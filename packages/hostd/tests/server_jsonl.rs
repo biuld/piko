@@ -8,9 +8,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::{HostServer, run_jsonl_server};
-use mock_turn_runner::MockTurnRunner;
+use mock_turn_runner::MockAgentRunRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{
@@ -23,36 +23,25 @@ use tokio::sync::Notify;
 struct SlowRunner;
 
 #[async_trait]
-impl TurnRunner for SlowRunner {
-    async fn run_turn(
+impl AgentRunRunner for SlowRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        let agent_instance_id = input.turn_id.clone();
-        let session_id = input.session_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(
-                agent_instance_id.clone(),
-                "main",
-                0,
-                execution_running(
-                    session_id,
-                    agent_instance_id.clone(),
-                    agent_instance_id,
-                    "main",
-                ),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
 
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "root",
+            input.operation_id,
+            input.agent_instance_id,
             1,
             Duration::from_millis(200),
         ))
@@ -83,17 +72,17 @@ async fn command_catalog_get_returns_slash_commands() {
 struct AssistantRunner;
 
 #[async_trait]
-impl TurnRunner for AssistantRunner {
-    async fn run_turn(
+impl AgentRunRunner for AssistantRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let agent_instance_id = input.turn_id.clone();
-        let turn_id = input.turn_id.clone();
+        let agent_instance_id = input.operation_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
         store
@@ -146,17 +135,7 @@ impl TurnRunner for AssistantRunner {
         tokio::spawn(async move {
             tokio::task::yield_now().await;
 
-            publisher_task.publish(
-                agent_instance_id.clone(),
-                "agent-1",
-                0,
-                execution_running(
-                    session_id.clone(),
-                    turn_id.clone(),
-                    agent_instance_id.clone(),
-                    "agent-1",
-                ),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "agent-1", 0, execution_running());
 
             publisher_task.publish(
                 agent_instance_id.clone(),
@@ -184,15 +163,15 @@ impl TurnRunner for AssistantRunner {
                 agent_instance_id.clone(),
                 "agent-1",
                 2,
-                execution_succeeded(session_id, turn_id, agent_instance_id, "agent-1"),
+                execution_succeeded(),
             );
         });
 
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "root",
+            input.operation_id,
+            input.agent_instance_id,
             4,
             Duration::ZERO,
         ))
@@ -200,17 +179,17 @@ impl TurnRunner for AssistantRunner {
 }
 
 #[derive(Default)]
-struct ReuseRootTurnRunner {
+struct ReuseRootAgentRunRunner {
     turn_count: std::sync::atomic::AtomicU32,
     root_agent_instance_id: std::sync::Mutex<Option<String>>,
 }
 
 #[async_trait]
-impl TurnRunner for ReuseRootTurnRunner {
-    async fn run_turn(
+impl AgentRunRunner for ReuseRootAgentRunRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let turn = self
@@ -219,7 +198,7 @@ impl TurnRunner for ReuseRootTurnRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let agent_instance_id = if turn == 0 {
-            let id = input.turn_id.clone();
+            let id = input.operation_id.clone();
             *self.root_agent_instance_id.lock().unwrap() = Some(id.clone());
             id
         } else {
@@ -229,7 +208,7 @@ impl TurnRunner for ReuseRootTurnRunner {
                 .clone()
                 .expect("root agent instance id")
         };
-        let turn_id = input.turn_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
         let user_message_id: String = if turn == 0 {
@@ -307,12 +286,7 @@ impl TurnRunner for ReuseRootTurnRunner {
                     agent_instance_id.clone(),
                     "agent-1",
                     1,
-                    execution_running(
-                        session_id.clone(),
-                        turn_id.clone(),
-                        agent_instance_id.clone(),
-                        "agent-1",
-                    ),
+                    execution_running(),
                 );
             }
 
@@ -342,15 +316,15 @@ impl TurnRunner for ReuseRootTurnRunner {
                 agent_instance_id.clone(),
                 "agent-1",
                 assistant_task_seq + 1,
-                execution_succeeded(session_id, turn_id, agent_instance_id, "agent-1"),
+                execution_succeeded(),
             );
         });
 
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "root",
+            input.operation_id,
+            input.agent_instance_id,
             if turn == 0 { 4 } else { 3 },
             Duration::ZERO,
         ))
@@ -363,16 +337,15 @@ struct WaitingApprovalRunner {
 }
 
 #[async_trait]
-impl TurnRunner for WaitingApprovalRunner {
-    async fn run_turn(
+impl AgentRunRunner for WaitingApprovalRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
-        let agent_instance_id = input.turn_id.clone();
-        let session_id = input.session_id.clone();
+        let agent_instance_id = input.operation_id.clone();
         let publisher_task = Arc::clone(&publisher);
         let barrier = piko_protocol::agent_runtime::SessionCursor {
             epoch: subscription.cursor.epoch.clone(),
@@ -380,47 +353,32 @@ impl TurnRunner for WaitingApprovalRunner {
         };
         let (completion_tx, completion) = tokio::sync::oneshot::channel();
         let completion_session_id = input.session_id.clone();
-        let completion_turn_id = input.turn_id.clone();
+        let completion_turn_id = input.operation_id.clone();
+        let completion_agent_instance_id = input.agent_instance_id.clone();
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(
-                agent_instance_id.clone(),
-                "main",
-                0,
-                execution_running(
-                    session_id.clone(),
-                    agent_instance_id.clone(),
-                    agent_instance_id.clone(),
-                    "main",
-                ),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             started.notify_one();
             finish.notified().await;
-            publisher_task.publish(
-                agent_instance_id.clone(),
-                "main",
-                1,
-                execution_succeeded(
-                    session_id,
-                    agent_instance_id.clone(),
-                    agent_instance_id,
-                    "main",
-                ),
-            );
-            let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
-                session_id: completion_session_id,
-                turn_id: completion_turn_id,
-                root_agent_instance_id: "root".into(),
-                result: Ok(success_report("root")),
+            publisher_task.publish(agent_instance_id.clone(), "main", 1, execution_succeeded());
+            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+                address: hostd::ports::AgentOperationAddress {
+                    session_id: completion_session_id,
+                    operation_id: completion_turn_id,
+                    agent_instance_id: completion_agent_instance_id.clone(),
+                },
+                result: Ok(success_report(completion_agent_instance_id)),
                 observation_barrier: barrier,
             });
         });
 
-        Ok(TurnRunHandle {
-            session_id: input.session_id,
-            turn_id: input.turn_id,
-            root_agent_instance_id: "root".into(),
+        Ok(AgentRunHandle {
+            address: hostd::ports::AgentOperationAddress {
+                session_id: input.session_id,
+                operation_id: input.operation_id,
+                agent_instance_id: input.agent_instance_id,
+            },
             observation: subscription,
             completion,
         })
@@ -671,7 +629,7 @@ async fn root_chat_reuses_session_sink_across_turns() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server =
-        HostServer::with_storage_and_runner(repo, Arc::new(ReuseRootTurnRunner::default()));
+        HostServer::with_storage_and_runner(repo, Arc::new(ReuseRootAgentRunRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -739,7 +697,7 @@ async fn root_chat_reuses_session_sink_across_turns() {
 async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),

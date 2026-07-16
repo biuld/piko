@@ -13,6 +13,7 @@ impl HostApp {
         &self,
         _command_id: &str,
         session_id: &str,
+        agent_instance_id: &str,
         context_window: u64,
         tx: &UnboundedSender<ServerMessage>,
     ) {
@@ -47,6 +48,12 @@ impl HostApp {
         let Ok(session) = state_lock.session(session_id) else {
             return;
         };
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        if agent_instance_id != root_agent_instance_id {
+            // SessionTreeEntry compaction currently projects the root shard.
+            // Never compact a different AgentInstance through root state.
+            return;
+        }
         let mut branch_entries =
             active_branch_entries(&session.entries, session.current_leaf_id.as_deref());
         // Compaction tips with no parent collapse the branch to a single stub;

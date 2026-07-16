@@ -8,14 +8,14 @@ use crate::application::turns::projection::reconcile_committed_messages;
 use crate::application::turns::projection::{
     realtime_message_from_delta, record_committed_message,
 };
-use crate::ports::{AgentOperationAddress, OperationRunCompletion, TurnRunner};
+use crate::ports::{AgentOperationAddress, AgentRunRunner, OperationRunCompletion};
 use crate::util::send_event;
 
 impl HostApp {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn drive_operation_observation<C>(
         &self,
-        runner: &Arc<dyn TurnRunner>,
+        runner: &Arc<dyn AgentRunRunner>,
         address: &AgentOperationAddress,
         session_dir: &std::path::Path,
         observation: orchd_api::SessionSubscription,
@@ -205,7 +205,7 @@ impl HostApp {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn recover_operation_observation(
         &self,
-        runner: &Arc<dyn TurnRunner>,
+        runner: &Arc<dyn AgentRunRunner>,
         session_id: &str,
         operation_id: &str,
         agent_instance_id: &str,

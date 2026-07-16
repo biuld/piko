@@ -6,7 +6,7 @@ use hostd::api::{
     UserInteractionStatus,
 };
 use hostd::infra::storage::JsonlSessionRepository;
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
 use piko_protocol::{InteractionChoice, InteractionQuestion};
 
@@ -17,17 +17,17 @@ struct PendingPromptRunner {
 }
 
 #[async_trait]
-impl TurnRunner for PendingPromptRunner {
-    async fn run_turn(
+impl AgentRunRunner for PendingPromptRunner {
+    async fn run_agent(
         &self,
-        _input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        _: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         Err(hostd::api::ProtocolError::InvalidCommand("not used".into()))
     }
 
     async fn pending_prompts_for_session(
         &self,
-        _session_id: &str,
+        _: &str,
     ) -> (Vec<ApprovalSnapshot>, Vec<UserInteractionSnapshot>) {
         (
             self.approvals.lock().unwrap().clone(),
@@ -43,6 +43,7 @@ async fn state_snapshot_includes_in_process_pending_prompts() {
     let runner = PendingPromptRunner::default();
     runner.approvals.lock().unwrap().push(ApprovalSnapshot {
         approval_id: "appr-1".into(),
+        agent_instance_id: "agent-root".into(),
         tool_name: "bash".into(),
         request: serde_json::json!({ "cmd": "ls" }),
         status: ApprovalStatus::Pending,

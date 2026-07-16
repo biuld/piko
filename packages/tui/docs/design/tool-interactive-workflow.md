@@ -233,7 +233,7 @@ and hostd emits `UserInteractionResolved`.
 
 ## Hostd Flow
 
-`OrchTurnRunner` should hold pending interaction senders similarly to pending
+`OrchAgentRunRunner` should hold pending interaction senders similarly to pending
 approval senders:
 
 ```rust
@@ -241,7 +241,7 @@ pending_interactions:
     Arc<Mutex<HashMap<InteractionId, oneshot::Sender<UserInteractionResponse>>>>
 ```
 
-`OrchTurnRunner` also owns a shared prompt gate used by both approval requests
+`OrchAgentRunRunner` also owns a shared prompt gate used by both approval requests
 and user-interaction requests:
 
 ```rust

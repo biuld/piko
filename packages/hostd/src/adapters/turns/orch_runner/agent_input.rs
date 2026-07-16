@@ -5,17 +5,17 @@ use piko_protocol::{AgentInputDelivery, MessageContent, SendAgentInputRequest};
 
 use crate::api::ProtocolError;
 use crate::ports::{
-    AgentInputRunCompletion, AgentInputRunHandle, AgentInputRunInput, AgentRunFailure,
+    AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,
 };
 
-use super::OrchTurnRunner;
+use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
-impl OrchTurnRunner {
-    pub(super) async fn run_agent_input_subscription(
+impl OrchAgentRunRunner {
+    pub(super) async fn run_agent_subscription(
         &self,
-        input: AgentInputRunInput,
-    ) -> Result<AgentInputRunHandle, ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, ProtocolError> {
         let root_spec = root_agent_spec(&input.cwd);
         let hub = Arc::new(orchd::events::SessionOutputHub::new(
             input.session_id.clone(),
@@ -24,7 +24,7 @@ impl OrchTurnRunner {
         ));
         let key = (input.session_id.clone(), input.agent_instance_id.clone());
         {
-            let mut active = self.active_agent_inputs.lock().unwrap();
+            let mut active = self.active_agent_runs.lock().unwrap();
             if active.contains_key(&key) {
                 return Err(ProtocolError::InvalidCommand(format!(
                     "agent already has an active input: {}",
@@ -33,8 +33,8 @@ impl OrchTurnRunner {
             }
             active.insert(
                 key.clone(),
-                super::ActiveAgentInputRuntime {
-                    run_id: input.run_id.clone(),
+                super::ActiveAgentRunRuntime {
+                    run_id: input.operation_id.clone(),
                     agent_instance_id: input.agent_instance_id.clone(),
                     observation: Arc::clone(&hub),
                     commit_router: None,
@@ -47,23 +47,27 @@ impl OrchTurnRunner {
                 &input.session_id,
                 &input.cwd,
                 &input.session_dir,
-                &input.run_id,
+                &input.operation_id,
                 &input.agent_instance_id,
-                false,
+                input.agent_instance_id == format!("agent_{}_root", input.session_id),
                 &root_spec,
-                None,
+                input.resume_agent.as_ref(),
                 Arc::clone(&hub),
             )
             .await
         {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.abort_agent_input(&input.session_id, &input.agent_instance_id, &input.run_id);
+                self.abort_agent_input(
+                    &input.session_id,
+                    &input.agent_instance_id,
+                    &input.operation_id,
+                );
                 return Err(error);
             }
         };
-        if let Some(active) = self.active_agent_inputs.lock().unwrap().get_mut(&key)
-            && active.run_id == input.run_id
+        if let Some(active) = self.active_agent_runs.lock().unwrap().get_mut(&key)
+            && active.run_id == input.operation_id
         {
             active.commit_router = Some(Arc::clone(&prepared.commit_router));
             active.realtime_router = Some(Arc::clone(&prepared.realtime_router));
@@ -73,7 +77,11 @@ impl OrchTurnRunner {
             .agent_snapshot(input.session_id.clone(), input.agent_instance_id.clone())
             .await
         {
-            self.abort_agent_input(&input.session_id, &input.agent_instance_id, &input.run_id);
+            self.abort_agent_input(
+                &input.session_id,
+                &input.agent_instance_id,
+                &input.operation_id,
+            );
             return Err(ProtocolError::InvalidCommand(error.to_string()));
         }
 
@@ -90,18 +98,23 @@ impl OrchTurnRunner {
             session_id: input.session_id.clone(),
             agent_instance_id: input.agent_instance_id.clone(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            source_turn_id: input.source_turn_id,
             message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
             content: MessageContent::String(input.prompt),
             delivery: AgentInputDelivery::StartWhenIdle,
-            prompt_resources: None,
+            prompt_resources: input.prompt_resources,
             active_tool_names: input.active_tool_names,
         };
         let (completion_tx, completion) = tokio::sync::oneshot::channel();
         let runtime = Arc::clone(&self.agent_runtime);
         let session_id = input.session_id.clone();
-        let run_id = input.run_id.clone();
+        let operation_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
+        let address = AgentOperationAddress {
+            session_id: session_id.clone(),
+            operation_id: operation_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+        };
         let completion_hub = Arc::clone(&hub);
         tokio::spawn(async move {
             let result = runtime
@@ -110,19 +123,19 @@ impl OrchTurnRunner {
                 .map_err(|error| AgentRunFailure {
                     message: error.to_string(),
                 });
-            let _ = completion_tx.send(AgentInputRunCompletion {
-                session_id,
-                run_id,
-                agent_instance_id,
+            let _ = completion_tx.send(AgentRunCompletion {
+                address,
                 result,
                 observation_barrier: completion_hub.cursor(),
             });
         });
 
-        Ok(AgentInputRunHandle {
-            session_id: input.session_id.clone(),
-            run_id: input.run_id,
-            agent_instance_id: input.agent_instance_id,
+        Ok(AgentRunHandle {
+            address: AgentOperationAddress {
+                session_id: input.session_id.clone(),
+                operation_id: input.operation_id,
+                agent_instance_id: input.agent_instance_id,
+            },
             observation: orchd_api::SessionSubscription {
                 session_id: input.session_id,
                 cursor: cursor.clone(),
@@ -139,7 +152,7 @@ impl OrchTurnRunner {
         run_id: &str,
     ) {
         let removed = {
-            let mut active = self.active_agent_inputs.lock().unwrap();
+            let mut active = self.active_agent_runs.lock().unwrap();
             let key = (session_id.to_string(), agent_instance_id.to_string());
             if active.get(&key).is_some_and(|run| run.run_id == run_id) {
                 active.remove(&key)

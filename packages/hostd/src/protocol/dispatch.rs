@@ -27,7 +27,11 @@ impl HostServer {
                     .apply_chat_submit(command_id, session_id, target_agent_instance_id, text, tx)
                     .await
             }
-            Command::SessionCompact { session_id, .. } => {
+            Command::SessionCompact {
+                session_id,
+                agent_instance_id,
+                ..
+            } => {
                 // Manual compaction — bypass threshold, always compact.
                 send_event(
                     tx,
@@ -37,7 +41,7 @@ impl HostServer {
                     },
                 );
                 self.0
-                    .compact_session_if_needed(&command_id, &session_id, 0, tx)
+                    .compact_session_if_needed(&command_id, &session_id, &agent_instance_id, 0, tx)
                     .await;
                 Ok(())
             }
@@ -166,47 +170,18 @@ impl HostServer {
                     let mut state = self.state.lock().await;
                     let queue_ev = state.push_steer(&session_id, &agent_instance_id, &message);
                     let has_active_turn = state
-                        .session(&session_id)
-                        .ok()
-                        .and_then(|s| s.active_turn_id.clone())
+                        .active_turn_for_agent(&session_id, &agent_instance_id)
                         .is_some();
                     (queue_ev, has_active_turn)
                 };
-                // Also route to the active root Agent if a Turn is running.
+                // Also route to the explicitly addressed AgentInstance when
+                // that target currently owns a running Turn.
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
-                    let _ = runner.steer_active_agent(&session_id, &message).await;
+                    let _ = runner
+                        .steer_agent(&session_id, &agent_instance_id, &message)
+                        .await;
                 }
-                Ok(vec![
-                    ServerMessage::CommandResponse {
-                        command_id,
-                        result: Ok(crate::api::CommandResult::Empty),
-                    },
-                    queue_ev.into(),
-                ])
-            }
-            Command::QueueFollowUp {
-                session_id,
-                message,
-                ..
-            } => {
-                let mut state = self.state.lock().await;
-                let queue_ev = state.push_follow_up(&session_id, &message);
-                Ok(vec![
-                    ServerMessage::CommandResponse {
-                        command_id,
-                        result: Ok(crate::api::CommandResult::Empty),
-                    },
-                    queue_ev.into(),
-                ])
-            }
-            Command::QueueNextTurn {
-                session_id,
-                message,
-                ..
-            } => {
-                let mut state = self.state.lock().await;
-                let queue_ev = state.push_next_turn(&session_id, &message);
                 Ok(vec![
                     ServerMessage::CommandResponse {
                         command_id,
@@ -220,8 +195,38 @@ impl HostServer {
                 session_id,
                 turn_id,
             } => {
+                let (agent_instance_id, status) = {
+                    let state = self.state.lock().await;
+                    let turn = state.turn(&session_id, &turn_id)?;
+                    (turn.agent_instance_id.clone(), turn.status.clone())
+                };
+                if status == crate::api::TurnStatus::Queued {
+                    let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
+                    return Ok(vec![
+                        ServerMessage::CommandResponse {
+                            command_id,
+                            result: Ok(crate::api::CommandResult::Empty),
+                        },
+                        event,
+                    ]);
+                }
                 let runner = self.turn_runner.lock().await.clone();
-                if !runner.cancel_turn_run(&session_id, &turn_id).await {
+                let address = crate::ports::AgentOperationAddress {
+                    session_id: session_id.clone(),
+                    operation_id: turn_id.clone(),
+                    agent_instance_id,
+                };
+                self.state.lock().await.set_turn_status(
+                    &session_id,
+                    &turn_id,
+                    crate::api::TurnStatus::Cancelling,
+                )?;
+                if !runner.cancel_agent_run(&address).await {
+                    self.state.lock().await.set_turn_status(
+                        &session_id,
+                        &turn_id,
+                        crate::api::TurnStatus::Running,
+                    )?;
                     return Err(ProtocolError::InvalidCommand(format!(
                         "no active Agent run for Turn {turn_id}"
                     )));

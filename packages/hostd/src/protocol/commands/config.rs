@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::api::{Command, ProtocolError, ServerMessage};
 use crate::domain::config::HostSettings;
-use crate::ports::{ErrorTurnRunner, TurnRunner};
+use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner, now_ms};
 
@@ -44,7 +44,7 @@ impl ConfigObserver for ModelRunnerObserver {
         if changed {
             let (runner, executor) = build_orch_turn_runner(new).await.unwrap_or_else(|e| {
                 (
-                    Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
+                    Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
                     None,
                 )
             });

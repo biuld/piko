@@ -223,7 +223,7 @@ new run unless explicit hot-reload semantics are later designed.
 ```mermaid
 sequenceDiagram
     participant H as hostd
-    participant R as OrchTurnRunner
+    participant R as OrchAgentRunRunner
     participant A as AgentRuntime / AgentActor
     participant E as ExecutionActor
     participant L as llmd

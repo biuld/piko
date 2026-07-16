@@ -17,7 +17,6 @@ mod agent_input;
 mod approval_gateway;
 mod attach;
 mod commit;
-mod completion;
 mod prompt_assembly;
 mod run;
 mod turn_runner;
@@ -29,11 +28,9 @@ mod tests;
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
 #[derive(Clone)]
-pub struct OrchTurnRunner {
+pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
-    /// session_id -> active root Turn. Execution identity stays inside AgentRuntime.
-    active_turns: Arc<std::sync::Mutex<HashMap<String, ActiveTurnRuntime>>>,
-    active_agent_inputs: Arc<std::sync::Mutex<HashMap<(String, String), ActiveAgentInputRuntime>>>,
+    active_agent_runs: Arc<std::sync::Mutex<HashMap<(String, String), ActiveAgentRunRuntime>>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
     pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
@@ -45,15 +42,7 @@ pub struct OrchTurnRunner {
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
-struct ActiveTurnRuntime {
-    turn_id: String,
-    observation: Arc<orchd::events::SessionOutputHub>,
-    root_agent_instance_id: String,
-    commit_router: Arc<ExecutionCommitRouter>,
-    realtime_router: Arc<RealtimeDeltaRouter>,
-}
-
-struct ActiveAgentInputRuntime {
+struct ActiveAgentRunRuntime {
     run_id: String,
     agent_instance_id: String,
     observation: Arc<orchd::events::SessionOutputHub>,
@@ -73,22 +62,7 @@ struct PendingInteractionEntry {
     tx: oneshot::Sender<UserInteractionResponse>,
 }
 
-fn remove_active_turn_if_matches(
-    active: &mut HashMap<String, ActiveTurnRuntime>,
-    session_id: &str,
-    turn_id: &str,
-) -> Option<ActiveTurnRuntime> {
-    if active
-        .get(session_id)
-        .is_some_and(|active_turn| active_turn.turn_id == turn_id)
-    {
-        active.remove(session_id)
-    } else {
-        None
-    }
-}
-
-impl OrchTurnRunner {
+impl OrchAgentRunRunner {
     pub async fn new(
         model_executor: Arc<dyn LlmGateway>,
         provider: &str,
@@ -172,8 +146,7 @@ impl OrchTurnRunner {
 
         Self {
             agent_runtime,
-            active_turns: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            active_agent_inputs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -211,14 +184,13 @@ impl OrchTurnRunner {
     }
 
     fn release_session_context_if_idle(&self, session_id: &str) {
-        let root_active = self.active_turns.lock().unwrap().contains_key(session_id);
-        let child_active = self
-            .active_agent_inputs
+        let active = self
+            .active_agent_runs
             .lock()
             .unwrap()
             .keys()
             .any(|(active_session_id, _)| active_session_id == session_id);
-        if !root_active && !child_active {
+        if !active {
             self.session_contexts.lock().unwrap().remove(session_id);
         }
     }
@@ -303,7 +275,10 @@ impl OrchTurnRunner {
         response
     }
 
-    async fn register_user_interaction_tools_on_execution(&self, gateway_runner: &OrchTurnRunner) {
+    async fn register_user_interaction_tools_on_execution(
+        &self,
+        gateway_runner: &OrchAgentRunRunner,
+    ) {
         let user_provider = UserInteractionProvider::new();
         let runner = gateway_runner.clone();
         user_provider

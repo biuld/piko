@@ -383,9 +383,15 @@ impl AppState {
                     self.status = "no active session to compact".to_string();
                     return effects;
                 };
+                let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone()
+                else {
+                    self.status = "no active agent to compact".to_string();
+                    return effects;
+                };
                 effects.push(Effect::send(Command::SessionCompact {
                     command_id: command_id(),
                     session_id,
+                    agent_instance_id,
                 }));
                 self.clear_focus();
                 self.status = "compaction requested".to_string();

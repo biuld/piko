@@ -32,23 +32,12 @@ impl HostApp {
                 ))
             })?;
 
-        if manifest.root_agent_instance_id.as_deref() == Some(target_agent_instance_id.as_str()) {
-            self.submit_root_chat(command_id, session_id, text, tx)
-                .await
-        } else {
-            if target.lifecycle != piko_protocol::AgentInstanceLifecycle::Open {
-                return Err(ProtocolError::InvalidCommand(format!(
-                    "agent instance is not open: {target_agent_instance_id}"
-                )));
-            }
-            self.submit_direct_agent_chat(
-                command_id,
-                session_id,
-                target_agent_instance_id,
-                text,
-                tx,
-            )
-            .await
+        if target.lifecycle != piko_protocol::AgentInstanceLifecycle::Open {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "agent instance is not open: {target_agent_instance_id}"
+            )));
         }
+        self.submit_chat(command_id, session_id, target_agent_instance_id, text, tx)
+            .await
     }
 }

@@ -79,8 +79,7 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
             chunks[idx],
             AgentPanelView {
                 state: &app.agent_panel,
-                is_running: app.active_turn_id().is_some()
-                    || app.session.active_agent_run_id.is_some(),
+                is_running: app.active_turn_id().is_some(),
                 queue: &app.queue_status,
                 spinner_frame: app.spinner_frame,
                 theme: &app.theme,

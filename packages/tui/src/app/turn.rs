@@ -81,9 +81,10 @@ impl AppState {
 
     pub(crate) fn cancel(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let (Some(session_id), Some(turn_id)) =
-            (self.session.id.clone(), self.session.active_turn_id.clone())
-        else {
+        let (Some(session_id), Some(turn_id)) = (
+            self.session.id.clone(),
+            self.active_turn_id().map(str::to_string),
+        ) else {
             self.editor.restore_text("");
             self.status = "editor cleared".to_string();
             return effects;

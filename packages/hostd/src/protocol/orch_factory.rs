@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use crate::adapters::OrchTurnRunner;
+use crate::adapters::OrchAgentRunRunner;
 use crate::domain::config::{HostSettings, ModelRegistry};
-use crate::ports::TurnRunner;
+use crate::ports::AgentRunRunner;
 use llmd::auth::AuthStorage;
 use llmd::gateway::LlmGateway;
 
-/// Build an OrchTurnRunner and return both the runner and the model executor (if available).
+/// Build an OrchAgentRunRunner and return both the runner and the model executor (if available).
 pub(crate) async fn build_orch_turn_runner(
     settings: &HostSettings,
-) -> Result<(Arc<dyn TurnRunner>, Option<Arc<dyn LlmGateway>>), String> {
+) -> Result<(Arc<dyn AgentRunRunner>, Option<Arc<dyn LlmGateway>>), String> {
     let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(auth.clone(), vec![]);
     let resolved = registry
@@ -59,7 +59,7 @@ pub(crate) async fn build_orch_turn_runner(
     let thinking = settings.default_thinking_level.clone();
     let thinking_map = resolved.model.thinking_level_map.clone();
     let runner = Arc::new(
-        OrchTurnRunner::new_with_mcp(
+        OrchAgentRunRunner::new_with_mcp(
             executor.clone(),
             &resolved.provider,
             &api_key_for_runner,

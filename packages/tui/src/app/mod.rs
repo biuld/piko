@@ -175,9 +175,7 @@ pub struct SessionUiState {
     pub pending_turn_text: Option<String>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
-    pub active_turn_id: Option<String>,
-    pub active_agent_run_id: Option<String>,
-    pub active_agent_run_instance_id: Option<String>,
+    pub active_turns: HashMap<String, String>,
     pub pending: pending::PendingCommands,
 }
 
@@ -293,7 +291,11 @@ impl AppState {
     }
 
     pub fn active_turn_id(&self) -> Option<&str> {
-        self.session.active_turn_id.as_deref()
+        let agent_instance_id = self.agent_panel.active_agent_instance_id.as_deref()?;
+        self.session
+            .active_turns
+            .get(agent_instance_id)
+            .map(String::as_str)
     }
 
     pub fn cwd(&self) -> PathBuf {

@@ -4,60 +4,23 @@ use orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
-use crate::ports::{
-    AgentInputRunHandle, AgentInputRunInput, TurnRunHandle, TurnRunInput, TurnRunner,
-};
+use crate::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 
-use super::OrchTurnRunner;
+use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
 #[async_trait]
-impl TurnRunner for OrchTurnRunner {
-    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError> {
+impl AgentRunRunner for OrchAgentRunRunner {
+    async fn run_agent(&self, input: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         self.agent_runtime
             .set_approval_gateway(Box::new(self.clone()))
             .await;
 
-        let agent_spec = root_agent_spec(&input.cwd);
-
         self.ui_router.register(
             &input.session_id,
-            &input.turn_id,
-            &format!("agent_{}_root", input.session_id),
-            true,
-            input.ui_event_tx.clone(),
-        );
-        self.register_user_interaction_tools_on_execution(self)
-            .await;
-        self.agent_runtime.register_agent(agent_spec.clone()).await;
-        tracing::info!(
-            session_id = %input.session_id,
-            turn_id = %input.turn_id,
-            "turn subscription starting; dispatching execution runtime"
-        );
-        let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
-        let result = self
-            .run_execution_turn_subscription(input, agent_spec)
-            .await;
-        if result.is_err() {
-            self.ui_router.unregister(&session_id, &turn_id);
-        }
-        result
-    }
-
-    async fn run_agent_input(
-        &self,
-        input: AgentInputRunInput,
-    ) -> Result<AgentInputRunHandle, ProtocolError> {
-        self.agent_runtime
-            .set_approval_gateway(Box::new(self.clone()))
-            .await;
-        self.ui_router.register(
-            &input.session_id,
-            &input.run_id,
+            &input.operation_id,
             &input.agent_instance_id,
-            false,
+            input.agent_instance_id == format!("agent_{}_root", input.session_id),
             input.ui_event_tx.clone(),
         );
         self.register_user_interaction_tools_on_execution(self)
@@ -65,40 +28,33 @@ impl TurnRunner for OrchTurnRunner {
         self.agent_runtime
             .register_agent(root_agent_spec(&input.cwd))
             .await;
+        tracing::info!(
+            session_id = %input.session_id,
+            operation_id = %input.operation_id,
+            agent_instance_id = %input.agent_instance_id,
+            "Agent run subscription starting"
+        );
         let session_id = input.session_id.clone();
-        let run_id = input.run_id.clone();
-        let result = self.run_agent_input_subscription(input).await;
+        let operation_id = input.operation_id.clone();
+        let result = self.run_agent_subscription(input).await;
         if result.is_err() {
-            self.ui_router.unregister(&session_id, &run_id);
+            self.ui_router.unregister(&session_id, &operation_id);
         }
         result
     }
 
-    async fn finish_agent_input(&self, session_id: &str, agent_instance_id: &str, run_id: &str) {
-        self.finish_agent_input(session_id, agent_instance_id, run_id);
-        self.ui_router.unregister(session_id, run_id);
-    }
-
-    async fn acknowledge_turn_run(
+    async fn finish_agent_run(
         &self,
-        session_id: &str,
-        turn_id: &str,
+        operation: &crate::ports::AgentOperationAddress,
         _barrier: &piko_protocol::agent_runtime::SessionCursor,
     ) {
-        let mut active = self.active_turns.lock().unwrap();
-        if let Some(runtime) =
-            super::remove_active_turn_if_matches(&mut active, session_id, turn_id)
-        {
-            drop(active);
-            runtime
-                .commit_router
-                .unregister(&runtime.root_agent_instance_id, turn_id);
-            runtime
-                .realtime_router
-                .unregister(&runtime.root_agent_instance_id, turn_id);
-            self.release_session_context_if_idle(session_id);
-            self.ui_router.unregister(session_id, turn_id);
-        }
+        self.finish_agent_input(
+            &operation.session_id,
+            &operation.agent_instance_id,
+            &operation.operation_id,
+        );
+        self.ui_router
+            .unregister(&operation.session_id, &operation.operation_id);
     }
 
     async fn recover_observation(
@@ -112,26 +68,17 @@ impl TurnRunner for OrchTurnRunner {
         ProtocolError,
     > {
         // Resubscribe observation without cancelling the Agent run.
-        let root_hub = {
-            let active = self.active_turns.lock().unwrap();
-            active.get(&operation.session_id).and_then(|turn| {
-                (turn.turn_id == operation.operation_id
-                    && turn.root_agent_instance_id == operation.agent_instance_id)
-                    .then(|| turn.observation.clone())
-            })
-        };
-        let hub = root_hub.or_else(|| {
-            self.active_agent_inputs
-                .lock()
-                .unwrap()
-                .get(&(
-                    operation.session_id.clone(),
-                    operation.agent_instance_id.clone(),
-                ))
-                .and_then(|run| {
-                    (run.run_id == operation.operation_id).then(|| run.observation.clone())
-                })
-        });
+        let hub = self
+            .active_agent_runs
+            .lock()
+            .unwrap()
+            .get(&(
+                operation.session_id.clone(),
+                operation.agent_instance_id.clone(),
+            ))
+            .and_then(|run| {
+                (run.run_id == operation.operation_id).then(|| run.observation.clone())
+            });
         let Some(hub) = hub else {
             return Err(ProtocolError::ObservationFailed(format!(
                 "no live observation hub for {}/{}/{}",
@@ -159,15 +106,20 @@ impl TurnRunner for OrchTurnRunner {
         ))
     }
 
-    async fn steer_active_agent(&self, session_id: &str, message: &str) -> bool {
-        if !self.active_turns.lock().unwrap().contains_key(session_id) {
+    async fn steer_agent(&self, session_id: &str, agent_instance_id: &str, message: &str) -> bool {
+        if !self
+            .active_agent_runs
+            .lock()
+            .unwrap()
+            .contains_key(&(session_id.to_string(), agent_instance_id.to_string()))
+        {
             return false;
         }
         self.agent_runtime
             .steer_agent(piko_protocol::SteerAgentRequest {
                 request_id: format!("req_steer_{}", uuid::Uuid::new_v4()),
                 session_id: session_id.to_string(),
-                agent_instance_id: format!("agent_{session_id}_root"),
+                agent_instance_id: agent_instance_id.to_string(),
                 caller_agent_instance_id: None,
                 message_id: format!("msg_steer_{}", uuid::Uuid::new_v4()),
                 content: MessageContent::String(message.to_string()),
@@ -176,25 +128,35 @@ impl TurnRunner for OrchTurnRunner {
             .is_ok()
     }
 
-    async fn cancel_turn_run(&self, session_id: &str, turn_id: &str) -> bool {
+    async fn cancel_agent_run(&self, operation: &crate::ports::AgentOperationAddress) -> bool {
         let active = {
-            let active = self.active_turns.lock().unwrap();
+            let active = self.active_agent_runs.lock().unwrap();
             active
-                .get(session_id)
-                .is_some_and(|active_turn| active_turn.turn_id == turn_id)
+                .get(&(
+                    operation.session_id.clone(),
+                    operation.agent_instance_id.clone(),
+                ))
+                .is_some_and(|run| run.run_id == operation.operation_id)
         };
         if !active {
             return false;
         }
         self.agent_runtime
-            .cancel_agent_run(session_id.to_string(), format!("agent_{session_id}_root"))
+            .cancel_agent_run(
+                operation.session_id.clone(),
+                operation.agent_instance_id.clone(),
+            )
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false)
     }
 
-    async fn has_active_turn_run(&self, session_id: &str) -> bool {
-        self.active_turns.lock().unwrap().contains_key(session_id)
+    async fn has_active_session_run(&self, session_id: &str) -> bool {
+        self.active_agent_runs
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(active_session_id, _)| active_session_id == session_id)
     }
 
     async fn list_agent_instances(&self, session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {

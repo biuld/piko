@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Editor sends a message to the Agent currently shown in Timeline. The main
-Agent continues the normal session conversation, while selecting a child Agent
-allows a direct follow-up conversation with that Agent.
+The Editor sends a message to the Agent currently shown in Timeline. Every
+accepted submission creates a Turn for that Agent, whether it is the root or a
+child AgentInstance.
 
 ## Layout
 
@@ -19,11 +19,12 @@ Agent in AgentPanel identifies the recipient of the next Editor submission.
 - Messages and streaming output stay in the selected Agent's Timeline.
 - Messages are committed to that Agent's transcript and remain visible after
   reopening the session.
-- Submitting to the main Agent retains the existing Turn lifecycle, queue,
-  compaction, cancellation, and prompt-resource behavior.
-- Submitting to an idle open child Agent starts a new child Agent run.
-- A child Agent that is busy or not open reports an error without redirecting
-  the message to the main Agent.
+- Every accepted submission uses the same Turn lifecycle and Agent run API.
+- One AgentInstance runs at most one Turn at a time. Additional submissions to
+  that Agent are queued in submission order.
+- Different AgentInstances in the same Session may run Turns concurrently.
+- Cancelling stops the active Turn for the Agent currently shown in Timeline.
+- A target that is not open reports an error without redirecting the message.
 - Switching the viewed Agent does not redirect an input that was already
   accepted.
 
@@ -34,7 +35,6 @@ existing Agent selection and Editor submission controls.
 
 ## Non-goals
 
-- It does not turn a child Agent run into a main session Turn.
 - It does not automatically reopen a closed child Agent.
 - It does not allow one TUI submission to target multiple Agents.
 - It does not change Agent hierarchy or authorization rules.

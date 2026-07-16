@@ -15,7 +15,7 @@ impl HostApp {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let mut state = self.state.lock().await;
         let session = state.session(&session_id)?;
-        if session.active_turn_id.is_some() {
+        if !session.active_turns.is_empty() {
             return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
         }
 
@@ -139,7 +139,7 @@ impl HostApp {
                 }
                 state = self.state.lock().await;
                 let session = state.session(&session_id)?;
-                if session.active_turn_id.is_some() {
+                if !session.active_turns.is_empty() {
                     return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
                 }
                 if session.current_leaf_id != old_leaf_id {

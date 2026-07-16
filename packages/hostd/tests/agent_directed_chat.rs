@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use hostd::adapters::OrchTurnRunner;
+use hostd::adapters::OrchAgentRunRunner;
 use hostd::api::{Command, CommandResult, ServerMessage};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use hostd::protocol::HostServer;
@@ -134,7 +134,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
         .unwrap();
 
     let runner = Arc::new(
-        OrchTurnRunner::new(
+        OrchAgentRunRunner::new(
             Arc::new(DirectChatGateway),
             "test",
             "test-key",
@@ -180,7 +180,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        ServerMessage::AgentRunLifecycle(piko_protocol::AgentRunEvent::Completed {
+        ServerMessage::TurnLifecycle(piko_protocol::TurnEvent::Completed {
             agent_instance_id,
             ..
         }) if agent_instance_id == "agent-child"

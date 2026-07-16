@@ -11,7 +11,7 @@ use crate::domain::sessions::HostState;
 use crate::ports::prompt_materials::PromptMaterialLoader;
 use crate::ports::session_repository::SessionRepositoryPort;
 use crate::ports::session_store::SessionStoreFactory;
-use crate::ports::{ErrorTurnRunner, TurnRunner};
+use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
 /// Application-layer composition root.
 ///
@@ -23,7 +23,7 @@ use crate::ports::{ErrorTurnRunner, TurnRunner};
 ///
 /// `application::turns` / `application::sessions` bodies only ever see the
 /// port traits (`SessionRepositoryPort`, `SessionStoreFactory`,
-/// `PromptMaterialLoader`, `TurnRunner`) — never `crate::infra` or
+/// `PromptMaterialLoader`, `AgentRunRunner`) — never `crate::infra` or
 /// `crate::adapters` directly. The default-adapter wiring below is the one
 /// sanctioned exception: as the composition root, `HostApp`'s constructors
 /// build the real filesystem-backed adapters so `HostServer::new()` and the
@@ -34,7 +34,7 @@ pub struct HostApp {
     pub(crate) state: Arc<Mutex<HostState>>,
     pub(crate) storage: Option<Arc<dyn SessionRepositoryPort>>,
     pub(crate) session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
-    pub(crate) turn_runner: Arc<Mutex<Arc<dyn TurnRunner>>>,
+    pub(crate) turn_runner: Arc<Mutex<Arc<dyn AgentRunRunner>>>,
     pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     pub(crate) settings: Arc<Mutex<HostSettings>>,
     pub(crate) model_registry: Arc<Mutex<ModelRegistry>>,
@@ -50,8 +50,8 @@ impl Default for HostApp {
 }
 
 impl HostApp {
-    fn default_turn_runner() -> Arc<dyn TurnRunner> {
-        Arc::new(ErrorTurnRunner::new("turn runner not configured"))
+    fn default_turn_runner() -> Arc<dyn AgentRunRunner> {
+        Arc::new(ErrorAgentRunRunner::new("turn runner not configured"))
     }
 
     /// Default filesystem-backed session store factory (see composition-root
@@ -88,7 +88,7 @@ impl HostApp {
         Self::with_storage_and_runner(storage, Self::default_turn_runner())
     }
 
-    pub fn with_turn_runner(turn_runner: Arc<dyn TurnRunner>) -> Self {
+    pub fn with_turn_runner(turn_runner: Arc<dyn AgentRunRunner>) -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
@@ -108,7 +108,7 @@ impl HostApp {
 
     pub fn with_storage_and_runner(
         storage: impl SessionRepositoryPort + 'static,
-        turn_runner: Arc<dyn TurnRunner>,
+        turn_runner: Arc<dyn AgentRunRunner>,
     ) -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
@@ -129,7 +129,7 @@ impl HostApp {
 
     pub fn with_storage_runner_settings(
         storage: impl SessionRepositoryPort + 'static,
-        turn_runner: Arc<dyn TurnRunner>,
+        turn_runner: Arc<dyn AgentRunRunner>,
         settings: HostSettings,
     ) -> Self {
         let auth = AuthStorage::create(None)

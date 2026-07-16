@@ -9,7 +9,7 @@ use hostd::api::{Command, ServerMessage as Event};
 use hostd::domain::config::HostSettings;
 use hostd::infra::storage::JsonlSessionRepository;
 use hostd::infra::storage::session_store::SessionStore;
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
 use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use piko_protocol::agent_runtime::SessionEvent;
@@ -46,19 +46,19 @@ impl LlmGateway for SummaryGateway {
     }
 }
 
-struct CompactTurnRunner;
+struct CompactAgentRunRunner;
 
 #[async_trait]
-impl TurnRunner for CompactTurnRunner {
-    async fn run_turn(
+impl AgentRunRunner for CompactAgentRunRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let agent_instance_id = input.turn_id.clone();
-        let turn_id = input.turn_id.clone();
+        let agent_instance_id = input.operation_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
         store
@@ -109,17 +109,7 @@ impl TurnRunner for CompactTurnRunner {
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(
-                agent_instance_id.clone(),
-                "agent-1",
-                0,
-                execution_running(
-                    session_id.clone(),
-                    turn_id.clone(),
-                    agent_instance_id.clone(),
-                    "agent-1",
-                ),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "agent-1", 0, execution_running());
             publisher_task.publish(
                 agent_instance_id.clone(),
                 "agent-1",
@@ -144,20 +134,15 @@ impl TurnRunner for CompactTurnRunner {
                 agent_instance_id.clone(),
                 "agent-1",
                 3,
-                execution_succeeded(
-                    session_id,
-                    agent_instance_id.clone(),
-                    agent_instance_id,
-                    "agent-1",
-                ),
+                execution_succeeded(),
             );
         });
 
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "root",
+            input.operation_id,
+            input.agent_instance_id,
             3,
             std::time::Duration::ZERO,
         ))
@@ -173,7 +158,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
     // still forces a rewrite via context_window = 0.
     let server = HostServer::with_storage_runner_settings(
         repo,
-        Arc::new(CompactTurnRunner),
+        Arc::new(CompactAgentRunRunner),
         HostSettings::default(),
     );
     server.set_model_executor(Arc::new(SummaryGateway)).await;
@@ -221,6 +206,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
         .handle_command(Command::SessionCompact {
             command_id: "compact".into(),
             session_id: session_id.clone(),
+            agent_instance_id: format!("agent_{session_id}_root"),
         })
         .await;
 

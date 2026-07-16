@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::api::ServerMessage as Event;
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
 use mock_session::MockSessionPublisher;
 
 #[derive(Clone, Default)]
-struct CancellableTurnRunner {
+struct CancellableAgentRunRunner {
     active: Arc<std::sync::Mutex<Option<CancellableRun>>>,
     publishers: Arc<std::sync::Mutex<Vec<Arc<MockSessionPublisher>>>>,
 }
@@ -18,19 +18,23 @@ struct CancellableTurnRunner {
 struct CancellableRun {
     session_id: String,
     turn_id: String,
+    agent_instance_id: String,
     barrier: piko_protocol::agent_runtime::SessionCursor,
-    completion_tx: tokio::sync::oneshot::Sender<hostd::ports::TurnRunCompletion>,
+    completion_tx: tokio::sync::oneshot::Sender<hostd::ports::AgentRunCompletion>,
 }
 
-impl CancellableTurnRunner {
+impl CancellableAgentRunRunner {
     fn finish_cancelled(&self) {
         let run = self.active.lock().unwrap().take().unwrap();
-        let _ = run.completion_tx.send(hostd::ports::TurnRunCompletion {
-            session_id: run.session_id,
-            turn_id: run.turn_id,
-            root_agent_instance_id: "root".into(),
+        let agent_instance_id = run.agent_instance_id;
+        let _ = run.completion_tx.send(hostd::ports::AgentRunCompletion {
+            address: hostd::ports::AgentOperationAddress {
+                session_id: run.session_id,
+                operation_id: run.turn_id,
+                agent_instance_id: agent_instance_id.clone(),
+            },
             result: Ok(piko_protocol::AgentRunReport {
-                agent_instance_id: "root".into(),
+                agent_instance_id: agent_instance_id.clone(),
                 report_id: "report-cancelled".into(),
                 outcome: piko_protocol::ExecutionOutcome::Cancelled {
                     reason: Some("cancelled by test".into()),
@@ -45,11 +49,11 @@ impl CancellableTurnRunner {
 }
 
 #[async_trait]
-impl TurnRunner for CancellableTurnRunner {
-    async fn run_turn(
+impl AgentRunRunner for CancellableAgentRunRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         self.publishers.lock().unwrap().push(publisher.clone());
         publisher.publish(
@@ -67,31 +71,32 @@ impl TurnRunner for CancellableTurnRunner {
         let (completion_tx, completion) = tokio::sync::oneshot::channel();
         *self.active.lock().unwrap() = Some(CancellableRun {
             session_id: input.session_id.clone(),
-            turn_id: input.turn_id.clone(),
+            turn_id: input.operation_id.clone(),
+            agent_instance_id: input.agent_instance_id.clone(),
             barrier,
             completion_tx,
         });
-        Ok(TurnRunHandle {
-            session_id: input.session_id,
-            turn_id: input.turn_id,
-            root_agent_instance_id: "root".into(),
+        Ok(AgentRunHandle {
+            address: hostd::ports::AgentOperationAddress {
+                session_id: input.session_id,
+                operation_id: input.operation_id,
+                agent_instance_id: input.agent_instance_id,
+            },
             observation: subscription,
             completion,
         })
     }
 
-    async fn cancel_turn_run(&self, session_id: &str, turn_id: &str) -> bool {
-        self.active
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|run| run.session_id == session_id && run.turn_id == turn_id)
+    async fn cancel_agent_run(&self, operation: &hostd::ports::AgentOperationAddress) -> bool {
+        self.active.lock().unwrap().as_ref().is_some_and(|run| {
+            run.session_id == operation.session_id && run.turn_id == operation.operation_id
+        })
     }
 }
 
 #[tokio::test]
 async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
-    let runner = Arc::new(CancellableTurnRunner::default());
+    let runner = Arc::new(CancellableAgentRunRunner::default());
     let server = HostServer::with_turn_runner(runner.clone());
     let created = server
         .handle_command(hostd::api::Command::SessionCreate {
@@ -122,8 +127,8 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
         let found = refresh.iter().find_map(|event| match event {
             Event::SessionReconciled(reconciled) => reconciled
                 .snapshot
-                .active_turn
-                .as_ref()
+                .active_turns
+                .first()
                 .map(|turn| turn.turn_id.clone()),
             _ => None,
         });
@@ -156,30 +161,35 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
 struct ChildReportRunner;
 
 #[async_trait]
-impl TurnRunner for ChildReportRunner {
-    async fn run_turn(
+impl AgentRunRunner for ChildReportRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let barrier = subscription.cursor.clone();
         let (completion_tx, completion) = tokio::sync::oneshot::channel();
         let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
+        let turn_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         tokio::spawn(async move {
             let _publisher = publisher;
-            let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
-                session_id,
-                turn_id,
-                root_agent_instance_id: "root".into(),
+            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+                address: hostd::ports::AgentOperationAddress {
+                    session_id,
+                    operation_id: turn_id,
+                    agent_instance_id,
+                },
                 result: Ok(success_report("child")),
                 observation_barrier: barrier,
             });
         });
-        Ok(TurnRunHandle {
-            session_id: input.session_id,
-            turn_id: input.turn_id,
-            root_agent_instance_id: "root".into(),
+        Ok(AgentRunHandle {
+            address: hostd::ports::AgentOperationAddress {
+                session_id: input.session_id,
+                operation_id: input.operation_id,
+                agent_instance_id: input.agent_instance_id,
+            },
             observation: subscription,
             completion,
         })
@@ -187,7 +197,7 @@ impl TurnRunner for ChildReportRunner {
 }
 
 #[tokio::test]
-async fn child_agent_report_cannot_complete_root_turn() {
+async fn mismatched_agent_report_cannot_complete_turn() {
     let server = HostServer::with_turn_runner(Arc::new(ChildReportRunner));
     let created = server
         .handle_command(hostd::api::Command::SessionCreate {
@@ -213,7 +223,7 @@ async fn child_agent_report_cannot_complete_root_turn() {
     assert!(events.iter().any(|event| matches!(
         event,
         Event::CommandResponse { result: Err(error), .. }
-            if error.contains("root Agent report identity mismatch")
+            if error.contains("Agent report identity mismatch")
     )));
 }
 

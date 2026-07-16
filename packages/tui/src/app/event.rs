@@ -400,10 +400,10 @@ impl AppState {
                 self.push_focus(AppMode::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
-            Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
                 session_id,
                 turn_id,
-                root_agent_instance_id,
+                agent_instance_id,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -412,33 +412,61 @@ impl AppState {
                 self.session
                     .pending
                     .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
-                self.session.active_turn_id = Some(turn_id.clone());
-                self.status = format!("turn {turn_id} running ({root_agent_instance_id})");
+                self.status = format!("turn {turn_id} queued ({agent_instance_id})");
             }
-            Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
                 session_id,
                 turn_id,
+                agent_instance_id,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.active_turn_id = None;
+                self.session
+                    .pending
+                    .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
+                self.session
+                    .active_turns
+                    .insert(agent_instance_id.clone(), turn_id.clone());
+                self.status = format!("turn {turn_id} running ({agent_instance_id})");
+            }
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
+                session_id,
+                turn_id,
+                agent_instance_id,
+                ..
+            }) => {
+                if !self.accepts_session(&session_id) {
+                    return effects;
+                }
+                if self
+                    .session
+                    .active_turns
+                    .get(&agent_instance_id)
+                    .is_some_and(|active| active == &turn_id)
+                {
+                    self.session.active_turns.remove(&agent_instance_id);
                 }
                 self.status = format!("turn {turn_id} completed");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Failed {
                 session_id,
                 turn_id,
+                agent_instance_id,
                 error,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.active_turn_id = None;
+                if self
+                    .session
+                    .active_turns
+                    .get(&agent_instance_id)
+                    .is_some_and(|active| active == &turn_id)
+                {
+                    self.session.active_turns.remove(&agent_instance_id);
                 }
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
@@ -446,64 +474,23 @@ impl AppState {
             Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled {
                 session_id,
                 turn_id,
+                agent_instance_id,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                if self.session.active_turn_id.as_deref() == Some(&turn_id) {
-                    self.session.active_turn_id = None;
+                if self
+                    .session
+                    .active_turns
+                    .get(&agent_instance_id)
+                    .is_some_and(|active| active == &turn_id)
+                {
+                    self.session.active_turns.remove(&agent_instance_id);
                 }
                 self.status = format!("turn {turn_id} cancelled");
             }
-            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Started {
-                session_id,
-                run_id,
-                agent_instance_id,
-                ..
-            }) => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.session.active_agent_run_id = Some(run_id.clone());
-                self.session.active_agent_run_instance_id = Some(agent_instance_id.clone());
-                self.session
-                    .pending
-                    .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
-                self.status = format!("agent run {run_id} running ({agent_instance_id})");
-            }
-            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Completed {
-                session_id,
-                run_id,
-                agent_instance_id,
-                ..
-            }) => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                if self.session.active_agent_run_id.as_deref() == Some(&run_id) {
-                    self.session.active_agent_run_id = None;
-                    self.session.active_agent_run_instance_id = None;
-                }
-                self.status = format!("agent run completed ({agent_instance_id})");
-            }
-            Event::AgentRunLifecycle(piko_protocol::AgentRunEvent::Failed {
-                session_id,
-                run_id,
-                agent_instance_id,
-                error,
-                ..
-            }) => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                if self.session.active_agent_run_id.as_deref() == Some(&run_id) {
-                    self.session.active_agent_run_id = None;
-                    self.session.active_agent_run_instance_id = None;
-                }
-                self.status = format!("agent run failed ({agent_instance_id})");
-                self.push_error(error);
-            }
+            Event::AgentRunLifecycle(_) => {}
             Event::Approval(piko_protocol::ApprovalEvent::Requested {
                 session_id,
                 approval_id,
@@ -791,11 +778,11 @@ impl AppState {
             }
         }
 
-        if let Some(turn) = snapshot.active_turn {
-            self.session.active_turn_id = Some(turn.turn_id);
-        } else {
-            self.session.active_turn_id = None;
-        }
+        self.session.active_turns = snapshot
+            .active_turns
+            .into_iter()
+            .map(|turn| (turn.agent_instance_id, turn.turn_id))
+            .collect();
 
         self.approvals.clear();
         for approval in snapshot.pending_approvals {

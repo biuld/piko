@@ -44,11 +44,11 @@ impl SessionStorePort for SessionStore {
         SessionStore::find_committed_message_lenient(self, agent_instance_id, message_id)
     }
 
-    fn root_agent_report_for_turn(
+    fn agent_report_for_turn(
         &self,
         turn_id: &str,
     ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError> {
-        SessionStore::root_agent_report_for_turn(self, turn_id)
+        SessionStore::agent_report_for_turn(self, turn_id)
     }
 
     fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {

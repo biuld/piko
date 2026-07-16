@@ -1,6 +1,8 @@
 # Turn–Agent Run Boundary Design
 
-> Status: implemented normative design
+> Status: superseded for ChatSubmit Turn cardinality and runner API by
+> [hostd Turn Model and Agent Run API](hostd-turn-model.md). The completion
+> channel and observation-barrier rules in this document remain design history.
 > Business model: [Single-Agent Runtime Model](single-agent-runtime-model.md)
 > Runtime model: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Run durability: [Agent Run Atomicity Design](agent-run-atomicity-design.md)
@@ -54,7 +56,7 @@ The second cardinality is an implementation fact, not a hostd contract.
 ### 3.1 Completion is a command result
 
 `AgentRuntime::run_agent` resolves only after the AgentActor has durably
-committed its terminal report. OrchTurnRunner forwards that result to hostd on
+committed its terminal report. OrchAgentRunRunner forwards that result to hostd on
 a dedicated completion channel.
 
 The completion path is not a `SessionEvent`, broadcast, or stream item.
@@ -77,7 +79,7 @@ while hostd has not yet consumed the corresponding `MessageCommitted` event.
 Completing the Turn first would allow `TurnCompleted` to reach the TUI before
 the final transcript projection.
 
-OrchTurnRunner therefore captures the Session event cursor after `run_agent`
+OrchAgentRunRunner therefore captures the Session event cursor after `run_agent`
 returns and sends it with the completion result. hostd drains or replays the
 reliable event lane through that cursor before committing the Turn terminal.
 
@@ -112,7 +114,7 @@ it is run input, not Create input.
 
 ## 4. Target Host Port
 
-TurnRunner returns one handle containing independent observation and completion
+AgentRunRunner returns one handle containing independent observation and completion
 capabilities:
 
 ```rust
@@ -152,10 +154,10 @@ It is not synthesized when a durable Failed or Cancelled report already exists.
 dropped host receiver does not cancel the Agent run. Cancellation remains an
 explicit AgentRuntime command.
 
-The TurnRunner control surface becomes Agent/Turn-oriented:
+The AgentRunRunner control surface becomes Agent/Turn-oriented:
 
 ```rust
-trait TurnRunner {
+trait AgentRunRunner {
     async fn run_turn(input: TurnRunInput) -> TurnRunHandle;
     async fn recover_observation(session_id: SessionId) -> SessionSubscription;
     async fn acknowledge_turn_run(
@@ -175,7 +177,7 @@ The host port uses Turn/Agent language rather than Task/Execution control names.
 ```mermaid
 sequenceDiagram
     participant H as hostd Turn service
-    participant R as OrchTurnRunner
+    participant R as OrchAgentRunRunner
     participant A as AgentRuntime / AgentActor
     participant S as hostd durable stores
     participant O as Session observation hub
@@ -364,7 +366,7 @@ Task/Work dependencies while that legacy surface still exists.
 - reliable Session events contain committed product facts only;
 - realtime retains internal correlation but has no terminal authority;
 - Agent list/status projection flows through Agent state;
-- Agent reports and TurnRunner methods use Agent/Turn terminology.
+- Agent reports and AgentRunRunner methods use Agent/Turn terminology.
 
 ### 12.4 Active Turn scope
 

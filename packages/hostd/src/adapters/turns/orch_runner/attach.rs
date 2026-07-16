@@ -8,9 +8,9 @@ use piko_protocol::agents::AgentSpec;
 
 use crate::api::ProtocolError;
 use crate::infra::storage::session_store::SessionStore;
-use crate::ports::ResumeRootAgent;
+use crate::ports::ResumeAgent;
 
-use super::OrchTurnRunner;
+use super::OrchAgentRunRunner;
 use super::agent_commit::ProjectingAgentCommitPort;
 use super::commit::{ExecutionCommitRouter, RealtimeDeltaRouter, RepositoryExecutionCommitPort};
 use super::run::resolve_recovered_agent_spec;
@@ -20,7 +20,7 @@ pub(super) struct PreparedSessionRuntime {
     pub realtime_router: Arc<RealtimeDeltaRouter>,
 }
 
-impl OrchTurnRunner {
+impl OrchAgentRunRunner {
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn prepare_session_runtime(
         &self,
@@ -31,7 +31,7 @@ impl OrchTurnRunner {
         target_agent_instance_id: &str,
         fallback_route: bool,
         root_spec: &AgentSpec,
-        resume_root_agent: Option<&ResumeRootAgent>,
+        resume_agent: Option<&ResumeAgent>,
         hub: Arc<orchd::events::SessionOutputHub>,
     ) -> Result<PreparedSessionRuntime, ProtocolError> {
         let attach_lock = self.session_attach_lock(session_id);
@@ -101,11 +101,11 @@ impl OrchTurnRunner {
                         .ok()
                         .and_then(|agent| agent.head_message_id);
                     if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
-                        transcript = resume_root_agent
+                        transcript = resume_agent
                             .map(|resume| resume.state.transcript.clone())
                             .unwrap_or_default();
-                        head_message_id = resume_root_agent
-                            .and_then(|resume| resume.state.head_message_id.clone());
+                        head_message_id =
+                            resume_agent.and_then(|resume| resume.state.head_message_id.clone());
                     }
                     AgentRecoveryState {
                         inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),

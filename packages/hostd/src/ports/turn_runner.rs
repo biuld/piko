@@ -19,17 +19,19 @@ pub struct AgentOperationAddress {
 }
 
 #[derive(Clone)]
-pub struct ResumeRootAgent {
+pub struct ResumeAgent {
     pub agent_instance_id: String,
     pub state: piko_protocol::agent_runtime::AgentResumeState,
 }
 
 #[derive(Clone)]
-pub struct TurnRunInput {
+pub struct AgentRunInput {
     pub session_id: String,
-    pub turn_id: String,
+    pub operation_id: String,
+    pub agent_instance_id: String,
     pub prompt: String,
-    pub prompt_resources: piko_protocol::PromptResourceSnapshot,
+    pub source_turn_id: Option<String>,
+    pub prompt_resources: Option<piko_protocol::PromptResourceSnapshot>,
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
@@ -39,36 +41,20 @@ pub struct TurnRunInput {
     /// The turn handler drains this and forwards to TUI on the main outbound channel.
     pub ui_event_tx: UnboundedSender<ServerMessage>,
     /// Reattach a resumed root agent with committed transcript history.
-    pub resume_root_agent: Option<ResumeRootAgent>,
+    pub resume_agent: Option<ResumeAgent>,
 }
 
-#[derive(Clone)]
-pub struct AgentInputRunInput {
-    pub session_id: String,
-    pub run_id: String,
-    pub agent_instance_id: String,
-    pub prompt: String,
-    pub cwd: String,
-    pub active_tool_names: Option<Vec<String>>,
-    pub session_dir: PathBuf,
-    pub ui_event_tx: UnboundedSender<ServerMessage>,
-}
-
-pub struct AgentInputRunHandle {
-    pub session_id: String,
-    pub run_id: String,
-    pub agent_instance_id: String,
+pub struct AgentRunHandle {
+    pub address: AgentOperationAddress,
     pub observation: SessionSubscription,
-    pub completion: AgentInputRunCompletionReceiver,
+    pub completion: AgentRunCompletionReceiver,
 }
 
-pub type AgentInputRunCompletionReceiver = oneshot::Receiver<AgentInputRunCompletion>;
+pub type AgentRunCompletionReceiver = oneshot::Receiver<AgentRunCompletion>;
 
 #[derive(Debug)]
-pub struct AgentInputRunCompletion {
-    pub session_id: String,
-    pub run_id: String,
-    pub agent_instance_id: String,
+pub struct AgentRunCompletion {
+    pub address: AgentOperationAddress,
     pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
     pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
 }
@@ -78,46 +64,9 @@ pub trait OperationRunCompletion: Send {
     fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor;
 }
 
-impl OperationRunCompletion for AgentInputRunCompletion {
+impl OperationRunCompletion for AgentRunCompletion {
     fn operation_address(&self) -> AgentOperationAddress {
-        AgentOperationAddress {
-            session_id: self.session_id.clone(),
-            operation_id: self.run_id.clone(),
-            agent_instance_id: self.agent_instance_id.clone(),
-        }
-    }
-
-    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
-        &self.observation_barrier
-    }
-}
-
-pub struct TurnRunHandle {
-    pub session_id: String,
-    pub turn_id: String,
-    pub root_agent_instance_id: String,
-    pub observation: SessionSubscription,
-    pub completion: TurnRunCompletionReceiver,
-}
-
-pub type TurnRunCompletionReceiver = oneshot::Receiver<TurnRunCompletion>;
-
-#[derive(Debug)]
-pub struct TurnRunCompletion {
-    pub session_id: String,
-    pub turn_id: String,
-    pub root_agent_instance_id: String,
-    pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
-    pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
-}
-
-impl OperationRunCompletion for TurnRunCompletion {
-    fn operation_address(&self) -> AgentOperationAddress {
-        AgentOperationAddress {
-            session_id: self.session_id.clone(),
-            operation_id: self.turn_id.clone(),
-            agent_instance_id: self.root_agent_instance_id.clone(),
-        }
+        self.address.clone()
     }
 
     fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
@@ -131,33 +80,23 @@ pub struct AgentRunFailure {
 }
 
 #[async_trait]
-pub trait TurnRunner: Send + Sync {
-    /// Run a Turn and return independent observation and completion paths.
-    async fn run_turn(&self, input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError>;
-
-    async fn run_agent_input(
-        &self,
-        _input: AgentInputRunInput,
-    ) -> Result<AgentInputRunHandle, ProtocolError> {
+pub trait AgentRunRunner: Send + Sync {
+    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
-            "direct agent input is unavailable".into(),
+            "Agent run is unavailable".into(),
         ))
     }
 
-    async fn finish_agent_input(&self, _session_id: &str, _agent_instance_id: &str, _run_id: &str) {
-    }
-
-    async fn acknowledge_turn_run(
+    async fn finish_agent_run(
         &self,
-        _session_id: &str,
-        _turn_id: &str,
-        _barrier: &piko_protocol::agent_runtime::SessionCursor,
+        _: &AgentOperationAddress,
+        _: &piko_protocol::agent_runtime::SessionCursor,
     ) {
     }
 
     async fn recover_observation(
         &self,
-        _operation: &AgentOperationAddress,
+        _: &AgentOperationAddress,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,
@@ -172,45 +111,40 @@ pub trait TurnRunner: Send + Sync {
 
     async fn respond_approval(
         &self,
-        _approval_id: &str,
-        _decision: crate::api::ApprovalDecision,
+        _: &str,
+        _: crate::api::ApprovalDecision,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
     }
 
     async fn respond_user_interaction(
         &self,
-        _interaction_id: &str,
-        _response: crate::api::UserInteractionResponse,
+        _: &str,
+        _: crate::api::UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
     }
 
-    /// Route a steering message to the active root Agent.
-    /// Returns true if the steering was delivered.
-    async fn steer_active_agent(&self, _session_id: &str, _message: &str) -> bool {
+    async fn steer_agent(&self, _: &str, _: &str, _: &str) -> bool {
         false
     }
 
-    /// Cancel the root Agent run bound to the active Turn.
-    /// Returns true if a cancel was accepted.
-    async fn cancel_turn_run(&self, _session_id: &str, _turn_id: &str) -> bool {
+    async fn cancel_agent_run(&self, _: &AgentOperationAddress) -> bool {
         false
     }
 
-    /// Whether this process still owns a live Agent run for the session.
-    async fn has_active_turn_run(&self, _session_id: &str) -> bool {
+    async fn has_active_session_run(&self, _: &str) -> bool {
         false
     }
 
-    async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
+    async fn list_agent_instances(&self, _: &str) -> Option<Vec<crate::api::AgentInfo>> {
         None
     }
 
     /// In-process pending approvals/interactions for recoverable session projection.
     async fn pending_prompts_for_session(
         &self,
-        _session_id: &str,
+        _: &str,
     ) -> (
         Vec<crate::api::ApprovalSnapshot>,
         Vec<crate::api::UserInteractionSnapshot>,
@@ -220,11 +154,11 @@ pub trait TurnRunner: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct ErrorTurnRunner {
+pub struct ErrorAgentRunRunner {
     message: String,
 }
 
-impl ErrorTurnRunner {
+impl ErrorAgentRunRunner {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -233,8 +167,8 @@ impl ErrorTurnRunner {
 }
 
 #[async_trait]
-impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn(&self, _input: TurnRunInput) -> Result<TurnRunHandle, ProtocolError> {
+impl AgentRunRunner for ErrorAgentRunRunner {
+    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }

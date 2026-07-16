@@ -6,10 +6,10 @@ use orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest};
 use crate::adapters::turns::approval::ApprovalScope;
 use crate::api::ServerMessage;
 
-use super::OrchTurnRunner;
+use super::OrchAgentRunRunner;
 
 #[async_trait]
-impl ApprovalGateway for OrchTurnRunner {
+impl ApprovalGateway for OrchAgentRunRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
         let cwd = request
@@ -52,6 +52,7 @@ impl ApprovalGateway for OrchTurnRunner {
                     session_id: Some(session_id.clone()),
                     snapshot: crate::api::ApprovalSnapshot {
                         approval_id: approval_id.clone(),
+                        agent_instance_id: request.agent_instance_id.clone(),
                         tool_name: request.tool_name.clone(),
                         request: request.tool_args.clone(),
                         status: crate::api::ApprovalStatus::Pending,

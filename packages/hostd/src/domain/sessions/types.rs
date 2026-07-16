@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::api::{
     AgentId, ContentBlock, Message, MessageContent, SessionId, SessionSummary, SessionTreeEntry,
-    TurnId,
+    TurnId, TurnStatus,
 };
 use piko_protocol::SequencedServerMessage;
 use piko_protocol::messages::Usage;
@@ -18,17 +18,15 @@ pub struct SessionState {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
-    pub active_turn_id: Option<TurnId>,
+    pub turns: HashMap<TurnId, TurnRecord>,
+    pub active_turns: HashMap<String, TurnId>,
+    pub turn_queues: HashMap<String, VecDeque<TurnId>>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
     /// Last committed transcript message for each runtime agent instance.
     pub task_heads: HashMap<String, String>,
     /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
-    /// Queue of pending follow-up prompts
-    pub follow_up_queue: Vec<String>,
-    /// Queue of pending next-turn prompts
-    pub next_turn_queue: Vec<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
     /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
@@ -38,6 +36,14 @@ pub struct SessionState {
     /// Per-agent-instance live view replay state.
     pub agent_views: HashMap<String, AgentViewState>,
     pub next_agent_view_seq: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnRecord {
+    pub turn_id: TurnId,
+    pub agent_instance_id: String,
+    pub message: String,
+    pub status: TurnStatus,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -87,13 +93,13 @@ impl SessionState {
             cwd,
             seq: 0,
             entries: Vec::new(),
-            active_turn_id: None,
+            turns: HashMap::new(),
+            active_turns: HashMap::new(),
+            turn_queues: HashMap::new(),
             name: None,
             current_leaf_id: None,
             task_heads: HashMap::new(),
             steer_queue: Vec::new(),
-            follow_up_queue: Vec::new(),
-            next_turn_queue: Vec::new(),
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
             active_agent_instance_id: None,

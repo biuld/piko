@@ -104,8 +104,8 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    /// Submit user text to one concrete AgentInstance. hostd resolves whether
-    /// the target follows the root Turn path or the direct Agent-run path.
+    /// Submit user text to one concrete AgentInstance. Every accepted submit
+    /// creates a hostd Turn and uses the same Agent run API.
     ChatSubmit {
         command_id: CommandId,
         session_id: SessionId,
@@ -146,16 +146,6 @@ pub enum Command {
         agent_instance_id: crate::AgentInstanceId,
         message: String,
     },
-    QueueFollowUp {
-        command_id: CommandId,
-        session_id: SessionId,
-        message: String,
-    },
-    QueueNextTurn {
-        command_id: CommandId,
-        session_id: SessionId,
-        message: String,
-    },
     /// Request the list of available models from hostd's catalog.
     ModelList {
         command_id: CommandId,
@@ -168,6 +158,7 @@ pub enum Command {
     SessionCompact {
         command_id: CommandId,
         session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
     },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
@@ -222,8 +213,6 @@ impl Command {
             | Self::StateSnapshot { command_id, .. }
             | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
-            | Self::QueueFollowUp { command_id, .. }
-            | Self::QueueNextTurn { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }

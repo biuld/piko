@@ -41,7 +41,7 @@ fn empty_reconcile(session_id: &str) -> Event {
             entries: Vec::new(),
             current_leaf_id: None,
             selected_agent_instance_id: Some(format!("agent_{session_id}_root")),
-            active_turn: None,
+            active_turns: Vec::new(),
             pending_approvals: Vec::new(),
             pending_interactions: Vec::new(),
             name: None,
@@ -560,7 +560,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 entries: vec![assistant, tool_call, tool_result],
                 current_leaf_id: Some("msg-tool".into()),
                 selected_agent_instance_id: None,
-                active_turn: None,
+                active_turns: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,
@@ -618,12 +618,12 @@ fn stale_session_events_do_not_mutate_live_view() {
     app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
         session_id: "session-2".into(),
         turn_id: "foreign-turn".into(),
-        root_agent_instance_id: "foreign-agent".into(),
+        agent_instance_id: "foreign-agent".into(),
         timestamp: 0,
     }));
 
     assert_eq!(app.queue_status.steer_count, 0);
-    assert!(app.session.active_turn_id.is_none());
+    assert!(app.session.active_turns.is_empty());
 }
 
 #[test]
@@ -853,7 +853,7 @@ fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
     let agent = &app.agent_panel.agents[0];
     assert_eq!(agent.activity, piko_protocol::AgentActivity::Idle);
     assert_eq!(agent.status, piko_protocol::AgentStatus::Idle);
-    assert_eq!(app.session.active_agent_run_id.as_deref(), Some("run-1"));
+    assert!(app.session.active_turns.is_empty());
 }
 
 #[test]
@@ -1032,7 +1032,7 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 entries: Vec::new(),
                 current_leaf_id: None,
                 selected_agent_instance_id: None,
-                active_turn: None,
+                active_turns: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,

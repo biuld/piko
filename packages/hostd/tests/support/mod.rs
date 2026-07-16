@@ -9,7 +9,7 @@ pub fn successful_turn_run(
     root_agent_instance_id: impl Into<String>,
     barrier_seq: u64,
     delay: std::time::Duration,
-) -> hostd::ports::TurnRunHandle {
+) -> hostd::ports::AgentRunHandle {
     let session_id = session_id.into();
     let turn_id = turn_id.into();
     let root_agent_instance_id = root_agent_instance_id.into();
@@ -18,25 +18,25 @@ pub fn successful_turn_run(
         seq: barrier_seq,
     };
     let (completion_tx, completion) = tokio::sync::oneshot::channel();
-    let completion_session_id = session_id.clone();
-    let completion_turn_id = turn_id.clone();
     let handle_root_agent_instance_id = root_agent_instance_id.clone();
+    let address = hostd::ports::AgentOperationAddress {
+        session_id: session_id.clone(),
+        operation_id: turn_id.clone(),
+        agent_instance_id: handle_root_agent_instance_id,
+    };
+    let completion_address = address.clone();
     tokio::spawn(async move {
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
-        let _ = completion_tx.send(hostd::ports::TurnRunCompletion {
-            session_id: completion_session_id,
-            turn_id: completion_turn_id,
-            root_agent_instance_id: root_agent_instance_id.clone(),
+        let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+            address: completion_address,
             result: Ok(success_report(root_agent_instance_id)),
             observation_barrier: barrier,
         });
     });
-    hostd::ports::TurnRunHandle {
-        session_id,
-        turn_id,
-        root_agent_instance_id: handle_root_agent_instance_id,
+    hostd::ports::AgentRunHandle {
+        address,
         observation: subscription,
         completion,
     }
@@ -56,23 +56,13 @@ pub fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::Ag
 }
 
 use piko_protocol::agent_runtime::SessionEvent;
-pub fn execution_running(
-    _session_id: impl Into<String>,
-    _turn_id: impl Into<String>,
-    _execution_id: impl Into<String>,
-    _agent_id: impl Into<String>,
-) -> SessionEvent {
+pub fn execution_running() -> SessionEvent {
     SessionEvent::InteractionResolved {
         resolution: serde_json::json!({"marker": "running"}),
     }
 }
 
-pub fn execution_succeeded(
-    _session_id: impl Into<String>,
-    _turn_id: impl Into<String>,
-    _execution_id: impl Into<String>,
-    _agent_id: impl Into<String>,
-) -> SessionEvent {
+pub fn execution_succeeded() -> SessionEvent {
     SessionEvent::InteractionResolved {
         resolution: serde_json::json!({"marker": "completed"}),
     }

@@ -8,22 +8,19 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
-use orchd_api::{AgentCommitPort, ExecutionCommitPort};
+use orchd_api::AgentCommitPort;
 use piko_protocol::AgentInstanceIdentity;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 
 use crate::api::ServerMessage;
 use crate::infra::storage::SessionStore;
-use crate::ports::{AgentInputRunInput, TurnRunner};
+use crate::ports::{AgentOperationAddress, AgentRunInput, AgentRunRunner};
 
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
 use super::run::{ensure_root_tool_sets, resolve_recovered_agent_spec};
-use super::{ActiveTurnRuntime, remove_active_turn_if_matches};
 
 struct FailingAgentCommitPort;
-
-struct NoopExecutionCommitPort;
 
 struct DirectInputGateway;
 
@@ -31,8 +28,8 @@ struct DirectInputGateway;
 impl LlmGateway for DirectInputGateway {
     async fn chat_stream(
         &self,
-        _request: GatewayRequest,
-        _cancel: Option<CancellationToken>,
+        _: GatewayRequest,
+        _: Option<CancellationToken>,
     ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
         Ok(Box::pin(iter(vec![
             GatewayEvent::ContentDelta("child reply".into()),
@@ -43,10 +40,10 @@ impl LlmGateway for DirectInputGateway {
 
     async fn llm_call(
         &self,
-        _model: piko_protocol::Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<piko_protocol::Message>,
-        _settings: piko_protocol::ModelRunSettings,
+        _: piko_protocol::Model,
+        _: Option<String>,
+        _: Vec<piko_protocol::Message>,
+        _: piko_protocol::ModelRunSettings,
     ) -> Result<String, String> {
         Ok("child reply".into())
     }
@@ -57,27 +54,11 @@ impl LlmGateway for DirectInputGateway {
 }
 
 #[async_trait]
-impl ExecutionCommitPort for NoopExecutionCommitPort {
-    async fn commit_message(
-        &self,
-        _commit: piko_protocol::execution::MessageCommit,
-    ) -> Result<piko_protocol::CommitAck, CommitError> {
-        Ok(piko_protocol::CommitAck {
-            session_id: "session".into(),
-            execution_id: "exec".into(),
-            agent_instance_id: "root".into(),
-            message_id: None,
-            revision: 1,
-        })
-    }
-}
-
-#[async_trait]
 impl AgentCommitPort for FailingAgentCommitPort {
     async fn commit_agent_command(
         &self,
-        _session_id: &str,
-        _command: AgentDurableCommand,
+        _: &str,
+        _: AgentDurableCommand,
     ) -> Result<AgentCommitAck, CommitError> {
         Err(CommitError::Unavailable)
     }
@@ -199,7 +180,7 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         .await
         .unwrap();
 
-    let runner = super::OrchTurnRunner::new(
+    let runner = super::OrchAgentRunRunner::new(
         Arc::new(DirectInputGateway),
         "test",
         "test-key",
@@ -208,30 +189,48 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
     .await;
     let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let run = runner
-        .run_agent_input(AgentInputRunInput {
+        .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
-            run_id: "run-direct".into(),
+            operation_id: "run-direct".into(),
             agent_instance_id: child_id.into(),
             prompt: "follow up".into(),
+            source_turn_id: Some("run-direct".into()),
+            prompt_resources: None,
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
             ui_event_tx,
+            resume_agent: None,
         })
         .await
         .unwrap();
-    TurnRunner::finish_agent_input(&runner, "session-direct", child_id, "stale-run-id").await;
+    AgentRunRunner::finish_agent_run(
+        &runner,
+        &AgentOperationAddress {
+            session_id: "session-direct".into(),
+            operation_id: "stale-run-id".into(),
+            agent_instance_id: child_id.into(),
+        },
+        &piko_protocol::agent_runtime::SessionCursor {
+            epoch: "stale".into(),
+            seq: 0,
+        },
+    )
+    .await;
     let (duplicate_ui_tx, _duplicate_ui_rx) = unbounded_channel();
     let duplicate = runner
-        .run_agent_input(AgentInputRunInput {
+        .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
-            run_id: "run-duplicate".into(),
+            operation_id: "run-duplicate".into(),
             agent_instance_id: child_id.into(),
             prompt: "duplicate".into(),
+            source_turn_id: Some("run-duplicate".into()),
+            prompt_resources: None,
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
             ui_event_tx: duplicate_ui_tx,
+            resume_agent: None,
         })
         .await;
     assert!(matches!(
@@ -240,21 +239,24 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
     ));
     let (second_ui_tx, _second_ui_rx) = unbounded_channel();
     let second = runner
-        .run_agent_input(AgentInputRunInput {
+        .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
-            run_id: "run-second-child".into(),
+            operation_id: "run-second-child".into(),
             agent_instance_id: "agent-child-two".into(),
             prompt: "parallel".into(),
+            source_turn_id: Some("run-second-child".into()),
+            prompt_resources: None,
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
             ui_event_tx: second_ui_tx,
+            resume_agent: None,
         })
         .await
         .expect("different AgentInstances may run concurrently");
     let completed = run.completion.await.unwrap();
     let second_completed = second.completion.await.unwrap();
-    assert_eq!(completed.agent_instance_id, child_id);
+    assert_eq!(completed.address.agent_instance_id, child_id);
     assert!(completed.result.is_ok());
     assert!(second_completed.result.is_ok());
 
@@ -267,34 +269,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             ..
         } if text == "follow up"
     ));
-}
-
-#[test]
-fn stale_turn_acknowledgement_cannot_remove_newer_runtime_scope() {
-    let temp = tempfile::tempdir().unwrap();
-    let commit_router = Arc::new(super::commit::ExecutionCommitRouter::new(
-        Arc::new(NoopExecutionCommitPort),
-        SessionStore::new(temp.path()),
-    ));
-    let mut active = std::collections::HashMap::from([(
-        "session".into(),
-        ActiveTurnRuntime {
-            turn_id: "turn-new".into(),
-            observation: Arc::new(orchd::testing::SessionOutputHub::new(
-                "session".into(),
-                "epoch".into(),
-                4,
-            )),
-            root_agent_instance_id: "root".into(),
-            commit_router,
-            realtime_router: Arc::new(super::commit::RealtimeDeltaRouter::default()),
-        },
-    )]);
-
-    assert!(remove_active_turn_if_matches(&mut active, "session", "turn-old").is_none());
-    assert_eq!(active["session"].turn_id, "turn-new");
-    assert!(remove_active_turn_if_matches(&mut active, "session", "turn-new").is_some());
-    assert!(active.is_empty());
 }
 
 #[test]

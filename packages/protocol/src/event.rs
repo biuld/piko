@@ -276,26 +276,35 @@ impl From<AuthEvent> for ServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
+    Queued {
+        session_id: SessionId,
+        turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
     Started {
         session_id: SessionId,
         turn_id: TurnId,
-        root_agent_instance_id: crate::AgentInstanceId,
+        agent_instance_id: crate::AgentInstanceId,
         timestamp: i64,
     },
     Completed {
         session_id: SessionId,
         turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
         timestamp: i64,
     },
     Failed {
         session_id: SessionId,
         turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
         error: String,
         timestamp: i64,
     },
     Cancelled {
         session_id: SessionId,
         turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
         timestamp: i64,
     },
 }
@@ -518,7 +527,8 @@ pub struct SessionSnapshot {
     /// Authoritative AgentInstance view selected for this Session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_agent_instance_id: Option<crate::AgentInstanceId>,
-    pub active_turn: Option<TurnSnapshot>,
+    #[serde(default)]
+    pub active_turns: Vec<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(default)]
     pub pending_interactions: Vec<UserInteractionSnapshot>,
@@ -533,6 +543,7 @@ pub struct SessionSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub turn_id: TurnId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub status: TurnStatus,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCallSnapshot>,
@@ -541,7 +552,7 @@ pub struct TurnSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
-    Idle,
+    Queued,
     Running,
     WaitingForApproval,
     Cancelling,
@@ -572,6 +583,7 @@ pub enum ToolCallStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalSnapshot {
     pub approval_id: ApprovalId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub tool_name: String,
     /// Tool arguments (or structured request payload).
     pub request: serde_json::Value,

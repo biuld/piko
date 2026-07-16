@@ -3,7 +3,7 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::types::{HostState, SessionState, now_ms};
+use super::types::{HostState, SessionState, TurnRecord, now_ms};
 
 impl HostState {
     pub fn new() -> Self {
@@ -122,41 +122,100 @@ impl HostState {
         &mut self,
         session_id: &str,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let turn_id = {
+        let turns = {
             let state = self.session(session_id)?;
-            state.active_turn_id.clone()
+            state.active_turns.values().cloned().collect::<Vec<_>>()
         };
-        let Some(turn_id) = turn_id else {
-            return Ok(Vec::new());
-        };
-        tracing::info!(
-            session_id = %session_id,
-            turn_id = %turn_id,
-            "finalizing interrupted turn on session open"
-        );
-        Ok(vec![self.fail_turn(
-            session_id,
-            &turn_id,
-            "turn interrupted: session reopened without a live execution",
-        )?])
+        let mut events = Vec::with_capacity(turns.len());
+        for turn_id in turns {
+            tracing::info!(
+                session_id = %session_id,
+                turn_id = %turn_id,
+                "finalizing interrupted turn on session open"
+            );
+            events.push(self.fail_turn(
+                session_id,
+                &turn_id,
+                "turn interrupted: session reopened without a live execution",
+            )?);
+        }
+        Ok(events)
     }
 
     pub fn start_turn(
         &mut self,
         session_id: &str,
-    ) -> Result<(TurnId, Vec<ServerMessage>), ProtocolError> {
+        agent_instance_id: &str,
+        message: &str,
+    ) -> Result<(TurnId, crate::api::TurnStatus), ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if let Some(active) = state.active_turn_id.as_ref() {
-            tracing::info!(
-                session_id = %session_id,
-                active_turn_id = %active,
-                "refusing start_turn while a turn is still active"
-            );
-            return Err(ProtocolError::ActiveTurnExists(session_id.to_string()));
-        }
         let turn_id = format!("turn_{}", Uuid::new_v4());
-        state.active_turn_id = Some(turn_id.clone());
-        Ok((turn_id, Vec::new()))
+        let status = if state.active_turns.contains_key(agent_instance_id) {
+            state
+                .turn_queues
+                .entry(agent_instance_id.to_string())
+                .or_default()
+                .push_back(turn_id.clone());
+            crate::api::TurnStatus::Queued
+        } else {
+            state
+                .active_turns
+                .insert(agent_instance_id.to_string(), turn_id.clone());
+            crate::api::TurnStatus::Running
+        };
+        state.turns.insert(
+            turn_id.clone(),
+            TurnRecord {
+                turn_id: turn_id.clone(),
+                agent_instance_id: agent_instance_id.to_string(),
+                message: message.to_string(),
+                status: status.clone(),
+            },
+        );
+        Ok((turn_id, status))
+    }
+
+    pub fn turn(&self, session_id: &str, turn_id: &str) -> Result<&TurnRecord, ProtocolError> {
+        self.session(session_id)?
+            .turns
+            .get(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))
+    }
+
+    pub fn active_turn_for_agent(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Option<&TurnRecord> {
+        let state = self.session(session_id).ok()?;
+        let turn_id = state.active_turns.get(agent_instance_id)?;
+        state.turns.get(turn_id)
+    }
+
+    pub fn promote_next_turn(
+        &mut self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Result<Option<TurnRecord>, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if state.active_turns.contains_key(agent_instance_id) {
+            return Ok(None);
+        }
+        let Some(turn_id) = state
+            .turn_queues
+            .get_mut(agent_instance_id)
+            .and_then(|queue| queue.pop_front())
+        else {
+            return Ok(None);
+        };
+        state
+            .active_turns
+            .insert(agent_instance_id.to_string(), turn_id.clone());
+        let turn = state.turns.get_mut(&turn_id).ok_or_else(|| {
+            ProtocolError::InvalidCommand(format!("queued turn not found: {turn_id}"))
+        })?;
+        turn.status = crate::api::TurnStatus::Running;
+        Ok(Some(turn.clone()))
     }
 
     pub fn complete_turn(
@@ -165,13 +224,25 @@ impl HostState {
         turn_id: &str,
     ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        let turn = state
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        turn.status = crate::api::TurnStatus::Completed;
+        let agent_instance_id = turn.agent_instance_id.clone();
+        if state
+            .active_turns
+            .get(&agent_instance_id)
+            .map(String::as_str)
+            == Some(turn_id)
+        {
+            state.active_turns.remove(&agent_instance_id);
         }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Completed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
+                agent_instance_id,
                 timestamp: now_ms(),
             },
         ))
@@ -184,13 +255,25 @@ impl HostState {
         error: impl Into<String>,
     ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        let turn = state
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        turn.status = crate::api::TurnStatus::Failed;
+        let agent_instance_id = turn.agent_instance_id.clone();
+        if state
+            .active_turns
+            .get(&agent_instance_id)
+            .map(String::as_str)
+            == Some(turn_id)
+        {
+            state.active_turns.remove(&agent_instance_id);
         }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Failed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
+                agent_instance_id,
                 error: error.into(),
                 timestamp: now_ms(),
             },
@@ -203,16 +286,48 @@ impl HostState {
         turn_id: &str,
     ) -> Result<ServerMessage, ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        let turn = state
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        let agent_instance_id = turn.agent_instance_id.clone();
+        if turn.status == crate::api::TurnStatus::Queued
+            && let Some(queue) = state.turn_queues.get_mut(&agent_instance_id)
+        {
+            queue.retain(|queued| queued != turn_id);
+        }
+        turn.status = crate::api::TurnStatus::Cancelled;
+        if state
+            .active_turns
+            .get(&agent_instance_id)
+            .map(String::as_str)
+            == Some(turn_id)
+        {
+            state.active_turns.remove(&agent_instance_id);
         }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Cancelled {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
+                agent_instance_id,
                 timestamp: now_ms(),
             },
         ))
+    }
+
+    pub fn set_turn_status(
+        &mut self,
+        session_id: &str,
+        turn_id: &str,
+        status: crate::api::TurnStatus,
+    ) -> Result<(), ProtocolError> {
+        let turn = self
+            .session_mut(session_id)?
+            .turns
+            .get_mut(turn_id)
+            .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        turn.status = status;
+        Ok(())
     }
 
     pub fn clear_active_turn(
@@ -221,8 +336,18 @@ impl HostState {
         turn_id: &str,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
-        if state.active_turn_id.as_deref() == Some(turn_id) {
-            state.active_turn_id = None;
+        let agent_instance_id = state
+            .turns
+            .get(turn_id)
+            .map(|turn| turn.agent_instance_id.clone());
+        if let Some(agent_instance_id) = agent_instance_id
+            && state
+                .active_turns
+                .get(&agent_instance_id)
+                .map(String::as_str)
+                == Some(turn_id)
+        {
+            state.active_turns.remove(&agent_instance_id);
         }
         Ok(())
     }

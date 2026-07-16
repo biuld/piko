@@ -1,5 +1,9 @@
 # Multi-Agent Runtime Model
 
+> Turn amendment: [hostd Turn Model and Agent Run API](hostd-turn-model.md)
+> supersedes root-only Turn cardinality in this document. Every accepted
+> `Command::ChatSubmit` creates a target-aware Turn for any AgentInstance.
+
 > Status: current normative business and runtime model
 > Technical base: [Agent Runtime Actor Design](single-agent-actor-runtime-design.md)
 > Root Turn integration: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)

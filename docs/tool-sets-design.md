@@ -114,7 +114,7 @@ Notes:
 | `todo` | Execution runtime bootstrap | `AgentExecutionRuntime::register_single_agent_tools` |
 | `workspace` | same | same |
 | `multi_agent` | AgentRuntime bootstrap | `AgentRuntime::bootstrap` |
-| `user_interaction` | each Turn, after host callbacks are set | `OrchTurnRunner` |
+| `user_interaction` | each Turn, after host callbacks are set | `OrchAgentRunRunner` |
 | `mcp_*` | orch runner construction | `initialize_mcp_tools` |
 
 Invariant: **declaring a ToolSet id on an AgentSpec without registering that

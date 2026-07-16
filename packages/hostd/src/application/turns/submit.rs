@@ -7,10 +7,8 @@ use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, expand_prompt_template, snapshot_prompt_resources,
 };
-use crate::ports::TurnRunInput;
+use crate::ports::AgentRunInput;
 use crate::util::{now_ms, send_event, storage_error};
-
-use super::queue::drain_one_queued;
 
 impl HostApp {
     /// Resolve the on-disk directory backing this session's AgentInstance
@@ -55,10 +53,46 @@ impl HostApp {
         Ok(dir)
     }
 
-    pub(crate) async fn submit_root_chat(
+    pub(crate) async fn submit_chat(
         &self,
         command_id: String,
         session_id: String,
+        agent_instance_id: String,
+        text: String,
+        tx: &UnboundedSender<ServerMessage>,
+    ) -> Result<(), ProtocolError> {
+        let (turn_id, status) = {
+            let mut state = self.state.lock().await;
+            state.start_turn(&session_id, &agent_instance_id, &text)?
+        };
+        send_event(
+            tx,
+            ServerMessage::CommandResponse {
+                command_id,
+                result: Ok(CommandResult::Empty),
+            },
+        );
+        if status == crate::api::TurnStatus::Queued {
+            send_event(
+                tx,
+                ServerMessage::TurnLifecycle(crate::api::TurnEvent::Queued {
+                    session_id,
+                    turn_id,
+                    agent_instance_id,
+                    timestamp: now_ms(),
+                }),
+            );
+            return Ok(());
+        }
+        self.run_started_turn(session_id, turn_id, agent_instance_id, text, tx)
+            .await
+    }
+
+    async fn run_started_turn(
+        &self,
+        session_id: String,
+        turn_id: String,
+        agent_instance_id: String,
         text: String,
         tx: &UnboundedSender<ServerMessage>,
     ) -> Result<(), ProtocolError> {
@@ -78,36 +112,6 @@ impl HostApp {
             ..BuildSystemPromptOptions::default()
         });
 
-        let (turn_id, start_events) = {
-            let mut state = self.state.lock().await;
-            match state.start_turn(&session_id) {
-                Ok(started) => started,
-                Err(ProtocolError::ActiveTurnExists(_)) => {
-                    // Keep root work serial: queue until the active turn terminals,
-                    // then drain_one_queued re-enters submit_root_chat.
-                    let queue_ev = state.push_next_turn(&session_id, &text);
-                    tracing::info!(
-                        session_id = %session_id,
-                        "turn submit queued; prior turn still active"
-                    );
-                    drop(state);
-                    send_event(
-                        tx,
-                        ServerMessage::CommandResponse {
-                            command_id,
-                            result: Ok(CommandResult::Empty),
-                        },
-                    );
-                    send_event(tx, queue_ev.into());
-                    return Ok(());
-                }
-                Err(error) => return Err(error),
-            }
-        };
-        for event in start_events {
-            send_event(tx, event);
-        }
-
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
         let cwd = {
             let state = self.state.lock().await;
@@ -115,47 +119,55 @@ impl HostApp {
         };
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
         let root_agent_instance_id = format!("agent_{session_id}_root");
-        let resume_root_agent = self
-            .resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
-            .await;
+        let resume_agent = if agent_instance_id == root_agent_instance_id {
+            self.resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
+                .await
+        } else {
+            None
+        };
         let runner = self.turn_runner.lock().await.clone();
-        let root_agent_instance_id = resume_root_agent
-            .as_ref()
-            .map(|agent| agent.agent_instance_id.clone());
         tracing::info!(
             session_id = %session_id,
             turn_id = %turn_id,
+            agent_instance_id = %agent_instance_id,
             "turn observation loop starting"
         );
         let (ui_event_tx, ui_event_rx) = unbounded_channel();
-        let turn_run = runner
-            .run_turn(TurnRunInput {
+        let run = match runner
+            .run_agent(AgentRunInput {
                 session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
+                operation_id: turn_id.clone(),
+                agent_instance_id: agent_instance_id.clone(),
                 prompt: expanded_text,
-                prompt_resources,
+                source_turn_id: Some(turn_id.clone()),
+                prompt_resources: Some(prompt_resources),
                 cwd: cwd.clone(),
                 active_tool_names,
                 session_dir: session_dir.clone(),
                 ui_event_tx,
-                resume_root_agent,
+                resume_agent,
             })
-            .await?;
-        send_event(
-            tx,
-            ServerMessage::CommandResponse {
-                command_id: command_id.clone(),
-                result: Ok(CommandResult::Empty),
-            },
-        );
-        // Follow-up turns reuse the root Agent (no re-creation event), so every
-        // accepted root chat emits its own operation lifecycle.
+            .await
+        {
+            Ok(run) => run,
+            Err(error) => {
+                let failed =
+                    self.state
+                        .lock()
+                        .await
+                        .fail_turn(&session_id, &turn_id, error.to_string())?;
+                send_event(tx, failed);
+                self.start_next_turn(&session_id, &agent_instance_id, tx)
+                    .await?;
+                return Ok(());
+            }
+        };
         send_event(
             tx,
             ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
-                root_agent_instance_id: root_agent_instance_id.unwrap_or_default(),
+                agent_instance_id: agent_instance_id.clone(),
                 timestamp: now_ms(),
             }),
         );
@@ -165,51 +177,59 @@ impl HostApp {
                 &runner,
                 &session_id,
                 &turn_id,
+                &agent_instance_id,
                 &session_dir,
-                turn_run,
+                run,
                 ui_event_rx,
                 tx,
             )
             .await?;
 
-        if !turn_succeeded {
-            return Ok(());
-        }
-
-        let context_window = {
-            let settings = self.settings.lock().await;
-            settings
-                .compaction
-                .as_ref()
-                .and_then(|c| c.reserve_tokens)
-                .unwrap_or(16384)
-                + settings
+        if turn_succeeded && agent_instance_id == root_agent_instance_id {
+            let context_window = {
+                let settings = self.settings.lock().await;
+                settings
                     .compaction
                     .as_ref()
-                    .and_then(|c| c.keep_recent_tokens)
-                    .unwrap_or(20000)
-        };
-        self.compact_session_if_needed(&command_id, &session_id, context_window, tx)
+                    .and_then(|c| c.reserve_tokens)
+                    .unwrap_or(16384)
+                    + settings
+                        .compaction
+                        .as_ref()
+                        .and_then(|c| c.keep_recent_tokens)
+                        .unwrap_or(20000)
+            };
+            self.compact_session_if_needed(
+                &turn_id,
+                &session_id,
+                &agent_instance_id,
+                context_window,
+                tx,
+            )
             .await;
-
-        let mut queued: Vec<String> = Vec::new();
-        let mut state = self.state.lock().await;
-        while let Some(next_text) = drain_one_queued(&mut state, &session_id) {
-            queued.push(next_text);
         }
-        drop(state);
+        self.start_next_turn(&session_id, &agent_instance_id, tx)
+            .await?;
+        Ok(())
+    }
 
-        for next_text in queued {
-            {
-                let state = self.state.lock().await;
-                let queue_event: ServerMessage = state.build_queue_update(&session_id).into();
-                drop(state);
-                send_event(tx, queue_event);
-            }
-            Box::pin(self.submit_root_chat(
-                format!("auto-{}", uuid::Uuid::new_v4()),
-                session_id.clone(),
-                next_text,
+    async fn start_next_turn(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        tx: &UnboundedSender<ServerMessage>,
+    ) -> Result<(), ProtocolError> {
+        let next = self
+            .state
+            .lock()
+            .await
+            .promote_next_turn(session_id, agent_instance_id)?;
+        if let Some(next) = next {
+            Box::pin(self.run_started_turn(
+                session_id.to_string(),
+                next.turn_id,
+                next.agent_instance_id,
+                next.message,
                 tx,
             ))
             .await?;

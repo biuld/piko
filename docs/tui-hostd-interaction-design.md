@@ -24,10 +24,10 @@ Elm-ish `Msg` / `Effect` shape.
 ## 2. Ownership Boundaries
 
 ```text
-┌─────────────┐  Command (JSONL)   ┌─────────────┐  TurnRunner   ┌─────────┐
-│     TUI     │ ─────────────────► │    hostd    │ ────────────► │  orchd  │
-│  projection │ ◄───────────────── │ authority   │ ◄──────────── │ runtime │
-│  + local UI │  ServerMessage     │ + storage   │  observation  └─────────┘
+┌─────────────┐  Command (JSONL)   ┌─────────────┐  AgentRunRunner ┌─────────┐
+│     TUI     │ ─────────────────► │    hostd    │ ────────────►   │  orchd  │
+│  projection │ ◄───────────────── │ authority   │ ◄────────────   │ runtime │
+│  + local UI │  ServerMessage     │ + storage   │  observation    └─────────┘
 └─────────────┘                    └─────────────┘
 ```
 
@@ -117,15 +117,14 @@ the current process without replaying live history, for:
 | Session id, cwd, name | `snapshot` |
 | Transcript tree + leaf | `snapshot.entries`, `snapshot.current_leaf_id` |
 | Agent list (runtime instances) | `agents` (`AgentInfo`, including `name`) |
-| Active turn (if any) | `snapshot.active_turn` with real status |
+| Active Turns | `snapshot.active_turns` with target-aware status |
 | Pending approvals | `snapshot.pending_approvals` |
 | Pending interactions | `snapshot.pending_interactions` |
 | Usage summary (if shown) | `snapshot.cumulative_usage` |
 
-`TurnSnapshot` is **session-scoped** (turn id + status + best-effort chrome). It
-does not carry `agent_instance_id`; root/agent affiliation for spinner and panel
-routing comes from `TurnLifecycle` (e.g. `root_agent_instance_id`) and the
-`agents` list. Per-agent turn chrome, if needed later, is a separate extension.
+Each `TurnSnapshot` carries `turn_id`, `agent_instance_id`, status, and
+best-effort chrome. The TUI resolves the selected Agent's Turn by
+`agent_instance_id`; it does not infer affiliation from root identity.
 
 **Fact R2.** If a process-local value is required for correct UI after hydrate
 (including mid-turn reopen in the same hostd process), it is either included in
@@ -134,8 +133,8 @@ no third category of “field exists on the DTO but is always empty / stubbed
 while UI still depends on it.”
 
 **Fact R3 — Active turn completeness.**
-When a turn is running (or waiting for approval/interaction), `active_turn`
-carries enough status for the TUI spinner and modal restoration. Stub turns that
+When Turns are running (or waiting for approval/interaction), `active_turns`
+carries enough target-aware status for TUI spinner and modal restoration. Turns that
 only contain `turn_id` + `Running` with empty tool/approval state are not a
 valid recoverable projection when approvals/interactions are outstanding.
 
@@ -152,9 +151,9 @@ valid recoverable projection when approvals/interactions are outstanding.
 
 **Fact R5 — Process-local prompt recovery.**
 Pending tool approvals and user interactions are owned by the live hostd
-process (`TurnRunner` pending maps). Same-process refresh / reconcile
+process (`AgentRunRunner` pending maps). Same-process refresh / reconcile
 (`ExplicitRefresh`, mid-session open while the turn is still live) MUST include
-them in `SessionSnapshot.pending_*` and set `active_turn.status` to
+them in `SessionSnapshot.pending_*` and set the matching active Turn status to
 `WaitingForApproval` when any are outstanding.
 
 After hostd process exit, those pending oneshots are gone. Reopening a session

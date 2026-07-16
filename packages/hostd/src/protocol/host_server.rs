@@ -5,7 +5,7 @@ use crate::api::{Command, ServerMessage};
 use crate::application::HostApp;
 use crate::domain::config::HostSettings;
 use crate::infra::storage::JsonlSessionRepository;
-use crate::ports::TurnRunner;
+use crate::ports::AgentRunRunner;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use super::send_event;
@@ -50,20 +50,20 @@ impl HostServer {
         Self(HostApp::with_storage(storage))
     }
 
-    pub fn with_turn_runner(turn_runner: Arc<dyn TurnRunner>) -> Self {
+    pub fn with_turn_runner(turn_runner: Arc<dyn AgentRunRunner>) -> Self {
         Self(HostApp::with_turn_runner(turn_runner))
     }
 
     pub fn with_storage_and_runner(
         storage: JsonlSessionRepository,
-        turn_runner: Arc<dyn TurnRunner>,
+        turn_runner: Arc<dyn AgentRunRunner>,
     ) -> Self {
         Self(HostApp::with_storage_and_runner(storage, turn_runner))
     }
 
     pub fn with_storage_runner_settings(
         storage: JsonlSessionRepository,
-        turn_runner: Arc<dyn TurnRunner>,
+        turn_runner: Arc<dyn AgentRunRunner>,
         settings: HostSettings,
     ) -> Self {
         Self(HostApp::with_storage_runner_settings(

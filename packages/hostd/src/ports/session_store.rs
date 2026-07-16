@@ -43,7 +43,7 @@ pub trait SessionStorePort: Send + Sync {
         message_id: &str,
     ) -> Option<CommittedMessage>;
 
-    fn root_agent_report_for_turn(
+    fn agent_report_for_turn(
         &self,
         turn_id: &str,
     ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError>;

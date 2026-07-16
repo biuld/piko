@@ -5,4 +5,4 @@ pub mod storage;
 pub mod turns;
 
 pub use storage::FsSessionStoreFactory;
-pub use turns::{ApprovalScope, ApprovalStore, OrchTurnRunner};
+pub use turns::{ApprovalScope, ApprovalStore, OrchAgentRunRunner};

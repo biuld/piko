@@ -92,8 +92,9 @@ impl AppState {
                 }
             }
             Some(pending::PendingCommandKind::ChatSubmit) => {
-                self.session.active_agent_run_id = None;
-                self.session.active_agent_run_instance_id = None;
+                // Turn lifecycle is authoritative. A rejected submit never
+                // creates an active Turn, so there is no optimistic run state
+                // to clear here.
             }
             Some(pending::PendingCommandKind::SessionDelete) => {
                 self.session.pending.delete_session_id = None;

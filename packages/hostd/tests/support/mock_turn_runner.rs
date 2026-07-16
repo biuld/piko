@@ -2,25 +2,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::infra::storage::SessionStore;
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{Message, MessageContent, MessageRole};
 
 use super::{MockSessionPublisher, successful_turn_run};
 
 #[derive(Debug, Clone, Default)]
-pub struct MockTurnRunner;
+pub struct MockAgentRunRunner;
 
 #[async_trait]
-impl TurnRunner for MockTurnRunner {
-    async fn run_turn(
+impl AgentRunRunner for MockAgentRunRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let source_turn_id = input.turn_id.clone();
-        let agent_instance_id = input.turn_id.clone();
+        let source_turn_id = input.operation_id.clone();
+        let agent_instance_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
@@ -91,8 +91,8 @@ impl TurnRunner for MockTurnRunner {
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "root",
+            input.operation_id,
+            input.agent_instance_id,
             barrier_seq,
             std::time::Duration::ZERO,
         ))

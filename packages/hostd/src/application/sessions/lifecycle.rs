@@ -17,41 +17,59 @@ impl HostApp {
         session_store_factory: &dyn SessionStoreFactory,
         live_turn_run: bool,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let active_turn_id = state.session(&session_id)?.active_turn_id.clone();
-        let durable_report = match (live_turn_run, active_turn_id.as_deref(), session_path) {
-            (true, _, _) => None,
-            (false, Some(turn_id), Some(path)) => {
-                let store = session_store_factory.open(path);
-                let report = store
-                    .root_agent_report_for_turn(turn_id)
-                    .map_err(storage_error)?;
-                if report.is_some() {
-                    report
-                } else {
+        let active_turn_ids = state
+            .session(&session_id)?
+            .active_turns
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let interrupt_events = if live_turn_run {
+            Vec::new()
+        } else if let Some(path) = session_path {
+            let store = session_store_factory.open(path);
+            let mut reports = Vec::with_capacity(active_turn_ids.len());
+            for turn_id in &active_turn_ids {
+                reports.push((
+                    turn_id.clone(),
                     store
-                        .interrupt_incomplete_agent_executions()
-                        .map_err(storage_error)?;
-                    store
-                        .root_agent_report_for_turn(turn_id)
-                        .map_err(storage_error)?
-                }
+                        .agent_report_for_turn(turn_id)
+                        .map_err(storage_error)?,
+                ));
             }
-            _ => None,
-        };
-        let interrupt_events = match (live_turn_run, active_turn_id.as_deref(), durable_report) {
-            (true, _, _) => Vec::new(),
-            (false, Some(turn_id), Some(report)) => vec![match report.outcome {
-                piko_protocol::ExecutionOutcome::Succeeded { .. } => {
-                    state.complete_turn(&session_id, turn_id)?
-                }
-                piko_protocol::ExecutionOutcome::Failed { error } => {
-                    state.fail_turn(&session_id, turn_id, error)?
-                }
-                piko_protocol::ExecutionOutcome::Cancelled { .. } => {
-                    state.cancel_turn(&session_id, turn_id)?
-                }
-            }],
-            (false, _, _) => state.finalize_interrupted_turns(&session_id)?,
+            if reports.iter().any(|(_, report)| report.is_none()) {
+                store
+                    .interrupt_incomplete_agent_executions()
+                    .map_err(storage_error)?;
+            }
+            let mut events = Vec::with_capacity(reports.len());
+            for (turn_id, report) in reports {
+                let report = match report {
+                    Some(report) => Some(report),
+                    None => store
+                        .agent_report_for_turn(&turn_id)
+                        .map_err(storage_error)?,
+                };
+                let event = match report.map(|report| report.outcome) {
+                    Some(piko_protocol::ExecutionOutcome::Succeeded { .. }) => {
+                        state.complete_turn(&session_id, &turn_id)?
+                    }
+                    Some(piko_protocol::ExecutionOutcome::Cancelled { .. }) => {
+                        state.cancel_turn(&session_id, &turn_id)?
+                    }
+                    Some(piko_protocol::ExecutionOutcome::Failed { error }) => {
+                        state.fail_turn(&session_id, &turn_id, error)?
+                    }
+                    None => state.fail_turn(
+                        &session_id,
+                        &turn_id,
+                        "turn interrupted: session reopened without a live execution",
+                    )?,
+                };
+                events.push(event);
+            }
+            events
+        } else {
+            state.finalize_interrupted_turns(&session_id)?
         };
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
@@ -132,7 +150,7 @@ impl HostApp {
             .lock()
             .await
             .clone()
-            .has_active_turn_run(&session_id)
+            .has_active_session_run(&session_id)
             .await;
         let known_session_path = self.session_paths.lock().await.get(&session_id).cloned();
         let mut state = self.state.lock().await;
@@ -319,7 +337,10 @@ mod tests {
         else {
             unreachable!()
         };
-        let (turn_id, _) = state.start_turn(&session_id).unwrap();
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        let (turn_id, _) = state
+            .start_turn(&session_id, &root_agent_instance_id, "recover me")
+            .unwrap();
         let temp = tempfile::tempdir().unwrap();
         let store = crate::infra::storage::SessionStore::create_session(
             temp.path(),
@@ -385,7 +406,7 @@ mod tests {
                 ..
             }) if completed == &turn_id
         )));
-        assert!(state.session(&session_id).unwrap().active_turn_id.is_none());
+        assert!(state.session(&session_id).unwrap().active_turns.is_empty());
 
         let replay = HostApp::session_open_response(
             &mut state,
@@ -411,7 +432,10 @@ mod tests {
         else {
             unreachable!()
         };
-        let (turn_id, _) = state.start_turn(&session_id).unwrap();
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        let (turn_id, _) = state
+            .start_turn(&session_id, &root_agent_instance_id, "keep running")
+            .unwrap();
         let factory = crate::adapters::storage::FsSessionStoreFactory;
 
         let events = HostApp::session_open_response(
@@ -428,8 +452,9 @@ mod tests {
             state
                 .session(&session_id)
                 .unwrap()
-                .active_turn_id
-                .as_deref(),
+                .active_turns
+                .get(&root_agent_instance_id)
+                .map(String::as_str),
             Some(turn_id.as_str())
         );
         assert!(events.iter().all(|event| !matches!(
@@ -439,8 +464,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             ServerMessage::SessionReconciled(reconciled)
-                if reconciled.snapshot.active_turn.as_ref().map(|turn| &turn.turn_id)
-                    == Some(&turn_id)
+                if reconciled.snapshot.active_turns.iter().any(|turn| turn.turn_id == turn_id)
         )));
     }
 }

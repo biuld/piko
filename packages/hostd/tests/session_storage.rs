@@ -7,9 +7,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{TurnRunHandle, TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
-use mock_turn_runner::MockTurnRunner;
+use mock_turn_runner::MockAgentRunRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
@@ -40,17 +40,17 @@ fn snapshot_from_refresh(events: &[Event]) -> &hostd::api::SessionSnapshot {
 struct AgentPersistRunner;
 
 #[async_trait]
-impl TurnRunner for AgentPersistRunner {
-    async fn run_turn(
+impl AgentRunRunner for AgentPersistRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<TurnRunHandle, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let session_dir = input.session_dir.clone();
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let store = SessionStore::new(session_dir);
         let session_id = input.session_id.clone();
-        let turn_id = input.turn_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
         let publisher_task = Arc::clone(&publisher);
 
@@ -103,12 +103,7 @@ impl TurnRunner for AgentPersistRunner {
                         agent_instance_id.into(),
                         agent_id.into(),
                         0,
-                        execution_running(
-                            session_id.clone(),
-                            turn_id.clone(),
-                            agent_instance_id,
-                            agent_id,
-                        ),
+                        execution_running(),
                     );
                 }
             }
@@ -203,19 +198,14 @@ impl TurnRunner for AgentPersistRunner {
                 },
             );
 
-            publish(
-                "task-main".into(),
-                "main".into(),
-                2,
-                execution_succeeded(session_id.clone(), turn_id.clone(), "task-main", "main"),
-            );
+            publish("task-main".into(), "main".into(), 2, execution_succeeded());
         });
 
         Ok(successful_turn_run(
             subscription,
             input.session_id,
-            input.turn_id,
-            "task-main",
+            input.operation_id,
+            input.agent_instance_id,
             5,
             std::time::Duration::ZERO,
         ))
@@ -282,7 +272,7 @@ async fn persistent_server_reopens_with_session() {
 async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
 
     let created = server
         .handle_command(Command::SessionCreate {
@@ -342,7 +332,7 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
 async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create-delete".into(),

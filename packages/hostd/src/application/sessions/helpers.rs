@@ -70,13 +70,21 @@ impl HostApp {
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
-        if let Some(turn) = snapshot.active_turn.as_mut() {
-            if !snapshot.pending_approvals.is_empty() || !snapshot.pending_interactions.is_empty() {
-                turn.status = crate::api::TurnStatus::WaitingForApproval;
-            } else if agents
+        for turn in &mut snapshot.active_turns {
+            if snapshot
+                .pending_approvals
                 .iter()
-                .any(|agent| agent.activity == piko_protocol::AgentActivity::Cancelling)
+                .any(|approval| approval.agent_instance_id == turn.agent_instance_id)
+                || snapshot
+                    .pending_interactions
+                    .iter()
+                    .any(|interaction| interaction.agent_instance_id == turn.agent_instance_id)
             {
+                turn.status = crate::api::TurnStatus::WaitingForApproval;
+            } else if agents.iter().any(|agent| {
+                agent.agent_instance_id == turn.agent_instance_id
+                    && agent.activity == piko_protocol::AgentActivity::Cancelling
+            }) {
                 turn.status = crate::api::TurnStatus::Cancelling;
             }
         }
