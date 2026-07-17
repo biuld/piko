@@ -1,1 +1,1 @@
-pub use orchd_api::approval::ApprovalGateway;
+pub use piko_orchd_api::approval::ApprovalGateway;

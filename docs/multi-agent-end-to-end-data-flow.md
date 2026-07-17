@@ -512,6 +512,9 @@ both directions:
 ```text
 ExecutionActor
 → OrchAgentRunRunner implementing ApprovalGateway
+→ SessionEvent::ApprovalRequested
+→ SessionOutputHub reliable observation
+→ HostApp projection
 → ServerMessage::Approval(ApprovalEvent::Requested)
 → ApprovalPanel
 → Command::ApprovalRespond
@@ -526,8 +529,9 @@ own the approval decision.
 ## 12. Combined architecture
 
 The diagram below uses the concrete type and method names from the current
-implementation. Parenthetical text describes the role of a particular
-instance; it does not introduce another component name.
+implementation. All user-visible runtime observation shares one
+`SessionObservationRouter` registry and the reliable or realtime lanes of
+`SessionOutputHub`.
 
 ```mermaid
 flowchart LR
@@ -546,6 +550,8 @@ flowchart LR
         submit_chat["HostApp::submit_chat"]
         OrchAgentRunRunner
         SessionStore
+        ProjectingAgentCommitPort
+        SessionObservationRouter
         project_operation_output["HostApp::project_operation_output"]
         ExecutionCommitRouter
         RealtimeDeltaRouter
@@ -589,15 +595,20 @@ flowchart LR
     ToolRegistryImpl --> MultiAgentToolProvider
     MultiAgentToolProvider --> AgentRuntime
 
-    AgentRuntime -->|AgentCommitPort| SessionStore
-    SessionStore -->|AgentCommitAck| AgentRuntime
+    AgentRuntime -->|AgentCommitPort| ProjectingAgentCommitPort
+    ProjectingAgentCommitPort --> SessionStore
+    SessionStore -->|AgentCommitAck| ProjectingAgentCommitPort
+    ProjectingAgentCommitPort -->|AgentCommitAck| AgentRuntime
+    ProjectingAgentCommitPort -->|SessionEvent::AgentChanged| SessionObservationRouter
+    OrchAgentRunRunner -->|typed approval / interaction SessionEvent| SessionObservationRouter
     ExecutionActor -->|ExecutionCommitPort| ExecutionCommitRouter
     ExecutionCommitRouter --> SessionStore
     SessionStore -->|CommitAck| ExecutionCommitRouter
 
-    ExecutionCommitRouter -->|SessionEventEnvelope| SessionOutputHub
+    ExecutionCommitRouter -->|SessionEventEnvelope| SessionObservationRouter
     ExecutionActor -->|RealtimeDeltaEnvelope| RealtimeDeltaRouter
-    RealtimeDeltaRouter --> SessionOutputHub
+    RealtimeDeltaRouter --> SessionObservationRouter
+    SessionObservationRouter --> SessionOutputHub
     SessionOutputHub -->|SessionOutputEnvelope| project_operation_output
     project_operation_output -->|ServerMessage| AppState
     AppState --> Timeline
@@ -605,7 +616,228 @@ flowchart LR
     AppState --> ApprovalPanel
 ```
 
-## 13. Summary
+## 13. Historical pre-consolidation channel inventory
+
+> Status: superseded by the implemented communication-contract architecture.
+>
+> Normative design:
+> [Communication Contract and Async Flow Consolidation Design](async-flow-channel-consolidation-design.md)
+>
+> Current generated topology:
+> [Generated Communication Topology](generated/communication-topology.md)
+
+The diagrams in this section intentionally preserve the pre-consolidation
+baseline that motivated the design. They are not a description of the current
+runtime. In particular, the current runtime has no `UiEventRouter`, host run
+relay oneshots, Execution snapshot watch, JSONL inbound queue, or unbounded
+command/output queues. Raw channel construction is confined to reviewed
+adapters by `piko-comms` architecture tests and workspace Clippy policy.
+
+Before removing the independent UI event channel, the broader use of channels
+must be reviewed as one system. The diagrams below cover explicit in-process
+Rust channels on production paths. They exclude test-only fixtures, provider
+streams implemented inside dependencies, and the JSONL operating-system pipes
+themselves.
+
+### 13.1 End-to-end channel topology
+
+This diagram makes each transport or channel a node. Red nodes are unbounded
+queues; yellow nodes are oneshot rendezvous; green nodes are the two broadcast
+observation lanes. Solid component-to-component arrows without a channel node
+are direct calls or returned streams/futures.
+
+```mermaid
+flowchart TB
+    subgraph TUI["tui process"]
+        AppState
+        HostdClient
+        HostStdoutThread["hostd stdout reader thread"]
+        TuiHostQueue[["unbounded std MPSC: HostLine"]]
+    end
+
+    subgraph HostTransport["hostd JSONL transport"]
+        ReadCommands["read_commands task"]
+        InboundQueue[["unbounded MPSC: InboundLine"]]
+        JsonlLoop["run_jsonl_server loop"]
+        HostServer
+        CommandOutput[["per-command unbounded MPSC: ServerMessage"]]
+        ForwardEvents["forward_events task"]
+        OutboundQueue[["server-wide unbounded MPSC: OutboundLine"]]
+        StdoutWriter["single stdout writer"]
+    end
+
+    subgraph HostTurn["hostd Turn orchestration"]
+        HostApp
+        OrchAgentRunRunner
+        HostStarted[["oneshot: SessionSubscription"]]
+        HostCompletion[["oneshot: AgentRunCompletion + barrier"]]
+        RunRelay["hostd run relay task"]
+        ProjectingAgentCommitPort
+        PromptGateway["hostd approval / interaction gateway"]
+        UiEventRouter["UiEventRouter (?)"]
+        UiEventQueue[["per-operation unbounded MPSC: ServerMessage"]]
+        ObservationLoop["HostApp::drive_operation_observation"]
+        PromptReply[["oneshot: approval / interaction response"]]
+    end
+
+    subgraph OrchRuntime["orchd runtime and observation"]
+        AgentRuntime
+        AgentActor
+        OrchStarted[["oneshot: Agent run started"]]
+        OrchCompletion[["oneshot: AgentRunReport"]]
+        ExecutionActor
+        ExecutionCommitRouter
+        RealtimeDeltaRouter
+        SessionOutputHub
+        ReliableLane[["broadcast: retained SessionEvent"]]
+        RealtimeLane[["broadcast: best-effort RealtimeDelta"]]
+        MergedOutput["merged SessionSubscription stream"]
+    end
+
+    AppState -->|Command| HostdClient
+    HostdClient -->|JSONL over OS stdin pipe| ReadCommands
+    ReadCommands --> InboundQueue
+    InboundQueue --> JsonlLoop
+    JsonlLoop --> HostServer
+    HostServer --> HostApp
+
+    HostApp -->|run_agent| OrchAgentRunRunner
+    OrchAgentRunRunner --> AgentRuntime
+    AgentRuntime --> AgentActor
+    AgentActor --> OrchStarted
+    AgentActor --> OrchCompletion
+    OrchStarted --> RunRelay
+    OrchCompletion --> RunRelay
+    RunRelay --> HostStarted
+    RunRelay --> HostCompletion
+
+    ExecutionActor --> ExecutionCommitRouter
+    ExecutionCommitRouter --> SessionOutputHub
+    ExecutionActor --> RealtimeDeltaRouter
+    RealtimeDeltaRouter --> SessionOutputHub
+    SessionOutputHub --> ReliableLane
+    SessionOutputHub --> RealtimeLane
+    ReliableLane --> MergedOutput
+    RealtimeLane --> MergedOutput
+    MergedOutput --> ObservationLoop
+    HostStarted -->|opens observation| ObservationLoop
+    HostCompletion -->|terminal result| ObservationLoop
+
+    AgentActor -->|durable Agent command| ProjectingAgentCommitPort
+    ProjectingAgentCommitPort -->|AgentChanged projection| UiEventRouter
+    ExecutionActor -->|approval / interaction request| PromptGateway
+    PromptGateway -->|requested ServerMessage| UiEventRouter
+    UiEventRouter --> UiEventQueue
+    UiEventQueue --> ObservationLoop
+
+    ObservationLoop --> HostApp
+    HostApp --> CommandOutput
+    CommandOutput --> ForwardEvents
+    ForwardEvents --> OutboundQueue
+    OutboundQueue --> StdoutWriter
+    StdoutWriter -->|JSONL over OS stdout pipe| HostStdoutThread
+    HostStdoutThread --> TuiHostQueue
+    TuiHostQueue --> AppState
+
+    HostApp -->|response command| PromptReply
+    PromptReply --> PromptGateway
+    PromptGateway -->|resume waiting request| ExecutionActor
+
+    class TuiHostQueue,InboundQueue,CommandOutput,OutboundQueue,UiEventQueue unbounded
+    class HostStarted,HostCompletion,OrchStarted,OrchCompletion,PromptReply oneshot
+    class ReliableLane,RealtimeLane broadcast
+    classDef unbounded fill:#ffe5e5,stroke:#b42318,color:#3d0c08
+    classDef oneshot fill:#fff3cd,stroke:#997404,color:#332701
+    classDef broadcast fill:#e6f4ea,stroke:#238636,color:#0d2b14
+```
+
+The complete user-visible `UiEventRouter` output path can therefore contain
+four unbounded queues. Three occur before the single stdout writer and one
+bridges the hostd stdout reader thread back into the TUI loop:
+
+```text
+per-operation UiEventQueue
+→ per-command CommandOutput
+→ server-wide OutboundQueue
+→ stdout
+→ TuiHostQueue
+→ AppState
+```
+
+Session observation avoids the first queue but still passes through the latter
+two, followed by the TUI process's unbounded thread-bridge queue after stdout.
+The diagram also exposes the two-stage start/completion handoff:
+orchd creates one pair of oneshots and the host adapter relays them into a
+second pair with host-specific subscription and barrier values.
+
+### 13.2 orchd actor channel topology
+
+The actor diagram separates long-lived serialization mailboxes from the many
+short-lived reply channels attached to commands.
+
+```mermaid
+flowchart LR
+    Caller["AgentRuntime API caller"]
+    AgentMailbox[["bounded MPSC(32): AgentCommand"]]
+    AgentActor
+    AgentReply[["oneshot per command reply"]]
+    AgentSnapshot[["watch: latest AgentSnapshot"]]
+    AgentReaders["supervisor / snapshot APIs"]
+    RunStarted[["oneshot: started"]]
+    RunReport[["oneshot: AgentRunReport"]]
+
+    AgentExecutionRuntime
+    ExecutionMailbox[["bounded MPSC(32): ExecutionCommand"]]
+    ExecutionActor
+    ExecutionSupervisor["Execution supervisor"]
+    ExecutionReply[["oneshot per steer / cancel / shutdown"]]
+    ExecutionSnapshot[["watch: latest ExecutionSnapshot"]]
+    NoReader["no current production reader"]
+    ExecutionTerminal[["oneshot: ExecutionTerminal"]]
+    TerminalWaiter["terminal waiter task"]
+    HandoffAck[["oneshot: handoff accepted"]]
+
+    Caller -->|AgentCommand + reply sender| AgentMailbox
+    AgentMailbox --> AgentActor
+    AgentActor -->|receipt / result| AgentReply
+    AgentReply --> Caller
+    AgentActor --> AgentSnapshot
+    AgentSnapshot --> AgentReaders
+    AgentActor --> RunStarted
+    AgentActor --> RunReport
+    RunStarted --> Caller
+    RunReport --> Caller
+
+    AgentActor -->|prepare / start| AgentExecutionRuntime
+    AgentExecutionRuntime -->|ExecutionCommand + reply sender| ExecutionMailbox
+    ExecutionMailbox --> ExecutionActor
+    ExecutionActor --> ExecutionReply
+    ExecutionReply --> AgentExecutionRuntime
+    ExecutionActor --> ExecutionSnapshot
+    ExecutionSnapshot -.-> NoReader
+
+    ExecutionActor -->|returns outcome| ExecutionSupervisor
+    ExecutionSupervisor --> ExecutionTerminal
+    ExecutionTerminal --> TerminalWaiter
+    TerminalWaiter -->|ExecutionFinished + lease| AgentMailbox
+    AgentActor --> HandoffAck
+    HandoffAck --> TerminalWaiter
+
+    class AgentMailbox,ExecutionMailbox bounded
+    class AgentReply,RunStarted,RunReport,ExecutionReply,ExecutionTerminal,HandoffAck oneshot
+    class AgentSnapshot,ExecutionSnapshot watch
+    classDef bounded fill:#e7f1ff,stroke:#0969da,color:#071d49
+    classDef oneshot fill:#fff3cd,stroke:#997404,color:#332701
+    classDef watch fill:#f1e8ff,stroke:#8250df,color:#271052
+```
+
+Here the channel count is high mainly because each actor command embeds a
+reply sender. Those oneshots do not form additional event buses: they close a
+single RPC obligation. The bounded MPSC mailboxes are the actual serialization
+boundaries. The Execution snapshot `watch` is different: it continuously
+publishes state but currently has no production reader.
+
+## 14. Summary
 
 The end-to-end responsibilities can be reduced to four statements:
 

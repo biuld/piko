@@ -27,7 +27,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
     let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -65,7 +65,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
             ports: SessionAgentPorts {
                 agents: agents_port as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })
@@ -140,7 +140,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
     let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
         config,
     )
     .await;
@@ -160,7 +160,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
             ports: SessionAgentPorts {
                 agents: agents_port as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use orchd_api::{
+use piko_orchd_api::{
     AgentApiError, AgentRuntimeApi, ToolDiscoveryContext, ToolExecError, ToolExecResult,
     ToolExecutionContext, ToolProvider,
 };
@@ -394,7 +394,7 @@ fn agent_target_schema() -> serde_json::Value {
 }
 
 fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> String {
-    orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
+    piko_orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
 }
 
 fn report_value(report: &piko_protocol::AgentRunReport) -> serde_json::Value {

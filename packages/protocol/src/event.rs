@@ -18,7 +18,7 @@ pub type InteractionChoiceId = String;
 pub type AgentId = String;
 
 /// Agent 状态信息，由 hostd 维护，TUI 通过 AgentList 查询
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub session_id: SessionId,
@@ -579,7 +579,7 @@ pub enum ToolCallStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalSnapshot {
     pub approval_id: ApprovalId,
@@ -598,7 +598,7 @@ pub enum ApprovalStatus {
     Rejected,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UserInteractionSnapshot {
     pub interaction_id: InteractionId,

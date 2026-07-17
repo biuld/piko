@@ -70,9 +70,11 @@ pub struct SessionAgentHandle {
 
 pub struct AgentRunAcceptance {
     pub receipt: AgentInputReceipt,
-    pub started: tokio::sync::oneshot::Receiver<()>,
-    pub completion:
-        tokio::sync::oneshot::Receiver<Result<piko_protocol::AgentRunReport, AgentApiError>>,
+    pub started: piko_comms::ReplyReceiver<piko_comms::contracts::AgentRunStarted, ()>,
+    pub completion: piko_comms::ReplyReceiver<
+        piko_comms::contracts::AgentRunReport,
+        Result<piko_protocol::AgentRunReport, AgentApiError>,
+    >,
 }
 
 impl AgentRunAcceptance {

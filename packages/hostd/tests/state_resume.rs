@@ -1,11 +1,11 @@
-use hostd::HostState;
-use hostd::api::ServerMessage as Event;
+use piko_hostd::HostState;
+use piko_hostd::api::ServerMessage as Event;
 
 #[test]
 fn start_turn_queues_second_turn_for_same_agent() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -23,8 +23,8 @@ fn start_turn_queues_second_turn_for_same_agent() {
     let (queued_turn_id, second_status) = state
         .start_turn(&session_id, &agent_instance_id, "second")
         .unwrap();
-    assert_eq!(first_status, hostd::api::TurnStatus::Running);
-    assert_eq!(second_status, hostd::api::TurnStatus::Queued);
+    assert_eq!(first_status, piko_hostd::api::TurnStatus::Running);
+    assert_eq!(second_status, piko_hostd::api::TurnStatus::Queued);
 
     state.complete_turn(&session_id, &turn_id).unwrap();
     state
@@ -32,7 +32,7 @@ fn start_turn_queues_second_turn_for_same_agent() {
         .unwrap();
     assert_eq!(
         state.turn(&session_id, &queued_turn_id).unwrap().status,
-        hostd::api::TurnStatus::Running
+        piko_hostd::api::TurnStatus::Running
     );
 }
 
@@ -40,7 +40,7 @@ fn start_turn_queues_second_turn_for_same_agent() {
 fn different_agents_can_own_running_turns_concurrently() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
     let root_agent_instance_id = format!("agent_{session_id}_root");
@@ -65,8 +65,8 @@ fn different_agents_can_own_running_turns_concurrently() {
         )
         .unwrap();
 
-    assert_eq!(root_status, hostd::api::TurnStatus::Running);
-    assert_eq!(child_status, hostd::api::TurnStatus::Running);
+    assert_eq!(root_status, piko_hostd::api::TurnStatus::Running);
+    assert_eq!(child_status, piko_hostd::api::TurnStatus::Running);
     assert_eq!(state.snapshot(&session_id).unwrap().active_turns.len(), 2);
 }
 
@@ -76,7 +76,7 @@ fn create_session_emits_session_created() {
     let event = state.create_session("/tmp/project");
     assert!(matches!(
         event,
-        hostd::api::CommandResult::SessionCreated { .. }
+        piko_hostd::api::CommandResult::SessionCreated { .. }
     ));
 }
 
@@ -84,7 +84,7 @@ fn create_session_emits_session_created() {
 fn can_start_and_complete_turn() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -99,15 +99,15 @@ fn can_start_and_complete_turn() {
             piko_protocol::InputDisposition::Accepted,
         )
         .unwrap();
-    assert_eq!(status, hostd::api::TurnStatus::Running);
+    assert_eq!(status, piko_hostd::api::TurnStatus::Running);
 
     let complete = state.complete_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         &complete,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
     ));
     let replay = state.complete_turn(&session_id, &turn_id).unwrap();
-    let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
+    let Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed {
         session_id: s1,
         turn_id: t1,
         ..
@@ -115,7 +115,7 @@ fn can_start_and_complete_turn() {
     else {
         panic!("expected Completed turn event");
     };
-    let Event::TurnLifecycle(hostd::api::TurnEvent::Completed {
+    let Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed {
         session_id: s2,
         turn_id: t2,
         ..
@@ -131,7 +131,7 @@ fn can_start_and_complete_turn() {
 fn fail_turn_emits_turn_failed() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -144,7 +144,7 @@ fn fail_turn_emits_turn_failed() {
         .unwrap();
     assert!(matches!(
         fail,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Failed { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Failed { .. })
     ));
 }
 
@@ -152,7 +152,7 @@ fn fail_turn_emits_turn_failed() {
 fn cancel_turn_emits_turn_cancelled() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -163,7 +163,7 @@ fn cancel_turn_emits_turn_cancelled() {
     let cancel = state.cancel_turn(&session_id, &turn_id).unwrap();
     assert!(matches!(
         cancel,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Cancelled { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Cancelled { .. })
     ));
 }
 
@@ -171,7 +171,7 @@ fn cancel_turn_emits_turn_cancelled() {
 fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
-        hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session_created"),
     };
 
@@ -189,7 +189,7 @@ fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
     let events = state.finalize_interrupted_turns(&session_id).unwrap();
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::TurnLifecycle(hostd::api::TurnEvent::Failed {
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Failed {
             turn_id: failed_id,
             error,
             ..

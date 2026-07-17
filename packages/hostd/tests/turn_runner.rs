@@ -5,16 +5,15 @@ mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
-use hostd::protocol::HostServer;
 use mock_turn_runner::MockAgentRunRunner;
-use orchd_api::SessionSubscription;
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::protocol::HostServer;
+use piko_orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionRuntimeSnapshot;
 use support::{
     MockSessionPublisher, execution_running, execution_succeeded, success_report,
-    successful_turn_run,
+    successful_turn_run, test_agent_run_process,
 };
-use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::StreamExt;
 
 #[derive(Clone, Default)]
@@ -22,7 +21,9 @@ struct RecoveringAgentRunRunner {
     agent_instance_id: Arc<std::sync::Mutex<Option<String>>>,
     turn_id: Arc<std::sync::Mutex<Option<String>>>,
     completion_tx: Arc<
-        std::sync::Mutex<Option<tokio::sync::oneshot::Sender<hostd::ports::AgentRunCompletion>>>,
+        std::sync::Mutex<
+            Option<tokio::sync::oneshot::Sender<piko_hostd::ports::AgentRunCompletion>>,
+        >,
     >,
     publishers: Arc<std::sync::Mutex<Vec<Arc<MockSessionPublisher>>>>,
 }
@@ -32,7 +33,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let root_agent_instance_id = input
             .resume_agent
             .as_ref()
@@ -42,7 +43,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
         *self.turn_id.lock().unwrap() = Some(input.operation_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         self.publishers.lock().unwrap().push(publisher.clone());
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         *self.completion_tx.lock().unwrap() = Some(completion_tx);
         let publish_agent_instance_id = root_agent_instance_id.clone();
         tokio::spawn(async move {
@@ -52,12 +53,12 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                 1,
                 execution_running(),
             );
-            publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
+            publisher.require_snapshot(piko_orchd_api::SnapshotRequiredReason::CursorExpired);
         });
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
-            address: hostd::ports::AgentOperationAddress {
+            address: piko_hostd::ports::AgentOperationAddress {
                 session_id: input.session_id.clone(),
                 operation_id: input.operation_id.clone(),
                 agent_instance_id: root_agent_instance_id.clone(),
@@ -68,15 +69,14 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                 agent_instance_id: root_agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 
     async fn recover_observation(
         &self,
-        operation: &hostd::ports::AgentOperationAddress,
-    ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), hostd::api::ProtocolError> {
+        operation: &piko_hostd::ports::AgentOperationAddress,
+    ) -> Result<(SessionRuntimeSnapshot, SessionSubscription), piko_hostd::api::ProtocolError> {
         let session_id = &operation.session_id;
         let agent_instance_id = self.agent_instance_id.lock().unwrap().clone().unwrap();
         let (publisher, subscription) = MockSessionPublisher::new(session_id.to_string());
@@ -98,8 +98,8 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                 execution_succeeded(),
             );
             if let Some(completion_tx) = completion_tx {
-                let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
-                    address: hostd::ports::AgentOperationAddress {
+                let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
+                    address: piko_hostd::ports::AgentOperationAddress {
                         session_id: recovered_session_id,
                         operation_id: completion_turn_id,
                         agent_instance_id: recovered_agent_instance_id.clone(),
@@ -124,11 +124,11 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
         &self,
         session_id: &str,
     ) -> (
-        Vec<hostd::api::ApprovalSnapshot>,
-        Vec<hostd::api::UserInteractionSnapshot>,
+        Vec<piko_hostd::api::ApprovalSnapshot>,
+        Vec<piko_hostd::api::UserInteractionSnapshot>,
     ) {
         (
-            vec![hostd::api::ApprovalSnapshot {
+            vec![piko_hostd::api::ApprovalSnapshot {
                 approval_id: "approval-recovered".into(),
                 agent_instance_id: self
                     .agent_instance_id
@@ -138,7 +138,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                     .unwrap_or_else(|| format!("agent_{session_id}_root")),
                 tool_name: "bash".into(),
                 request: serde_json::json!({"cmd": "pwd"}),
-                status: hostd::api::ApprovalStatus::Pending,
+                status: piko_hostd::api::ApprovalStatus::Pending,
             }],
             Vec::new(),
         )
@@ -148,7 +148,6 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
 #[tokio::test]
 async fn mock_turn_runner_completes_turn() {
     let runner = MockAgentRunRunner;
-    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_agent(AgentRunInput {
             session_id: "session-test".into(),
@@ -163,20 +162,20 @@ async fn mock_turn_runner_completes_turn() {
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            ui_event_tx,
             resume_agent: None,
         })
         .await
         .unwrap();
 
-    let mut output = subscription.started.await.unwrap().output;
+    let mut process = subscription.process;
+    let mut output = process.wait_started().await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
 #[tokio::test]
 async fn mock_turn_with_storage_populates_state() {
-    use hostd::api::{Command, ServerMessage as Event};
-    use hostd::infra::storage::JsonlSessionRepository;
+    use piko_hostd::api::{Command, ServerMessage as Event};
+    use piko_hostd::infra::storage::JsonlSessionRepository;
 
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
@@ -190,7 +189,7 @@ async fn mock_turn_with_storage_populates_state() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("unexpected {other:?}"),
@@ -236,7 +235,6 @@ async fn mock_turn_with_storage_populates_state() {
 async fn turn_runner_returns_streaming_events() {
     let runner = MockAgentRunRunner;
 
-    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_agent(AgentRunInput {
             session_id: "session-test".into(),
@@ -251,20 +249,20 @@ async fn turn_runner_returns_streaming_events() {
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            ui_event_tx,
             resume_agent: None,
         })
         .await
         .unwrap();
 
-    let mut output = subscription.started.await.unwrap().output;
+    let mut process = subscription.process;
+    let mut output = process.wait_started().await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
 #[tokio::test]
 async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
-    use hostd::api::{Command, ServerMessage as Event};
-    use hostd::infra::storage::JsonlSessionRepository;
+    use piko_hostd::api::{Command, ServerMessage as Event};
+    use piko_hostd::infra::storage::JsonlSessionRepository;
 
     let temp = tempfile::tempdir().unwrap();
     let server = HostServer::with_storage_and_runner(
@@ -281,7 +279,7 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         .iter()
         .find_map(|event| match event {
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
                 ..
             } => Some(session_id.clone()),
             _ => None,
@@ -349,7 +347,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let disposition = if self
             .submissions
@@ -363,7 +361,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
         if disposition == piko_protocol::InputDisposition::Accepted {
             self.prompts.lock().unwrap().push(input.prompt.clone());
         }
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let epoch = subscription.cursor.epoch.clone();
         let queued_start = if disposition == piko_protocol::InputDisposition::Accepted {
             let _ = started_tx.send(subscription);
@@ -371,13 +369,13 @@ impl AgentRunRunner for GatedAgentRunRunner {
         } else {
             Some((started_tx, subscription))
         };
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         let runner = self.clone();
         let session_id = input.session_id.clone();
         let operation_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
         let prompt = input.prompt.clone();
-        let address = hostd::ports::AgentOperationAddress {
+        let address = piko_hostd::ports::AgentOperationAddress {
             session_id: session_id.clone(),
             operation_id: operation_id.clone(),
             agent_instance_id: agent_instance_id.clone(),
@@ -391,7 +389,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
             }
             publisher.publish(agent_instance_id.clone(), "main", 1, execution_running());
             publisher.publish(agent_instance_id.clone(), "main", 2, execution_succeeded());
-            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+            let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
                 address: completion_address,
                 result: Ok(success_report(agent_instance_id)),
                 observation_barrier: piko_protocol::agent_runtime::SessionCursor { epoch, seq: 2 },
@@ -405,16 +403,15 @@ impl AgentRunRunner for GatedAgentRunRunner {
                 agent_instance_id: input.agent_instance_id,
                 disposition,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 }
 
 #[tokio::test]
 async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
-    use hostd::api::{Command, ServerMessage as Event};
-    use hostd::infra::storage::JsonlSessionRepository;
+    use piko_hostd::api::{Command, ServerMessage as Event};
+    use piko_hostd::infra::storage::JsonlSessionRepository;
 
     let runner = GatedAgentRunRunner::new();
     let prompts = Arc::clone(&runner.prompts);
@@ -430,7 +427,7 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("unexpected {other:?}"),
@@ -482,7 +479,7 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         event,
         Event::CommandResponse {
             command_id,
-            result: Ok(hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::Empty),
         } if command_id == "submit-2"
     )));
     assert!(

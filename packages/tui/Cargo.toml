@@ -1,5 +1,5 @@
 [package]
-name = "tui"
+name = "piko-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ name = "piko-tui"
 path = "src/main.rs"
 
 [dependencies]
+piko-comms = { path = "../comms" }
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 anyhow = "1"
 crossterm = "0.29"

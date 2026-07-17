@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::GatewayEvent;
 
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};

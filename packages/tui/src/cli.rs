@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf};
 
-const DEBUG_LOG_FILTER: &str = "debug,hostd=debug,orchd=debug";
+const DEBUG_LOG_FILTER: &str = "debug,piko_hostd=debug,piko_orchd=debug";
 
 #[derive(Debug, Clone)]
 pub struct HostLogConfig {
@@ -200,10 +200,10 @@ fn default_log_file_path() -> PathBuf {
 /// Resolve the hostd executable path in priority order:
 ///
 /// 1. `PIKO_HOSTD_PATH` / `PIKO_HOSTD_COMMAND` env var
-/// 2. `hostd` next to the running `piko-tui` binary
-/// 3. `<workspace-root>/target/debug/hostd`
-/// 4. `<workspace-root>/target/release/hostd`
-/// 5. Fall back to bare `"hostd"` (rely on PATH)
+/// 2. `piko-hostd` next to the running `piko-tui` binary
+/// 3. `<workspace-root>/target/debug/piko-hostd`
+/// 4. `<workspace-root>/target/release/piko-hostd`
+/// 5. Fall back to bare `"piko-hostd"` (rely on PATH)
 fn resolve_hostd_command() -> String {
     // 1. explicit env override
     if let Ok(path) = env::var("PIKO_HOSTD_PATH").or_else(|_| env::var("PIKO_HOSTD_COMMAND")) {
@@ -212,7 +212,7 @@ fn resolve_hostd_command() -> String {
 
     // 2. same directory as the running binary
     if let Ok(exe) = env::current_exe() {
-        let sibling = exe.parent().unwrap_or(&exe).join("hostd");
+        let sibling = exe.parent().unwrap_or(&exe).join("piko-hostd");
         if sibling.exists() {
             return sibling.to_string_lossy().into_owned();
         }
@@ -220,18 +220,18 @@ fn resolve_hostd_command() -> String {
 
     // 3 & 4. cargo workspace target directories
     if let Some(root) = find_workspace_root() {
-        let debug = root.join("target/debug/hostd");
+        let debug = root.join("target/debug/piko-hostd");
         if debug.exists() {
             return debug.to_string_lossy().into_owned();
         }
-        let release = root.join("target/release/hostd");
+        let release = root.join("target/release/piko-hostd");
         if release.exists() {
             return release.to_string_lossy().into_owned();
         }
     }
 
     // 5. rely on PATH
-    "hostd".to_string()
+    "piko-hostd".to_string()
 }
 
 /// Walk up the directory tree from the current exe looking for the workspace
@@ -269,7 +269,7 @@ Options:
   --hostd <path>           Override hostd executable path
   --hostd-arg <arg>        Pass an extra argument to hostd (repeatable)
   --log-file <path>        Override hostd log file path (~ expanded)
-  --log-level <filter>     Tracing filter for hostd (default: info,hostd=info,orchd=info)
+  --log-level <filter>     Tracing filter for hostd (default: info,piko_hostd=info,piko_orchd=info)
   --debug                  Set hostd log level to debug
   --no-log                 Disable hostd file logging
   -h, --help               Show this help

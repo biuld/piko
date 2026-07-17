@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use hostd::domain::config::ModelRegistry;
-use llmd::auth::{AuthCredential, AuthStorage};
-use llmd::providers::ProviderRegistry;
+use piko_hostd::domain::config::ModelRegistry;
+use piko_llmd::auth::{AuthCredential, AuthStorage};
+use piko_llmd::providers::ProviderRegistry;
 
 fn registry_with_openai_key() -> ModelRegistry {
     let mut auth = HashMap::new();

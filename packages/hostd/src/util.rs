@@ -5,13 +5,16 @@
 //! nor `application` may depend on the other, so shared leaf helpers live
 //! here at the crate root instead.
 
-use tokio::sync::mpsc::UnboundedSender;
-
 use crate::api::{ProtocolError, ServerMessage};
 use crate::infra::storage::SessionStorageError;
 
-pub(crate) fn send_event(tx: &UnboundedSender<ServerMessage>, event: ServerMessage) {
-    let _ = tx.send(event);
+pub(crate) type ClientEventSender =
+    piko_comms::MailboxSender<piko_comms::contracts::HostCommandOutput, ServerMessage>;
+pub(crate) type ClientEventReceiver =
+    piko_comms::MailboxReceiver<piko_comms::contracts::HostCommandOutput, ServerMessage>;
+
+pub(crate) async fn send_event(tx: &ClientEventSender, event: ServerMessage) {
+    let _ = tx.send(event).await;
 }
 
 pub(crate) fn storage_error(error: SessionStorageError) -> ProtocolError {

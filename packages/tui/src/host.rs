@@ -1,7 +1,6 @@
 use std::{
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, Command as ProcessCommand, Stdio},
-    sync::mpsc::{self, Receiver},
     thread,
 };
 
@@ -20,7 +19,7 @@ pub enum HostLine {
 pub struct HostdClient {
     child: Child,
     stdin: ChildStdin,
-    rx: Receiver<HostLine>,
+    rx: piko_comms::ThreadBridgeReceiver<piko_comms::contracts::TuiHostBridge, HostLine>,
 }
 
 impl HostdClient {
@@ -48,7 +47,8 @@ impl HostdClient {
 
         let stdin = child.stdin.take().context("hostd stdin unavailable")?;
         let stdout = child.stdout.take().context("hostd stdout unavailable")?;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) =
+            piko_comms::thread_bridge::<piko_comms::contracts::TuiHostBridge, HostLine>();
 
         thread::spawn(move || {
             let reader = BufReader::new(stdout);

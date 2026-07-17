@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use llmd::gateway::{GatewayEvent, GatewayRequest};
+use piko_llmd::gateway::{GatewayEvent, GatewayRequest};
 use piko_protocol::execution::{CommitAck, CommitError};
 
 use super::*;
@@ -37,7 +37,7 @@ impl LlmGateway for NoopGateway {
 struct NoopCommit;
 
 #[async_trait]
-impl orchd_api::ExecutionCommitPort for NoopCommit {
+impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
     async fn commit_message(
         &self,
         commit: piko_protocol::execution::MessageCommit,

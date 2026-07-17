@@ -35,8 +35,8 @@ fn domain_must_not_depend_on_orchd_or_infra() {
             if trimmed.starts_with("//") {
                 continue;
             }
-            if trimmed.contains("use orchd")
-                || trimmed.contains("use orchd_api")
+            if trimmed.contains("use piko_orchd")
+                || trimmed.contains("use piko_orchd_api")
                 || trimmed.contains("use crate::infra")
                 || trimmed.contains("use crate::adapters")
             {

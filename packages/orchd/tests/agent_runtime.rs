@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
-use orchd::AgentRuntime;
-use orchd::testing::CollectingExecutionCommitPort;
-use orchd::tools::{MultiAgentToolProvider, UserInteractionProvider};
-use orchd_api::{
+use piko_orchd::AgentRuntime;
+use piko_orchd::testing::CollectingExecutionCommitPort;
+use piko_orchd::tools::{MultiAgentToolProvider, UserInteractionProvider};
+use piko_orchd_api::{
     AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, PromptAssemblyPort, SessionAgentConfig,
     SessionAgentPorts, SessionExecutionPorts, ToolExecutionContext, ToolProvider,
 };
@@ -60,7 +60,7 @@ impl PromptAssemblyPort for RecordingPromptAssemblyPort {
     async fn assemble_prompt(
         &self,
         request: PromptAssemblyRequest,
-    ) -> Result<AgentRunPrompt, orchd_api::AgentApiError> {
+    ) -> Result<AgentRunPrompt, piko_orchd_api::AgentApiError> {
         let system_prompt = format!(
             "{}|{}",
             request.agent_spec.base_system_prompt, request.resources.context_section
@@ -120,14 +120,14 @@ impl AgentCommitPort for StrictCreateCommitPort {
 }
 
 #[async_trait]
-impl llmd::gateway::LlmGateway for PanicGateway {
+impl piko_llmd::gateway::LlmGateway for PanicGateway {
     async fn chat_stream(
         &self,
-        _req: llmd::gateway::GatewayRequest,
+        _req: piko_llmd::gateway::GatewayRequest,
         _cancel: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<
         std::pin::Pin<
-            Box<dyn futures_core::Stream<Item = llmd::gateway::GatewayEvent> + Send + 'static>,
+            Box<dyn futures_core::Stream<Item = piko_llmd::gateway::GatewayEvent> + Send + 'static>,
         >,
         String,
     > {
@@ -169,7 +169,7 @@ impl AgentCommitPort for BlockingRunStartCommitPort {
 }
 
 #[async_trait]
-impl orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
+impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
     async fn commit_message(
         &self,
         commit: piko_protocol::execution::MessageCommit,
@@ -308,7 +308,7 @@ async fn attached_runtime() -> (
     Arc<FauxProvider>,
 ) {
     let model = Arc::new(FauxProvider::new());
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     runtime.register_agent(test_agent()).await;
     let mut coder = test_agent();
     coder.id = "coder".into();
@@ -329,7 +329,7 @@ async fn attached_runtime() -> (
             ports: SessionAgentPorts {
                 agents: agents.clone() as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })

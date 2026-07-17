@@ -5,11 +5,11 @@ mod support;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
-use hostd::protocol::HostServer;
 use mock_turn_runner::MockAgentRunRunner;
+use piko_hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
+use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::protocol::HostServer;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
@@ -19,7 +19,7 @@ fn session_id_from(events: &[Event]) -> String {
         .iter()
         .find_map(|event| match event {
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
                 ..
             } => Some(session_id.clone()),
             _ => None,
@@ -27,7 +27,7 @@ fn session_id_from(events: &[Event]) -> String {
         .expect("session id event")
 }
 
-fn snapshot_from_refresh(events: &[Event]) -> &hostd::api::SessionSnapshot {
+fn snapshot_from_refresh(events: &[Event]) -> &piko_hostd::api::SessionSnapshot {
     events
         .iter()
         .find_map(|event| match event {
@@ -44,7 +44,7 @@ impl AgentRunRunner for AgentPersistRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let session_dir = input.session_dir.clone();
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
@@ -82,7 +82,7 @@ impl AgentRunRunner for AgentPersistRunner {
                     }
                     manifest.agents.insert(
                         agent_instance_id.to_string(),
-                        hostd::infra::storage::AgentManifestEntry {
+                        piko_hostd::infra::storage::AgentManifestEntry {
                             identity: piko_protocol::AgentInstanceIdentity {
                                 session_id: session_id.clone(),
                                 agent_instance_id: agent_instance_id.to_string(),
@@ -129,6 +129,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "main".into(),
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: "user-main".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -156,6 +157,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "hello-agent".into(),
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: "user-child".into(),
                     source_turn_id: "child-work".into(),
                     role: MessageRole::User,
@@ -192,6 +194,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "hello-agent".into(),
                 2,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 3,
                     message_id: "assistant-child".into(),
                     source_turn_id: "child-work".into(),
                     role: MessageRole::Assistant,
@@ -235,7 +238,7 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &listed[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }), .. }
+        Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::SessionListed { sessions, .. }), .. }
             if sessions.iter().any(|session| session.session_id == session_id)
     ));
 
@@ -249,7 +252,7 @@ async fn persistent_server_reopens_with_session() {
     assert!(matches!(
         &renamed[0],
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::Empty),
             ..
         }
     ));
@@ -311,7 +314,7 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
 
     assert!(matches!(
         &navigated[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionNavigated {
+        Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::SessionNavigated {
             new_leaf_id: None,
             selected_entry_id,
             editor_text: Some(text),
@@ -352,7 +355,7 @@ async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
         deleted.as_slice(),
         [
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::Empty),
+                result: Ok(piko_hostd::api::CommandResult::Empty),
                 ..
             },
             Event::SessionCleared(piko_protocol::SessionClearedEvent {
@@ -370,7 +373,7 @@ async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
     assert!(matches!(
         &listed[0],
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionListed { sessions, .. }),
             ..
         } if sessions.iter().all(|session| session.session_id != session_id)
     ));
@@ -407,7 +410,7 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         })
         .await;
     let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }),
+        result: Ok(piko_hostd::api::CommandResult::SessionListed { sessions, .. }),
         ..
     } = &listed[0]
     else {
@@ -453,7 +456,7 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
     assert!(matches!(
         &opened[0],
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionOpened { .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionOpened { .. }),
             ..
         }
     ));
@@ -474,7 +477,7 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .await;
     assert!(matches!(
         &listed_agents[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentListed { agents, .. }), .. }
+        Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::AgentListed { agents, .. }), .. }
             if agents.len() == 2
                 && agents[0].agent_instance_id == "task-main"
                 && agents[1].agent_instance_id == "task-child"
@@ -491,7 +494,7 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .await;
     assert!(matches!(
         &subscribed[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::AgentSubscribed { agent_instance_id, agent_id, snapshot, .. }), .. }
+        Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::AgentSubscribed { agent_instance_id, agent_id, snapshot, .. }), .. }
             if agent_instance_id == "task-child"
                 && agent_id == "hello-agent"
                 && snapshot.agent_instance_id == "task-child"

@@ -4,7 +4,7 @@ impl AgentActor {
     pub(super) fn register_waiter(
         &mut self,
         execution_id: String,
-        reply: oneshot::Sender<Result<AgentRunReport, AgentApiError>>,
+        reply: ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>,
     ) {
         if let Some(report) = self.completed_executions.get(&execution_id) {
             let _ = reply.send(Ok(report.clone()));

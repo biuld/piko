@@ -5,16 +5,14 @@ use async_trait::async_trait;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentCommitPort, AgentRecoveryState};
+use piko_orchd_api::{AgentCommitPort, AgentRecoveryState};
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, AgentInstanceLifecycle, CommitError};
-
-use crate::api::ServerMessage;
 
 pub(super) struct ProjectingAgentCommitPort {
     inner: Arc<dyn AgentCommitPort>,
     session_id: String,
     agents: std::sync::Mutex<HashMap<String, crate::api::AgentInfo>>,
-    event_router: Arc<super::ui_router::UiEventRouter>,
+    event_router: Arc<super::observation_router::SessionObservationRouter>,
 }
 
 impl ProjectingAgentCommitPort {
@@ -22,7 +20,7 @@ impl ProjectingAgentCommitPort {
         inner: Arc<dyn AgentCommitPort>,
         session_id: String,
         recovered: &[AgentRecoveryState],
-        event_router: Arc<super::ui_router::UiEventRouter>,
+        event_router: Arc<super::observation_router::SessionObservationRouter>,
     ) -> Self {
         let agents = recovered
             .iter()
@@ -57,7 +55,7 @@ impl ProjectingAgentCommitPort {
         }
     }
 
-    fn project(&self, command: AgentDurableCommand) {
+    async fn project(&self, command: AgentDurableCommand) {
         let changed = {
             let mut agents = self.agents.lock().unwrap();
             match command {
@@ -121,11 +119,15 @@ impl ProjectingAgentCommitPort {
         };
         if let Some(changed) = changed {
             let agent_instance_id = changed.agent_instance_id.clone();
-            self.event_router.publish(
-                &self.session_id,
-                &agent_instance_id,
-                ServerMessage::AgentChanged(changed),
-            );
+            let agent_id = changed.agent_id.clone();
+            self.event_router
+                .publish(
+                    &self.session_id,
+                    &agent_instance_id,
+                    &agent_id,
+                    piko_protocol::agent_runtime::SessionEvent::AgentChanged { agent: changed },
+                )
+                .await;
         }
     }
 }
@@ -141,7 +143,7 @@ impl AgentCommitPort for ProjectingAgentCommitPort {
             .inner
             .commit_agent_command(session_id, command.clone())
             .await?;
-        self.project(command);
+        self.project(command).await;
         Ok(ack)
     }
 }

@@ -16,7 +16,7 @@ pub use storage_types::{
     PersistedSession, RecoveredAgent, SESSION_SCHEMA_VERSION, SessionManifest, SessionStorageError,
 };
 pub use turn_runner::{
-    AgentOperationAddress, AgentRunCompletion, AgentRunCompletionReceiver, AgentRunFailure,
-    AgentRunHandle, AgentRunInput, AgentRunRunner, ErrorAgentRunRunner, OperationRunCompletion,
-    ResumeAgent, TurnEventStream,
+    AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,
+    AgentRunProcess, AgentRunRunner, ErrorAgentRunRunner, OperationRunCompletion, ResumeAgent,
+    TurnEventStream,
 };

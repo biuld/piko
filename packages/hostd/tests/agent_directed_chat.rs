@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use hostd::adapters::OrchAgentRunRunner;
-use hostd::api::{Command, CommandResult, ServerMessage};
-use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::protocol::HostServer;
-use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
-use orchd_api::AgentCommitPort;
+use piko_hostd::adapters::OrchAgentRunRunner;
+use piko_hostd::api::{Command, CommandResult, ServerMessage};
+use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use piko_hostd::protocol::HostServer;
+use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_orchd_api::AgentCommitPort;
 use piko_protocol::{
     AgentDurableCommand, AgentInstanceIdentity, AgentSpec, Message, MessageContent,
 };

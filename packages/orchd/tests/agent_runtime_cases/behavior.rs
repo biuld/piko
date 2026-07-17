@@ -37,7 +37,7 @@ async fn lifecycle_and_activity_are_independent() {
 })
         .await
         .expect_err("closed AgentInstance must reject input");
-    assert_eq!(rejected, orchd_api::AgentApiError::AgentClosed);
+    assert_eq!(rejected, piko_orchd_api::AgentApiError::AgentClosed);
 
     let reopened = runtime
         .reopen_agent(AgentLifecycleRequest {
@@ -72,7 +72,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("first").await;
     model.push_text("second").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -90,7 +90,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
             ports: SessionAgentPorts {
                 agents: agents as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 )
                 .with_prompt(prompts.clone() as Arc<dyn PromptAssemblyPort>),
             },
@@ -140,7 +140,7 @@ async fn cross_session_or_missing_parent_is_rejected_before_commit() {
         })
         .await
         .expect_err("missing parent must fail");
-    assert_eq!(error, orchd_api::AgentApiError::AgentNotFound);
+    assert_eq!(error, piko_orchd_api::AgentApiError::AgentNotFound);
     assert_eq!(commits.commands.lock().await.len(), 1);
 }
 
@@ -264,7 +264,7 @@ async fn sibling_messaging_is_rejected_by_runtime_policy() {
 })
         .await
         .expect_err("siblings must not acquire arbitrary routing capability");
-    assert_eq!(error, orchd_api::AgentApiError::AgentUnauthorized);
+    assert_eq!(error, piko_orchd_api::AgentApiError::AgentUnauthorized);
 }
 
 #[tokio::test]
@@ -452,7 +452,7 @@ async fn queued_follow_up_can_be_cancelled_before_it_starts() {
         .await
         .unwrap();
     assert!(cancelled.accepted);
-    assert!(matches!(queued.wait().await, Err(orchd_api::AgentApiError::Cancelled)));
+    assert!(matches!(queued.wait().await, Err(piko_orchd_api::AgentApiError::Cancelled)));
     assert!(commits.commands.lock().await.iter().any(|command| matches!(
         command,
         AgentDurableCommand::QueuedInputCancelled { queued_input_id, .. }

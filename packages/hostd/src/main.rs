@@ -1,4 +1,4 @@
-use hostd::{
+use piko_hostd::{
     logging::{init, parse_hostd_log_cli, resolve_config},
     run_stdio_server,
 };

@@ -1,7 +1,7 @@
 use piko_protocol::{ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel};
 
-use llmd::auth::AuthStorage;
-use llmd::providers::{ModelCatalog, ProviderRegistry};
+use piko_llmd::auth::AuthStorage;
+use piko_llmd::providers::{ModelCatalog, ProviderRegistry};
 
 #[derive(Debug, Clone)]
 pub struct ModelRegistry {
@@ -168,7 +168,7 @@ impl ModelRegistry {
         self.auth_storage.has_auth(provider)
     }
 
-    pub fn get_oauth(&self, provider: &str) -> Option<&dyn llmd::providers::OAuthFlow> {
+    pub fn get_oauth(&self, provider: &str) -> Option<&dyn piko_llmd::providers::OAuthFlow> {
         self.catalog.get_oauth(provider)
     }
 

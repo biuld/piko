@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use hostd::logging::{DEFAULT_FILTER, HostdLogCli, LogConfig, init, resolve_config};
+use piko_hostd::logging::{DEFAULT_FILTER, HostdLogCli, LogConfig, init, resolve_config};
 use tempfile::tempdir;
 use tracing::info;
 

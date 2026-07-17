@@ -4,11 +4,11 @@ use async_trait::async_trait;
 pub(super) struct HostPromptAssemblyPort;
 
 #[async_trait]
-impl orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
+impl piko_orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
     async fn assemble_prompt(
         &self,
         request: piko_protocol::PromptAssemblyRequest,
-    ) -> Result<piko_protocol::AgentRunPrompt, orchd_api::AgentApiError> {
+    ) -> Result<piko_protocol::AgentRunPrompt, piko_orchd_api::AgentApiError> {
         Ok(crate::domain::prompts::assemble_agent_run_prompt(&request))
     }
 }

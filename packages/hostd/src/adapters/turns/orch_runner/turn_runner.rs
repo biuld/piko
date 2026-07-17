@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use orchd_api::{AgentRuntimeApi, SessionSubscription};
+use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
@@ -16,13 +16,6 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .set_approval_gateway(Box::new(self.clone()))
             .await;
 
-        self.ui_router.register(
-            &input.session_id,
-            &input.operation_id,
-            &input.agent_instance_id,
-            input.agent_instance_id == format!("agent_{}_root", input.session_id),
-            input.ui_event_tx.clone(),
-        );
         self.register_user_interaction_tools_on_execution(self)
             .await;
         self.agent_runtime
@@ -34,13 +27,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
             agent_instance_id = %input.agent_instance_id,
             "Agent run subscription starting"
         );
-        let session_id = input.session_id.clone();
-        let operation_id = input.operation_id.clone();
-        let result = self.run_agent_subscription(input).await;
-        if result.is_err() {
-            self.ui_router.unregister(&session_id, &operation_id);
-        }
-        result
+        self.run_agent_subscription(input).await
     }
 
     async fn finish_agent_run(
@@ -53,7 +40,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
             &operation.agent_instance_id,
             &operation.operation_id,
         );
-        self.ui_router
+        self.observation_router
             .unregister(&operation.session_id, &operation.operation_id);
     }
 
@@ -98,7 +85,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
             SessionSubscription {
                 session_id: operation.session_id.clone(),
                 cursor: cursor.clone(),
-                output: orchd::events::merged_output_stream(hub_sub, cursor),
+                output: piko_orchd::events::merged_output_stream(hub_sub, cursor),
             },
         ))
     }
@@ -226,8 +213,26 @@ impl AgentRunRunner for OrchAgentRunRunner {
         approval_id: &str,
         decision: crate::api::ApprovalDecision,
     ) -> Result<bool, ProtocolError> {
-        let mut pending = self.pending_approvals.lock().unwrap();
-        if let Some(entry) = pending.remove(approval_id) {
+        let entry = self.pending_approvals.lock().unwrap().remove(approval_id);
+        if let Some(entry) = entry {
+            if let Some(session_id) = &entry.session_id {
+                let status = if decision == crate::api::ApprovalDecision::Decline {
+                    crate::api::ApprovalStatus::Rejected
+                } else {
+                    crate::api::ApprovalStatus::Approved
+                };
+                self.observation_router
+                    .publish(
+                        session_id,
+                        &entry.snapshot.agent_instance_id,
+                        "unknown",
+                        piko_protocol::agent_runtime::SessionEvent::ApprovalResolved {
+                            approval_id: approval_id.to_string(),
+                            status,
+                        },
+                    )
+                    .await;
+            }
             let _ = entry.tx.send(decision);
             Ok(true)
         } else {
@@ -240,8 +245,33 @@ impl AgentRunRunner for OrchAgentRunRunner {
         interaction_id: &str,
         response: UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
-        let mut pending = self.pending_interactions.lock().unwrap();
-        if let Some(entry) = pending.remove(interaction_id) {
+        let entry = self
+            .pending_interactions
+            .lock()
+            .unwrap()
+            .remove(interaction_id);
+        if let Some(entry) = entry {
+            if let Some(session_id) = &entry.session_id {
+                let status = match &response {
+                    UserInteractionResponse::Submit { .. } => {
+                        crate::api::UserInteractionStatus::Submitted
+                    }
+                    UserInteractionResponse::Cancel { .. } => {
+                        crate::api::UserInteractionStatus::Cancelled
+                    }
+                };
+                self.observation_router
+                    .publish(
+                        session_id,
+                        &entry.snapshot.agent_instance_id,
+                        &entry.snapshot.agent_id,
+                        piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
+                            interaction_id: interaction_id.to_string(),
+                            status,
+                        },
+                    )
+                    .await;
+            }
             let _ = entry.tx.send(response);
             Ok(true)
         } else {

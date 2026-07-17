@@ -2,8 +2,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_core::Stream;
-use llmd::gateway::GatewayEvent;
-use orchd_api::RealtimeDeltaSink;
+use piko_llmd::gateway::GatewayEvent;
+use piko_orchd_api::RealtimeDeltaSink;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;

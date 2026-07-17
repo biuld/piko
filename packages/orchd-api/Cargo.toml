@@ -1,5 +1,5 @@
 [package]
-name = "orchd-api"
+name = "piko-orchd-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,7 @@ description = "Public contract for the piko agent runtime (orchd)"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 futures-core = "0.3"
+piko-comms = { path = "../comms" }
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

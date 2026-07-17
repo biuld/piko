@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::GatewayEvent;
 
 use crate::runtime::events::collector::{SharedAssistantMessageCollector, SharedPersistCollector};
 use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};

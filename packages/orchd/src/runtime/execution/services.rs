@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
-use orchd_api::ToolProvider;
+use piko_orchd_api::ToolProvider;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::ToolSet;
 

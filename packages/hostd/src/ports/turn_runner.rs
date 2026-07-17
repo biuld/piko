@@ -1,13 +1,10 @@
 use std::path::PathBuf;
 use std::pin::Pin;
 
+use crate::api::{ProtocolError, ServerMessage};
 use async_trait::async_trait;
 use futures_core::Stream;
-use orchd_api::SessionSubscription;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
-
-use crate::api::{ProtocolError, ServerMessage};
+use piko_orchd_api::SessionSubscription;
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
@@ -37,9 +34,6 @@ pub struct AgentRunInput {
     pub active_tool_names: Option<Vec<String>>,
     /// Session storage directory for the durable AgentInstance shard.
     pub session_dir: PathBuf,
-    /// Turn-scoped queue for approval/interaction UI prompts.
-    /// The turn handler drains this and forwards to TUI on the main outbound channel.
-    pub ui_event_tx: UnboundedSender<ServerMessage>,
     /// Reattach a resumed root agent with committed transcript history.
     pub resume_agent: Option<ResumeAgent>,
 }
@@ -47,11 +41,15 @@ pub struct AgentRunInput {
 pub struct AgentRunHandle {
     pub address: AgentOperationAddress,
     pub receipt: piko_protocol::AgentInputReceipt,
-    pub started: oneshot::Receiver<SessionSubscription>,
-    pub completion: AgentRunCompletionReceiver,
+    pub process: Box<dyn AgentRunProcess>,
 }
 
-pub type AgentRunCompletionReceiver = oneshot::Receiver<AgentRunCompletion>;
+#[async_trait]
+pub trait AgentRunProcess: Send {
+    async fn wait_started(&mut self) -> Result<SessionSubscription, ProtocolError>;
+
+    async fn wait_completion(self: Box<Self>) -> Result<AgentRunCompletion, ProtocolError>;
+}
 
 #[derive(Debug)]
 pub struct AgentRunCompletion {

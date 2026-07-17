@@ -1,3 +1,3 @@
 //! Re-exports of the public orchd-api contract.
 
-pub use orchd_api::*;
+pub use piko_orchd_api::*;

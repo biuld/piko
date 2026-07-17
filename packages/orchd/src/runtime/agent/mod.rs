@@ -10,7 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
-use orchd_api::{
+use piko_comms::contracts::{
+    AgentCommandReply, AgentCommands, AgentSnapshot as AgentSnapshotContract,
+};
+use piko_orchd_api::{
     AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
 };
 use piko_protocol::{
@@ -19,7 +22,7 @@ use piko_protocol::{
     AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
     SteerAgentRequest,
 };
-use tokio::sync::{RwLock, mpsc, oneshot, watch};
+use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
 use self::actor::AgentActor;
@@ -87,7 +90,7 @@ impl AgentRuntime {
         self.execution.register_agent(spec).await;
     }
 
-    pub async fn register_tool_provider(&self, provider: Box<dyn orchd_api::ToolProvider>) {
+    pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.execution.register_tool_provider(provider).await;
     }
 
@@ -95,7 +98,7 @@ impl AgentRuntime {
         self.execution.register_tool_set(tool_set).await;
     }
 
-    pub async fn set_approval_gateway(&self, gateway: Box<dyn orchd_api::ApprovalGateway>) {
+    pub async fn set_approval_gateway(&self, gateway: Box<dyn piko_orchd_api::ApprovalGateway>) {
         self.execution.set_approval_gateway(gateway).await;
     }
 
@@ -132,7 +135,7 @@ impl AgentRuntime {
             return Err(AgentApiError::AgentSpecNotFound);
         };
         let generation = scope.next_generation();
-        let (command_tx, command_rx) = mpsc::channel(32);
+        let (command_tx, command_rx) = piko_comms::mailbox::<AgentCommands, _>();
         let lifecycle = recovery
             .as_ref()
             .map(|state| state.lifecycle)
@@ -172,7 +175,7 @@ impl AgentRuntime {
                 .count() as u32,
             generation,
         };
-        let (snapshot_tx, snapshot_rx) = watch::channel(initial);
+        let (snapshot_tx, snapshot_rx) = piko_comms::latest::<AgentSnapshotContract, _>(initial);
         let run_cancellation = Arc::new(RunCancellation::new());
         let handle = AgentHandle {
             generation,
@@ -255,7 +258,7 @@ impl AgentRuntime {
             )
             .await
             .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .try_send(AgentCommand::SetLifecycle {
@@ -461,7 +464,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&request.agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .try_send(AgentCommand::Input { request, reply })
@@ -477,7 +480,7 @@ impl AgentRuntimeApi for AgentRuntime {
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<orchd_api::AgentRunAcceptance, AgentApiError> {
+    ) -> Result<piko_orchd_api::AgentRunAcceptance, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(
@@ -489,7 +492,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&request.agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .try_send(AgentCommand::Run { request, reply })
@@ -522,7 +525,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&recipient_agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         source
             .command_tx
             .try_send(AgentCommand::InputDetached {
@@ -571,7 +574,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
         let cancellation_requested = handle.run_cancellation.cancel_active();
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .send(AgentCommand::CancelRun {
@@ -605,7 +608,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .send(AgentCommand::CancelInput { request_id, reply })
@@ -678,7 +681,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .send(AgentCommand::Inbox { reply })
@@ -698,7 +701,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&request.agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = oneshot::channel();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .send(AgentCommand::ConsumeInbox { request, reply })

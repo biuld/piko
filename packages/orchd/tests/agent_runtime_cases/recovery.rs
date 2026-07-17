@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
     let model = Arc::new(FauxProvider::new());
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -52,12 +52,12 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
                     head_message_id: None,
                     inbox: Vec::new(),
                     latest_report: Some(report.clone()),
-                    execution_reports: vec![orchd_api::RecoveredExecutionReport {
+                    execution_reports: vec![piko_orchd_api::RecoveredExecutionReport {
                         internal_execution_id: "exec-recovered-detached".into(),
                         report: report.clone(),
                     }],
                     queued_inputs: Vec::new(),
-                    pending_detached_deliveries: vec![orchd_api::RecoveredDetachedDelivery {
+                    pending_detached_deliveries: vec![piko_orchd_api::RecoveredDetachedDelivery {
                         recipient_agent_instance_id: "root".into(),
                         report,
                     }],
@@ -66,7 +66,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
             ports: SessionAgentPorts {
                 agents: agents.clone() as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })
@@ -102,7 +102,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
 async fn recovered_child_restores_private_transcript_and_inbox() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("after recovery").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -177,7 +177,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                     head_message_id: Some("old-head".into()),
                     inbox: Vec::new(),
                     latest_report: Some(old_report),
-                    execution_reports: vec![orchd_api::RecoveredExecutionReport {
+                    execution_reports: vec![piko_orchd_api::RecoveredExecutionReport {
                         internal_execution_id: recovered_execution_id(
                             "session-recovery",
                             "child",
@@ -201,7 +201,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
             ports: SessionAgentPorts {
                 agents: agents as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })
@@ -264,14 +264,14 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
 }
 
 fn recovered_execution_id(session_id: &str, agent_instance_id: &str, request_id: &str) -> String {
-    orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, request_id])
+    piko_orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, request_id])
 }
 
 #[tokio::test]
 async fn recovered_durable_follow_up_starts_without_new_input() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("recovered follow-up").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -315,7 +315,7 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
             ports: SessionAgentPorts {
                 agents: agents.clone() as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })
@@ -349,7 +349,7 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
 async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("with multi_agent tools").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
     let runtime = Arc::new(runtime);
 
     let mut registered = test_agent();
@@ -405,7 +405,7 @@ async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
             ports: SessionAgentPorts {
                 agents: agents as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn orchd_api::ExecutionCommitPort>,
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
                 ),
             },
         })

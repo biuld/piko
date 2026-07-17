@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
 use futures_core::Stream;
-use llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::GatewayEvent;
 
 use crate::domain::model::step::ModelSpec;
 use crate::runtime::events::identity::DispatchIdentity;

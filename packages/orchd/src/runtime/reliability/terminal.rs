@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::runtime::execution::ExecutionTerminal;
 use crate::runtime::reliability::{CommitFailure, ExecutionHandoffLease, RetryState};
-use orchd_api::AgentCommitPort;
+use piko_orchd_api::AgentCommitPort;
 use piko_protocol::{AgentDurableCommand, AgentRunReport, CommitError, ExecutionOutcome, Message};
 
 /// Frozen terminal state. Publication data is private until `commit` returns a
@@ -113,7 +113,7 @@ impl PendingTerminal {
 }
 
 fn report_id(internal_execution_id: &str) -> String {
-    orchd_api::stable_internal_id("report", &[internal_execution_id])
+    piko_orchd_api::stable_internal_id("report", &[internal_execution_id])
 }
 
 impl CommittedTerminal {

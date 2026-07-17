@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentApiError, SessionExecutionPorts};
+use piko_orchd_api::{AgentApiError, SessionExecutionPorts};
 use tokio::sync::Mutex;
 
 use super::ExecutionIdentity;
@@ -115,7 +115,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use piko_protocol::execution::{CommitAck, CommitError, ExecutionSnapshot, ExecutionStatus};
+    use piko_protocol::execution::{CommitAck, CommitError};
 
     use super::*;
     use crate::runtime::execution::mailbox::{ArcTerminalReceiver, ExecutionHandle};
@@ -123,7 +123,7 @@ mod tests {
     struct NoopCommit;
 
     #[async_trait]
-    impl orchd_api::ExecutionCommitPort for NoopCommit {
+    impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
         async fn commit_message(
             &self,
             commit: piko_protocol::execution::MessageCommit,
@@ -146,25 +146,13 @@ mod tests {
             agent_instance_id: "agent".into(),
             agent_id: "main".into(),
         };
-        let (command_tx, _) = tokio::sync::mpsc::channel(1);
-        let (_, snapshot_rx) = tokio::sync::watch::channel(ExecutionSnapshot {
-            session_id: "session".into(),
-            source_turn_id: None,
-            execution_id: execution_id.into(),
-            agent_instance_id: "agent".into(),
-            agent_id: "main".into(),
-            status: ExecutionStatus::Accepted,
-            model_step_index: 0,
-            usage: Default::default(),
-            error: None,
-        });
-        let (_, terminal_rx) = tokio::sync::oneshot::channel();
+        let (command_tx, _) = piko_comms::mailbox::<piko_comms::contracts::ExecutionCommands, _>();
+        let (_, terminal_rx) = piko_comms::reply::<piko_comms::contracts::ExecutionTerminal, _>();
         ExecutionHandle {
             identity,
             generation,
             command_tx,
             cancel: tokio_util::sync::CancellationToken::new(),
-            snapshot_rx,
             terminal_rx: ArcTerminalReceiver::new(terminal_rx),
         }
     }
@@ -173,7 +161,7 @@ mod tests {
     async fn stale_cleanup_cannot_remove_a_new_generation() {
         let scope = SessionExecutionScope::new(
             "session".into(),
-            orchd_api::SessionExecutionPorts::new(Arc::new(NoopCommit)),
+            piko_orchd_api::SessionExecutionPorts::new(Arc::new(NoopCommit)),
         );
         scope.reserve_execution(handle("exec", 2)).await.unwrap();
         scope.rollback_reservation("exec", 1).await;

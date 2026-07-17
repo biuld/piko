@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
-use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use piko_protocol::messages::{Message, Model, Usage};
 use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
 

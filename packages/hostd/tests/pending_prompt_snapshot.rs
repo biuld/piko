@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::api::{
+use piko_hostd::api::{
     ApprovalSnapshot, ApprovalStatus, Command, ServerMessage as Event, UserInteractionSnapshot,
     UserInteractionStatus,
 };
-use hostd::infra::storage::JsonlSessionRepository;
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
-use hostd::protocol::HostServer;
+use piko_hostd::infra::storage::JsonlSessionRepository;
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::protocol::HostServer;
 use piko_protocol::{InteractionChoice, InteractionQuestion};
 
 #[derive(Clone, Default)]
@@ -21,8 +21,10 @@ impl AgentRunRunner for PendingPromptRunner {
     async fn run_agent(
         &self,
         _: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
-        Err(hostd::api::ProtocolError::InvalidCommand("not used".into()))
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
+        Err(piko_hostd::api::ProtocolError::InvalidCommand(
+            "not used".into(),
+        ))
     }
 
     async fn pending_prompts_for_session(
@@ -86,7 +88,7 @@ async fn state_snapshot_includes_in_process_pending_prompts() {
         .iter()
         .find_map(|event| match event {
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
                 ..
             } => Some(session_id.clone()),
             _ => None,

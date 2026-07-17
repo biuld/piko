@@ -37,7 +37,7 @@ impl JsonlSessionRepository {
                     .get(&agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .unwrap_or_else(|| message.agent_id.clone());
-                let execution_id = orchd_api::stable_internal_id(
+                let execution_id = piko_orchd_api::stable_internal_id(
                     "projection",
                     &[&manifest.session_id, &agent_instance_id, &message.id],
                 );
@@ -68,7 +68,7 @@ impl JsonlSessionRepository {
                     });
                 };
                 let manifest = store.load_manifest()?;
-                let execution_id = orchd_api::stable_internal_id(
+                let execution_id = piko_orchd_api::stable_internal_id(
                     "projection",
                     &[&manifest.session_id, agent_instance_id, &tool.id],
                 );

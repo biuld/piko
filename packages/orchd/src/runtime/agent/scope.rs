@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentApiError, AgentCommitPort};
+use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use tokio::sync::Mutex;
 
 use super::mailbox::{AgentCommand, AgentHandle};
@@ -180,7 +180,8 @@ impl SessionAgentScope {
             .cloned()
             .collect::<Vec<_>>();
         for handle in handles {
-            let (reply, received) = tokio::sync::oneshot::channel();
+            let (reply, received) =
+                piko_comms::reply::<piko_comms::contracts::AgentCommandReply, _>();
             if handle
                 .command_tx
                 .send(AgentCommand::Shutdown { reply })

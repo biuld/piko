@@ -1,16 +1,15 @@
-use crate::api::{Command, ProtocolError, ServerMessage};
-use crate::domain::commands::command_catalog;
-use tokio::sync::mpsc::UnboundedSender;
-
 use super::host_server::HostServer;
 use super::{now_ms, send_event};
+use crate::api::{Command, ProtocolError, ServerMessage};
+use crate::domain::commands::command_catalog;
+use crate::util::ClientEventSender;
 
 impl HostServer {
     pub(super) async fn apply_command_stream(
         &self,
         command: Command,
         command_id: String,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         match command {
             Command::AuthLoginOAuth { provider, .. } => {
@@ -39,7 +38,8 @@ impl HostServer {
                         command_id: command_id.clone(),
                         result: Ok(crate::api::CommandResult::Empty),
                     },
-                );
+                )
+                .await;
                 self.0
                     .compact_session_if_needed(&command_id, &session_id, &agent_instance_id, 0, tx)
                     .await;
@@ -48,7 +48,7 @@ impl HostServer {
             command => {
                 let events = self.apply_command(command).await?;
                 for event in events {
-                    send_event(tx, event);
+                    send_event(tx, event).await;
                 }
                 Ok(())
             }

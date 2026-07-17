@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::oneshot;
-
-use llmd::gateway::LlmGateway;
-use orchd::AgentRuntime;
-use orchd::tools::{UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest};
+use piko_llmd::gateway::LlmGateway;
+use piko_orchd::AgentRuntime;
+use piko_orchd::tools::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+};
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::adapters::turns::approval::ApprovalStore;
-use crate::api::{ServerMessage, UserInteractionResponse};
+use crate::api::UserInteractionResponse;
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 
 mod agent_commit;
@@ -17,10 +17,10 @@ mod agent_input;
 mod approval_gateway;
 mod attach;
 mod commit;
+mod observation_router;
 mod prompt_assembly;
 mod run;
 mod turn_runner;
-mod ui_router;
 
 #[cfg(test)]
 mod tests;
@@ -28,7 +28,7 @@ mod tests;
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
 type AgentRunKey = (String, String);
-type AgentHubMap = HashMap<AgentRunKey, Arc<orchd::events::SessionOutputHub>>;
+type AgentHubMap = HashMap<AgentRunKey, Arc<piko_orchd::events::SessionOutputHub>>;
 
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
@@ -42,28 +42,26 @@ pub struct OrchAgentRunRunner {
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
-    ui_router: Arc<ui_router::UiEventRouter>,
+    observation_router: Arc<observation_router::SessionObservationRouter>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct ActiveAgentRunRuntime {
     run_id: String,
     agent_instance_id: String,
-    observation: Arc<orchd::events::SessionOutputHub>,
-    commit_router: Option<Arc<ExecutionCommitRouter>>,
-    realtime_router: Option<Arc<RealtimeDeltaRouter>>,
+    observation: Arc<piko_orchd::events::SessionOutputHub>,
 }
 
 struct PendingApprovalEntry {
     session_id: Option<String>,
     snapshot: crate::api::ApprovalSnapshot,
-    tx: oneshot::Sender<crate::api::ApprovalDecision>,
+    tx: piko_comms::ReplySender<piko_comms::contracts::ApprovalReply, crate::api::ApprovalDecision>,
 }
 
 struct PendingInteractionEntry {
     session_id: Option<String>,
     snapshot: crate::api::UserInteractionSnapshot,
-    tx: oneshot::Sender<UserInteractionResponse>,
+    tx: piko_comms::ReplySender<piko_comms::contracts::InteractionReply, UserInteractionResponse>,
 }
 
 impl OrchAgentRunRunner {
@@ -159,7 +157,7 @@ impl OrchAgentRunRunner {
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            ui_router: Arc::new(ui_router::UiEventRouter::default()),
+            observation_router: Arc::new(observation_router::SessionObservationRouter::default()),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
@@ -218,7 +216,7 @@ impl OrchAgentRunRunner {
     ) -> UserInteractionResponse {
         let _prompt_turn = self.prompt_gate.lock().await;
         if !self
-            .ui_router
+            .observation_router
             .has_route(&request.session_id, &request.agent_instance_id)
         {
             return UserInteractionResponse::Cancel {
@@ -233,44 +231,40 @@ impl OrchAgentRunRunner {
                 .unwrap_or_default()
                 .as_millis()
         );
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = piko_comms::reply::<piko_comms::contracts::InteractionReply, _>();
         let session_id = request.session_id.clone();
+        let snapshot = crate::api::UserInteractionSnapshot {
+            interaction_id: interaction_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
+            agent_id: request.agent_id.clone(),
+            tool_call_id: request.tool_call_id.clone(),
+            status: crate::api::UserInteractionStatus::Pending,
+            title: request.title.clone(),
+            questions: request.questions.clone(),
+            require_confirm: request.require_confirm,
+            auto_resolution_ms: request.auto_resolution_ms,
+        };
         {
             let mut pending = self.pending_interactions.lock().unwrap();
             pending.insert(
                 interaction_id.clone(),
                 PendingInteractionEntry {
                     session_id: Some(session_id.clone()),
-                    snapshot: crate::api::UserInteractionSnapshot {
-                        interaction_id: interaction_id.clone(),
-                        agent_instance_id: request.agent_instance_id.clone(),
-                        agent_id: request.agent_id.clone(),
-                        tool_call_id: request.tool_call_id.clone(),
-                        status: crate::api::UserInteractionStatus::Pending,
-                        title: request.title.clone(),
-                        questions: request.questions.clone(),
-                        require_confirm: request.require_confirm,
-                        auto_resolution_ms: request.auto_resolution_ms,
-                    },
+                    snapshot: snapshot.clone(),
                     tx,
                 },
             );
         }
-        self.ui_router.publish(
-            &session_id,
-            &request.agent_instance_id,
-            ServerMessage::Interaction(piko_protocol::InteractionEvent::Requested {
-                session_id: session_id.clone(),
-                agent_instance_id: request.agent_instance_id.clone(),
-                agent_id: request.agent_id.clone(),
-                interaction_id: interaction_id.clone(),
-                tool_call_id: request.tool_call_id,
-                title: request.title,
-                questions: request.questions,
-                require_confirm: request.require_confirm,
-                auto_resolution_ms: request.auto_resolution_ms,
-            }),
-        );
+        self.observation_router
+            .publish(
+                &session_id,
+                &request.agent_instance_id,
+                &request.agent_id,
+                piko_protocol::agent_runtime::SessionEvent::InteractionRequested {
+                    interaction: snapshot,
+                },
+            )
+            .await;
         let response = match rx.await {
             Ok(response) => response,
             Err(_) => UserInteractionResponse::Cancel {

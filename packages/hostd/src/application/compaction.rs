@@ -1,12 +1,10 @@
-use tokio::sync::mpsc::UnboundedSender;
-
-use crate::api::{ServerMessage, SessionTreeEntry};
+use crate::api::SessionTreeEntry;
 use crate::application::host_app::HostApp;
 use crate::application::sessions::helpers::session_reconciled_message;
 use crate::domain::compaction::{
     CompactionSettings, active_branch_entries, context_entries_after_compaction, should_compact,
 };
-use crate::util::send_event;
+use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
     pub(crate) async fn compact_session_if_needed(
@@ -15,7 +13,7 @@ impl HostApp {
         session_id: &str,
         agent_instance_id: &str,
         context_window: u64,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) {
         let c_settings;
         let enabled;
@@ -179,7 +177,8 @@ impl HostApp {
                     snapshot,
                     agents,
                 ),
-            );
+            )
+            .await;
         }
     }
 }

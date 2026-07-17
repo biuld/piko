@@ -1,7 +1,9 @@
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{SessionOutputStream, SessionStreamError, SessionSubscription};
+use piko_orchd_api::{SessionOutputStream, SessionStreamError, SessionSubscription};
 use piko_protocol::agent_runtime::{
     SessionCursor, SessionEvent, SessionEventEnvelope, SessionOutput, SessionOutputEnvelope,
 };
@@ -43,7 +45,7 @@ impl MockSessionPublisher {
         &self,
         agent_instance_id: impl Into<String>,
         agent_id: impl Into<String>,
-        task_seq: u64,
+        _task_seq: u64,
         event: SessionEvent,
     ) {
         let agent_instance_id = agent_instance_id.into();
@@ -51,7 +53,6 @@ impl MockSessionPublisher {
         let envelope = SessionEventEnvelope {
             agent_instance_id: agent_instance_id.clone(),
             agent_id: agent_id.into(),
-            transcript_seq: task_seq,
             cursor: SessionCursor {
                 epoch: self.epoch.clone(),
                 seq,
@@ -65,10 +66,10 @@ impl MockSessionPublisher {
         }));
     }
 
-    pub fn require_snapshot(&self, reason: orchd_api::SnapshotRequiredReason) {
+    pub fn require_snapshot(&self, reason: piko_orchd_api::SnapshotRequiredReason) {
         let _ = self
             .tx
-            .send(Err(orchd_api::SessionStreamError::SnapshotRequired {
+            .send(Err(piko_orchd_api::SessionStreamError::SnapshotRequired {
                 reason,
             }));
     }
@@ -77,5 +78,5 @@ impl MockSessionPublisher {
 #[test]
 fn require_snapshot_is_callable() {
     let (publisher, _subscription) = MockSessionPublisher::new("session");
-    publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
+    publisher.require_snapshot(piko_orchd_api::SnapshotRequiredReason::CursorExpired);
 }

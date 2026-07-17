@@ -4,7 +4,7 @@
 //! [`SessionStorePort`] (and opens/creates stores only through
 //! [`SessionStoreFactory`]); the concrete filesystem-backed implementation
 //! (`SessionStore`) lives in `adapters::storage`. Durable mutation still
-//! flows through `orchd_api::AgentCommitPort`, implemented by the same
+//! flows through `piko_orchd_api::AgentCommitPort`, implemented by the same
 //! adapter.
 
 use std::path::Path;

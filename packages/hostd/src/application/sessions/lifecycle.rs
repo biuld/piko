@@ -363,7 +363,7 @@ impl HostApp {
 
 #[cfg(test)]
 mod tests {
-    use orchd_api::AgentCommitPort;
+    use piko_orchd_api::AgentCommitPort;
     use piko_protocol::{AgentDurableCommand, AgentRunReport, ExecutionOutcome};
 
     use super::*;

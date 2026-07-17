@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use hostd::api::{Command, ServerMessage as Event};
-use hostd::domain::config::HostSettings;
-use hostd::infra::storage::JsonlSessionRepository;
-use hostd::infra::storage::session_store::SessionStore;
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
-use hostd::protocol::HostServer;
-use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_hostd::api::{Command, ServerMessage as Event};
+use piko_hostd::domain::config::HostSettings;
+use piko_hostd::infra::storage::JsonlSessionRepository;
+use piko_hostd::infra::storage::session_store::SessionStore;
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::protocol::HostServer;
+use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::messages::{Message, Model};
 use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
@@ -53,7 +53,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
@@ -115,6 +115,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: "user-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -125,6 +126,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: "assistant-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
@@ -173,7 +175,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
         .iter()
         .find_map(|event| match event {
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+                result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
                 ..
             } => Some(session_id.clone()),
             _ => None,
@@ -191,7 +193,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
     assert!(
         turn_events.iter().any(|event| matches!(
             event,
-            Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
+            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
         )),
         "turn must complete before compact; events={turn_events:?}"
     );
@@ -228,7 +230,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
             .snapshot
             .entries
             .iter()
-            .any(|entry| matches!(entry, hostd::api::SessionTreeEntry::Compaction(_))),
+            .any(|entry| matches!(entry, piko_hostd::api::SessionTreeEntry::Compaction(_))),
         "reconciled snapshot should include compaction entry; entries={:?}",
         reconciled.snapshot.entries
     );
