@@ -1,8 +1,6 @@
-use tokio::sync::mpsc::UnboundedSender;
-
-use crate::api::{ProtocolError, ServerMessage};
+use crate::api::ProtocolError;
 use crate::application::host_app::HostApp;
-use crate::util::storage_error;
+use crate::util::{ClientEventSender, storage_error};
 
 impl HostApp {
     /// Resolve one target-oriented user submission through host authority.
@@ -14,7 +12,7 @@ impl HostApp {
         session_id: String,
         target_agent_instance_id: String,
         text: String,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         let cwd = self.state.lock().await.session_cwd(&session_id)?;
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;

@@ -6,7 +6,7 @@ use crate::application::HostApp;
 use crate::domain::config::HostSettings;
 use crate::infra::storage::JsonlSessionRepository;
 use crate::ports::AgentRunRunner;
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use crate::util::{ClientEventReceiver, ClientEventSender};
 
 use super::send_event;
 
@@ -82,24 +82,30 @@ impl HostServer {
         events
     }
 
-    pub fn handle_command_stream(&self, command: Command) -> UnboundedReceiver<ServerMessage> {
-        let command_id = command.command_id().to_string();
+    pub fn handle_command_stream(&self, command: Command) -> ClientEventReceiver {
         let server = self.clone();
-        let (tx, rx) = unbounded_channel();
+        let (tx, rx): (ClientEventSender, ClientEventReceiver) =
+            piko_comms::mailbox::<piko_comms::contracts::HostCommandOutput, _>();
         tokio::spawn(async move {
-            if let Err(err) = server
-                .apply_command_stream(command, command_id.clone(), &tx)
-                .await
-            {
-                send_event(
-                    &tx,
-                    ServerMessage::CommandResponse {
-                        command_id: command_id.clone(),
-                        result: Err(err.to_string()),
-                    },
-                );
-            }
+            server.handle_command_into(command, tx).await;
         });
         rx
+    }
+
+    pub async fn handle_command_into(&self, command: Command, tx: ClientEventSender) {
+        let command_id = command.command_id().to_string();
+        if let Err(err) = self
+            .apply_command_stream(command, command_id.clone(), &tx)
+            .await
+        {
+            send_event(
+                &tx,
+                ServerMessage::CommandResponse {
+                    command_id,
+                    result: Err(err.to_string()),
+                },
+            )
+            .await;
+        }
     }
 }

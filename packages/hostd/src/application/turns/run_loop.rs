@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::ports::{AgentOperationAddress, AgentRunHandle, AgentRunRunner};
-use crate::util::send_event;
+use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
     /// Drive one Turn's session output stream to completion: apply realtime
@@ -22,22 +20,15 @@ impl HostApp {
         agent_instance_id: &str,
         session_dir: &std::path::Path,
         run: AgentRunHandle,
-        ui_event_rx: UnboundedReceiver<ServerMessage>,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<bool, ProtocolError> {
         let address = AgentOperationAddress {
             session_id: session_id.to_string(),
             operation_id: turn_id.to_string(),
             agent_instance_id: agent_instance_id.to_string(),
         };
-        let AgentRunHandle {
-            started,
-            completion,
-            ..
-        } = run;
-        let observation = started.await.map_err(|_| {
-            ProtocolError::ObservationFailed("Agent run start signal closed".into())
-        })?;
+        let AgentRunHandle { mut process, .. } = run;
+        let observation = process.wait_started().await?;
         self.state
             .lock()
             .await
@@ -50,15 +41,15 @@ impl HostApp {
                 agent_instance_id: agent_instance_id.to_string(),
                 timestamp: crate::util::now_ms(),
             }),
-        );
+        )
+        .await;
         let completion = self
             .drive_operation_observation(
                 runner,
                 &address,
                 session_dir,
                 observation,
-                completion,
-                ui_event_rx,
+                process.wait_completion(),
                 tx,
             )
             .await?;
@@ -124,7 +115,7 @@ impl HostApp {
                 turn_id = %turn_id,
                 "turn observation loop finished; emitting terminal"
             );
-            send_event(tx, complete_event);
+            send_event(tx, complete_event).await;
         } else {
             tracing::info!(
                 session_id = %session_id,

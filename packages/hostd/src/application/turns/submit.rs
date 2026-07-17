@@ -1,14 +1,12 @@
 use std::path::PathBuf;
 
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
-
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
     BuildSystemPromptOptions, expand_prompt_template, snapshot_prompt_resources,
 };
 use crate::ports::AgentRunInput;
-use crate::util::{now_ms, send_event, storage_error};
+use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
 
 impl HostApp {
     /// Resolve the on-disk directory backing this session's AgentInstance
@@ -59,7 +57,7 @@ impl HostApp {
         session_id: String,
         agent_instance_id: String,
         text: String,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         let (turn_id, _) = {
             let mut state = self.state.lock().await;
@@ -76,7 +74,7 @@ impl HostApp {
         turn_id: String,
         agent_instance_id: String,
         text: String,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         let cwd = {
             let state = self.state.lock().await;
@@ -114,7 +112,6 @@ impl HostApp {
             agent_instance_id = %agent_instance_id,
             "turn observation loop starting"
         );
-        let (ui_event_tx, ui_event_rx) = unbounded_channel();
         let run = match runner
             .run_agent(AgentRunInput {
                 session_id: session_id.clone(),
@@ -126,7 +123,6 @@ impl HostApp {
                 cwd: cwd.clone(),
                 active_tool_names,
                 session_dir: session_dir.clone(),
-                ui_event_tx,
                 resume_agent,
             })
             .await
@@ -144,8 +140,9 @@ impl HostApp {
                         command_id,
                         result: Err(error.to_string()),
                     },
-                );
-                send_event(tx, failed);
+                )
+                .await;
+                send_event(tx, failed).await;
                 return Ok(());
             }
         };
@@ -160,7 +157,8 @@ impl HostApp {
                 command_id,
                 result: Ok(CommandResult::Empty),
             },
-        );
+        )
+        .await;
         if status == crate::api::TurnStatus::Queued {
             send_event(
                 tx,
@@ -170,7 +168,8 @@ impl HostApp {
                     agent_instance_id: agent_instance_id.clone(),
                     timestamp: now_ms(),
                 }),
-            );
+            )
+            .await;
         }
 
         let turn_result = self
@@ -181,7 +180,6 @@ impl HostApp {
                 &agent_instance_id,
                 &session_dir,
                 run,
-                ui_event_rx,
                 tx,
             )
             .await;

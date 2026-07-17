@@ -2,18 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
-
-enum OutboundLine {
-    ServerMessage(String),
-    Done,
-}
-
-enum InboundLine {
-    Command(Command),
-    Rejected(Box<ServerMessage>),
-    Closed,
-}
 
 use crate::api::{Command, ServerMessage};
 use crate::domain::config::SettingsManager;
@@ -21,6 +9,8 @@ use crate::infra::storage::JsonlSessionRepository;
 use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner};
+
+const MAX_IN_FLIGHT_COMMANDS: usize = 64;
 
 pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = tokio::io::stdin();
@@ -71,116 +61,82 @@ where
     R: AsyncBufRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin,
 {
-    let (event_tx, mut event_rx) = unbounded_channel::<OutboundLine>();
-    let (command_tx, mut command_rx) = unbounded_channel::<InboundLine>();
-    read_commands(reader, command_tx);
+    let (event_tx, mut event_rx) =
+        piko_comms::mailbox::<piko_comms::contracts::HostCommandOutput, ServerMessage>();
+    let mut reader = reader;
+    let mut line = String::new();
+    let mut command_tasks = tokio::task::JoinSet::new();
     let mut input_closed = false;
-    let mut active_streams = 0usize;
     loop {
-        if input_closed && active_streams == 0 {
+        if input_closed && command_tasks.is_empty() && event_rx.is_empty() {
             break;
         }
         tokio::select! {
-            maybe_outbound = event_rx.recv(), if active_streams > 0 => {
-                let Some(outbound) = maybe_outbound else {
-                    active_streams = 0;
-                    continue;
-                };
-                match outbound {
-                    OutboundLine::ServerMessage(encoded) => {
-                        writer.write_all(encoded.as_bytes()).await?;
-                        writer.write_all(b"\n").await?;
-                        writer.flush().await?;
+            maybe_outbound = event_rx.recv() => {
+                let Some(outbound) = maybe_outbound else { continue };
+                write_ack(&mut writer, outbound).await?;
+            }
+            read = reader.read_line(&mut line), if !input_closed => {
+                match read {
+                    Ok(0) => input_closed = true,
+                    Ok(_) => {
+                        let raw = line.trim();
+                        if raw.is_empty() {
+                            line.clear();
+                            continue;
+                        }
+                        match serde_json::from_str::<Command>(raw) {
+                            Ok(command) => {
+                                if command_tasks.len() >= MAX_IN_FLIGHT_COMMANDS {
+                                    write_ack(
+                                        &mut writer,
+                                        ServerMessage::CommandResponse {
+                                            command_id: command.command_id().to_string(),
+                                            result: Err(format!(
+                                                "host command overload: maximum {MAX_IN_FLIGHT_COMMANDS} in flight"
+                                            )),
+                                        },
+                                    )
+                                    .await?;
+                                    line.clear();
+                                    continue;
+                                }
+                                let command_server = server.clone();
+                                let command_tx = event_tx.clone();
+                                command_tasks.spawn(async move {
+                                    command_server.handle_command_into(command, command_tx).await;
+                                });
+                            }
+                            Err(err) => {
+                                write_ack(
+                                    &mut writer,
+                                    ServerMessage::CommandResponse {
+                                        command_id: "unknown".to_string(),
+                                        result: Err(format!("invalid json command: {err}")),
+                                    },
+                                )
+                                .await?;
+                            }
+                        }
+                        line.clear();
                     }
-                    OutboundLine::Done => {
-                        active_streams = active_streams.saturating_sub(1);
+                    Err(err) => {
+                        write_ack(
+                            &mut writer,
+                            ServerMessage::CommandResponse {
+                                command_id: "unknown".to_string(),
+                                result: Err(format!("read command: {err}")),
+                            },
+                        )
+                        .await?;
+                        input_closed = true;
                     }
                 }
             }
-            inbound = command_rx.recv(), if !input_closed => {
-                match inbound {
-                    Some(InboundLine::Command(command)) => {
-                        active_streams += 1;
-                        forward_events(server.handle_command_stream(command), event_tx.clone());
-                    }
-                    Some(InboundLine::Rejected(message)) => {
-                        write_ack(&mut writer, *message).await?;
-                    }
-                    Some(InboundLine::Closed) | None => input_closed = true,
-                }
-            }
+            _ = command_tasks.join_next(), if !command_tasks.is_empty() => {}
         }
     }
     Ok(())
-}
-
-fn read_commands<R>(mut reader: R, command_tx: UnboundedSender<InboundLine>)
-where
-    R: AsyncBufRead + Unpin + Send + 'static,
-{
-    tokio::spawn(async move {
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let read = match reader.read_line(&mut line).await {
-                Ok(read) => read,
-                Err(err) => {
-                    let _ = command_tx.send(InboundLine::Rejected(Box::new(
-                        ServerMessage::CommandResponse {
-                            command_id: "unknown".to_string(),
-                            result: Err(format!("read command: {err}")),
-                        },
-                    )));
-                    break;
-                }
-            };
-            if read == 0 {
-                break;
-            }
-            let raw = line.trim();
-            if raw.is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<Command>(raw) {
-                Ok(command) => {
-                    if command_tx.send(InboundLine::Command(command)).is_err() {
-                        return;
-                    }
-                }
-                Err(err) => {
-                    if command_tx
-                        .send(InboundLine::Rejected(Box::new(
-                            ServerMessage::CommandResponse {
-                                command_id: "unknown".to_string(),
-                                result: Err(format!("invalid json command: {err}")),
-                            },
-                        )))
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-        }
-        let _ = command_tx.send(InboundLine::Closed);
-    });
-}
-
-fn forward_events(
-    mut events: tokio::sync::mpsc::UnboundedReceiver<crate::api::ServerMessage>,
-    event_tx: UnboundedSender<OutboundLine>,
-) {
-    tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            let Ok(encoded) = serde_json::to_string(&event) else {
-                continue;
-            };
-            if event_tx.send(OutboundLine::ServerMessage(encoded)).is_err() {
-                break;
-            }
-        }
-        let _ = event_tx.send(OutboundLine::Done);
-    });
 }
 
 async fn write_ack<W>(writer: &mut W, ack: ServerMessage) -> Result<(), Box<dyn std::error::Error>>

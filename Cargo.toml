@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "packages/hostd", "packages/llmd",
-  "packages/orchd", "packages/orchd-api", "packages/protocol",
+  "packages/orchd", "packages/orchd-api", "packages/protocol", "packages/comms",
   "packages/sandbox", "packages/tui",
 ]
 resolver = "2"

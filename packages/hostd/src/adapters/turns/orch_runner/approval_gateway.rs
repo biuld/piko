@@ -1,12 +1,8 @@
 use async_trait::async_trait;
-use tokio::sync::oneshot;
-
 use orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest};
 
-use crate::adapters::turns::approval::ApprovalScope;
-use crate::api::ServerMessage;
-
 use super::OrchAgentRunRunner;
+use crate::adapters::turns::approval::ApprovalScope;
 
 #[async_trait]
 impl ApprovalGateway for OrchAgentRunRunner {
@@ -34,7 +30,7 @@ impl ApprovalGateway for OrchAgentRunRunner {
             }
         }
 
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = piko_comms::reply::<piko_comms::contracts::ApprovalReply, _>();
         let approval_id = request.tool_entity_id.clone();
         let session_id = request
             .host_context
@@ -44,36 +40,35 @@ impl ApprovalGateway for OrchAgentRunRunner {
             tracing::warn!("declining approval without host session context");
             return ToolApprovalDecision::Decline;
         };
+        let snapshot = crate::api::ApprovalSnapshot {
+            approval_id: approval_id.clone(),
+            agent_instance_id: request.agent_instance_id.clone(),
+            tool_name: request.tool_name.clone(),
+            request: request.tool_args.clone(),
+            status: crate::api::ApprovalStatus::Pending,
+        };
         {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.insert(
                 approval_id.clone(),
                 super::PendingApprovalEntry {
                     session_id: Some(session_id.clone()),
-                    snapshot: crate::api::ApprovalSnapshot {
-                        approval_id: approval_id.clone(),
-                        agent_instance_id: request.agent_instance_id.clone(),
-                        tool_name: request.tool_name.clone(),
-                        request: request.tool_args.clone(),
-                        status: crate::api::ApprovalStatus::Pending,
-                    },
+                    snapshot: snapshot.clone(),
                     tx,
                 },
             );
         }
 
-        self.ui_router.publish(
-            &session_id,
-            &request.agent_instance_id,
-            ServerMessage::Approval(crate::api::ApprovalEvent::Requested {
-                session_id: session_id.clone(),
-                agent_instance_id: request.agent_instance_id.clone(),
-                agent_id: request.agent_id.clone(),
-                approval_id: approval_id.clone(),
-                tool_name: request.tool_name.clone(),
-                tool_args: request.tool_args.clone(),
-            }),
-        );
+        self.observation_router
+            .publish(
+                &session_id,
+                &request.agent_instance_id,
+                &request.agent_id,
+                piko_protocol::agent_runtime::SessionEvent::ApprovalRequested {
+                    approval: snapshot,
+                },
+            )
+            .await;
 
         let decision = match rx.await {
             Ok(d) => d,

@@ -67,7 +67,6 @@ pub enum SessionOutput {
 pub struct SessionEventEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: String,
-    pub transcript_seq: u64,
     pub cursor: SessionCursor,
     pub event: SessionEvent,
 }
@@ -76,20 +75,33 @@ pub struct SessionEventEnvelope {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEvent {
     MessageCommitted {
+        transcript_seq: u64,
         message_id: MessageId,
         source_turn_id: String,
         role: MessageRole,
     },
     ToolCommitted {
+        transcript_seq: u64,
         message_id: MessageId,
         source_turn_id: String,
         tool_call_id: String,
     },
     InteractionRequested {
-        request: serde_json::Value,
+        interaction: crate::UserInteractionSnapshot,
     },
     InteractionResolved {
-        resolution: serde_json::Value,
+        interaction_id: crate::InteractionId,
+        status: crate::UserInteractionStatus,
+    },
+    AgentChanged {
+        agent: crate::AgentInfo,
+    },
+    ApprovalRequested {
+        approval: crate::ApprovalSnapshot,
+    },
+    ApprovalResolved {
+        approval_id: crate::ApprovalId,
+        status: crate::ApprovalStatus,
     },
 }
 
@@ -138,12 +150,12 @@ mod tests {
         let value = serde_json::to_value(SessionEventEnvelope {
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            transcript_seq: 1,
             cursor: SessionCursor {
                 epoch: "epoch".into(),
                 seq: 1,
             },
             event: SessionEvent::MessageCommitted {
+                transcript_seq: 1,
                 message_id: "message-1".into(),
                 source_turn_id: "turn-1".into(),
                 role: MessageRole::Assistant,

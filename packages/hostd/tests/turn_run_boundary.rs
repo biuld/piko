@@ -1,5 +1,4 @@
-#[path = "support/mock_session.rs"]
-mod mock_session;
+mod support;
 
 use std::sync::Arc;
 
@@ -7,7 +6,7 @@ use async_trait::async_trait;
 use hostd::api::ServerMessage as Event;
 use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
-use mock_session::MockSessionPublisher;
+use support::{MockSessionPublisher, test_agent_run_process};
 
 #[derive(Clone, Default)]
 struct CancellableAgentRunRunner {
@@ -61,14 +60,15 @@ impl AgentRunRunner for CancellableAgentRunRunner {
             "main",
             0,
             piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
-                resolution: serde_json::json!({"marker": "active"}),
+                interaction_id: "active".into(),
+                status: piko_protocol::UserInteractionStatus::Submitted,
             },
         );
         let barrier = piko_protocol::agent_runtime::SessionCursor {
             epoch: subscription.cursor.epoch.clone(),
             seq: 1,
         };
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         *self.active.lock().unwrap() = Some(CancellableRun {
             session_id: input.session_id.clone(),
             turn_id: input.operation_id.clone(),
@@ -76,7 +76,7 @@ impl AgentRunRunner for CancellableAgentRunRunner {
             barrier,
             completion_tx,
         });
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
@@ -90,8 +90,7 @@ impl AgentRunRunner for CancellableAgentRunRunner {
                 agent_instance_id: input.agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 
@@ -176,7 +175,7 @@ impl AgentRunRunner for ChildReportRunner {
     ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let barrier = subscription.cursor.clone();
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         let session_id = input.session_id.clone();
         let turn_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
@@ -192,7 +191,7 @@ impl AgentRunRunner for ChildReportRunner {
                 observation_barrier: barrier,
             });
         });
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
@@ -206,8 +205,7 @@ impl AgentRunRunner for ChildReportRunner {
                 agent_instance_id: input.agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 }

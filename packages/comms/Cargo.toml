@@ -1,0 +1,18 @@
+[package]
+name = "piko-comms"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed communication contracts and channel policy for piko"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tracing = "0.1"
+
+[[bin]]
+name = "piko-comms-topology"
+path = "src/bin/topology.rs"

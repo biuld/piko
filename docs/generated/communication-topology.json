@@ -1,0 +1,267 @@
+[
+  {
+    "id": "orchd.agent.commands",
+    "kind": "mailbox",
+    "owner": "AgentActor",
+    "producers": [
+      "AgentRuntime",
+      "ExecutionTerminalWaiter"
+    ],
+    "consumer": "AgentActor",
+    "scope": "agent",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "bounded",
+      "value": 32
+    },
+    "overflow": "reject_overload",
+    "closure": "runtime_unavailable",
+    "cancellation": "explicit_command"
+  },
+  {
+    "id": "orchd.agent.command_reply",
+    "kind": "reply",
+    "owner": "AgentRuntimeCaller",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "AgentRuntimeCaller",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "orchd.agent.run_started",
+    "kind": "reply",
+    "owner": "AgentRunAcceptance",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "AgentRunAcceptance",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "orchd.agent.run_report",
+    "kind": "reply",
+    "owner": "AgentRunAcceptance",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "AgentRunAcceptance",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "orchd.agent.snapshot",
+    "kind": "latest_state",
+    "owner": "AgentActor",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "AgentRuntime",
+    "scope": "agent",
+    "delivery": "latest_only",
+    "capacity": {
+      "type": "latest"
+    },
+    "overflow": "replace_latest",
+    "closure": "runtime_unavailable",
+    "cancellation": "scope_shutdown"
+  },
+  {
+    "id": "orchd.execution.commands",
+    "kind": "mailbox",
+    "owner": "ExecutionActor",
+    "producers": [
+      "AgentExecutionRuntime"
+    ],
+    "consumer": "ExecutionActor",
+    "scope": "execution",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "bounded",
+      "value": 32
+    },
+    "overflow": "reject_overload",
+    "closure": "runtime_unavailable",
+    "cancellation": "explicit_command"
+  },
+  {
+    "id": "orchd.execution.command_reply",
+    "kind": "reply",
+    "owner": "AgentExecutionRuntime",
+    "producers": [
+      "ExecutionActor"
+    ],
+    "consumer": "AgentExecutionRuntime",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "orchd.execution.terminal",
+    "kind": "reply",
+    "owner": "ExecutionSupervisor",
+    "producers": [
+      "ExecutionSupervisor"
+    ],
+    "consumer": "ExecutionTerminalWaiter",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "scope_shutdown"
+  },
+  {
+    "id": "orchd.execution.handoff_ack",
+    "kind": "reply",
+    "owner": "ExecutionTerminalWaiter",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "ExecutionTerminalWaiter",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "orchd.session.reliable_observation",
+    "kind": "observation",
+    "owner": "SessionOutputHub",
+    "producers": [
+      "SessionObservationRouter"
+    ],
+    "consumer": "HostObservationProjection",
+    "scope": "session",
+    "delivery": "reliable_observation",
+    "capacity": {
+      "type": "bounded",
+      "value": 64
+    },
+    "overflow": "recover_snapshot",
+    "closure": "observation_ended",
+    "cancellation": "scope_shutdown"
+  },
+  {
+    "id": "orchd.session.realtime_observation",
+    "kind": "observation",
+    "owner": "SessionOutputHub",
+    "producers": [
+      "SessionObservationRouter"
+    ],
+    "consumer": "HostObservationProjection",
+    "scope": "session",
+    "delivery": "best_effort",
+    "capacity": {
+      "type": "bounded",
+      "value": 256
+    },
+    "overflow": "drop_newest",
+    "closure": "observation_ended",
+    "cancellation": "scope_shutdown"
+  },
+  {
+    "id": "hostd.prompt.approval_reply",
+    "kind": "reply",
+    "owner": "OrchAgentRunRunner",
+    "producers": [
+      "HostApp"
+    ],
+    "consumer": "ApprovalGateway",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "request_cancelled",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "hostd.prompt.interaction_reply",
+    "kind": "reply",
+    "owner": "OrchAgentRunRunner",
+    "producers": [
+      "HostApp"
+    ],
+    "consumer": "UserInteractionGateway",
+    "scope": "request",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "one"
+    },
+    "overflow": "not_applicable",
+    "closure": "request_cancelled",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "tui.host.process_bridge",
+    "kind": "thread_bridge",
+    "owner": "HostdClient",
+    "producers": [
+      "HostStdoutReaderThread"
+    ],
+    "consumer": "TuiEventLoop",
+    "scope": "process",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "unbounded",
+      "value": {
+        "justification": "blocking host stdout reader crosses into the synchronous TUI loop"
+      }
+    },
+    "overflow": "not_applicable",
+    "closure": "process_exited",
+    "cancellation": "disconnect_only"
+  },
+  {
+    "id": "hostd.client.output",
+    "kind": "client_output",
+    "owner": "HostClientConnection",
+    "producers": [
+      "HostApp",
+      "HostServerCommandTask"
+    ],
+    "consumer": "HostTransport",
+    "scope": "connection",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "bounded",
+      "value": 256
+    },
+    "overflow": "await_capacity",
+    "closure": "client_disconnected",
+    "cancellation": "disconnect_only"
+  }
+]

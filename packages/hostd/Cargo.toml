@@ -20,6 +20,7 @@ async-stream = "0.3"
 
 orchd = { path = "../orchd" }
 orchd-api = { path = "../orchd-api" }
+piko-comms = { path = "../comms" }
 tokio = { version = "1", features = ["full"] }
 futures-core = "0.3"
 tokio-stream = "0.1"

@@ -15,7 +15,7 @@ use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{
     MockSessionPublisher, execution_running, execution_succeeded, success_report,
-    successful_turn_run,
+    successful_turn_run, test_agent_run_process,
 };
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
@@ -142,6 +142,7 @@ impl AgentRunRunner for AssistantRunner {
                 "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: "user-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -153,6 +154,7 @@ impl AgentRunRunner for AssistantRunner {
                 "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: "assistant-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
@@ -295,6 +297,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 "agent-1",
                 user_task_seq,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: user_message_id,
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -306,6 +309,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 "agent-1",
                 assistant_task_seq,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: assistant_message_id,
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
@@ -351,7 +355,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
             epoch: subscription.cursor.epoch.clone(),
             seq: 2,
         };
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         let completion_session_id = input.session_id.clone();
         let completion_turn_id = input.operation_id.clone();
         let completion_agent_instance_id = input.agent_instance_id.clone();
@@ -373,7 +377,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
             });
         });
 
-        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (started_tx, started_rx) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
@@ -387,8 +391,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
                 agent_instance_id: input.agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
             },
-            started: started_rx,
-            completion,
+            process: test_agent_run_process(started_rx, completion),
         })
     }
 

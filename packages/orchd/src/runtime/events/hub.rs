@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::broadcast;
+use piko_comms::BroadcastSender;
+use piko_comms::contracts::{SessionRealtimeObservation, SessionReliableObservation};
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
@@ -26,8 +27,8 @@ pub struct SendError;
 pub struct SessionOutputHub {
     session_id: String,
     epoch: String,
-    reliable_tx: broadcast::Sender<SessionEventEnvelope>,
-    delta_tx: broadcast::Sender<RealtimeDeltaEnvelope>,
+    reliable_tx: BroadcastSender<SessionReliableObservation, SessionEventEnvelope>,
+    delta_tx: BroadcastSender<SessionRealtimeObservation, RealtimeDeltaEnvelope>,
     cursor_seq: std::sync::atomic::AtomicU64,
     reliable_retention: tokio::sync::Mutex<VecDeque<SessionEventEnvelope>>,
     retention_limit: usize,
@@ -35,8 +36,10 @@ pub struct SessionOutputHub {
 
 impl SessionOutputHub {
     pub fn new(session_id: String, epoch: String, buffer: usize) -> Self {
-        let (reliable_tx, _) = broadcast::channel(buffer);
-        let (delta_tx, _) = broadcast::channel(buffer * 4);
+        let (reliable_tx, _) =
+            piko_comms::broadcast::<SessionReliableObservation, SessionEventEnvelope>();
+        let (delta_tx, _) =
+            piko_comms::broadcast::<SessionRealtimeObservation, RealtimeDeltaEnvelope>();
         Self {
             session_id,
             epoch,
@@ -116,8 +119,8 @@ impl SessionOutputHub {
             .collect();
         Ok(SessionHubSubscription {
             session_id: self.session_id.clone(),
-            reliable: BroadcastStream::new(reliable),
-            delta: BroadcastStream::new(delta),
+            reliable: reliable.into_stream(),
+            delta: delta.into_stream(),
             replay,
         })
     }
@@ -207,12 +210,12 @@ mod tests {
         SessionEventEnvelope {
             agent_instance_id: "root".into(),
             agent_id: "agent".into(),
-            transcript_seq: 1,
             cursor: SessionCursor {
                 epoch: String::new(),
                 seq: 0,
             },
             event: SessionEvent::MessageCommitted {
+                transcript_seq: 1,
                 message_id: message_id.into(),
                 source_turn_id: "turn".into(),
                 role: MessageRole::Assistant,

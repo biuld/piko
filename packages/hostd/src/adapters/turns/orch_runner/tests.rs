@@ -4,8 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_core::Stream;
 use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
-use tokio::sync::mpsc::unbounded_channel;
-use tokio_stream::iter;
+use tokio_stream::{StreamExt, iter};
 use tokio_util::sync::CancellationToken;
 
 use orchd_api::AgentCommitPort;
@@ -13,7 +12,6 @@ use piko_protocol::AgentInstanceIdentity;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 
-use crate::api::ServerMessage;
 use crate::infra::storage::SessionStore;
 use crate::ports::{AgentOperationAddress, AgentRunInput, AgentRunRunner};
 
@@ -88,9 +86,16 @@ fn create_command() -> AgentDurableCommand {
 
 #[tokio::test]
 async fn agent_projection_is_emitted_only_after_durable_ack() {
-    let (event_tx, mut event_rx) = unbounded_channel();
-    let event_router = Arc::new(super::ui_router::UiEventRouter::default());
-    event_router.register("session-1", "operation", "child", true, event_tx);
+    let hub = Arc::new(orchd::events::SessionOutputHub::new(
+        "session-1".into(),
+        "epoch".into(),
+        4,
+    ));
+    let event_router = Arc::new(super::observation_router::SessionObservationRouter::default());
+    event_router.register("session-1", "operation", "child", true, Arc::clone(&hub));
+    let cursor = hub.cursor();
+    let subscription = hub.subscribe(&cursor).await.unwrap();
+    let mut output = orchd::events::merged_output_stream(subscription, cursor);
     let committing = ProjectingAgentCommitPort::new(
         Arc::new(EphemeralAgentCommitPort::default()),
         "session-1".into(),
@@ -101,10 +106,15 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
         .commit_agent_command("session", create_command())
         .await
         .unwrap();
+    let envelope = output.next().await.unwrap().unwrap();
     assert!(matches!(
-        event_rx.try_recv(),
-        Ok(ServerMessage::AgentChanged(info)) if info.agent_instance_id == "child"
+        envelope.output,
+        piko_protocol::agent_runtime::SessionOutput::Event(event)
+            if matches!(&event.event,
+                piko_protocol::agent_runtime::SessionEvent::AgentChanged { agent }
+                    if agent.agent_instance_id == "child")
     ));
+    let cursor_after_success = hub.cursor();
 
     let failing = ProjectingAgentCommitPort::new(
         Arc::new(FailingAgentCommitPort),
@@ -118,7 +128,7 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
             .await
             .is_err()
     );
-    assert!(event_rx.try_recv().is_err());
+    assert_eq!(hub.cursor(), cursor_after_success);
 }
 
 #[tokio::test]
@@ -187,7 +197,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         "test-model",
     )
     .await;
-    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let run = runner
         .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
@@ -199,7 +208,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
-            ui_event_tx,
             resume_agent: None,
         })
         .await
@@ -217,7 +225,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         },
     )
     .await;
-    let (duplicate_ui_tx, _duplicate_ui_rx) = unbounded_channel();
     let duplicate = runner
         .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
@@ -229,7 +236,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
-            ui_event_tx: duplicate_ui_tx,
             resume_agent: None,
         })
         .await;
@@ -237,7 +243,6 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         duplicate.unwrap().receipt.disposition,
         piko_protocol::InputDisposition::Queued
     );
-    let (second_ui_tx, _second_ui_rx) = unbounded_channel();
     let second = runner
         .run_agent(AgentRunInput {
             session_id: "session-direct".into(),
@@ -249,13 +254,12 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             cwd: "/project".into(),
             active_tool_names: Some(Vec::new()),
             session_dir: temp.path().to_path_buf(),
-            ui_event_tx: second_ui_tx,
             resume_agent: None,
         })
         .await
         .expect("different AgentInstances may run concurrently");
-    let completed = run.completion.await.unwrap();
-    let second_completed = second.completion.await.unwrap();
+    let completed = run.process.wait_completion().await.unwrap();
+    let second_completed = second.process.wait_completion().await.unwrap();
     assert_eq!(completed.address.agent_instance_id, child_id);
     assert!(completed.result.is_ok());
     assert!(second_completed.result.is_ok());

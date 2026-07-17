@@ -1,0 +1,9 @@
+disallowed-methods = [
+  { path = "tokio::sync::mpsc::channel", reason = "declare a piko-comms contract and use piko_comms::mailbox" },
+  { path = "tokio::sync::mpsc::unbounded_channel", reason = "unbounded channels require an explicit piko-comms contract" },
+  { path = "tokio::sync::oneshot::channel", reason = "declare a piko-comms reply contract and use piko_comms::reply" },
+  { path = "tokio::sync::watch::channel", reason = "declare a latest-state contract and use piko_comms::latest" },
+  { path = "tokio::sync::broadcast::channel", reason = "declare an observation contract and use piko_comms::broadcast" },
+  { path = "std::sync::mpsc::channel", reason = "thread bridges must use a declared piko-comms contract" },
+  { path = "std::sync::mpsc::sync_channel", reason = "thread bridges must use a declared piko-comms contract" },
+]

@@ -129,6 +129,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "main".into(),
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: "user-main".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -156,6 +157,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "hello-agent".into(),
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: "user-child".into(),
                     source_turn_id: "child-work".into(),
                     role: MessageRole::User,
@@ -192,6 +194,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 "hello-agent".into(),
                 2,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 3,
                     message_id: "assistant-child".into(),
                     source_turn_id: "child-work".into(),
                     role: MessageRole::Assistant,

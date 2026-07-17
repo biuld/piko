@@ -1,6 +1,50 @@
+#![allow(clippy::disallowed_methods)]
+#![allow(dead_code)]
+
 pub mod mock_session;
 
 pub use mock_session::MockSessionPublisher;
+
+pub fn test_oneshot<T>() -> (
+    tokio::sync::oneshot::Sender<T>,
+    tokio::sync::oneshot::Receiver<T>,
+) {
+    tokio::sync::oneshot::channel()
+}
+
+pub struct TestAgentRunProcess {
+    started: tokio::sync::oneshot::Receiver<orchd_api::SessionSubscription>,
+    completion: tokio::sync::oneshot::Receiver<hostd::ports::AgentRunCompletion>,
+}
+
+#[async_trait::async_trait]
+impl hostd::ports::AgentRunProcess for TestAgentRunProcess {
+    async fn wait_started(
+        &mut self,
+    ) -> Result<orchd_api::SessionSubscription, hostd::api::ProtocolError> {
+        (&mut self.started).await.map_err(|_| {
+            hostd::api::ProtocolError::ObservationFailed("test start signal closed".into())
+        })
+    }
+
+    async fn wait_completion(
+        self: Box<Self>,
+    ) -> Result<hostd::ports::AgentRunCompletion, hostd::api::ProtocolError> {
+        self.completion.await.map_err(|_| {
+            hostd::api::ProtocolError::ObservationFailed("test completion signal closed".into())
+        })
+    }
+}
+
+pub fn test_agent_run_process(
+    started: tokio::sync::oneshot::Receiver<orchd_api::SessionSubscription>,
+    completion: tokio::sync::oneshot::Receiver<hostd::ports::AgentRunCompletion>,
+) -> Box<dyn hostd::ports::AgentRunProcess> {
+    Box::new(TestAgentRunProcess {
+        started,
+        completion,
+    })
+}
 
 pub fn successful_turn_run(
     subscription: orchd_api::SessionSubscription,
@@ -17,8 +61,8 @@ pub fn successful_turn_run(
         epoch: subscription.cursor.epoch.clone(),
         seq: barrier_seq,
     };
-    let (completion_tx, completion) = tokio::sync::oneshot::channel();
-    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let (completion_tx, completion) = test_oneshot();
+    let (started_tx, started) = test_oneshot();
     let _ = started_tx.send(subscription);
     let handle_root_agent_instance_id = root_agent_instance_id.clone();
     let address = hostd::ports::AgentOperationAddress {
@@ -46,8 +90,7 @@ pub fn successful_turn_run(
             agent_instance_id: root_agent_instance_id.clone(),
             disposition: piko_protocol::InputDisposition::Accepted,
         },
-        started,
-        completion,
+        process: test_agent_run_process(started, completion),
     }
 }
 
@@ -67,12 +110,14 @@ pub fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::Ag
 use piko_protocol::agent_runtime::SessionEvent;
 pub fn execution_running() -> SessionEvent {
     SessionEvent::InteractionResolved {
-        resolution: serde_json::json!({"marker": "running"}),
+        interaction_id: "running".into(),
+        status: piko_protocol::UserInteractionStatus::Submitted,
     }
 }
 
 pub fn execution_succeeded() -> SessionEvent {
     SessionEvent::InteractionResolved {
-        resolution: serde_json::json!({"marker": "completed"}),
+        interaction_id: "completed".into(),
+        status: piko_protocol::UserInteractionStatus::Submitted,
     }
 }

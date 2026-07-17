@@ -1,22 +1,23 @@
 use orchd_api::AgentApiError;
-use tokio::sync::oneshot;
+use piko_comms::contracts::ExecutionHandoffAck;
+use piko_comms::{ReplyReceiver, ReplySender};
 
 /// The receiving Actor owns the only payload and the obligation to explicitly
 /// acknowledge that it has accepted the handoff.
 pub(crate) struct ExecutionHandoffLease<T> {
     payload: T,
-    accepted: Option<oneshot::Sender<()>>,
+    accepted: Option<ReplySender<ExecutionHandoffAck, ()>>,
 }
 
 /// The sending supervisor retains only the completion obligation, never a
 /// second mutable copy of the payload.
 pub(crate) struct ExecutionHandoffWaiter {
-    accepted: oneshot::Receiver<()>,
+    accepted: ReplyReceiver<ExecutionHandoffAck, ()>,
 }
 
 impl<T> ExecutionHandoffLease<T> {
     pub fn new(payload: T) -> (Self, ExecutionHandoffWaiter) {
-        let (accepted, waiter) = oneshot::channel();
+        let (accepted, waiter) = piko_comms::reply::<ExecutionHandoffAck, _>();
         (
             Self {
                 payload,

@@ -12,9 +12,8 @@ use orchd_api::SessionSubscription;
 use piko_protocol::agent_runtime::SessionRuntimeSnapshot;
 use support::{
     MockSessionPublisher, execution_running, execution_succeeded, success_report,
-    successful_turn_run,
+    successful_turn_run, test_agent_run_process,
 };
-use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::StreamExt;
 
 #[derive(Clone, Default)]
@@ -42,7 +41,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
         *self.turn_id.lock().unwrap() = Some(input.operation_id.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         self.publishers.lock().unwrap().push(publisher.clone());
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         *self.completion_tx.lock().unwrap() = Some(completion_tx);
         let publish_agent_instance_id = root_agent_instance_id.clone();
         tokio::spawn(async move {
@@ -54,7 +53,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
             );
             publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
         });
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
             address: hostd::ports::AgentOperationAddress {
@@ -68,8 +67,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                 agent_instance_id: root_agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 
@@ -148,7 +146,6 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
 #[tokio::test]
 async fn mock_turn_runner_completes_turn() {
     let runner = MockAgentRunRunner;
-    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_agent(AgentRunInput {
             session_id: "session-test".into(),
@@ -163,13 +160,13 @@ async fn mock_turn_runner_completes_turn() {
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            ui_event_tx,
             resume_agent: None,
         })
         .await
         .unwrap();
 
-    let mut output = subscription.started.await.unwrap().output;
+    let mut process = subscription.process;
+    let mut output = process.wait_started().await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
@@ -236,7 +233,6 @@ async fn mock_turn_with_storage_populates_state() {
 async fn turn_runner_returns_streaming_events() {
     let runner = MockAgentRunRunner;
 
-    let (ui_event_tx, _ui_event_rx) = unbounded_channel();
     let subscription = runner
         .run_agent(AgentRunInput {
             session_id: "session-test".into(),
@@ -251,13 +247,13 @@ async fn turn_runner_returns_streaming_events() {
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            ui_event_tx,
             resume_agent: None,
         })
         .await
         .unwrap();
 
-    let mut output = subscription.started.await.unwrap().output;
+    let mut process = subscription.process;
+    let mut output = process.wait_started().await.unwrap().output;
     assert!(output.next().await.is_some());
 }
 
@@ -363,7 +359,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
         if disposition == piko_protocol::InputDisposition::Accepted {
             self.prompts.lock().unwrap().push(input.prompt.clone());
         }
-        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (started_tx, started) = support::test_oneshot();
         let epoch = subscription.cursor.epoch.clone();
         let queued_start = if disposition == piko_protocol::InputDisposition::Accepted {
             let _ = started_tx.send(subscription);
@@ -371,7 +367,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
         } else {
             Some((started_tx, subscription))
         };
-        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let (completion_tx, completion) = support::test_oneshot();
         let runner = self.clone();
         let session_id = input.session_id.clone();
         let operation_id = input.operation_id.clone();
@@ -405,8 +401,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
                 agent_instance_id: input.agent_instance_id,
                 disposition,
             },
-            started,
-            completion,
+            process: test_agent_run_process(started, completion),
         })
     }
 }

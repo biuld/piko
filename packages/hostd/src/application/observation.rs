@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc::UnboundedSender;
-
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::application::turns::projection::reconcile_committed_messages;
@@ -9,7 +7,7 @@ use crate::application::turns::projection::{
     realtime_message_from_delta, record_committed_message,
 };
 use crate::ports::{AgentOperationAddress, AgentRunRunner, OperationRunCompletion};
-use crate::util::send_event;
+use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
     #[allow(clippy::too_many_arguments)]
@@ -19,9 +17,10 @@ impl HostApp {
         address: &AgentOperationAddress,
         session_dir: &std::path::Path,
         observation: orchd_api::SessionSubscription,
-        mut completion_rx: tokio::sync::oneshot::Receiver<C>,
-        mut ui_event_rx: tokio::sync::mpsc::UnboundedReceiver<ServerMessage>,
-        tx: &UnboundedSender<ServerMessage>,
+        mut completion_future: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<C, ProtocolError>> + Send>,
+        >,
+        tx: &ClientEventSender,
     ) -> Result<C, ProtocolError>
     where
         C: OperationRunCompletion + 'static,
@@ -31,7 +30,6 @@ impl HostApp {
         let mut output = observation.output;
         let mut observed_cursor = observation.cursor;
         let mut completion = None;
-        let mut ui_events_open = true;
 
         loop {
             if completion.as_ref().is_some_and(|completed: &C| {
@@ -41,27 +39,14 @@ impl HostApp {
             }
             tokio::select! {
                 biased;
-                result = &mut completion_rx, if completion.is_none() => {
-                    let completed = result.map_err(|_| ProtocolError::ObservationFailed(
-                        format!("operation completion channel closed for {}/{}/{}",
-                            address.session_id,
-                            address.agent_instance_id,
-                            address.operation_id,
-                        )
-                    ))?;
+                result = &mut completion_future, if completion.is_none() => {
+                    let completed = result?;
                     if completed.operation_address() != *address {
                         return Err(ProtocolError::ObservationFailed(
                             "operation completion identity mismatch".into(),
                         ));
                     }
                     completion = Some(completed);
-                }
-                ui_event = ui_event_rx.recv(), if ui_events_open => {
-                    if let Some(event) = ui_event {
-                        self.forward_operation_ui_event(&address.session_id, event, tx).await;
-                    } else {
-                        ui_events_open = false;
-                    }
                 }
                 item = output.next() => {
                     let Some(item) = item else {
@@ -110,8 +95,6 @@ impl HostApp {
             }
         }
 
-        self.drain_operation_ui_events(&address.session_id, &mut ui_event_rx, tx)
-            .await;
         Ok(completion.expect("completion checked before observation driver exits"))
     }
 
@@ -120,12 +103,12 @@ impl HostApp {
         session_id: &str,
         session_dir: &std::path::Path,
         envelope: piko_protocol::agent_runtime::SessionOutputEnvelope,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<Option<piko_protocol::agent_runtime::SessionCursor>, ProtocolError> {
         match envelope.output {
             piko_protocol::agent_runtime::SessionOutput::Delta(delta) => {
                 if let Some(event) = realtime_message_from_delta(session_id, &delta) {
-                    send_event(tx, ServerMessage::RealtimeMessage(event));
+                    send_event(tx, ServerMessage::RealtimeMessage(event)).await;
                 }
                 Ok(None)
             }
@@ -157,46 +140,88 @@ impl HostApp {
                                 event.agent_instance_id
                             ))
                         })?;
-                        send_event(tx, ServerMessage::TranscriptCommitted(committed));
+                        send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
                     }
-                    _ => {}
+                    piko_protocol::agent_runtime::SessionEvent::AgentChanged { agent } => {
+                        self.state
+                            .lock()
+                            .await
+                            .upsert_live_agent(session_id, agent.clone())?;
+                        send_event(tx, ServerMessage::AgentChanged(agent)).await;
+                    }
+                    piko_protocol::agent_runtime::SessionEvent::ApprovalRequested { approval } => {
+                        send_event(
+                            tx,
+                            ServerMessage::Approval(crate::api::ApprovalEvent::Requested {
+                                session_id: session_id.to_string(),
+                                agent_instance_id: approval.agent_instance_id,
+                                agent_id: event.agent_id,
+                                approval_id: approval.approval_id,
+                                tool_name: approval.tool_name,
+                                tool_args: approval.request,
+                            }),
+                        )
+                        .await;
+                    }
+                    piko_protocol::agent_runtime::SessionEvent::ApprovalResolved {
+                        approval_id,
+                        status,
+                    } => {
+                        let decision = match status {
+                            crate::api::ApprovalStatus::Approved => {
+                                crate::api::ApprovalDecision::Accept
+                            }
+                            crate::api::ApprovalStatus::Pending
+                            | crate::api::ApprovalStatus::Rejected => {
+                                crate::api::ApprovalDecision::Decline
+                            }
+                        };
+                        send_event(
+                            tx,
+                            ServerMessage::Approval(crate::api::ApprovalEvent::Resolved {
+                                session_id: session_id.to_string(),
+                                approval_id,
+                                decision,
+                            }),
+                        )
+                        .await;
+                    }
+                    piko_protocol::agent_runtime::SessionEvent::InteractionRequested {
+                        interaction,
+                    } => {
+                        send_event(
+                            tx,
+                            ServerMessage::Interaction(crate::api::InteractionEvent::Requested {
+                                session_id: session_id.to_string(),
+                                agent_instance_id: interaction.agent_instance_id,
+                                agent_id: interaction.agent_id,
+                                interaction_id: interaction.interaction_id,
+                                tool_call_id: interaction.tool_call_id,
+                                title: interaction.title,
+                                questions: interaction.questions,
+                                require_confirm: interaction.require_confirm,
+                                auto_resolution_ms: interaction.auto_resolution_ms,
+                            }),
+                        )
+                        .await;
+                    }
+                    piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
+                        interaction_id,
+                        status,
+                    } => {
+                        send_event(
+                            tx,
+                            ServerMessage::Interaction(crate::api::InteractionEvent::Resolved {
+                                session_id: session_id.to_string(),
+                                interaction_id,
+                                status,
+                            }),
+                        )
+                        .await
+                    }
                 }
                 Ok(Some(cursor))
             }
-        }
-    }
-
-    pub(crate) async fn forward_operation_ui_event(
-        &self,
-        session_id: &str,
-        event: ServerMessage,
-        tx: &UnboundedSender<ServerMessage>,
-    ) {
-        if let ServerMessage::AgentChanged(info) = &event
-            && let Err(error) = self
-                .state
-                .lock()
-                .await
-                .upsert_live_agent(session_id, info.clone())
-        {
-            tracing::warn!(
-                session_id,
-                agent_instance_id = %info.agent_instance_id,
-                %error,
-                "failed to mirror AgentChanged into host state"
-            );
-        }
-        send_event(tx, event);
-    }
-
-    pub(crate) async fn drain_operation_ui_events(
-        &self,
-        session_id: &str,
-        rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerMessage>,
-        tx: &UnboundedSender<ServerMessage>,
-    ) {
-        while let Ok(event) = rx.try_recv() {
-            self.forward_operation_ui_event(session_id, event, tx).await;
         }
     }
 
@@ -211,7 +236,7 @@ impl HostApp {
         agent_instance_id: &str,
         session_dir: &std::path::Path,
         reason: piko_protocol::ReconcileReason,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) -> Result<orchd_api::SessionSubscription, ProtocolError> {
         let operation = AgentOperationAddress {
             session_id: session_id.to_string(),
@@ -238,7 +263,8 @@ impl HostApp {
                 snapshot,
                 agents,
             }),
-        );
+        )
+        .await;
         Ok(recovered)
     }
 }

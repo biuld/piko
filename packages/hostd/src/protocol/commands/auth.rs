@@ -1,6 +1,5 @@
-use tokio::sync::mpsc::UnboundedSender;
-
 use crate::api::{ProtocolError, ServerMessage};
+use crate::util::ClientEventSender;
 
 use crate::protocol::HostServer;
 
@@ -16,7 +15,7 @@ impl HostServer {
         &self,
         command_id: &str,
         provider: String,
-        tx: &UnboundedSender<ServerMessage>,
+        tx: &ClientEventSender,
     ) {
         let command_id = command_id.to_string();
         let tx_clone = tx.clone();
@@ -28,10 +27,12 @@ impl HostServer {
             };
 
             if !oauth {
-                let _ = tx_clone.send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
-                    provider,
-                    error: "OAuth not supported for this provider".into(),
-                }));
+                let _ = tx_clone
+                    .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
+                        provider,
+                        error: "OAuth not supported for this provider".into(),
+                    }))
+                    .await;
                 return;
             }
 
@@ -39,68 +40,76 @@ impl HostServer {
             let flow = match reg.get_oauth(&provider) {
                 Some(f) => f,
                 None => {
-                    let _ =
-                        tx_clone.send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
+                    let _ = tx_clone
+                        .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                             provider,
                             error: "OAuth not supported for this provider".into(),
-                        }));
+                        }))
+                        .await;
                     return;
                 }
             };
 
             match flow.start_device_auth().await {
                 Ok(info) => {
-                    let _ = tx_clone.send(ServerMessage::Auth(
-                        crate::api::AuthEvent::LoginDeviceCode {
-                            provider: provider.clone(),
-                            user_code: info.user_code.clone(),
-                            verification_uri: info.verification_uri.clone(),
-                        },
-                    ));
+                    let _ = tx_clone
+                        .send(ServerMessage::Auth(
+                            crate::api::AuthEvent::LoginDeviceCode {
+                                provider: provider.clone(),
+                                user_code: info.user_code.clone(),
+                                verification_uri: info.verification_uri.clone(),
+                            },
+                        ))
+                        .await;
 
                     match flow.poll_device_auth(&info).await {
                         Ok((code, verifier)) => match flow.exchange_code(code, verifier).await {
                             Ok(_cred) => {
-                                let _ = tx_clone.send(ServerMessage::Auth(
-                                    crate::api::AuthEvent::LoginSuccess {
-                                        provider: provider.clone(),
-                                    },
-                                ));
+                                let _ = tx_clone
+                                    .send(ServerMessage::Auth(
+                                        crate::api::AuthEvent::LoginSuccess {
+                                            provider: provider.clone(),
+                                        },
+                                    ))
+                                    .await;
                                 let reg = registry.lock().await;
                                 let providers = reg.list_providers();
-                                let _ = tx_clone.send(server_response_ok(
-                                    &command_id,
-                                    crate::api::CommandResult::ModelListed {
-                                        providers,
-                                        timestamp: crate::protocol::now_ms(),
-                                    },
-                                ));
+                                let _ = tx_clone
+                                    .send(server_response_ok(
+                                        &command_id,
+                                        crate::api::CommandResult::ModelListed {
+                                            providers,
+                                            timestamp: crate::protocol::now_ms(),
+                                        },
+                                    ))
+                                    .await;
                             }
                             Err(e) => {
-                                let _ = tx_clone.send(ServerMessage::Auth(
-                                    crate::api::AuthEvent::LoginFailed {
+                                let _ = tx_clone
+                                    .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                                         provider: provider.clone(),
                                         error: format!("Exchange failed: {e}"),
-                                    },
-                                ));
+                                    }))
+                                    .await;
                             }
                         },
                         Err(e) => {
-                            let _ = tx_clone.send(ServerMessage::Auth(
-                                crate::api::AuthEvent::LoginFailed {
+                            let _ = tx_clone
+                                .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                                     provider: provider.clone(),
                                     error: format!("Poll failed: {e}"),
-                                },
-                            ));
+                                }))
+                                .await;
                         }
                     }
                 }
                 Err(e) => {
-                    let _ =
-                        tx_clone.send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
+                    let _ = tx_clone
+                        .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                             provider: provider.clone(),
                             error: format!("Start failed: {e}"),
-                        }));
+                        }))
+                        .await;
                 }
             }
         });

@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -43,7 +45,7 @@ impl MockSessionPublisher {
         &self,
         agent_instance_id: impl Into<String>,
         agent_id: impl Into<String>,
-        task_seq: u64,
+        _task_seq: u64,
         event: SessionEvent,
     ) {
         let agent_instance_id = agent_instance_id.into();
@@ -51,7 +53,6 @@ impl MockSessionPublisher {
         let envelope = SessionEventEnvelope {
             agent_instance_id: agent_instance_id.clone(),
             agent_id: agent_id.into(),
-            transcript_seq: task_seq,
             cursor: SessionCursor {
                 epoch: self.epoch.clone(),
                 seq,

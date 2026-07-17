@@ -115,6 +115,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 1,
                     message_id: "user-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
@@ -125,6 +126,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
+                    transcript_seq: 2,
                     message_id: "assistant-1".into(),
                     source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,

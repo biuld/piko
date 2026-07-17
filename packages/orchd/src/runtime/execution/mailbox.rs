@@ -1,7 +1,10 @@
 use orchd_api::{AgentApiError, CancelReceipt};
+use piko_comms::contracts::{
+    ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
+};
+use piko_comms::{MailboxSender, ReplyReceiver, ReplySender};
 use piko_protocol::execution::ExecutionInputReceipt;
-use piko_protocol::execution::{CancelReason, ExecutionSnapshot, SteerExecutionRequest};
-use tokio::sync::{mpsc, oneshot, watch};
+use piko_protocol::execution::{CancelReason, SteerExecutionRequest};
 use tokio_util::sync::CancellationToken;
 
 use super::{ExecutionIdentity, ExecutionTerminal};
@@ -9,15 +12,15 @@ use super::{ExecutionIdentity, ExecutionTerminal};
 pub enum ExecutionCommand {
     Steer {
         request: SteerExecutionRequest,
-        reply: oneshot::Sender<Result<ExecutionInputReceipt, AgentApiError>>,
+        reply: ReplySender<ExecutionCommandReply, Result<ExecutionInputReceipt, AgentApiError>>,
     },
     Cancel {
         request_id: String,
         reason: CancelReason,
-        reply: oneshot::Sender<Result<CancelReceipt, AgentApiError>>,
+        reply: ReplySender<ExecutionCommandReply, Result<CancelReceipt, AgentApiError>>,
     },
     Shutdown {
-        reply: oneshot::Sender<()>,
+        reply: ReplySender<ExecutionCommandReply, ()>,
     },
 }
 
@@ -25,9 +28,8 @@ pub enum ExecutionCommand {
 pub struct ExecutionHandle {
     pub identity: ExecutionIdentity,
     pub generation: u64,
-    pub command_tx: mpsc::Sender<ExecutionCommand>,
+    pub command_tx: MailboxSender<ExecutionCommands, ExecutionCommand>,
     pub cancel: CancellationToken,
-    pub snapshot_rx: watch::Receiver<ExecutionSnapshot>,
     /// Receives the durable terminal outcome once (finalizer).
     pub terminal_rx: ArcTerminalReceiver,
 }
@@ -35,11 +37,13 @@ pub struct ExecutionHandle {
 /// Cloneable waiter for the terminal ExecutionOutcome.
 #[derive(Clone)]
 pub struct ArcTerminalReceiver {
-    inner: std::sync::Arc<tokio::sync::Mutex<Option<oneshot::Receiver<ExecutionTerminal>>>>,
+    inner: std::sync::Arc<
+        tokio::sync::Mutex<Option<ReplyReceiver<ExecutionTerminalContract, ExecutionTerminal>>>,
+    >,
 }
 
 impl ArcTerminalReceiver {
-    pub fn new(rx: oneshot::Receiver<ExecutionTerminal>) -> Self {
+    pub fn new(rx: ReplyReceiver<ExecutionTerminalContract, ExecutionTerminal>) -> Self {
         Self {
             inner: std::sync::Arc::new(tokio::sync::Mutex::new(Some(rx))),
         }

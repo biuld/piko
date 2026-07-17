@@ -30,6 +30,7 @@ impl RealtimeDeltaSink for RecordingRealtimeSink {
 }
 
 #[tokio::test]
+#[allow(clippy::disallowed_methods)]
 async fn realtime_delta_is_published_before_step_completion() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let events = async_stream::stream! {

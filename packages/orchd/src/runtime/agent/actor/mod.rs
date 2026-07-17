@@ -6,13 +6,17 @@ mod input;
 mod run_protocol;
 
 use orchd_api::{AgentApiError, AgentCommitPort};
+use piko_comms::contracts::{
+    AgentCommands, AgentRunReport as AgentRunReportContract, AgentRunStarted,
+    AgentSnapshot as AgentSnapshotContract,
+};
+use piko_comms::{LatestSender, MailboxReceiver, MailboxSender, ReplySender};
 use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot,
     AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
     AgentLifecycleReceipt, AgentRunReport, AgentSnapshot, ConversationContext, ExecutionConfig,
     InputDisposition, SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
 };
-use tokio::sync::{mpsc, oneshot, watch};
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
 use super::scope::SessionAgentScope;
@@ -36,16 +40,19 @@ pub struct AgentActor {
     run_state: AgentRunState,
     latest_report: Option<AgentRunReport>,
     completed_executions: HashMap<String, AgentRunReport>,
-    execution_waiters: HashMap<String, Vec<oneshot::Sender<Result<AgentRunReport, AgentApiError>>>>,
+    execution_waiters: HashMap<
+        String,
+        Vec<ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>>,
+    >,
     detached_reports: HashMap<String, Vec<DetachedReportTarget>>,
     scope: std::sync::Weak<SessionAgentScope>,
     recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
     generation: u64,
     commit: Arc<dyn AgentCommitPort>,
     execution: Arc<AgentExecutionRuntime>,
-    command_tx: mpsc::Sender<AgentCommand>,
-    mailbox: mpsc::Receiver<AgentCommand>,
-    snapshot_tx: watch::Sender<AgentSnapshot>,
+    command_tx: MailboxSender<AgentCommands, AgentCommand>,
+    mailbox: MailboxReceiver<AgentCommands, AgentCommand>,
+    snapshot_tx: LatestSender<AgentSnapshotContract, AgentSnapshot>,
     run_cancellation: Arc<RunCancellation>,
     current_run_cancellation_generation: Option<u64>,
 }
@@ -57,8 +64,8 @@ struct QueuedRuntimeInput {
 
 enum QueuedCompletion {
     Waiter {
-        started: oneshot::Sender<()>,
-        report: oneshot::Sender<Result<AgentRunReport, AgentApiError>>,
+        started: ReplySender<AgentRunStarted, ()>,
+        report: ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>,
     },
     Detached(DetachedReportTarget),
 }
@@ -116,9 +123,9 @@ impl AgentActor {
         generation: u64,
         commit: Arc<dyn AgentCommitPort>,
         execution: Arc<AgentExecutionRuntime>,
-        command_tx: mpsc::Sender<AgentCommand>,
-        mailbox: mpsc::Receiver<AgentCommand>,
-        snapshot_tx: watch::Sender<AgentSnapshot>,
+        command_tx: MailboxSender<AgentCommands, AgentCommand>,
+        mailbox: MailboxReceiver<AgentCommands, AgentCommand>,
+        snapshot_tx: LatestSender<AgentSnapshotContract, AgentSnapshot>,
         scope: std::sync::Weak<SessionAgentScope>,
         run_cancellation: Arc<RunCancellation>,
     ) -> Self {
@@ -190,8 +197,8 @@ impl AgentActor {
                 AgentCommand::Run { request, reply } if self.should_queue_follow_up(&request) => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let (started_tx, started_rx) = oneshot::channel();
-                    let (report_tx, report_rx) = oneshot::channel();
+                    let (started_tx, started_rx) = piko_comms::reply::<AgentRunStarted, _>();
+                    let (report_tx, report_rx) = piko_comms::reply::<AgentRunReportContract, _>();
                     match self
                         .enqueue_follow_up(
                             request,
@@ -215,8 +222,10 @@ impl AgentActor {
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     match self.handle_input(request).await {
                         Ok(accepted) => {
-                            let (started_tx, started_rx) = oneshot::channel();
-                            let (report_tx, report_rx) = oneshot::channel();
+                            let (started_tx, started_rx) =
+                                piko_comms::reply::<AgentRunStarted, _>();
+                            let (report_tx, report_rx) =
+                                piko_comms::reply::<AgentRunReportContract, _>();
                             self.register_waiter(accepted.internal_execution_id, report_tx);
                             let _ = started_tx.send(());
                             command.complete(Ok(orchd_api::AgentRunAcceptance {

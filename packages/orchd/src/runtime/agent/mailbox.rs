@@ -1,9 +1,12 @@
 use orchd_api::{AgentApiError, AgentRunAcceptance};
+use piko_comms::contracts::{
+    AgentCommandReply, AgentCommands, AgentSnapshot as AgentSnapshotContract,
+};
+use piko_comms::{LatestReceiver, MailboxSender, ReplySender};
 use piko_protocol::{
     AgentInboxSnapshot, AgentInputReceipt, AgentInstanceLifecycle, AgentLifecycleReceipt,
     AgentSnapshot, SendAgentInputRequest,
 };
-use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::runtime::execution::ExecutionTerminal;
 use crate::runtime::reliability::{DetachedDeliveryScope, ExecutionHandoffLease, RunCancellation};
@@ -16,16 +19,16 @@ pub struct DetachedReportTarget {
 pub enum AgentCommand {
     Input {
         request: SendAgentInputRequest,
-        reply: oneshot::Sender<Result<AgentInputReceipt, AgentApiError>>,
+        reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
     },
     Run {
         request: SendAgentInputRequest,
-        reply: oneshot::Sender<Result<AgentRunAcceptance, AgentApiError>>,
+        reply: ReplySender<AgentCommandReply, Result<AgentRunAcceptance, AgentApiError>>,
     },
     InputDetached {
         request: SendAgentInputRequest,
         recipient: DetachedReportTarget,
-        reply: oneshot::Sender<Result<AgentInputReceipt, AgentApiError>>,
+        reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
     },
     ExecutionFinished {
         execution_id: String,
@@ -44,32 +47,41 @@ pub enum AgentCommand {
     SetLifecycle {
         request_id: String,
         lifecycle: AgentInstanceLifecycle,
-        reply: oneshot::Sender<Result<AgentLifecycleReceipt, AgentApiError>>,
+        reply: ReplySender<AgentCommandReply, Result<AgentLifecycleReceipt, AgentApiError>>,
     },
     CancelRun {
         request_id: String,
-        reply: oneshot::Sender<Result<piko_protocol::AgentCancelReceipt, AgentApiError>>,
+        reply: ReplySender<
+            AgentCommandReply,
+            Result<piko_protocol::AgentCancelReceipt, AgentApiError>,
+        >,
     },
     CancelInput {
         request_id: String,
-        reply: oneshot::Sender<Result<piko_protocol::AgentCancelReceipt, AgentApiError>>,
+        reply: ReplySender<
+            AgentCommandReply,
+            Result<piko_protocol::AgentCancelReceipt, AgentApiError>,
+        >,
     },
     Inbox {
-        reply: oneshot::Sender<AgentInboxSnapshot>,
+        reply: ReplySender<AgentCommandReply, AgentInboxSnapshot>,
     },
     ConsumeInbox {
         request: piko_protocol::ConsumeAgentInboxRequest,
-        reply: oneshot::Sender<Result<piko_protocol::ConsumeAgentInboxReceipt, AgentApiError>>,
+        reply: ReplySender<
+            AgentCommandReply,
+            Result<piko_protocol::ConsumeAgentInboxReceipt, AgentApiError>,
+        >,
     },
     Shutdown {
-        reply: oneshot::Sender<()>,
+        reply: ReplySender<AgentCommandReply, ()>,
     },
 }
 
 #[derive(Clone)]
 pub struct AgentHandle {
     pub generation: u64,
-    pub command_tx: mpsc::Sender<AgentCommand>,
-    pub snapshot_rx: watch::Receiver<AgentSnapshot>,
+    pub command_tx: MailboxSender<AgentCommands, AgentCommand>,
+    pub snapshot_rx: LatestReceiver<AgentSnapshotContract, AgentSnapshot>,
     pub(crate) run_cancellation: std::sync::Arc<RunCancellation>,
 }

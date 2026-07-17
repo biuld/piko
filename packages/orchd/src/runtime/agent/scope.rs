@@ -180,7 +180,8 @@ impl SessionAgentScope {
             .cloned()
             .collect::<Vec<_>>();
         for handle in handles {
-            let (reply, received) = tokio::sync::oneshot::channel();
+            let (reply, received) =
+                piko_comms::reply::<piko_comms::contracts::AgentCommandReply, _>();
             if handle
                 .command_tx
                 .send(AgentCommand::Shutdown { reply })

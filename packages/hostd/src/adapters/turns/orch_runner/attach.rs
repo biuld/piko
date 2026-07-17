@@ -15,25 +15,15 @@ use super::agent_commit::ProjectingAgentCommitPort;
 use super::commit::{ExecutionCommitRouter, RealtimeDeltaRouter, RepositoryExecutionCommitPort};
 use super::run::resolve_recovered_agent_spec;
 
-pub(super) struct PreparedSessionRuntime {
-    pub commit_router: Arc<ExecutionCommitRouter>,
-    pub realtime_router: Arc<RealtimeDeltaRouter>,
-}
-
 impl OrchAgentRunRunner {
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn prepare_session_runtime(
         &self,
         session_id: &str,
         cwd: &str,
         session_dir: &std::path::Path,
-        operation_id: &str,
-        target_agent_instance_id: &str,
-        fallback_route: bool,
         root_spec: &AgentSpec,
         resume_agent: Option<&ResumeAgent>,
-        hub: Arc<orchd::events::SessionOutputHub>,
-    ) -> Result<PreparedSessionRuntime, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         let attach_lock = self.session_attach_lock(session_id);
         let _attach_guard = attach_lock.lock().await;
         self.register_session_context(session_id.to_string(), cwd.to_string());
@@ -51,29 +41,20 @@ impl OrchAgentRunRunner {
                 Arc::new(ExecutionCommitRouter::new(
                     Arc::clone(&durable_commit),
                     store.clone(),
+                    session_id.to_string(),
+                    Arc::clone(&self.observation_router),
                 ))
             }))
         };
         let realtime_router = {
             let mut routers = self.realtime_routers.lock().unwrap();
-            Arc::clone(
-                routers
-                    .entry(session_id.to_string())
-                    .or_insert_with(|| Arc::new(RealtimeDeltaRouter::default())),
-            )
+            Arc::clone(routers.entry(session_id.to_string()).or_insert_with(|| {
+                Arc::new(RealtimeDeltaRouter::new(
+                    session_id.to_string(),
+                    Arc::clone(&self.observation_router),
+                ))
+            }))
         };
-        commit_router.register(
-            target_agent_instance_id.to_string(),
-            operation_id.to_string(),
-            Arc::clone(&hub),
-            fallback_route,
-        );
-        realtime_router.register(
-            target_agent_instance_id.to_string(),
-            operation_id.to_string(),
-            hub,
-            fallback_route,
-        );
 
         if matches!(
             self.agent_runtime
@@ -138,7 +119,7 @@ impl OrchAgentRunRunner {
                 agent_commit,
                 session_id.to_string(),
                 &recovered_agents,
-                Arc::clone(&self.ui_router),
+                Arc::clone(&self.observation_router),
             ));
             self.agent_runtime
                 .attach_agent_session(SessionAgentConfig {
@@ -158,9 +139,6 @@ impl OrchAgentRunRunner {
                 .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
         }
 
-        Ok(PreparedSessionRuntime {
-            commit_router,
-            realtime_router,
-        })
+        Ok(())
     }
 }

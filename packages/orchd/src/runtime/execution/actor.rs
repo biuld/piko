@@ -2,13 +2,13 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
+use piko_comms::MailboxReceiver;
+use piko_comms::contracts::ExecutionCommands;
 use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
-    ExecutionOutcome, ExecutionSnapshot, ExecutionStatus, StartExecutionRequest,
-    SteerExecutionRequest,
+    ExecutionOutcome, ExecutionStatus, StartExecutionRequest, SteerExecutionRequest,
 };
 use piko_protocol::{Message, Usage};
-use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use super::ExecutionIdentity;
@@ -39,11 +39,10 @@ pub struct ExecutionRunResult {
 pub struct ExecutionActor {
     identity: ExecutionIdentity,
     state: ExecutionState,
-    mailbox: mpsc::Receiver<ExecutionCommand>,
+    mailbox: MailboxReceiver<ExecutionCommands, ExecutionCommand>,
     cancel: CancellationToken,
     ports: Arc<SessionExecutionScope>,
     services: ExecutionServices,
-    snapshot_tx: watch::Sender<ExecutionSnapshot>,
     request: StartExecutionRequest,
     tools: Vec<piko_protocol::ToolDef>,
     routes: HashMap<String, CatalogRoute>,
@@ -55,11 +54,10 @@ impl ExecutionActor {
         request: StartExecutionRequest,
         tools: Vec<piko_protocol::ToolDef>,
         routes: HashMap<String, CatalogRoute>,
-        mailbox: mpsc::Receiver<ExecutionCommand>,
+        mailbox: MailboxReceiver<ExecutionCommands, ExecutionCommand>,
         cancel: CancellationToken,
         ports: Arc<SessionExecutionScope>,
         services: ExecutionServices,
-        snapshot_tx: watch::Sender<ExecutionSnapshot>,
     ) -> Self {
         let mut transcript = TranscriptManager::new(Some(request.context.messages.clone()));
         transcript.push_user_content(request.input.clone(), None);
@@ -81,7 +79,6 @@ impl ExecutionActor {
             cancel,
             ports,
             services,
-            snapshot_tx,
             request,
             tools,
             routes,
@@ -109,7 +106,6 @@ impl ExecutionActor {
 
     async fn run_loop(&mut self) -> Result<ExecutionOutcome, AgentApiError> {
         self.transition(ExecutionStatus::Running);
-        self.publish_snapshot();
 
         loop {
             if self.cancel.is_cancelled() {
@@ -152,20 +148,6 @@ impl ExecutionActor {
 
     fn transition(&mut self, status: ExecutionStatus) {
         self.state.status = status;
-    }
-
-    fn publish_snapshot(&self) {
-        let _ = self.snapshot_tx.send(ExecutionSnapshot {
-            session_id: self.identity.session_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
-            execution_id: self.identity.execution_id.clone(),
-            agent_instance_id: self.identity.agent_instance_id.clone(),
-            agent_id: self.identity.agent_id.clone(),
-            status: self.state.status.clone(),
-            model_step_index: self.state.model_step_index,
-            usage: self.state.usage.clone(),
-            error: self.state.error.clone(),
-        });
     }
 
     fn drain_controls_nonblocking(&mut self) -> Result<(), AgentApiError> {
@@ -290,15 +272,12 @@ impl ExecutionActor {
         };
 
         match result {
-            Ok(step) => {
-                self.publish_snapshot();
-                Ok(CompletedModelStep {
-                    assistant_message: step.step.assistant_message,
-                    tool_calls: step.step.tool_calls,
-                    routes,
-                    message_id,
-                })
-            }
+            Ok(step) => Ok(CompletedModelStep {
+                assistant_message: step.step.assistant_message,
+                tool_calls: step.step.tool_calls,
+                routes,
+                message_id,
+            }),
             Err((error, step)) => {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
                     return Err(AgentApiError::PersistenceFailed(error));
@@ -377,7 +356,6 @@ impl ExecutionActor {
             self.commit_message(result_message, result_message_id)
                 .await?;
         }
-        self.publish_snapshot();
         Ok(())
     }
 
@@ -417,7 +395,6 @@ impl ExecutionActor {
         .commit(&self.ports.ports().commit)
         .await?;
         committed.apply(&mut self.state);
-        self.publish_snapshot();
         Ok(())
     }
 
