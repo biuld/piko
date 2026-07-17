@@ -7,10 +7,32 @@
 //! - Visibility = removal from constraint array (no 0-height tricks).
 //! - Replacement = same position swap.
 //! - BottomBar is always the last constraint.
+//! - Slot layout is edge-flush; Timeline applies its own horizontal inset.
 
-use ratatui::layout::Constraint;
+use ratatui::layout::{Constraint, Rect};
 
 use crate::app::{AppMode, AppState, Placement};
+
+/// Default left/right gutter for edge-flush chat surfaces without full borders
+/// (Timeline, AgentPanel).
+pub const DEFAULT_HORIZONTAL_INSET: u16 = 1;
+
+/// Shrink `area` by `inset` cells on the left and right only.
+///
+/// On tiny terminals the inset is clamped so at least one cell of width remains
+/// whenever the original area is non-empty.
+pub fn inset_horizontal(area: Rect, inset: u16) -> Rect {
+    if area.width == 0 {
+        return area;
+    }
+    let horizontal = inset.min(area.width.saturating_sub(1) / 2);
+    Rect {
+        x: area.x.saturating_add(horizontal),
+        y: area.y,
+        width: area.width.saturating_sub(horizontal.saturating_mul(2)),
+        height: area.height,
+    }
+}
 
 /// The four layout configurations.  Mapped from AppMode + Approval state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,4 +236,35 @@ pub fn has_visible_notification(app: &AppState) -> bool {
 /// Whether completion suggestions are visible (Chat mode only).
 pub fn has_visible_suggestions(app: &AppState) -> bool {
     app.mode == AppMode::Chat && app.editor.auto_complete.is_active()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inset_horizontal_applies_left_right_gutter() {
+        let area = Rect::new(0, 0, 80, 24);
+        let inset = inset_horizontal(area, 1);
+        assert_eq!(inset, Rect::new(1, 0, 78, 24));
+    }
+
+    #[test]
+    fn inset_horizontal_clamps_on_tiny_terminal() {
+        let area = Rect::new(0, 0, 3, 2);
+        let inset = inset_horizontal(area, 1);
+        assert_eq!(inset, Rect::new(1, 0, 1, 2));
+    }
+
+    #[test]
+    fn inset_horizontal_preserves_empty_width() {
+        let area = Rect::new(5, 5, 0, 10);
+        assert_eq!(inset_horizontal(area, 1), area);
+    }
+
+    #[test]
+    fn inset_horizontal_zero_is_identity() {
+        let area = Rect::new(2, 3, 40, 20);
+        assert_eq!(inset_horizontal(area, 0), area);
+    }
 }

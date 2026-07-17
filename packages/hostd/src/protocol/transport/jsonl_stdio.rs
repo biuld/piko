@@ -15,10 +15,10 @@ enum InboundLine {
     Closed,
 }
 
-use crate::api::{Command, CommandResult, ServerMessage};
+use crate::api::{Command, ServerMessage};
 use crate::domain::config::SettingsManager;
 use crate::infra::storage::JsonlSessionRepository;
-use crate::ports::{ErrorTurnRunner, TurnRunner};
+use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
 use crate::protocol::{HostServer, build_orch_turn_runner};
 
@@ -37,7 +37,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .unwrap_or_else(|e| {
             (
-                Arc::new(ErrorTurnRunner::new(e)) as Arc<dyn TurnRunner>,
+                Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
                 None,
             )
         });
@@ -100,8 +100,6 @@ where
             inbound = command_rx.recv(), if !input_closed => {
                 match inbound {
                     Some(InboundLine::Command(command)) => {
-                        let command_id = command.command_id().to_string();
-                        write_ack(&mut writer, ServerMessage::CommandResponse { command_id, result: Ok(CommandResult::Empty) }).await?;
                         active_streams += 1;
                         forward_events(server.handle_command_stream(command), event_tx.clone());
                     }

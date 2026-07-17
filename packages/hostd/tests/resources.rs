@@ -7,8 +7,56 @@ use hostd::domain::compaction::{
 };
 use hostd::domain::prompts::skills::format_skills_for_prompt;
 use hostd::domain::prompts::{
-    BuildSystemPromptOptions, build_system_prompt, expand_prompt_template,
+    BuildSystemPromptOptions, assemble_agent_run_prompt, build_system_prompt,
+    expand_prompt_template,
 };
+use piko_protocol::{
+    AgentSpec, PromptAssemblyRequest, PromptResourceSnapshot, ToolDef, ToolExecutorRef,
+};
+
+fn prompt_tool(name: &str, description: &str) -> ToolDef {
+    ToolDef {
+        name: name.into(),
+        description: description.into(),
+        input_schema: serde_json::json!({"type": "object"}),
+        executor: ToolExecutorRef {
+            kind: "native".into(),
+            target: name.into(),
+            extra: None,
+        },
+        execution_mode: None,
+        exposure: None,
+        capabilities: None,
+        approval: None,
+        metadata: None,
+    }
+}
+
+fn prompt_request(tool_catalog: Vec<ToolDef>) -> PromptAssemblyRequest {
+    PromptAssemblyRequest {
+        session_id: "session".into(),
+        agent_instance_id: "root".into(),
+        agent_spec: AgentSpec {
+            id: "main".into(),
+            name: "Main".into(),
+            role: "root".into(),
+            description: None,
+            base_system_prompt: "Stable agent identity".into(),
+            model: None,
+            thinking_level: None,
+            tool_set_ids: vec!["workspace".into()],
+            active_tool_names: None,
+        },
+        resources: PromptResourceSnapshot {
+            product_instructions: "Product instructions".into(),
+            context_section: "Project context".into(),
+            skills_section: "Available skills".into(),
+            prompt_templates_section: "Prompt templates".into(),
+            environment_section: "Current date: 2026-07-15".into(),
+        },
+        tool_catalog,
+    }
+}
 
 #[test]
 fn loads_context_files_from_ancestors_general_to_specific() {
@@ -123,6 +171,34 @@ fn builds_system_prompt_with_context_skills_and_templates() {
     assert!(prompt.contains("Current date: 20"));
     assert!(!prompt.contains("unix-day-"));
     assert!(prompt.contains("When asked about: extensions"));
+}
+
+#[test]
+fn agent_run_prompt_describes_only_the_resolved_tool_catalog() {
+    let prompt =
+        assemble_agent_run_prompt(&prompt_request(vec![prompt_tool("bash", "Run commands")]));
+
+    assert!(prompt.system_prompt.contains("- bash: Run commands"));
+    assert!(!prompt.system_prompt.contains("Available skills"));
+    assert!(!prompt.system_prompt.contains("- read:"));
+}
+
+#[test]
+fn agent_run_prompt_is_deterministic_for_equivalent_tool_catalogs() {
+    let first = assemble_agent_run_prompt(&prompt_request(vec![
+        prompt_tool("read", "Read files"),
+        prompt_tool("bash", "Run commands"),
+    ]));
+    let second = assemble_agent_run_prompt(&prompt_request(vec![
+        prompt_tool("bash", "Run commands"),
+        prompt_tool("read", "Read files"),
+    ]));
+
+    assert_eq!(first, second);
+    assert!(first.system_prompt.contains("Available skills"));
+    assert!(
+        first.system_prompt.find("- bash:").unwrap() < first.system_prompt.find("- read:").unwrap()
+    );
 }
 
 #[test]

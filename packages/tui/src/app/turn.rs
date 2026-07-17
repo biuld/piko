@@ -30,9 +30,14 @@ impl AppState {
             self.session.pending_turn_text = Some(text);
 
             if !self.session.initializing {
-                self.session.initializing = true;
+                self.begin_session_hydration(None);
+                let create_id = command_id();
+                self.session.pending.track(
+                    create_id.clone(),
+                    super::pending::PendingCommandKind::SessionCreate,
+                );
                 effects.push(Effect::send(Command::SessionCreate {
-                    command_id: command_id(),
+                    command_id: create_id,
                     cwd: self.cwd.to_string_lossy().into_owned(),
                 }));
                 self.status = "creating session...".to_string();
@@ -42,22 +47,44 @@ impl AppState {
             return effects;
         };
         let submit_command_id = command_id();
-        self.session.pending_turn_command_id = Some(submit_command_id.clone());
-        effects.push(Effect::send(Command::TurnSubmit {
+        let Some(target_agent_instance_id) = self.agent_panel.active_agent_instance_id.clone()
+        else {
+            self.editor.restore_text(&submitted_draft);
+            self.status = "no agent selected".to_string();
+            self.notify(NotificationLevel::Error, "no agent selected");
+            return effects;
+        };
+        let target_name = self
+            .agent_panel
+            .agents
+            .iter()
+            .find(|agent| agent.agent_instance_id == target_agent_instance_id)
+            .map(|agent| agent.name.clone())
+            .unwrap_or_else(|| target_agent_instance_id.clone());
+        self.session.pending.track(
+            submit_command_id.clone(),
+            super::pending::PendingCommandKind::ChatSubmit,
+        );
+        effects.push(Effect::send(Command::ChatSubmit {
             command_id: submit_command_id,
             session_id,
+            target_agent_instance_id,
             text,
         }));
-        self.status = "submitted turn".to_string();
-        self.notify(NotificationLevel::Info, "submitted turn");
+        self.status = format!("submitted to {target_name}");
+        self.notify(
+            NotificationLevel::Info,
+            format!("submitted to {target_name}"),
+        );
         effects
     }
 
     pub(crate) fn cancel(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        let (Some(session_id), Some(turn_id)) =
-            (self.session.id.clone(), self.session.active_turn_id.clone())
-        else {
+        let (Some(session_id), Some(turn_id)) = (
+            self.session.id.clone(),
+            self.active_turn_id().map(str::to_string),
+        ) else {
             self.editor.restore_text("");
             self.status = "editor cleared".to_string();
             return effects;

@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::application::host_app::HostApp;
-use crate::infra::storage::SessionStore;
-use crate::ports::ResumeRootAgent;
+use crate::domain::sessions::transcript_messages_from_session_entries;
+use crate::ports::ResumeAgent;
 
 impl HostApp {
     /// Reconstruct the root AgentInstance's resume state (transcript +
@@ -13,16 +13,15 @@ impl HostApp {
         session_id: &str,
         session_dir: &Path,
         root_agent_instance_id: &str,
-    ) -> Option<ResumeRootAgent> {
+    ) -> Option<ResumeAgent> {
         let state = self.state.lock().await;
         match state.session(session_id) {
             Ok(session) => {
-                let session_transcript =
-                    crate::infra::storage::transcript_messages_from_session_entries(
-                        &session.entries,
-                    );
+                let session_transcript = transcript_messages_from_session_entries(&session.entries);
                 if !session_transcript.is_empty() {
-                    let transcript_seq = SessionStore::new(session_dir)
+                    let transcript_seq = self
+                        .session_store_factory
+                        .open(session_dir)
                         .load_agent(session_id, root_agent_instance_id)
                         .ok()
                         .map(|recovered| recovered.last_transcript_seq)
@@ -46,7 +45,7 @@ impl HostApp {
                         .get(root_agent_instance_id)
                         .cloned()
                         .or_else(|| session.current_leaf_id.clone());
-                    Some(ResumeRootAgent {
+                    Some(ResumeAgent {
                         agent_instance_id: root_agent_instance_id.to_string(),
                         state: piko_protocol::agent_runtime::AgentResumeState {
                             head_message_id,
@@ -65,11 +64,12 @@ impl HostApp {
                         },
                     })
                 } else {
-                    SessionStore::new(session_dir)
+                    self.session_store_factory
+                        .open(session_dir)
                         .load_agent(session_id, root_agent_instance_id)
                         .ok()
                         .filter(|recovered| !recovered.transcript.is_empty())
-                        .map(|recovered| ResumeRootAgent {
+                        .map(|recovered| ResumeAgent {
                             agent_instance_id: root_agent_instance_id.to_string(),
                             state: piko_protocol::agent_runtime::AgentResumeState {
                                 transcript: recovered

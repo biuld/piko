@@ -21,10 +21,8 @@ struct InFlightToolCall {
     arguments_json: String,
 }
 
-#[allow(dead_code)]
 pub struct ToolCallChunkUpdate {
     pub content_index: u32,
-    pub tool_call_index: u32,
     pub tool_call_id: String,
     pub delta: String,
 }
@@ -70,7 +68,6 @@ impl ToolCallAggregator {
             });
             return Some(ToolCallChunkUpdate {
                 content_index: tool_call_index,
-                tool_call_index,
                 tool_call_id: id,
                 delta: args_delta,
             });
@@ -80,7 +77,6 @@ impl ToolCallAggregator {
         current.arguments_json.push_str(&args_delta);
         Some(ToolCallChunkUpdate {
             content_index: current.tool_call_index,
-            tool_call_index: current.tool_call_index,
             tool_call_id: current.id.clone(),
             delta: args_delta,
         })
@@ -217,7 +213,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
                     message_id: commit.message_id,
                     agent_instance_id: ctx.agent_instance_id.clone(),
                     agent_id: ctx.agent_id.clone(),
-                    source_turn_id: ctx.work_id.to_string(),
+                    source_turn_id: ctx.source_turn_id.to_string(),
                     parent_message_id: ctx.message_id.clone(),
                     message: commit.message,
                 });

@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 
-use piko_protocol::{AgentExecutionReport, AgentInboxItem, Message};
+use piko_protocol::{AgentInboxItem, Message};
 
 use super::super::SessionStorageError;
 use super::SessionStore;
@@ -9,6 +9,18 @@ use super::io::read_records;
 use super::types::*;
 
 impl SessionStore {
+    pub fn agent_report_for_turn(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError> {
+        let manifest = self.load_manifest()?;
+        Ok(manifest
+            .agent_executions
+            .into_values()
+            .find(|run| run.source_turn_id.as_deref() == Some(turn_id))
+            .and_then(|run| run.report))
+    }
+
     pub fn agent_instances(&self) -> Result<Vec<AgentManifestEntry>, SessionStorageError> {
         Ok(self.load_manifest()?.agents.into_values().collect())
     }
@@ -41,13 +53,50 @@ impl SessionStore {
     pub fn agent_execution_reports(
         &self,
         agent_instance_id: &str,
-    ) -> Result<Vec<AgentExecutionReport>, SessionStorageError> {
+    ) -> Result<Vec<orchd_api::RecoveredExecutionReport>, SessionStorageError> {
         Ok(self
             .load_manifest()?
             .agent_executions
             .into_values()
             .filter(|execution| execution.agent_instance_id == agent_instance_id)
-            .filter_map(|execution| execution.report)
+            .filter_map(|execution| {
+                Some(orchd_api::RecoveredExecutionReport {
+                    internal_execution_id: execution.execution_id,
+                    report: execution.report?,
+                })
+            })
+            .collect())
+    }
+
+    pub fn agent_queued_inputs(
+        &self,
+        agent_instance_id: &str,
+    ) -> Result<Vec<piko_protocol::DurableAgentInput>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_input_queue
+            .into_iter()
+            .filter(|input| input.request.agent_instance_id == agent_instance_id)
+            .collect())
+    }
+
+    pub fn pending_detached_deliveries(
+        &self,
+        source_agent_instance_id: &str,
+    ) -> Result<Vec<orchd_api::RecoveredDetachedDelivery>, SessionStorageError> {
+        Ok(self
+            .load_manifest()?
+            .agent_executions
+            .into_values()
+            .filter(|run| {
+                run.agent_instance_id == source_agent_instance_id && !run.detached_report_delivered
+            })
+            .filter_map(|run| {
+                Some(orchd_api::RecoveredDetachedDelivery {
+                    recipient_agent_instance_id: run.detached_recipient_agent_instance_id?,
+                    report: run.report?,
+                })
+            })
             .collect())
     }
     /// Load the full recovered transcript + head for one AgentInstance shard.

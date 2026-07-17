@@ -33,16 +33,16 @@ pub enum AgentInstanceLifecycle {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AgentActivity {
     Idle,
-    Running { execution_id: ExecutionId },
-    WaitingForApproval { execution_id: ExecutionId },
-    Cancelling { execution_id: ExecutionId },
+    Running,
+    WaitingForApproval,
+    Cancelling,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentExecutionReport {
+pub struct AgentRunReport {
     pub agent_instance_id: AgentInstanceId,
-    pub execution_id: ExecutionId,
+    pub report_id: String,
     pub outcome: ExecutionOutcome,
     pub summary: String,
     pub usage: Usage,
@@ -66,7 +66,7 @@ pub struct AgentSnapshot {
     pub lifecycle: AgentInstanceLifecycle,
     pub activity: AgentActivity,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_report: Option<AgentExecutionReport>,
+    pub latest_report: Option<AgentRunReport>,
     pub unread_report_count: u32,
     pub generation: u64,
 }
@@ -90,8 +90,6 @@ pub struct CreateAgentRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requested_agent_instance_id: Option<AgentInstanceId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin_execution_id: Option<ExecutionId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_tool_call_id: Option<String>,
 }
 
@@ -110,8 +108,6 @@ pub struct SendAgentInputRequest {
     pub agent_instance_id: AgentInstanceId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_agent_instance_id: Option<AgentInstanceId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub requested_execution_id: Option<ExecutionId>,
     /// Interaction Turn this input is bound to. `Some` on the root Turn path,
     /// `None` for child agent runs spawned by multi-agent tools.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,6 +115,13 @@ pub struct SendAgentInputRequest {
     pub message_id: String,
     pub content: MessageContent,
     pub delivery: AgentInputDelivery,
+    /// Trusted host-owned prompt resources for this run. Child/tool callers
+    /// omit this and receive the AgentSpec base prompt plus resolved tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_resources: Option<crate::PromptResourceSnapshot>,
+    /// Optional transient restriction intersected with the AgentSpec allow-list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_tool_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -139,9 +142,17 @@ pub struct AgentInputReceipt {
     pub request_id: String,
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<ExecutionId>,
     pub disposition: crate::InputDisposition,
+}
+
+/// Durable follow-up input owned by one AgentInstance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DurableAgentInput {
+    pub queued_input_id: String,
+    pub request: SendAgentInputRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detached_recipient_agent_instance_id: Option<AgentInstanceId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -169,7 +180,7 @@ pub struct AgentInboxItem {
     pub report_id: String,
     pub recipient_agent_instance_id: AgentInstanceId,
     pub source_agent_instance_id: AgentInstanceId,
-    pub report: AgentExecutionReport,
+    pub report: AgentRunReport,
     pub committed_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumed_at: Option<i64>,
@@ -211,6 +222,15 @@ pub struct AgentCommitAck {
     pub revision: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCancelReceipt {
+    pub request_id: String,
+    pub session_id: String,
+    pub agent_instance_id: AgentInstanceId,
+    pub accepted: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AgentDurableCommand {
@@ -222,17 +242,54 @@ pub enum AgentDurableCommand {
         agent_instance_id: AgentInstanceId,
         lifecycle: AgentInstanceLifecycle,
     },
-    ExecutionStarted {
+    RunStarted {
         agent_instance_id: AgentInstanceId,
-        execution_id: ExecutionId,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
         started_at: i64,
     },
-    RecordExecutionReport {
-        report: AgentExecutionReport,
+    RunTerminal {
+        run_id: String,
+        report: AgentRunReport,
+        finished_at: i64,
+    },
+    InputQueued {
+        agent_instance_id: AgentInstanceId,
+        queued_input: DurableAgentInput,
+    },
+    QueuedInputCancelled {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        cancelled_at: i64,
+    },
+    QueuedInputStarted {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
+        started_at: i64,
     },
     CommitReport {
         recipient_agent_instance_id: AgentInstanceId,
-        report: AgentExecutionReport,
+        report: AgentRunReport,
     },
     ConsumeInboxItem {
         agent_instance_id: AgentInstanceId,
@@ -269,9 +326,7 @@ mod tests {
                 parent_agent_instance_id: None,
             },
             lifecycle: AgentInstanceLifecycle::Open,
-            activity: AgentActivity::Running {
-                execution_id: "exec-1".into(),
-            },
+            activity: AgentActivity::Running,
             latest_report: None,
             unread_report_count: 0,
             generation: 1,
@@ -279,5 +334,100 @@ mod tests {
         let value = serde_json::to_value(snapshot).expect("serialize snapshot");
         assert_eq!(value["lifecycle"], "open");
         assert_eq!(value["activity"]["type"], "running");
+    }
+
+    #[test]
+    fn agent_facing_dtos_never_serialize_execution_identity() {
+        let identity = AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
+            agent_spec_id: "main".into(),
+            parent_agent_instance_id: None,
+        };
+        let report = AgentRunReport {
+            agent_instance_id: "root".into(),
+            report_id: "report-1".into(),
+            outcome: ExecutionOutcome::Succeeded {
+                usage: Usage::default(),
+            },
+            summary: "done".into(),
+            usage: Usage::default(),
+            artifacts: Vec::new(),
+        };
+        let values = [
+            serde_json::to_value(AgentSnapshot {
+                identity,
+                lifecycle: AgentInstanceLifecycle::Open,
+                activity: AgentActivity::Running,
+                latest_report: Some(report.clone()),
+                unread_report_count: 0,
+                generation: 1,
+            })
+            .expect("serialize AgentSnapshot"),
+            serde_json::to_value(report).expect("serialize AgentRunReport"),
+            serde_json::to_value(CreateAgentRequest {
+                request_id: "create-1".into(),
+                session_id: "session-1".into(),
+                parent_agent_instance_id: "root".into(),
+                agent_spec_id: "main".into(),
+                requested_agent_instance_id: None,
+                origin_tool_call_id: Some("tool-1".into()),
+            })
+            .expect("serialize CreateAgentRequest"),
+            serde_json::to_value(SendAgentInputRequest {
+                request_id: "input-1".into(),
+                session_id: "session-1".into(),
+                agent_instance_id: "root".into(),
+                caller_agent_instance_id: None,
+                source_turn_id: Some("turn-1".into()),
+                message_id: "message-1".into(),
+                content: MessageContent::String("hello".into()),
+                delivery: AgentInputDelivery::StartWhenIdle,
+                prompt_resources: None,
+                active_tool_names: None,
+            })
+            .expect("serialize SendAgentInputRequest"),
+            serde_json::to_value(AgentInputReceipt {
+                request_id: "input-1".into(),
+                session_id: "session-1".into(),
+                agent_instance_id: "root".into(),
+                disposition: crate::InputDisposition::Accepted,
+            })
+            .expect("serialize AgentInputReceipt"),
+            serde_json::to_value(AgentCancelReceipt {
+                request_id: "cancel-1".into(),
+                session_id: "session-1".into(),
+                agent_instance_id: "root".into(),
+                accepted: true,
+            })
+            .expect("serialize AgentCancelReceipt"),
+        ];
+
+        for value in values {
+            assert_no_execution_identity(&value);
+        }
+    }
+
+    fn assert_no_execution_identity(value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (field, value) in fields {
+                    assert!(
+                        !matches!(
+                            field.as_str(),
+                            "executionId" | "requestedExecutionId" | "originExecutionId"
+                        ),
+                        "Agent-facing DTO leaked `{field}`: {value}"
+                    );
+                    assert_no_execution_identity(value);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    assert_no_execution_identity(value);
+                }
+            }
+            _ => {}
+        }
     }
 }

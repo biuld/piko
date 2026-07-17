@@ -9,6 +9,18 @@ use super::super::types::{JsonlSessionRepository, SessionStorageError};
 use super::helpers::{commit_storage_error, timestamp};
 
 impl JsonlSessionRepository {
+    pub fn set_selected_agent(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        updated_at: i64,
+    ) -> Result<(), SessionStorageError> {
+        SessionStore::new(session_dir).update_manifest(|manifest| {
+            manifest.selected_agent_instance_id = Some(agent_instance_id.to_string());
+            manifest.updated_at = manifest.updated_at.max(updated_at);
+        })
+    }
+
     pub fn append_entry(
         &self,
         session_dir: &Path,
@@ -25,12 +37,16 @@ impl JsonlSessionRepository {
                     .get(&agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .unwrap_or_else(|| message.agent_id.clone());
+                let execution_id = orchd_api::stable_internal_id(
+                    "projection",
+                    &[&manifest.session_id, &agent_instance_id, &message.id],
+                );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: manifest.session_id,
                             source_turn_id: Some(message.source_turn_id.clone()),
-                            execution_id: message.source_turn_id.clone(),
+                            execution_id,
                             agent_instance_id,
                             message_id: message.id.clone(),
                             parent_message_id: message.parent_id.clone(),
@@ -44,20 +60,24 @@ impl JsonlSessionRepository {
             }
             SessionTreeEntry::ToolCall(tool) => {
                 let (Some(agent_instance_id), Some(agent_spec_id)) =
-                    (&tool.task_id, &tool.agent_id)
+                    (&tool.agent_instance_id, &tool.agent_id)
                 else {
                     return Err(SessionStorageError::Invalid {
                         path: session_dir.to_path_buf(),
-                        message: "tool entry requires task_id and agent_id".into(),
+                        message: "tool entry requires agent_instance_id and agent_id".into(),
                     });
                 };
                 let manifest = store.load_manifest()?;
+                let execution_id = orchd_api::stable_internal_id(
+                    "projection",
+                    &[&manifest.session_id, agent_instance_id, &tool.id],
+                );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: manifest.session_id,
                             source_turn_id: Some(agent_instance_id.clone()),
-                            execution_id: agent_instance_id.clone(),
+                            execution_id,
                             agent_instance_id: agent_instance_id.clone(),
                             message_id: tool.id.clone(),
                             parent_message_id: None,

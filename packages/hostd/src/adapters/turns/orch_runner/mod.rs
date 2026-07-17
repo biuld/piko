@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use llmd::gateway::LlmGateway;
@@ -14,37 +13,60 @@ use crate::api::{ServerMessage, UserInteractionResponse};
 use crate::domain::config::{McpServerConfig, SandboxSettings};
 
 mod agent_commit;
+mod agent_input;
 mod approval_gateway;
+mod attach;
 mod commit;
+mod prompt_assembly;
 mod run;
 mod turn_runner;
+mod ui_router;
 
 #[cfg(test)]
 mod tests;
 
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
+type AgentRunKey = (String, String);
+type AgentHubMap = HashMap<AgentRunKey, Arc<orchd::events::SessionOutputHub>>;
+
 #[derive(Clone)]
-pub struct OrchTurnRunner {
+pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
-    /// session_id -> (turn_id, execution_id) for the Execution-runtime path.
-    active_executions: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>,
-    /// Live observation hubs for Execution turns (reconnect without cancelling).
-    active_hubs: Arc<std::sync::Mutex<HashMap<String, Arc<orchd::testing::SessionOutputHub>>>>,
+    active_agent_runs: Arc<std::sync::Mutex<HashMap<AgentRunKey, ActiveAgentRunRuntime>>>,
+    agent_hubs: Arc<std::sync::Mutex<AgentHubMap>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
-    pending_approvals:
-        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<crate::api::ApprovalDecision>>>>,
-    pending_interactions:
-        Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<UserInteractionResponse>>>>,
+    pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
+    pending_interactions: Arc<std::sync::Mutex<HashMap<String, PendingInteractionEntry>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
-    task_contexts: Arc<std::sync::Mutex<HashMap<String, (String, String)>>>, // task_id -> (session_id, cwd)
-    agent_event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
-    ui_event_tx: Option<UnboundedSender<ServerMessage>>,
+    session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    ui_router: Arc<ui_router::UiEventRouter>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
-impl OrchTurnRunner {
+struct ActiveAgentRunRuntime {
+    run_id: String,
+    agent_instance_id: String,
+    observation: Arc<orchd::events::SessionOutputHub>,
+    commit_router: Option<Arc<ExecutionCommitRouter>>,
+    realtime_router: Option<Arc<RealtimeDeltaRouter>>,
+}
+
+struct PendingApprovalEntry {
+    session_id: Option<String>,
+    snapshot: crate::api::ApprovalSnapshot,
+    tx: oneshot::Sender<crate::api::ApprovalDecision>,
+}
+
+struct PendingInteractionEntry {
+    session_id: Option<String>,
+    snapshot: crate::api::UserInteractionSnapshot,
+    tx: oneshot::Sender<UserInteractionResponse>,
+}
+
+impl OrchAgentRunRunner {
     pub async fn new(
         model_executor: Arc<dyn LlmGateway>,
         provider: &str,
@@ -128,46 +150,58 @@ impl OrchTurnRunner {
 
         Self {
             agent_runtime,
-            active_executions: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            active_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            agent_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            task_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            agent_event_tx: Arc::new(std::sync::Mutex::new(None)),
-            ui_event_tx: None,
+            session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            ui_router: Arc::new(ui_router::UiEventRouter::default()),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
-    fn with_ui_event_tx(&self, ui_event_tx: UnboundedSender<ServerMessage>) -> Self {
-        *self.agent_event_tx.lock().unwrap() = Some(ui_event_tx.clone());
-        Self {
-            agent_runtime: Arc::clone(&self.agent_runtime),
-            active_executions: Arc::clone(&self.active_executions),
-            active_hubs: Arc::clone(&self.active_hubs),
-            commit_routers: Arc::clone(&self.commit_routers),
-            realtime_routers: Arc::clone(&self.realtime_routers),
-            pending_approvals: Arc::clone(&self.pending_approvals),
-            pending_interactions: Arc::clone(&self.pending_interactions),
-            approval_stores: Arc::clone(&self.approval_stores),
-            task_contexts: Arc::clone(&self.task_contexts),
-            agent_event_tx: Arc::clone(&self.agent_event_tx),
-            ui_event_tx: Some(ui_event_tx),
-            prompt_gate: Arc::clone(&self.prompt_gate),
+    fn register_session_context(&self, session_id: String, cwd: String) {
+        self.session_contexts
+            .lock()
+            .unwrap()
+            .insert(session_id, cwd);
+    }
+
+    fn session_attach_lock(&self, session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.session_attach_locks.lock().unwrap();
+        Arc::clone(
+            locks
+                .entry(session_id.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    }
+
+    fn session_cwd(&self, session_id: &str) -> Option<String> {
+        self.session_contexts
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+    }
+
+    fn release_session_context_if_idle(&self, session_id: &str) {
+        let active = self
+            .active_agent_runs
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(active_session_id, _)| active_session_id == session_id);
+        if !active {
+            self.session_contexts.lock().unwrap().remove(session_id);
+            self.agent_hubs
+                .lock()
+                .unwrap()
+                .retain(|(hub_session_id, _), _| hub_session_id != session_id);
         }
-    }
-
-    fn register_task_context(&self, task_id: String, session_id: String, cwd: String) {
-        let mut contexts = self.task_contexts.lock().unwrap();
-        contexts.insert(task_id, (session_id, cwd));
-    }
-
-    fn get_task_context(&self, task_id: &str) -> Option<(String, String)> {
-        let contexts = self.task_contexts.lock().unwrap();
-        contexts.get(task_id).cloned()
     }
 
     fn get_approval_store(&self, cwd: &str) -> Arc<ApprovalStore> {
@@ -178,24 +212,19 @@ impl OrchTurnRunner {
             .clone()
     }
 
-    fn emit_ui_event(&self, event: ServerMessage) {
-        if let Some(tx) = self.ui_event_tx.as_ref()
-            && tx.send(event).is_err()
-        {
-            tracing::error!("turn ui event channel closed");
-        }
-    }
-
     async fn request_user_interaction(
         &self,
         request: UserInteractionRequest,
     ) -> UserInteractionResponse {
         let _prompt_turn = self.prompt_gate.lock().await;
-        let Some(_) = self.ui_event_tx.as_ref() else {
+        if !self
+            .ui_router
+            .has_route(&request.session_id, &request.agent_instance_id)
+        {
             return UserInteractionResponse::Cancel {
                 reason: Some("No TUI event channel available".into()),
             };
-        };
+        }
         let interaction_id = format!(
             "interaction_{}_{}",
             request.tool_call_id,
@@ -205,13 +234,34 @@ impl OrchTurnRunner {
                 .as_millis()
         );
         let (tx, rx) = oneshot::channel();
+        let session_id = request.session_id.clone();
         {
             let mut pending = self.pending_interactions.lock().unwrap();
-            pending.insert(interaction_id.clone(), tx);
+            pending.insert(
+                interaction_id.clone(),
+                PendingInteractionEntry {
+                    session_id: Some(session_id.clone()),
+                    snapshot: crate::api::UserInteractionSnapshot {
+                        interaction_id: interaction_id.clone(),
+                        agent_instance_id: request.agent_instance_id.clone(),
+                        agent_id: request.agent_id.clone(),
+                        tool_call_id: request.tool_call_id.clone(),
+                        status: crate::api::UserInteractionStatus::Pending,
+                        title: request.title.clone(),
+                        questions: request.questions.clone(),
+                        require_confirm: request.require_confirm,
+                        auto_resolution_ms: request.auto_resolution_ms,
+                    },
+                    tx,
+                },
+            );
         }
-        self.emit_ui_event(ServerMessage::Interaction(
-            piko_protocol::InteractionEvent::Requested {
-                task_id: request.task_id.clone(),
+        self.ui_router.publish(
+            &session_id,
+            &request.agent_instance_id,
+            ServerMessage::Interaction(piko_protocol::InteractionEvent::Requested {
+                session_id: session_id.clone(),
+                agent_instance_id: request.agent_instance_id.clone(),
                 agent_id: request.agent_id.clone(),
                 interaction_id: interaction_id.clone(),
                 tool_call_id: request.tool_call_id,
@@ -219,8 +269,8 @@ impl OrchTurnRunner {
                 questions: request.questions,
                 require_confirm: request.require_confirm,
                 auto_resolution_ms: request.auto_resolution_ms,
-            },
-        ));
+            }),
+        );
         let response = match rx.await {
             Ok(response) => response,
             Err(_) => UserInteractionResponse::Cancel {
@@ -234,7 +284,10 @@ impl OrchTurnRunner {
         response
     }
 
-    async fn register_user_interaction_tools_on_execution(&self, gateway_runner: &OrchTurnRunner) {
+    async fn register_user_interaction_tools_on_execution(
+        &self,
+        gateway_runner: &OrchAgentRunRunner,
+    ) {
         let user_provider = UserInteractionProvider::new();
         let runner = gateway_runner.clone();
         user_provider

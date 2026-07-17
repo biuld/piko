@@ -10,7 +10,6 @@
 //! 4. Missing tokens filled from built-in dark defaults
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use ratatui::style::Color;
 use serde::Deserialize;
@@ -46,18 +45,14 @@ enum ColorValue {
 // ── Embedded built-in themes ─────────────────────────────────────────────────
 
 const DARK_TOML: &str = include_str!("../resources/themes/dark.toml");
-#[allow(dead_code)]
-const LIGHT_TOML: &str = include_str!("../resources/themes/light.toml");
 
 // ── Theme ────────────────────────────────────────────────────────────────────
 
 /// Resolved theme: all Layer-1 tokens are ratatui `Color` values, ready for
 /// direct use in rendering.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Theme {
     pub name: String,
-    pub source_path: Option<PathBuf>,
 
     // ── Layer 1: Core UI (actively used in rendering) ──
     pub text: Color,
@@ -84,24 +79,6 @@ impl Theme {
     /// Load the built-in dark theme.
     pub fn dark() -> Self {
         Self::from_toml_str(DARK_TOML).expect("built-in dark.toml must be valid")
-    }
-
-    /// Load the built-in light theme.
-    #[allow(dead_code)]
-    pub fn light() -> Self {
-        Self::from_toml_str(LIGHT_TOML).expect("built-in light.toml must be valid")
-    }
-
-    // ── file loading ──────────────────────────────────────────────────────────
-
-    /// Load a theme from a `.toml` file on disk.
-    #[allow(dead_code)]
-    pub fn from_path(path: &Path) -> Result<Self, ThemeError> {
-        let toml_str =
-            std::fs::read_to_string(path).map_err(|e| ThemeError::Io(path.to_path_buf(), e))?;
-        let mut theme = Self::from_toml_str(&toml_str)?;
-        theme.source_path = Some(path.to_path_buf());
-        Ok(theme)
     }
 
     /// Parse and resolve a TOML string.
@@ -133,7 +110,6 @@ impl Theme {
     fn from_resolved(name: String, colors: &HashMap<String, Color>) -> Self {
         Self {
             name,
-            source_path: None,
             text: get_color(colors, "text"),
             dim: get_color(colors, "dim"),
             muted: get_color(colors, "muted"),
@@ -151,15 +127,8 @@ impl Theme {
     }
 
     /// Look up an arbitrary token by name (for Layer 2/3).
-    #[allow(dead_code)]
     pub fn get(&self, key: &str) -> Color {
         self.all.get(key).copied().unwrap_or(Color::Reset)
-    }
-
-    /// Notify callers that the theme has changed (hot reload).
-    #[allow(dead_code)]
-    pub fn source_path(&self) -> Option<&Path> {
-        self.source_path.as_deref()
     }
 }
 
@@ -378,9 +347,7 @@ fn color_value_to_color(value: &str, vars: &HashMap<String, Color>) -> Color {
 // ── Errors ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum ThemeError {
-    Io(PathBuf, std::io::Error),
     Parse(String),
     InvalidName(String),
     MissingVar(String),
@@ -391,7 +358,6 @@ pub enum ThemeError {
 impl std::fmt::Display for ThemeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(path, e) => write!(f, "Failed to read {}: {e}", path.display()),
             Self::Parse(msg) => write!(f, "Invalid theme TOML: {msg}"),
             Self::InvalidName(name) => {
                 write!(f, "Invalid theme name '{name}': must not contain '/'")
@@ -424,7 +390,8 @@ mod tests {
 
     #[test]
     fn test_light_theme_loads() {
-        let theme = Theme::light();
+        let light = include_str!("../resources/themes/light.toml");
+        let theme = Theme::from_toml_str(light).expect("built-in light.toml must be valid");
         assert_eq!(theme.name, "light");
         assert_ne!(theme.accent, Color::Reset);
     }

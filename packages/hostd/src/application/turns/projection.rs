@@ -1,9 +1,17 @@
+//! Turn observation projection helpers.
+//!
+//! Bridges realtime deltas and durably committed messages coming off the
+//! orchd observation stream into `HostState` / TUI-facing events. Reads
+//! durable storage only through [`SessionStorePort`] so this module has no
+//! `crate::infra` / `crate::adapters` dependency.
+
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
 
-use crate::api::{MessageEntry, ProtocolError};
+use crate::api::{MessageEntry, ProtocolError, ServerMessage};
 use crate::domain::sessions::HostState;
-use crate::infra::storage::SessionStore;
+use crate::ports::session_store::SessionStorePort;
+use crate::ports::storage_types::SessionStorageError;
 
 /// Observation path: project a committed message for TUI emission.
 ///
@@ -13,7 +21,7 @@ use crate::infra::storage::SessionStore;
 /// storage for the first observation of a shard or during session recovery.
 pub fn project_committed_message(
     state: &HostState,
-    store: Option<&SessionStore>,
+    store: Option<&dyn SessionStorePort>,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -32,7 +40,7 @@ pub fn project_committed_message(
 /// subsequent `StateSnapshot` reflects it without a disk reload.
 pub fn record_committed_message(
     state: &mut HostState,
-    store: Option<&SessionStore>,
+    store: Option<&dyn SessionStorePort>,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -53,6 +61,43 @@ pub fn record_committed_message(
         projected.transcript_seq,
         None,
     )
+}
+
+/// Rebuild the in-memory committed projection from every durable Agent shard.
+/// This is used when reliable observation cannot replay the full cursor range.
+pub fn reconcile_committed_messages(
+    state: &mut HostState,
+    store: &dyn SessionStorePort,
+    session_id: &str,
+) -> Result<(), ProtocolError> {
+    let agents = match store.agent_instances() {
+        Ok(agents) => agents,
+        Err(SessionStorageError::NotFound(_)) => return Ok(()),
+        Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
+    };
+    for agent in agents {
+        let agent_instance_id = agent.identity.agent_instance_id;
+        let recovered = match store.load_agent(session_id, &agent_instance_id) {
+            Ok(recovered) => recovered,
+            Err(SessionStorageError::NotFound(_)) => continue,
+            Err(SessionStorageError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                continue;
+            }
+            Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
+        };
+        for message in recovered.transcript {
+            let _ = record_committed_message(
+                state,
+                Some(store),
+                session_id,
+                &agent_instance_id,
+                &message.id,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn project_committed_message_from_state(
@@ -84,7 +129,7 @@ fn project_committed_message_from_state(
 }
 
 fn project_committed_message_from_store(
-    store: &SessionStore,
+    store: &dyn SessionStorePort,
     session_id: &str,
     agent_instance_id: &str,
     message_id: &str,
@@ -124,15 +169,6 @@ pub fn realtime_message_from_delta(
         delta_seq: envelope.delta_seq,
         delta: envelope.delta.clone(),
     })
-}
-
-pub fn is_execution_terminal(status: &piko_protocol::ExecutionStatus) -> bool {
-    matches!(
-        status,
-        piko_protocol::ExecutionStatus::Succeeded
-            | piko_protocol::ExecutionStatus::Failed
-            | piko_protocol::ExecutionStatus::Cancelled
-    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -190,7 +226,7 @@ fn append_committed_message(
     // MessageCommitted notifications arrive after the AgentInstance shard write
     // is durable; only project into HostState here.
     state.append_task_entry(session_id, agent_instance_id, entry)?;
-    Ok(Some(TranscriptCommittedEvent {
+    let committed = TranscriptCommittedEvent {
         session_id: session_id.to_string(),
         agent_instance_id: agent_instance_id.to_string(),
         agent_id: agent_id.to_string(),
@@ -198,7 +234,14 @@ fn append_committed_message(
         message_id: message_id.to_string(),
         transcript_seq,
         message: message.clone(),
-    }))
+    };
+    let _ = state.append_agent_view_event(
+        session_id,
+        agent_instance_id,
+        agent_id,
+        ServerMessage::TranscriptCommitted(committed.clone()),
+    );
+    Ok(Some(committed))
 }
 
 fn message_timestamp(message: &Message) -> &i64 {
@@ -229,7 +272,6 @@ mod tests {
                 agent_instance_id: "root".into(),
                 execution_id: "exec-1".into(),
                 agent_id: "main".into(),
-                work_id: "work-1".into(),
                 message_id: Some("message-1".into()),
                 delta_seq: 7,
                 delta: RealtimeDelta::Text {
@@ -258,7 +300,6 @@ mod tests {
                     agent_instance_id: "root".into(),
                     execution_id: "exec-1".into(),
                     agent_id: "main".into(),
-                    work_id: "work-1".into(),
                     message_id: None,
                     delta_seq: 0,
                     delta: RealtimeDelta::MessageStarted {
@@ -311,6 +352,48 @@ mod tests {
         .expect("projection should load from store");
         assert_eq!(projection.message_id, "msg-followup");
         assert_eq!(projection.transcript_seq, 1);
+    }
+
+    #[test]
+    fn reconciliation_rebuilds_missing_committed_projection_from_agent_shard() {
+        use piko_protocol::MessageContent;
+        use piko_protocol::execution::MessageCommit;
+        use tempfile::tempdir;
+
+        let temp = tempdir().unwrap();
+        let store =
+            SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+                .unwrap();
+        let root = store.ensure_root_agent("main").unwrap();
+        store
+            .commit_message(
+                MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-1".into()),
+                    execution_id: "exec-1".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "message-rebuild".into(),
+                    parent_message_id: None,
+                    message: Message::User {
+                        content: MessageContent::String("durable".into()),
+                        timestamp: Some(2),
+                    },
+                    committed_at: 2,
+                },
+                "main",
+            )
+            .unwrap();
+        let mut state = HostState::default();
+        state.insert_session(crate::domain::sessions::SessionState::new(
+            "session-1".into(),
+            "/project".into(),
+        ));
+
+        reconcile_committed_messages(&mut state, &store, "session-1").unwrap();
+
+        assert!(state.session("session-1").unwrap().entries.iter().any(
+            |entry| matches!(entry, SessionTreeEntry::Message(message) if message.id == "message-rebuild")
+        ));
     }
 
     #[test]

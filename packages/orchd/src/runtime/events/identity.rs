@@ -72,7 +72,7 @@ impl DispatchIdentity {
         &'a self,
         message_id: &'a MessageId,
         model: Option<&'a ModelSpec>,
-        work_id: &'a str,
+        source_turn_id: &'a str,
     ) -> AgentDispatchContext<'a> {
         AgentDispatchContext {
             session_id: &self.session_id,
@@ -80,7 +80,7 @@ impl DispatchIdentity {
             execution_id: &self.execution_id,
             agent_id: &self.agent_id,
             message_id,
-            work_id,
+            source_turn_id,
             model,
         }
     }
@@ -98,7 +98,7 @@ pub(crate) struct AgentDispatchContext<'a> {
     pub execution_id: &'a ExecutionId,
     pub agent_id: &'a AgentId,
     pub message_id: &'a MessageId,
-    pub work_id: &'a str,
+    pub source_turn_id: &'a str,
     pub model: Option<&'a ModelSpec>,
 }
 

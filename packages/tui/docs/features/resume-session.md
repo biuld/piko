@@ -63,6 +63,10 @@ When a session is selected, hostd opens the selected session and emits the
 restored snapshot. The TUI then closes the panel and renders the restored
 session. If opening fails, the panel remains usable and an error is shown.
 
+Messages added after resuming remain part of the same session and appear the
+next time it is opened. Reopening follows the newest committed point unless the
+user explicitly selected an earlier point in the session tree.
+
 Selecting the already-active session is allowed but should behave as a no-op
 refresh rather than creating a new session or losing editor state.
 

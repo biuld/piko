@@ -19,7 +19,6 @@ pub struct Policy {
     #[serde(default)]
     pub allowed_commands: Vec<String>,
     #[serde(default)]
-    #[allow(dead_code)]
     pub allow_network: bool,
 }
 

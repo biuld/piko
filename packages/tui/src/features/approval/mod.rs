@@ -1,12 +1,6 @@
 use std::collections::VecDeque;
 
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::Style,
-    text::{Line, Span},
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Rect, style::Style, widgets::Paragraph};
 
 use crate::theme::Theme;
 
@@ -110,28 +104,5 @@ impl ApprovalPanel {
             help,
             Rect::new(area.x.saturating_add(2), y, area.width.saturating_sub(4), 1),
         );
-    }
-
-    /// Render informational label when there are no pending approvals.
-    #[allow(dead_code)]
-    pub fn render_count_label(count: usize, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        if count > 0 {
-            let label = format!(" {count} pending approvals ");
-            let width = label.len() as u16 + 2;
-            let x = area.x + area.width.saturating_sub(width + 2);
-            let popup = Rect {
-                x,
-                y: area.y + 1,
-                width,
-                height: 1,
-            };
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    label,
-                    Style::default().fg(theme.warning),
-                ))),
-                popup,
-            );
-        }
     }
 }

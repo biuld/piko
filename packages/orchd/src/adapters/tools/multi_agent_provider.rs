@@ -1,6 +1,5 @@
 //! Thin LLM tool adapter for the mandatory AgentRuntime control surface.
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,8 +13,8 @@ use piko_protocol::tools::{
     ToolProviderSource,
 };
 use piko_protocol::{
-    AgentInputDelivery, AgentLifecycleRequest, CancelExecutionRequest, CancelReason,
-    CreateAgentRequest, MessageContent, SendAgentInputRequest,
+    AgentInputDelivery, AgentLifecycleRequest, CreateAgentRequest, MessageContent,
+    SendAgentInputRequest,
 };
 
 #[derive(Clone)]
@@ -118,66 +117,61 @@ impl MultiAgentToolProvider {
                 parent_agent_instance_id: context.agent_instance_id.clone(),
                 agent_spec_id,
                 requested_agent_instance_id: Some(child_id),
-                origin_execution_id: Some(context.execution_id.clone()),
                 origin_tool_call_id: Some(call.id.clone()),
             })
             .await?;
-        let input = self
-            .runtime
-            .send_agent_input(SendAgentInputRequest {
-                request_id: format!("input:{}:{}", context.execution_id, call.id),
-                session_id: context.session_id.clone(),
-                agent_instance_id: child.identity.agent_instance_id.clone(),
-                caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-                requested_execution_id: Some(format!("exec_{spawn_id}")),
-                // Child agent runs have no Interaction Turn binding.
-                source_turn_id: None,
-                message_id: format!("message:{}:{}", context.execution_id, call.id),
-                content: MessageContent::String(prompt),
-                delivery: AgentInputDelivery::StartWhenIdle,
-            })
-            .await?;
-        let execution_id = input.execution_id.ok_or(AgentApiError::InvalidState)?;
+        let input = SendAgentInputRequest {
+            request_id: format!("input:{}:{}", context.execution_id, call.id),
+            session_id: context.session_id.clone(),
+            agent_instance_id: child.identity.agent_instance_id.clone(),
+            caller_agent_instance_id: Some(context.agent_instance_id.clone()),
+            // Child agent runs have no Interaction Turn binding.
+            source_turn_id: None,
+            message_id: format!("message:{}:{}", context.execution_id, call.id),
+            content: MessageContent::String(prompt),
+            delivery: AgentInputDelivery::StartWhenIdle,
+            prompt_resources: None,
+            active_tool_names: None,
+        };
 
         if detached {
             self.runtime
-                .track_detached_execution(
-                    context.session_id.clone(),
-                    context.agent_instance_id.clone(),
-                    child.identity.agent_instance_id.clone(),
-                    execution_id.clone(),
-                )
+                .send_agent_input_detached(input, context.agent_instance_id.clone())
                 .await?;
             Ok(serde_json::json!({
                 "agent_instance_id": child.identity.agent_instance_id,
-                "execution_id": execution_id,
                 "status": "accepted"
             }))
         } else {
-            let wait = self.runtime.wait_agent_execution(
-                context.session_id.clone(),
-                child.identity.agent_instance_id.clone(),
-                execution_id.clone(),
-            );
-            let report = if let Some(cancellation) = &context.cancellation {
+            let acceptance = if let Some(cancellation) = &context.cancellation {
                 tokio::select! {
-                    report = wait => report?,
+                    acceptance = self.runtime.run_agent(input) => acceptance?,
                     _ = cancellation.cancelled() => {
-                        let _ = self.runtime.request_cancel_execution(CancelExecutionRequest {
-                            request_id: format!("cancel:{}:{}", context.execution_id, call.id),
-                            session_id: context.session_id.clone(),
-                            execution_id,
-                            reason: CancelReason::Superseded,
-                        }).await;
+                        let _ = self.runtime.cancel_agent_run(
+                            context.session_id.clone(),
+                            child.identity.agent_instance_id.clone(),
+                        ).await;
                         return Err(AgentApiError::Cancelled);
                     }
                 }
             } else {
-                wait.await?
+                self.runtime.run_agent(input).await?
             };
-            serde_json::to_value(report).map_err(|error| {
-                AgentApiError::PersistenceFailed(format!("serialize agent report: {error}"))
-            })
+            let report = if let Some(cancellation) = &context.cancellation {
+                tokio::select! {
+                    report = acceptance.wait() => report?,
+                    _ = cancellation.cancelled() => {
+                        let _ = self.runtime.cancel_agent_run(
+                            context.session_id.clone(),
+                            child.identity.agent_instance_id.clone(),
+                        ).await;
+                        return Err(AgentApiError::Cancelled);
+                    }
+                }
+            } else {
+                acceptance.wait().await?
+            };
+            Ok(report_value(&report))
         }
     }
 }
@@ -221,20 +215,20 @@ impl ToolProvider for MultiAgentToolProvider {
                                 session_id: context.session_id.clone(),
                                 agent_instance_id: target,
                                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-                                requested_execution_id: None,
                                 // Steered/follow-up input to an existing agent has no
                                 // Interaction Turn binding of its own.
                                 source_turn_id: None,
                                 message_id: format!("message:{}:{}", context.execution_id, call.id),
                                 content: MessageContent::String(message),
                                 delivery,
+                                prompt_resources: None,
+                                active_tool_names: None,
                             })
                             .await
-                            .and_then(|receipt| {
-                                serde_json::to_value(receipt).map_err(|error| {
-                                    AgentApiError::PersistenceFailed(error.to_string())
-                                })
-                            })
+                            .map(|receipt| serde_json::json!({
+                                "agent_instance_id": receipt.agent_instance_id,
+                                "disposition": receipt.disposition,
+                            }))
                     }
                     (Err(error), _) | (_, Err(error)) => Err(error),
                 }
@@ -245,10 +239,19 @@ impl ToolProvider for MultiAgentToolProvider {
                     .agent_snapshot(context.session_id.clone(), target)
                     .await
                     .and_then(|snapshot| snapshot.ok_or(AgentApiError::AgentNotFound))
-                    .and_then(|snapshot| {
-                        serde_json::to_value(snapshot)
-                            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))
-                    }),
+                    .map(|snapshot| serde_json::json!({
+                        "agent_instance_id": snapshot.identity.agent_instance_id,
+                        "agent_spec_id": snapshot.identity.agent_spec_id,
+                        "parent_agent_instance_id": snapshot.identity.parent_agent_instance_id,
+                        "lifecycle": snapshot.lifecycle,
+                        "activity": match snapshot.activity {
+                            piko_protocol::AgentActivity::Idle => "idle",
+                            piko_protocol::AgentActivity::Running => "running",
+                            piko_protocol::AgentActivity::WaitingForApproval => "waiting_for_approval",
+                            piko_protocol::AgentActivity::Cancelling => "cancelling",
+                        },
+                        "unread_report_count": snapshot.unread_report_count,
+                    })),
                 Err(error) => Err(error),
             },
             "collect_agent_reports" => {
@@ -290,7 +293,16 @@ impl ToolProvider for MultiAgentToolProvider {
                         if let Some(error) = failure {
                             Err(error)
                         } else {
-                            Ok(serde_json::json!({ "reports": consumed }))
+                            Ok(serde_json::json!({
+                                "reports": consumed
+                                    .iter()
+                                    .map(|item| serde_json::json!({
+                                        "report_id": item.report_id,
+                                        "source_agent_instance_id": item.source_agent_instance_id,
+                                        "report": report_value(&item.report),
+                                    }))
+                                    .collect::<Vec<_>>()
+                            }))
                         }
                     }
                     Err(error) => Err(error),
@@ -382,8 +394,15 @@ fn agent_target_schema() -> serde_json::Value {
 }
 
 fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    execution_id.hash(&mut hasher);
-    tool_call_id.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+    orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
+}
+
+fn report_value(report: &piko_protocol::AgentRunReport) -> serde_json::Value {
+    serde_json::json!({
+        "agent_instance_id": report.agent_instance_id,
+        "outcome": report.outcome,
+        "summary": report.summary,
+        "usage": report.usage,
+        "artifacts": report.artifacts,
+    })
 }

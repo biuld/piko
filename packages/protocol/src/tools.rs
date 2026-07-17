@@ -139,7 +139,7 @@ pub struct ToolDef {
 #[serde(rename_all = "camelCase")]
 pub struct ToolSetMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>, // builtin, host, mcp, plugin, dynamic, agent
+    pub source: Option<String>, // todo, host, mcp, plugin, dynamic, agent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }

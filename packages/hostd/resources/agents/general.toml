@@ -2,5 +2,4 @@ name = "General"
 role = "generalist"
 description = "General-purpose coding agent."
 system_prompt = "You are Piko, a general-purpose coding agent."
-tool_set_ids = ["builtin", "workspace"]
-
+tool_set_ids = ["todo", "workspace", "multi_agent"]

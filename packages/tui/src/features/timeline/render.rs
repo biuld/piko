@@ -9,6 +9,7 @@ use ratatui::{
 use crate::{
     app::ToolStatus,
     features::{preview_text, short_id},
+    layout::DEFAULT_HORIZONTAL_INSET,
     theme::Theme,
 };
 
@@ -19,11 +20,20 @@ use super::{
 
 impl Timeline {
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let content_area = Rect {
-            x: area.x.saturating_add(1),
+        // Layout: [left inset][content][scrollbar]. The scrollbar column is the
+        // right gutter — do not inset again inside the content band.
+        let content_band = Rect {
+            x: area.x,
             y: area.y,
-            width: area.width.saturating_sub(2),
+            width: area.width.saturating_sub(1).max(1),
             height: area.height,
+        };
+        let left = DEFAULT_HORIZONTAL_INSET.min(content_band.width.saturating_sub(1));
+        let content_area = Rect {
+            x: content_band.x.saturating_add(left),
+            y: content_band.y,
+            width: content_band.width.saturating_sub(left),
+            height: content_band.height,
         };
         let mut lines = self.render_lines(theme, content_area.width);
         if lines.is_empty() {
@@ -61,7 +71,9 @@ impl Timeline {
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
-                    .end_symbol(None),
+                    .end_symbol(None)
+                    .style(Style::default().fg(theme.border_muted))
+                    .thumb_style(Style::default().fg(theme.dim)),
                 area,
                 &mut scrollbar_state,
             );

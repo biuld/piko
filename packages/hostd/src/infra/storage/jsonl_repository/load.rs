@@ -1,14 +1,11 @@
 use std::collections::VecDeque;
-use std::fs;
-use std::io::BufRead;
 use std::path::Path;
 
 use crate::api::{AgentInfo, AgentStatus, Message, ServerMessage, SessionTreeEntry};
 use crate::domain::sessions::AgentViewState;
 use crate::domain::sessions::SessionState;
 
-use super::super::jsonl_io::SessionHeader;
-use super::super::recovery::{agent_task_state_from_manifest_entry, agent_transcript_entries};
+use super::super::recovery::agent_transcript_entries;
 use super::super::session_store::{SessionManifest, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
 
@@ -26,13 +23,11 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.name = manifest.name.clone();
     state.current_leaf_id = manifest.current_leaf_id.clone();
     state.entries = manifest.entries.clone();
+    let mut recovered_root_leaf = None;
     for agent_instance_id in store.list_agents(&manifest.session_id)? {
         let recovered = store.load_agent(&manifest.session_id, &agent_instance_id)?;
-        if let Some(agent) = manifest.agents.get(&agent_instance_id) {
-            state.tasks.insert(
-                agent_instance_id.clone(),
-                agent_task_state_from_manifest_entry(&manifest, agent),
-            );
+        if manifest.root_agent_instance_id.as_deref() == Some(agent_instance_id.as_str()) {
+            recovered_root_leaf = Some(resolve_recovered_root_leaf(&manifest, &recovered));
         }
         for entry in agent_transcript_entries(&recovered) {
             if let SessionTreeEntry::Message(message) = &entry {
@@ -42,6 +37,9 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
             }
             state.entries.push(entry);
         }
+    }
+    if let Some(root_leaf) = recovered_root_leaf {
+        state.current_leaf_id = root_leaf;
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
@@ -54,43 +52,39 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     })
 }
 
-#[allow(dead_code)]
-fn load_file_state(path: &Path) -> Result<(SessionState, SessionHeader), SessionStorageError> {
-    let f = fs::File::open(path).map_err(|e| SessionStorageError::Io {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut lines = std::io::BufReader::new(f).lines();
-    let hl = lines
-        .next()
-        .ok_or(SessionStorageError::Invalid {
-            path: path.to_path_buf(),
-            message: "missing header".into(),
-        })?
-        .map_err(|e| SessionStorageError::Io {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-    let h: SessionHeader = serde_json::from_str(&hl).map_err(|e| SessionStorageError::Json {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-    let mut state = SessionState::new(h.id.clone(), h.cwd.clone());
-    for l in lines {
-        let l = l.map_err(|e| SessionStorageError::Io {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-        if l.trim().is_empty() {
-            continue;
-        }
-        if let Ok(entry) = serde_json::from_str::<SessionTreeEntry>(&l) {
-            state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
-            state.entries.push(entry);
-        }
+fn resolve_recovered_root_leaf(
+    manifest: &super::super::session_store::SessionManifest,
+    recovered: &super::super::session_store::RecoveredAgent,
+) -> Option<String> {
+    let Some(head_id) = recovered.head_message_id.as_ref() else {
+        return manifest.current_leaf_id.clone();
+    };
+    if manifest.current_leaf_id.as_ref() == Some(head_id) {
+        return Some(head_id.clone());
     }
-    state.seq = state.entries.len() as u64;
-    Ok((state, h))
+
+    let head_timestamp = recovered
+        .transcript
+        .iter()
+        .find(|message| &message.id == head_id)
+        .map(|message| message.timestamp)
+        .unwrap_or(i64::MIN);
+    let selection_timestamp = manifest
+        .entries
+        .iter()
+        .filter(|entry| match entry {
+            SessionTreeEntry::Leaf(leaf) => leaf.target_id == manifest.current_leaf_id,
+            _ => manifest.current_leaf_id.as_deref() == Some(entry.id()),
+        })
+        .filter_map(|entry| entry.timestamp().parse::<i64>().ok())
+        .max()
+        .unwrap_or(i64::MIN);
+
+    if head_timestamp > selection_timestamp {
+        Some(head_id.clone())
+    } else {
+        manifest.current_leaf_id.clone()
+    }
 }
 
 fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManifest) {
@@ -114,6 +108,7 @@ fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManif
         state.active_agents.insert(
             agent.identity.agent_instance_id.clone(),
             AgentInfo {
+                session_id: state.session_id.clone(),
                 agent_instance_id: agent.identity.agent_instance_id.clone(),
                 agent_id: agent.identity.agent_spec_id.clone(),
                 parent_agent_instance_id: agent.identity.parent_agent_instance_id.clone(),
@@ -131,11 +126,12 @@ fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManif
         );
     }
 
-    state.active_agent_instance_id = state
-        .active_agents
-        .values()
-        .find(|agent| agent.parent_agent_instance_id.is_none())
-        .map(|agent| agent.agent_instance_id.clone())
+    state.active_agent_instance_id = manifest
+        .selected_agent_instance_id
+        .clone()
+        .filter(|selected| state.active_agents.contains_key(selected))
+        .or_else(|| manifest.root_agent_instance_id.clone())
+        .filter(|selected| state.active_agents.contains_key(selected))
         .or_else(|| state.active_agents.keys().next().cloned());
 
     let entries = state.entries.clone();
@@ -194,14 +190,17 @@ fn project_agent_view_from_entry(
             }
         }
         SessionTreeEntry::ToolCall(tool) => {
-            let (Some(agent_instance_id), Some(agent_id)) = (&tool.task_id, &tool.agent_id) else {
+            let (Some(agent_instance_id), Some(agent_id)) =
+                (&tool.agent_instance_id, &tool.agent_id)
+            else {
                 return Vec::new();
             };
             vec![(
                 agent_instance_id.clone(),
                 agent_id.clone(),
                 ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
-                    task_id: agent_instance_id.clone(),
+                    session_id: session_id.to_string(),
+                    agent_instance_id: agent_instance_id.clone(),
                     agent_id: agent_id.clone(),
                     tool_call_id: tool.tool_call_id.clone(),
                     tool_name: tool.tool_name.clone(),

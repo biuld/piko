@@ -2,16 +2,15 @@
 
 > Status: normative
 > Scope: single-agent hostd/orchd architecture
-> Migration record: [Single-Agent Runtime Migration](single-agent-runtime-migration.md)
+> Prompt lifecycle: [Agent Prompt Assembly Design](agent-prompt-assembly-design.md)
+> Pending amendment: AgentRunPrompt references below await design confirmation.
 
 ## 1. Purpose
 
 This document defines the stable concepts, identities, lifecycles, ownership
 boundaries, and invariants of piko's single-agent runtime.
 
-It describes what the system means. It does not describe the current
-implementation, migration phases, compatibility shims, or file-level changes.
-Those belong in [Single-Agent Runtime Migration](single-agent-runtime-migration.md).
+It describes what the system means rather than file-level implementation.
 The Tokio realization is defined in
 [Single-Agent Actor Runtime Design](single-agent-actor-runtime-design.md).
 
@@ -73,7 +72,8 @@ spinner convergence. It is not one model request and it is not one tool call.
 
 ### 3.3 Agent Execution
 
-An Agent Execution is orchd processing one accepted Interaction Turn.
+An Agent Execution is orchd processing one accepted Interaction Turn. It is an
+internal runtime concept, not an address exposed by AgentRuntime.
 
 It is identified by `execution_id`.
 
@@ -96,6 +96,7 @@ points:
 
 An Agent Execution owns live execution state:
 
+- the immutable AgentRunPrompt frozen for this run;
 - cancellation;
 - the current model stream;
 - the current Model Step;
@@ -110,6 +111,11 @@ Execution state is temporary. It is not the durable conversation authority.
 
 A Model Step is one provider request and the immediate tool batch requested by
 its assistant response.
+
+The provider request combines the run's immutable AgentRunPrompt with the
+current committed transcript and the run's resolved tool catalog. Exact
+assembly and retry semantics are defined in
+[Agent Prompt Assembly Design](agent-prompt-assembly-design.md).
 
 ```text
 context snapshot
@@ -178,7 +184,8 @@ Model Step          1 ── 1 Assistant Message
 Model Step          1 ── 0..N Tool Execution
 ```
 
-`turn_id` and `execution_id` are never aliases in the type system, even when
+`turn_id` and `execution_id` are distinct semantic identities and are never
+substituted for one another in runtime or persistence contracts, even when
 their values are allocated together.
 
 ## 5. State Machines
@@ -219,10 +226,13 @@ Session activity is a live projection, not an independent lifecycle:
 
 ```text
 Idle                         no active Execution
-Running(execution_id)        active Execution
-WaitingForApproval(...)      active Execution blocked on a host decision
-Cancelling(execution_id)     cancellation requested, terminal not committed
+Running                      active Execution
+WaitingForApproval           active Execution blocked on a host decision
+Cancelling                   cancellation requested, terminal not committed
 ```
+
+The projection deliberately omits Execution identity. Commands target the
+AgentInstance; AgentRuntime resolves its active internal Execution.
 
 ## 6. Execution Loop
 
@@ -269,11 +279,16 @@ not create another Turn or Execution.
 Follow-up is input submitted while an Execution is active but intended to run
 after the active Execution settles.
 
-Follow-up is owned by hostd queueing:
+Follow-up is owned by the target `AgentActor`:
 
-1. the current Execution and Turn reach a terminal outcome;
-2. hostd creates a new Interaction Turn;
-3. hostd starts a new Agent Execution with the queued input.
+1. hostd creates the Turn before calling `AgentRuntimeApi::run_agent` with
+   `AgentInputDelivery::FollowUp`;
+2. `AgentActor` commits `AgentDurableCommand::InputQueued` when an Execution is
+   active;
+3. after the active Execution settles,
+   `AgentActor::advance_next_follow_up` commits
+   `AgentDurableCommand::QueuedInputStarted` and starts the next Execution;
+4. hostd receives the `started` signal and projects the Turn as `Running`.
 
 Every user-visible submission therefore has one explicit Turn identity and one
 terminal outcome.
@@ -288,10 +303,11 @@ hostd SessionAggregate
   ├─ approval and interaction state
   └─ live projection
           │
-          │ StartExecution + scoped capabilities
+          │ run Agent + scoped capabilities
           ▼
-orchd AgentExecutor
-  └─ ActiveExecution?             at most one in single-agent mode
+orchd AgentRuntime
+  └─ root AgentActor
+      └─ internal ActiveExecution?  at most one per AgentInstance
       ├─ ExecutionState
       ├─ Model Step loop
       ├─ Tool Executor
@@ -422,33 +438,36 @@ Rules:
 
 ## 12. Command and Event Contract
 
-A minimal orchd-facing capability provides:
+A minimal orchd-facing Agent capability provides:
 
 ```text
-start_execution
-steer_execution
-cancel_execution
-execution_snapshot
-subscribe_session
+run_agent
+send_agent_input
+steer_agent
+cancel_agent_run
+agent_snapshot
 ```
 
-Every execution command is addressed by `session_id + execution_id`. Commands
-use `request_id` for idempotency.
+Every control command is addressed by `session_id + agent_instance_id`.
+Execution identity remains internal metadata for persistence, realtime
+correlation, and diagnostics. Commands use `request_id` for idempotency.
 
-Reliable execution events include:
+Reliable product observation contains committed Session facts such as:
 
 ```text
-ExecutionAccepted
-ExecutionStarted
 MessageCommitted
-ToolExecutionStarted
-ToolExecutionCompleted
-ExecutionSucceeded
-ExecutionFailed
-ExecutionCancelled
+ToolCommitted
+InteractionRequested
+InteractionResolved
 ```
 
-Realtime events include only partial assistant or tool output.
+Agent run completion is the durable result of `run_agent`, not an observation
+event. hostd maps a root Agent report to its Turn terminal after committed
+message projection reaches the completion barrier. See
+[Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md).
+
+Realtime events include only partial assistant or tool output and may carry
+internal Execution correlation that is removed from user-visible projection.
 
 ## 13. Recovery
 
@@ -467,7 +486,7 @@ Resumable execution requires an explicit durable checkpoint contract.
 ## 14. Single-Agent Invariants
 
 1. A Session has at most one active Agent Execution.
-2. An accepted Interaction Turn binds exactly one root `execution_id`.
+2. An accepted Interaction Turn binds exactly one root internal Execution.
 3. Every accepted Turn and Execution has exactly one terminal outcome.
 4. One Execution may contain multiple Model Steps.
 5. Tool continuation stays in the same Execution.
@@ -530,6 +549,9 @@ execution_id
 source_turn_id
 ```
 
+`execution_id` is internal recovery and diagnostic metadata. It is absent from
+Agent-facing requests, receipts, reports, activity, and cancellation APIs.
+
 In single-agent mode:
 
 ```text
@@ -590,18 +612,18 @@ These sequences are not aliases.
 
 ### 15.6 Cancellation
 
-Execution cancellation remains addressed by `execution_id`. Agent lifecycle
-control is addressed by `agent_instance_id`. Cancelling one Execution does not
-close its AgentInstance.
+Run cancellation is addressed by `agent_instance_id`; AgentRuntime resolves the
+active internal Execution. Cancelling a run does not close its AgentInstance.
 
 ## 16. Multi-Agent Compatibility Invariants
 
 The single-agent implementation must preserve these extension points:
 
 1. AgentRuntime remains the only runtime entry point and supervisor.
-2. Execution commands are addressed by `execution_id`.
-3. Agent commands are addressed by `agent_instance_id`.
-4. `execution_id`, `agent_instance_id`, and `turn_id` remain distinct types.
+2. Public runtime commands are addressed by `agent_instance_id`.
+3. Execution identity remains internal persistence/observation metadata.
+4. `execution_id`, `agent_instance_id`, and `turn_id` remain distinct internal
+   types and are never aliases.
 5. A Turn binds one root Execution, not an arbitrary set of Executions.
 6. AgentInstance Tree is independent of Execution history.
 7. AgentInstance owns private transcript; Execution uses a working view of it.

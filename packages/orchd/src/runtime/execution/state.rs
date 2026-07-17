@@ -5,7 +5,7 @@ use piko_protocol::execution::{ExecutionStatus, SteerExecutionRequest};
 
 use crate::domain::transcript::TranscriptManager;
 
-pub struct ExecutionState {
+pub(crate) struct ExecutionState {
     pub status: ExecutionStatus,
     pub transcript: TranscriptManager,
     pub model_step_index: u32,

@@ -1,7 +1,9 @@
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures_core::Stream;
 use llmd::gateway::GatewayEvent;
+use orchd_api::RealtimeDeltaSink;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
@@ -43,7 +45,7 @@ impl StepDispatch {
     pub(crate) fn from_step_stream(
         identity: DispatchIdentity,
         message_id: MessageId,
-        work_id: String,
+        source_turn_id: String,
         model: ModelSpec,
         events: Pin<Box<dyn Stream<Item = GatewayEvent> + Send>>,
     ) -> Self {
@@ -51,7 +53,7 @@ impl StepDispatch {
             source: StepDispatchSource::StepStream(StepDispatchInput {
                 identity,
                 message_id,
-                work_id,
+                source_turn_id,
                 model,
                 events,
             }),
@@ -62,7 +64,7 @@ impl StepDispatch {
     pub(crate) fn from_step_failure(
         identity: DispatchIdentity,
         message_id: MessageId,
-        work_id: String,
+        source_turn_id: String,
         model: ModelSpec,
         error_message: String,
     ) -> Self {
@@ -70,7 +72,7 @@ impl StepDispatch {
             source: StepDispatchSource::StepFailure(StepFailureInput {
                 identity,
                 message_id,
-                work_id,
+                source_turn_id,
                 model,
                 error_message,
             }),
@@ -91,9 +93,13 @@ impl StepDispatch {
         self.consumers.push(consumer);
     }
 
-    pub(crate) async fn dispatch_step(&mut self) -> StepDispatchResult {
+    pub(crate) async fn dispatch_step(
+        &mut self,
+        realtime_sink: Option<Arc<dyn RealtimeDeltaSink>>,
+    ) -> StepDispatchResult {
         let metadata = self.source.metadata();
-        let bundle = assembly::StepConsumerBundle::attach_collecting(self, &metadata);
+        let bundle =
+            assembly::StepConsumerBundle::attach_collecting(self, &metadata, realtime_sink);
         match &mut self.source {
             StepDispatchSource::StepStream(input) => {
                 stream::dispatch_step_stream(

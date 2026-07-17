@@ -315,8 +315,14 @@ impl AppState {
         let mut effects = Vec::new();
         match action {
             SlashAction::New => {
+                self.begin_session_hydration(None);
+                let create_id = command_id();
+                self.session.pending.track(
+                    create_id.clone(),
+                    super::pending::PendingCommandKind::SessionCreate,
+                );
                 effects.push(Effect::send(Command::SessionCreate {
-                    command_id: command_id(),
+                    command_id: create_id,
                     cwd: self.cwd.to_string_lossy().into_owned(),
                 }));
                 self.clear_focus();
@@ -326,8 +332,14 @@ impl AppState {
             SlashAction::Clone => effects.extend(self.fork_session(None)),
             SlashAction::Rename(name) => effects.extend(self.rename_session(name)),
             SlashAction::Import(path) => {
+                self.begin_session_hydration(None);
+                let import_id = command_id();
+                self.session.pending.track(
+                    import_id.clone(),
+                    super::pending::PendingCommandKind::SessionOpen,
+                );
                 effects.push(Effect::send(Command::SessionImport {
-                    command_id: command_id(),
+                    command_id: import_id,
                     path,
                 }));
                 self.status = "importing session".to_string();
@@ -371,9 +383,15 @@ impl AppState {
                     self.status = "no active session to compact".to_string();
                     return effects;
                 };
+                let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone()
+                else {
+                    self.status = "no active agent to compact".to_string();
+                    return effects;
+                };
                 effects.push(Effect::send(Command::SessionCompact {
                     command_id: command_id(),
                     session_id,
+                    agent_instance_id,
                 }));
                 self.clear_focus();
                 self.status = "compaction requested".to_string();

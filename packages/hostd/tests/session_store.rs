@@ -1,12 +1,12 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use hostd::infra::storage::SessionStore;
+use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use orchd_api::AgentCommitPort;
 use piko_protocol::execution::{CommitError, MessageCommit};
 use piko_protocol::{
-    AgentDurableCommand, AgentExecutionReport, AgentInstanceIdentity, AgentInstanceLifecycle,
-    Message, MessageContent,
+    AgentDurableCommand, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, Message,
+    MessageContent,
 };
 use tempfile::tempdir;
 
@@ -16,7 +16,7 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
         name: id.into(),
         role: "test".into(),
         description: None,
-        system_prompt: "test".into(),
+        base_system_prompt: "test".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: Vec::new(),
@@ -77,9 +77,9 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
             "session-1",
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id: root.agent_instance_id.clone(),
-                report: AgentExecutionReport {
+                report: AgentRunReport {
                     agent_instance_id: child.agent_instance_id.clone(),
-                    execution_id: "exec-child-1".into(),
+                    report_id: "report-child-1".into(),
                     outcome: piko_protocol::ExecutionOutcome::Succeeded {
                         usage: Default::default(),
                     },
@@ -103,7 +103,7 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
     assert_eq!(recovered_child.lifecycle, AgentInstanceLifecycle::Closed);
     let inbox = reopened.agent_inbox(&root.agent_instance_id).unwrap();
     assert_eq!(inbox.len(), 1);
-    assert_eq!(inbox[0].report.execution_id, "exec-child-1");
+    assert_eq!(inbox[0].report.report_id, "report-child-1");
 }
 
 #[test]
@@ -149,35 +149,6 @@ fn private_transcripts_are_recovered_per_agent_shard() {
         &b[0],
         Message::User { content: MessageContent::String(text), .. }
             if text == "private-coder-b"
-    ));
-}
-
-#[tokio::test]
-async fn recovery_marks_accepted_execution_interrupted() {
-    let temp = tempdir().unwrap();
-    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
-        .unwrap();
-    let root = store.ensure_root_agent("main").unwrap();
-    store
-        .commit_agent_command(
-            "session-1",
-            AgentDurableCommand::ExecutionStarted {
-                agent_instance_id: root.agent_instance_id.clone(),
-                execution_id: "exec-interrupted".into(),
-                started_at: 1,
-            },
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
-    assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 0);
-    let manifest = store.load_manifest().unwrap();
-    let execution = manifest.agent_executions.get("exec-interrupted").unwrap();
-    assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
-    assert!(matches!(
-        execution.report.as_ref().map(|report| &report.outcome),
-        Some(piko_protocol::ExecutionOutcome::Cancelled { .. })
     ));
 }
 
@@ -227,6 +198,105 @@ fn stores_and_recovers_agent_shard_transcript() {
     );
     assert!(!temp.path().join("tasks").exists());
     assert!(!temp.path().join("tasks.json").exists());
+}
+
+#[test]
+fn root_transcript_advances_persisted_leaf_across_reopen() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    store
+        .commit_message(message_commit("message-1", None), "main")
+        .unwrap();
+    store
+        .commit_message(message_commit("message-2", Some("message-1")), "main")
+        .unwrap();
+
+    let reopened = SessionStore::new(temp.path());
+    assert_eq!(
+        reopened.load_manifest().unwrap().current_leaf_id.as_deref(),
+        Some("message-2")
+    );
+    reopened
+        .update_manifest(|manifest| manifest.current_leaf_id = Some("message-1".into()))
+        .unwrap();
+    let repaired = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(repaired.state.current_leaf_id.as_deref(), Some("message-2"));
+    JsonlSessionRepository::new(temp.path())
+        .navigate(temp.path(), Some("message-2"), Some("message-1"), None)
+        .unwrap();
+    let explicitly_navigated = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(
+        explicitly_navigated.state.current_leaf_id.as_deref(),
+        Some("message-1")
+    );
+
+    reopened
+        .commit_message(message_commit("message-3", Some("message-2")), "main")
+        .unwrap();
+    reopened
+        .commit_message(message_commit("message-1", None), "main")
+        .unwrap();
+    assert_eq!(
+        SessionStore::new(temp.path())
+            .load_manifest()
+            .unwrap()
+            .current_leaf_id
+            .as_deref(),
+        Some("message-3")
+    );
+
+    let restored = JsonlSessionRepository::new(temp.path())
+        .load_by_path(temp.path())
+        .unwrap();
+    assert_eq!(restored.state.current_leaf_id.as_deref(), Some("message-3"));
+    assert!(
+        restored
+            .state
+            .entries
+            .iter()
+            .any(|entry| entry.id() == "message-3")
+    );
+}
+
+#[test]
+fn child_transcript_does_not_move_persisted_session_leaf() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    store
+        .commit_message(message_commit("message-root", None), "main")
+        .unwrap();
+    store
+        .ensure_agent_shard("session-1", "agent-child", "coder", 2)
+        .unwrap();
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: None,
+                execution_id: "exec-child".into(),
+                agent_instance_id: "agent-child".into(),
+                message_id: "message-child".into(),
+                parent_message_id: None,
+                message: Message::User {
+                    content: MessageContent::String("private".into()),
+                    timestamp: Some(3),
+                },
+                committed_at: 3,
+            },
+            "coder",
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.load_manifest().unwrap().current_leaf_id.as_deref(),
+        Some("message-root")
+    );
 }
 
 #[test]
@@ -295,3 +365,46 @@ async fn fork_to_copies_agent_shards_with_rewritten_session_id() {
         .unwrap();
     assert_eq!(recovered.transcript.len(), 1);
 }
+
+#[tokio::test]
+async fn durable_commands_serialize_across_independent_store_handles() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+
+    let left = SessionStore::new(temp.path());
+    let right = SessionStore::new(temp.path());
+    let left_cmd = AgentDurableCommand::Create {
+        identity: AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "child-a".into(),
+            agent_spec_id: "coder".into(),
+            parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+        },
+        spec: test_agent_spec("coder"),
+    };
+    let right_cmd = AgentDurableCommand::Create {
+        identity: AgentInstanceIdentity {
+            session_id: "session-1".into(),
+            agent_instance_id: "child-b".into(),
+            agent_spec_id: "reviewer".into(),
+            parent_agent_instance_id: Some(root.agent_instance_id),
+        },
+        spec: test_agent_spec("reviewer"),
+    };
+
+    let (left_ack, right_ack) = tokio::join!(
+        left.commit_agent_command("session-1", left_cmd),
+        right.commit_agent_command("session-1", right_cmd),
+    );
+    left_ack.expect("left create");
+    right_ack.expect("right create");
+
+    let manifest = SessionStore::new(temp.path()).load_manifest().unwrap();
+    assert!(manifest.agents.contains_key("child-a"));
+    assert!(manifest.agents.contains_key("child-b"));
+    assert!(manifest.agent_revision >= 3);
+}
+
+include!("session_store_cases/durable_agent.rs");

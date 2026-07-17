@@ -1,7 +1,7 @@
 //! Small crate-wide helpers shared by `protocol` and `application`.
 //!
-//! Kept intentionally tiny per `docs/ddd-layering.md` §9: "Do not require
-//! hexagonal purity for tiny helpers (logging, `now_ms`)." Neither `protocol`
+//! Kept intentionally tiny: not every pure helper needs to become a port.
+//! Neither `protocol`
 //! nor `application` may depend on the other, so shared leaf helpers live
 //! here at the crate root instead.
 

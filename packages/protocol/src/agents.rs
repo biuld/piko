@@ -1,4 +1,4 @@
-// ---- Protocol: agents — agent & task types ----
+// ---- Protocol: agents — agent spec & runtime types ----
 
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,8 @@ pub struct AgentSpec {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(rename = "systemPrompt")]
-    pub system_prompt: String,
+    #[serde(rename = "baseSystemPrompt", alias = "systemPrompt")]
+    pub base_system_prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Thinking level override for this agent (e.g. "off", "low", "medium", "high").
@@ -51,56 +51,7 @@ pub struct AgentRuntimeState {
     pub transcript: Vec<Message>,
 }
 
-// ---- Task types ----
-
-pub type AgentTaskId = String;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum TaskSource {
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "agent")]
-    Agent {
-        #[serde(rename = "agentId")]
-        agent_id: String,
-        #[serde(rename = "taskId")]
-        task_id: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentTaskStatus {
-    Queued,
-    Running,
-    Idle,
-    Closed,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentTask {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<AgentTaskId>,
-    #[serde(rename = "targetAgentId")]
-    pub target_agent_id: String,
-    pub prompt: String,
-    pub source: TaskSource,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "parentTaskId")]
-    pub parent_task_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<Vec<Message>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume: Option<crate::agent_runtime::AgentResumeState>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
-    pub host_context: Option<HostSessionContext>,
-}
+// ---- Host session context ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -116,37 +67,24 @@ impl HostSessionContext {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentTaskState {
-    pub id: AgentTaskId,
-    #[serde(rename = "targetAgentId")]
-    pub target_agent_id: String,
-    pub prompt: String,
-    pub source: TaskSource,
-    pub status: AgentTaskStatus,
-    pub priority: i32,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "parentTaskId")]
-    pub parent_task_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<AgentTaskResult>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
+#[cfg(test)]
+mod tests {
+    use super::AgentSpec;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentArtifact {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub artifact_type: String,
-    pub data: serde_json::Value,
-}
+    #[test]
+    fn agent_spec_reads_legacy_system_prompt_and_writes_base_system_prompt() {
+        let spec: AgentSpec = serde_json::from_value(serde_json::json!({
+            "id": "main",
+            "name": "Main",
+            "role": "root",
+            "systemPrompt": "durable prompt",
+            "toolSetIds": []
+        }))
+        .unwrap();
+        assert_eq!(spec.base_system_prompt, "durable prompt");
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentTaskResult {
-    pub summary: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub artifacts: Option<Vec<AgentArtifact>>,
+        let serialized = serde_json::to_value(spec).unwrap();
+        assert_eq!(serialized["baseSystemPrompt"], "durable prompt");
+        assert!(serialized.get("systemPrompt").is_none());
+    }
 }

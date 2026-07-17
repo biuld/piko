@@ -2,10 +2,9 @@ use std::path::PathBuf;
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::infra::storage::jsonl_repository::load_session_dir;
 use crate::util::{now_ms, storage_error};
 
-use super::helpers::server_response_ok;
+use super::helpers::{server_response_ok, session_reconciled_message};
 
 impl HostApp {
     pub(crate) async fn apply_session_fork(
@@ -37,18 +36,17 @@ impl HostApp {
             .await
             .insert(forked_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let cwd = state.snapshot(&forked_id)?.cwd.clone();
-        let mut events = vec![server_response_ok(
+        let path = persisted.path.clone();
+        let mut events = Self::session_open_response(
+            &mut state,
             command_id,
-            crate::api::CommandResult::SessionCreated {
-                session_id: forked_id.clone(),
-                cwd,
-                timestamp: now_ms(),
-            },
-        )];
-        events.extend(Self::session_open_response(
-            &mut state, command_id, forked_id,
-        )?);
+            forked_id.clone(),
+            Some(&path),
+            self.session_store_factory.as_ref(),
+            false,
+        )?;
+        drop(state);
+        events = self.enrich_reconcile_messages(&forked_id, events).await;
         Ok(events)
     }
 
@@ -73,20 +71,17 @@ impl HostApp {
             .await
             .insert(imported_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let cwd = state.snapshot(&imported_id)?.cwd.clone();
-        let mut events = vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionCreated {
-                session_id: imported_id.clone(),
-                cwd,
-                timestamp: now_ms(),
-            },
-        )];
-        events.extend(Self::session_open_response(
+        let path = persisted.path.clone();
+        let mut events = Self::session_open_response(
             &mut state,
             command_id,
-            imported_id,
-        )?);
+            imported_id.clone(),
+            Some(&path),
+            self.session_store_factory.as_ref(),
+            false,
+        )?;
+        drop(state);
+        events = self.enrich_reconcile_messages(&imported_id, events).await;
         Ok(events)
     }
 
@@ -110,15 +105,17 @@ impl HostApp {
                     .map_err(storage_error)?;
             }
         }
-        let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::SessionOpened {
+        drop(state);
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            session_reconciled_message(
                 session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
                 snapshot,
-                timestamp: now_ms(),
-            },
-        )])
+                agents,
+            ),
+        ])
     }
 
     pub(crate) async fn apply_session_delete(
@@ -129,10 +126,16 @@ impl HostApp {
         self.state.lock().await.delete_session(&session_id);
         let path = self.session_paths.lock().await.remove(&session_id);
         if let Some(path) = path {
-            let _ = std::fs::remove_file(path);
+            std::fs::remove_dir_all(path).map_err(|error| {
+                ProtocolError::InvalidCommand(format!("delete session storage: {error}"))
+            })?;
         }
-        self.apply_session_list(command_id, crate::api::SessionListScope::All, None)
-            .await
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            ServerMessage::SessionCleared(piko_protocol::SessionClearedEvent {
+                previous_session_id: session_id,
+            }),
+        ])
     }
 
     pub(crate) async fn apply_session_set_label(
@@ -161,19 +164,21 @@ impl HostApp {
                 storage
                     .append_entry(&path, &label_entry, None)
                     .map_err(storage_error)?;
-                let persisted = load_session_dir(&path).map_err(storage_error)?;
+                let persisted = storage.load_by_path(&path).map_err(storage_error)?;
                 state.insert_session(persisted.state);
             }
         }
 
-        let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::StateSnapshot {
+        drop(state);
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            session_reconciled_message(
                 session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
                 snapshot,
-                timestamp: now_ms(),
-            },
-        )])
+                agents,
+            ),
+        ])
     }
 }

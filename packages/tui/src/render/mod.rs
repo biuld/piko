@@ -7,6 +7,8 @@
 //! 4. Delegate each slot to its surface widget
 //!
 //! All visible elements participate in the layout — no floaters.
+//! Timeline applies horizontal inset itself; other panels stay edge-flush
+//! (borders may touch the terminal edge).
 
 use ratatui::{
     Frame,
@@ -180,7 +182,7 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
             SettingsRenderState {
                 thinking_level: app.model.active_thinking_level.as_deref(),
                 thinking_visible: app.timeline.thinking_visible,
-                theme_name: &app.tui_config.theme.name,
+                theme_name: &app.theme.name,
                 no_tools: app.initial_options.no_tools,
             },
             &app.theme,

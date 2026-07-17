@@ -1,9 +1,8 @@
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::infra::storage::jsonl_repository::load_session_dir;
 use crate::util::{now_ms, storage_error};
 
-use super::helpers::server_response_ok;
+use super::helpers::{server_response_ok, session_reconciled_message};
 
 impl HostApp {
     pub(crate) async fn apply_session_navigate(
@@ -16,7 +15,7 @@ impl HostApp {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let mut state = self.state.lock().await;
         let session = state.session(&session_id)?;
-        if session.active_turn_id.is_some() {
+        if !session.active_turns.is_empty() {
             return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
         }
 
@@ -140,7 +139,7 @@ impl HostApp {
                 }
                 state = self.state.lock().await;
                 let session = state.session(&session_id)?;
-                if session.active_turn_id.is_some() {
+                if !session.active_turns.is_empty() {
                     return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
                 }
                 if session.current_leaf_id != old_leaf_id {
@@ -176,7 +175,7 @@ impl HostApp {
                 )
                 .map_err(storage_error)?;
 
-            let persisted = load_session_dir(path).map_err(storage_error)?;
+            let persisted = storage.load_by_path(path).map_err(storage_error)?;
             state.insert_session(persisted.state);
             persisted_via_storage = true;
         }
@@ -196,7 +195,8 @@ impl HostApp {
             state.append_entry(&session_id, leaf_entry)?;
         }
 
-        let snapshot = state.snapshot(&session_id)?;
+        drop(state);
+        let (snapshot, agents) = self.session_view(&session_id).await?;
         Ok(vec![
             server_response_ok(
                 command_id,
@@ -210,13 +210,11 @@ impl HostApp {
                     timestamp: now_ms(),
                 },
             ),
-            server_response_ok(
-                command_id,
-                crate::api::CommandResult::SessionOpened {
-                    session_id,
-                    snapshot,
-                    timestamp: now_ms(),
-                },
+            session_reconciled_message(
+                session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
+                snapshot,
+                agents,
             ),
         ])
     }

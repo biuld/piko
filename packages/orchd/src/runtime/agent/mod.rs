@@ -11,14 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use futures_util::FutureExt;
 use orchd_api::{
-    AgentApiError, AgentExecutor, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig,
-    SessionAgentHandle, SessionExecutionConfig,
+    AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
 };
 use piko_protocol::{
-    AgentActivity, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
+    AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
     AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentSnapshot, CancelExecutionRequest, CancelReceipt, CreateAgentReceipt, CreateAgentRequest,
-    SendAgentInputRequest, SteerAgentRequest,
+    AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
+    SteerAgentRequest,
 };
 use tokio::sync::{RwLock, mpsc, oneshot, watch};
 use uuid::Uuid;
@@ -27,6 +26,7 @@ use self::actor::AgentActor;
 use self::mailbox::{AgentCommand, AgentHandle};
 use super::execution::AgentExecutionRuntime;
 use crate::ports::model_gateway::LlmGateway;
+use crate::runtime::reliability::RunCancellation;
 
 /// Mandatory facade and Actor supervisor for multi-agent runtime operations.
 pub struct AgentRuntime {
@@ -54,13 +54,8 @@ impl AgentRuntime {
 
     pub async fn bootstrap(
         model_executor: Arc<dyn LlmGateway>,
-        mut config: piko_protocol::config::OrchdConfig,
+        config: piko_protocol::config::OrchdConfig,
     ) -> Arc<Self> {
-        for spec in config.agents.values_mut() {
-            if !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
-                spec.tool_set_ids.push("multi_agent".into());
-            }
-        }
         let execution = AgentExecutionRuntime::bootstrap(model_executor, config).await;
         let runtime = Arc::new(Self::from_execution_runtime(Arc::clone(&execution)));
         execution
@@ -120,15 +115,21 @@ impl AgentRuntime {
         spec_override: Option<piko_protocol::AgentSpec>,
         recovery: Option<AgentRecoveryState>,
     ) -> Result<(), AgentApiError> {
-        let spec = match spec_override.or_else(|| recovery.as_ref().map(|state| state.spec.clone()))
+        // Recovery restores the durable immutable AgentSpec snapshot. The live
+        // registry is authoritative only for newly created AgentInstances.
+        let spec = if let Some(spec) = spec_override {
+            spec
+        } else if let Some(state) = recovery.as_ref() {
+            state.spec.clone()
+        } else if let Some(spec) = self
+            .execution
+            .services()
+            .agent_spec(&identity.agent_spec_id)
+            .await
         {
-            Some(spec) => spec,
-            None => self
-                .execution
-                .services()
-                .agent_spec(&identity.agent_spec_id)
-                .await
-                .ok_or(AgentApiError::AgentSpecNotFound)?,
+            spec
+        } else {
+            return Err(AgentApiError::AgentSpecNotFound);
         };
         let generation = scope.next_generation();
         let (command_tx, command_rx) = mpsc::channel(32);
@@ -140,6 +141,9 @@ impl AgentRuntime {
             .as_ref()
             .map(|state| state.transcript.clone())
             .unwrap_or_default();
+        let head_message_id = recovery
+            .as_ref()
+            .and_then(|state| state.head_message_id.clone());
         let inbox = recovery
             .as_ref()
             .map(|state| state.inbox.clone())
@@ -147,6 +151,14 @@ impl AgentRuntime {
         let execution_reports = recovery
             .as_ref()
             .map(|state| state.execution_reports.clone())
+            .unwrap_or_default();
+        let queued_inputs = recovery
+            .as_ref()
+            .map(|state| state.queued_inputs.clone())
+            .unwrap_or_default();
+        let pending_detached_deliveries = recovery
+            .as_ref()
+            .map(|state| state.pending_detached_deliveries.clone())
             .unwrap_or_default();
         let latest_report = recovery.and_then(|state| state.latest_report);
         let initial = AgentSnapshot {
@@ -161,10 +173,12 @@ impl AgentRuntime {
             generation,
         };
         let (snapshot_tx, snapshot_rx) = watch::channel(initial);
+        let run_cancellation = Arc::new(RunCancellation::new());
         let handle = AgentHandle {
             generation,
             command_tx: command_tx.clone(),
             snapshot_rx,
+            run_cancellation: Arc::clone(&run_cancellation),
         };
         scope
             .insert_agent(identity.agent_instance_id.clone(), handle)
@@ -175,15 +189,20 @@ impl AgentRuntime {
             spec,
             lifecycle,
             transcript,
+            head_message_id,
             inbox,
             latest_report,
             execution_reports,
+            queued_inputs,
+            pending_detached_deliveries,
             generation,
             Arc::clone(scope.commit()),
             Arc::clone(&self.execution),
             command_tx.clone(),
             command_rx,
             snapshot_tx,
+            Arc::downgrade(scope),
+            run_cancellation,
         );
         let scope = Arc::clone(scope);
         let commit = Arc::clone(scope.commit());
@@ -270,6 +289,20 @@ impl AgentRuntimeApi for AgentRuntime {
         }
         let session_id = config.session_id.clone();
         let root = config.root.clone();
+        let mut recovered_agents = config.recovered_agents;
+        let root_recovery = recovered_agents
+            .iter()
+            .position(|state| state.identity.agent_instance_id == root.agent_instance_id)
+            .map(|index| recovered_agents.remove(index));
+        let root_spec = if let Some(recovery) = root_recovery.as_ref() {
+            recovery.spec.clone()
+        } else {
+            self.execution
+                .services()
+                .agent_spec(&root.agent_spec_id)
+                .await
+                .ok_or(AgentApiError::AgentSpecNotFound)?
+        };
         let scope = Arc::new(SessionAgentScope::new(
             session_id.clone(),
             root.agent_instance_id.clone(),
@@ -283,12 +316,7 @@ impl AgentRuntimeApi for AgentRuntime {
                 &session_id,
                 AgentDurableCommand::Create {
                     identity: root.clone(),
-                    spec: self
-                        .execution
-                        .services()
-                        .agent_spec(&root.agent_spec_id)
-                        .await
-                        .ok_or(AgentApiError::AgentSpecNotFound)?,
+                    spec: root_spec,
                 },
             )
             .await
@@ -304,20 +332,12 @@ impl AgentRuntimeApi for AgentRuntime {
 
         if let Err(error) = self
             .execution
-            .attach_session(SessionExecutionConfig {
-                session_id: session_id.clone(),
-                ports: config.ports.executions,
-            })
+            .attach_session(session_id.clone(), config.ports.executions)
             .await
         {
             self.sessions.write().await.remove(&session_id);
             return Err(error);
         }
-        let mut recovered_agents = config.recovered_agents;
-        let root_recovery = recovered_agents
-            .iter()
-            .position(|state| state.identity.agent_instance_id == root.agent_instance_id)
-            .map(|index| recovered_agents.remove(index));
         if let Err(error) = self
             .spawn_agent_actor(&scope, root.clone(), None, root_recovery)
             .await
@@ -454,6 +474,73 @@ impl AgentRuntimeApi for AgentRuntime {
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
     }
 
+    async fn run_agent(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<orchd_api::AgentRunAcceptance, AgentApiError> {
+        let scope = self.scope(&request.session_id).await?;
+        scope
+            .authorize_input(
+                request.caller_agent_instance_id.as_deref(),
+                &request.agent_instance_id,
+            )
+            .await?;
+        let handle = scope
+            .agent(&request.agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let (reply, received) = oneshot::channel();
+        handle
+            .command_tx
+            .try_send(AgentCommand::Run { request, reply })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
+                mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
+            })?;
+        received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?
+    }
+
+    async fn send_agent_input_detached(
+        &self,
+        request: SendAgentInputRequest,
+        recipient_agent_instance_id: String,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        let scope = self.scope(&request.session_id).await?;
+        scope
+            .authorize_input(
+                request.caller_agent_instance_id.as_deref(),
+                &request.agent_instance_id,
+            )
+            .await?;
+        let source = scope
+            .agent(&request.agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        scope
+            .agent(&recipient_agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let (reply, received) = oneshot::channel();
+        source
+            .command_tx
+            .try_send(AgentCommand::InputDetached {
+                request,
+                recipient: self::mailbox::DetachedReportTarget {
+                    agent_instance_id: recipient_agent_instance_id,
+                },
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
+                mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
+            })?;
+        received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?
+    }
+
     async fn steer_agent(
         &self,
         request: SteerAgentRequest,
@@ -463,20 +550,70 @@ impl AgentRuntimeApi for AgentRuntime {
             session_id: request.session_id,
             agent_instance_id: request.agent_instance_id,
             caller_agent_instance_id: request.caller_agent_instance_id,
-            requested_execution_id: None,
             source_turn_id: None,
             message_id: request.message_id,
             content: request.content,
             delivery: piko_protocol::AgentInputDelivery::SteerActive,
+            prompt_resources: None,
+            active_tool_names: None,
         })
         .await
     }
 
-    async fn request_cancel_execution(
+    async fn cancel_agent_run(
         &self,
-        request: CancelExecutionRequest,
-    ) -> Result<CancelReceipt, AgentApiError> {
-        self.execution.request_cancel(request).await
+        session_id: String,
+        agent_instance_id: String,
+    ) -> Result<AgentCancelReceipt, AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let cancellation_requested = handle.run_cancellation.cancel_active();
+        let (reply, received) = oneshot::channel();
+        handle
+            .command_tx
+            .send(AgentCommand::CancelRun {
+                request_id: format!("cancel-agent-{agent_instance_id}"),
+                reply,
+            })
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        let result = received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        match result {
+            Err(AgentApiError::InvalidState) if cancellation_requested => Ok(AgentCancelReceipt {
+                request_id: format!("cancel-agent-{agent_instance_id}"),
+                session_id,
+                agent_instance_id,
+                accepted: true,
+            }),
+            result => result,
+        }
+    }
+
+    async fn cancel_agent_input(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        request_id: String,
+    ) -> Result<AgentCancelReceipt, AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let (reply, received) = oneshot::channel();
+        handle
+            .command_tx
+            .send(AgentCommand::CancelInput { request_id, reply })
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?
     }
 
     async fn close_agent(
@@ -505,100 +642,6 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&agent_instance_id)
             .await
             .map(|handle| handle.snapshot_rx.borrow().clone()))
-    }
-
-    async fn wait_agent_execution(
-        &self,
-        session_id: String,
-        agent_instance_id: String,
-        execution_id: String,
-    ) -> Result<piko_protocol::AgentExecutionReport, AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        let handle = scope
-            .agent(&agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let mut snapshots = handle.snapshot_rx.clone();
-        loop {
-            if let Some(report) = &snapshots.borrow().latest_report
-                && report.execution_id == execution_id
-            {
-                return Ok(report.clone());
-            }
-            snapshots
-                .changed()
-                .await
-                .map_err(|_| AgentApiError::RuntimeUnavailable)?;
-        }
-    }
-
-    async fn track_detached_execution(
-        &self,
-        session_id: String,
-        recipient_agent_instance_id: String,
-        source_agent_instance_id: String,
-        execution_id: String,
-    ) -> Result<(), AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        if scope.agent(&recipient_agent_instance_id).await.is_none()
-            || scope.agent(&source_agent_instance_id).await.is_none()
-        {
-            return Err(AgentApiError::AgentNotFound);
-        }
-        let source = scope
-            .agent(&source_agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let recipient = scope
-            .agent(&recipient_agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let mut snapshots = source.snapshot_rx.clone();
-        let commit = Arc::clone(scope.commit());
-        tokio::spawn(async move {
-            loop {
-                let report = snapshots.borrow().latest_report.clone();
-                if let Some(report) = report
-                    && report.execution_id == execution_id
-                {
-                    let report_id = format!(
-                        "report_{}_{}",
-                        report.agent_instance_id, report.execution_id
-                    );
-                    if commit
-                        .commit_agent_command(
-                            &session_id,
-                            AgentDurableCommand::CommitReport {
-                                recipient_agent_instance_id: recipient_agent_instance_id.clone(),
-                                report: report.clone(),
-                            },
-                        )
-                        .await
-                        .is_ok()
-                    {
-                        let _ = recipient
-                            .command_tx
-                            .send(AgentCommand::InboxReport {
-                                item: piko_protocol::AgentInboxItem {
-                                    report_id,
-                                    recipient_agent_instance_id: recipient_agent_instance_id
-                                        .clone(),
-                                    source_agent_instance_id: report.agent_instance_id.clone(),
-                                    report,
-                                    committed_at: chrono::Utc::now().timestamp_millis(),
-                                    consumed_at: None,
-                                },
-                            })
-                            .await;
-                    }
-                    break;
-                }
-                if snapshots.changed().await.is_err() {
-                    break;
-                }
-            }
-        });
-        Ok(())
     }
 
     async fn list_agents(&self, session_id: String) -> Result<Vec<AgentSnapshot>, AgentApiError> {

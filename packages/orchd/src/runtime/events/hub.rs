@@ -133,7 +133,6 @@ pub struct SessionHubSubscription {
 pub fn merged_output_stream(
     mut subscription: SessionHubSubscription,
     cursor: SessionCursor,
-    task_filter: Option<String>,
 ) -> std::pin::Pin<Box<dyn Stream<Item = Result<SessionOutputEnvelope, SessionStreamError>> + Send>>
 {
     let session_id = subscription.session_id.clone();
@@ -141,16 +140,11 @@ pub fn merged_output_stream(
     let after_seq = cursor.seq;
     Box::pin(async_stream::stream! {
         while let Some(envelope) = subscription.replay.pop_front() {
-            if task_filter
-                .as_ref()
-                .is_none_or(|execution_id| Some(execution_id) == envelope.execution_id.as_ref())
-            {
-                yield Ok(SessionOutputEnvelope {
-                    session_id: session_id.clone(),
-                    emitted_at: crate::ports::clock::now_ms(),
-                    output: SessionOutput::Event(envelope),
-                });
-            }
+            yield Ok(SessionOutputEnvelope {
+                session_id: session_id.clone(),
+                emitted_at: crate::ports::clock::now_ms(),
+                output: SessionOutput::Event(envelope),
+            });
         }
         loop {
             tokio::select! {
@@ -164,11 +158,6 @@ pub fn merged_output_stream(
                                 break;
                             }
                             if envelope.cursor.seq <= after_seq {
-                                continue;
-                            }
-                            if task_filter.as_ref().is_some_and(|execution_id| {
-                                Some(execution_id) != envelope.execution_id.as_ref()
-                            }) {
                                 continue;
                             }
                             yield Ok(SessionOutputEnvelope {
@@ -189,12 +178,6 @@ pub fn merged_output_stream(
                 delta = subscription.delta.next() => {
                     match delta {
                         Some(Ok(envelope)) => {
-                            if task_filter
-                                .as_ref()
-                                .is_some_and(|execution_id| execution_id != &envelope.execution_id)
-                            {
-                                continue;
-                            }
                             yield Ok(SessionOutputEnvelope {
                                 session_id: session_id.clone(),
                                 emitted_at: crate::ports::clock::now_ms(),
@@ -215,30 +198,24 @@ pub type SharedSessionOutputHub = Arc<SessionOutputHub>;
 #[cfg(test)]
 mod tests {
     use futures_util::StreamExt;
+    use piko_protocol::MessageRole;
     use piko_protocol::agent_runtime::SessionEvent;
-    use piko_protocol::execution::{ExecutionObservationSnapshot, ExecutionStatus};
 
     use super::*;
 
-    fn event(execution_id: &str) -> SessionEventEnvelope {
+    fn event(message_id: &str) -> SessionEventEnvelope {
         SessionEventEnvelope {
             agent_instance_id: "root".into(),
-            execution_id: Some(execution_id.into()),
             agent_id: "agent".into(),
             transcript_seq: 1,
             cursor: SessionCursor {
                 epoch: String::new(),
                 seq: 0,
             },
-            event: SessionEvent::ExecutionChanged {
-                snapshot: ExecutionObservationSnapshot {
-                    session_id: "session".into(),
-                    source_turn_id: Some("turn".into()),
-                    execution_id: execution_id.into(),
-                    agent_instance_id: "root".into(),
-                    agent_id: "agent".into(),
-                    status: ExecutionStatus::Running,
-                },
+            event: SessionEvent::MessageCommitted {
+                message_id: message_id.into(),
+                source_turn_id: "turn".into(),
+                role: MessageRole::Assistant,
             },
         }
     }
@@ -250,16 +227,19 @@ mod tests {
         hub.publish_event(event("exec-1")).await.unwrap();
 
         let subscription = hub.subscribe(&cursor).await.unwrap();
-        let mut stream = merged_output_stream(subscription, cursor, None);
+        let mut stream = merged_output_stream(subscription, cursor);
         let output = stream.next().await.unwrap().unwrap();
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.execution_id.as_deref(), Some("exec-1"));
+        assert!(matches!(
+            output.event,
+            SessionEvent::MessageCommitted { .. }
+        ));
     }
 
     #[tokio::test]
-    async fn rejects_expired_cursor_and_filters_tasks() {
+    async fn rejects_expired_cursor_and_replays_session_events() {
         let hub = SessionOutputHub::new("session".into(), "epoch".into(), 1);
         let original = hub.cursor();
         hub.publish_event(event("exec-1")).await.unwrap();
@@ -272,11 +252,14 @@ mod tests {
         ));
 
         let subscription = hub.subscribe(&after_first).await.unwrap();
-        let mut stream = merged_output_stream(subscription, after_first, Some("exec-2".into()));
+        let mut stream = merged_output_stream(subscription, after_first);
         let output = stream.next().await.unwrap().unwrap();
         let SessionOutput::Event(output) = output.output else {
             panic!("expected reliable event");
         };
-        assert_eq!(output.execution_id.as_deref(), Some("exec-2"));
+        assert!(matches!(
+            output.event,
+            SessionEvent::MessageCommitted { .. }
+        ));
     }
 }

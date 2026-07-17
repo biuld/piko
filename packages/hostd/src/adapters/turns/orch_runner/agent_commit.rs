@@ -4,7 +4,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::sync::mpsc::UnboundedSender;
 
 use orchd_api::{AgentCommitPort, AgentRecoveryState};
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, AgentInstanceLifecycle, CommitError};
@@ -13,15 +12,17 @@ use crate::api::ServerMessage;
 
 pub(super) struct ProjectingAgentCommitPort {
     inner: Arc<dyn AgentCommitPort>,
+    session_id: String,
     agents: std::sync::Mutex<HashMap<String, crate::api::AgentInfo>>,
-    event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+    event_router: Arc<super::ui_router::UiEventRouter>,
 }
 
 impl ProjectingAgentCommitPort {
     pub(super) fn new(
         inner: Arc<dyn AgentCommitPort>,
+        session_id: String,
         recovered: &[AgentRecoveryState],
-        event_tx: Arc<std::sync::Mutex<Option<UnboundedSender<ServerMessage>>>>,
+        event_router: Arc<super::ui_router::UiEventRouter>,
     ) -> Self {
         let agents = recovered
             .iter()
@@ -30,6 +31,7 @@ impl ProjectingAgentCommitPort {
                 (
                     state.identity.agent_instance_id.clone(),
                     crate::api::AgentInfo {
+                        session_id: session_id.clone(),
                         agent_instance_id: state.identity.agent_instance_id.clone(),
                         agent_id: state.identity.agent_spec_id.clone(),
                         parent_agent_instance_id: state.identity.parent_agent_instance_id.clone(),
@@ -49,8 +51,9 @@ impl ProjectingAgentCommitPort {
             .collect();
         Self {
             inner,
+            session_id,
             agents: std::sync::Mutex::new(agents),
-            event_tx,
+            event_router,
         }
     }
 
@@ -60,6 +63,7 @@ impl ProjectingAgentCommitPort {
             match command {
                 AgentDurableCommand::Create { identity, spec } => {
                     let info = crate::api::AgentInfo {
+                        session_id: self.session_id.clone(),
                         agent_instance_id: identity.agent_instance_id.clone(),
                         agent_id: identity.agent_spec_id,
                         parent_agent_instance_id: identity.parent_agent_instance_id.clone(),
@@ -73,22 +77,25 @@ impl ProjectingAgentCommitPort {
                     agents.insert(identity.agent_instance_id, info.clone());
                     Some(info)
                 }
-                AgentDurableCommand::ExecutionStarted {
+                AgentDurableCommand::RunStarted {
                     agent_instance_id,
-                    execution_id,
+                    internal_execution_id: _,
                     ..
                 } => agents.get_mut(&agent_instance_id).map(|info| {
-                    info.activity = piko_protocol::AgentActivity::Running { execution_id };
+                    info.activity = piko_protocol::AgentActivity::Running;
                     info.status = crate::api::AgentStatus::Running;
                     info.clone()
                 }),
-                AgentDurableCommand::RecordExecutionReport { report } => {
+                AgentDurableCommand::RunTerminal { report, .. } => {
                     agents.get_mut(&report.agent_instance_id).map(|info| {
                         info.activity = piko_protocol::AgentActivity::Idle;
                         info.status = crate::api::AgentStatus::Idle;
                         info.clone()
                     })
                 }
+                AgentDurableCommand::InputQueued { .. }
+                | AgentDurableCommand::QueuedInputCancelled { .. }
+                | AgentDurableCommand::QueuedInputStarted { .. } => None,
                 AgentDurableCommand::SetLifecycle {
                     agent_instance_id,
                     lifecycle,
@@ -112,10 +119,13 @@ impl ProjectingAgentCommitPort {
                 }),
             }
         };
-        if let Some(changed) = changed
-            && let Some(tx) = self.event_tx.lock().unwrap().as_ref()
-        {
-            let _ = tx.send(ServerMessage::AgentChanged(changed));
+        if let Some(changed) = changed {
+            let agent_instance_id = changed.agent_instance_id.clone();
+            self.event_router.publish(
+                &self.session_id,
+                &agent_instance_id,
+                ServerMessage::AgentChanged(changed),
+            );
         }
     }
 }
@@ -167,8 +177,17 @@ impl AgentCommitPort for EphemeralAgentCommitPort {
             | AgentDurableCommand::ConsumeInboxItem {
                 agent_instance_id, ..
             } => agent_instance_id,
-            AgentDurableCommand::RecordExecutionReport { report } => report.agent_instance_id,
-            AgentDurableCommand::ExecutionStarted {
+            AgentDurableCommand::RunTerminal { report, .. } => report.agent_instance_id,
+            AgentDurableCommand::RunStarted {
+                agent_instance_id, ..
+            } => agent_instance_id,
+            AgentDurableCommand::InputQueued {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::QueuedInputCancelled {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id, ..
             } => agent_instance_id,
             AgentDurableCommand::CommitReport {

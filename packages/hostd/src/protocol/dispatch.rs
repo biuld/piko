@@ -17,17 +17,31 @@ impl HostServer {
                 self.start_oauth_login(&command_id, provider, tx);
                 Ok(())
             }
-            Command::TurnSubmit {
-                session_id, text, ..
+            Command::ChatSubmit {
+                session_id,
+                target_agent_instance_id,
+                text,
+                ..
             } => {
                 self.0
-                    .apply_turn_submit(command_id, session_id, text, tx)
+                    .apply_chat_submit(command_id, session_id, target_agent_instance_id, text, tx)
                     .await
             }
-            Command::SessionCompact { session_id, .. } => {
+            Command::SessionCompact {
+                session_id,
+                agent_instance_id,
+                ..
+            } => {
                 // Manual compaction — bypass threshold, always compact.
+                send_event(
+                    tx,
+                    ServerMessage::CommandResponse {
+                        command_id: command_id.clone(),
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                );
                 self.0
-                    .compact_session_if_needed(&command_id, &session_id, 0, tx)
+                    .compact_session_if_needed(&command_id, &session_id, &agent_instance_id, 0, tx)
                     .await;
                 Ok(())
             }
@@ -49,6 +63,9 @@ impl HostServer {
 
         match command {
             Command::AuthLoginOAuth { .. } => unreachable!("auth oauth handled in stream"),
+            Command::ChatSubmit { .. } => {
+                unreachable!("streaming chat commands handled in stream")
+            }
             Command::AuthSetApiKey {
                 provider, api_key, ..
             } => {
@@ -140,64 +157,98 @@ impl HostServer {
                     .apply_session_set_label(&command_id, session_id, entry_id, label)
                     .await
             }
-            Command::StateSnapshot { session_id, .. }
-            | Command::EventsResume { session_id, .. } => {
+            Command::StateSnapshot { session_id, .. } => {
                 self.0.apply_session_snapshot(&command_id, session_id).await
             }
             Command::QueueSteer {
                 session_id,
-                task_id,
+                agent_instance_id,
                 message,
                 ..
             } => {
                 let (queue_ev, has_active_turn) = {
                     let mut state = self.state.lock().await;
-                    let queue_ev = state.push_steer(&session_id, &task_id, &message);
+                    let queue_ev = state.push_steer(&session_id, &agent_instance_id, &message);
                     let has_active_turn = state
-                        .session(&session_id)
-                        .ok()
-                        .and_then(|s| s.active_turn_id.clone())
+                        .active_turn_for_agent(&session_id, &agent_instance_id)
                         .is_some();
                     (queue_ev, has_active_turn)
                 };
-                // Also route to the active orchd task if a turn is running
+                // Also route to the explicitly addressed AgentInstance when
+                // that target currently owns a running Turn.
                 if has_active_turn {
                     let runner = self.turn_runner.lock().await.clone();
                     let _ = runner
-                        .steer_task(&session_id, &task_id, "queue", "hostd", &message)
+                        .steer_agent(&session_id, &agent_instance_id, &message)
                         .await;
                 }
-                Ok(vec![queue_ev.into()])
-            }
-            Command::QueueFollowUp {
-                session_id,
-                message,
-                ..
-            } => {
-                let mut state = self.state.lock().await;
-                let queue_ev = state.push_follow_up(&session_id, &message);
-                Ok(vec![queue_ev.into()])
-            }
-            Command::QueueNextTurn {
-                session_id,
-                message,
-                ..
-            } => {
-                let mut state = self.state.lock().await;
-                let queue_ev = state.push_next_turn(&session_id, &message);
-                Ok(vec![queue_ev.into()])
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    queue_ev.into(),
+                ])
             }
             Command::TurnCancel {
+                command_id,
                 session_id,
                 turn_id,
-                ..
             } => {
+                let (agent_instance_id, status) = {
+                    let state = self.state.lock().await;
+                    let turn = state.turn(&session_id, &turn_id)?;
+                    (turn.agent_instance_id.clone(), turn.status.clone())
+                };
+                if status == crate::api::TurnStatus::Queued {
+                    let runner = self.turn_runner.lock().await.clone();
+                    let address = crate::ports::AgentOperationAddress {
+                        session_id: session_id.clone(),
+                        operation_id: turn_id.clone(),
+                        agent_instance_id,
+                    };
+                    if !runner.cancel_queued_agent_run(&address).await {
+                        return Err(ProtocolError::InvalidCommand(format!(
+                            "queued Agent input not found for Turn {turn_id}"
+                        )));
+                    }
+                    let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
+                    return Ok(vec![
+                        ServerMessage::CommandResponse {
+                            command_id,
+                            result: Ok(crate::api::CommandResult::Empty),
+                        },
+                        event,
+                    ]);
+                }
                 let runner = self.turn_runner.lock().await.clone();
-                let _ = runner.cancel_execution(&session_id, &turn_id).await;
-                let mut state = self.state.lock().await;
-                Ok(vec![state.cancel_turn(&session_id, &turn_id)?])
+                let address = crate::ports::AgentOperationAddress {
+                    session_id: session_id.clone(),
+                    operation_id: turn_id.clone(),
+                    agent_instance_id,
+                };
+                self.state.lock().await.set_turn_status(
+                    &session_id,
+                    &turn_id,
+                    crate::api::TurnStatus::Cancelling,
+                )?;
+                if !runner.cancel_agent_run(&address).await {
+                    self.state.lock().await.set_turn_status(
+                        &session_id,
+                        &turn_id,
+                        crate::api::TurnStatus::Running,
+                    )?;
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "no active Agent run for Turn {turn_id}"
+                    )));
+                }
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::Empty),
+                }])
             }
             Command::ApprovalRespond {
+                command_id,
                 session_id,
                 approval_id,
                 decision,
@@ -209,16 +260,20 @@ impl HostServer {
                     .clone()
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
-                Ok(vec![ServerMessage::Approval(
-                    crate::api::ApprovalEvent::Resolved {
-                        task_id: session_id.clone(),
-                        agent_id: "hostd".into(),
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    ServerMessage::Approval(crate::api::ApprovalEvent::Resolved {
+                        session_id,
                         approval_id,
                         decision,
-                    },
-                )])
+                    }),
+                ])
             }
             Command::UserInteractionRespond {
+                command_id,
                 session_id,
                 interaction_id,
                 response,
@@ -238,18 +293,18 @@ impl HostServer {
                         crate::api::UserInteractionStatus::Cancelled
                     }
                 };
-                Ok(vec![ServerMessage::Interaction(
-                    piko_protocol::InteractionEvent::Resolved {
-                        task_id: session_id.clone(),
-                        agent_id: "hostd".into(),
+                Ok(vec![
+                    ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    },
+                    ServerMessage::Interaction(piko_protocol::InteractionEvent::Resolved {
+                        session_id,
                         interaction_id,
                         status,
-                    },
-                )])
+                    }),
+                ])
             }
-            Command::TurnSubmit { .. } => Err(ProtocolError::InvalidCommand(
-                "turn_submit requires streaming command handling".into(),
-            )),
             Command::ConfigGet { namespace, .. } => {
                 let settings = self.settings.lock().await;
                 let value = match namespace.as_str() {
@@ -293,6 +348,7 @@ impl HostServer {
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentListed {
+                        session_id,
                         agents,
                         timestamp: now_ms(),
                     }),
@@ -304,14 +360,31 @@ impl HostServer {
                 after_seq,
                 command_id,
             } => {
-                let mut state = self.state.lock().await;
-                state.set_active_task(&session_id, &agent_instance_id)?;
-                let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
-                let replay = state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
+                let (snapshot, replay) = {
+                    let mut state = self.state.lock().await;
+                    state.set_active_task(&session_id, &agent_instance_id)?;
+                    let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
+                    let replay =
+                        state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
+                    (snapshot, replay)
+                };
+                if let Some(storage) = &self.storage {
+                    let session_dir = self
+                        .session_paths
+                        .lock()
+                        .await
+                        .get(&session_id)
+                        .cloned()
+                        .ok_or_else(|| ProtocolError::SessionNotFound(session_id.clone()))?;
+                    storage
+                        .set_selected_agent(&session_dir, &agent_instance_id, now_ms())
+                        .map_err(crate::util::storage_error)?;
+                }
                 let next_seq = snapshot.next_seq;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
                     result: Ok(crate::api::CommandResult::AgentSubscribed {
+                        session_id,
                         agent_instance_id,
                         agent_id: snapshot.agent_id.clone(),
                         snapshot,

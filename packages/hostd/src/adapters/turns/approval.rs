@@ -333,10 +333,7 @@ mod tests {
         assert_eq!(compute_bash_fingerprint(&args), "bash:npm:install");
 
         let args = serde_json::json!({ "command": "custom-script.sh -f" });
-        assert_eq!(
-            compute_bash_fingerprint(&args),
-            "bash:custom-script.sh -f"
-        );
+        assert_eq!(compute_bash_fingerprint(&args), "bash:custom-script.sh -f");
     }
 
     #[test]

@@ -51,8 +51,6 @@ pub struct OrchRunOptions {
     pub host_context: Option<super::agents::HostSessionContext>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "sourceTurnId")]
     pub source_turn_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "workId")]
-    pub work_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

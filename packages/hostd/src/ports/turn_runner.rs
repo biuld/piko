@@ -5,24 +5,33 @@ use async_trait::async_trait;
 use futures_core::Stream;
 use orchd_api::SessionSubscription;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use crate::api::{ProtocolError, ServerMessage};
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentOperationAddress {
+    pub session_id: String,
+    pub operation_id: String,
+    pub agent_instance_id: String,
+}
+
 #[derive(Clone)]
-pub struct ResumeRootAgent {
+pub struct ResumeAgent {
     pub agent_instance_id: String,
     pub state: piko_protocol::agent_runtime::AgentResumeState,
 }
 
 #[derive(Clone)]
-pub struct TurnRunInput {
+pub struct AgentRunInput {
     pub session_id: String,
-    pub turn_id: String,
-    pub work_id: String,
+    pub operation_id: String,
+    pub agent_instance_id: String,
     pub prompt: String,
-    pub system_prompt: String,
+    pub source_turn_id: Option<String>,
+    pub prompt_resources: Option<piko_protocol::PromptResourceSnapshot>,
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
@@ -32,20 +41,67 @@ pub struct TurnRunInput {
     /// The turn handler drains this and forwards to TUI on the main outbound channel.
     pub ui_event_tx: UnboundedSender<ServerMessage>,
     /// Reattach a resumed root agent with committed transcript history.
-    pub resume_root_agent: Option<ResumeRootAgent>,
+    pub resume_agent: Option<ResumeAgent>,
+}
+
+pub struct AgentRunHandle {
+    pub address: AgentOperationAddress,
+    pub receipt: piko_protocol::AgentInputReceipt,
+    pub started: oneshot::Receiver<SessionSubscription>,
+    pub completion: AgentRunCompletionReceiver,
+}
+
+pub type AgentRunCompletionReceiver = oneshot::Receiver<AgentRunCompletion>;
+
+#[derive(Debug)]
+pub struct AgentRunCompletion {
+    pub address: AgentOperationAddress,
+    pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+    pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
+}
+
+pub trait OperationRunCompletion: Send {
+    fn operation_address(&self) -> AgentOperationAddress;
+    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor;
+}
+
+impl OperationRunCompletion for AgentRunCompletion {
+    fn operation_address(&self) -> AgentOperationAddress {
+        self.address.clone()
+    }
+
+    fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
+        &self.observation_barrier
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunFailure {
+    pub message: String,
 }
 
 #[async_trait]
-pub trait TurnRunner: Send + Sync {
-    /// Run a turn and return a session output subscription.
-    async fn run_turn_subscription(
-        &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, ProtocolError>;
+pub trait AgentRunRunner: Send + Sync {
+    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "Agent run is unavailable".into(),
+        ))
+    }
 
-    async fn recover_session_subscription(
+    async fn finish_agent_run(
         &self,
-        _session_id: &str,
+        _: &AgentOperationAddress,
+        _: &piko_protocol::agent_runtime::SessionCursor,
+    ) {
+    }
+
+    async fn cancel_queued_agent_run(&self, _: &AgentOperationAddress) -> bool {
+        false
+    }
+
+    async fn recover_observation(
+        &self,
+        _: &AgentOperationAddress,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,
@@ -60,53 +116,54 @@ pub trait TurnRunner: Send + Sync {
 
     async fn respond_approval(
         &self,
-        _approval_id: &str,
-        _decision: crate::api::ApprovalDecision,
+        _: &str,
+        _: crate::api::ApprovalDecision,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
     }
 
     async fn respond_user_interaction(
         &self,
-        _interaction_id: &str,
-        _response: crate::api::UserInteractionResponse,
+        _: &str,
+        _: crate::api::UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
     }
 
-    /// Route a steering message to the active orchd task / execution.
-    /// Returns true if the steering was delivered.
-    async fn steer_task(
-        &self,
-        _session_id: &str,
-        _task_id: &str,
-        _source_task_id: &str,
-        _source_agent_id: &str,
-        _message: &str,
-    ) -> bool {
+    async fn steer_agent(&self, _: &str, _: &str, _: &str) -> bool {
         false
     }
 
-    /// Cancel the active Execution for a session (Execution-runtime path).
-    /// Returns true if a cancel was accepted.
-    async fn cancel_execution(&self, _session_id: &str, _turn_id: &str) -> bool {
+    async fn cancel_agent_run(&self, _: &AgentOperationAddress) -> bool {
         false
     }
 
-    async fn list_agent_instances(&self, _session_id: &str) -> Option<Vec<crate::api::AgentInfo>> {
+    async fn has_active_session_run(&self, _: &str) -> bool {
+        false
+    }
+
+    async fn list_agent_instances(&self, _: &str) -> Option<Vec<crate::api::AgentInfo>> {
         None
     }
 
-    /// Register task identity for approval pre-checks and scoped grants.
-    async fn on_task_created(&self, _task_id: &str, _session_id: &str, _cwd: &str) {}
+    /// In-process pending approvals/interactions for recoverable session projection.
+    async fn pending_prompts_for_session(
+        &self,
+        _: &str,
+    ) -> (
+        Vec<crate::api::ApprovalSnapshot>,
+        Vec<crate::api::UserInteractionSnapshot>,
+    ) {
+        (Vec::new(), Vec::new())
+    }
 }
 
 #[derive(Debug, Clone)]
-pub struct ErrorTurnRunner {
+pub struct ErrorAgentRunRunner {
     message: String,
 }
 
-impl ErrorTurnRunner {
+impl ErrorAgentRunRunner {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -115,11 +172,8 @@ impl ErrorTurnRunner {
 }
 
 #[async_trait]
-impl TurnRunner for ErrorTurnRunner {
-    async fn run_turn_subscription(
-        &self,
-        _input: TurnRunInput,
-    ) -> Result<SessionSubscription, ProtocolError> {
+impl AgentRunRunner for ErrorAgentRunRunner {
+    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }

@@ -1,3 +1,5 @@
+#[path = "support/mock_turn_runner.rs"]
+mod mock_turn_runner;
 mod support;
 
 use std::sync::Arc;
@@ -6,40 +8,43 @@ use std::time::Duration;
 use async_trait::async_trait;
 use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{TurnRunInput, TurnRunner};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::{HostServer, run_jsonl_server};
-use orchd_api::SessionSubscription;
+use mock_turn_runner::MockAgentRunRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
+use support::{
+    MockSessionPublisher, execution_running, execution_succeeded, success_report,
+    successful_turn_run,
+};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Notify;
 
 struct SlowRunner;
 
 #[async_trait]
-impl TurnRunner for SlowRunner {
-    async fn run_turn_subscription(
+impl AgentRunRunner for SlowRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        let task_id = input.work_id.clone();
-        let session_id = input.session_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let publisher_task = Arc::clone(&publisher);
-
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(
-                task_id.clone(),
-                "main",
-                0,
-                execution_running(session_id, task_id.clone(), task_id, "main"),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             tokio::time::sleep(Duration::from_millis(200)).await;
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.operation_id,
+            input.agent_instance_id,
+            1,
+            Duration::from_millis(200),
+        ))
     }
 }
 
@@ -67,17 +72,17 @@ async fn command_catalog_get_returns_slash_commands() {
 struct AssistantRunner;
 
 #[async_trait]
-impl TurnRunner for AssistantRunner {
-    async fn run_turn_subscription(
+impl AgentRunRunner for AssistantRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let task_id = input.work_id.clone();
-        let turn_id = input.work_id.clone();
+        let agent_instance_id = input.operation_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
         store
@@ -85,8 +90,8 @@ impl TurnRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
                     parent_message_id: None,
                     message: Message::User {
@@ -115,8 +120,8 @@ impl TurnRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
                     parent_message_id: Some("user-1".into()),
                     message: assistant_message,
@@ -130,64 +135,61 @@ impl TurnRunner for AssistantRunner {
         tokio::spawn(async move {
             tokio::task::yield_now().await;
 
-            publisher_task.publish(
-                task_id.clone(),
-                "agent-1",
-                0,
-                execution_running(
-                    session_id.clone(),
-                    turn_id.clone(),
-                    task_id.clone(),
-                    "agent-1",
-                ),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "agent-1", 0, execution_running());
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-1".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-1".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 2,
-                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
+                execution_succeeded(),
             );
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.operation_id,
+            input.agent_instance_id,
+            4,
+            Duration::ZERO,
+        ))
     }
 }
 
 #[derive(Default)]
-struct ReuseRootTurnRunner {
+struct ReuseRootAgentRunRunner {
     turn_count: std::sync::atomic::AtomicU32,
-    root_task_id: std::sync::Mutex<Option<String>>,
+    root_agent_instance_id: std::sync::Mutex<Option<String>>,
 }
 
 #[async_trait]
-impl TurnRunner for ReuseRootTurnRunner {
-    async fn run_turn_subscription(
+impl AgentRunRunner for ReuseRootAgentRunRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let turn = self
@@ -195,18 +197,18 @@ impl TurnRunner for ReuseRootTurnRunner {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let task_id = if turn == 0 {
-            let id = input.work_id.clone();
-            *self.root_task_id.lock().unwrap() = Some(id.clone());
+        let agent_instance_id = if turn == 0 {
+            let id = input.operation_id.clone();
+            *self.root_agent_instance_id.lock().unwrap() = Some(id.clone());
             id
         } else {
-            self.root_task_id
+            self.root_agent_instance_id
                 .lock()
                 .unwrap()
                 .clone()
-                .expect("root task id")
+                .expect("root agent instance id")
         };
-        let turn_id = input.work_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
         let user_message_id: String = if turn == 0 {
@@ -219,8 +221,8 @@ impl TurnRunner for ReuseRootTurnRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: user_message_id.clone(),
                     parent_message_id: if turn == 0 {
                         None
@@ -263,8 +265,8 @@ impl TurnRunner for ReuseRootTurnRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(turn_id.clone()),
-                    execution_id: task_id.clone(),
-                    agent_instance_id: task_id.clone(),
+                    execution_id: agent_instance_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_message_id.clone(),
                     parent_message_id: Some(user_message_id.clone()),
                     message: assistant_message,
@@ -281,49 +283,51 @@ impl TurnRunner for ReuseRootTurnRunner {
             tokio::task::yield_now().await;
             if turn == 0 {
                 publisher_task.publish(
-                    task_id.clone(),
+                    agent_instance_id.clone(),
                     "agent-1",
                     1,
-                    execution_running(
-                        session_id.clone(),
-                        turn_id.clone(),
-                        task_id.clone(),
-                        "agent-1",
-                    ),
+                    execution_running(),
                 );
             }
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 user_task_seq,
                 SessionEvent::MessageCommitted {
                     message_id: user_message_id,
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 assistant_task_seq,
                 SessionEvent::MessageCommitted {
                     message_id: assistant_message_id,
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::Assistant,
                 },
             );
 
             publisher_task.publish(
-                task_id.clone(),
+                agent_instance_id.clone(),
                 "agent-1",
                 assistant_task_seq + 1,
-                execution_succeeded(session_id, turn_id, task_id, "agent-1"),
+                execution_succeeded(),
             );
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.operation_id,
+            input.agent_instance_id,
+            if turn == 0 { 4 } else { 3 },
+            Duration::ZERO,
+        ))
     }
 }
 
@@ -333,37 +337,59 @@ struct WaitingApprovalRunner {
 }
 
 #[async_trait]
-impl TurnRunner for WaitingApprovalRunner {
-    async fn run_turn_subscription(
+impl AgentRunRunner for WaitingApprovalRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
-        let task_id = input.work_id.clone();
-        let session_id = input.session_id.clone();
+        let agent_instance_id = input.operation_id.clone();
         let publisher_task = Arc::clone(&publisher);
+        let barrier = piko_protocol::agent_runtime::SessionCursor {
+            epoch: subscription.cursor.epoch.clone(),
+            seq: 2,
+        };
+        let (completion_tx, completion) = tokio::sync::oneshot::channel();
+        let completion_session_id = input.session_id.clone();
+        let completion_turn_id = input.operation_id.clone();
+        let completion_agent_instance_id = input.agent_instance_id.clone();
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(
-                task_id.clone(),
-                "main",
-                0,
-                execution_running(session_id.clone(), task_id.clone(), task_id.clone(), "main"),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             started.notify_one();
             finish.notified().await;
-            publisher_task.publish(
-                task_id.clone(),
-                "main",
-                1,
-                execution_succeeded(session_id, task_id.clone(), task_id, "main"),
-            );
+            publisher_task.publish(agent_instance_id.clone(), "main", 1, execution_succeeded());
+            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+                address: hostd::ports::AgentOperationAddress {
+                    session_id: completion_session_id,
+                    operation_id: completion_turn_id,
+                    agent_instance_id: completion_agent_instance_id.clone(),
+                },
+                result: Ok(success_report(completion_agent_instance_id)),
+                observation_barrier: barrier,
+            });
         });
 
-        Ok(subscription)
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let _ = started_tx.send(subscription);
+        Ok(AgentRunHandle {
+            address: hostd::ports::AgentOperationAddress {
+                session_id: input.session_id.clone(),
+                operation_id: input.operation_id.clone(),
+                agent_instance_id: input.agent_instance_id.clone(),
+            },
+            receipt: piko_protocol::AgentInputReceipt {
+                request_id: input.operation_id,
+                session_id: input.session_id,
+                agent_instance_id: input.agent_instance_id,
+                disposition: piko_protocol::InputDisposition::Accepted,
+            },
+            started: started_rx,
+            completion,
+        })
     }
 
     async fn respond_approval(
@@ -376,7 +402,7 @@ impl TurnRunner for WaitingApprovalRunner {
 }
 
 #[tokio::test]
-async fn turn_submit_streams_started_before_runner_finishes() {
+async fn root_chat_streams_started_before_runner_finishes() {
     let server = HostServer::with_turn_runner(Arc::new(SlowRunner));
     let created = server
         .handle_command(Command::SessionCreate {
@@ -392,17 +418,26 @@ async fn turn_submit_streams_started_before_runner_finishes() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::TurnSubmit {
+    let mut events = server.handle_command_stream(Command::ChatSubmit {
         command_id: "submit".into(),
-        session_id,
+        target_agent_instance_id: format!("agent_{session_id}_root"),
+        session_id: session_id.clone(),
         text: "hello".into(),
     });
 
-    let started = tokio::time::timeout(Duration::from_millis(50), events.recv())
+    let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
         .unwrap()
         .unwrap();
+    assert!(matches!(
+        accepted,
+        Event::CommandResponse {
+            command_id,
+            result: Ok(hostd::api::CommandResult::Empty),
+        } if command_id == "submit"
+    ));
 
+    let started = events.recv().await.unwrap();
     assert!(matches!(
         started,
         Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
@@ -431,18 +466,27 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::TurnSubmit {
+    let mut events = server.handle_command_stream(Command::ChatSubmit {
         command_id: "submit".into(),
         session_id: session_id.clone(),
+        target_agent_instance_id: format!("agent_{session_id}_root"),
         text: "hello".into(),
     });
 
-    let first = tokio::time::timeout(Duration::from_millis(50), events.recv())
+    let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
         .unwrap()
         .unwrap();
     assert!(matches!(
-        first,
+        accepted,
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
+    let started_event = events.recv().await.unwrap();
+    assert!(matches!(
+        started_event,
         Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
     ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
@@ -462,10 +506,23 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     .await
     .expect("approval response should not wait for the active turn to finish");
 
-    assert!(matches!(
-        approval_events.first(),
-        Some(Event::Approval(hostd::api::ApprovalEvent::Resolved { .. }))
-    ));
+    assert!(
+        approval_events.iter().any(|event| matches!(
+            event,
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::Empty),
+                ..
+            }
+        )),
+        "approval should return business Empty; events={approval_events:?}"
+    );
+    assert!(
+        approval_events.iter().any(|event| matches!(
+            event,
+            Event::Approval(hostd::api::ApprovalEvent::Resolved { .. })
+        )),
+        "approval should emit resolved; events={approval_events:?}"
+    );
 
     finish.notify_one();
 }
@@ -491,7 +548,7 @@ async fn create_session_returns_session_created() {
 }
 
 #[tokio::test]
-async fn turn_submit_persists_completed_assistant_as_session_entry() {
+async fn root_chat_persists_completed_assistant_as_session_entry() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
@@ -510,9 +567,10 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
     };
 
     let turn_events = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -528,21 +586,38 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
     assert!(matches!(committed[0].message, Message::User { .. }));
     assert_eq!(committed[1].transcript_seq, 2);
     assert!(matches!(committed[1].message, Message::Assistant { .. }));
+    let final_message_index = turn_events
+        .iter()
+        .rposition(|event| matches!(event, Event::TranscriptCommitted(_)))
+        .unwrap();
+    let completed_index = turn_events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
+            )
+        })
+        .unwrap();
+    assert!(
+        final_message_index < completed_index,
+        "completion barrier must project final transcript before TurnCompleted"
+    );
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id,
         })
         .await;
 
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     assert_eq!(snapshot.entries.len(), 2);
     assert!(matches!(
         &snapshot.entries[0],
@@ -558,11 +633,11 @@ async fn turn_submit_persists_completed_assistant_as_session_entry() {
 }
 
 #[tokio::test]
-async fn turn_submit_reuses_session_sink_across_turns() {
+async fn root_chat_reuses_session_sink_across_turns() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server =
-        HostServer::with_storage_and_runner(repo, Arc::new(ReuseRootTurnRunner::default()));
+        HostServer::with_storage_and_runner(repo, Arc::new(ReuseRootAgentRunRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -579,9 +654,10 @@ async fn turn_submit_reuses_session_sink_across_turns() {
 
     for (command_id, text) in [("submit-1", "hello"), ("submit-2", "follow up")] {
         let turn_events = server
-            .handle_command(Command::TurnSubmit {
+            .handle_command(Command::ChatSubmit {
                 command_id: command_id.into(),
                 session_id: session_id.clone(),
+                target_agent_instance_id: format!("agent_{session_id}_root"),
                 text: text.into(),
             })
             .await;
@@ -609,19 +685,19 @@ async fn turn_submit_reuses_session_sink_across_turns() {
         );
     }
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id,
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     assert_eq!(snapshot.entries.len(), 4);
 }
 
@@ -629,7 +705,7 @@ async fn turn_submit_reuses_session_sink_across_turns() {
 async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -645,26 +721,27 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
     };
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
 
-    let snapshot = server
+    let refresh = server
         .handle_command(Command::StateSnapshot {
             command_id: "snapshot".into(),
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
+    let snapshot = refresh
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("expected reconciled snapshot");
     let root_user_id = snapshot.entries[0].id().to_string();
 
     let navigated = server
@@ -686,16 +763,12 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
             ..
         }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
-        ..
-    } = &navigated[1]
-    else {
-        panic!("expected session opened");
+    let Event::SessionReconciled(reconciled) = &navigated[1] else {
+        panic!("expected session reconciled");
     };
-    assert_eq!(snapshot.current_leaf_id, None);
+    assert_eq!(reconciled.snapshot.current_leaf_id, None);
     assert!(matches!(
-        snapshot.entries.last(),
+        reconciled.snapshot.entries.last(),
         Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
     ));
 }
@@ -720,15 +793,6 @@ async fn jsonl_server_round_trips_events() {
     let mut output = String::new();
     read_out.read_to_string(&mut output).await.unwrap();
     let mut lines = output.lines();
-    let ack = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
-    assert!(matches!(
-        ack,
-        Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
-            ..
-        }
-    ));
-
     let event = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
     assert!(matches!(
         event,
@@ -737,6 +801,8 @@ async fn jsonl_server_round_trips_events() {
             ..
         }
     ));
+    let reconciled = serde_json::from_str::<Event>(lines.next().unwrap()).unwrap();
+    assert!(matches!(reconciled, Event::SessionReconciled(_)));
 }
 
 #[tokio::test]
@@ -771,9 +837,10 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let mut writer = client_in;
     let mut reader = BufReader::new(client_out);
 
-    let submit = serde_json::to_string(&Command::TurnSubmit {
+    let submit = serde_json::to_string(&Command::ChatSubmit {
         command_id: "submit".into(),
         session_id: session_id.clone(),
+        target_agent_instance_id: format!("agent_{session_id}_root"),
         text: "hello".into(),
     })
     .unwrap();
@@ -783,11 +850,11 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let mut line = String::new();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
         .await
-        .expect("turn_submit ack should arrive")
+        .expect("turn_started should arrive")
         .unwrap();
-    let ack = serde_json::from_str::<Event>(line.trim()).unwrap();
+    let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
-        ack,
+        event,
         Event::CommandResponse {
             result: Ok(hostd::api::CommandResult::Empty),
             ..

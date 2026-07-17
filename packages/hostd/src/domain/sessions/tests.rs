@@ -2,10 +2,10 @@ use super::*;
 use crate::api::{RealtimeMessageEvent, ServerMessage};
 use piko_protocol::agent_runtime::RealtimeDelta;
 
-fn realtime(task_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
+fn realtime(agent_instance_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
     ServerMessage::RealtimeMessage(RealtimeMessageEvent {
         session_id: "session".into(),
-        agent_instance_id: task_id.into(),
+        agent_instance_id: agent_instance_id.into(),
         agent_id: agent_id.into(),
         message_id: message_id.into(),
         delta_seq: seq,
@@ -79,13 +79,12 @@ fn agent_list_orders_parent_before_child_tasks() {
     session.active_agents.insert(
         "task-child".into(),
         crate::api::AgentInfo {
+            session_id: session_id.clone(),
             agent_instance_id: "task-child".into(),
             agent_id: "hello-agent".into(),
             parent_agent_instance_id: Some("task-main".into()),
             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-            activity: piko_protocol::AgentActivity::Running {
-                execution_id: "task-child".into(),
-            },
+            activity: piko_protocol::AgentActivity::Running,
             unread_report_count: 0,
             name: "hello-agent".into(),
             role: "assistant".into(),
@@ -95,13 +94,12 @@ fn agent_list_orders_parent_before_child_tasks() {
     session.active_agents.insert(
         "task-main".into(),
         crate::api::AgentInfo {
+            session_id: session_id.clone(),
             agent_instance_id: "task-main".into(),
             agent_id: "main".into(),
             parent_agent_instance_id: None,
             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-            activity: piko_protocol::AgentActivity::Running {
-                execution_id: "task-main".into(),
-            },
+            activity: piko_protocol::AgentActivity::Running,
             unread_report_count: 0,
             name: "main".into(),
             role: "assistant".into(),
@@ -112,4 +110,37 @@ fn agent_list_orders_parent_before_child_tasks() {
     let agents = state.get_agent_list(&session_id);
     assert_eq!(agents[0].agent_instance_id, "task-main");
     assert_eq!(agents[1].agent_instance_id, "task-child");
+}
+
+#[test]
+fn upsert_live_agent_makes_subscribe_snapshot_available() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp") {
+        crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session created"),
+    };
+
+    state
+        .upsert_live_agent(
+            &session_id,
+            crate::api::AgentInfo {
+                session_id: session_id.clone(),
+                agent_instance_id: "agent_spawn_1".into(),
+                agent_id: "coder".into(),
+                parent_agent_instance_id: Some("root".into()),
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                name: "Coder".into(),
+                role: "assistant".into(),
+                status: crate::api::AgentStatus::Idle,
+            },
+        )
+        .unwrap();
+
+    let snapshot = state
+        .agent_view_snapshot(&session_id, "agent_spawn_1")
+        .unwrap();
+    assert_eq!(snapshot.agent_id, "coder");
+    assert_eq!(snapshot.agent_instance_id, "agent_spawn_1");
 }

@@ -38,6 +38,12 @@ state-specific backgrounds for pending, completed, and failed work. Session
 notices and errors use compact styles that do not look like normal assistant
 output.
 
+Fenced code blocks appear as unobstructed code without a decorative box or
+generic title. When the fence names a recognized language, syntax colors make
+keywords, strings, comments, and other language elements easier to scan. Code
+without a language, code using an unknown language, and exceptionally large
+blocks remain readable as plain text.
+
 When live events update an existing assistant message or tool execution, the
 existing visible item changes in place. The Timeline should not append duplicate
 rows for every streaming text delta, tool start, or final tool result.
@@ -108,6 +114,7 @@ Timeline key bindings use the existing timeline action namespace:
   in surrounding status surfaces.
 - Timeline does not create floating UI.
 - Timeline does not expose custom extension renderers in the first version.
+- Timeline does not provide horizontal scrolling for long code lines.
 - Timeline does not require image-capable tool output in the first version.
 - Timeline does not require partial tool-output streaming in the first version.
 - Timeline does not make every transient progress update a durable transcript

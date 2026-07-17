@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use orchd_api::{AgentApiError, CancelReceipt, ExecutionInputReceipt, InputDisposition};
+use orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
+use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
     ExecutionOutcome, ExecutionSnapshot, ExecutionStatus, StartExecutionRequest,
     SteerExecutionRequest,
@@ -19,11 +20,12 @@ use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::{ToolCall, ToolCallItem};
 use crate::domain::transcript::TranscriptManager;
-use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext};
+use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::events::identity::DispatchIdentity;
+use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
-use crate::runtime::tools::{append_tool, append_tool_err};
+use crate::runtime::tools::{build_tool_error, build_tool_result};
 use crate::runtime::utils::runtime_tool_entity_id;
 use llmd::gateway::GatewayRequest;
 
@@ -31,6 +33,7 @@ use llmd::gateway::GatewayRequest;
 pub struct ExecutionRunResult {
     pub outcome: ExecutionOutcome,
     pub transcript: Vec<Message>,
+    pub head_message_id: Option<String>,
 }
 
 pub struct ExecutionActor {
@@ -42,12 +45,16 @@ pub struct ExecutionActor {
     services: ExecutionServices,
     snapshot_tx: watch::Sender<ExecutionSnapshot>,
     request: StartExecutionRequest,
+    tools: Vec<piko_protocol::ToolDef>,
+    routes: HashMap<String, CatalogRoute>,
 }
 
 impl ExecutionActor {
     pub fn new(
         identity: ExecutionIdentity,
         request: StartExecutionRequest,
+        tools: Vec<piko_protocol::ToolDef>,
+        routes: HashMap<String, CatalogRoute>,
         mailbox: mpsc::Receiver<ExecutionCommand>,
         cancel: CancellationToken,
         ports: Arc<SessionExecutionScope>,
@@ -62,8 +69,8 @@ impl ExecutionActor {
             model_step_index: 0,
             steering: VecDeque::new(),
             usage: Usage::default(),
-            // Host commits the user input before start_execution; durable head for
-            // this execution is always that input message, not prior-turn context head.
+            // PreparedExecution commits the input before activation, so the
+            // first live transcript head is always durable.
             head_message_id: Some(request.input_message_id.clone()),
             error: None,
         };
@@ -76,6 +83,8 @@ impl ExecutionActor {
             services,
             snapshot_tx,
             request,
+            tools,
+            routes,
         }
     }
 
@@ -94,6 +103,7 @@ impl ExecutionActor {
         ExecutionRunResult {
             outcome,
             transcript: self.state.transcript.to_vec(),
+            head_message_id: self.state.head_message_id.clone(),
         }
     }
 
@@ -111,9 +121,8 @@ impl ExecutionActor {
             self.drain_controls_nonblocking()?;
 
             let step = self.run_model_step().await?;
-            self.commit_assistant(&step.assistant_message, &step.message_id)
+            self.commit_message(step.assistant_message, step.message_id.clone())
                 .await?;
-            self.state.transcript.push_assistant(step.assistant_message);
 
             if !step.tool_calls.is_empty() {
                 if !self.request.config.allow_tool_calls {
@@ -174,6 +183,7 @@ impl ExecutionActor {
     fn handle_command(&mut self, command: ExecutionCommand) -> Result<(), AgentApiError> {
         match command {
             ExecutionCommand::Steer { request, reply } => {
+                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                 let receipt = ExecutionInputReceipt {
                     request_id: request.request_id.clone(),
                     session_id: self.identity.session_id.clone(),
@@ -182,15 +192,16 @@ impl ExecutionActor {
                     disposition: InputDisposition::Queued,
                 };
                 self.state.steering.push_back(request);
-                let _ = reply.send(Ok(receipt));
+                command.complete(Ok(receipt));
             }
             ExecutionCommand::Cancel {
                 request_id,
                 reason: _,
                 reply,
             } => {
+                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                 self.cancel.cancel();
-                let _ = reply.send(Ok(CancelReceipt {
+                command.complete(Ok(CancelReceipt {
                     request_id,
                     session_id: self.identity.session_id.clone(),
                     execution_id: self.identity.execution_id.clone(),
@@ -217,14 +228,7 @@ impl ExecutionActor {
 
         let model = self.resolve_model(&agent).await;
         let (tools, routes) = if self.request.config.allow_tool_calls {
-            (*self.services.tool_registry())
-                .discover_tools(&ToolDiscoveryContext {
-                    agent_id: agent.id.clone(),
-                    agent_instance_id: Some(self.identity.agent_instance_id.clone()),
-                    tool_set_ids: agent.tool_set_ids.clone(),
-                    active_tool_names: agent.active_tool_names.clone(),
-                })
-                .await
+            (self.tools.clone(), self.routes.clone())
         } else {
             (Vec::new(), HashMap::new())
         };
@@ -233,25 +237,21 @@ impl ExecutionActor {
             run_id: self.identity.execution_id.clone(),
             step_id: format!("step_{step_count}"),
             transcript: self.state.transcript.to_vec(),
-            system_prompt: self
-                .request
-                .context
-                .system_prompt
-                .clone()
-                .unwrap_or(agent.system_prompt),
+            system_prompt: self.request.run_prompt.system_prompt.clone(),
             model: model.id.clone(),
             provider: model.provider.clone(),
             tools,
             thinking: None,
         };
 
-        // Bridge: StepDispatch identity still uses task_id; pass execution_id.
+        // Pass Interaction Turn binding into StepDispatch (empty for child runs).
         let identity = DispatchIdentity::new(
             self.identity.session_id.clone(),
             self.identity.agent_instance_id.clone(),
             self.identity.execution_id.clone(),
             self.identity.agent_id.clone(),
         );
+        let source_turn_id = self.identity.source_turn_id.clone().unwrap_or_default();
 
         let result = match self
             .services
@@ -263,11 +263,13 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_stream(
                     identity,
                     message_id.clone(),
-                    self.identity.execution_id.clone(),
+                    source_turn_id.clone(),
                     model,
                     llm,
                 );
-                Ok(dispatch.dispatch_step().await)
+                Ok(dispatch
+                    .dispatch_step(self.ports.ports().realtime.clone())
+                    .await)
             }
             Err(error) => {
                 if self.cancel.is_cancelled() {
@@ -276,18 +278,19 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_failure(
                     identity,
                     message_id.clone(),
-                    self.identity.execution_id.clone(),
+                    source_turn_id,
                     model,
                     error.to_string(),
                 );
-                let result = dispatch.dispatch_step().await;
+                let result = dispatch
+                    .dispatch_step(self.ports.ports().realtime.clone())
+                    .await;
                 Err((error.to_string(), result))
             }
         };
 
         match result {
             Ok(step) => {
-                self.publish_realtime(&step.local_output.realtime);
                 self.publish_snapshot();
                 Ok(CompletedModelStep {
                     assistant_message: step.step.assistant_message,
@@ -300,7 +303,7 @@ impl ExecutionActor {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
                     return Err(AgentApiError::PersistenceFailed(error));
                 }
-                self.commit_assistant(&step.step.assistant_message, &message_id)
+                self.commit_message(step.step.assistant_message, message_id)
                     .await?;
                 Err(AgentApiError::PersistenceFailed(error))
             }
@@ -328,9 +331,8 @@ impl ExecutionActor {
             };
             let tool_call_message_id =
                 format!("{}:tool_call:{}", parent_message_id, tc.tool_call_index);
-            self.commit_message(&tool_call_message, &tool_call_message_id)
+            self.commit_message(tool_call_message, tool_call_message_id)
                 .await?;
-            self.state.transcript.push_message(tool_call_message);
 
             let result_message = match routes.get(&tc.name) {
                 Some(route) => {
@@ -365,25 +367,15 @@ impl ExecutionActor {
                     let record = (*self.services.tool_registry())
                         .execute_tool(&call, &exec_ctx, route, Some(self.cancel.clone()))
                         .await;
-                    append_tool(&mut self.state.transcript, tc, &record.result)
+                    build_tool_result(tc, &record.result)
                 }
-                None => append_tool_err(
-                    &mut self.state.transcript,
-                    tc,
-                    &format!("No route for tool \"{}\"", tc.name),
-                ),
+                None => build_tool_error(tc, &format!("No route for tool \"{}\"", tc.name)),
             };
 
-            // append_tool already pushed to transcript; pop and re-commit with identity.
             let result_message_id =
                 format!("{}:tool_result:{}", parent_message_id, tc.tool_call_index);
-            // transcript already has the message from append_*; commit durable copy.
-            self.commit_message(&result_message, &result_message_id)
+            self.commit_message(result_message, result_message_id)
                 .await?;
-            // append_* already pushed; avoid double push by not pushing again.
-            // But commit_message doesn't push — append already did. Good.
-            // Wait: append_tool pushes then returns the message. We commit that. Transcript already has it. OK.
-            let _ = result_message;
         }
         self.publish_snapshot();
         Ok(())
@@ -411,53 +403,20 @@ impl ExecutionActor {
         }
     }
 
-    fn publish_realtime(&self, frames: &[crate::domain::RealtimeFrame]) {
-        let Some(sink) = &self.ports.ports().realtime else {
-            return;
-        };
-        for (delta_seq, frame) in frames.iter().enumerate() {
-            sink.try_publish(piko_protocol::agent_runtime::RealtimeDeltaEnvelope {
-                agent_instance_id: frame.agent_instance_id.clone(),
-                execution_id: self.identity.execution_id.clone(),
-                agent_id: frame.agent_id.clone(),
-                work_id: self.identity.execution_id.clone(),
-                message_id: Some(frame.message_id.clone()),
-                delta_seq: delta_seq as u64,
-                delta: frame.delta.clone(),
-            });
-        }
-    }
-
-    async fn commit_assistant(
-        &mut self,
-        message: &Message,
-        message_id: &str,
-    ) -> Result<(), AgentApiError> {
-        self.commit_message(message, message_id).await
-    }
-
     async fn commit_message(
         &mut self,
-        message: &Message,
-        message_id: &str,
+        message: Message,
+        message_id: String,
     ) -> Result<(), AgentApiError> {
-        let commit = piko_protocol::execution::MessageCommit {
-            session_id: self.identity.session_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
-            execution_id: self.identity.execution_id.clone(),
-            agent_instance_id: self.identity.agent_instance_id.clone(),
-            message_id: message_id.to_string(),
-            parent_message_id: self.state.head_message_id.clone(),
-            message: message.clone(),
-            committed_at: chrono::Utc::now().timestamp_millis(),
-        };
-        self.ports
-            .ports()
-            .commit
-            .commit_message(commit)
-            .await
-            .map_err(|err| AgentApiError::PersistenceFailed(err.to_string()))?;
-        self.state.head_message_id = Some(message_id.to_string());
+        let committed = MessageCommitScope::new(
+            &self.identity,
+            self.state.head_message_id.clone(),
+            message_id,
+            message,
+        )
+        .commit(&self.ports.ports().commit)
+        .await?;
+        committed.apply(&mut self.state);
         self.publish_snapshot();
         Ok(())
     }
@@ -470,8 +429,8 @@ impl ExecutionActor {
             content: steering.content.clone(),
             timestamp: Some(steering.submitted_at),
         };
-        self.commit_message(&message, &steering.message_id).await?;
-        self.state.transcript.push_message(message);
+        self.commit_message(message, steering.message_id.clone())
+            .await?;
         Ok(())
     }
 }

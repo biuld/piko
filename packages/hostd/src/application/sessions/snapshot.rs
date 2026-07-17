@@ -1,8 +1,7 @@
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::util::now_ms;
 
-use super::helpers::server_response_ok;
+use super::helpers::{server_response_ok, session_reconciled_message};
 
 impl HostApp {
     pub(crate) async fn apply_session_snapshot(
@@ -10,15 +9,15 @@ impl HostApp {
         command_id: &str,
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let state = self.state.lock().await;
-        let snapshot = state.snapshot(&session_id)?;
-        Ok(vec![server_response_ok(
-            command_id,
-            crate::api::CommandResult::StateSnapshot {
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        Ok(vec![
+            server_response_ok(command_id, crate::api::CommandResult::Empty),
+            session_reconciled_message(
                 session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
                 snapshot,
-                timestamp: now_ms(),
-            },
-        )])
+                agents,
+            ),
+        ])
     }
 }

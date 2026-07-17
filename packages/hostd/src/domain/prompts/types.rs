@@ -2,13 +2,6 @@ use std::path::PathBuf;
 
 use crate::domain::prompts::skills::Skill;
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct PromptResources {
-    pub system_prompt: String,
-    pub context_files: Vec<ContextFile>,
-    pub prompt_templates: Vec<PromptTemplate>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextFile {
     pub path: PathBuf,

@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
-    ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
-    InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
+    AgentId, AgentInfo, AgentRunEvent, ApprovalDecision, ApprovalEvent, ApprovalId,
+    ApprovalSnapshot, ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer,
+    InteractionChoice, InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
     InteractionQuestionId, LifecycleEvent, MessageId, MessageRole, ModelEvent, QueueEvent,
-    ServerMessage, SessionId, SessionSnapshot, SessionSummary, TaskEvent, TaskId, ToolCallId,
-    ToolCallRef, ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
+    ServerMessage, SessionId, SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef,
+    ToolCallSnapshot, ToolCallStatus, TurnEvent, TurnId, TurnSnapshot, TurnStatus,
     UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
@@ -104,9 +104,12 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    TurnSubmit {
+    /// Submit user text to one concrete AgentInstance. Every accepted submit
+    /// creates a hostd Turn and uses the same Agent run API.
+    ChatSubmit {
         command_id: CommandId,
         session_id: SessionId,
+        target_agent_instance_id: crate::AgentInstanceId,
         text: String,
     },
     TurnCancel {
@@ -132,11 +135,6 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
     },
-    EventsResume {
-        command_id: CommandId,
-        session_id: SessionId,
-        after_seq: u64,
-    },
     ConfigUpdate {
         command_id: CommandId,
         patch: serde_json::Value,
@@ -145,17 +143,7 @@ pub enum Command {
     QueueSteer {
         command_id: CommandId,
         session_id: SessionId,
-        task_id: TaskId,
-        message: String,
-    },
-    QueueFollowUp {
-        command_id: CommandId,
-        session_id: SessionId,
-        message: String,
-    },
-    QueueNextTurn {
-        command_id: CommandId,
-        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         message: String,
     },
     /// Request the list of available models from hostd's catalog.
@@ -170,6 +158,7 @@ pub enum Command {
     SessionCompact {
         command_id: CommandId,
         session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
     },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
@@ -217,16 +206,13 @@ impl Command {
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
-            | Self::TurnSubmit { command_id, .. }
+            | Self::ChatSubmit { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
-            | Self::EventsResume { command_id, .. }
             | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
-            | Self::QueueFollowUp { command_id, .. }
-            | Self::QueueNextTurn { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }

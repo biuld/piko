@@ -4,10 +4,6 @@ use std::path::Path;
 use crate::features::auto_completion::CompletionRow;
 
 pub trait AutoCompleteProvider {
-    /// String prefix that triggers this provider (e.g. "/" or "@").
-    #[allow(dead_code)]
-    fn trigger(&self) -> &str;
-
     /// Checks if this provider is triggered by the current token.
     fn is_triggered(&self, text: &str, cursor: usize) -> bool;
 

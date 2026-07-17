@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -18,6 +18,7 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
     let mut in_blockquote = false;
     let mut in_code_block = false;
     let mut code_block_buf = String::new();
+    let mut code_block_lang = None;
 
     // helper to get the active merged style from stack
     let get_current_style = |stack: &[Style]| -> Style {
@@ -71,11 +72,25 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                         flush_line(&mut current_line, &mut lines);
                     }
                 }
-                Tag::CodeBlock(_) => {
+                Tag::CodeBlock(kind) => {
                     in_code_block = true;
                     code_block_buf.clear();
+                    code_block_lang = match kind {
+                        CodeBlockKind::Fenced(info) => info
+                            .split([',', ' ', '\t'])
+                            .next()
+                            .filter(|language| !language.is_empty())
+                            .map(str::to_string),
+                        CodeBlockKind::Indented => None,
+                    };
                     if !current_line.is_empty() {
                         flush_line(&mut current_line, &mut lines);
+                    }
+                    if lines
+                        .last()
+                        .is_some_and(|line| line.spans.iter().any(|span| !span.content.is_empty()))
+                    {
+                        lines.push(Line::from(""));
                     }
                 }
                 Tag::List(start) => {
@@ -137,25 +152,11 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                 }
                 TagEnd::CodeBlock => {
                     in_code_block = false;
-                    let code_color = theme.get("mdCodeBlock");
-                    let border_color = theme.get("mdCodeBlockBorder");
-
-                    lines.push(Line::from(Span::styled(
-                        " ┌─── Code Block ────────────────────────────",
-                        Style::default().fg(border_color),
-                    )));
-
-                    for line in code_block_buf.lines() {
-                        lines.push(Line::from(vec![
-                            Span::styled(" │ ", Style::default().fg(border_color)),
-                            Span::styled(format!(" {}", line), Style::default().fg(code_color)),
-                        ]));
-                    }
-
-                    lines.push(Line::from(Span::styled(
-                        " └───────────────────────────────────────────",
-                        Style::default().fg(border_color),
-                    )));
+                    lines.extend(super::highlight::highlight_code_to_lines(
+                        &code_block_buf,
+                        code_block_lang.take().as_deref(),
+                        theme,
+                    ));
                 }
                 TagEnd::List(_) => {
                     list_stack.pop();
@@ -207,3 +208,7 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
 
     lines
 }
+
+#[cfg(test)]
+#[path = "markdown_tests.rs"]
+mod tests;

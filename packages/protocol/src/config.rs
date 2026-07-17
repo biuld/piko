@@ -184,9 +184,14 @@ impl OrchdConfig {
             name: "Main".into(),
             role: "assistant".into(),
             description: Some("Default agent".into()),
-            system_prompt: String::new(),
+            base_system_prompt: String::new(),
             model: Some(model_id_str.clone()),
-            tool_set_ids: vec!["builtin".into(), "workspace".into()],
+            tool_set_ids: vec![
+                "todo".into(),
+                "workspace".into(),
+                "user_interaction".into(),
+                "multi_agent".into(),
+            ],
             active_tool_names: None,
             thinking_level: None,
         };

@@ -48,6 +48,8 @@ pub enum AgentApiError {
     PersistenceUnavailable,
     #[error("persistence failed: {0}")]
     PersistenceFailed(String),
+    #[error("prompt assembly failed: {0}")]
+    PromptAssemblyFailed(String),
     #[error("runtime unavailable")]
     RuntimeUnavailable,
     #[error("a fresh snapshot is required")]

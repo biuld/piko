@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::api::{
-    AgentId, AgentTaskState, ContentBlock, Message, MessageContent, SessionId, SessionSummary,
-    SessionTreeEntry, TurnId,
+    AgentId, ContentBlock, Message, MessageContent, SessionId, SessionSummary, SessionTreeEntry,
+    TurnId, TurnStatus,
 };
 use piko_protocol::SequencedServerMessage;
 use piko_protocol::messages::Usage;
@@ -18,27 +18,31 @@ pub struct SessionState {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
-    pub tasks: HashMap<String, AgentTaskState>,
-    pub active_turn_id: Option<TurnId>,
+    pub turns: HashMap<TurnId, TurnRecord>,
+    pub active_turns: HashMap<String, TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
-    /// Last committed transcript message for each runtime task.
+    /// Last committed transcript message for each runtime agent instance.
     pub task_heads: HashMap<String, String>,
-    /// Queue of pending steering messages: (task_id, message)
+    /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
-    /// Queue of pending follow-up prompts
-    pub follow_up_queue: Vec<String>,
-    /// Queue of pending next-turn prompts
-    pub next_turn_queue: Vec<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
-    /// Tracked task executions from lifecycle events, keyed by task_id.
+    /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
     pub active_agents: HashMap<String, crate::api::AgentInfo>,
     /// Agent instance the TUI is currently viewing.
     pub active_agent_instance_id: Option<String>,
-    /// Per-task live view replay state.
+    /// Per-agent-instance live view replay state.
     pub agent_views: HashMap<String, AgentViewState>,
     pub next_agent_view_seq: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnRecord {
+    pub turn_id: TurnId,
+    pub agent_instance_id: String,
+    pub message: String,
+    pub status: TurnStatus,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -88,14 +92,12 @@ impl SessionState {
             cwd,
             seq: 0,
             entries: Vec::new(),
-            tasks: HashMap::new(),
-            active_turn_id: None,
+            turns: HashMap::new(),
+            active_turns: HashMap::new(),
             name: None,
             current_leaf_id: None,
             task_heads: HashMap::new(),
             steer_queue: Vec::new(),
-            follow_up_queue: Vec::new(),
-            next_turn_queue: Vec::new(),
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
             active_agent_instance_id: None,

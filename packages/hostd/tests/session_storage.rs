@@ -1,16 +1,18 @@
+#[path = "support/mock_turn_runner.rs"]
+mod mock_turn_runner;
 mod support;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::ports::{TurnRunInput, TurnRunner};
 use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use hostd::protocol::HostServer;
-use orchd_api::SessionSubscription;
+use mock_turn_runner::MockAgentRunRunner;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, MockTurnRunner, execution_running, execution_succeeded};
+use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -25,54 +27,68 @@ fn session_id_from(events: &[Event]) -> String {
         .expect("session id event")
 }
 
+fn snapshot_from_refresh(events: &[Event]) -> &hostd::api::SessionSnapshot {
+    events
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("session reconciled snapshot")
+}
+
 struct AgentPersistRunner;
 
 #[async_trait]
-impl TurnRunner for AgentPersistRunner {
-    async fn run_turn_subscription(
+impl AgentRunRunner for AgentPersistRunner {
+    async fn run_agent(
         &self,
-        input: TurnRunInput,
-    ) -> Result<SessionSubscription, hostd::api::ProtocolError> {
+        input: AgentRunInput,
+    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
         let session_dir = input.session_dir.clone();
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let store = SessionStore::new(session_dir);
         let session_id = input.session_id.clone();
-        let turn_id = input.work_id.clone();
+        let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
         let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            let publish =
-                |task_id: String, agent_id: String, task_seq: u64, event: SessionEvent| {
-                    publisher_task.publish(task_id, agent_id, task_seq, event);
-                };
+            let publish = |agent_instance_id: String,
+                           agent_id: String,
+                           task_seq: u64,
+                           event: SessionEvent| {
+                publisher_task.publish(agent_instance_id, agent_id, task_seq, event);
+            };
 
             let created_at = 1;
-            for (task_id, agent_id, parent_task_id) in [
+            for (agent_instance_id, agent_id, parent_agent_instance_id) in [
                 ("task-main", "main", None),
                 ("task-child", "hello-agent", Some("task-main")),
             ] {
-                let is_root = parent_task_id.is_none();
-                let _ = store.ensure_agent_shard(&session_id, task_id, agent_id, created_at);
+                let is_root = parent_agent_instance_id.is_none();
+                let _ =
+                    store.ensure_agent_shard(&session_id, agent_instance_id, agent_id, created_at);
                 let _ = store.update_manifest(|manifest| {
                     if is_root {
                         // Replace the default root AgentInstance created by
-                        // `create_session` with this test's own root task id
-                        // so the manifest only ever tracks the two tasks under
-                        // test.
+                        // `create_session` with this test's own root agent
+                        // instance id so the manifest only ever tracks the
+                        // two agent instances under test.
                         manifest.agents.clear();
-                        manifest.root_agent_instance_id = Some(task_id.to_string());
+                        manifest.root_agent_instance_id = Some(agent_instance_id.to_string());
                     }
                     manifest.agents.insert(
-                        task_id.to_string(),
+                        agent_instance_id.to_string(),
                         hostd::infra::storage::AgentManifestEntry {
                             identity: piko_protocol::AgentInstanceIdentity {
                                 session_id: session_id.clone(),
-                                agent_instance_id: task_id.to_string(),
+                                agent_instance_id: agent_instance_id.to_string(),
                                 agent_spec_id: agent_id.to_string(),
-                                parent_agent_instance_id: parent_task_id.map(str::to_string),
+                                parent_agent_instance_id: parent_agent_instance_id
+                                    .map(str::to_string),
                             },
                             spec: None,
                             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
@@ -84,10 +100,10 @@ impl TurnRunner for AgentPersistRunner {
                 });
                 if is_root {
                     publish(
-                        task_id.into(),
+                        agent_instance_id.into(),
                         agent_id.into(),
                         0,
-                        execution_running(session_id.clone(), turn_id.clone(), task_id, agent_id),
+                        execution_running(),
                     );
                 }
             }
@@ -114,7 +130,7 @@ impl TurnRunner for AgentPersistRunner {
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-main".into(),
-                    work_id: turn_id.clone(),
+                    source_turn_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -141,7 +157,7 @@ impl TurnRunner for AgentPersistRunner {
                 1,
                 SessionEvent::MessageCommitted {
                     message_id: "user-child".into(),
-                    work_id: "child-work".into(),
+                    source_turn_id: "child-work".into(),
                     role: MessageRole::User,
                 },
             );
@@ -177,20 +193,22 @@ impl TurnRunner for AgentPersistRunner {
                 2,
                 SessionEvent::MessageCommitted {
                     message_id: "assistant-child".into(),
-                    work_id: "child-work".into(),
+                    source_turn_id: "child-work".into(),
                     role: MessageRole::Assistant,
                 },
             );
 
-            publish(
-                "task-main".into(),
-                "main".into(),
-                2,
-                execution_succeeded(session_id.clone(), turn_id.clone(), "task-main", "main"),
-            );
+            publish("task-main".into(), "main".into(), 2, execution_succeeded());
         });
 
-        Ok(subscription)
+        Ok(successful_turn_run(
+            subscription,
+            input.session_id,
+            input.operation_id,
+            input.agent_instance_id,
+            5,
+            std::time::Duration::ZERO,
+        ))
     }
 }
 
@@ -230,8 +248,15 @@ async fn persistent_server_reopens_with_session() {
         .await;
     assert!(matches!(
         &renamed[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
-            if snapshot.name.as_deref() == Some("Renamed")
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::Empty),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &renamed[1],
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.name.as_deref() == Some("Renamed")
     ));
 
     let snapshot = server
@@ -240,18 +265,14 @@ async fn persistent_server_reopens_with_session() {
             session_id: session_id.clone(),
         })
         .await;
-    assert!(matches!(
-        &snapshot[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }), .. }
-            if snapshot.session_id == session_id
-    ));
+    assert_eq!(snapshot_from_refresh(&snapshot).session_id, session_id);
 }
 
 #[tokio::test]
 async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockTurnRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
 
     let created = server
         .handle_command(Command::SessionCreate {
@@ -262,9 +283,10 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "hello".into(),
         })
         .await;
@@ -275,14 +297,7 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
             session_id: session_id.clone(),
         })
         .await;
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::StateSnapshot { snapshot, .. }),
-        ..
-    } = &snapshot[0]
-    else {
-        panic!("expected state snapshot");
-    };
-    let root_user_id = snapshot.entries[0].id().to_string();
+    let root_user_id = snapshot_from_refresh(&snapshot).entries[0].id().to_string();
 
     let navigated = server
         .handle_command(Command::SessionNavigate {
@@ -303,17 +318,61 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
             ..
         }), .. } if selected_entry_id == &root_user_id && text == "hello"
     ));
-    let Event::CommandResponse {
-        result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }),
-        ..
-    } = &navigated[1]
-    else {
-        panic!("expected session opened");
+    let Event::SessionReconciled(reconciled) = &navigated[1] else {
+        panic!("expected session reconciled");
     };
-    assert_eq!(snapshot.current_leaf_id, None);
+    assert_eq!(reconciled.snapshot.current_leaf_id, None);
     assert!(matches!(
-        snapshot.entries.last(),
+        reconciled.snapshot.entries.last(),
         Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
+    ));
+}
+
+#[tokio::test]
+async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create-delete".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+
+    let deleted = server
+        .handle_command(Command::SessionDelete {
+            command_id: "delete".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+
+    assert!(matches!(
+        deleted.as_slice(),
+        [
+            Event::CommandResponse {
+                result: Ok(hostd::api::CommandResult::Empty),
+                ..
+            },
+            Event::SessionCleared(piko_protocol::SessionClearedEvent {
+                previous_session_id
+            })
+        ] if previous_session_id == &session_id
+    ));
+    let listed = server
+        .handle_command(Command::SessionList {
+            command_id: "list-after-delete".into(),
+            scope: piko_protocol::SessionListScope::All,
+            cwd: None,
+        })
+        .await;
+    assert!(matches!(
+        &listed[0],
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionListed { sessions, .. }),
+            ..
+        } if sessions.iter().all(|session| session.session_id != session_id)
     ));
 }
 
@@ -332,9 +391,10 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::TurnSubmit {
+        .handle_command(Command::ChatSubmit {
             command_id: "submit".into(),
             session_id: session_id.clone(),
+            target_agent_instance_id: format!("agent_{session_id}_root"),
             text: "spawn child".into(),
         })
         .await;
@@ -392,8 +452,10 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .await;
     assert!(matches!(
         &opened[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionOpened { snapshot, .. }), .. }
-            if snapshot.tasks.contains_key("task-main") && snapshot.tasks.contains_key("task-child")
+        Event::CommandResponse {
+            result: Ok(hostd::api::CommandResult::SessionOpened { .. }),
+            ..
+        }
     ));
     assert!(matches!(
         &opened[1],

@@ -8,10 +8,6 @@ use crate::features::auto_completion::{
 pub struct CommandPaletteProvider;
 
 impl AutoCompleteProvider for CommandPaletteProvider {
-    fn trigger(&self) -> &str {
-        "/"
-    }
-
     fn is_triggered(&self, text: &str, cursor: usize) -> bool {
         if cursor > text.len() || !text.is_char_boundary(cursor) {
             return false;

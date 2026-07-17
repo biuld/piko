@@ -1,7 +1,6 @@
 use crate::CommandCatalogItem;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
-use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -16,13 +15,13 @@ pub type ApprovalId = String;
 pub type InteractionId = String;
 pub type InteractionQuestionId = String;
 pub type InteractionChoiceId = String;
-pub type TaskId = String;
 pub type AgentId = String;
 
 /// Agent 状态信息，由 hostd 维护，TUI 通过 AgentList 查询
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
+    pub session_id: SessionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
     pub parent_agent_instance_id: Option<crate::AgentInstanceId>,
@@ -67,6 +66,8 @@ pub enum ServerMessage {
     RealtimeMessage(RealtimeMessageEvent),
     /// 带可靠事件边界的 session hydration/reconciliation。
     SessionReconciled(SessionReconciledEvent),
+    /// Authoritative transition from a visible session to no session.
+    SessionCleared(SessionClearedEvent),
     /// 工具执行过程；与 committed ToolCall/ToolResult transcript 分离。
     ToolExecution(ToolExecutionEvent),
     /// 用户交互生命周期；不属于消息 realtime delta。
@@ -74,6 +75,7 @@ pub enum ServerMessage {
     /// 完整 agent 投影，以 agent_instance_id / execution_id 为实体 identity。
     AgentChanged(AgentInfo),
     TurnLifecycle(TurnEvent),
+    AgentRunLifecycle(AgentRunEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
@@ -122,11 +124,18 @@ pub struct SessionReconciledEvent {
     pub agents: Vec<AgentInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClearedEvent {
+    pub previous_session_id: SessionId,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolExecutionEvent {
     Started {
-        task_id: TaskId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
         tool_name: String,
@@ -135,7 +144,8 @@ pub enum ToolExecutionEvent {
         parent_message_id: Option<MessageId>,
     },
     Ended {
-        task_id: TaskId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         tool_call_id: ToolCallId,
         tool_name: String,
@@ -148,7 +158,8 @@ pub enum ToolExecutionEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InteractionEvent {
     Requested {
-        task_id: TaskId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         interaction_id: InteractionId,
         tool_call_id: ToolCallId,
@@ -160,8 +171,7 @@ pub enum InteractionEvent {
         auto_resolution_ms: Option<u64>,
     },
     Resolved {
-        task_id: TaskId,
-        agent_id: AgentId,
+        session_id: SessionId,
         interaction_id: InteractionId,
         status: UserInteractionStatus,
     },
@@ -176,6 +186,7 @@ impl ServerMessage {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
@@ -185,9 +196,9 @@ pub enum CommandResult {
         cwd: String,
         timestamp: i64,
     },
+    /// Session identity only — visible view arrives via `SessionReconciled`.
     SessionOpened {
         session_id: SessionId,
-        snapshot: SessionSnapshot,
         timestamp: i64,
     },
     SessionListed {
@@ -205,11 +216,6 @@ pub enum CommandResult {
         summary_entry: Option<SessionTreeEntry>,
         timestamp: i64,
     },
-    StateSnapshot {
-        session_id: SessionId,
-        snapshot: SessionSnapshot,
-        timestamp: i64,
-    },
     ModelListed {
         providers: Vec<ProviderInfo>,
         timestamp: i64,
@@ -223,10 +229,12 @@ pub enum CommandResult {
         timestamp: i64,
     },
     AgentListed {
+        session_id: SessionId,
         agents: Vec<AgentInfo>,
         timestamp: i64,
     },
     AgentSubscribed {
+        session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         snapshot: AgentViewSnapshot,
@@ -268,27 +276,59 @@ impl From<AuthEvent> for ServerMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
+    Queued {
+        session_id: SessionId,
+        turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
     Started {
         session_id: SessionId,
         turn_id: TurnId,
-        root_task_id: TaskId,
+        agent_instance_id: crate::AgentInstanceId,
         timestamp: i64,
     },
     Completed {
         session_id: SessionId,
         turn_id: TurnId,
-        total_tasks: u32,
+        agent_instance_id: crate::AgentInstanceId,
         timestamp: i64,
     },
     Failed {
         session_id: SessionId,
         turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
         error: String,
         timestamp: i64,
     },
     Cancelled {
         session_id: SessionId,
         turn_id: TurnId,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentRunEvent {
+    Started {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
+    Completed {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        timestamp: i64,
+    },
+    Failed {
+        session_id: SessionId,
+        run_id: String,
+        agent_instance_id: crate::AgentInstanceId,
+        error: String,
         timestamp: i64,
     },
 }
@@ -298,167 +338,22 @@ pub enum TurnEvent {
 #[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
 pub enum LifecycleEvent {
     Turn(TurnEvent),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TaskEvent {
-    Created {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        parent_task_id: Option<TaskId>,
-        source_agent_id: Option<AgentId>,
-        prompt: String,
-        work_id: TurnId,
-        timestamp: i64,
-    },
-    Started {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    Idle {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        total_steps: u32,
-        summary: String,
-        timestamp: i64,
-    },
-    Completed {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        total_steps: u32,
-        summary: String,
-        final_status: String,
-        timestamp: i64,
-    },
-    Failed {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        error: String,
-        timestamp: i64,
-    },
-    Cancelled {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    Closed {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    Reopened {
-        session_id: SessionId,
-        task_id: TaskId,
-        agent_id: AgentId,
-        timestamp: i64,
-    },
-    Joined {
-        session_id: SessionId,
-        task_id: TaskId,
-        parent_task_id: TaskId,
-        result: serde_json::Value,
-        timestamp: i64,
-    },
-    Steered {
-        session_id: SessionId,
-        task_id: TaskId,
-        source_task_id: TaskId,
-        source_agent_id: AgentId,
-        message: String,
-        timestamp: i64,
-    },
-}
-
-impl TaskEvent {
-    pub fn task_id(&self) -> &str {
-        match self {
-            Self::Created { task_id, .. }
-            | Self::Started { task_id, .. }
-            | Self::Idle { task_id, .. }
-            | Self::Completed { task_id, .. }
-            | Self::Failed { task_id, .. }
-            | Self::Cancelled { task_id, .. }
-            | Self::Closed { task_id, .. }
-            | Self::Reopened { task_id, .. }
-            | Self::Joined { task_id, .. }
-            | Self::Steered { task_id, .. } => task_id,
-        }
-    }
-}
-
-/// Work lifecycle events scoped to a single input-driven execution cycle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum WorkEvent {
-    Started {
-        session_id: SessionId,
-        task_id: TaskId,
-        work_id: String,
-        timestamp: i64,
-    },
-    Succeeded {
-        session_id: SessionId,
-        task_id: TaskId,
-        work_id: String,
-        timestamp: i64,
-    },
-    Failed {
-        session_id: SessionId,
-        task_id: TaskId,
-        work_id: String,
-        error: String,
-        timestamp: i64,
-    },
-    Cancelled {
-        session_id: SessionId,
-        task_id: TaskId,
-        work_id: String,
-        timestamp: i64,
-    },
-}
-
-impl WorkEvent {
-    pub fn work_id(&self) -> &str {
-        match self {
-            Self::Started { work_id, .. }
-            | Self::Succeeded { work_id, .. }
-            | Self::Failed { work_id, .. }
-            | Self::Cancelled { work_id, .. } => work_id,
-        }
-    }
-
-    pub fn task_id(&self) -> &str {
-        match self {
-            Self::Started { task_id, .. }
-            | Self::Succeeded { task_id, .. }
-            | Self::Failed { task_id, .. }
-            | Self::Cancelled { task_id, .. } => task_id,
-        }
-    }
+    AgentRun(AgentRunEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalEvent {
     Requested {
-        task_id: TaskId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
         agent_id: AgentId,
         approval_id: ApprovalId,
         tool_name: String,
         tool_args: serde_json::Value,
     },
     Resolved {
-        task_id: TaskId,
-        agent_id: AgentId,
+        session_id: SessionId,
         approval_id: ApprovalId,
         decision: ApprovalDecision,
     },
@@ -627,11 +522,13 @@ pub struct SessionSnapshot {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
-    #[serde(default)]
-    pub tasks: HashMap<TaskId, crate::agents::AgentTaskState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_leaf_id: Option<String>,
-    pub active_turn: Option<TurnSnapshot>,
+    /// Authoritative AgentInstance view selected for this Session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_agent_instance_id: Option<crate::AgentInstanceId>,
+    #[serde(default)]
+    pub active_turns: Vec<TurnSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(default)]
     pub pending_interactions: Vec<UserInteractionSnapshot>,
@@ -646,6 +543,7 @@ pub struct SessionSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct TurnSnapshot {
     pub turn_id: TurnId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub status: TurnStatus,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCallSnapshot>,
@@ -654,7 +552,7 @@ pub struct TurnSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
-    Idle,
+    Queued,
     Running,
     WaitingForApproval,
     Cancelling,
@@ -685,6 +583,9 @@ pub enum ToolCallStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalSnapshot {
     pub approval_id: ApprovalId,
+    pub agent_instance_id: crate::AgentInstanceId,
+    pub tool_name: String,
+    /// Tool arguments (or structured request payload).
     pub request: serde_json::Value,
     pub status: ApprovalStatus,
 }
@@ -701,7 +602,7 @@ pub enum ApprovalStatus {
 #[serde(rename_all = "camelCase")]
 pub struct UserInteractionSnapshot {
     pub interaction_id: InteractionId,
-    pub task_id: TaskId,
+    pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
     pub tool_call_id: ToolCallId,
     pub status: UserInteractionStatus,

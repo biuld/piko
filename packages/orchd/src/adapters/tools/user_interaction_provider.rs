@@ -53,7 +53,8 @@ pub struct UserInteractionCallbacks {
 
 #[derive(Clone, Debug)]
 pub struct UserInteractionRequest {
-    pub task_id: String,
+    pub session_id: String,
+    pub agent_instance_id: String,
     pub agent_id: String,
     pub tool_call_id: String,
     pub title: Option<String>,
@@ -98,7 +99,7 @@ impl UserInteractionProvider {
         *guard = cbs;
     }
 
-    fn builtin_tools() -> Vec<ToolDef> {
+    fn tools() -> Vec<ToolDef> {
         vec![
             ToolDef {
                 name: "ask_user".into(),
@@ -197,7 +198,7 @@ impl ToolProvider for UserInteractionProvider {
     }
 
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
-        Self::builtin_tools()
+        Self::tools()
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
@@ -228,7 +229,8 @@ impl ToolProvider for UserInteractionProvider {
                 };
                 let question = args.get("question").and_then(|v| v.as_str()).unwrap_or("");
                 let response = cb(UserInteractionRequest {
-                    task_id: context.agent_instance_id.clone(),
+                    session_id: context.session_id.clone(),
+                    agent_instance_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: Some("Question".into()),
@@ -287,7 +289,8 @@ impl ToolProvider for UserInteractionProvider {
                     };
                 }
                 let response = cb(UserInteractionRequest {
-                    task_id: context.agent_instance_id.clone(),
+                    session_id: context.session_id.clone(),
+                    agent_instance_id: context.agent_instance_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: args.get("title").and_then(|v| v.as_str()).map(String::from),

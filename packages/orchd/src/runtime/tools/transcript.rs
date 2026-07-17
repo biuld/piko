@@ -1,13 +1,9 @@
 use crate::domain::tools::call::ToolCallItem;
 use crate::domain::tools::result::ToolExecResult;
-use crate::domain::transcript::{ContentBlock, Message, TranscriptManager};
+use crate::domain::transcript::{ContentBlock, Message};
 
-pub(crate) fn append_tool(
-    transcript: &mut TranscriptManager,
-    tc: &ToolCallItem,
-    result: &ToolExecResult,
-) -> Message {
-    let msg = if result.ok {
+pub(crate) fn build_tool_result(tc: &ToolCallItem, result: &ToolExecResult) -> Message {
+    if result.ok {
         let text = match &result.value {
             Some(v) if v.is_string() => v.as_str().unwrap_or("").to_string(),
             Some(v) => serde_json::to_string_pretty(v).unwrap_or_default(),
@@ -38,17 +34,11 @@ pub(crate) fn append_tool(
             is_error: Some(true),
             timestamp: None,
         }
-    };
-    transcript.push_message(msg.clone());
-    msg
+    }
 }
 
-pub(crate) fn append_tool_err(
-    transcript: &mut TranscriptManager,
-    tc: &ToolCallItem,
-    error: &str,
-) -> Message {
-    let msg = Message::ToolResult {
+pub(crate) fn build_tool_error(tc: &ToolCallItem, error: &str) -> Message {
+    Message::ToolResult {
         tool_call_id: tc.id.clone(),
         tool_name: Some(tc.name.clone()),
         content: vec![ContentBlock::Text {
@@ -57,7 +47,5 @@ pub(crate) fn append_tool_err(
         details: Some(serde_json::json!({"error": error})),
         is_error: Some(true),
         timestamp: None,
-    };
-    transcript.push_message(msg.clone());
-    msg
+    }
 }

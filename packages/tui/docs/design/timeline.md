@@ -120,9 +120,10 @@ content.
 
 ### Active Turn Scope
 
-`SessionSnapshot.active_turn` currently exposes:
+Each entry in `SessionSnapshot.active_turns` exposes:
 
 - `turn_id`
+- `agent_instance_id`
 - `status`
 - `assistant_text`
 - `tool_calls: Vec<ToolCallSnapshot>`
@@ -135,7 +136,7 @@ as a child process over stdio, so there is no supported reconnect flow where a
 new TUI attaches to a still-running turn and needs to restore in-flight
 assistant/tool content from snapshot.
 
-For this feature, `active_turn` is status metadata only. In-flight Timeline
+For this feature, `active_turns` is status metadata only. In-flight Timeline
 content comes from live streaming events received by the current TUI process.
 
 ## Core Model
@@ -407,7 +408,7 @@ Rules:
    components with result content, details, and error state.
 7. Keep unresolved historical tool components indexed so later live events can
    update them.
-8. Treat `snapshot.active_turn` as status-only. Rich in-flight assistant/tool
+8. Treat `snapshot.active_turns` as status-only. Rich in-flight assistant/tool
    restore is out of scope for this feature.
 9. Show latest content after session open or rebuild unless the user explicitly
    had a preserved viewport position.
