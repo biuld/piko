@@ -1,6 +1,6 @@
 use std::fs;
 
-use hostd::domain::config::{CompactionSettings, HostSettings, SettingsManager};
+use piko_hostd::domain::config::{CompactionSettings, HostSettings, SettingsManager};
 
 #[test]
 fn in_memory_settings_apply_defaults_and_overrides() {

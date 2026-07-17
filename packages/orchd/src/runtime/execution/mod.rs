@@ -17,10 +17,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::FutureExt;
-use orchd_api::{AgentApiError, CancelReceipt, SessionExecutionPorts};
 use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
+use piko_orchd_api::{AgentApiError, CancelReceipt, SessionExecutionPorts};
 use piko_protocol::execution::{
     CancelExecutionRequest, ExecutionInputReceipt, ExecutionReceipt, ExecutionStatus,
     StartExecutionRequest, SteerExecutionRequest,
@@ -60,7 +60,7 @@ impl AgentExecutionRuntime {
         self.services.register_agent(spec).await;
     }
 
-    pub async fn register_tool_provider(&self, provider: Box<dyn orchd_api::ToolProvider>) {
+    pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.services.register_tool_provider(provider).await;
     }
 
@@ -68,7 +68,7 @@ impl AgentExecutionRuntime {
         self.services.register_tool_set(tool_set).await;
     }
 
-    pub async fn set_approval_gateway(&self, gateway: Box<dyn orchd_api::ApprovalGateway>) {
+    pub async fn set_approval_gateway(&self, gateway: Box<dyn piko_orchd_api::ApprovalGateway>) {
         self.services
             .tool_registry()
             .set_approval_gateway(Some(gateway))
@@ -323,20 +323,14 @@ impl AgentExecutionRuntime {
 fn fallback_run_prompt(
     request: &piko_protocol::PromptAssemblyRequest,
 ) -> piko_protocol::AgentRunPrompt {
-    let mut system_prompt = request.agent_spec.base_system_prompt.clone();
+    let system_prompt = request.agent_spec.base_system_prompt.clone();
     let mut tools = request.tool_catalog.clone();
     tools.sort_by(|left, right| left.name.cmp(&right.name));
-    if !tools.is_empty() {
-        system_prompt.push_str("\n\nAvailable tools:\n");
-        for tool in &tools {
-            system_prompt.push_str(&format!("- {}: {}\n", tool.name, tool.description));
-        }
-    }
     let catalog_digest_input = serde_json::to_string(&tools)
         .expect("resolved tool catalog must serialize for prompt diagnostics");
     let assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION.to_string();
     piko_protocol::AgentRunPrompt {
-        source_digest: orchd_api::stable_internal_id(
+        source_digest: piko_orchd_api::stable_internal_id(
             "prompt",
             &[&assembly_version, &system_prompt, &catalog_digest_input],
         ),

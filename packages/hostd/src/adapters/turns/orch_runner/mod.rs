@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use llmd::gateway::LlmGateway;
-use orchd::AgentRuntime;
-use orchd::tools::{UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest};
+use piko_llmd::gateway::LlmGateway;
+use piko_orchd::AgentRuntime;
+use piko_orchd::tools::{
+    UserInteractionCallbacks, UserInteractionProvider, UserInteractionRequest,
+};
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::adapters::turns::approval::ApprovalStore;
@@ -26,7 +28,7 @@ mod tests;
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
 type AgentRunKey = (String, String);
-type AgentHubMap = HashMap<AgentRunKey, Arc<orchd::events::SessionOutputHub>>;
+type AgentHubMap = HashMap<AgentRunKey, Arc<piko_orchd::events::SessionOutputHub>>;
 
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
@@ -47,7 +49,7 @@ pub struct OrchAgentRunRunner {
 struct ActiveAgentRunRuntime {
     run_id: String,
     agent_instance_id: String,
-    observation: Arc<orchd::events::SessionOutputHub>,
+    observation: Arc<piko_orchd::events::SessionOutputHub>,
 }
 
 struct PendingApprovalEntry {

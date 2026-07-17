@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use orchd_api::AgentRuntimeApi;
+use piko_orchd_api::AgentRuntimeApi;
 use piko_protocol::{AgentInputDelivery, MessageContent, SendAgentInputRequest};
 
 use crate::api::ProtocolError;
@@ -14,8 +14,8 @@ use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
 struct OrchAgentRunProcess {
-    runtime_handle: orchd_api::AgentRunAcceptance,
-    hub: Arc<orchd::events::SessionOutputHub>,
+    runtime_handle: piko_orchd_api::AgentRunAcceptance,
+    hub: Arc<piko_orchd::events::SessionOutputHub>,
     acceptance_cursor: piko_protocol::agent_runtime::SessionCursor,
     disposition: piko_protocol::InputDisposition,
     address: AgentOperationAddress,
@@ -23,7 +23,7 @@ struct OrchAgentRunProcess {
 
 #[async_trait]
 impl AgentRunProcess for OrchAgentRunProcess {
-    async fn wait_started(&mut self) -> Result<orchd_api::SessionSubscription, ProtocolError> {
+    async fn wait_started(&mut self) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
         self.runtime_handle
             .wait_started()
             .await
@@ -38,10 +38,10 @@ impl AgentRunProcess for OrchAgentRunProcess {
             .subscribe(&cursor)
             .await
             .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
-        Ok(orchd_api::SessionSubscription {
+        Ok(piko_orchd_api::SessionSubscription {
             session_id: self.address.session_id.clone(),
             cursor: cursor.clone(),
-            output: orchd::events::merged_output_stream(subscription, cursor),
+            output: piko_orchd::events::merged_output_stream(subscription, cursor),
         })
     }
 
@@ -77,7 +77,7 @@ impl OrchAgentRunRunner {
             Arc::clone(
                 hubs.entry((input.session_id.clone(), input.agent_instance_id.clone()))
                     .or_insert_with(|| {
-                        Arc::new(orchd::events::SessionOutputHub::new(
+                        Arc::new(piko_orchd::events::SessionOutputHub::new(
                             input.session_id.clone(),
                             uuid::Uuid::new_v4().to_string(),
                             64,

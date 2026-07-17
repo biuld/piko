@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use orchd_api::{AgentRuntimeApi, SessionSubscription};
+use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 
 use crate::api::{ProtocolError, UserInteractionResponse};
@@ -85,7 +85,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
             SessionSubscription {
                 session_id: operation.session_id.clone(),
                 cursor: cursor.clone(),
-                output: orchd::events::merged_output_stream(hub_sub, cursor),
+                output: piko_orchd::events::merged_output_stream(hub_sub, cursor),
             },
         ))
     }

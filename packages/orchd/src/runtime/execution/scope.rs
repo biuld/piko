@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentApiError, SessionExecutionPorts};
+use piko_orchd_api::{AgentApiError, SessionExecutionPorts};
 use tokio::sync::Mutex;
 
 use super::ExecutionIdentity;
@@ -123,7 +123,7 @@ mod tests {
     struct NoopCommit;
 
     #[async_trait]
-    impl orchd_api::ExecutionCommitPort for NoopCommit {
+    impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
         async fn commit_message(
             &self,
             commit: piko_protocol::execution::MessageCommit,
@@ -161,7 +161,7 @@ mod tests {
     async fn stale_cleanup_cannot_remove_a_new_generation() {
         let scope = SessionExecutionScope::new(
             "session".into(),
-            orchd_api::SessionExecutionPorts::new(Arc::new(NoopCommit)),
+            piko_orchd_api::SessionExecutionPorts::new(Arc::new(NoopCommit)),
         );
         scope.reserve_execution(handle("exec", 2)).await.unwrap();
         scope.rollback_reservation("exec", 1).await;

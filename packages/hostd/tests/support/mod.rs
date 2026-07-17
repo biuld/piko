@@ -13,33 +13,35 @@ pub fn test_oneshot<T>() -> (
 }
 
 pub struct TestAgentRunProcess {
-    started: tokio::sync::oneshot::Receiver<orchd_api::SessionSubscription>,
-    completion: tokio::sync::oneshot::Receiver<hostd::ports::AgentRunCompletion>,
+    started: tokio::sync::oneshot::Receiver<piko_orchd_api::SessionSubscription>,
+    completion: tokio::sync::oneshot::Receiver<piko_hostd::ports::AgentRunCompletion>,
 }
 
 #[async_trait::async_trait]
-impl hostd::ports::AgentRunProcess for TestAgentRunProcess {
+impl piko_hostd::ports::AgentRunProcess for TestAgentRunProcess {
     async fn wait_started(
         &mut self,
-    ) -> Result<orchd_api::SessionSubscription, hostd::api::ProtocolError> {
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
         (&mut self.started).await.map_err(|_| {
-            hostd::api::ProtocolError::ObservationFailed("test start signal closed".into())
+            piko_hostd::api::ProtocolError::ObservationFailed("test start signal closed".into())
         })
     }
 
     async fn wait_completion(
         self: Box<Self>,
-    ) -> Result<hostd::ports::AgentRunCompletion, hostd::api::ProtocolError> {
+    ) -> Result<piko_hostd::ports::AgentRunCompletion, piko_hostd::api::ProtocolError> {
         self.completion.await.map_err(|_| {
-            hostd::api::ProtocolError::ObservationFailed("test completion signal closed".into())
+            piko_hostd::api::ProtocolError::ObservationFailed(
+                "test completion signal closed".into(),
+            )
         })
     }
 }
 
 pub fn test_agent_run_process(
-    started: tokio::sync::oneshot::Receiver<orchd_api::SessionSubscription>,
-    completion: tokio::sync::oneshot::Receiver<hostd::ports::AgentRunCompletion>,
-) -> Box<dyn hostd::ports::AgentRunProcess> {
+    started: tokio::sync::oneshot::Receiver<piko_orchd_api::SessionSubscription>,
+    completion: tokio::sync::oneshot::Receiver<piko_hostd::ports::AgentRunCompletion>,
+) -> Box<dyn piko_hostd::ports::AgentRunProcess> {
     Box::new(TestAgentRunProcess {
         started,
         completion,
@@ -47,13 +49,13 @@ pub fn test_agent_run_process(
 }
 
 pub fn successful_turn_run(
-    subscription: orchd_api::SessionSubscription,
+    subscription: piko_orchd_api::SessionSubscription,
     session_id: impl Into<String>,
     turn_id: impl Into<String>,
     root_agent_instance_id: impl Into<String>,
     barrier_seq: u64,
     delay: std::time::Duration,
-) -> hostd::ports::AgentRunHandle {
+) -> piko_hostd::ports::AgentRunHandle {
     let session_id = session_id.into();
     let turn_id = turn_id.into();
     let root_agent_instance_id = root_agent_instance_id.into();
@@ -65,7 +67,7 @@ pub fn successful_turn_run(
     let (started_tx, started) = test_oneshot();
     let _ = started_tx.send(subscription);
     let handle_root_agent_instance_id = root_agent_instance_id.clone();
-    let address = hostd::ports::AgentOperationAddress {
+    let address = piko_hostd::ports::AgentOperationAddress {
         session_id: session_id.clone(),
         operation_id: turn_id.clone(),
         agent_instance_id: handle_root_agent_instance_id,
@@ -76,13 +78,13 @@ pub fn successful_turn_run(
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;
         }
-        let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
+        let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
             address: completion_address,
             result: Ok(success_report(report_agent_instance_id)),
             observation_barrier: barrier,
         });
     });
-    hostd::ports::AgentRunHandle {
+    piko_hostd::ports::AgentRunHandle {
         address,
         receipt: piko_protocol::AgentInputReceipt {
             request_id: turn_id,

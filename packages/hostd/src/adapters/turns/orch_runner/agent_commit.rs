@@ -5,7 +5,7 @@ use async_trait::async_trait;
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{AgentCommitPort, AgentRecoveryState};
+use piko_orchd_api::{AgentCommitPort, AgentRecoveryState};
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, AgentInstanceLifecycle, CommitError};
 
 pub(super) struct ProjectingAgentCommitPort {

@@ -53,14 +53,14 @@ impl SessionStore {
     pub fn agent_execution_reports(
         &self,
         agent_instance_id: &str,
-    ) -> Result<Vec<orchd_api::RecoveredExecutionReport>, SessionStorageError> {
+    ) -> Result<Vec<piko_orchd_api::RecoveredExecutionReport>, SessionStorageError> {
         Ok(self
             .load_manifest()?
             .agent_executions
             .into_values()
             .filter(|execution| execution.agent_instance_id == agent_instance_id)
             .filter_map(|execution| {
-                Some(orchd_api::RecoveredExecutionReport {
+                Some(piko_orchd_api::RecoveredExecutionReport {
                     internal_execution_id: execution.execution_id,
                     report: execution.report?,
                 })
@@ -83,7 +83,7 @@ impl SessionStore {
     pub fn pending_detached_deliveries(
         &self,
         source_agent_instance_id: &str,
-    ) -> Result<Vec<orchd_api::RecoveredDetachedDelivery>, SessionStorageError> {
+    ) -> Result<Vec<piko_orchd_api::RecoveredDetachedDelivery>, SessionStorageError> {
         Ok(self
             .load_manifest()?
             .agent_executions
@@ -92,7 +92,7 @@ impl SessionStore {
                 run.agent_instance_id == source_agent_instance_id && !run.detached_report_delivered
             })
             .filter_map(|run| {
-                Some(orchd_api::RecoveredDetachedDelivery {
+                Some(piko_orchd_api::RecoveredDetachedDelivery {
                     recipient_agent_instance_id: run.detached_recipient_agent_instance_id?,
                     report: run.report?,
                 })

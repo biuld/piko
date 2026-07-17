@@ -125,7 +125,7 @@ impl HostServer {
         let auth = registry.auth_storage_mut();
         auth.set(
             &provider,
-            llmd::auth::AuthCredential::ApiKey { key: api_key },
+            piko_llmd::auth::AuthCredential::ApiKey { key: api_key },
         )
         .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
         auth.flush()

@@ -1,8 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use orchd_api::AgentCommitPort;
+use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use piko_orchd_api::AgentCommitPort;
 use piko_protocol::execution::{CommitError, MessageCommit};
 use piko_protocol::{
     AgentDurableCommand, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, Message,

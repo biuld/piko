@@ -1,138 +1,180 @@
 # piko
 
-A coding agent harness with a **hostd + orchd** architecture. piko reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the monolithic runtime into a clean layered design: a stateful Rust **Host daemon** above a stream-driven Rust **Orchestrator**, with a **ratatui-based TUI** connected over JSON-lines.
+piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** architecture. It separates state management (sessions, prompts, settings, and compaction) in the Host daemon from transient agent execution in the stream-driven Orchestrator, using a Ratatui-based terminal UI client connected over JSON-lines stdio.
 
-> **Status:** Active development. Core hostd/orchd flows are wired; TUI surfaces, multi-agent support, and protocol semantics are being hardened.
+---
 
 ## Architecture
 
 ```mermaid
 graph TD
-  tui["tui (ratatui)"] <-->|JSON-lines stdio| hostd["hostd"]
-  hostd --> orchd["orchd"]
-  hostd --> llmd["llmd"]
-  orchd --> llmd
-  orchd --> sandbox["sandbox"]
-  hostd --> protocol["protocol"]
-  orchd --> protocol
-  tui --> protocol
-  llmd --> protocol
+    subgraph Client Layer
+        TUI["piko-tui (Ratatui Terminal UI)"]
+    end
+
+    subgraph Host Layer
+        Hostd["piko-hostd (Host Daemon)"]
+    end
+
+    subgraph Orchestration Layer
+        OrchdApi["piko-orchd-api (Port & DTO Traits)"]
+        Orchd["piko-orchd (Agent Runtime)"]
+    end
+
+    subgraph Core Services & Sandbox
+        LLMd["piko-llmd (LLM Gateway)"]
+        Sandbox["piko-sandbox (Process Sandbox)"]
+    end
+
+    subgraph Shared Foundations
+        Comms["piko-comms (Typed Channels)"]
+        Protocol["piko-protocol (DTOs & DSL)"]
+    end
+
+    %% Flow of control
+    TUI <-->|JSON-lines over stdio| Hostd
+    Hostd -.->|implements ports| OrchdApi
+    Orchd -.->|implements traits| OrchdApi
+    Hostd -->|drives API| Orchd
+    Orchd --> LLMd
+    Hostd --> LLMd
+    Orchd --> Sandbox
+
+    %% Core dependencies
+    TUI -.-> Comms
+    Hostd -.-> Comms
+    Orchd -.-> Comms
+
+    TUI -.-> Protocol
+    Hostd -.-> Protocol
+    Orchd -.-> Protocol
+    LLMd -.-> Protocol
 ```
 
-```
-tui ──────────────→ protocol
-hostd ──→ orchd ──→ protocol
-hostd ──→ llmd ───→ protocol
-         orchd ──→ llmd
-         orchd ──→ sandbox
-sandbox (leaf)
-```
+### Crates & Project Layout
 
-| Crate | Type | Description |
-|---|---|---|
-| `tui` | binary | Ratatui terminal UI (CLI entrypoint, surfaces, commands, keymap, timeline, session management) |
-| `hostd` | lib + bin | Host daemon (JSON-lines server, sessions, settings, auth, prompts, skills, compaction, approvals) |
-| `orchd` | lib | Orchestrator runtime (Stream\<Event\>-driven agent loop, tasks, model steps, tool registry) |
-| `llmd` | lib | LLM gateway (provider abstraction, OAuth, token/cost middleware, multi-provider catalog) |
-| `protocol` | lib | Shared DTOs (commands, events, snapshots, messages, config, agent state, tool definitions) |
-| `sandbox` | lib | Filesystem/process sandbox (ACL enforcement, command validation) |
+| Crate | Directory | Type | Description |
+|---|---|---|---|
+| `piko-tui` | `packages/tui` | binary (`piko-tui`) | Terminal UI built with Ratatui (Timeline, Session view, Command dispatch, Keymap) |
+| `piko-hostd` | `packages/hostd` | bin + lib (`piko-hostd`) | State authority: manages sessions, configuration, credentials, prompt assembly, and turn compaction |
+| `piko-orchd-api` | `packages/orchd-api` | library | Public traits, interfaces, and ports defining the Orchestrator contract |
+| `piko-orchd` | `packages/orchd` | library | Transient agent execution runtime (AgentActor & ExecutionActor scheduling) |
+| `piko-llmd` | `packages/llmd` | library | LLM provider registry, token/cost middleware, and OAuth provider gateway |
+| `piko-comms` | `packages/comms` | bin + lib | Bounded, contract-enforced async channel topology ensuring design-compliant backpressure |
+| `piko-protocol` | `packages/protocol` | library | Shared ubiquitous DTOs, wire formats, commands, and events |
+| `piko-sandbox` | `packages/sandbox` | library | Fail-closed process and filesystem sandbox for sandboxed CLI execution |
 
-- **tui** connects to hostd via JSON-lines stdio; hostd auto-discovered or configured via `--hostd`.
-- **hostd** owns all user-visible state; orchd receives only agent specs, tool sets, and model config per turn.
-- **protocol** is the single shared leaf — all inter-crate types live here.
+---
+
+## Core Design Principles
+
+- **Host-Authoritative State:** `hostd` owns all user-visible state (sessions, prompts, settings, compaction). `orchd` is transient: it receives input, runs agent loops, and writes executions back to hostd via durability ports.
+- **Clean Interface Boundary (Ports & Adapters):** `hostd` and `orchd` communicate strictly through `orchd-api`. `orchd` defines interfaces (ports) for storage, LLM, and tool approvals, allowing developers to mock components cleanly.
+- **Contract-Enforced Channels:** `piko-comms` replaces ad-hoc Tokio channels. All asynchronous channels conform to predefined contracts (e.g. Mailbox, Reply, LatestState, Broadcast, ThreadBridge).
+- **Stream-Driven Execution:** Step mutations, tool outputs, and LLM completions are compiled into a unified reactive stream (`Stream<Item = OrchEvent>`), avoiding raw spawns and lock contention.
+
+---
 
 ## Quick Start
 
-```bash
-# Prerequisites: Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+### Build
 
+Ensure you have a stable [Rust toolchain](https://rustup.rs) installed:
+
+```bash
 # Clone & build
 git clone <repo-url> piko
 cd piko
 cargo build --release
+```
 
-# Set API key
+### Run
+
+Set your LLM provider API key and start the terminal user interface:
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Start
-cargo run -p tui                          # new session
-cargo run -p tui -- -c                    # continue most recent session
-cargo run -p tui -- -m claude-sonnet-4-5-20250929  # specific model
-cargo run -p tui -- --thinking-level high           # thinking level
-cargo run -p tui -- --name "my session"             # session name
+# Start a new session
+cargo run -p piko-tui
+
+# Continue the most recent session
+cargo run -p piko-tui -- -c
+
+# Run with a specific model and thinking level
+cargo run -p piko-tui -- -m claude-3-5-sonnet-20241022 --thinking-level medium
 ```
 
-### CLI Reference
+---
 
-```
+## CLI Reference
+
+```text
 piko-tui [options]
 
-  -m, --model <id>           Model ID
-  -p, --provider <name>      Provider (e.g. anthropic, openai)
-  -k, --api-key <key>        API key (forwarded to hostd)
-  --thinking-level <level>   off | low | medium | high
+  -c, --continue             Continue the most recent session
   --session <id>             Open a specific session
-  -c, --continue             Continue most recent session
-  --name <name>              Session name (new sessions)
-  --no-tools                 Disable all tools
-  --hostd <path>             Override hostd executable path
-  --hostd-arg <arg>          Extra hostd argument (repeatable)
-  -h, --help                 Show help
+  --name <name>              Set session name (only for new sessions)
+  -m, --model <id>           Override the Model ID
+  -p, --provider <name>      Override the Provider (e.g., anthropic, openai)
+  -k, --api-key <key>        Provide API key (forwarded directly to hostd)
+  --thinking-level <level>   Specify thinking level (off | low | medium | high)
+  --no-tools                 Disable all tools for this session
+  --hostd <path>             Override the hostd executable path
+  --hostd-arg <arg>          Extra hostd argument (can be repeated)
+  --log-file <path>          Path to hostd log file
+  --log-level <level>        Hostd log level filter
+  --debug                    Enable debug logging
+  --no-log                   Disable hostd logging
+  -h, --help                 Show help message
 ```
 
-Hostd auto-discovery order: `PIKO_HOSTD_PATH` env → sibling of `piko-tui` binary → `target/debug/hostd` → `target/release/hostd` → `hostd` on PATH.
+---
 
 ## Development
 
-### Prerequisites
+### Workspace Commands
 
-- [Rust](https://rustup.rs) stable toolchain
-
-### Project structure
-
-```
-packages/
-  tui/          # Ratatui TUI (binary: piko-tui)
-  hostd/        # Host daemon (lib + binary: hostd)
-  orchd/        # Orchestrator runtime (lib)
-  llmd/         # LLM gateway (lib)
-  protocol/     # Shared DTOs (lib)
-  sandbox/      # Sandbox supervisor (lib)
-```
-
-### Build, check, test
+Run check, formatting, and lint rules:
 
 ```bash
-cargo build --workspace              # Build all
-cargo build --release                # Optimized build
-cargo check --workspace              # Fast check (no codegen)
-cargo clippy --workspace --all-targets -- -D warnings  # Lint
-cargo fmt --all                      # Format
-cargo test --workspace               # Run all tests
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-### Per-crate testing
+### Testing
+
+Run the entire test suite or run tests for a specific crate:
 
 ```bash
-cargo test -p hostd
-cargo test -p orchd
-cargo test -p tui
-cargo test -p llmd
-cargo test -p protocol
-cargo test -p sandbox
+# Test the entire workspace
+cargo test --workspace
+
+# Per-crate testing
+cargo test -p piko-hostd
+cargo test -p piko-orchd
+cargo test -p piko-orchd-api
+cargo test -p piko-tui
+cargo test -p piko-llmd
+cargo test -p piko-comms
+cargo test -p piko-protocol
+cargo test -p piko-sandbox
 ```
 
-## Architecture Decisions
+### Communication Topology
 
-- **Stream-driven runtime**: orchd uses `Stream<Item = OrchEvent>` as its execution substrate — a single stream chain from LLM to hostd. No actors, no spawn.
-- **Ports & Adapters**: orchd defines `ports/` (traits like `ModelGateway`, `ToolProvider`, `ApprovalGateway`). llmd, sandbox, and hostd provide implementations so orchd stays testable with mocks.
-- **Host owns state**: Sessions, settings, auth, model registry, skills, and prompts all live in hostd. orchd only holds per-turn runtime state.
-- **Explicit approval**: Tool approval goes through a hostd-provided `ApprovalGateway`. Each tool has a `ToolPolicy` (sensitivity + approval requirement).
-- **Agent capability boundaries**: Each agent has explicit `toolSetIds`. Tool discovery respects tool set membership, active restrictions, and approval policies.
-- **Domain-driven structure**: `domain/` for business logic, `ports/` for traits, `adapters/` for implementations. Hostd adds `infra/` (storage, MCP) and `protocol/` (transport, command dispatch).
-- **JSON-lines protocol**: TUI ↔ hostd communication uses newline-delimited JSON over stdio. `protocol` crate defines the DTO contract shared by both sides.
+The communication channels are checked for drift as part of `cargo test` using the checked-in topology definition at `docs/generated/communication-topology.md`. To update or manually check the topology:
+
+```bash
+# Check for topology definition drift
+cargo run -p piko-comms --bin piko-comms-topology -- --check docs/generated/communication-topology.md docs/generated/communication-topology.json
+
+# Regenerate topology definitions
+cargo run -p piko-comms --bin piko-comms-topology -- docs/generated/communication-topology.md docs/generated/communication-topology.json
+```
+
+---
 
 ## License
 
-MIT
+This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for details.

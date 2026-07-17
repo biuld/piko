@@ -6,11 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry};
-use hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
-use hostd::protocol::{HostServer, run_jsonl_server};
 use mock_turn_runner::MockAgentRunRunner;
+use piko_hostd::api::{
+    ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry,
+};
+use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::protocol::{HostServer, run_jsonl_server};
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{ContentBlock, MessageContent, MessageRole};
 use support::{
@@ -27,7 +29,7 @@ impl AgentRunRunner for SlowRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let agent_instance_id = input.agent_instance_id.clone();
         let publisher_task = Arc::clone(&publisher);
@@ -59,7 +61,7 @@ async fn command_catalog_get_returns_slash_commands() {
 
     let [
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::CommandCatalogListed { commands, .. }),
+            result: Ok(piko_hostd::api::CommandResult::CommandCatalogListed { commands, .. }),
             ..
         },
     ] = events.as_slice()
@@ -76,7 +78,7 @@ impl AgentRunRunner for AssistantRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
@@ -191,7 +193,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let store = SessionStore::new(&input.session_dir);
 
         let turn = self
@@ -345,7 +347,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
@@ -366,8 +368,8 @@ impl AgentRunRunner for WaitingApprovalRunner {
             started.notify_one();
             finish.notified().await;
             publisher_task.publish(agent_instance_id.clone(), "main", 1, execution_succeeded());
-            let _ = completion_tx.send(hostd::ports::AgentRunCompletion {
-                address: hostd::ports::AgentOperationAddress {
+            let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
+                address: piko_hostd::ports::AgentOperationAddress {
                     session_id: completion_session_id,
                     operation_id: completion_turn_id,
                     agent_instance_id: completion_agent_instance_id.clone(),
@@ -380,7 +382,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
         let (started_tx, started_rx) = support::test_oneshot();
         let _ = started_tx.send(subscription);
         Ok(AgentRunHandle {
-            address: hostd::ports::AgentOperationAddress {
+            address: piko_hostd::ports::AgentOperationAddress {
                 session_id: input.session_id.clone(),
                 operation_id: input.operation_id.clone(),
                 agent_instance_id: input.agent_instance_id.clone(),
@@ -399,7 +401,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
         &self,
         _approval_id: &str,
         _decision: ApprovalDecision,
-    ) -> Result<bool, hostd::api::ProtocolError> {
+    ) -> Result<bool, piko_hostd::api::ProtocolError> {
         Ok(true)
     }
 }
@@ -415,7 +417,7 @@ async fn root_chat_streams_started_before_runner_finishes() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -436,14 +438,14 @@ async fn root_chat_streams_started_before_runner_finishes() {
         accepted,
         Event::CommandResponse {
             command_id,
-            result: Ok(hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::Empty),
         } if command_id == "submit"
     ));
 
     let started = events.recv().await.unwrap();
     assert!(matches!(
         started,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
     ));
 }
 
@@ -463,7 +465,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -483,14 +485,14 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     assert!(matches!(
         accepted,
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::Empty),
             ..
         }
     ));
     let started_event = events.recv().await.unwrap();
     assert!(matches!(
         started_event,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
     ));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
@@ -513,7 +515,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         approval_events.iter().any(|event| matches!(
             event,
             Event::CommandResponse {
-                result: Ok(hostd::api::CommandResult::Empty),
+                result: Ok(piko_hostd::api::CommandResult::Empty),
                 ..
             }
         )),
@@ -522,7 +524,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     assert!(
         approval_events.iter().any(|event| matches!(
             event,
-            Event::Approval(hostd::api::ApprovalEvent::Resolved { .. })
+            Event::Approval(piko_hostd::api::ApprovalEvent::Resolved { .. })
         )),
         "approval should emit resolved; events={approval_events:?}"
     );
@@ -544,7 +546,7 @@ async fn create_session_returns_session_created() {
     assert!(matches!(
         events[0],
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { .. }),
             ..
         }
     ));
@@ -563,7 +565,7 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -598,7 +600,7 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
         .position(|event| {
             matches!(
                 event,
-                Event::TurnLifecycle(hostd::api::TurnEvent::Completed { .. })
+                Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
             )
         })
         .unwrap();
@@ -624,14 +626,14 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
     assert_eq!(snapshot.entries.len(), 2);
     assert!(matches!(
         &snapshot.entries[0],
-        hostd::api::SessionTreeEntry::Message(entry)
-            if matches!(entry.message, hostd::api::Message::User { .. })
+        piko_hostd::api::SessionTreeEntry::Message(entry)
+            if matches!(entry.message, piko_hostd::api::Message::User { .. })
     ));
     assert!(matches!(
         &snapshot.entries[1],
-        hostd::api::SessionTreeEntry::Message(entry)
+        piko_hostd::api::SessionTreeEntry::Message(entry)
             if entry.id == "assistant-1"
-                && matches!(entry.message, hostd::api::Message::Assistant { .. })
+                && matches!(entry.message, piko_hostd::api::Message::Assistant { .. })
     ));
 }
 
@@ -649,7 +651,7 @@ async fn root_chat_reuses_session_sink_across_turns() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -717,7 +719,7 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -759,7 +761,7 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
 
     assert!(matches!(
         &navigated[0],
-        Event::CommandResponse { result: Ok(hostd::api::CommandResult::SessionNavigated {
+        Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::SessionNavigated {
             new_leaf_id: None,
             selected_entry_id,
             editor_text: Some(text),
@@ -800,7 +802,7 @@ async fn jsonl_server_round_trips_events() {
     assert!(matches!(
         event,
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { .. }),
             ..
         }
     ));
@@ -824,7 +826,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         .await;
     let session_id = match &created[0] {
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
             ..
         } => session_id.clone(),
         other => panic!("expected session_created, got {other:?}"),
@@ -859,7 +861,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     assert!(matches!(
         event,
         Event::CommandResponse {
-            result: Ok(hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::Empty),
             ..
         }
     ));
@@ -872,7 +874,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
         event,
-        Event::TurnLifecycle(hostd::api::TurnEvent::Started { .. })
+        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
     ));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
@@ -930,7 +932,7 @@ async fn test_config_update_returns_config_changed_event() {
 
     let mut found = false;
     for event in events {
-        if let Event::Model(hostd::api::ModelEvent::ConfigChanged { .. }) = event {
+        if let Event::Model(piko_hostd::api::ModelEvent::ConfigChanged { .. }) = event {
             found = true;
             break;
         }

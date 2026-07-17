@@ -4,7 +4,7 @@ use std::pin::Pin;
 use crate::api::{ProtocolError, ServerMessage};
 use async_trait::async_trait;
 use futures_core::Stream;
-use orchd_api::SessionSubscription;
+use piko_orchd_api::SessionSubscription;
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 

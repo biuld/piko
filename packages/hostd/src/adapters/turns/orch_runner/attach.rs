@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use orchd_api::{
+use piko_orchd_api::{
     AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, ExecutionCommitPort, RealtimeDeltaSink,
     SessionAgentConfig, SessionAgentPorts, SessionExecutionPorts,
 };
@@ -60,7 +60,7 @@ impl OrchAgentRunRunner {
             self.agent_runtime
                 .agent_snapshot(session_id.to_string(), root.agent_instance_id.clone())
                 .await,
-            Err(orchd_api::AgentApiError::SessionNotAttached)
+            Err(piko_orchd_api::AgentApiError::SessionNotAttached)
         ) {
             let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(store.clone());
             let resolved_specs = crate::adapters::prompts::agent_loader::load_agents(cwd);

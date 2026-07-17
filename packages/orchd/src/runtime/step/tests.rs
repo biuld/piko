@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use llmd::gateway::GatewayEvent;
-use orchd_api::RealtimeDeltaSink;
+use piko_llmd::gateway::GatewayEvent;
+use piko_orchd_api::RealtimeDeltaSink;
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use tokio_stream::iter;
 

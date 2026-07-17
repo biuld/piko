@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_core::Stream;
-use llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
 use tokio_stream::{StreamExt, iter};
 use tokio_util::sync::CancellationToken;
 
-use orchd_api::AgentCommitPort;
+use piko_orchd_api::AgentCommitPort;
 use piko_protocol::AgentInstanceIdentity;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
@@ -86,7 +86,7 @@ fn create_command() -> AgentDurableCommand {
 
 #[tokio::test]
 async fn agent_projection_is_emitted_only_after_durable_ack() {
-    let hub = Arc::new(orchd::events::SessionOutputHub::new(
+    let hub = Arc::new(piko_orchd::events::SessionOutputHub::new(
         "session-1".into(),
         "epoch".into(),
         4,
@@ -95,7 +95,7 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
     event_router.register("session-1", "operation", "child", true, Arc::clone(&hub));
     let cursor = hub.cursor();
     let subscription = hub.subscribe(&cursor).await.unwrap();
-    let mut output = orchd::events::merged_output_stream(subscription, cursor);
+    let mut output = piko_orchd::events::merged_output_stream(subscription, cursor);
     let committing = ProjectingAgentCommitPort::new(
         Arc::new(EphemeralAgentCommitPort::default()),
         "session-1".into(),

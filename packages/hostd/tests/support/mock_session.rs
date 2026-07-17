@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use orchd_api::{SessionOutputStream, SessionStreamError, SessionSubscription};
+use piko_orchd_api::{SessionOutputStream, SessionStreamError, SessionSubscription};
 use piko_protocol::agent_runtime::{
     SessionCursor, SessionEvent, SessionEventEnvelope, SessionOutput, SessionOutputEnvelope,
 };
@@ -66,10 +66,10 @@ impl MockSessionPublisher {
         }));
     }
 
-    pub fn require_snapshot(&self, reason: orchd_api::SnapshotRequiredReason) {
+    pub fn require_snapshot(&self, reason: piko_orchd_api::SnapshotRequiredReason) {
         let _ = self
             .tx
-            .send(Err(orchd_api::SessionStreamError::SnapshotRequired {
+            .send(Err(piko_orchd_api::SessionStreamError::SnapshotRequired {
                 reason,
             }));
     }
@@ -78,5 +78,5 @@ impl MockSessionPublisher {
 #[test]
 fn require_snapshot_is_callable() {
     let (publisher, _subscription) = MockSessionPublisher::new("session");
-    publisher.require_snapshot(orchd_api::SnapshotRequiredReason::CursorExpired);
+    publisher.require_snapshot(piko_orchd_api::SnapshotRequiredReason::CursorExpired);
 }

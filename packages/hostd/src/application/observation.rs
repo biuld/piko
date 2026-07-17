@@ -16,7 +16,7 @@ impl HostApp {
         runner: &Arc<dyn AgentRunRunner>,
         address: &AgentOperationAddress,
         session_dir: &std::path::Path,
-        observation: orchd_api::SessionSubscription,
+        observation: piko_orchd_api::SessionSubscription,
         mut completion_future: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<C, ProtocolError>> + Send>,
         >,
@@ -65,7 +65,7 @@ impl HostApp {
                     };
                     let envelope = match item {
                         Ok(envelope) => envelope,
-                        Err(orchd_api::SessionStreamError::SnapshotRequired { .. }) => {
+                        Err(piko_orchd_api::SessionStreamError::SnapshotRequired { .. }) => {
                             let recovered = self.recover_operation_observation(
                                 runner,
                                 &address.session_id,
@@ -237,7 +237,7 @@ impl HostApp {
         session_dir: &std::path::Path,
         reason: piko_protocol::ReconcileReason,
         tx: &ClientEventSender,
-    ) -> Result<orchd_api::SessionSubscription, ProtocolError> {
+    ) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
         let operation = AgentOperationAddress {
             session_id: session_id.to_string(),
             operation_id: operation_id.to_string(),

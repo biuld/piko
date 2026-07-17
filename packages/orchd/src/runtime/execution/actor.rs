@@ -1,9 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
 use piko_comms::MailboxReceiver;
 use piko_comms::contracts::ExecutionCommands;
+use piko_orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
 use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
     ExecutionOutcome, ExecutionStatus, StartExecutionRequest, SteerExecutionRequest,
@@ -27,7 +27,7 @@ use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
 use crate::runtime::tools::{build_tool_error, build_tool_result};
 use crate::runtime::utils::runtime_tool_entity_id;
-use llmd::gateway::GatewayRequest;
+use piko_llmd::gateway::GatewayRequest;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionRunResult {

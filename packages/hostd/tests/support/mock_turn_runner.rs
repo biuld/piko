@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hostd::infra::storage::SessionStore;
-use hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::infra::storage::SessionStore;
+use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{Message, MessageContent, MessageRole};
 
@@ -16,7 +16,7 @@ impl AgentRunRunner for MockAgentRunRunner {
     async fn run_agent(
         &self,
         input: AgentRunInput,
-    ) -> Result<AgentRunHandle, hostd::api::ProtocolError> {
+    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let source_turn_id = input.operation_id.clone();

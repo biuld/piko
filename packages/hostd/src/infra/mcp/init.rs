@@ -8,7 +8,7 @@ use super::provider::McpProvider;
 /// Execution runtime.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
-    runtime: &orchd::AgentRuntime,
+    runtime: &piko_orchd::AgentRuntime,
 ) -> Vec<String> {
     let mut registered = Vec::new();
 

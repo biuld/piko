@@ -5,12 +5,12 @@ mod delivery;
 mod input;
 mod run_protocol;
 
-use orchd_api::{AgentApiError, AgentCommitPort};
 use piko_comms::contracts::{
     AgentCommands, AgentRunReport as AgentRunReportContract, AgentRunStarted,
     AgentSnapshot as AgentSnapshotContract,
 };
 use piko_comms::{LatestSender, MailboxReceiver, MailboxSender, ReplySender};
+use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot,
     AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
@@ -46,7 +46,7 @@ pub struct AgentActor {
     >,
     detached_reports: HashMap<String, Vec<DetachedReportTarget>>,
     scope: std::sync::Weak<SessionAgentScope>,
-    recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
+    recovered_detached_deliveries: Vec<piko_orchd_api::RecoveredDetachedDelivery>,
     generation: u64,
     commit: Arc<dyn AgentCommitPort>,
     execution: Arc<AgentExecutionRuntime>,
@@ -84,7 +84,7 @@ enum AgentRunState {
 }
 
 fn internal_execution_id(identity: &AgentInstanceIdentity, request_id: &str) -> String {
-    orchd_api::stable_internal_id(
+    piko_orchd_api::stable_internal_id(
         "exec",
         &[
             &identity.session_id,
@@ -117,9 +117,9 @@ impl AgentActor {
         head_message_id: Option<String>,
         inbox: Vec<AgentInboxItem>,
         latest_report: Option<AgentRunReport>,
-        execution_reports: Vec<orchd_api::RecoveredExecutionReport>,
+        execution_reports: Vec<piko_orchd_api::RecoveredExecutionReport>,
         queued_inputs: Vec<piko_protocol::DurableAgentInput>,
-        recovered_detached_deliveries: Vec<orchd_api::RecoveredDetachedDelivery>,
+        recovered_detached_deliveries: Vec<piko_orchd_api::RecoveredDetachedDelivery>,
         generation: u64,
         commit: Arc<dyn AgentCommitPort>,
         execution: Arc<AgentExecutionRuntime>,
@@ -209,7 +209,7 @@ impl AgentActor {
                         )
                         .await
                     {
-                        Ok(receipt) => command.complete(Ok(orchd_api::AgentRunAcceptance {
+                        Ok(receipt) => command.complete(Ok(piko_orchd_api::AgentRunAcceptance {
                             receipt,
                             started: started_rx,
                             completion: report_rx,
@@ -228,7 +228,7 @@ impl AgentActor {
                                 piko_comms::reply::<AgentRunReportContract, _>();
                             self.register_waiter(accepted.internal_execution_id, report_tx);
                             let _ = started_tx.send(());
-                            command.complete(Ok(orchd_api::AgentRunAcceptance {
+                            command.complete(Ok(piko_orchd_api::AgentRunAcceptance {
                                 receipt: accepted.receipt,
                                 started: started_rx,
                                 completion: report_rx,

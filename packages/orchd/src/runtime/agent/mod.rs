@@ -10,11 +10,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
-use orchd_api::{
-    AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
-};
 use piko_comms::contracts::{
     AgentCommandReply, AgentCommands, AgentSnapshot as AgentSnapshotContract,
+};
+use piko_orchd_api::{
+    AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
 };
 use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
@@ -90,7 +90,7 @@ impl AgentRuntime {
         self.execution.register_agent(spec).await;
     }
 
-    pub async fn register_tool_provider(&self, provider: Box<dyn orchd_api::ToolProvider>) {
+    pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.execution.register_tool_provider(provider).await;
     }
 
@@ -98,7 +98,7 @@ impl AgentRuntime {
         self.execution.register_tool_set(tool_set).await;
     }
 
-    pub async fn set_approval_gateway(&self, gateway: Box<dyn orchd_api::ApprovalGateway>) {
+    pub async fn set_approval_gateway(&self, gateway: Box<dyn piko_orchd_api::ApprovalGateway>) {
         self.execution.set_approval_gateway(gateway).await;
     }
 
@@ -480,7 +480,7 @@ impl AgentRuntimeApi for AgentRuntime {
     async fn run_agent(
         &self,
         request: SendAgentInputRequest,
-    ) -> Result<orchd_api::AgentRunAcceptance, AgentApiError> {
+    ) -> Result<piko_orchd_api::AgentRunAcceptance, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::adapters::OrchAgentRunRunner;
 use crate::domain::config::{HostSettings, ModelRegistry};
 use crate::ports::AgentRunRunner;
-use llmd::auth::AuthStorage;
-use llmd::gateway::LlmGateway;
+use piko_llmd::auth::AuthStorage;
+use piko_llmd::gateway::LlmGateway;
 
 /// Build an OrchAgentRunRunner and return both the runner and the model executor (if available).
 pub(crate) async fn build_orch_turn_runner(
@@ -55,7 +55,7 @@ pub(crate) async fn build_orch_turn_runner(
             .and_then(|r| r.base_delay_ms)
             .unwrap_or(2000),
     };
-    let executor = llmd::build_gateway(providers, retry_config);
+    let executor = piko_llmd::build_gateway(providers, retry_config);
     let thinking = settings.default_thinking_level.clone();
     let thinking_map = resolved.model.thinking_level_map.clone();
     let runner = Arc::new(

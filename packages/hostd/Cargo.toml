@@ -1,25 +1,25 @@
 [package]
-name = "hostd"
+name = "piko-hostd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "piko host runtime daemon"
 
 [lib]
-name = "hostd"
+name = "piko_hostd"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hostd"
+name = "piko-hostd"
 path = "src/main.rs"
 
 [dependencies]
-llmd = { path = "../llmd" }
+piko-llmd = { path = "../llmd" }
 async-trait = "0.1"
 async-stream = "0.3"
 
-orchd = { path = "../orchd" }
-orchd-api = { path = "../orchd-api" }
+piko-orchd = { path = "../orchd" }
+piko-orchd-api = { path = "../orchd-api" }
 piko-comms = { path = "../comms" }
 tokio = { version = "1", features = ["full"] }
 futures-core = "0.3"

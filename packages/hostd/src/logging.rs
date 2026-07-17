@@ -9,8 +9,8 @@ use std::{
 use thiserror::Error;
 use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-pub const DEFAULT_FILTER: &str = "info,hostd=info,orchd=info";
-pub const DEBUG_FILTER: &str = "debug,hostd=debug,orchd=debug";
+pub const DEFAULT_FILTER: &str = "info,piko_hostd=info,piko_orchd=info";
+pub const DEBUG_FILTER: &str = "debug,piko_hostd=debug,piko_orchd=debug";
 
 /// Resolved logging configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,11 +265,11 @@ mod tests {
             "--log-file".to_string(),
             "~/logs/hostd.log".to_string(),
             "--log-level".to_string(),
-            "debug,orchd=debug".to_string(),
+            "debug,piko_orchd=debug".to_string(),
             "--log-stderr".to_string(),
         ]);
         assert_eq!(cli.log_file, Some(PathBuf::from("~/logs/hostd.log")));
-        assert_eq!(cli.log_level.as_deref(), Some("debug,orchd=debug"));
+        assert_eq!(cli.log_level.as_deref(), Some("debug,piko_orchd=debug"));
         assert!(cli.log_stderr);
     }
 

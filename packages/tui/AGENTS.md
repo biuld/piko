@@ -1,4 +1,4 @@
-# AGENTS.md — tui crate context
+# AGENTS.md — piko-tui crate context
 
 ## Architecture overview
 

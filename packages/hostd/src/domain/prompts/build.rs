@@ -12,7 +12,7 @@ pub fn snapshot_prompt_resources(
     } else {
         let guidelines = build_guidelines(&options.prompt_guidelines);
         let mut prompt = format!(
-            "You are an expert coding assistant operating inside piko, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\nGuidelines:\n{guidelines}\n\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/README.md\n- Additional docs: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/docs\n- Examples: /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)"
+            "You are an expert coding assistant operating inside piko, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\nGuidelines:\n{guidelines}"
         );
         if let Some(append) = options.append_system_prompt {
             prompt.push_str("\n\n");
@@ -41,16 +41,7 @@ pub fn assemble_agent_run_prompt(
     }
     let mut tools = request.tool_catalog.clone();
     tools.sort_by(|left, right| left.name.cmp(&right.name));
-    if !tools.is_empty() {
-        sections.push(format!(
-            "Available tools:\n{}",
-            tools
-                .iter()
-                .map(|tool| format!("- {}: {}", tool.name, tool.description))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-    }
+
     let has_read = request.tool_catalog.iter().any(|tool| tool.name == "read");
     for section in [
         Some(&request.resources.context_section),
@@ -70,7 +61,7 @@ pub fn assemble_agent_run_prompt(
         .expect("resolved tool catalog must serialize for prompt diagnostics");
     let assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION.to_string();
     piko_protocol::AgentRunPrompt {
-        source_digest: orchd_api::stable_internal_id(
+        source_digest: piko_orchd_api::stable_internal_id(
             "prompt",
             &[&assembly_version, &system_prompt, &catalog_digest_input],
         ),

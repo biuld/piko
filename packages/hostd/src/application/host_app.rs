@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use llmd::auth::AuthStorage;
-use llmd::gateway::LlmGateway;
+use piko_llmd::auth::AuthStorage;
+use piko_llmd::gateway::LlmGateway;
 use tokio::sync::Mutex;
 
 use crate::domain::config::{HostSettings, ModelRegistry};

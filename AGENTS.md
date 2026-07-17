@@ -2,12 +2,7 @@
 
 ## Project overview
 
-piko is a coding agent harness with a **hostd + orchd** architecture. It
-reimplements [pi](https://github.com/earendil-works/pi-mono) by splitting the
-monolithic runtime into a stateful Rust **Host daemon** (sessions, TUI
-protocol, settings, auth, skills, prompts, compaction) and a stream-driven
-Rust **Orchestrator** (agent runtime, tool routing, multi-agent supervision).
-A **ratatui-based TUI** connects to hostd over JSON-lines stdio.
+piko is a coding agent harness with a decoupled **hostd + orchd** architecture. It splits the runtime into a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, multi-agent supervision). A **ratatui-based TUI** connects to hostd over JSON-lines stdio.
 
 Guiding principle: keep the host+orchestrator split clean, and keep `hostd`
 authoritative for user-visible state.
@@ -25,12 +20,12 @@ sandbox (leaf)
 
 | Crate | Type | Description |
 |---|---|---|
-| `tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
-| `hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
-| `orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
-| `llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
-| `protocol` | lib | Shared serializable DTOs only. See `packages/protocol/AGENTS.md`. |
-| `sandbox` | lib | Fail-closed filesystem and process sandbox. |
+| `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
+| `piko-hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
+| `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
+| `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
+| `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
+| `piko-sandbox` | lib | Fail-closed filesystem and process sandbox. |
 
 ## Coding conventions
 
@@ -96,10 +91,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```bash
 cargo test --workspace
 
-cargo test -p hostd
-cargo test -p orchd
-cargo test -p tui
-cargo test -p llmd
+cargo test -p piko-hostd
+cargo test -p piko-orchd
+cargo test -p piko-tui
+cargo test -p piko-llmd
 cargo test -p piko-protocol
 cargo test -p piko-sandbox
 ```

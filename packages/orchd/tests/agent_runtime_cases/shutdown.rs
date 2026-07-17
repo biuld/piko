@@ -107,6 +107,6 @@ async fn session_detach_cancels_and_drains_active_executions() {
     .expect("detach must drain");
     assert_eq!(
         runtime.list_agents("session-1".into()).await.unwrap_err(),
-        orchd_api::AgentApiError::SessionNotAttached
+        piko_orchd_api::AgentApiError::SessionNotAttached
     );
 }

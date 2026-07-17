@@ -22,5 +22,5 @@ pub mod testing;
 pub mod tools;
 
 pub use api::{AgentApiError, SessionOutputStream, SessionSubscription};
-pub use orchd_api;
+pub use piko_orchd_api;
 pub use runtime::AgentRuntime;

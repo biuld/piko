@@ -6,7 +6,7 @@ use piko_protocol::agent_runtime::{SessionEvent, SessionEventEnvelope};
 struct ObservationRoute {
     target_agent_instance_id: String,
     fallback: bool,
-    hub: Arc<orchd::events::SessionOutputHub>,
+    hub: Arc<piko_orchd::events::SessionOutputHub>,
 }
 
 #[cfg(test)]
@@ -16,12 +16,12 @@ mod tests {
     #[test]
     fn exact_agent_route_wins_over_session_fallback() {
         let router = SessionObservationRouter::default();
-        let root = Arc::new(orchd::events::SessionOutputHub::new(
+        let root = Arc::new(piko_orchd::events::SessionOutputHub::new(
             "s".into(),
             "root".into(),
             4,
         ));
-        let child = Arc::new(orchd::events::SessionOutputHub::new(
+        let child = Arc::new(piko_orchd::events::SessionOutputHub::new(
             "s".into(),
             "child".into(),
             4,
@@ -52,7 +52,7 @@ impl SessionObservationRouter {
         operation_id: &str,
         target_agent_instance_id: &str,
         fallback: bool,
-        hub: Arc<orchd::events::SessionOutputHub>,
+        hub: Arc<piko_orchd::events::SessionOutputHub>,
     ) {
         self.routes
             .lock()
@@ -88,7 +88,7 @@ impl SessionObservationRouter {
         &self,
         session_id: &str,
         agent_instance_id: &str,
-    ) -> Option<Arc<orchd::events::SessionOutputHub>> {
+    ) -> Option<Arc<piko_orchd::events::SessionOutputHub>> {
         self.matching_hubs(session_id, agent_instance_id)
             .into_iter()
             .next()
@@ -117,7 +117,7 @@ impl SessionObservationRouter {
         &self,
         session_id: &str,
         agent_instance_id: &str,
-    ) -> Vec<Arc<orchd::events::SessionOutputHub>> {
+    ) -> Vec<Arc<piko_orchd::events::SessionOutputHub>> {
         let routes = self.routes.lock().unwrap();
         let mut exact = Vec::new();
         let mut fallback = Vec::new();

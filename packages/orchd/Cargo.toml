@@ -1,9 +1,9 @@
 [package]
-name = "orchd"
+name = "piko-orchd"
 version = "0.1.0"
 edition = "2024"
 description = "piko orchestrator daemon — Rust-native AI agent runtime"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -23,11 +23,11 @@ tokio-stream = "0.1"
 async-trait = "0.1"
 async-stream = "0.3"
 
-llmd = { path = "../llmd" }
-orchd-api = { path = "../orchd-api" }
+piko-llmd = { path = "../llmd" }
+piko-orchd-api = { path = "../orchd-api" }
 piko-comms = { path = "../comms" }
 piko-sandbox = { path = "../sandbox" }
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 
 [dev-dependencies]
-orchd-api = { path = "../orchd-api" }
+piko-orchd-api = { path = "../orchd-api" }
