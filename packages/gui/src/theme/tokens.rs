@@ -85,6 +85,10 @@ impl PikoTokens {
         Self::rgba(self.border)
     }
 
+    pub fn ring_rgba(self) -> Rgba {
+        Self::rgba(self.ring)
+    }
+
     pub fn role_accent(self, role: RoleAccent) -> Rgba {
         match role {
             RoleAccent::User => Self::rgba(self.user),
@@ -105,6 +109,9 @@ impl PikoTokens {
 pub enum RoleAccent {
     User,
     Assistant,
+    /// Reserved for dedicated thinking chrome (thinking currently uses
+    /// markdown blockquotes under Assistant rows).
+    #[expect(dead_code)]
     Thinking,
     Tool,
     System,

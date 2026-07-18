@@ -73,5 +73,6 @@ mod tests {
         assert_eq!(m.body_size, px(14.));
         assert_eq!(m.body_line_height, px(21.));
         assert_eq!(m.island_gutter, px(8.));
+        assert_eq!(m.island_radius, px(10.));
     }
 }

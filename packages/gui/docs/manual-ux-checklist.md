@@ -6,7 +6,7 @@ hostd process.
 
 ## Keyboard main path
 
-- [ ] `cmd-n` create session, `cmd-b` / `cmd-i` toggle Sessions / Inspector
+- [ ] `cmd-n` create session, `cmd-b` / `cmd-i` toggle Sessions / Agents+Tree
 - [ ] `cmd-l` focus Composer, Enter submit, Shift+Enter newline
 - [ ] `cmd-.` cancel Turn, `cmd-j` jump to latest when detached
 - [ ] Tab / Shift+Tab traverses focusable chrome without trapping in StatusBar
@@ -22,11 +22,15 @@ hostd process.
 
 - [ ] Attached: streaming deltas keep viewport at bottom
 - [ ] Detached (scroll up): streaming does **not** move the reader
-- [ ] “Jump to latest” reattaches and scrolls to end
+- [ ] `cmd-j` reattaches follow and scrolls to end (no in-panel Jump button)
+- [ ] Opening or hydrating an existing session starts at the top and does not
+      implicitly enable bottom-follow
 - [ ] Expanding a tool Detail card does not force scroll when detached
 - [ ] Switching Agent restores that Agent’s follow preference
 - [ ] A long Timeline scrolls inside its own island without moving or shrinking
       Composer
+- [ ] Timeline scrollbar is anchored to the viewport edge, spans only Timeline,
+      and supports wheel, track, and thumb dragging without moving with content
 
 ## Conversation center
 
@@ -35,6 +39,8 @@ hostd process.
 - [ ] Messages have no full-width separator lines or persistent left role rails
 - [ ] Role markers remain distinct without overpowering mixed CJK/Latin body
       text
+- [ ] Thinking content is visually subordinate without a visible `thinking`
+      heading or prefix
 - [ ] Running, completed, and failed tool markers use info, success, and danger
       colors respectively
 - [ ] Collapsed Activity is a 32 px borderless row and gains a container only
@@ -50,9 +56,11 @@ hostd process.
 
 ## Layout / StatusBar
 
-- [ ] Wide (≥1200): three panes; medium hides Inspector; narrow uses Sheets
+- [ ] Wide (≥1200): Sessions + center + Agents/Tree; medium hides Agents/Tree; narrow uses Sheets
 - [ ] Wide layout shows an 8 px canvas gutter between the three columns
-- [ ] Agents and Conversation Map are separate rounded islands with an 8 px vertical gutter
+- [ ] Agents and Tree are separate rounded islands with an 8 px vertical gutter
+- [ ] Sessions / Agents / Tree scrollbars match Timeline (themed thumb, island
+  bottom-right radius preserved; vertical only — Tree labels truncate)
 - [ ] TitleBar and StatusBar remain edge-to-edge and are not rounded islands
 - [ ] Islands and edge chrome have no decorative outer borders
 - [ ] Resizable gutters draw no idle line; drag feedback appears only while resizing
@@ -65,10 +73,11 @@ hostd process.
 
 ## Visual system
 
-- [ ] Session, Agent, and Map selections use filled rows, not blue outline cards
+- [ ] Session, Agent, and Tree selections use filled rows, not blue outline cards
 - [ ] Tree disclosures toggle without also activating the row
 - [ ] Tree depth guides remain aligned while scrolling and resizing
-- [ ] Timeline and Composer content remain centered at the 880 px reading width
+- [ ] Timeline content remains centered at the 880 px reading width; Activity
+      and Composer fill the center column and stay edge-aligned with each other
 - [ ] Mixed CJK/Latin labels truncate cleanly without clipping vertically
 
 See [`ui-guidelines.md`](ui-guidelines.md) for the normative visual rules.
@@ -89,4 +98,4 @@ See [`ui-guidelines.md`](ui-guidelines.md) for the normative visual rules.
   until host exposes it.
 - VoiceOver / platform accessibility announcements are not bridged yet.
 - `[gui]` persistence covers pane visibility, split sizes, and reduced motion;
-  focus, map expansion, drafts, and scroll/follow positions remain local.
+  focus, tree expansion, drafts, and scroll/follow positions remain local.

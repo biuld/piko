@@ -23,10 +23,10 @@ approval or interaction prompts.
 │ Search           │        Conversation Timeline         │ ├─ Researcher     │
 │ + New Session    │                                      │ └─ Reviewer       │
 │                  │                                      ├───────────────────┤
-│ Current folder   │                                      │ Conversation Map  │
-│  ● Current       │                                      │ ● current leaf    │
-│    Previous      ├──────────────────────────────────────┤ ├─ prompt         │
-│    Older         │ Activity: 1 approval · 2 running     │ └─ branch         │
+│ Folder groups    │                                      │ Tree              │
+│  ● alpha         │                                      │ ● current leaf    │
+│    myapp         ├──────────────────────────────────────┤ ├─ prompt         │
+│    other         │ Activity: 1 approval · 2 running     │ └─ branch         │
 │                  ├──────────────────────────────────────┤                   │
 │                  │ Main ▾ · Model ▾ · Think ▾    Send   │                   │
 │                  │ Multi-line Composer                  │                   │
@@ -35,26 +35,39 @@ approval or interaction prompts.
 └──────────────────┴──────────────────────────────────────┴───────────────────┘
 ```
 
-Wide windows show the Session sidebar on the left and an Inspector sidebar on
-the right by default. The Inspector stacks Agent Tree above Conversation Map.
-Both outer sidebars are independently hideable and resizable. The center
-Workbench remains fully usable as a single column and never depends on either
-sidebar.
+Wide windows show the Sessions island on the left and, when open, Agents above
+Tree on the right. Those right-hand islands share a column width
+and a vertical split. Both outer docks are independently hideable and
+resizable. The center Workbench remains fully usable as a single column and
+never depends on either side.
+
+## Island isolation and focus
+
+Each Workbench island (Sessions, Timeline, Composer, Agents, Tree) is an
+independent GPUI Entity: scroll, hover, and local UI updates re-render that
+island only. Cross-island actions use directed `IslandMsg` routing through
+chrome (`DesktopApp`), not a broadcast rebuild of the whole Workbench.
+
+Keyboard focus is island-owned:
+
+- Tab / Shift+Tab cycle visible islands (StatusBar is not focusable).
+- `cmd-l` focuses the Composer island and its input.
+- The focused island shows the theme `ring` on its shell.
 
 There is no persistent center header. The center starts directly with the
-Timeline. Session and cwd context belong to Session Sidebar and the native
+Timeline. Session and cwd context belong to Sessions and the native
 window title; the Composer identifies its target Agent and submission settings.
 
 ## Session Entry
 
-- The left Session sidebar is the primary place to search, create, open, and
-  identify Sessions.
+- The left Sessions island lists all Sessions globally, grouped by working
+  directory and sorted alphabetically.
 - Starting with a requested Session opens that Session and shows a loading
   state until its complete view is available.
-- Starting without a requested Session shows Sessions for the current working
-  directory in the left sidebar and an action to create a new Session.
+- Starting without a requested Session shows the global Sessions list and an
+  action to create a new Session (create still uses the process cwd).
 - Selecting a Session opens it in the same Workbench window.
-- While a different Session is opening, the sidebar distinguishes the live
+- While a different Session is opening, the list distinguishes the live
   Session from the pending target.
 - Creating a Session enters the Workbench immediately, but conversation state
   remains loading until the Session is ready.
@@ -64,23 +77,23 @@ window title; the Composer identifies its target Agent and submission settings.
 
 ## Agent Tree
 
-The upper Inspector panel is the primary Agent selector and runtime overview
-for the visible Session.
+The Agents island is the primary Agent selector and runtime overview for the
+visible Session.
 
 - It shows the durable AgentInstance parent/child hierarchy, not a flat list of
   transient model runs.
 - Each row favors Agent display name and role, with compact indicators for
   lifecycle, active Turn, queued work, unread activity, or failure when known.
 - Selecting an Agent changes the center Timeline, Composer target, Turn status,
-  and lower Conversation Map together; it does not create or start work.
+  and lower Tree together; it does not create or start work.
 - The selected Agent, actively running Agents, and Agents needing attention are
   visually distinct states.
 - Expansion, selection focus, and panel scroll are window-local UI state. Agent
   identity and hierarchy come from the reconciled Session projection.
 
-## Conversation Map
+## Tree
 
-The lower Inspector panel is a compact structural map of the selected Agent's
+The Tree island is a compact structural map of the selected Agent's
 conversation. It is closer to an editor's symbol tree or minimap than to a
 second transcript.
 
@@ -114,8 +127,8 @@ second transcript.
   committed message without duplication.
 - The viewport follows new output only while the user is already near the end.
   Reading older content is never interrupted by incoming output.
-- A visible "Jump to latest" action appears when new content arrives while the
-  viewport is detached from the end.
+- When detached, `cmd-j` reattaches follow and scrolls to the end (no in-panel
+  Jump button — Timeline uses the same IslandPanel scrollbar as other islands).
 - Switching Agents preserves each Agent's Timeline and scroll position for the
   current window.
 
@@ -158,8 +171,10 @@ Timeline or an unbounded event log.
 
 ## Composer
 
-- The Composer grows from one line to a bounded multi-line height and then
-  scrolls internally.
+- The Composer starts at three lines, grows to a bounded multi-line height, and
+  then scrolls internally.
+- Activity and Composer share the full center-column width (not the Timeline
+  reading-width cap) so they stay aligned as the window resizes.
 - Its action row shows the selected target Agent plus model and thinking
   controls. These values affect the next submission and do not occupy a
   persistent Workbench header.
@@ -248,20 +263,20 @@ authority before the matching host event or reconciliation.
 
 ## Responsive Sidebars
 
-- Wide windows show both outer sidebars by default. Agent Tree and Conversation
-  Map share the right Inspector through a vertically resizable split.
+- Wide windows show Sessions and the right column (Agents + Tree)
+  by default. Agents and Tree share column width through a vertically resizable
+  split; each island has its own open preference (UI still toggles them together).
 - Activity Center remains between Timeline and Composer at every window width.
   It has a compact bounded height and can be collapsed to its summary row.
-- Medium windows keep the Session sidebar visible and collapse the entire
-  Inspector behind a toolbar action.
-- Narrow windows collapse both outer sidebars. Sessions and Inspector remain
-  available as temporary sheets above the Workbench; the narrow Inspector uses
-  one tree at a time.
-- Both sidebars are resizable and independently hideable.
-- Closing both outer sidebars returns to the single-column Workbench with
-  no loss of functionality.
-- Sidebar visibility, size, expansion, and selection are presentation state.
-- Sidebar visibility and size persist under hostd's opaque `[gui]` namespace.
+- Medium windows keep Sessions docked and collapse Agents/Tree behind a toolbar
+  action (`cmd-i`).
+- Narrow windows undock Sessions, Agents, and Map. They remain available as
+  temporary sheets above the Workbench; the right sheet keeps Agents above Map
+  in the same vertical split as the docked column.
+- Outer islands are resizable and hideable. Closing Sessions and both right
+  islands returns to the single-column Workbench with no loss of functionality.
+- Island visibility, size, expansion, and selection are presentation state.
+- Visibility and size persist under hostd's opaque `[gui]` namespace.
 
 ## Configuration
 

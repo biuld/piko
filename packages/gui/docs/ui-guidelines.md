@@ -36,7 +36,7 @@ native-integrated title bar / window canvas
 ┌──────────────────────────────────────────────────────────────┐
 │  Sessions island  │    Timeline island    │ Agents island   │
 │                   │                       ├─────────────────┤
-│                   ├───────────────────────┤ Map island      │
+│                   ├───────────────────────┤ Tree island      │
 │                   │    Composer island    │                 │
 │                   │ Activity / input      │                 │
 └──────────────────────────────────────────────────────────────┘
@@ -45,13 +45,14 @@ edge-to-edge status bar
 
 - The title bar and StatusBar belong to the window canvas. They are never
   islands and never receive floating margins or rounded corners.
-- Sessions, Timeline, and Composer are first-class islands. The Inspector
-  column owns two additional first-class islands: Agents and Conversation Map.
+- Layout units are islands only: Sessions, Timeline, Composer, Agents, and
+  Tree. The right column is just Agents stacked above Tree when
+  either is open.
 - Timeline fills the remaining center-column height and owns its vertical
   scroll. Composer keeps its intrinsic height at the bottom, independent of
   Timeline content length.
 - Activity belongs to the Composer island as its operational status layer.
-- Agent Tree and Conversation Map are independent islands separated by the
+- Agent Tree and Tree are independent islands separated by the
   same 8 px canvas gutter used horizontally. Their resize handle is invisible
   until dragging.
 
@@ -60,7 +61,7 @@ edge-to-edge status bar
 | Level | Token | Fleet Dark value | Use |
 |---|---|---:|---|
 | Canvas | `canvas` / `chrome` | `#090909` | title bar, gutters, StatusBar |
-| Island | `surface` | `#18191B` | Sessions, Conversation, Inspector |
+| Island | `surface` | `#18191B` | Sessions, Timeline, Composer, Agents, Tree |
 | Elevated | `elevated` | `#252629` | Composer, tool detail, hover/selection |
 | Separator | `border` | `#3E4147` | internal dividers and focus-neutral edges |
 | Focus | `ring` | `#2A7DEB` | keyboard focus and active input only |
@@ -92,11 +93,41 @@ The implementation source of truth is `src/theme/metrics.rs`.
 - Use the 4 / 8 / 12 / 16 px spacing scale.
 - Use the system UI font for interface and mixed CJK text. Use monospace only
   for code, logs, ids, and tool detail.
-- Limit conversation reading width to 880 px and center it in the island.
+- Limit Timeline conversation reading width to 880 px and center it in the
+  island. Activity and Composer fill the center column width and track the
+  window; they are not capped at the reading width.
 - Preserve text hierarchy with weight and muted color before increasing size.
-- Truncate navigation/tree labels to one line. Conversation prose may wrap.
+- Truncate Sessions / Agents / Tree list labels to one line. Conversation
+  prose may wrap.
 
 ## 5. Component rules
+
+### IslandPanel
+
+Workbench islands use the shared `IslandPanel` chrome in `src/chrome/`:
+
+- Shell: surface fill, 10 px radius, no idle outline.
+- Header: optional. Tool windows (Sessions, Agents, Tree, Sheet) set
+  `IslandHeader::Title`. Timeline and Composer omit the header
+  (`.header(...)` not called). Composer uses `.scroll(false)` + `.fill(false)`
+  for intrinsic height; Timeline uses the shared scroll viewport with an
+  injected `ScrollHandle`.
+- Content states: `Ready` (default via `IslandPanel::new`), `Loading`,
+  `Empty`, or `Custom` full override. Loading/Empty use a shared centered
+  placeholder (`IslandPlaceholder`: optional icon or media element, title,
+  optional subtitle, optional action). Islands override by changing those
+  fields or by using `IslandBody::Custom` / `IslandPanel::custom`.
+- Content scrolling (Ready only, default on): themed vertical scrollbar via
+  IslandPanel's viewport (`ScrollableElement` + theme `scrollbar` /
+  `scrollbar_thumb`). A thumb paints only when content overflows the viewport
+  vertically (gpui-component overflow gate). Timeline injects its own
+  `ScrollHandle` for follow/scroll-to-bottom; Sessions / Agents / Tree use a
+  keyed handle. The island shell clips to its 10 px radius.
+  Loading/Empty/Custom do not use the list scrollbar.
+  Horizontal overflow for Tree is deferred (labels truncate for now).
+- `.fill(false)` keeps intrinsic height (Composer). Default `.fill(true)`
+  fills the parent slot.
+- All scrolling islands (Sessions, Timeline, Agents, Tree) share this viewport.
 
 ### Title bar
 
@@ -112,8 +143,7 @@ The implementation source of truth is `src/theme/metrics.rs`.
 
 ### Session navigation
 
-- The header behaves like a tool-window tab strip, not a marketing header.
-- New Session is a compact ghost `+` action with a tooltip.
+- Built with `IslandPanel` (title + `+` action).
 - Rows use the shared list-item states and show metadata with muted text.
 
 ### Timeline
@@ -129,7 +159,7 @@ The implementation source of truth is `src/theme/metrics.rs`.
   the island surface so longer prose reads like a document.
 - System messages stay on the island surface with muted text and reduced
   emphasis. Thinking is subordinate to the committed answer and uses muted
-  contrast.
+  blockquote styling. Do not add a redundant `thinking` heading or prefix.
 - Tool calls use an elevated rounded block because they are interactive. Their
   own status marker uses `info` while running, `success` when completed, and
   `danger` when failed. Expanded detail drops back to the island surface.
@@ -156,6 +186,12 @@ The implementation source of truth is `src/theme/metrics.rs`.
 - Place the input on the elevated surface inside the Composer island so its
   editable area remains immediately legible. The component focus ring is the
   only strong outline.
+- Default the multi-line input to three rows and auto-grow up to twelve before
+  scrolling internally.
+- Activity and Composer share one full-width column inside the island so their
+  edges stay aligned as the window resizes. Inset that column with the same
+  horizontal island padding as Timeline (`space_lg`); do not indent the
+  Composer island shell relative to Timeline in the center column.
 - Keep the input visually primary and actions in one compact footer with 8 px
   internal padding.
 - Target uses the accent color. Model and thinking controls use muted ghost
@@ -189,11 +225,15 @@ The implementation source of truth is `src/theme/metrics.rs`.
 
 ## 6. Responsive behavior
 
-- Wide: show all three islands.
-- Medium: keep Sessions and Conversation; expose Inspector through its action.
-- Narrow: keep Conversation and open Sessions/Inspector in Sheets.
+- Wide: dock Sessions, Timeline, Composer, and (when open) Agents + Tree.
+  Islands stay visible without a live session and show Empty / Loading until
+  the session is ready.
+- Medium: keep Sessions and center islands; Agents/Tree stay behind the
+  action (`cmd-i` toggles both islands together).
+- Narrow: keep Timeline + Composer; open Sessions in a Sheet, and Agents + Tree
+  as the same vertical island stack in a right Sheet.
 - Removing an island also removes its gutter slot; do not leave empty rails.
-- Persist user widths, but always protect the Conversation minimum width.
+- Persist user widths, but always protect the center-column minimum width.
 
 ## 7. Review checklist
 

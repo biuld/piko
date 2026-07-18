@@ -3,29 +3,21 @@
 use std::collections::HashSet;
 
 use gpui::*;
-use gpui_component::input::InputState;
 use piko_client_core::state::PendingOp;
 use piko_client_core::{ClientIntent, SessionPhase};
 
-use crate::workbench::{derive_composer, derive_timeline};
+use crate::chrome::IslandId;
+use crate::islands::derive_composer;
 
 use super::desktop_app::{CancelTurn, DesktopApp, FocusComposer, JumpToLatest, NewSession};
 use super::model_cycle::{next_model_intent, next_thinking_intent};
 use super::timeline_follow::{TimelineContentFp, is_near_bottom, should_scroll_on_growth};
 
 impl DesktopApp {
-    pub(crate) fn composer_input_entity(&self) -> &Entity<InputState> {
-        &self.composer_input
-    }
-
-    pub(crate) fn timeline_scroll_handle(&self) -> &ScrollHandle {
-        &self.timeline_scroll
-    }
-
     pub(crate) fn follow_for_selected(&self) -> bool {
         self.selected_agent_id()
             .and_then(|id| self.follow_bottom.get(&id).copied())
-            .unwrap_or(true)
+            .unwrap_or(false)
     }
 
     pub(crate) fn action_new_session(
@@ -38,6 +30,7 @@ impl DesktopApp {
         self.bridge.intent(ClientIntent::CreateSession {
             cwd: self.cwd.clone(),
         });
+        self.refresh_islands(cx);
         cx.notify();
     }
 
@@ -48,6 +41,7 @@ impl DesktopApp {
         cx: &mut Context<Self>,
     ) {
         self.bridge.intent(ClientIntent::CancelTurn);
+        self.refresh_islands(cx);
         cx.notify();
     }
 
@@ -57,9 +51,7 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.composer_input.update(cx, |state, cx| {
-            state.focus(window, cx);
-        });
+        self.focus_island(IslandId::Composer, window, cx);
     }
 
     pub(crate) fn action_jump_to_latest(
@@ -71,17 +63,29 @@ impl DesktopApp {
         if let Some(agent) = self.selected_agent_id() {
             self.follow_bottom.insert(agent, true);
             self.pending_scroll_bottom = true;
-            self.timeline_scroll.scroll_to_bottom();
+            self.timeline.update(cx, |island, cx| {
+                island.scroll_to_bottom();
+                island.set_follow(true, cx);
+            });
             cx.notify();
         }
     }
 
     pub(crate) fn handle_open_session(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.persist_composer_draft(cx);
+        self.follow_bottom.clear();
+        self.timeline_offsets.clear();
+        self.last_selected_agent = None;
+        self.last_timeline_fp = TimelineContentFp::default();
+        self.pending_scroll_bottom = false;
+        self.timeline.update(cx, |island, _cx| {
+            island.set_offset(point(px(0.), px(0.)));
+        });
         self.bridge.intent(ClientIntent::OpenSession {
             session_id,
             session_path: None,
         });
+        self.refresh_islands(cx);
         cx.notify();
     }
 
@@ -93,31 +97,43 @@ impl DesktopApp {
     ) {
         self.persist_composer_draft(cx);
         if let Some(current) = self.selected_agent_id() {
-            self.timeline_offsets
-                .insert(current, self.timeline_scroll.offset());
+            let offset = self.timeline.read(cx).offset();
+            self.timeline_offsets.insert(current, offset);
         }
         self.bridge.intent(ClientIntent::SelectAgent {
             agent_instance_id: agent_instance_id.clone(),
         });
         self.load_draft_into_composer(window, cx);
+        self.refresh_islands(cx);
         cx.notify();
     }
 
-    pub(crate) fn sync_selected_agent_scroll(&mut self) {
+    pub(crate) fn sync_selected_agent_scroll(&mut self, cx: &mut Context<Self>) {
         let selected = self.selected_agent_id();
         if selected == self.last_selected_agent {
             return;
         }
         if let Some(previous) = self.last_selected_agent.take() {
-            self.timeline_offsets
-                .entry(previous)
-                .or_insert_with(|| self.timeline_scroll.offset());
+            let offset = self.timeline.read(cx).offset();
+            self.timeline_offsets.entry(previous).or_insert(offset);
         }
         if let Some(agent) = selected.clone() {
-            if self.follow_bottom.get(&agent).copied().unwrap_or(true) {
-                self.pending_scroll_bottom = true;
-            } else if let Some(offset) = self.timeline_offsets.get(&agent).copied() {
-                self.timeline_scroll.set_offset(offset);
+            match self.follow_bottom.get(&agent).copied() {
+                Some(true) => self.pending_scroll_bottom = true,
+                Some(false) => {
+                    if let Some(offset) = self.timeline_offsets.get(&agent).copied() {
+                        self.timeline.update(cx, |island, _cx| {
+                            island.set_offset(offset);
+                        });
+                    }
+                }
+                None => {
+                    self.follow_bottom.insert(agent, false);
+                    self.pending_scroll_bottom = false;
+                    self.timeline.update(cx, |island, _cx| {
+                        island.set_offset(point(px(0.), px(0.)));
+                    });
+                }
             }
         }
         self.last_selected_agent = selected;
@@ -131,6 +147,7 @@ impl DesktopApp {
             model.model_id.as_deref(),
         ) {
             self.bridge.intent(intent);
+            self.refresh_islands(cx);
             cx.notify();
         }
     }
@@ -138,6 +155,7 @@ impl DesktopApp {
     pub(crate) fn cycle_thinking(&mut self, cx: &mut Context<Self>) {
         let current = self.bridge.state().model.thinking_level.clone();
         self.bridge.intent(next_thinking_intent(current.as_deref()));
+        self.refresh_islands(cx);
         cx.notify();
     }
 
@@ -170,6 +188,7 @@ impl DesktopApp {
             {
                 self.pending_first_submit.track(command_id, text);
             }
+            self.refresh_islands(cx);
             cx.notify();
             return;
         }
@@ -188,10 +207,7 @@ impl DesktopApp {
         } else {
             self.no_session_draft.clear();
         }
-        if let Some(agent) = self.selected_agent_id() {
-            self.follow_bottom.insert(agent, true);
-            self.pending_scroll_bottom = true;
-        }
+        self.refresh_islands(cx);
         cx.notify();
     }
 
@@ -215,6 +231,10 @@ impl DesktopApp {
         {
             self.submit_recovery.track(command_id, recovery_text);
         }
+        if let Some(agent) = self.selected_agent_id() {
+            self.follow_bottom.insert(agent, true);
+            self.pending_scroll_bottom = true;
+        }
     }
 
     pub(crate) fn on_bridge_polled(&mut self, _before_err: Option<String>) {
@@ -226,8 +246,8 @@ impl DesktopApp {
         }
     }
 
-    pub(crate) fn sync_timeline_follow(&mut self) {
-        let timeline = derive_timeline(self.bridge.state());
+    pub(crate) fn sync_timeline_follow(&mut self, cx: &mut Context<Self>) {
+        let timeline = crate::islands::derive_timeline(self.bridge_state());
         let fp = TimelineContentFp {
             agent_id: self.selected_agent_id(),
             row_count: timeline.rows.len(),
@@ -238,18 +258,27 @@ impl DesktopApp {
 
         let follow = self.follow_for_selected();
         if should_scroll_on_growth(follow, content_grew, self.pending_scroll_bottom) {
-            self.timeline_scroll.scroll_to_bottom();
+            self.timeline.update(cx, |island, cx| {
+                island.scroll_to_bottom();
+                island.set_follow(true, cx);
+            });
             self.pending_scroll_bottom = false;
             return;
         }
 
-        let near = is_near_bottom(&self.timeline_scroll);
-        if let Some(agent) = self.selected_agent_id() {
-            if follow && !near {
-                self.follow_bottom.insert(agent, false);
-            } else if !follow && near {
-                self.follow_bottom.insert(agent, true);
-            }
+        if content_grew {
+            return;
+        }
+
+        let near = is_near_bottom(self.timeline.read(cx).scroll_handle());
+        if let Some(agent) = self.selected_agent_id()
+            && follow
+            && !near
+        {
+            self.follow_bottom.insert(agent, false);
+            self.timeline.update(cx, |island, cx| {
+                island.set_follow(false, cx);
+            });
         }
     }
 

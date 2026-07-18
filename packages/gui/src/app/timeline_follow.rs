@@ -21,7 +21,7 @@ pub fn is_near_bottom(handle: &ScrollHandle) -> bool {
 /// Whether content growth should force a scroll-to-bottom.
 ///
 /// Detached readers (`follow == false`) are never moved by streaming/growth.
-/// Explicit jump/submit uses `pending_bottom`.
+/// Only explicit jump/submit reattaches and uses `pending_bottom`.
 pub fn should_scroll_on_growth(follow: bool, content_grew: bool, pending_bottom: bool) -> bool {
     pending_bottom || (follow && content_grew)
 }

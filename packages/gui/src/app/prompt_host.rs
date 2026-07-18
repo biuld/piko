@@ -7,55 +7,15 @@ use gpui_component::WindowExt;
 use piko_client_core::{ClientIntent, find_approval, find_interaction};
 use piko_protocol::{ApprovalDecision, UserInteractionResponse};
 
+use crate::islands::ActivityItem;
 use crate::overlays::{
     PromptFront, PromptKind, derive_prompt_front, open_approval_dialog, open_interaction_dialog,
     prompt_fingerprint,
 };
-use crate::workbench::{ActivityItem, derive_activity};
 
 use super::desktop_app::DesktopApp;
 
 impl DesktopApp {
-    pub(crate) fn expanded_tools(&self) -> &std::collections::HashSet<String> {
-        &self.expanded_tools
-    }
-
-    pub(crate) fn activity_expanded(&self) -> bool {
-        self.activity_expanded
-    }
-
-    pub(crate) fn toggle_activity_expanded(&mut self) {
-        self.activity_expanded = !self.activity_expanded;
-        self.activity_user_toggled = true;
-    }
-
-    pub(crate) fn toggle_tool_detail(&mut self, row_id: String) {
-        if !self.expanded_tools.remove(&row_id) {
-            self.expanded_tools.insert(row_id);
-        }
-    }
-
-    pub(crate) fn sync_activity_expand(&mut self) {
-        let vm = derive_activity(self.bridge_state());
-        let fp: String = vm
-            .items
-            .iter()
-            .filter(|i| i.actionable)
-            .map(|i| i.id.as_str())
-            .collect::<Vec<_>>()
-            .join("|");
-        if fp != self.activity_actionable_fp {
-            self.activity_actionable_fp = fp;
-            self.activity_user_toggled = false;
-            if vm.prefer_expanded {
-                self.activity_expanded = true;
-            }
-        }
-        if !vm.prefer_expanded && !self.activity_user_toggled {
-            self.activity_expanded = false;
-        }
-    }
-
     pub(crate) fn handle_activity_item(
         &mut self,
         item: ActivityItem,
@@ -68,6 +28,7 @@ impl DesktopApp {
         if item.prompt_id.is_some() {
             self.sync_prompts(window, cx);
         }
+        self.refresh_islands(cx);
         cx.notify();
     }
 

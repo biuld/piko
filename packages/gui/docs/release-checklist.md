@@ -24,7 +24,7 @@ cargo test -p piko-gui hostd_shutdown_reaps -- --nocapture
 
 - [x] Open/create → reconcile → Live against real hostd
 - [ ] ListModels completes; submit → cancel when models/auth allow
-- [ ] Center Workbench usable with both sidebars closed (Sessions + Inspector)
+- [ ] Center Workbench usable with both sidebars closed (Sessions + Agents/Tree)
 - [x] GUI does not spawn orchd; Session durability remains on hostd
 - [x] `packages/tui` unchanged by this GUI wave; `cargo test -p piko-tui` passes
 - [x] Dependency pins still exact (`gpui = "=0.2.2"`, `gpui-component = "=0.5.1"`)

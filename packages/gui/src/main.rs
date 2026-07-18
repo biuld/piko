@@ -1,19 +1,17 @@
 //! piko GPUI desktop client entrypoint.
 //!
-//! Launches the real DesktopApp shell with hostd transport. The Phase 1 spike
-//! module is retained for manual demos but is not the default path.
+//! Launches DesktopApp with hostd transport.
 
 mod app;
 mod bridge;
+mod chrome;
 mod cli;
 mod config;
-mod inspector;
+mod islands;
 mod overlays;
-mod shell;
-mod spike;
+mod projections;
 mod theme;
 mod transport;
-mod workbench;
 
 use std::env;
 
@@ -21,8 +19,8 @@ use gpui::*;
 use gpui_component::Root;
 
 use crate::app::desktop_app::{
-    CancelTurn, DesktopApp, FocusComposer, JumpToLatest, NewSession, ToggleInspector,
-    ToggleSessions,
+    CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
+    NewSession, ToggleAgentsTree, ToggleSessions,
 };
 use crate::bridge::spawn_bridge;
 use crate::theme::apply_piko_dark_theme;
@@ -44,7 +42,9 @@ fn main() {
             KeyBinding::new("cmd-l", FocusComposer, Some("DesktopApp")),
             KeyBinding::new("cmd-j", JumpToLatest, Some("DesktopApp")),
             KeyBinding::new("cmd-b", ToggleSessions, Some("DesktopApp")),
-            KeyBinding::new("cmd-i", ToggleInspector, Some("DesktopApp")),
+            KeyBinding::new("cmd-i", ToggleAgentsTree, Some("DesktopApp")),
+            KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),
+            KeyBinding::new("shift-tab", FocusPrevIsland, Some("DesktopApp")),
         ]);
 
         let cwd_clone = cwd.clone();

@@ -12,8 +12,9 @@ cargo build -p piko-gui
 cargo run -p piko-gui
 ```
 
-The window title includes the current working directory’s leaf name. The left
-Session sidebar lists Sessions for that cwd by default.
+The window title includes the process working directory’s leaf name. The left
+Sessions island lists all Sessions globally, grouped by working directory and
+sorted alphabetically.
 
 ## hostd discovery
 
@@ -35,8 +36,9 @@ Useful environment variables:
 | Binding | Action |
 |---|---|
 | `cmd-n` | New Session |
-| `cmd-b` / `cmd-i` | Toggle Sessions / Inspector (Sheet on narrow) |
+| `cmd-b` / `cmd-i` | Toggle Sessions / Agents+Tree (Sheet on narrow) |
 | `cmd-l` | Focus Composer |
+| `tab` / `shift-tab` | Cycle focus among visible islands |
 | `cmd-j` | Jump to latest Timeline |
 | `cmd-.` | Cancel Turn |
 

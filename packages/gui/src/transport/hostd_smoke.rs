@@ -70,8 +70,8 @@ fn hostd_smoke_discover_create_reconcile_list_models() {
     .expect("spawn hostd");
 
     bridge.intent(ClientIntent::DiscoverSessions {
-        scope: SessionListScope::CurrentFolder,
-        cwd: Some(cwd.clone()),
+        scope: SessionListScope::All,
+        cwd: None,
     });
     assert!(
         poll_until(&mut bridge, Duration::from_secs(5), |b| {

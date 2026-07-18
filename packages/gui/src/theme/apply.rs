@@ -12,6 +12,8 @@ pub fn apply_piko_dark_theme(cx: &mut App) {
     let theme = Theme::global_mut(cx);
     overlay_piko_colors(&mut theme.colors, t);
     theme.mode = ThemeMode::Dark;
+    // Overflow-gated thumbs; follow OS auto-hide vs hover preference.
+    Theme::sync_scrollbar_appearance(cx);
 }
 
 fn overlay_piko_colors(c: &mut ThemeColor, t: PikoTokens) {

@@ -1,71 +1,82 @@
-//! Root DesktopApp view: owns ClientBridge, polling, and top-level layout.
+//! Root DesktopApp view: owns ClientBridge, island Entities, and chrome.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
 
 use crate::bridge::ClientBridge;
-use crate::shell::derive_status_bar;
+use crate::chrome::{
+    FocusCycleDir, IslandFocusRing, IslandId, render_status_bar, render_title_bar,
+};
+use crate::islands::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
+use crate::projections::derive_status_bar;
+use crate::theme::metrics;
+use crate::theme::tokens;
+use gpui_component::Root;
 use piko_client_core::{ClientIntent, ClientState};
 use piko_protocol::SessionListScope;
 
 use super::layout_state::LayoutState;
-use super::status_bar::render_status_bar;
 use super::submit_recovery::{FirstSubmitRecovery, SubmitRecovery};
 use super::timeline_follow::TimelineContentFp;
-use super::title_bar::render_title_bar;
 use super::ux_prefs::GuiUxPrefs;
-use crate::theme::metrics;
-use crate::theme::tokens;
-use gpui_component::Root;
 
 actions!(
     piko,
     [
         FocusComposer,
+        FocusNextIsland,
+        FocusPrevIsland,
         NewSession,
         CancelTurn,
         JumpToLatest,
         ToggleSessions,
-        ToggleInspector
+        ToggleAgentsTree
     ]
 );
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct DesktopApp {
-    pub(super) bridge: ClientBridge,
-    pub(super) cwd: String,
+    pub(crate) bridge: ClientBridge,
+    pub(crate) cwd: String,
     focus_handle: FocusHandle,
-    pub(super) composer_input: Entity<InputState>,
-    pub(super) drafts: HashMap<String, String>,
-    pub(super) no_session_draft: String,
-    pub(super) follow_bottom: HashMap<String, bool>,
-    pub(super) timeline_offsets: HashMap<String, Point<Pixels>>,
-    pub(super) last_selected_agent: Option<String>,
-    pub(super) timeline_scroll: ScrollHandle,
-    pub(super) last_timeline_fp: TimelineContentFp,
-    pub(super) pending_scroll_bottom: bool,
-    pub(super) submit_recovery: SubmitRecovery,
-    pub(super) pending_first_submit: FirstSubmitRecovery,
-    pub(super) clear_composer_on_render: bool,
-    pub(super) expanded_tools: HashSet<String>,
-    pub(super) activity_expanded: bool,
-    pub(super) activity_user_toggled: bool,
-    pub(super) activity_actionable_fp: String,
-    pub(super) open_prompt_fp: Option<String>,
-    pub(super) open_prompt_flight: Option<bool>,
-    pub(super) layout: LayoutState,
-    pub(super) map_preview_entry_id: Option<String>,
-    pub(super) map_expanded_by_agent: super::workbench_chrome::MapExpandedByAgent,
-    pub(super) pending_timeline_scroll_id: Option<String>,
-    pub(super) ux_prefs: GuiUxPrefs,
-    pub(super) last_notified_error: Option<String>,
-    pub(super) last_connection_connected: bool,
-    pub(super) last_live_session_for_draft: Option<String>,
+    pub(crate) sessions: Entity<SessionsIsland>,
+    pub(crate) timeline: Entity<TimelineIsland>,
+    pub(crate) composer: Entity<ComposerIsland>,
+    pub(crate) agents: Entity<AgentsIsland>,
+    pub(crate) tree: Entity<TreeIsland>,
+    pub(crate) composer_input: Entity<InputState>,
+    pub(crate) drafts: HashMap<String, String>,
+    pub(crate) no_session_draft: String,
+    pub(crate) follow_bottom: HashMap<String, bool>,
+    pub(crate) timeline_offsets: HashMap<String, Point<Pixels>>,
+    pub(crate) last_selected_agent: Option<String>,
+    pub(crate) last_timeline_fp: TimelineContentFp,
+    pub(crate) pending_scroll_bottom: bool,
+    pub(crate) submit_recovery: SubmitRecovery,
+    pub(crate) pending_first_submit: FirstSubmitRecovery,
+    pub(crate) clear_composer_on_render: bool,
+    pub(crate) open_prompt_fp: Option<String>,
+    pub(crate) open_prompt_flight: Option<bool>,
+    pub(crate) layout: LayoutState,
+    pub(crate) tree_preview_entry_id: Option<String>,
+    pub(crate) tree_expanded_by_agent: super::island_actions::TreeExpandedByAgent,
+    pub(crate) pending_timeline_scroll_id: Option<String>,
+    pub(crate) ux_prefs: GuiUxPrefs,
+    pub(crate) last_notified_error: Option<String>,
+    pub(crate) last_connection_connected: bool,
+    pub(crate) last_live_session_for_draft: Option<String>,
     gui_config_fingerprint: Option<String>,
+    pub(crate) island_focus: IslandFocusRing,
+    pub(crate) fp_sessions: Option<String>,
+    pub(crate) fp_timeline: Option<String>,
+    pub(crate) fp_composer: Option<String>,
+    pub(crate) fp_agents: Option<String>,
+    pub(crate) fp_tree: Option<String>,
+    pub(crate) last_chrome_fp: Option<String>,
 }
 
 impl DesktopApp {
@@ -77,7 +88,7 @@ impl DesktopApp {
     ) -> Self {
         let composer_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .auto_grow(1, 8)
+                .auto_grow(3, 12)
                 .placeholder("Message… (Enter to send, Shift+Enter for newline)")
         });
 
@@ -94,6 +105,13 @@ impl DesktopApp {
         )
         .detach();
 
+        let host = cx.entity().downgrade();
+        let sessions = cx.new(|cx| SessionsIsland::new(host.clone(), cx));
+        let timeline = cx.new(|cx| TimelineIsland::new(host.clone(), cx));
+        let composer = cx.new(|cx| ComposerIsland::new(host.clone(), composer_input.clone(), cx));
+        let agents = cx.new(|cx| AgentsIsland::new(host.clone(), cx));
+        let tree = cx.new(|cx| TreeIsland::new(host, cx));
+
         let entity = cx.entity().downgrade();
         cx.spawn_in(window, async move |_window, cx| {
             loop {
@@ -105,12 +123,16 @@ impl DesktopApp {
                             if this.bridge.poll() {
                                 this.sync_gui_config();
                                 this.on_bridge_polled(before_err);
-                                this.sync_timeline_follow();
-                                this.sync_activity_expand();
+                                this.sync_timeline_follow(cx);
                                 if this.bridge.state().is_live() {
                                     this.prune_map_state_after_reconcile();
                                 }
-                                cx.notify();
+                                this.refresh_islands(cx);
+                                let chrome_fp = this.chrome_fingerprint();
+                                if this.last_chrome_fp.as_ref() != Some(&chrome_fp) {
+                                    this.last_chrome_fp = Some(chrome_fp);
+                                    cx.notify();
+                                }
                             }
                         });
                     }
@@ -125,40 +147,59 @@ impl DesktopApp {
             bridge,
             cwd,
             focus_handle: cx.focus_handle(),
+            sessions,
+            timeline,
+            composer,
+            agents,
+            tree,
             composer_input,
             drafts: HashMap::new(),
             no_session_draft: String::new(),
             follow_bottom: HashMap::new(),
             timeline_offsets: HashMap::new(),
             last_selected_agent: None,
-            timeline_scroll: ScrollHandle::new(),
             last_timeline_fp: TimelineContentFp::default(),
             pending_scroll_bottom: false,
             submit_recovery: SubmitRecovery::default(),
             pending_first_submit: FirstSubmitRecovery::default(),
             clear_composer_on_render: false,
-            expanded_tools: HashSet::new(),
-            activity_expanded: false,
-            activity_user_toggled: false,
-            activity_actionable_fp: String::new(),
             open_prompt_fp: None,
             open_prompt_flight: None,
             layout: LayoutState::default(),
-            map_preview_entry_id: None,
-            map_expanded_by_agent: std::collections::HashMap::new(),
+            tree_preview_entry_id: None,
+            tree_expanded_by_agent: HashMap::new(),
             pending_timeline_scroll_id: None,
             ux_prefs: GuiUxPrefs::default(),
             last_notified_error: None,
             last_connection_connected: true,
             last_live_session_for_draft: None,
             gui_config_fingerprint: None,
+            island_focus: IslandFocusRing::default(),
+            fp_sessions: None,
+            fp_timeline: None,
+            fp_composer: None,
+            fp_agents: None,
+            fp_tree: None,
+            last_chrome_fp: None,
         }
+    }
+
+    fn chrome_fingerprint(&self) -> String {
+        format!(
+            "{:?}|{:?}|{}|{}|{}|{:?}",
+            self.bridge.state().shell.connection,
+            self.bridge.state().last_error,
+            self.layout.sessions_open,
+            self.layout.agents_open,
+            self.layout.tree_open,
+            self.island_focus.focused(),
+        )
     }
 
     pub fn bootstrap(&mut self) {
         self.bridge.intent(ClientIntent::DiscoverSessions {
-            scope: SessionListScope::CurrentFolder,
-            cwd: Some(self.cwd.clone()),
+            scope: SessionListScope::All,
+            cwd: None,
         });
         self.bridge.intent(ClientIntent::ListModels);
         self.bridge.request_gui_config();
@@ -183,9 +224,10 @@ impl DesktopApp {
         match serde_json::from_value::<crate::config::GuiSettings>(value) {
             Ok(settings) => {
                 self.layout.session_width = settings.session_width;
-                self.layout.inspector_width = settings.inspector_width;
-                self.layout.prefer_session_open = settings.session_open;
-                self.layout.prefer_inspector_open = settings.inspector_open;
+                self.layout.agents_tree_width = settings.agents_tree_width;
+                self.layout.sessions_open = settings.session_open;
+                self.layout.agents_open = settings.agents_tree_open;
+                self.layout.tree_open = settings.agents_tree_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
                 self.gui_config_fingerprint = Some(fingerprint);
             }
@@ -198,9 +240,9 @@ impl DesktopApp {
     pub(crate) fn persist_gui_config(&mut self) {
         let settings = crate::config::GuiSettings {
             session_width: self.layout.session_width,
-            inspector_width: self.layout.inspector_width,
-            session_open: self.layout.prefer_session_open,
-            inspector_open: self.layout.prefer_inspector_open,
+            agents_tree_width: self.layout.agents_tree_width,
+            session_open: self.layout.sessions_open,
+            agents_tree_open: self.layout.agents_tree_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
         };
         if let Ok(value) = serde_json::to_value(settings) {
@@ -214,10 +256,10 @@ impl Render for DesktopApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.apply_pending_composer_restore(window, cx);
         self.sync_layout_breakpoint(window);
-        self.sync_selected_agent_scroll();
-        self.sync_timeline_follow();
-        self.apply_pending_timeline_scroll();
-        self.sync_activity_expand();
+        self.sync_selected_agent_scroll(cx);
+        self.sync_timeline_follow(cx);
+        self.apply_pending_timeline_scroll(cx);
+        self.refresh_islands(cx);
         self.sync_prompts(window, cx);
         self.maybe_close_session_sheet_on_live(window, cx);
         self.sync_notifications(window, cx);
@@ -228,8 +270,10 @@ impl Render for DesktopApp {
         let on_focus = cx.listener(Self::action_focus_composer);
         let on_jump = cx.listener(Self::action_jump_to_latest);
         let on_sessions = cx.listener(Self::action_toggle_sessions);
-        let on_inspector = cx.listener(Self::action_toggle_inspector);
-        let show_session = self.layout.show_session_pane();
+        let on_agents_tree = cx.listener(Self::action_toggle_agents_tree);
+        let on_focus_next = cx.listener(Self::action_focus_next_island);
+        let on_focus_prev = cx.listener(Self::action_focus_prev_island);
+        let show_session = self.layout.is_docked_visible(IslandId::Sessions, true);
         let status_vm = derive_status_bar(self.bridge.state(), show_session);
         let t = tokens();
         let m = metrics();
@@ -247,7 +291,9 @@ impl Render for DesktopApp {
             .on_action(on_focus)
             .on_action(on_jump)
             .on_action(on_sessions)
-            .on_action(on_inspector)
+            .on_action(on_agents_tree)
+            .on_action(on_focus_next)
+            .on_action(on_focus_prev)
             .key_context("DesktopApp")
             .size_full()
             .flex()
@@ -279,5 +325,33 @@ impl Focusable for DesktopApp {
 impl Drop for DesktopApp {
     fn drop(&mut self) {
         self.bridge.shutdown();
+    }
+}
+
+impl DesktopApp {
+    pub(crate) fn action_focus_next_island(
+        &mut self,
+        _: &FocusNextIsland,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let visible = self.visible_focus_islands();
+        self.island_focus.cycle(FocusCycleDir::Next, &visible);
+        let id = self.island_focus.focused();
+        self.focus_island(id, window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn action_focus_prev_island(
+        &mut self,
+        _: &FocusPrevIsland,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let visible = self.visible_focus_islands();
+        self.island_focus.cycle(FocusCycleDir::Prev, &visible);
+        let id = self.island_focus.focused();
+        self.focus_island(id, window, cx);
+        cx.notify();
     }
 }
