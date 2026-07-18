@@ -89,7 +89,7 @@ impl DesktopApp {
         let composer_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .auto_grow(3, 12)
-                .placeholder("Message… (Enter to send, Shift+Enter for newline)")
+                .placeholder(crate::t!("composer.placeholder"))
         });
 
         cx.subscribe_in(
@@ -202,6 +202,7 @@ impl DesktopApp {
             cwd: None,
         });
         self.bridge.intent(ClientIntent::ListModels);
+        self.bridge.intent(ClientIntent::SyncModelConfig);
         self.bridge.request_gui_config();
     }
 

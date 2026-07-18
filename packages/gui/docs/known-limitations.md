@@ -22,6 +22,10 @@
   is deferred.
 - **Accessibility.** Visible badges exist; platform VoiceOver announcements are
   not bridged yet.
+- **Chrome presentation.** Vendored Lucide icons, typography roles, and an
+  English chrome catalog are landed. Additional locales (for example `zh-CN`)
+  and `[gui].locale` remain deferred. See
+  [GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md).
 - **Settings / Palette / Dock.** Deferred after M4.
 - **Approvals on live models.** Deterministic Core/GUI tests cover prompts;
   real-hostd smoke exercises submit/cancel when a model catalog is present, and

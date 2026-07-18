@@ -71,7 +71,9 @@ impl DesktopApp {
         self.apply_island_focus_chrome(cx);
         let sessions = self.sessions.clone();
         window.open_sheet_at(Placement::Left, cx, move |sheet, _window, _cx| {
-            sheet.title("Sessions").child(sessions.clone())
+            sheet
+                .title(crate::t!("sheet.sessions.title"))
+                .child(sessions.clone())
         });
         self.focus_island(IslandId::Sessions, window, cx);
     }
@@ -247,7 +249,7 @@ pub(crate) fn render_pane_toggles(
                 let entity = entity.clone();
                 d.child(
                     Button::new("open-sessions")
-                        .label("Sessions")
+                        .label(crate::t!("sheet.open.sessions"))
                         .on_click(move |_, window, cx| {
                             if let Some(view) = entity.upgrade() {
                                 view.update(cx, |this, cx| {
@@ -264,7 +266,7 @@ pub(crate) fn render_pane_toggles(
                 let entity = entity.clone();
                 d.child(
                     Button::new("open-right-column")
-                        .label("Agents")
+                        .label(crate::t!("sheet.open.agents"))
                         .on_click(move |_, window, cx| {
                             if let Some(view) = entity.upgrade() {
                                 view.update(cx, |this, cx| {

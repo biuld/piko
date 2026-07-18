@@ -72,7 +72,7 @@ pub fn render_tree_row(
 ) -> impl IntoElement {
     let m = metrics();
     let t = tokens();
-    let chevron = if spec.expanded { "▾" } else { "▸" };
+    let mute = crate::theme::PikoTokens::hsla(t.muted_fg);
     let toggle_id = SharedString::from(format!("tree-row-exp-{ix}"));
     let row_id = SharedString::from(format!("tree-row-{}-{ix}", spec.id));
     let fill = spec.selected || spec.emphasized;
@@ -98,48 +98,33 @@ pub fn render_tree_row(
         .hover(|style| style.bg(t.elevated_rgba()))
         .when(fill, |d| d.bg(t.elevated_rgba()))
         .children(tree_guides(spec.depth, spec.show_guides))
-        .child(
-            div()
-                .w(px(16.))
-                .h_full()
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(if spec.has_children {
-                    let toggle = on_toggle.unwrap_or_else(|| {
-                        // Disclosure without a handler still reserves the column.
-                        Box::new(|_: &ClickEvent, _: &mut Window, _: &mut App| {})
-                    });
-                    div()
-                        .id(toggle_id)
-                        .text_size(m.meta_size)
-                        .text_color(t.muted_fg_rgba())
-                        .cursor_pointer()
-                        .on_click(move |ev, w, cx| {
-                            cx.stop_propagation();
-                            toggle(ev, w, cx);
-                        })
-                        .child(chevron)
-                        .into_any_element()
-                } else {
-                    div()
-                        .text_size(m.meta_size)
-                        .text_color(t.muted_fg_rgba())
-                        .child("•")
-                        .into_any_element()
-                }),
-        )
+        .when(spec.has_children, |d| {
+            let toggle = on_toggle
+                .unwrap_or_else(|| Box::new(|_: &ClickEvent, _: &mut Window, _: &mut App| {}));
+            d.child(
+                div()
+                    .id(toggle_id)
+                    .w(px(16.))
+                    .h_full()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .on_click(move |ev, w, cx| {
+                        cx.stop_propagation();
+                        toggle(ev, w, cx);
+                    })
+                    .child(crate::theme::disclosure(spec.expanded, mute)),
+            )
+        })
         .children(spec.leading)
         .child(
-            div()
+            crate::theme::label_text(semibold)
                 .min_w_0()
                 .flex_1()
                 .truncate()
-                .text_size(m.label_size)
-                .line_height(m.label_line_height)
                 .text_color(label_color)
-                .when(semibold, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .child(spec.label),
         )
         .children(spec.trailing)

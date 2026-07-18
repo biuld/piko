@@ -7,7 +7,9 @@ use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 
-use crate::theme::{RoleAccent, metrics, tokens};
+use crate::theme::{
+    IconSize, PikoIcon, PikoTokens, RoleAccent, icon, metrics, row_leading, tokens,
+};
 
 use super::activity_vm::{ActivityItem, ActivityItemKind, ActivityViewModel};
 use super::vm::ComposerViewModel;
@@ -25,6 +27,13 @@ pub fn render_activity_center(
 ) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
+    let header_color = if vm.has_actionable {
+        t.role_accent_hsla(RoleAccent::Warning)
+    } else if vm.show_stop {
+        t.role_accent_hsla(RoleAccent::Info)
+    } else {
+        PikoTokens::hsla(t.muted_fg)
+    };
     div()
         .id("activity-center")
         .w_full()
@@ -39,40 +48,20 @@ pub fn render_activity_center(
                 .flex()
                 .items_center()
                 .gap(m.space_sm)
+                .px(m.space_sm)
                 .rounded_md()
                 .hover(|style| style.bg(t.elevated_rgba()))
                 .cursor_pointer()
                 .on_click(on_toggle)
-                .child(div().w(px(6.)).h(px(6.)).flex_shrink_0().rounded_full().bg(
-                    if vm.has_actionable {
-                        t.role_accent(RoleAccent::Warning)
-                    } else if vm.show_stop {
-                        t.role_accent(RoleAccent::Info)
-                    } else {
-                        t.muted_fg_rgba()
-                    },
-                ))
+                .child(row_leading(PikoIcon::Activity, header_color))
                 .child(
-                    div()
-                        .w(px(12.))
-                        .text_center()
-                        .text_size(m.meta_size)
-                        .line_height(m.meta_line_height)
-                        .text_color(if vm.has_actionable {
-                            t.role_accent(RoleAccent::Warning)
-                        } else {
-                            t.muted_fg_rgba()
-                        })
-                        .child(if expanded { "▾" } else { "▸" }),
-                )
-                .child(
-                    div()
+                    crate::theme::text(crate::theme::TextRole::Meta)
                         .min_w_0()
                         .truncate()
-                        .text_size(m.meta_size)
-                        .line_height(m.meta_line_height)
                         .text_color(if vm.has_actionable {
                             t.role_accent(RoleAccent::Warning)
+                        } else if vm.show_stop {
+                            t.role_accent(RoleAccent::Info)
                         } else {
                             t.muted_fg_rgba()
                         })
@@ -103,18 +92,14 @@ pub fn render_activity_center(
 fn render_activity_item(item: &ActivityItem, on_click: ClickHandler) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
-    let accent = match item.kind {
-        ActivityItemKind::Warning | ActivityItemKind::ToolFailed => {
-            t.role_accent(RoleAccent::Danger)
-        }
-        ActivityItemKind::Approval | ActivityItemKind::Interaction => {
-            t.role_accent(RoleAccent::Warning)
-        }
-        ActivityItemKind::TurnRunning | ActivityItemKind::ToolRunning => {
-            t.role_accent(RoleAccent::Info)
-        }
-        ActivityItemKind::UnreadReport => t.role_accent(RoleAccent::Accent),
-        ActivityItemKind::TurnQueued => t.muted_fg_rgba(),
+    let (icon_name, accent_role) = activity_item_icon(item.kind);
+    let accent = match accent_role {
+        Some(role) => t.role_accent(role),
+        None => t.muted_fg_rgba(),
+    };
+    let accent_hsla = match accent_role {
+        Some(role) => t.role_accent_hsla(role),
+        None => PikoTokens::hsla(t.muted_fg),
     };
     div()
         .id(SharedString::from(item.id.clone()))
@@ -127,21 +112,27 @@ fn render_activity_item(item: &ActivityItem, on_click: ClickHandler) -> impl Int
         .hover(|s| s.bg(t.surface_rgba()))
         .cursor_pointer()
         .on_click(move |ev, window, cx| on_click(ev, window, cx))
+        .child(row_leading(icon_name, accent_hsla))
         .child(
-            div()
-                .w(px(5.))
-                .h(px(5.))
-                .flex_shrink_0()
-                .rounded_full()
-                .bg(accent),
-        )
-        .child(
-            div()
-                .text_size(m.meta_size)
-                .line_height(m.meta_line_height)
+            crate::theme::text(crate::theme::TextRole::Meta)
                 .text_color(accent)
                 .child(item.label.clone()),
         )
+}
+
+fn activity_item_icon(kind: ActivityItemKind) -> (PikoIcon, Option<RoleAccent>) {
+    match kind {
+        ActivityItemKind::Approval | ActivityItemKind::Interaction => {
+            (PikoIcon::Bell, Some(RoleAccent::Warning))
+        }
+        ActivityItemKind::TurnRunning => (PikoIcon::Activity, Some(RoleAccent::Info)),
+        ActivityItemKind::TurnQueued => (PikoIcon::CircleDashed, None),
+        ActivityItemKind::ToolRunning => (PikoIcon::Wrench, Some(RoleAccent::Info)),
+        ActivityItemKind::ToolFailed | ActivityItemKind::Warning => {
+            (PikoIcon::TriangleAlert, Some(RoleAccent::Danger))
+        }
+        ActivityItemKind::UnreadReport => (PikoIcon::Inbox, Some(RoleAccent::Accent)),
+    }
 }
 
 pub fn render_composer_panel(
@@ -154,6 +145,9 @@ pub fn render_composer_panel(
 ) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
+    let mute = PikoTokens::hsla(t.muted_fg);
+    let accent = t.role_accent_hsla(RoleAccent::Accent);
+    let danger = t.role_accent_hsla(RoleAccent::Danger);
     div()
         .id("composer-panel")
         .w_full()
@@ -167,16 +161,16 @@ pub fn render_composer_panel(
                 .flex()
                 .items_center()
                 .gap(m.space_sm)
+                .child(row_leading(PikoIcon::Bot, accent))
                 .child(
-                    div()
-                        .text_size(m.label_size)
-                        .line_height(m.label_line_height)
+                    crate::theme::text(crate::theme::TextRole::Label)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(t.role_accent(RoleAccent::Accent))
-                        .child(format!("@{}", vm.target_label)),
+                        .child(vm.target_label.clone()),
                 )
                 .child(
                     Button::new("cycle-model")
+                        .icon(icon(PikoIcon::Cpu, IconSize::Meta, mute))
                         .label(vm.model_label.clone())
                         .ghost()
                         .small()
@@ -187,7 +181,11 @@ pub fn render_composer_panel(
                 )
                 .child(
                     Button::new("cycle-thinking")
-                        .label(format!("think:{}", vm.thinking_label))
+                        .icon(icon(PikoIcon::Brain, IconSize::Meta, mute))
+                        .label(crate::t!(
+                            "composer.thinking.prefix",
+                            level = vm.thinking_label.as_str()
+                        ))
                         .ghost()
                         .small()
                         .compact()
@@ -199,7 +197,8 @@ pub fn render_composer_panel(
                 .when(vm.show_stop, |d| {
                     d.child(
                         Button::new("stop-turn")
-                            .label("Stop")
+                            .icon(icon(PikoIcon::CircleStop, IconSize::Meta, danger))
+                            .label(crate::t!("composer.action.stop"))
                             .ghost()
                             .small()
                             .compact()
@@ -209,10 +208,11 @@ pub fn render_composer_panel(
                 })
                 .child(
                     Button::new("send-turn")
+                        .icon(icon(PikoIcon::Send, IconSize::Meta, PikoTokens::hsla(t.fg)))
                         .primary()
                         .small()
                         .compact()
-                        .label("Send")
+                        .label(crate::t!("composer.action.send"))
                         .disabled(!vm.can_send)
                         .on_click(on_send),
                 ),

@@ -255,3 +255,63 @@ fn c3_config_changed_updates_model_state() {
     assert_eq!(state.model.thinking_level.as_deref(), Some("high"));
     assert!(state.pending_commands.is_empty());
 }
+
+#[test]
+fn c3_sync_model_config_emits_empty_config_update() {
+    let mut ids = SeqIds(0);
+    let (_state, effects) = intent(
+        ClientState::default(),
+        ClientIntent::SyncModelConfig,
+        &mut ids,
+    );
+
+    match first_command(&effects) {
+        Command::ConfigUpdate { patch, .. } => {
+            assert!(patch.as_object().is_some_and(|o| o.is_empty()));
+        }
+        _ => panic!("expected empty ConfigUpdate"),
+    }
+}
+
+#[test]
+fn c3_sync_model_event_fills_empty_model_state() {
+    let mut ids = SeqIds(0);
+    let (state, _) = host(
+        ClientState::default(),
+        ServerMessage::Model(piko_protocol::ModelEvent::ConfigChanged {
+            model_id: "gpt-4o".into(),
+            provider: "openai".into(),
+            thinking_level: None,
+            timestamp: 1,
+        }),
+        &mut ids,
+    );
+
+    assert_eq!(state.model.model_id.as_deref(), Some("gpt-4o"));
+    assert_eq!(state.model.provider.as_deref(), Some("openai"));
+    assert_eq!(state.model.thinking_level.as_deref(), Some("off"));
+}
+
+#[test]
+fn c3_sync_model_event_does_not_clobber_existing_model() {
+    let mut ids = SeqIds(0);
+    let mut state = ClientState::default();
+    state.model.model_id = Some("session-model".into());
+    state.model.provider = Some("anthropic".into());
+    state.model.thinking_level = Some("medium".into());
+
+    let (state, _) = host(
+        state,
+        ServerMessage::Model(piko_protocol::ModelEvent::ConfigChanged {
+            model_id: "gpt-4o".into(),
+            provider: "openai".into(),
+            thinking_level: Some(piko_protocol::ThinkingLevel::High),
+            timestamp: 1,
+        }),
+        &mut ids,
+    );
+
+    assert_eq!(state.model.model_id.as_deref(), Some("session-model"));
+    assert_eq!(state.model.provider.as_deref(), Some("anthropic"));
+    assert_eq!(state.model.thinking_level.as_deref(), Some("medium"));
+}

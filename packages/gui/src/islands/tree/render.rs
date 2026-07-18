@@ -6,7 +6,7 @@ use crate::chrome::{
     IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
     TreeRowSpec, render_tree_list,
 };
-use crate::theme::{RoleAccent, metrics, tokens};
+use crate::theme::{PikoIcon, PikoTokens, RoleAccent, row_leading, tokens};
 
 use super::vm::{ConversationTreeViewModel, TreeEntryKind, TreeNode};
 
@@ -19,27 +19,28 @@ pub fn render_tree_panel(
     on_tree_activate: IdClickFactory,
     on_tree_toggle_expand: IdClickFactory,
 ) -> IslandPanel {
-    let header = IslandHeader::title("Tree");
+    let header = IslandHeader::title(crate::t!("island.tree.title"));
     match phase {
         IslandSessionPhase::Idle => IslandPanel::empty(
             "conversation-tree",
-            IslandPlaceholder::new("No session")
-                .icon("▤")
-                .subtitle("Select a session to see the tree"),
+            IslandPlaceholder::new(crate::t!("island.tree.empty_no_session.title"))
+                .piko_icon(PikoIcon::Network)
+                .subtitle(crate::t!("island.tree.empty_no_session.subtitle")),
         )
         .header(header)
         .focused(focused),
         IslandSessionPhase::Loading => IslandPanel::loading(
             "conversation-tree",
-            IslandPlaceholder::new("Loading tree…").icon("◌"),
+            IslandPlaceholder::new(crate::t!("island.tree.loading"))
+                .piko_icon(PikoIcon::CircleDashed),
         )
         .header(header)
         .focused(focused),
         IslandSessionPhase::Ready if tree.nodes.is_empty() => IslandPanel::empty(
             "conversation-tree",
-            IslandPlaceholder::new("No conversation tree")
-                .icon("▤")
-                .subtitle("Tree entries appear as the agent works"),
+            IslandPlaceholder::new(crate::t!("island.tree.empty.title"))
+                .piko_icon(PikoIcon::Network)
+                .subtitle(crate::t!("island.tree.empty.subtitle")),
         )
         .header(header)
         .focused(focused),
@@ -57,7 +58,6 @@ fn render_tree_nodes(
     on_tree_activate: &IdClickFactory,
     on_tree_toggle_expand: &IdClickFactory,
 ) -> impl IntoElement {
-    let meta_size = metrics().meta_size;
     let rows: Vec<_> = tree
         .nodes
         .iter()
@@ -66,7 +66,7 @@ fn render_tree_nodes(
             let activate = on_tree_activate(node.id.clone());
             let toggle = on_tree_toggle_expand(node.id.clone());
             (
-                conversation_row_spec(node, previewed, meta_size),
+                conversation_row_spec(node, previewed),
                 activate,
                 Some(toggle),
             )
@@ -75,40 +75,28 @@ fn render_tree_nodes(
     render_tree_list(rows)
 }
 
-fn conversation_row_spec(node: &TreeNode, previewed: bool, meta_size: Pixels) -> TreeRowSpec {
-    let kind = match node.kind {
-        TreeEntryKind::Message => "M",
-        TreeEntryKind::Tool => "T",
-        TreeEntryKind::System => "S",
-        TreeEntryKind::Other => "·",
-    };
-    let accent = if node.is_leaf {
-        tokens().role_accent(RoleAccent::Accent)
-    } else if previewed {
-        tokens().role_accent(RoleAccent::Warning)
-    } else if node.on_path {
-        tokens().fg_rgba()
-    } else {
-        tokens().muted_fg_rgba()
-    };
+fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
+    let t = tokens();
+    let kind_icon = tree_kind_icon(node.kind);
+    let kind_color = tree_kind_color(node.kind);
 
-    let leading = div()
-        .w(px(16.))
-        .flex_shrink_0()
-        .text_center()
-        .text_size(meta_size)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(accent)
-        .child(kind)
-        .into_any_element();
+    // Path / leaf / preview still drive label emphasis; kind owns the icon tint.
+    let label_color = if node.is_leaf {
+        t.role_accent(RoleAccent::Accent)
+    } else if previewed {
+        t.role_accent(RoleAccent::Warning)
+    } else if node.on_path {
+        t.fg_rgba()
+    } else {
+        t.muted_fg_rgba()
+    };
 
     let trailing = if node.on_path {
         Some(
-            div()
+            crate::theme::text(crate::theme::TextRole::Meta)
                 .flex_shrink_0()
-                .text_size(meta_size)
-                .text_color(tokens().muted_fg_rgba())
-                .child("path")
+                .text_color(t.muted_fg_rgba())
+                .child(crate::t!("island.tree.meta.path"))
                 .into_any_element(),
         )
     } else {
@@ -124,8 +112,35 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool, meta_size: Pixels) ->
         emphasized: node.is_leaf || previewed,
         show_guides: true,
         label: SharedString::from(node.label.clone()),
-        label_color: Some(accent),
-        leading: Some(leading),
+        label_color: Some(label_color),
+        leading: Some(row_leading(kind_icon, kind_color)),
         trailing,
+    }
+}
+
+fn tree_kind_icon(kind: TreeEntryKind) -> PikoIcon {
+    match kind {
+        TreeEntryKind::User => PikoIcon::User,
+        TreeEntryKind::Assistant => PikoIcon::Bot,
+        TreeEntryKind::Tool => PikoIcon::Wrench,
+        TreeEntryKind::Model => PikoIcon::Cpu,
+        TreeEntryKind::Thinking => PikoIcon::Brain,
+        TreeEntryKind::Branch => PikoIcon::GitBranch,
+        TreeEntryKind::Compaction => PikoIcon::Layers,
+        TreeEntryKind::Other => PikoIcon::Circle,
+    }
+}
+
+fn tree_kind_color(kind: TreeEntryKind) -> gpui::Hsla {
+    let t = tokens();
+    match kind {
+        TreeEntryKind::User => t.role_accent_hsla(RoleAccent::User),
+        TreeEntryKind::Assistant => t.role_accent_hsla(RoleAccent::Assistant),
+        TreeEntryKind::Tool => t.role_accent_hsla(RoleAccent::Tool),
+        TreeEntryKind::Thinking => t.role_accent_hsla(RoleAccent::Thinking),
+        TreeEntryKind::Model | TreeEntryKind::Branch | TreeEntryKind::Compaction => {
+            t.role_accent_hsla(RoleAccent::System)
+        }
+        TreeEntryKind::Other => PikoTokens::hsla(t.muted_fg),
     }
 }

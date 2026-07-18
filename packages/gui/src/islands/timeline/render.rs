@@ -7,9 +7,10 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::scroll::ScrollableElement;
-use gpui_component::text::TextView;
 
-use crate::theme::{RoleAccent, metrics, tokens};
+use crate::theme::{
+    PikoIcon, RoleAccent, TextRole, body_markdown, metrics, row_leading, text, tokens,
+};
 
 use super::vm::{TimelineRow, TimelineRowKind, TimelineViewModel, ToolCardStatus};
 
@@ -79,23 +80,25 @@ fn render_timeline_row(
 ) -> AnyElement {
     let m = metrics();
     let t = tokens();
-    let (accent, bg) = match row.kind {
-        TimelineRowKind::User => (t.role_accent(RoleAccent::User), t.canvas_rgba()),
+    let (role, bg, role_icon) = match row.kind {
+        TimelineRowKind::User => (RoleAccent::User, t.canvas_rgba(), Some(PikoIcon::User)),
         TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
-            (t.role_accent(RoleAccent::Assistant), t.surface_rgba())
+            (RoleAccent::Assistant, t.surface_rgba(), Some(PikoIcon::Bot))
         }
-        TimelineRowKind::Tool => (t.role_accent(RoleAccent::Tool), t.surface_rgba()),
-        TimelineRowKind::System => (t.role_accent(RoleAccent::System), t.surface_rgba()),
+        TimelineRowKind::Tool => (RoleAccent::Tool, t.surface_rgba(), None),
+        TimelineRowKind::System => (RoleAccent::System, t.surface_rgba(), None),
     };
+    let accent = t.role_accent(role);
+    let accent_hsla = t.role_accent_hsla(role);
 
     let status_label = row.tool_status.map(|s| match s {
-        ToolCardStatus::Running => "running",
-        ToolCardStatus::Completed => "done",
-        ToolCardStatus::Failed => "failed",
+        ToolCardStatus::Running => crate::t!("island.timeline.tool.running"),
+        ToolCardStatus::Completed => crate::t!("island.timeline.tool.done"),
+        ToolCardStatus::Failed => crate::t!("island.timeline.tool.failed"),
     });
 
     let body: AnyElement = if row.render_markdown {
-        TextView::markdown(
+        body_markdown(
             SharedString::from(format!("md-{}", row.id)),
             row.body.clone(),
             window,
@@ -104,9 +107,7 @@ fn render_timeline_row(
         .selectable(true)
         .into_any_element()
     } else {
-        div()
-            .text_size(m.body_size)
-            .line_height(m.body_line_height)
+        text(TextRole::Body)
             .text_color(t.fg_rgba())
             .child(row.body.clone())
             .into_any_element()
@@ -127,36 +128,35 @@ fn render_timeline_row(
                 .flex()
                 .gap(m.space_sm)
                 .items_center()
+                .when_some(role_icon, |d, name| d.child(row_leading(name, accent_hsla)))
                 .child(
-                    div()
-                        .text_size(m.meta_size)
-                        .line_height(m.meta_line_height)
+                    crate::theme::text(TextRole::Meta)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(accent)
                         .child(row.label.clone()),
                 )
                 .when_some(status_label, |d, s| {
                     d.child(
-                        div()
-                            .text_size(m.meta_size)
-                            .line_height(m.meta_line_height)
+                        crate::theme::text(TextRole::Meta)
                             .text_color(t.muted_fg_rgba())
                             .child(s),
                     )
                 })
                 .when(row.streaming, |d| {
                     d.child(
-                        div()
-                            .text_size(m.meta_size)
-                            .line_height(m.meta_line_height)
+                        crate::theme::text(TextRole::Meta)
                             .text_color(t.muted_fg_rgba())
-                            .child("streaming"),
+                            .child(crate::t!("island.timeline.streaming")),
                     )
                 })
                 .when(row.detail.is_some(), |d| {
                     d.child(div().flex_1()).child(
                         Button::new(SharedString::from(format!("toggle-{}", row.id)))
-                            .label(if expanded { "Hide" } else { "Detail" })
+                            .label(if expanded {
+                                crate::t!("island.timeline.tool.hide")
+                            } else {
+                                crate::t!("island.timeline.tool.detail")
+                            })
                             .ghost()
                             .small()
                             .compact()
@@ -176,10 +176,7 @@ fn render_timeline_row(
                         .max_h(px(160.))
                         .overflow_y_scrollbar()
                         .child(
-                            div()
-                                .text_size(m.meta_size)
-                                .line_height(m.meta_line_height)
-                                .font_family("monospace")
+                            crate::theme::text(TextRole::BodyMono)
                                 .text_color(t.muted_fg_rgba())
                                 .child(detail.clone()),
                         ),

@@ -21,7 +21,7 @@ pub use branch::{active_branch_entries, active_path_ids};
 pub use effect::ClientEffect;
 pub use intent::ClientIntent;
 pub use msg::{ClientMsg, TransportObservation};
-pub use state::{ClientState, ConnectionState, LiveSession, SessionPhase};
+pub use state::{ClientState, ConnectionState, LiveSession, ModelState, SessionPhase};
 pub use timeline::{
     AgentTimeline, ApplyOutcome, CommittedItem, RealtimeDraft, TimelineItem, ToolItem, ToolStatus,
 };

@@ -89,9 +89,9 @@ pub(crate) fn agent_node_visible(
 
 fn activity_label(activity: &AgentActivity) -> String {
     match activity {
-        AgentActivity::Idle => "idle".into(),
-        AgentActivity::Running => "running".into(),
-        AgentActivity::WaitingForApproval => "approval".into(),
-        AgentActivity::Cancelling => "cancelling".into(),
+        AgentActivity::Idle => crate::t!("agent.activity.idle"),
+        AgentActivity::Running => crate::t!("agent.activity.running"),
+        AgentActivity::WaitingForApproval => crate::t!("agent.activity.approval"),
+        AgentActivity::Cancelling => crate::t!("agent.activity.cancelling"),
     }
 }

@@ -7,6 +7,45 @@ into piko's conversation Workbench. They define a product-specific system; they
 do not require pixel-for-pixel imitation of an IDE or custom replacements for
 working GPUI Component controls.
 
+Chrome icons, named type roles, and the English chrome string catalog are
+contracted in
+[GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md)
+and designed in
+[GUI Chrome Presentation Design](../../../docs/gui-chrome-presentation-design.md).
+
+### Icons
+
+- Use `PikoIcon` / `theme::icon` for chrome actions, Empty / Loading marks, and
+  disclosures. Do not introduce new Unicode glyph icons.
+- Empty / Loading marks: Sessions/no-session `Circle`, Timeline
+  `MessageSquare`, Agents `Bot`, Tree `Network`, Loading `CircleDashed`, Error
+  `TriangleAlert`.
+- Sessions rows: directory `Folder` / `FolderOpen`, session `MessageSquare`.
+- Timeline roles: user `User`, assistant `Bot` (tool/system keep status color
+  without a role icon for now).
+- Agents rows: `Bot`.
+- Composer: target `Bot`; model `Cpu`; thinking `Brain`; Send `Send`; Stop
+  `CircleStop`. Activity header `Activity` (status via icon/summary color);
+  activity items use kind icons (`Bell` / `Wrench` / `TriangleAlert` / …).
+- Tree rows by kind: user `User`, assistant `Bot`, tool `Wrench`, model `Cpu`,
+  thinking `Brain`, branch `GitBranch`, compaction `Layers`, other `Circle`.
+- Keep 6 px status / role / connection markers as colored dots — they are not
+  icons. Timeline still uses a left accent border alongside role icons.
+
+### Typography
+
+- Prefer `theme::text(TextRole::…)` / `label_text` / `body_markdown` over
+  one-off size pairs. Numbers live in `metrics.rs`; application lives in
+  `typography.rs`.
+- Timeline conversation body: plain text → `TextRole::Body`; markdown →
+  `body_markdown` (Body metrics + heading base). Do not call `text_size` with
+  metrics outside `theme/typography.rs` and `theme/icons.rs`.
+
+### Chrome copy
+
+- GUI-owned chrome strings go through `crate::t!("…")` and
+  `packages/gui/locales/gui.yml` (`en` only for now).
+
 ## 1. Design goals
 
 1. Keep the active conversation visually dominant.
@@ -78,7 +117,17 @@ Rules:
 
 ## 4. Density and typography
 
-The implementation source of truth is `src/theme/metrics.rs`.
+Implementation ownership under `src/theme/`:
+
+| Concern | Module |
+|---|---|
+| Spacing, type-scale numbers, layout constants | `metrics.rs` |
+| Semantic colors | `tokens.rs` |
+| Applying type roles to UI | `typography.rs` (`TextRole`, `body_markdown`) |
+| Icon box sizes | `icons.rs` (`IconSize`) |
+
+Call sites use `theme::text` / `label_text` / `body_markdown` / `row_leading`.
+They must not read `metrics().*_size` to set fonts directly.
 
 | Role | Size / line height |
 |---|---:|
@@ -170,12 +219,13 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
 
 - Collapsed Activity is a quiet 32 px status row above Composer, not a
   persistent card. It has no border or background until hover.
-- Use a 6 px state marker: muted for idle/queued, `info` for running,
-  `warning` for an action the user must take, and `danger` for failure.
-- The disclosure control owns a fixed 12 px column so the summary does not
-  shift between states.
+- Status uses the `Activity` icon tint and summary color: muted for idle,
+  `info` for running, `warning` for an action the user must take. Do not draw
+  a separate status dot beside the icon.
+- Header content uses `space_sm` horizontal padding inside the hit target.
+  The whole row toggles expand/collapse; do not add a disclosure chevron.
 - Expanded Activity uses one elevated rounded container. Items remain flat
-  rows with compact state markers; do not put a card around every event.
+  rows with kind icons; do not put a card around every event.
 - Keep operational detail here instead of competing with conversation prose in
   Timeline.
 

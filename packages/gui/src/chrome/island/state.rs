@@ -3,14 +3,11 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 
-use crate::theme::{metrics, tokens};
+use crate::theme::{PikoIcon, TextRole, placeholder_icon, text, tokens};
 
 /// Optional mark above placeholder title.
 pub enum IslandMedia {
-    /// Glyph / short label (emoji or text icon).
-    Icon(SharedString),
-    /// Image or fully custom mark.
-    #[allow(dead_code)]
+    /// Image or fully custom mark (Empty / Loading icons).
     Element(AnyElement),
 }
 
@@ -32,8 +29,11 @@ impl IslandPlaceholder {
         }
     }
 
-    pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
-        self.media = Some(IslandMedia::Icon(icon.into()));
+    pub fn piko_icon(mut self, name: PikoIcon) -> Self {
+        let color = crate::theme::PikoTokens::hsla(tokens().muted_fg);
+        self.media = Some(IslandMedia::Element(
+            placeholder_icon(name, color).into_any_element(),
+        ));
         self
     }
 
@@ -90,8 +90,8 @@ impl IslandBody {
 
 /// Shared centered placeholder used by Loading and Empty.
 pub fn render_island_placeholder(placeholder: IslandPlaceholder) -> impl IntoElement {
-    let m = metrics();
     let t = tokens();
+    let m = crate::theme::metrics();
     div()
         .id("island-placeholder")
         .size_full()
@@ -103,29 +103,18 @@ pub fn render_island_placeholder(placeholder: IslandPlaceholder) -> impl IntoEle
         .px(m.space_md)
         .when_some(placeholder.media, |d, media| {
             d.child(match media {
-                IslandMedia::Icon(icon) => div()
-                    .text_size(px(28.))
-                    .line_height(px(32.))
-                    .text_color(t.muted_fg_rgba())
-                    .child(icon)
-                    .into_any_element(),
                 IslandMedia::Element(el) => el,
             })
         })
         .child(
-            div()
-                .text_size(m.label_size)
-                .line_height(m.label_line_height)
-                .font_weight(FontWeight::SEMIBOLD)
+            text(TextRole::PlaceholderTitle)
                 .text_color(t.fg_rgba())
                 .text_center()
                 .child(placeholder.title),
         )
         .when_some(placeholder.subtitle, |d, subtitle| {
             d.child(
-                div()
-                    .text_size(m.body_size)
-                    .line_height(m.body_line_height)
+                text(TextRole::PlaceholderSubtitle)
                     .text_color(t.muted_fg_rgba())
                     .text_center()
                     .child(subtitle),

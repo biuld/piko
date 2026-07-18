@@ -100,7 +100,7 @@ pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
         can_send: true,
         show_stop,
         target_label: name,
-        placeholder: "Message… (Enter to send, Shift+Enter for newline)".into(),
+        placeholder: crate::t!("composer.placeholder"),
         model_label,
         thinking_label,
         can_cycle_model,

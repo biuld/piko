@@ -75,10 +75,17 @@ hostd process.
 
 - [ ] Session, Agent, and Tree selections use filled rows, not blue outline cards
 - [ ] Tree disclosures toggle without also activating the row
+- [ ] Tree disclosures use chevron icons (not Unicode triangles) with a stable
+      12 px column
+- [ ] Empty / Loading islands show Lucide marks (`Circle` / `MessageSquare` /
+      `Bot` / `Network` / `CircleDashed` / `TriangleAlert`) instead of glyphs
+- [ ] New Session uses a Plus icon button with an English tooltip
 - [ ] Tree depth guides remain aligned while scrolling and resizing
 - [ ] Timeline content remains centered at the 880 px reading width; Activity
       and Composer fill the center column and stay edge-aligned with each other
+- [ ] Mixed CJK/Latin labels beside icons stay vertically centered at Retina
 - [ ] Mixed CJK/Latin labels truncate cleanly without clipping vertically
+- [ ] Status / role / connection markers remain 6 px color dots (not icons)
 
 See [`ui-guidelines.md`](ui-guidelines.md) for the normative visual rules.
 

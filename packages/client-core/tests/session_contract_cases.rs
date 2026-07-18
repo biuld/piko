@@ -230,6 +230,71 @@ fn c2_reconcile_hydrates_timelines_from_active_branch() {
 }
 
 #[test]
+fn c2_reconcile_hydrates_model_and_thinking_from_active_branch() {
+    let mut ids = SeqIds(0);
+    let (state, _) = intent(
+        ClientState::default(),
+        ClientIntent::OpenSession {
+            session_id: "sess-1".into(),
+            session_path: None,
+        },
+        &mut ids,
+    );
+    let (state, _) = host(
+        state,
+        cmd_ok(
+            "cmd-1",
+            CommandResult::SessionOpened {
+                session_id: "sess-1".into(),
+                timestamp: 1,
+            },
+        ),
+        &mut ids,
+    );
+
+    let mut snapshot = session_snapshot("sess-1");
+    snapshot.current_leaf_id = Some("think-1".into());
+    snapshot.entries = vec![
+        piko_protocol::session::SessionTreeEntry::ModelChange(
+            piko_protocol::session::ModelChangeEntry {
+                id: "model-1".into(),
+                parent_id: None,
+                timestamp: "1".into(),
+                provider: "anthropic".into(),
+                model_id: "claude-sonnet".into(),
+            },
+        ),
+        piko_protocol::session::SessionTreeEntry::ThinkingLevelChange(
+            piko_protocol::session::ThinkingLevelChangeEntry {
+                id: "think-1".into(),
+                parent_id: Some("model-1".into()),
+                timestamp: "2".into(),
+                thinking_level: "high".into(),
+            },
+        ),
+    ];
+
+    let (state, _) = host(
+        state,
+        ServerMessage::SessionReconciled(SessionReconciledEvent {
+            session_id: "sess-1".into(),
+            reason: ReconcileReason::InitialHydration,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "e1".into(),
+                seq: 1,
+            },
+            snapshot,
+            agents: vec![agent_info("sess-1", "root", None)],
+        }),
+        &mut ids,
+    );
+
+    assert_eq!(state.model.provider.as_deref(), Some("anthropic"));
+    assert_eq!(state.model.model_id.as_deref(), Some("claude-sonnet"));
+    assert_eq!(state.model.thinking_level.as_deref(), Some("high"));
+}
+
+#[test]
 fn c2_foreign_reconcile_ignored() {
     let mut ids = SeqIds(0);
     let state = ClientState::default();

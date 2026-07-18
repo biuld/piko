@@ -4780,6 +4780,7 @@ dependencies = [
  "piko-client-core",
  "piko-comms",
  "piko-protocol",
+ "rust-i18n",
  "serde",
  "serde_json",
  "uuid",

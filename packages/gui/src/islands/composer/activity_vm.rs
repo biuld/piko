@@ -49,7 +49,7 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
         items.push(ActivityItem {
             id: "disconnect".into(),
             kind: ActivityItemKind::Warning,
-            label: "Host disconnected".into(),
+            label: crate::t!("activity.item.host_disconnected"),
             agent_instance_id: None,
             prompt_id: None,
             prompt_kind: None,
@@ -61,7 +61,7 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
         items.push(ActivityItem {
             id: "last-error".into(),
             kind: ActivityItemKind::Warning,
-            label: format!("Error: {err}"),
+            label: crate::t!("activity.item.error", message = err.as_str()),
             agent_instance_id: None,
             prompt_id: None,
             prompt_kind: None,
@@ -82,9 +82,9 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                     items.push(ActivityItem {
                         id: format!("turn-{}", turn.turn_id),
                         kind: ActivityItemKind::TurnQueued,
-                        label: format!(
-                            "Turn queued ({})",
-                            short_agent(session, &turn.agent_instance_id)
+                        label: crate::t!(
+                            "activity.item.turn_queued",
+                            agent = short_agent(session, &turn.agent_instance_id)
                         ),
                         agent_instance_id: Some(turn.agent_instance_id.clone()),
                         prompt_id: None,
@@ -93,18 +93,20 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                     });
                 }
                 TurnStatus::Running | TurnStatus::WaitingForApproval | TurnStatus::Cancelling => {
-                    let status_label = match turn.status {
-                        TurnStatus::WaitingForApproval => "waiting for approval",
-                        TurnStatus::Cancelling => "cancelling",
-                        _ => "running",
+                    let agent = short_agent(session, &turn.agent_instance_id);
+                    let label = match turn.status {
+                        TurnStatus::WaitingForApproval => {
+                            crate::t!("activity.item.turn_waiting_approval", agent = agent)
+                        }
+                        TurnStatus::Cancelling => {
+                            crate::t!("activity.item.turn_cancelling", agent = agent)
+                        }
+                        _ => crate::t!("activity.item.turn_running", agent = agent),
                     };
                     items.push(ActivityItem {
                         id: format!("turn-{}", turn.turn_id),
                         kind: ActivityItemKind::TurnRunning,
-                        label: format!(
-                            "{}: {status_label}",
-                            short_agent(session, &turn.agent_instance_id)
-                        ),
+                        label,
                         agent_instance_id: Some(turn.agent_instance_id.clone()),
                         prompt_id: None,
                         prompt_kind: None,
@@ -115,9 +117,9 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                     items.push(ActivityItem {
                         id: format!("turn-fail-{}", turn.turn_id),
                         kind: ActivityItemKind::Warning,
-                        label: format!(
-                            "Turn failed ({})",
-                            short_agent(session, &turn.agent_instance_id)
+                        label: crate::t!(
+                            "activity.item.turn_failed",
+                            agent = short_agent(session, &turn.agent_instance_id)
                         ),
                         agent_instance_id: Some(turn.agent_instance_id.clone()),
                         prompt_id: None,
@@ -133,10 +135,10 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
             items.push(ActivityItem {
                 id: format!("turn-fail-{}", failure.turn_id),
                 kind: ActivityItemKind::Warning,
-                label: format!(
-                    "{} failed: {}",
-                    short_agent(session, &failure.agent_instance_id),
-                    failure.error
+                label: crate::t!(
+                    "activity.item.turn_failed_detail",
+                    agent = short_agent(session, &failure.agent_instance_id),
+                    message = failure.error.as_str()
                 ),
                 agent_instance_id: Some(failure.agent_instance_id.clone()),
                 prompt_id: None,
@@ -152,7 +154,7 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
             items.push(ActivityItem {
                 id: "host-queue".into(),
                 kind: ActivityItemKind::TurnQueued,
-                label: format!("{queued} queued item(s)"),
+                label: crate::t!("activity.item.queue_items", count = queued),
                 agent_instance_id: None,
                 prompt_id: None,
                 prompt_kind: None,
@@ -176,9 +178,10 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                 items.push(ActivityItem {
                     id: format!("unread-{}", agent.agent_instance_id),
                     kind: ActivityItemKind::UnreadReport,
-                    label: format!(
-                        "{}: {} unread report(s)",
-                        agent.name, agent.unread_report_count
+                    label: crate::t!(
+                        "activity.item.unread_reports",
+                        name = agent.name.as_str(),
+                        count = agent.unread_report_count
                     ),
                     agent_instance_id: Some(agent.agent_instance_id.clone()),
                     prompt_id: None,
@@ -194,12 +197,12 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                     let (kind, label, actionable) = match tool.status {
                         ToolStatus::Running => (
                             ActivityItemKind::ToolRunning,
-                            format!("Tool running: {}", tool.tool_name),
+                            crate::t!("activity.item.tool_running", name = tool.tool_name.as_str()),
                             false,
                         ),
                         ToolStatus::Failed => (
                             ActivityItemKind::ToolFailed,
-                            format!("Tool failed: {}", tool.tool_name),
+                            crate::t!("activity.item.tool_failed", name = tool.tool_name.as_str()),
                             true,
                         ),
                         ToolStatus::Completed => continue,
@@ -220,7 +223,7 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                 items.push(ActivityItem {
                     id: format!("tool-run-{call_id}"),
                     kind: ActivityItemKind::ToolRunning,
-                    label: format!("Tool running: {name}"),
+                    label: crate::t!("activity.item.tool_running", name = name.as_str()),
                     agent_instance_id: Some(agent_id.clone()),
                     prompt_id: None,
                     prompt_kind: None,
@@ -231,7 +234,7 @@ pub fn derive_activity(state: &ClientState) -> ActivityViewModel {
                 items.push(ActivityItem {
                     id: format!("tool-fail-{call_id}"),
                     kind: ActivityItemKind::ToolFailed,
-                    label: format!("Tool failed: {name}"),
+                    label: crate::t!("activity.item.tool_failed", name = name.as_str()),
                     agent_instance_id: Some(agent_id.clone()),
                     prompt_id: None,
                     prompt_kind: None,
@@ -285,9 +288,9 @@ fn summarize(items: &[ActivityItem], state: &ClientState) -> String {
             && let Some(agent_id) = session.selected_agent.as_ref()
         {
             let name = short_agent(session, agent_id);
-            return format!("{name}: idle");
+            return crate::t!("activity.agent_idle", name = name);
         }
-        return "Idle".into();
+        return crate::t!("activity.idle");
     }
 
     let approvals = items
@@ -323,31 +326,34 @@ fn summarize(items: &[ActivityItem], state: &ClientState) -> String {
 
     let mut parts = Vec::new();
     if approvals > 0 {
-        parts.push(format!(
-            "{approvals} approval{}",
-            if approvals == 1 { "" } else { "s" }
-        ));
+        parts.push(if approvals == 1 {
+            crate::t!("activity.summary.approvals.one", count = approvals)
+        } else {
+            crate::t!("activity.summary.approvals.other", count = approvals)
+        });
     }
     if interactions > 0 {
-        parts.push(format!(
-            "{interactions} interaction{}",
-            if interactions == 1 { "" } else { "s" }
-        ));
+        parts.push(if interactions == 1 {
+            crate::t!("activity.summary.interactions.one", count = interactions)
+        } else {
+            crate::t!("activity.summary.interactions.other", count = interactions)
+        });
     }
     if running > 0 {
-        parts.push(format!("{running} running"));
+        parts.push(crate::t!("activity.summary.running", count = running));
     }
     if queued > 0 {
-        parts.push(format!("{queued} queued"));
+        parts.push(crate::t!("activity.summary.queued", count = queued));
     }
     if warnings > 0 {
-        parts.push(format!(
-            "{warnings} warning{}",
-            if warnings == 1 { "" } else { "s" }
-        ));
+        parts.push(if warnings == 1 {
+            crate::t!("activity.summary.warnings.one", count = warnings)
+        } else {
+            crate::t!("activity.summary.warnings.other", count = warnings)
+        });
     }
     if parts.is_empty() {
-        format!("{} item(s)", items.len())
+        crate::t!("activity.summary.items", count = items.len())
     } else {
         parts.join(" · ")
     }

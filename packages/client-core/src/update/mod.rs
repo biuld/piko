@@ -263,6 +263,15 @@ fn handle_intent(
                 .insert(id.clone(), PendingOp::ListModels);
             effects.push(ClientEffect::Send(Command::ModelList { command_id: id }));
         }
+        ClientIntent::SyncModelConfig => {
+            // Empty merge patch: ModelRunnerObserver still emits ConfigChanged
+            // with the current host defaults (same bootstrap trick as TUI).
+            let id = ctx.command_ids.next_command_id();
+            effects.push(ClientEffect::Send(Command::ConfigUpdate {
+                command_id: id,
+                patch: serde_json::json!({}),
+            }));
+        }
         ClientIntent::SetModel { provider, model_id } => {
             // ConfigUpdate has no typed CommandResponse; ModelEvent correlates.
             let id = ctx.command_ids.next_command_id();

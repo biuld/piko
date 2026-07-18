@@ -3,10 +3,12 @@
 //! Launches DesktopApp with hostd transport.
 
 mod app;
+mod assets;
 mod bridge;
 mod chrome;
 mod cli;
 mod config;
+mod i18n;
 mod islands;
 mod overlays;
 mod projections;
@@ -22,18 +24,33 @@ use crate::app::desktop_app::{
     CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
     NewSession, ToggleRightColumn, ToggleSessions,
 };
+use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
 use crate::theme::apply_piko_dark_theme;
+
+rust_i18n::i18n!("locales", fallback = "en");
+
+/// Resolve a chrome catalog key (and optional args) to an owned English string.
+#[macro_export]
+macro_rules! t {
+    ($key:expr) => {{
+        rust_i18n::t!($key).to_string()
+    }};
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {{
+        rust_i18n::t!($key, $($name = $value),+).to_string()
+    }};
+}
 
 fn main() {
     let cwd = env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".into());
 
-    let app = Application::new();
+    let app = Application::new().with_assets(GuiAssets);
 
     app.run(move |cx| {
         gpui_component::init(cx);
+        i18n::init();
         apply_piko_dark_theme(cx);
 
         cx.bind_keys([

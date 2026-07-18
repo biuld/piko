@@ -54,7 +54,7 @@ pub fn open_approval_dialog(
                         div()
                             .text_xs()
                             .text_color(gpui::rgb(0xa6adc8))
-                            .child("Arguments"),
+                            .child(crate::t!("dialog.approval.arguments")),
                     )
                     .child(
                         div()
@@ -111,7 +111,7 @@ fn decision_row(in_flight: bool, on_decide: DecideFn) -> impl IntoElement {
         .child(
             Button::new("appr-decline")
                 .danger()
-                .label("Decline")
+                .label(crate::t!("dialog.approval.decline"))
                 .disabled(in_flight)
                 .on_click({
                     let on_decide = on_decide.clone();

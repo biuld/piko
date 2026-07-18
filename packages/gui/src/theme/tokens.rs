@@ -90,17 +90,25 @@ impl PikoTokens {
     }
 
     pub fn role_accent(self, role: RoleAccent) -> Rgba {
+        Self::rgba(self.role_hex(role))
+    }
+
+    pub fn role_accent_hsla(self, role: RoleAccent) -> Hsla {
+        Self::hsla(self.role_hex(role))
+    }
+
+    fn role_hex(self, role: RoleAccent) -> u32 {
         match role {
-            RoleAccent::User => Self::rgba(self.user),
-            RoleAccent::Assistant => Self::rgba(self.assistant),
-            RoleAccent::Thinking => Self::rgba(self.thinking),
-            RoleAccent::Tool => Self::rgba(self.tool),
-            RoleAccent::System => Self::rgba(self.system),
-            RoleAccent::Success => Self::rgba(self.success),
-            RoleAccent::Warning => Self::rgba(self.warning),
-            RoleAccent::Danger => Self::rgba(self.danger),
-            RoleAccent::Info => Self::rgba(self.info),
-            RoleAccent::Accent => Self::rgba(self.accent),
+            RoleAccent::User => self.user,
+            RoleAccent::Assistant => self.assistant,
+            RoleAccent::Thinking => self.thinking,
+            RoleAccent::Tool => self.tool,
+            RoleAccent::System => self.system,
+            RoleAccent::Success => self.success,
+            RoleAccent::Warning => self.warning,
+            RoleAccent::Danger => self.danger,
+            RoleAccent::Info => self.info,
+            RoleAccent::Accent => self.accent,
         }
     }
 }
@@ -109,9 +117,7 @@ impl PikoTokens {
 pub enum RoleAccent {
     User,
     Assistant,
-    /// Reserved for dedicated thinking chrome (thinking currently uses
-    /// markdown blockquotes under Assistant rows).
-    #[expect(dead_code)]
+    /// Thinking chrome (timeline quotes + Tree thinking-level nodes).
     Thinking,
     Tool,
     System,

@@ -1,0 +1,168 @@
+# Piko GUI chrome strings (en only for v1).
+# Lucide icons are vendored separately under assets/icons/.
+_version: 2
+
+island.sessions.title:
+  en: Sessions
+island.sessions.empty.title:
+  en: No sessions
+island.sessions.empty.subtitle:
+  en: Create a session to get started
+island.sessions.action.new:
+  en: New Session
+
+island.agents.title:
+  en: Agents
+island.agents.empty_no_session.title:
+  en: No session
+island.agents.empty_no_session.subtitle:
+  en: Select a session to see agents
+island.agents.loading:
+  en: Loading agents…
+island.agents.empty.title:
+  en: No agents
+island.agents.empty.subtitle:
+  en: Agents appear as the session runs
+
+island.tree.title:
+  en: Tree
+island.tree.empty_no_session.title:
+  en: No session
+island.tree.empty_no_session.subtitle:
+  en: Select a session to see the tree
+island.tree.loading:
+  en: Loading tree…
+island.tree.empty.title:
+  en: No conversation tree
+island.tree.empty.subtitle:
+  en: Tree entries appear as the agent works
+island.tree.meta.path:
+  en: path
+
+island.timeline.empty.title:
+  en: No messages yet
+island.timeline.empty.subtitle:
+  en: Send a message to start the conversation
+island.timeline.streaming:
+  en: streaming
+island.timeline.tool.running:
+  en: running
+island.timeline.tool.done:
+  en: done
+island.timeline.tool.failed:
+  en: failed
+island.timeline.tool.hide:
+  en: Hide
+island.timeline.tool.detail:
+  en: Detail
+
+center.no_session.title:
+  en: No session
+center.no_session.subtitle:
+  en: Select a session or type to start one.
+center.opening:
+  en: Opening session…
+center.loading:
+  en: Loading session…
+center.error.title:
+  en: Error
+center.error.subtitle:
+  en: "Error: %{message}"
+
+composer.placeholder:
+  en: "Message… (Enter to send, Shift+Enter for newline)"
+composer.action.send:
+  en: Send
+composer.action.stop:
+  en: Stop
+composer.thinking.prefix:
+  en: "think:%{level}"
+
+sheet.sessions.title:
+  en: Sessions
+sheet.open.sessions:
+  en: Sessions
+sheet.open.agents:
+  en: Agents
+
+status.connection.connected:
+  en: hostd connected
+status.connection.disconnected:
+  en: hostd disconnected
+
+dialog.action.submit:
+  en: Submit
+dialog.action.cancel:
+  en: Cancel
+dialog.approval.decline:
+  en: Decline
+dialog.approval.arguments:
+  en: Arguments
+
+activity.idle:
+  en: Idle
+activity.agent_idle:
+  en: "%{name}: idle"
+activity.summary.approvals.one:
+  en: "%{count} approval"
+activity.summary.approvals.other:
+  en: "%{count} approvals"
+activity.summary.interactions.one:
+  en: "%{count} interaction"
+activity.summary.interactions.other:
+  en: "%{count} interactions"
+activity.summary.running:
+  en: "%{count} running"
+activity.summary.queued:
+  en: "%{count} queued"
+activity.summary.warnings.one:
+  en: "%{count} warning"
+activity.summary.warnings.other:
+  en: "%{count} warnings"
+activity.summary.items:
+  en: "%{count} item(s)"
+
+activity.item.host_disconnected:
+  en: Host disconnected
+activity.item.error:
+  en: "Error: %{message}"
+activity.item.turn_queued:
+  en: "Turn queued (%{agent})"
+activity.item.turn_running:
+  en: "%{agent}: running"
+activity.item.turn_waiting_approval:
+  en: "%{agent}: waiting for approval"
+activity.item.turn_cancelling:
+  en: "%{agent}: cancelling"
+activity.item.turn_failed:
+  en: "Turn failed (%{agent})"
+activity.item.turn_failed_detail:
+  en: "%{agent} failed: %{message}"
+activity.item.queue_items:
+  en: "%{count} queued item(s)"
+activity.item.unread_reports:
+  en: "%{name}: %{count} unread report(s)"
+activity.item.tool_running:
+  en: "Tool running: %{name}"
+activity.item.tool_failed:
+  en: "Tool failed: %{name}"
+
+tree.entry.tool:
+  en: "tool %{name}"
+tree.entry.model:
+  en: "model %{id}"
+tree.entry.thinking:
+  en: "thinking %{level}"
+tree.entry.branch_summary:
+  en: branch summary
+tree.entry.compaction:
+  en: compaction
+
+agent.activity.idle:
+  en: idle
+agent.activity.running:
+  en: running
+agent.activity.approval:
+  en: approval
+agent.activity.cancelling:
+  en: cancelling

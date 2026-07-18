@@ -8,9 +8,13 @@ use piko_protocol::session::SessionTreeEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TreeEntryKind {
-    Message,
+    User,
+    Assistant,
     Tool,
-    System,
+    Model,
+    Thinking,
+    Branch,
+    Compaction,
     Other,
 }
 
@@ -166,6 +170,11 @@ fn entry_agent_instance(entry: &SessionTreeEntry) -> Option<String> {
 fn entry_label(entry: &SessionTreeEntry) -> (TreeEntryKind, String) {
     match entry {
         SessionTreeEntry::Message(m) => {
+            let kind = match &m.message {
+                Message::User { .. } => TreeEntryKind::User,
+                Message::Assistant { .. } => TreeEntryKind::Assistant,
+                _ => TreeEntryKind::Other,
+            };
             let body = match &m.message {
                 Message::User { content, .. } => match content {
                     piko_protocol::MessageContent::String(s) => s.clone(),
@@ -189,18 +198,28 @@ fn entry_label(entry: &SessionTreeEntry) -> (TreeEntryKind, String) {
                 other => other.role().to_string(),
             };
             let label = truncate(&body, 48);
-            (TreeEntryKind::Message, label)
+            (kind, label)
         }
-        SessionTreeEntry::ToolCall(t) => (TreeEntryKind::Tool, format!("tool {}", t.tool_name)),
-        SessionTreeEntry::ModelChange(m) => {
-            (TreeEntryKind::System, format!("model {}", m.model_id))
-        }
-        SessionTreeEntry::ThinkingLevelChange(t) => (
-            TreeEntryKind::System,
-            format!("thinking {}", t.thinking_level),
+        SessionTreeEntry::ToolCall(t) => (
+            TreeEntryKind::Tool,
+            crate::t!("tree.entry.tool", name = t.tool_name.as_str()),
         ),
-        SessionTreeEntry::BranchSummary(_) => (TreeEntryKind::System, "branch summary".into()),
-        SessionTreeEntry::Compaction(_) => (TreeEntryKind::System, "compaction".into()),
+        SessionTreeEntry::ModelChange(m) => (
+            TreeEntryKind::Model,
+            crate::t!("tree.entry.model", id = m.model_id.as_str()),
+        ),
+        SessionTreeEntry::ThinkingLevelChange(t) => (
+            TreeEntryKind::Thinking,
+            crate::t!("tree.entry.thinking", level = t.thinking_level.as_str()),
+        ),
+        SessionTreeEntry::BranchSummary(_) => (
+            TreeEntryKind::Branch,
+            crate::t!("tree.entry.branch_summary"),
+        ),
+        SessionTreeEntry::Compaction(_) => (
+            TreeEntryKind::Compaction,
+            crate::t!("tree.entry.compaction"),
+        ),
         SessionTreeEntry::Label(l) => (
             TreeEntryKind::Other,
             l.label.clone().unwrap_or_else(|| l.target_id.clone()),

@@ -3,7 +3,7 @@
 use gpui::*;
 use gpui_component::TitleBar;
 
-use crate::theme::{metrics, tokens};
+use crate::theme::{label_text, metrics, tokens};
 use piko_client_core::ClientState;
 
 pub fn render_title_bar(state: &ClientState, project_name: &str) -> impl IntoElement {
@@ -16,15 +16,13 @@ pub fn render_title_bar(state: &ClientState, project_name: &str) -> impl IntoEle
         .unwrap_or_else(|| project_name.to_string());
 
     TitleBar::new().h(m.title_bar_height).child(
-        div()
+        label_text(false)
             .size_full()
             .pr(m.title_bar_safe_inset)
             .flex()
             .items_center()
             .justify_center()
             .gap(m.space_sm)
-            .text_size(m.label_size)
-            .line_height(m.label_line_height)
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)

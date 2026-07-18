@@ -8,6 +8,8 @@
 > External references: [GPUI](https://gpui.rs/),
 > [GPUI Component](https://longbridge.github.io/gpui-component/docs/components/)
 > Visual system: [Piko GUI UI Guidelines](../packages/gui/docs/ui-guidelines.md)
+> Chrome presentation (draft): [Feature](gui-chrome-presentation-feature.md) ·
+> [Design](gui-chrome-presentation-design.md)
 
 ## 1. Purpose
 
@@ -469,7 +471,10 @@ states, and animation are desktop-native. A light theme and external theme
 directory support are later work.
 
 Icons use an explicit, vendored subset of Lucide-compatible SVG assets. The GUI
-does not depend on an implicit system-wide icon directory.
+does not depend on an implicit system-wide icon directory. Chrome typography
+roles and localizable chrome copy are specified in
+[GUI Chrome Presentation](gui-chrome-presentation-feature.md) and designed in
+[GUI Chrome Presentation Design](gui-chrome-presentation-design.md).
 
 ## 13. Dependency Policy
 

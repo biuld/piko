@@ -123,9 +123,9 @@ impl Render for TimelineIsland {
         let panel = if self.vm.rows.is_empty() {
             IslandPanel::empty(
                 "timeline-island",
-                IslandPlaceholder::new("No messages yet")
-                    .icon("✍")
-                    .subtitle("Send a message to start the conversation"),
+                IslandPlaceholder::new(crate::t!("island.timeline.empty.title"))
+                    .piko_icon(crate::theme::PikoIcon::MessageSquare)
+                    .subtitle(crate::t!("island.timeline.empty.subtitle")),
             )
             .focused(self.chrome_focused)
             .into_any_element()

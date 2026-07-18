@@ -144,6 +144,38 @@ pub struct ModelState {
     pub providers: Vec<piko_protocol::ProviderInfo>,
 }
 
+/// Apply the latest model / thinking overrides from the active session branch.
+///
+/// Entries without a change leave the corresponding [`ModelState`] field untouched
+/// so host defaults from `SyncModelConfig` remain when the session never overrode
+/// them.
+pub fn apply_model_overrides_from_entries(
+    model: &mut ModelState,
+    entries: &[SessionTreeEntry],
+    current_leaf_id: Option<&str>,
+) {
+    let mut last_model: Option<(String, String)> = None;
+    let mut last_thinking: Option<String> = None;
+    for entry in active_branch_entries(entries, current_leaf_id) {
+        match entry {
+            SessionTreeEntry::ModelChange(change) => {
+                last_model = Some((change.provider, change.model_id));
+            }
+            SessionTreeEntry::ThinkingLevelChange(change) => {
+                last_thinking = Some(change.thinking_level);
+            }
+            _ => {}
+        }
+    }
+    if let Some((provider, model_id)) = last_model {
+        model.provider = Some(provider);
+        model.model_id = Some(model_id);
+    }
+    if let Some(level) = last_thinking {
+        model.thinking_level = Some(level);
+    }
+}
+
 /// The previous live session id kept for failed open/create recovery.
 #[derive(Debug, Clone, Default)]
 pub struct ClientState {

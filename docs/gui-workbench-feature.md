@@ -281,9 +281,12 @@ authority before the matching host event or reconciliation.
 ## Configuration
 
 GUI-specific settings use the `[gui]` namespace stored by hostd. Panel sizes,
-sidebar visibility, and reduced-motion preference persist there. Typography,
-map expansion, focus, drafts, and per-Agent scroll/follow state remain
-frontend-local until their controls and recovery semantics are stable.
+sidebar visibility, and reduced-motion preference persist there. Named
+typography roles, vendored chrome icons, and an English chrome string catalog
+are covered by
+[GUI Chrome Presentation](gui-chrome-presentation-feature.md). Map expansion,
+focus, drafts, and per-Agent scroll/follow state remain frontend-local until
+their controls and recovery semantics are stable.
 
 Physical GUI shortcuts are frontend-specific even when their action names match
 TUI command intent.

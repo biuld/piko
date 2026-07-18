@@ -46,6 +46,11 @@ pub enum ClientIntent {
     },
     /// Request host model catalog (`ModelList` → `ModelListed`).
     ListModels,
+    /// Pull current host defaults via a no-op `ConfigUpdate` (`ModelEvent`).
+    ///
+    /// Frontends call this at bootstrap so Composer can show `default-model` /
+    /// `default-thinking-level` before the user cycles either value.
+    SyncModelConfig,
     /// Persist default model via `ConfigUpdate` (correlated by `ModelEvent`).
     SetModel {
         provider: String,

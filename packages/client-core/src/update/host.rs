@@ -96,28 +96,7 @@ pub(super) fn handle_host(
             }
         }
         ServerMessage::Model(model_event) => {
-            let piko_protocol::ModelEvent::ConfigChanged {
-                model_id,
-                provider,
-                thinking_level,
-                ..
-            } = model_event;
-            state.model.model_id = Some(model_id);
-            state.model.provider = Some(provider);
-            if let Some(level) = thinking_level {
-                state.model.thinking_level = Some(level.as_str().to_string());
-            }
-            let current_provider = state.model.provider.as_deref();
-            let current_model = state.model.model_id.as_deref();
-            let current_thinking = state.model.thinking_level.as_deref();
-            state.pending_commands.retain(|_, op| match op {
-                PendingOp::SetModel { provider, model_id } => {
-                    current_provider != Some(provider.as_str())
-                        || current_model != Some(model_id.as_str())
-                }
-                PendingOp::SetThinkingLevel { level } => current_thinking != Some(level.as_str()),
-                _ => true,
-            });
+            apply_model_config_changed(state, model_event);
         }
         _ => {}
     }
@@ -297,8 +276,71 @@ fn handle_session_reconciled(
     }
 
     let session = LiveSession::from_reconcile(event.session_id, &event.snapshot, &event.agents);
+    crate::state::apply_model_overrides_from_entries(
+        &mut state.model,
+        &session.entries,
+        session.current_leaf_id.as_deref(),
+    );
     state.live_session = Some(session);
     state.session_phase = SessionPhase::Live;
+}
+
+fn apply_model_config_changed(state: &mut ClientState, event: piko_protocol::ModelEvent) {
+    let piko_protocol::ModelEvent::ConfigChanged {
+        model_id,
+        provider,
+        thinking_level,
+        ..
+    } = event;
+
+    let has_model_pending = state
+        .pending_commands
+        .values()
+        .any(|op| matches!(op, PendingOp::SetModel { .. }));
+    let has_thinking_pending = state
+        .pending_commands
+        .values()
+        .any(|op| matches!(op, PendingOp::SetThinkingLevel { .. }));
+
+    let next_model = if model_id.is_empty() {
+        None
+    } else {
+        Some(model_id)
+    };
+    let next_provider = if provider.is_empty() {
+        None
+    } else {
+        Some(provider)
+    };
+    let next_thinking = Some(
+        thinking_level
+            .map(|level| level.as_str().to_string())
+            .unwrap_or_else(|| "off".to_string()),
+    );
+
+    // Soft-fill for bootstrap SyncModelConfig so a late ModelEvent cannot
+    // clobber session-tree overrides already applied during reconcile.
+    // Explicit SetModel / SetThinkingLevel always win.
+    if has_model_pending || state.model.model_id.is_none() {
+        state.model.model_id = next_model;
+    }
+    if has_model_pending || state.model.provider.is_none() {
+        state.model.provider = next_provider;
+    }
+    if has_thinking_pending || state.model.thinking_level.is_none() {
+        state.model.thinking_level = next_thinking;
+    }
+
+    let current_provider = state.model.provider.as_deref();
+    let current_model = state.model.model_id.as_deref();
+    let current_thinking = state.model.thinking_level.as_deref();
+    state.pending_commands.retain(|_, op| match op {
+        PendingOp::SetModel { provider, model_id } => {
+            current_provider != Some(provider.as_str()) || current_model != Some(model_id.as_str())
+        }
+        PendingOp::SetThinkingLevel { level } => current_thinking != Some(level.as_str()),
+        _ => true,
+    });
 }
 
 fn handle_session_cleared(state: &mut ClientState, previous_session_id: &str) {

@@ -134,7 +134,7 @@ impl Render for InteractionForm {
                     .child(
                         Button::new("ix-submit")
                             .primary()
-                            .label("Submit")
+                            .label(crate::t!("dialog.action.submit"))
                             .disabled(!can_submit)
                             .on_click(move |_, window, cx| {
                                 if let Some(form) = entity_for_submit.upgrade() {
@@ -149,7 +149,7 @@ impl Render for InteractionForm {
                     )
                     .child(
                         Button::new("ix-cancel")
-                            .label("Cancel")
+                            .label(crate::t!("dialog.action.cancel"))
                             .disabled(self.interaction.response_in_flight)
                             .on_click(move |_, window, cx| {
                                 on_cancel(

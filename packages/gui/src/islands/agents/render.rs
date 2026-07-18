@@ -8,7 +8,7 @@ use crate::chrome::{
     IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
     TreeRowSpec, render_tree_list,
 };
-use crate::theme::metrics;
+use crate::theme::{PikoIcon, PikoTokens, row_leading, tokens};
 
 use super::vm::{AgentTreeNode, AgentTreeViewModel, agent_node_visible};
 
@@ -23,29 +23,30 @@ pub fn render_agent_tree_panel(
     on_select: IdClickFactory,
     on_toggle: IdClickFactory,
 ) -> impl IntoElement {
-    let header = IslandHeader::title("Agents");
+    let header = IslandHeader::title(crate::t!("island.agents.title"));
     match phase {
         IslandSessionPhase::Idle => IslandPanel::empty(
             "agent-tree",
-            IslandPlaceholder::new("No session")
-                .icon("◇")
-                .subtitle("Select a session to see agents"),
+            IslandPlaceholder::new(crate::t!("island.agents.empty_no_session.title"))
+                .piko_icon(PikoIcon::Bot)
+                .subtitle(crate::t!("island.agents.empty_no_session.subtitle")),
         )
         .header(header)
         .focused(focused)
         .into_any_element(),
         IslandSessionPhase::Loading => IslandPanel::loading(
             "agent-tree",
-            IslandPlaceholder::new("Loading agents…").icon("◌"),
+            IslandPlaceholder::new(crate::t!("island.agents.loading"))
+                .piko_icon(PikoIcon::CircleDashed),
         )
         .header(header)
         .focused(focused)
         .into_any_element(),
         IslandSessionPhase::Ready if vm.nodes.is_empty() => IslandPanel::empty(
             "agent-tree",
-            IslandPlaceholder::new("No agents")
-                .icon("◇")
-                .subtitle("Agents appear as the session runs"),
+            IslandPlaceholder::new(crate::t!("island.agents.empty.title"))
+                .piko_icon(PikoIcon::Bot)
+                .subtitle(crate::t!("island.agents.empty.subtitle")),
         )
         .header(header)
         .focused(focused)
@@ -66,8 +67,6 @@ fn render_agent_tree_body(
     on_select: &IdClickFactory,
     on_toggle: &IdClickFactory,
 ) -> impl IntoElement {
-    let meta_size = metrics().meta_size;
-    let meta_line = metrics().meta_line_height;
     let rows: Vec<_> = vm
         .nodes
         .iter()
@@ -80,28 +79,26 @@ fn render_agent_tree_body(
             } else {
                 None
             };
-            (
-                agent_row_spec(node, collapsed, meta_size, meta_line),
-                activate,
-                toggle,
-            )
+            (agent_row_spec(node, collapsed), activate, toggle)
         })
         .collect();
     render_tree_list(rows)
 }
 
-fn agent_row_spec(
-    node: &AgentTreeNode,
-    collapsed: &HashSet<String>,
-    meta_size: Pixels,
-    meta_line: Pixels,
-) -> TreeRowSpec {
+fn agent_row_spec(node: &AgentTreeNode, collapsed: &HashSet<String>) -> TreeRowSpec {
+    let t = tokens();
+    let leading_color = if node.selected {
+        PikoTokens::hsla(t.accent)
+    } else {
+        PikoTokens::hsla(t.muted_fg)
+    };
     let trailing = div()
         .flex_shrink_0()
-        .text_size(meta_size)
-        .line_height(meta_line)
-        .text_color(crate::theme::tokens().muted_fg_rgba())
-        .child(format!("{} · {}", node.role, node.activity_label))
+        .child(
+            crate::theme::text(crate::theme::TextRole::Meta)
+                .text_color(t.muted_fg_rgba())
+                .child(format!("{} · {}", node.role, node.activity_label)),
+        )
         .into_any_element();
 
     TreeRowSpec {
@@ -114,7 +111,7 @@ fn agent_row_spec(
         show_guides: true,
         label: SharedString::from(node.name.clone()),
         label_color: None,
-        leading: None,
+        leading: Some(row_leading(PikoIcon::Bot, leading_color)),
         trailing: Some(trailing),
     }
 }

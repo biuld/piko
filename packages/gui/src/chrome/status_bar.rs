@@ -6,12 +6,12 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 use crate::projections::{ConnectionStatus, StatusBarViewModel};
-use crate::theme::{RoleAccent, metrics, tokens};
+use crate::theme::{RoleAccent, TextRole, metrics, text, tokens};
 
 pub fn render_status_bar(vm: &StatusBarViewModel, allow_motion: bool) -> Div {
     let t = tokens();
     let m = metrics();
-    let content = div()
+    let content = text(TextRole::Meta)
         .relative()
         .top(m.status_content_offset_y)
         .h(m.meta_line_height)
@@ -20,15 +20,17 @@ pub fn render_status_bar(vm: &StatusBarViewModel, allow_motion: bool) -> Div {
         .flex_row()
         .items_center()
         .gap(m.space_sm)
-        .text_size(m.meta_size)
-        .line_height(m.meta_line_height)
         .child(render_connection(&vm.connection, allow_motion))
         .when_some(vm.cwd.clone(), |d, cwd| {
-            d.child(div().text_color(t.muted_fg_rgba()).child(cwd))
+            d.child(
+                text(TextRole::Meta)
+                    .text_color(t.muted_fg_rgba())
+                    .child(cwd),
+            )
         })
         .when_some(vm.usage.clone(), |d, usage| {
             d.child(
-                div()
+                text(TextRole::Meta)
                     .ml_auto()
                     .text_color(t.role_accent(RoleAccent::Info))
                     .child(usage),
@@ -49,8 +51,14 @@ pub fn render_status_bar(vm: &StatusBarViewModel, allow_motion: bool) -> Div {
 fn render_connection(status: &ConnectionStatus, allow_motion: bool) -> Div {
     let t = tokens();
     let (color, label) = match status {
-        ConnectionStatus::Connected => (t.role_accent(RoleAccent::Success), "hostd connected"),
-        ConnectionStatus::Disconnected => (t.role_accent(RoleAccent::Danger), "hostd disconnected"),
+        ConnectionStatus::Connected => (
+            t.role_accent(RoleAccent::Success),
+            crate::t!("status.connection.connected"),
+        ),
+        ConnectionStatus::Disconnected => (
+            t.role_accent(RoleAccent::Danger),
+            crate::t!("status.connection.disconnected"),
+        ),
     };
 
     // Reduced motion: square indicator instead of a soft pill.

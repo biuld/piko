@@ -1,4 +1,8 @@
-//! Shared typography and spacing metrics for the desktop Workbench.
+//! Shared density and type-scale numbers for the desktop Workbench.
+//!
+//! Part of [`crate::theme`]. Islands must not hard-code px sizes for text;
+//! go through [`crate::theme::typography`] (or [`crate::theme::icons`] for
+//! icon boxes). Spacing and layout constants are read via [`metrics`].
 
 use gpui::{Pixels, px};
 

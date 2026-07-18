@@ -227,13 +227,10 @@ fn render_title_header(title: SharedString, actions: Vec<AnyElement>) -> impl In
         .items_center()
         .gap(m.space_sm)
         .child(
-            div()
+            crate::theme::label_text(true)
                 .min_w_0()
                 .flex_1()
                 .truncate()
-                .text_size(m.label_size)
-                .line_height(m.label_line_height)
-                .font_weight(FontWeight::SEMIBOLD)
                 .child(title),
         )
         .children(actions)

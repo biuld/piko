@@ -56,10 +56,11 @@ impl DesktopApp {
         let composer_vm = derive_composer(self.bridge_state());
         let activity_vm = derive_activity(self.bridge_state());
         let composer_fp = format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             composer_vm.can_send,
             composer_vm.target_label,
             composer_vm.model_label,
+            composer_vm.thinking_label,
             activity_vm.items.len()
         );
         if self.fp_composer.as_ref() != Some(&composer_fp) {
