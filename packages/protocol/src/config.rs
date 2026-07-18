@@ -52,6 +52,22 @@ pub struct ModelRef {
 
     /// Model ID string (e.g. "claude-sonnet-4-5-20250929").
     pub model_id: String,
+
+    /// Maximum provider input+output context for deterministic preflight.
+    #[serde(default = "default_context_window", rename = "contextWindow")]
+    pub context_window: u64,
+
+    /// Output tokens reserved before selecting transcript context.
+    #[serde(default = "default_max_output_tokens", rename = "maxOutputTokens")]
+    pub max_output_tokens: u64,
+}
+
+fn default_context_window() -> u64 {
+    128_000
+}
+
+fn default_max_output_tokens() -> u64 {
+    4_096
 }
 
 // ---- Full startup config ----
@@ -152,6 +168,8 @@ impl Default for OrchdConfig {
             default_model: ModelRef {
                 provider: "openai".into(),
                 model_id: "gpt-4o".into(),
+                context_window: default_context_window(),
+                max_output_tokens: default_max_output_tokens(),
             },
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
@@ -181,10 +199,12 @@ impl OrchdConfig {
 
         let main_agent = AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: crate::PromptSource::new("built-in", "agents/main"),
             name: "Main".into(),
             role: "assistant".into(),
             description: Some("Default agent".into()),
-            base_system_prompt: String::new(),
+            base_instructions: String::new(),
             model: Some(model_id_str.clone()),
             tool_set_ids: vec![
                 "todo".into(),
@@ -204,6 +224,8 @@ impl OrchdConfig {
             default_model: ModelRef {
                 provider: kind_str,
                 model_id: model_id_str,
+                context_window: default_context_window(),
+                max_output_tokens: default_max_output_tokens(),
             },
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),

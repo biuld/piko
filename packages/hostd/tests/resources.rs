@@ -7,16 +7,16 @@ use piko_hostd::domain::compaction::{
 };
 use piko_hostd::domain::prompts::skills::format_skills_for_prompt;
 use piko_hostd::domain::prompts::{
-    BuildSystemPromptOptions, assemble_agent_run_prompt, build_system_prompt,
-    expand_prompt_template,
+    PromptSnapshotOptions, assemble_agent_run_prompt, expand_prompt_template, resolved_catalog,
+    snapshot_prompt_resources,
 };
-use piko_protocol::{
-    AgentSpec, PromptAssemblyRequest, PromptResourceSnapshot, ToolDef, ToolExecutorRef,
-};
+use piko_protocol::{AgentSpec, PromptAssemblyRequest, ToolDef, ToolExecutorRef};
 
 fn prompt_tool(name: &str, description: &str) -> ToolDef {
     ToolDef {
         name: name.into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test-tool", name),
         description: description.into(),
         input_schema: serde_json::json!({"type": "object"}),
         executor: ToolExecutorRef {
@@ -26,7 +26,7 @@ fn prompt_tool(name: &str, description: &str) -> ToolDef {
         },
         execution_mode: None,
         exposure: None,
-        capabilities: None,
+        capabilities: (name == "read").then(|| vec![piko_protocol::ToolCapability::WorkspaceRead]),
         approval: None,
         metadata: None,
     }
@@ -38,23 +38,36 @@ fn prompt_request(tool_catalog: Vec<ToolDef>) -> PromptAssemblyRequest {
         agent_instance_id: "root".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "Main".into(),
             role: "root".into(),
             description: None,
-            base_system_prompt: "Stable agent identity".into(),
+            base_instructions: "Stable agent identity".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: vec!["workspace".into()],
             active_tool_names: None,
         },
-        resources: PromptResourceSnapshot {
-            product_instructions: "Product instructions".into(),
-            context_section: "Project context".into(),
-            skills_section: "Available skills".into(),
-            prompt_templates_section: "Prompt templates".into(),
-            environment_section: "Current date: 2026-07-15".into(),
-        },
-        tool_catalog,
+        resources: snapshot_prompt_resources(PromptSnapshotOptions {
+            cwd: std::path::PathBuf::from("/workspace"),
+            context_files: vec![piko_hostd::domain::prompts::ContextFile {
+                path: std::path::PathBuf::from("/workspace/AGENTS.md"),
+                content: "Project context".into(),
+            }],
+            skills: vec![piko_hostd::domain::prompts::skills::Skill {
+                name: "demo".into(),
+                description: "Available skills".into(),
+                file_path: "/workspace/.piko/skills/demo.md".into(),
+                base_dir: "/workspace/.piko/skills".into(),
+                disable_model_invocation: false,
+                model_override: None,
+                thinking_level: None,
+                active_tools: None,
+            }],
+            ..Default::default()
+        }),
+        tool_catalog: resolved_catalog(tool_catalog),
     }
 }
 
@@ -138,7 +151,7 @@ fn expands_prompt_template_argument_slices_and_quotes() {
 }
 
 #[test]
-fn builds_system_prompt_with_context_skills_and_templates() {
+fn snapshots_semantic_context_skills_and_templates() {
     let temp = tempfile::tempdir().unwrap();
     let skill_dir = temp.path().join(".piko").join("skills").join("demo");
     fs::create_dir_all(&skill_dir).unwrap();
@@ -148,7 +161,7 @@ fn builds_system_prompt_with_context_skills_and_templates() {
     )
     .unwrap();
     let skills = load_skills(temp.path()).skills;
-    let prompt = build_system_prompt(BuildSystemPromptOptions {
+    let snapshot = snapshot_prompt_resources(PromptSnapshotOptions {
         cwd: temp.path().to_path_buf(),
         context_files: vec![piko_hostd::domain::prompts::ContextFile {
             path: temp.path().join("AGENTS.md"),
@@ -162,12 +175,18 @@ fn builds_system_prompt_with_context_skills_and_templates() {
             content: "Fix".into(),
             file_path: temp.path().join(".piko/prompts/fix.md"),
         }],
-        ..BuildSystemPromptOptions::default()
+        ..PromptSnapshotOptions::default()
     });
+    let prompt = snapshot
+        .blocks
+        .iter()
+        .map(|block| block.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    assert!(prompt.contains("<project_context>"));
-    assert!(prompt.contains("<available_skills>"));
-    assert!(prompt.contains("## Prompt Templates"));
+    assert!(prompt.contains("project rules"));
+    assert!(prompt.contains("Available skill metadata"));
+    assert!(prompt.contains("Prompt templates expanded by hostd"));
     assert!(prompt.contains("Current date: 20"));
     assert!(!prompt.contains("unix-day-"));
 }
@@ -177,7 +196,12 @@ fn agent_run_prompt_describes_only_the_resolved_tool_catalog() {
     let prompt =
         assemble_agent_run_prompt(&prompt_request(vec![prompt_tool("bash", "Run commands")]));
 
-    assert!(!prompt.system_prompt.contains("Available skills"));
+    assert!(
+        !prompt
+            .blocks
+            .iter()
+            .any(|block| block.id == "catalog.skills")
+    );
 }
 
 #[test]
@@ -192,7 +216,48 @@ fn agent_run_prompt_is_deterministic_for_equivalent_tool_catalogs() {
     ]));
 
     assert_eq!(first, second);
-    assert!(first.system_prompt.contains("Available skills"));
+    assert!(
+        first
+            .blocks
+            .iter()
+            .any(|block| block.id == "catalog.skills")
+    );
+}
+
+#[test]
+fn run_dynamic_environment_does_not_invalidate_stable_cache_prefix() {
+    let mut first_request = prompt_request(vec![prompt_tool("read", "Read files")]);
+    let mut second_request = first_request.clone();
+    let environment = second_request
+        .resources
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == "environment.run")
+        .unwrap();
+    environment.content = "Current date: 2099-01-01\nCurrent working directory: /other".into();
+    environment.content_digest = "changed-environment".into();
+
+    let first = assemble_agent_run_prompt(&first_request);
+    let second = assemble_agent_run_prompt(&second_request);
+    assert_ne!(first.source_digest, second.source_digest);
+    assert_eq!(
+        first.cache_plan.semantic_prefix_digest,
+        second.cache_plan.semantic_prefix_digest
+    );
+
+    let project = first_request
+        .resources
+        .blocks
+        .iter_mut()
+        .find(|block| block.id.starts_with("project.context"))
+        .unwrap();
+    project.content = "changed project policy".into();
+    project.content_digest = "changed-project".into();
+    let changed_project = assemble_agent_run_prompt(&first_request);
+    assert_ne!(
+        first.cache_plan.semantic_prefix_digest,
+        changed_project.cache_plan.semantic_prefix_digest
+    );
 }
 
 #[test]

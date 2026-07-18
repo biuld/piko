@@ -17,8 +17,8 @@ use piko_orchd_api::{
 };
 use piko_protocol::{
     AgentCommitAck, AgentDurableCommand, AgentInputDelivery, AgentInstanceIdentity,
-    AgentInstanceLifecycle, AgentLifecycleRequest, AgentRunPrompt, AgentSpec, CommitError,
-    CreateAgentRequest, MessageContent, PromptAssemblyRequest, SendAgentInputRequest,
+    AgentInstanceLifecycle, AgentLifecycleRequest, AgentSpec, CommitError, CreateAgentRequest,
+    MessageContent, PromptAssemblyRequest, SendAgentInputRequest,
 };
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
@@ -60,18 +60,47 @@ impl PromptAssemblyPort for RecordingPromptAssemblyPort {
     async fn assemble_prompt(
         &self,
         request: PromptAssemblyRequest,
-    ) -> Result<AgentRunPrompt, piko_orchd_api::AgentApiError> {
-        let system_prompt = format!(
-            "{}|{}",
-            request.agent_spec.base_system_prompt, request.resources.context_section
-        );
+    ) -> Result<piko_protocol::SemanticRunPrompt, piko_orchd_api::AgentApiError> {
+        let context = request
+            .resources
+            .blocks
+            .iter()
+            .map(|block| block.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let system_prompt = format!("{}|{}", request.agent_spec.base_instructions, context);
         self.requests.lock().await.push(request);
-        Ok(AgentRunPrompt {
+        Ok(piko_protocol::SemanticRunPrompt {
             source_digest: system_prompt.clone(),
             assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
-            system_prompt,
+            blocks: vec![test_prompt_block(system_prompt)],
+            cache_plan: Default::default(),
         })
     }
+}
+
+fn test_prompt_block(content: impl Into<String>) -> piko_protocol::PromptBlock {
+    let content = content.into();
+    piko_protocol::PromptBlock {
+        id: "test".into(),
+        kind: piko_protocol::PromptBlockKind::Instruction,
+        authority: piko_protocol::InstructionAuthority::Agent,
+        trust: piko_protocol::ContentTrust::Trusted,
+        source: piko_protocol::PromptSource::new("test", "test"),
+        content_digest: content.clone(),
+        content,
+        cache_scope: piko_protocol::CacheScope::NoCache,
+    }
+}
+
+fn gateway_prompt_text(request: &piko_llmd::gateway::GatewayRequest) -> String {
+    request
+        .run_prompt
+        .blocks
+        .iter()
+        .map(|block| block.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 struct StrictCreateCommitPort {
@@ -291,10 +320,12 @@ impl AgentCommitPort for CollectingAgentCommitPort {
 fn test_agent() -> AgentSpec {
     AgentSpec {
         id: "main".into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "main".into(),
         role: "test".into(),
         description: None,
-        base_system_prompt: "test".into(),
+        base_instructions: "test".into(),
         model: Some("faux-1".into()),
         thinking_level: None,
         tool_set_ids: Vec::new(),

@@ -7,10 +7,13 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use piko_protocol::config::{ProviderConfig, RetryConfig};
-use piko_protocol::messages::{ContentBlock, MessageContent, Usage};
+use piko_protocol::messages::Usage;
 use piko_protocol::model::ModelCapabilities;
 
 use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+
+mod prompt_mapping;
+use prompt_mapping::{build_genai_messages, stateless_system_block};
 
 // ---- genai-based executor ----
 
@@ -164,7 +167,7 @@ impl LlmGateway for LlmdExecutor {
 
         let kind = adapter_kind(&req.provider);
         let model_iden = genai::ModelIden::new(kind, &req.model);
-        let llm_messages = build_genai_messages(&req.system_prompt, &req.transcript);
+        let llm_messages = build_genai_messages(&req.run_prompt, &req.transcript);
 
         let mut request = genai::chat::ChatRequest::new(llm_messages);
         if !req.tools.is_empty() {
@@ -186,7 +189,8 @@ impl LlmGateway for LlmdExecutor {
         }
 
         // Apply resolved thinking level
-        let chat_options = if let Some(ref thinking) = req.thinking {
+        let mut chat_options = genai::chat::ChatOptions::default();
+        if let Some(ref thinking) = req.thinking {
             let effort = match thinking.as_str() {
                 "none" => genai::chat::ReasoningEffort::None,
                 "minimal" => genai::chat::ReasoningEffort::Minimal,
@@ -204,10 +208,26 @@ impl LlmGateway for LlmdExecutor {
                     }
                 }
             };
-            Some(genai::chat::ChatOptions::default().with_reasoning_effort(effort))
-        } else {
-            None
-        };
+            chat_options = chat_options.with_reasoning_effort(effort);
+        }
+        use piko_protocol::PromptCachePolicy;
+        match req.run_prompt.cache_plan.policy {
+            PromptCachePolicy::Disabled => {}
+            PromptCachePolicy::ProviderDefault => {
+                chat_options = chat_options.with_prompt_cache_key(provider_cache_key(&req));
+            }
+            PromptCachePolicy::Ephemeral => {
+                chat_options = chat_options
+                    .with_prompt_cache_key(provider_cache_key(&req))
+                    .with_cache_control(genai::chat::CacheControl::Ephemeral);
+            }
+            PromptCachePolicy::Extended => {
+                chat_options = chat_options
+                    .with_prompt_cache_key(provider_cache_key(&req))
+                    .with_cache_control(genai::chat::CacheControl::Ephemeral24h);
+            }
+        }
+        let chat_options = Some(chat_options);
 
         // Open stream from genai, with retry on transient errors.
         let max_retries = if self.retry.enabled {
@@ -390,7 +410,15 @@ impl LlmGateway for LlmdExecutor {
         let kind = adapter_kind(&model.provider);
         let model_iden = genai::ModelIden::new(kind, &model.id);
         let sys = system_prompt.unwrap_or_default();
-        let genai_messages = build_genai_messages(&sys, &messages);
+        let prompt = piko_protocol::SemanticRunPrompt {
+            blocks: if sys.is_empty() {
+                Vec::new()
+            } else {
+                vec![stateless_system_block(sys)]
+            },
+            ..Default::default()
+        };
+        let genai_messages = build_genai_messages(&prompt, &messages);
         let request = genai::chat::ChatRequest::new(genai_messages);
 
         let resp = self
@@ -433,93 +461,12 @@ fn orch_tool_to_genai(tool: &piko_protocol::tools::ToolDef) -> genai::chat::Tool
         .with_schema(tool.input_schema.clone())
 }
 
-// ---- Message conversion ----
-
-fn build_genai_messages(
-    system_prompt: &str,
-    transcript: &[piko_protocol::messages::Message],
-) -> Vec<genai::chat::ChatMessage> {
-    let mut messages: Vec<genai::chat::ChatMessage> = Vec::with_capacity(transcript.len() + 1);
-
-    if !system_prompt.is_empty() {
-        messages.push(genai::chat::ChatMessage::system(system_prompt));
-    }
-
-    for msg in transcript {
-        let genai_msg = match msg {
-            piko_protocol::messages::Message::User { content, .. } => {
-                let text = extract_text(content);
-                genai::chat::ChatMessage::user(text)
-            }
-            piko_protocol::messages::Message::Assistant { content, .. } => {
-                build_assistant_message(content)
-            }
-            piko_protocol::messages::Message::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => genai::chat::ChatMessage::assistant(vec![genai::chat::ContentPart::ToolCall(
-                genai::chat::ToolCall {
-                    call_id: id.clone(),
-                    fn_name: name.clone(),
-                    fn_arguments: arguments.clone(),
-                    thought_signatures: None,
-                },
-            )]),
-            piko_protocol::messages::Message::ToolResult {
-                tool_call_id,
-                content,
-                ..
-            } => {
-                let text = extract_blocks(content);
-                let content = genai::chat::MessageContent::from_parts(vec![
-                    genai::chat::ContentPart::ToolResponse(genai::chat::ToolResponse::new(
-                        tool_call_id.clone(),
-                        text,
-                    )),
-                ]);
-                genai::chat::ChatMessage::new(genai::chat::ChatRole::Tool, content)
-            }
-        };
-        messages.push(genai_msg);
-    }
-
-    messages
-}
-
-fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
-    let mut parts: Vec<genai::chat::ContentPart> = Vec::with_capacity(content.len());
-
-    for block in content {
-        match block {
-            ContentBlock::Text { text } => {
-                parts.push(genai::chat::ContentPart::Text(text.clone()));
-            }
-            ContentBlock::Thinking { thinking, .. } => {
-                parts.push(genai::chat::ContentPart::ThoughtSignature(thinking.clone()));
-            }
-            ContentBlock::Image { .. } => {}
-        }
-    }
-
-    genai::chat::ChatMessage::assistant(parts)
-}
-
-fn extract_text(content: &MessageContent) -> String {
-    match content {
-        MessageContent::String(s) => s.clone(),
-        MessageContent::Blocks(blocks) => extract_blocks(blocks),
-    }
-}
-
-fn extract_blocks(blocks: &[ContentBlock]) -> String {
-    blocks
-        .iter()
-        .filter_map(|b| match b {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+fn provider_cache_key(request: &GatewayRequest) -> String {
+    format!(
+        "piko-prompt-map-v1:{}:{}:assembly-v{}:{}",
+        request.provider,
+        request.model,
+        request.run_prompt.assembly_version,
+        request.run_prompt.cache_plan.semantic_prefix_digest
+    )
 }

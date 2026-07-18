@@ -208,23 +208,62 @@ impl ExecutionActor {
 
         let agent = self.request.agent_spec.clone();
 
-        let model = self.resolve_model(&agent).await;
+        let model_config = self.services.model_config().await;
+        let model = model_config
+            .as_ref()
+            .map(|config| config.model.clone())
+            .unwrap_or_else(|| self.resolve_fallback_model(&agent));
+        let thinking = if let Some(level) = agent.thinking_level.as_ref() {
+            model_config.as_ref().and_then(|config| {
+                config
+                    .thinking_level_map
+                    .as_ref()
+                    .and_then(|map| map.get(level).cloned())
+                    .unwrap_or_else(|| Some(level.as_str().to_string()))
+            })
+        } else {
+            model_config
+                .as_ref()
+                .and_then(|config| config.resolve_thinking())
+        };
         let (tools, routes) = if self.request.config.allow_tool_calls {
             (self.tools.clone(), self.routes.clone())
         } else {
             (Vec::new(), HashMap::new())
         };
+        let transcript = self.state.transcript.to_vec();
+        if let Some(config) = model_config.as_ref() {
+            super::budget::enforce_context_budget(
+                &self.request.run_prompt,
+                &transcript,
+                &tools,
+                config.context_window,
+                config.max_output_tokens,
+                thinking.is_some(),
+            )?;
+        }
 
         let request = GatewayRequest {
             run_id: self.identity.execution_id.clone(),
             step_id: format!("step_{step_count}"),
-            transcript: self.state.transcript.to_vec(),
-            system_prompt: self.request.run_prompt.system_prompt.clone(),
+            transcript,
+            run_prompt: self.request.run_prompt.clone(),
             model: model.id.clone(),
             provider: model.provider.clone(),
             tools,
-            thinking: None,
+            thinking,
         };
+        tracing::debug!(
+            execution_id = %self.identity.execution_id,
+            step_id = %request.step_id,
+            prompt_assembly_version = request.run_prompt.assembly_version,
+            prompt_source_digest = %request.run_prompt.source_digest,
+            prompt_prefix_digest = %request.run_prompt.cache_plan.semantic_prefix_digest,
+            prompt_blocks = request.run_prompt.blocks.len(),
+            tools = request.tools.len(),
+            transcript_messages = request.transcript.len(),
+            "dispatching semantic model request"
+        );
 
         // Pass Interaction Turn binding into StepDispatch (empty for child runs).
         let identity = DispatchIdentity::new(
@@ -359,10 +398,7 @@ impl ExecutionActor {
         Ok(())
     }
 
-    async fn resolve_model(&self, agent: &piko_protocol::agents::AgentSpec) -> ModelSpec {
-        if let Some(model) = self.services.model_config().await {
-            return model.model;
-        }
+    fn resolve_fallback_model(&self, agent: &piko_protocol::agents::AgentSpec) -> ModelSpec {
         ModelSpec {
             id: self
                 .request

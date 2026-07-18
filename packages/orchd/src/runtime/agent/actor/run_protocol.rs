@@ -46,6 +46,7 @@ impl AgentActor {
                     agent_instance_id: self.identity.agent_instance_id.clone(),
                     agent_spec: self.spec.clone(),
                     run_prompt: run_context.prompt,
+                    tool_catalog: run_context.tool_catalog,
                     input_message_id: request.message_id,
                     input: request.content,
                     context: ConversationContext {
@@ -57,7 +58,6 @@ impl AgentActor {
                         ..Default::default()
                     },
                 },
-                run_context.tools,
                 run_context.routes,
             )
             .await

@@ -105,7 +105,8 @@ pub fn context_entries_after_compaction(entries: &[SessionTreeEntry]) -> Vec<Ses
         .unwrap_or(compaction_index + 1);
 
     std::iter::once(entries[compaction_index].clone())
-        .chain(entries.iter().skip(first_kept_index).cloned())
+        .chain(entries[first_kept_index..compaction_index].iter().cloned())
+        .chain(entries.iter().skip(compaction_index + 1).cloned())
         .collect()
 }
 
@@ -233,6 +234,7 @@ fn is_valid_cut_point(entry: &SessionTreeEntry) -> bool {
 
 fn message_text(message: &Message) -> String {
     match message {
+        Message::Context { content, .. } => message_content_text(content),
         Message::User { content, .. } => message_content_text(content),
         Message::Assistant { content, .. } => content
             .iter()

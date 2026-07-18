@@ -2,6 +2,7 @@ use piko_protocol::{ContentBlock, Message, MessageContent};
 
 pub fn message_to_text(message: &Message) -> String {
     match message {
+        Message::Context { content, .. } => message_content_to_text(content),
         Message::User { content, .. } => message_content_to_text(content),
         Message::Assistant { content, .. } => content
             .iter()

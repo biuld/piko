@@ -110,8 +110,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
                 content: MessageContent::String(suffix.into()),
                 delivery: AgentInputDelivery::Auto,
                 prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
-                    context_section: context.into(),
-                    ..Default::default()
+                    blocks: vec![test_prompt_block(context)],
                 }),
                 active_tool_names: None,
             })
@@ -121,8 +120,8 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
 
     let requests = model.requests().await;
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].system_prompt, "test|day one");
-    assert_eq!(requests[1].system_prompt, "test|day two");
+    assert_eq!(gateway_prompt_text(&requests[0]), "test|day one");
+    assert_eq!(gateway_prompt_text(&requests[1]), "test|day two");
     assert_eq!(prompts.requests.lock().await.len(), 2);
 }
 
@@ -282,7 +281,7 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
         .await
         .unwrap();
     let mut updated = test_agent();
-    updated.base_system_prompt = "updated globally".into();
+    updated.base_instructions = "updated globally".into();
     runtime.register_agent(updated).await;
     model.push_text("done").await;
     runtime
@@ -300,7 +299,7 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
 })
         .await
         .unwrap();
-    assert_eq!(model.requests().await[0].system_prompt, "test");
+    assert_eq!(gateway_prompt_text(&model.requests().await[0]), "test");
 }
 
 #[tokio::test]

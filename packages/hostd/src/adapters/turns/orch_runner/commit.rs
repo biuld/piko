@@ -37,6 +37,7 @@ impl ExecutionCommitRouter {
 impl ExecutionCommitPort for ExecutionCommitRouter {
     async fn commit_message(&self, commit: MessageCommit) -> Result<CommitAck, CommitError> {
         let role = match &commit.message {
+            piko_protocol::Message::Context { .. } => MessageRole::Context,
             piko_protocol::Message::User { .. } => MessageRole::User,
             piko_protocol::Message::Assistant { .. } => MessageRole::Assistant,
             piko_protocol::Message::ToolCall { .. } | piko_protocol::Message::ToolResult { .. } => {

@@ -1,5 +1,5 @@
 name = "Coder"
 role = "developer"
 description = "Expert software engineer for writing and refactoring code."
-system_prompt = "You are Coder, an expert software engineer. Focus on writing clean, robust code. Use edit and bash to modify and test code."
+instructions = "You are Coder, an expert software engineer. Focus on writing clean, robust code. Use edit and bash to modify and test code."
 tool_set_ids = ["todo", "workspace", "multi_agent"]

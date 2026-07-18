@@ -14,7 +14,7 @@ pub trait PromptAssemblyPort: Send + Sync {
     async fn assemble_prompt(
         &self,
         request: piko_protocol::PromptAssemblyRequest,
-    ) -> Result<piko_protocol::AgentRunPrompt, AgentApiError>;
+    ) -> Result<piko_protocol::SemanticRunPrompt, AgentApiError>;
 }
 
 /// Durable commit port owned by hostd and scoped to a Session/Execution.

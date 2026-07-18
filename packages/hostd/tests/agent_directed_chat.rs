@@ -119,10 +119,12 @@ async fn child_transcript_and_selected_view_persist_independently() {
                 },
                 spec: AgentSpec {
                     id: "worker".into(),
+                    version: "1".into(),
+                    provenance: piko_protocol::PromptSource::new("test", "worker"),
                     name: "Worker".into(),
                     role: "worker".into(),
                     description: None,
-                    base_system_prompt: "Reply directly".into(),
+                    base_instructions: "Reply directly".into(),
                     model: None,
                     thinking_level: None,
                     tool_set_ids: Vec::new(),

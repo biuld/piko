@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    BuildSystemPromptOptions, expand_prompt_template, snapshot_prompt_resources,
+    PromptSnapshotOptions, expand_prompt_template, snapshot_prompt_resources,
 };
 use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
@@ -80,16 +80,37 @@ impl HostApp {
             let state = self.state.lock().await;
             state.session_cwd(&session_id)?
         };
+        let root_agent_instance_id = format!("agent_{session_id}_root");
+        if agent_instance_id == root_agent_instance_id {
+            let context_window = self.resolved_model_context_window().await;
+            self.compact_session_if_needed(
+                &turn_id,
+                &session_id,
+                &agent_instance_id,
+                context_window,
+                tx,
+            )
+            .await;
+        }
         let templates = self.prompt_materials.load_prompt_templates(&cwd);
         let expanded_text = expand_prompt_template(&text, &templates);
         let context_files = self.prompt_materials.load_context_files(&cwd);
-        let skills = self.prompt_materials.load_skills(&cwd).skills;
-        let prompt_resources = snapshot_prompt_resources(BuildSystemPromptOptions {
+        let loaded_skills = self.prompt_materials.load_skills(&cwd);
+        for diagnostic in &loaded_skills.diagnostics {
+            tracing::warn!(
+                kind = ?diagnostic.kind,
+                path = %diagnostic.path.display(),
+                message = %diagnostic.message,
+                "skill omitted from prompt snapshot"
+            );
+        }
+        let skills = loaded_skills.skills;
+        let prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
             skills,
             prompt_templates: templates,
-            ..BuildSystemPromptOptions::default()
+            ..PromptSnapshotOptions::default()
         });
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
@@ -98,7 +119,6 @@ impl HostApp {
             state.session_cwd(&session_id).unwrap_or_default()
         };
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
-        let root_agent_instance_id = format!("agent_{session_id}_root");
         let resume_agent = if agent_instance_id == root_agent_instance_id {
             self.resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
                 .await
@@ -200,19 +220,7 @@ impl HostApp {
         };
 
         if turn_succeeded && agent_instance_id == root_agent_instance_id {
-            let context_window = {
-                let settings = self.settings.lock().await;
-                settings
-                    .compaction
-                    .as_ref()
-                    .and_then(|c| c.reserve_tokens)
-                    .unwrap_or(16384)
-                    + settings
-                        .compaction
-                        .as_ref()
-                        .and_then(|c| c.keep_recent_tokens)
-                        .unwrap_or(20000)
-            };
+            let context_window = self.resolved_model_context_window().await;
             self.compact_session_if_needed(
                 &turn_id,
                 &session_id,

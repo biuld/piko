@@ -8,10 +8,12 @@ async fn declared_tool_sets_expand_into_model_catalog() {
         "main".into(),
         AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "main".into(),
             role: "root".into(),
             description: None,
-            base_system_prompt: "test".into(),
+            base_instructions: "test".into(),
             model: Some("faux-1".into()),
             thinking_level: None,
             tool_set_ids: vec![
@@ -126,10 +128,12 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
         "main".into(),
         AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "main".into(),
             role: "root".into(),
             description: None,
-            base_system_prompt: "test".into(),
+            base_instructions: "test".into(),
             model: Some("faux-1".into()),
             thinking_level: None,
             tool_set_ids: vec!["todo".into()],

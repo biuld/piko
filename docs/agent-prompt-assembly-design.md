@@ -1,598 +1,965 @@
 # Agent Prompt Assembly Design
 
-> Status: normative core implemented; context budgeting and expanded replay diagnostics remain follow-up work
+> Status: normative source of truth; implementation migration is tracked in
+> Section 15
+> Design version: 2
 > Runtime model: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
 > Turn boundary: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)
 > Tool capabilities: [Tool Sets Design](tool-sets-design.md)
 
-## 1. Purpose
+## 1. Status, scope, and normative language
 
-Prompt assembly is a core Agent runtime boundary. It determines which
-instructions, conversation facts, tools, and current environment reach each
-model request.
+This document is the source of truth for how piko constructs every normal
+Agent model request. It defines the target behavior even when current code has
+not completed the migration. Section 15 is the only implementation-status
+section and is non-normative.
 
-This document defines:
+If a related runtime or tool-set document conflicts with this document on
+prompt authority, assembly, caching, provider mapping, or prompt lifetime, this
+document governs that concern.
 
-- which prompt data belongs to AgentSpec, Agent run, Execution, and Model Step;
-- when dynamic prompt resources are loaded and frozen;
-- how system prompt, transcript, current input, tool traffic, and steering are
-  ordered;
-- how resume, recovery, compaction, multi-agent runs, and retries affect prompt
-  construction;
-- which layer owns each decision across hostd, orchd, llmd, and protocol.
+The terms **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
+normative requirements.
 
-The immediate defect motivating this design was that hostd rendered a new
-system prompt for a resumed Turn, overwrote the root AgentSpec with it, and then
-replayed Agent creation. Dynamic prompt changes therefore appeared to storage
-as an AgentSpec idempotency conflict.
+This design covers:
 
-## 2. Core Decision
+- instruction authority and content trust;
+- prompt sources, ordering, provenance, and deterministic assembly;
+- AgentSpec, Agent run, transcript, Model Step, and provider-request lifetimes;
+- host-directed and multi-agent tool-directed inputs;
+- structured tools and provider adaptation;
+- prompt caching, context budgeting, compaction, retries, and recovery;
+- observability, privacy, validation, and replay diagnostics.
 
-Agent configuration and run prompt are different values with different
-lifetimes:
+A normal provider request is not one prompt string. It contains instruction
+messages, conversation messages, structured tools, and request configuration.
+Compaction is a separate LLM workload defined in Section 11.
 
-```text
-AgentSpec                 durable AgentInstance configuration
-    +
-current prompt resources host-owned snapshot for this run
-    +
-resolved tool catalog    orchd capability snapshot for this run
-    ↓
-AgentRunPrompt            immutable system prompt for one Agent run
-    +
-live transcript snapshot changes between Model Steps
-    ↓
-GatewayRequest            one provider request
-```
+## 2. Goals and core decisions
 
-The system prompt is assembled once per Agent run and reused by every Model
-Step in that run. The transcript is rebuilt from committed run state before
-each Model Step.
+### 2.1 Goals
 
-There is no RootTurn or RootTurnContext concept. An Interaction Turn starts one
-root Agent run; child Agents can also run without a hostd Turn. Prompt semantics
-therefore attach to Agent run, not to root identity or Turn identity.
+Prompt assembly MUST provide:
 
-## 3. Concepts and Lifetimes
+1. explicit instruction authority and content-trust boundaries;
+2. deterministic output for identical canonical inputs;
+3. one immutable semantic prompt and tool catalog per Agent run;
+4. provider-neutral semantics with explicit provider-specific mapping;
+5. least-privilege resource and tool visibility;
+6. safe context budgeting and compaction at every Model Step;
+7. stable prompt prefixes suitable for provider prompt caching;
+8. diagnostics and evals without logging secrets by default.
 
-### 3.1 AgentSpec
+Prompt caching is a first-class design goal. It is an optimization only: cache
+enablement, cache misses, or provider cache behavior MUST NOT change prompt
+semantics.
 
-AgentSpec is immutable configuration captured when an AgentInstance is created:
-
-- stable identity metadata such as role and description;
-- `base_system_prompt`, authored in the registered agent definition;
-- model and thinking defaults;
-- declared tool-set ids;
-- a stable capability allow-list, when configured.
-
-AgentSpec does not contain rendered project context, the current date, current
-working directory, discovered skills, prompt-template catalogs, or any other
-resource that can change between runs.
-
-The current protocol field `AgentSpec.system_prompt` becomes
-`AgentSpec.base_system_prompt`. This is a semantic rename, not merely cosmetic:
-storage compares it only as part of immutable AgentInstance creation.
-
-### 3.2 PromptResourceSnapshot
-
-PromptResourceSnapshot is the host-owned input used to assemble a prompt for
-one run. For the root Agent it may include:
-
-- current working directory;
-- current local date and other explicitly supported environment facts;
-- context files such as `AGENTS.md`;
-- visible skill metadata;
-- visible prompt-template metadata;
-- configured system-prompt override or append text;
-- prompt guidelines;
-- trusted product instructions.
-
-The snapshot contains loaded values, not live file handles. Files changing
-after the run starts do not alter an in-flight run.
-
-Prompt-template expansion of the submitted command is separate: expansion
-produces the current user input. Template catalog metadata may also appear in
-the system prompt so the model knows which templates exist.
-
-### 3.3 AgentRunPrompt
-
-AgentRunPrompt is the immutable prompt result for one Agent run:
-
-```rust
-struct AgentRunPrompt {
-    system_prompt: String,
-    assembly_version: u32,
-    source_digest: String,
-}
-```
-
-`source_digest` identifies the canonical assembly inputs and algorithm version.
-It supports diagnostics and tests; it is not Agent identity or an idempotency
-key.
-
-AgentRunPrompt contains only prompt material. Resolved model settings and tool
-definitions belong to the wider run/execution configuration, not inside this
-type.
-
-### 3.4 Conversation transcript
-
-The transcript is the durable ordered message history owned by one
-AgentInstance. It contains:
-
-- user inputs;
-- assistant outputs, including supported reasoning blocks;
-- tool calls;
-- tool results;
-- steering inputs once accepted at a step boundary;
-- explicit compaction/context messages defined by the transcript model.
-
-System prompt text is not a transcript Message. Rebuilding a prompt never
-rewrites historical Messages.
-
-### 3.5 Model Step request
-
-One Model Step sends a GatewayRequest containing:
+### 2.2 Core lifetime model
 
 ```text
-AgentRunPrompt.system_prompt
-current committed Execution transcript
-resolved tool definitions
-resolved model/thinking settings
-run_id + step_id diagnostics
+durable AgentSpec
+    +
+host-owned PromptResourceSnapshot
+    +
+orchd-owned ResolvedToolCatalog
+    ↓
+SemanticRunPrompt + PromptCachePlan          immutable for one Agent run
+    +
+committed AgentInstance transcript           grows between Model Steps
+    ↓
+SemanticModelRequest                         immutable for one Model Step
+    ↓ provider adapter
+ProviderRequest                              one provider attempt
 ```
 
-Every Model Step in the same Agent run uses the same AgentRunPrompt. The
-transcript grows after committed assistant messages, tool calls/results, and
-steering input, so later steps see those new Messages.
+The Agent run, not the Interaction Turn or root identity, owns the frozen
+prompt. A host-directed Interaction Turn may target any AgentInstance. Child
+Agents may run without an Interaction Turn.
 
-## 4. Ownership
+### 2.3 Ownership
 
 | Concern | Owner | Rule |
 |---|---|---|
-| AgentSpec definitions and durable snapshots | hostd | Captured on AgentInstance creation |
-| Context files, skills, templates, cwd, date | hostd | Loaded into PromptResourceSnapshot |
-| Prompt assembly policy and ordering | hostd `PromptAssemblyPort` | Pure deterministic assembly from snapshots and a resolved catalog |
-| Agent run preparation and prompt freeze | AgentRuntime / AgentActor | Resolves catalog; freezes one prompt/catalog pair per accepted run |
-| Transcript mutation and step loop | ExecutionActor | Only committed Messages advance context |
-| Tool discovery and routing | orchd | Derived from captured capability plus run filtering |
-| Provider message adaptation | llmd | Preserves the semantic prompt/message ordering |
-| TUI | none | Submits input and displays results; never assembles prompts |
+| Agent definitions and durable AgentSpec snapshots | hostd | Captured at AgentInstance creation; not silently replaced on resume |
+| Context files, skills, templates, cwd, date, operator prompt settings | hostd | Loaded into a value snapshot at the accepted run boundary |
+| Prompt assembly policy | hostd | Produces semantic blocks, provenance, digest, and cache plan |
+| Tool discovery, filtering, and routing | orchd | Produces one resolved catalog per Agent run |
+| Prompt/catalog freeze and transcript mutation | orchd | Only committed messages advance context |
+| Provider role/content/tool adaptation | llmd | Preserves semantic authority, order, content, and cache boundaries |
+| TUI | none | Submits input and renders state; never assembles prompts |
 
-hostd remains authoritative for project/user prompt resources. orchd must not
-read AGENTS.md, settings, skills, or prompt templates directly from disk.
+hostd MUST remain authoritative for workspace and user prompt resources. orchd
+MUST NOT load `AGENTS.md`, settings, skills, prompt templates, or agent TOMLs
+directly. llmd MUST remain stateless with respect to Sessions and Agents.
 
-AgentRuntime resolves the run's tool catalog, then calls a host-provided
-`PromptAssemblyPort` with the captured AgentSpec, trusted
-PromptResourceSnapshot, and resolved catalog. The returned AgentRunPrompt and
-that exact catalog are frozen together before durable run start. The port is a
-prompt capability, not an Agent/Execution control API.
+## 3. Semantic prompt model
 
-## 5. Assembly Inputs and Ordering
+### 3.1 Instruction authority
 
-The canonical rendered system prompt is assembled in this order:
+Textual order is not an authority model. Every semantic prompt block MUST carry
+an authority independent of where it is rendered. Data-only blocks use `None`:
 
-1. product-level harness instructions;
-2. `AgentSpec.base_system_prompt`;
-3. resolved tool guidance generated from the actual visible tool catalog;
-4. configured prompt guidelines and trusted append/override policy;
-5. project context files in deterministic path order;
-6. visible skill catalog in deterministic name/source order;
-7. prompt-template catalog in deterministic command order;
-8. current environment facts such as date and cwd.
+```rust
+enum InstructionAuthority {
+    Platform,
+    Operator,
+    Agent,
+    Project,
+    User,
+    None,
+}
+```
 
-Each section has an explicit delimiter. Project-controlled content is identified
-by source path and never concatenated as if it were a product instruction.
+Authority is ordered from strongest to weakest as listed above. A lower level
+MUST NOT override a higher level. Runtime authorization, sandboxing, tool
+filtering, approvals, and secret access MUST be enforced outside the model;
+prompt text is not a security boundary.
 
-Custom prompt policy must be explicit:
+| Authority | Typical content | Override policy |
+|---|---|---|
+| Platform | immutable product safety, capability framing, trust rules | never replaceable by settings, projects, Agents, users, or tools |
+| Operator | trusted global deployment policy and administrative additions | replaceable only by operator-owned configuration |
+| Agent | captured AgentSpec role and task behavior | replaceable only through explicit AgentSpec version/update semantics |
+| Project | workspace instructions such as `AGENTS.md` | may guide work but cannot grant tools, bypass policy, or override higher levels |
+| User | current input, follow-ups, and steering | may override Project only when Project or higher policy explicitly delegates; never overrides higher levels |
+| None | tool results, quoted file contents, retrieved content, summaries, metadata facts | data only; instructions inside have no authority |
 
-- `replace_base` replaces product/base prose but not required safety/capability
-  framing;
-- `append` adds text at its defined precedence point;
-- absence uses the standard product plus AgentSpec base prompt.
+Conflicts at the same authority MUST use a declared source policy rather than
+accidental concatenation order:
 
-Assembly is deterministic for identical inputs. Maps and discovered resources
-must be sorted before rendering. The current wall clock is first captured as a
-snapshot value and then rendered; the renderer does not read the clock itself.
+- Platform policy is one versioned set;
+- Operator layers use explicit global/deployment override rules;
+- an AgentInstance uses one captured AgentSpec version;
+- Project files are general-to-specific, with the more specific applicable
+  block taking precedence;
+- User messages are chronological, with later explicit instructions taking
+  precedence when still applicable;
+- `None` blocks never participate in instruction conflict resolution.
 
-## 6. Tool/Prompt Consistency
+### 3.2 Content trust
 
-The textual tool section and the structured `GatewayRequest.tools` must derive
-from the same resolved tool catalog snapshot.
+Authority and trust are separate dimensions:
+
+```rust
+enum ContentTrust {
+    Trusted,
+    WorkspaceControlled,
+    Untrusted,
+}
+```
+
+- Compiled platform policy and operator-owned global configuration are
+  `Trusted`.
+- Workspace agent definitions, context files, skills, and templates are
+  `WorkspaceControlled`. A cloned repository MUST NOT gain Platform or Operator
+  authority merely because its files are rendered into a prompt.
+- Tool results, retrieved content, quoted file bodies, external MCP content,
+  compaction summaries, and model output are `Untrusted` unless a deterministic
+  trusted component explicitly transforms them.
+
+Delimiters such as XML make source boundaries visible but do not create a
+security boundary. Provider adapters MUST use native roles or untrusted-content
+facilities where available and MUST preserve explicit provenance labels when a
+provider cannot represent the full hierarchy.
+
+### 3.3 Canonical block type
+
+The normative prompt representation is structured, not one rendered string:
+
+```rust
+enum PromptBlockKind {
+    Instruction,
+    Context,
+    Catalog,
+    Environment,
+}
+
+struct PromptBlock {
+    id: String,
+    kind: PromptBlockKind,
+    authority: InstructionAuthority,
+    trust: ContentTrust,
+    source: PromptSource,
+    content: String,
+    content_digest: String,
+    cache_scope: CacheScope,
+}
+
+struct SemanticRunPrompt {
+    blocks: Vec<PromptBlock>,
+    assembly_version: u32,
+    source_digest: String,
+    cache_plan: PromptCachePlan,
+}
+```
+
+`PromptSource` MUST identify the source kind and stable locator, such as a
+compiled resource id, settings layer, AgentSpec id/version, canonical file
+path, skill name/path, template command/path, or environment fact name. It MUST
+NOT contain file bodies or secrets.
+
+`content_digest` identifies canonical block content. `source_digest` covers the
+ordered blocks, their authority/trust/source metadata, the resolved tool
+catalog digest, and the assembly algorithm version. Digests are diagnostic and
+cache inputs, never Agent identity or authorization.
+
+### 3.4 Immutable and configurable layers
+
+Custom prompt policy MUST NOT replace Platform blocks. Configuration MAY:
+
+- append or replace Operator blocks when controlled by the operator;
+- select or version an Agent block through explicit AgentSpec lifecycle;
+- append Project blocks through workspace files;
+- add User input through normal transcript semantics.
+
+There is no unrestricted `replace_system_prompt` or `custom_prompt` operation.
+An operator-policy API MUST be authority-scoped and state exactly which
+Operator block ids it replaces.
+
+## 4. Final request composition
+
+```text
+SemanticModelRequest
+├── Request configuration                         not prompt content
+│   ├── provider + model
+│   ├── run_id + step_id
+│   ├── thinking/reasoning settings
+│   └── output limits and retry identity
+│
+├── SemanticRunPrompt                             frozen for the Agent run
+│   ├── ordered PromptBlock[]
+│   │   ├── kind + authority + trust + source
+│   │   ├── canonical content
+│   │   └── content digest + cache scope
+│   ├── assembly version + source digest
+│   └── PromptCachePlan
+│
+├── ConversationContext                          selected for this Model Step
+│   ├── committed prior messages
+│   ├── current user input
+│   └── committed assistant/tool/steering messages from earlier steps
+│
+└── ResolvedToolCatalog                          frozen for the Agent run
+    └── ToolDef[]
+        ├── public name + description
+        ├── strict JSON input schema
+        ├── provenance + version/digest
+        └── execution metadata enforced outside the model
+
+ProviderRequest                                  derived by llmd
+├── native instruction roles/content
+├── ordered conversation messages
+├── structured tools
+└── provider-specific cache controls
+```
+
+`SemanticRunPrompt` is the canonical value. A provider-specific rendered
+system/developer message is a derived artifact and MUST NOT become durable
+Agent configuration.
+
+## 5. Prompt sources, order, and caching class
+
+The canonical block order is strongest authority first, then stable content
+before dynamic content within an authority level:
+
+| Order | Block | Authority / trust | Source | Default cache scope |
+|---:|---|---|---|---|
+| 1 | Platform policy | Platform / Trusted | compiled, versioned host resource | GlobalStable |
+| 2 | Operator instructions | Operator / Trusted | global settings or deployment policy | OperatorStable |
+| 3 | Agent instructions | Agent / Trusted or WorkspaceControlled by provenance | durable AgentSpec snapshot | AgentStable |
+| 4 | Resolved tool guidance, only when provider/model needs textual guidance | Agent / Trusted | generated from the exact resolved catalog | CatalogStable |
+| 5 | Project instructions | Project / WorkspaceControlled | context files in deterministic general-to-specific order | ResourceSnapshot |
+| 6 | Skill catalog metadata | None / WorkspaceControlled | visible skill descriptors and locations | ResourceSnapshot |
+| 7 | Prompt-template catalog metadata | None / WorkspaceControlled | visible command descriptors | ResourceSnapshot |
+| 8 | Environment facts | None / Trusted | captured date, cwd, and explicitly supported facts | RunDynamic |
+
+Empty optional blocks are omitted. Remaining blocks keep canonical order.
+Collections MUST be sorted deterministically before rendering or hashing.
+
+Structured tool definitions are not PromptBlocks. Textual tool guidance
+SHOULD be omitted when the provider's structured tool channel is sufficient.
+If guidance is necessary, it MUST be generated from the same resolved catalog;
+hard-coded available-tool lists are forbidden.
+
+### 5.1 Platform and operator policy
+
+Platform policy defines immutable harness behavior, instruction hierarchy,
+untrusted-data handling, and capability framing. It MUST contain no credentials
+or secrets and MUST NOT claim that prompt text alone enforces authorization.
+
+Operator policy is loaded only from an operator-owned trusted configuration
+boundary. Project settings MUST NOT be promoted to Operator authority.
+
+### 5.2 Agent instructions
+
+Agent instructions come from the captured `AgentSpec`. The AgentSpec MUST
+record its definition provenance and version. Built-in and global operator
+AgentSpecs may be Trusted; workspace AgentSpecs are WorkspaceControlled even
+when they have Agent authority.
+
+Resuming a Session MUST restore the durable AgentSpec snapshot. A changed live
+registry definition MUST NOT silently mutate an existing AgentInstance.
+
+### 5.3 Project context files
+
+Context files are discovered from the workspace root down to the session cwd.
+At each directory, at most one supported file is loaded using this precedence:
+
+```text
+AGENTS.md → AGENTS.MD → CLAUDE.md → CLAUDE.MD
+```
+
+Files are ordered general-to-specific. Each block MUST retain the canonical
+source path and WorkspaceControlled trust. Project instructions MAY guide work
+but MUST NOT modify the runtime tool catalog, sandbox, approvals, provider
+credentials, or higher-authority policy.
+
+### 5.4 Skills
+
+Skill discovery may scan `.piko/skills/` and `.agents/skills/` from cwd toward
+the home boundary. Closer same-named skills win. The final catalog MUST be
+sorted by stable name and source path.
+
+The run prompt contains only visible skill metadata: name, description, and
+location. This catalog is data with no instruction authority. A higher-authority
+Platform or Agent instruction defines when the model may load and apply a skill.
+
+Skill bodies are loaded on demand through an authorized file tool. The loader,
+not skill-controlled frontmatter, assigns body authority from installation
+provenance and trusted policy. A workspace skill defaults to Project authority
+and WorkspaceControlled trust; it cannot promote itself to Agent, Operator, or
+Platform authority.
+
+The catalog MUST be omitted when no authorized tool can load a skill. This
+capability check MUST use an explicit capability, not a hard-coded public tool
+name such as `read`.
+
+### 5.5 Prompt templates and user input
+
+Template metadata may appear as a no-authority catalog. Template bodies never
+become system instructions merely because they came from disk.
+
+When raw host-directed input matches a template command, hostd expands the
+template body and arguments into the current User-authority message before
+durable input commit. Template expansion and template-catalog snapshotting MUST
+occur atomically at the same accepted-run boundary.
+
+The prompt catalog MUST describe commands as host-expanded; it MUST NOT tell the
+model that the model owns slash-command expansion.
+
+### 5.6 Environment facts
+
+Date and cwd are facts with `InstructionAuthority::None`. They are captured
+values, not live reads during rendering. They SHOULD remain in a dynamic suffix
+so they do not invalidate more stable cache prefixes.
+
+## 6. Assembly architecture and sequence
+
+### 6.1 Architecture
+
+```mermaid
+flowchart LR
+    subgraph Inputs[Input paths]
+        HostInput[Host-directed Interaction Turn]
+        ToolInput[Multi-agent tool input]
+    end
+
+    subgraph Hostd[hostd — prompt authority]
+        Materials[Versioned prompt sources<br/>with provenance and trust]
+        Snapshot[PromptResourceSnapshot]
+        Assemble[Semantic PromptAssemblyPort]
+    end
+
+    subgraph Orchd[orchd — Agent run]
+        Spec[Durable AgentSpec]
+        EmptySnapshot[Explicit empty/scoped snapshot]
+        Catalog[ResolvedToolCatalog]
+        RunPrompt[SemanticRunPrompt<br/>+ PromptCachePlan]
+        Transcript[Committed transcript]
+        Request[SemanticModelRequest]
+    end
+
+    subgraph Llmd[llmd — provider adapter]
+        Map[Authority/content mapping<br/>+ cache controls]
+    end
+
+    Provider[Model provider]
+
+    HostInput --> Materials --> Snapshot
+    ToolInput --> EmptySnapshot
+    Snapshot --> Assemble
+    EmptySnapshot --> Assemble
+    Spec --> Assemble
+    Catalog --> Assemble
+    Assemble --> RunPrompt
+    RunPrompt --> Request
+    Transcript --> Request
+    Catalog --> Request
+    Request --> Map --> Provider
+```
+
+### 6.2 Run and Model Step sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Host as hostd
+    participant Tool as Multi-agent tool
+    participant Agent as AgentRuntime / AgentActor
+    participant Prompt as PromptAssemblyPort
+    participant Exec as ExecutionActor
+    participant Llmd as llmd provider adapter
+    participant Model as Model provider
+
+    alt Host-directed input to any selected AgentInstance
+        User->>Host: submit raw input
+        Host->>Host: load and classify resources
+        Host->>Host: expand template and freeze resource snapshot
+        Host->>Agent: SendAgentInput(snapshot, user message)
+    else Multi-agent tool-directed input
+        Tool->>Agent: SendAgentInput(explicit scoped/empty resource policy)
+    end
+
+    Agent->>Agent: use captured AgentSpec and committed transcript
+    Agent->>Agent: resolve and filter tool catalog
+    Agent->>Prompt: assemble(spec, resources, catalog)
+    Prompt-->>Agent: SemanticRunPrompt + cache plan
+    Agent->>Agent: freeze prompt + catalog before durable run start
+    Agent->>Exec: start(prompt, catalog, context, current input)
+    Exec->>Host: durably commit current user input
+
+    loop Every Model Step
+        Exec->>Exec: select context and enforce token budget
+        Exec->>Llmd: SemanticModelRequest
+        Llmd->>Llmd: map authority, content, tools, and cache controls
+        Llmd->>Model: ProviderRequest
+        Model-->>Llmd: streamed events
+        Llmd-->>Exec: semantic gateway events
+        Exec->>Host: durably commit assistant output
+
+        opt Tool calls
+            Exec->>Exec: validate, authorize, execute
+            Exec->>Host: durably commit tool calls and results
+        end
+
+        opt Steering accepted at step boundary
+            Exec->>Host: durably commit steering user message
+        end
+    end
+```
+
+## 7. Run input policies
+
+### 7.1 Host-directed Interaction Turns
+
+A host-directed Turn MAY target root or any selected non-root AgentInstance. It
+receives a host-created resource snapshot according to the target AgentSpec and
+operator policy. Root identity does not grant prompt-resource visibility.
+
+Queued input MUST use one explicit snapshot policy. The normative policy is
+**Interaction-Turn acceptance capture**: template expansion and prompt-resource
+capture occur atomically when hostd accepts the user input, before it returns a
+queued or started disposition. The durable queue retains the expanded User
+message, command identity, and immutable resource snapshot. Later queue delay
+MUST NOT silently change the meaning of already accepted work. A product that
+wants execution-time freshness must expose that as a different explicit policy,
+not reinterpret an existing queued item.
+
+### 7.2 Multi-agent tool-directed runs
+
+Public multi-agent tools MUST NOT supply arbitrary PromptResourceSnapshot or
+system-prompt overrides. They provide a user-authority prompt/message plus an
+explicit resource policy selected from trusted Session capabilities.
+
+The default policy is `BaseOnly`:
+
+- use the target Agent's durable AgentSpec;
+- expose the target's resolved least-privilege tool catalog;
+- do not inherit the caller's rendered prompt or transcript;
+- do not expose project resources unless a trusted policy explicitly grants a
+  scoped snapshot.
+
+Future policies MAY expose a scoped Project block set, but MUST define an
+inheritance matrix per block source and MUST NOT copy a parent's rendered
+provider prompt.
+
+### 7.3 Steering and follow-ups
+
+Steering becomes a durable User-authority message at a safe Model Step boundary
+and does not rebuild the run prompt or catalog.
+
+A follow-up that starts a new Agent run receives a new prompt and catalog under
+the input path's resource policy. Host-directed queued follow-ups use
+start-boundary capture. Tool-directed follow-ups default to `BaseOnly`.
+
+## 8. Transcript and structured tools
+
+### 8.1 Transcript
+
+The transcript is the durable ordered private history of one AgentInstance. It
+contains user messages, assistant messages, tool calls, tool results, steering,
+and explicit context-summary messages selected by the context policy.
+
+Only committed messages enter a later Model Step. System/developer instruction
+messages derived from SemanticRunPrompt are not transcript messages. Rebuilding
+a run prompt never rewrites history.
+
+Tool results, model output, retrieved content, and compaction summaries have no
+instruction authority by default. Provider adapters MUST preserve supported
+text, image, reasoning-signature, and tool content deliberately; silently
+dropping a supported content kind is forbidden.
+
+### 8.2 Structured tools
 
 ```text
 AgentSpec.tool_set_ids
     ∩ registered ToolSets/providers
-    ∩ AgentSpec stable allow-list
-    ∩ optional run-scoped allow-list
+    ∩ stable AgentSpec allow-list
+    ∩ run-scoped allow-list
     ↓
 ResolvedToolCatalog
-    ├── prompt tool guidance
-    └── GatewayRequest.tools
+    ├── provider ToolDef[]
+    ├── execution routes
+    ├── catalog digest/version
+    └── optional generated textual guidance
 ```
 
-Hard-coded prompt tool lists must not claim tools that orchd did not expose.
-Conversely, a structured tool that is intentionally hidden from prompt prose
-must be marked by explicit policy rather than accidental drift.
+ToolDef is the canonical model-facing description. Each definition MUST have a
+stable public name, precise description, strict supported JSON Schema, source
+provenance, and version/digest. Arguments MUST be validated before execution.
 
-The catalog is frozen for the Agent run. Tool execution routing remains live
-only within the same registered capabilities. Configuration changes apply to a
-new run unless explicit hot-reload semantics are later designed.
+Side-effect classification, approval policy, sandbox policy, credentials, and
+authorization MUST be enforced by runtime code. Model-visible annotations MAY
+help tool selection but MUST NOT be the enforcement mechanism.
 
-## 7. Run and Step Sequence
+The exact catalog used for prompt assembly, cache planning, provider tools, and
+execution routes MUST be frozen together. Disabling tool calls MUST produce a
+request and prompt plan derived from an empty effective catalog; it MUST NOT
+leave prose claiming unavailable tools.
 
-```mermaid
-sequenceDiagram
-    participant H as hostd
-    participant R as OrchAgentRunRunner
-    participant A as AgentRuntime / AgentActor
-    participant E as ExecutionActor
-    participant L as llmd
+## 9. Provider adaptation
 
-    H->>H: load PromptResourceSnapshot
-    H->>H: expand submitted prompt template into user input
-    H->>R: run Turn with trusted prompt resources/input
-    R->>A: start Agent run with trusted resource snapshot
-    A->>A: resolve tool catalog
-    A->>H: PromptAssemblyPort(spec, resources, catalog)
-    H-->>A: AgentRunPrompt
-    A->>A: freeze prompt + catalog before durable run start
-    A->>E: start Execution with AgentSpec + AgentRunPrompt + transcript + input
+llmd maps SemanticModelRequest to provider-native roles and content. It MUST:
 
-    loop Model Steps
-        E->>L: GatewayRequest(same system prompt, current transcript, same tools)
-        L-->>E: assistant stream
-        E->>H: commit assistant Message
-        opt tool calls
-            E->>H: commit tool call/results
-        end
-        opt steering accepted
-            E->>H: commit steering user Message
-        end
-    end
+1. preserve authority order and avoid elevating lower-authority blocks when the
+   provider supports a lower role;
+2. keep untrusted data visibly delimited and labeled with provenance;
+3. preserve conversation and tool-call/result ordering;
+4. preserve supported multimodal and reasoning-signature content;
+5. map the exact resolved ToolDef catalog;
+6. apply provider-specific cache controls from PromptCachePlan;
+7. report bounded errors for unsupported required semantics.
 
-    E-->>A: terminal Execution result
+When a provider cannot represent the full authority hierarchy, its adapter MUST
+use a documented deterministic fallback. At minimum it renders strongest
+instructions first, wraps every lower-authority block with authority/trust/source
+metadata, and includes immutable Platform precedence instructions. Runtime
+security MUST remain independent of model compliance.
+
+Each adapter has a version. The adapter version participates in provider-request
+diagnostics and cache keys. Golden request fixtures MUST cover every supported
+provider and content kind.
+
+## 10. Prompt caching
+
+### 10.1 Objective
+
+Prompt caching SHOULD reduce repeated input processing, latency, and cost across
+Model Steps and compatible Agent runs. It MUST preserve identical semantic
+input and MUST be safe to disable globally or per provider.
+
+Caching has five logical layers:
+
+```text
+Global stable prefix
+└── Platform + Operator blocks
+    Agent stable prefix
+    └── Agent block + stable catalog-dependent guidance
+        Resource snapshot prefix
+        └── Project + skill + template blocks
+            Run-dynamic suffix
+            └── environment facts
+                Step-dynamic suffix
+                └── selected conversation messages
 ```
 
-The initial user input must be durably committed before the first Model Step.
-Assistant messages and tool traffic must be durably committed before they can
-appear in the transcript of a later Model Step.
+Provider ordering may place structured tool definitions before or alongside
+instruction messages. PromptCachePlan describes semantic boundaries; llmd maps
+them to provider-specific cache breakpoints or automatic-prefix hints.
 
-AgentRuntime must pass the same catalog value to PromptAssemblyPort and the
-Execution. This prevents prompt prose and structured tools from being assembled
-from different capability snapshots.
+### 10.2 Cache plan
 
-## 8. Root and Child Agent Runs
+```rust
+enum CacheScope {
+    GlobalStable,
+    OperatorStable,
+    AgentStable,
+    CatalogStable,
+    ResourceSnapshot,
+    RunDynamic,
+    NoCache,
+}
 
-### 8.1 Root run
+struct PromptCachePlan {
+    policy: PromptCachePolicy,
+    prefix_segments: Vec<CacheSegment>,
+    semantic_prefix_digest: String,
+}
 
-An Interaction Turn causes hostd to load current project resources and provide
-them through a trusted internal boundary. The resulting AgentRunPrompt applies
-only to the root Agent run bound to that Turn.
+enum PromptCachePolicy {
+    Disabled,
+    ProviderDefault,
+    Ephemeral,
+    Extended,
+}
+```
 
-`turn_id` correlates the run with hostd lifecycle but does not participate in
-prompt assembly beyond diagnostics.
+Each CacheSegment references ordered block digests and, when relevant, the
+catalog digest. `semantic_prefix_digest` remains provider-neutral. llmd derives
+a provider cache key from that digest and the provider mapping. Derived provider
+cache keys MUST include:
 
-### 8.2 Child run
+- semantic assembly version;
+- provider adapter version;
+- provider and model family when required by provider semantics;
+- ordered block authority/trust/content digests;
+- effective structured-tool catalog digest;
+- content/role mapping options that change provider input.
 
-A child Agent run has no Interaction Turn. It starts from the child
-AgentInstance's captured AgentSpec and an explicit prompt-resource policy.
+User messages, tool results, secrets, and other untrusted dynamic content MUST
+NOT be placed in a reusable cross-run segment by default.
 
-Initial policy:
+### 10.3 Stable-prefix rules
 
-- do not inherit or copy the parent's rendered system prompt;
-- use the child AgentSpec base prompt;
-- expose project resources only through a trusted host-provided Session prompt
-  service, if the child spec/policy enables them;
-- treat the parent's tool prompt as user input, never as a system instruction.
+- Stable blocks MUST precede dynamic blocks within compatible authority and
+  provider constraints.
+- Maps, skills, templates, context paths, and tools MUST use canonical order.
+- Date, volatile environment state, run ids, and step ids MUST NOT appear in a
+  stable prompt prefix.
+- Request diagnostics such as run_id and step_id remain request metadata unless
+  a provider strictly requires them in prompt content.
+- A change to any segment invalidates that segment and all following segments,
+  never preceding compatible prefixes.
+- Cache hits and misses MUST NOT alter transcript selection, tools, reasoning,
+  or output limits.
 
-This preserves Agent isolation and avoids silently granting child capabilities
-or instructions inherited from a parent.
+### 10.4 Privacy and observability
 
-## 9. Resume, Reuse, and Configuration Changes
+Provider caching may retain derived provider state. Cache policy MUST therefore
+respect operator data-retention settings, provider capabilities, regional
+requirements, and zero-data-retention modes. Extended caching requires explicit
+operator enablement.
 
-Resuming a Session restores:
+Usage accounting MUST record cache-read and cache-write tokens where available.
+Metrics MAY expose cache policy, segment ids, digests, hit/miss status, token
+savings, and latency. They MUST NOT expose block content by default.
 
-- stable root and child AgentInstance identities;
-- captured AgentSpec snapshots;
-- durable private transcripts and heads;
-- inbox, reports, queue, and lifecycle state.
+## 11. Context budgeting and compaction
 
-It does not regenerate AgentSpec and does not replay `Create` with a newly
-rendered prompt.
-
-When a new input starts after resume:
-
-1. hostd loads current prompt resources;
-2. AgentRuntime resolves tools and obtains a new AgentRunPrompt from the
-   host-provided PromptAssemblyPort;
-3. the existing AgentInstance starts a new run using its captured AgentSpec and
-   existing transcript.
-
-Therefore changes to date, AGENTS.md, skills, templates, or run-scoped tool
-filtering affect the next run without changing Agent identity or AgentSpec.
-
-A changed registered AgentSpec does not silently mutate an existing
-AgentInstance. Supporting that requires a separate versioned AgentSpec update
-or AgentInstance replacement design.
-
-## 10. Steering, Follow-ups, and Queues
-
-Steering belongs to the currently active Agent run:
-
-- it becomes a durable user Message at a Model Step boundary;
-- it does not rebuild AgentRunPrompt;
-- it does not change the visible tool catalog;
-- the next Model Step sees the same system prompt plus the new steering Message.
-
-A follow-up that is accepted as a new Agent run gets a new AgentRunPrompt.
-
-For queued root Turns, prompt resources are loaded when the queued Turn is
-actually started, not when raw text first enters the queue. This ensures the
-new run sees current project resources. The expanded user input and resource
-snapshot must be taken at one documented acceptance boundary so template
-content cannot come from a different revision than its catalog unexpectedly.
-
-## 11. Compaction
-
-Compaction is a separate model workload with its own task-specific system
-prompt. It must not reuse or mutate AgentRunPrompt.
-
-The result of compaction can affect a later Agent run only through the durable
-conversation context selected for that run. A compaction summary is therefore
-transcript/context data, not an AgentSpec field and not a system-prompt append.
-
-The context builder must preserve valid tool-call/tool-result grouping and the
-selected branch/head. Prompt assembly consumes the already selected compacted
-context; it does not decide compaction policy.
-
-### 11.1 Context-window budgeting
-
-Before every Model Step, orchd computes a context budget from the resolved
-model limit:
+Before every Model Step, orchd MUST calculate:
 
 ```text
 input budget
-  = model context limit
-  - reserved output/reasoning budget
+  = provider/model context limit
+  - reserved output budget
+  - reserved reasoning budget
+  - provider safety margin
 
-message budget
+conversation budget
   = input budget
-  - AgentRunPrompt tokens
+  - provider-mapped instruction tokens
   - structured tool-definition tokens
-  - provider framing allowance
+  - provider framing and multimodal tokens
 ```
 
-AgentRunPrompt and the resolved tool catalog remain frozen; the runtime must not
-silently drop instructions or tools to make a request fit. If fixed prompt/tool
-overhead alone exceeds the input budget, the run fails before calling the
-provider with a bounded diagnostic.
+Token counting MUST use the best available provider/model tokenizer or a
+documented conservative estimator. It MUST include tool schemas, images,
+reasoning signatures, and provider-added tool framing when applicable.
 
-Transcript selection may use an already durable compaction summary and retained
-recent Messages. It must preserve message order, selected branch/head, assistant
-tool calls with their tool results, and the current input. Arbitrary prefix
-truncation inside a tool exchange is forbidden.
+Fixed prompt/tool overhead MUST NOT be silently dropped. If it exceeds budget,
+the step fails before the provider call with section-level token diagnostics.
 
-The transcript grows during a tool loop, so budgeting is repeated at each step.
-If it no longer fits, the runtime requests the defined compaction/context
-reduction path at a safe step boundary or fails explicitly when no such path is
-available. It never rebuilds AgentRunPrompt as an overflow workaround.
+Transcript selection MUST preserve:
 
-## 12. Failure, Retry, and Recovery
+- current user input;
+- selected branch/head and message order;
+- assistant tool calls with all corresponding results;
+- valid multimodal message structure;
+- a durable compaction summary plus configured recent messages when compacted.
 
-### 12.1 Assembly failure
+Compaction is a separate LLM workload with its own immutable task prompt and no
+Agent tool catalog. Its summary is Untrusted conversation data, not AgentSpec or
+system-prompt content. Summary creation MUST record source range, summary prompt
+version, model/provider, digest, and first retained message. The next Agent run
+MUST actually select the summary plus retained messages rather than replaying
+the summarized prefix.
 
-If required prompt resources or tool resolution fail before durable run start,
-the Agent run is rejected and hostd terminates the bound Turn as failed. No
-partial AgentSpec update is allowed.
+Budgeting repeats after each tool loop because the transcript grows. If no safe
+compaction/context path fits, the run fails explicitly.
 
-Non-fatal resource diagnostics may omit an invalid optional resource, but the
-omission and source must be observable.
+## 12. Retry, recovery, persistence, and replay
 
-### 12.2 Provider retry
+### 12.1 Retry
 
-A retry of the same Model Step uses the same:
+A provider retry of the same Model Step MUST reuse the same semantic request,
+provider mapping, cache plan, transcript selection, tools, model settings, and
+step identity according to retry policy. It MUST NOT reread files or rebuild a
+prompt.
 
-- AgentRunPrompt;
-- transcript snapshot;
-- resolved tool catalog;
-- model settings;
-- run and step identities according to retry policy.
+### 12.2 Recovery
 
-Re-reading files or rebuilding the prompt during a provider retry is forbidden.
+The baseline process-loss policy MAY interrupt incomplete runs. Exact mid-step
+replay requires persisting, before the first attempt:
 
-### 12.3 Process recovery
+- SemanticRunPrompt or a recoverable encrypted/content-addressed equivalent;
+- effective catalog and model settings;
+- provider adapter version;
+- selected transcript head/range and step request digest;
+- cache policy, without depending on a cache hit.
 
-Current piko policy interrupts incomplete runs after process loss rather than
-resuming their Model Step. Therefore the full AgentRunPrompt need not initially
-be a transcript artifact.
+Rebuilding from current files is not exact replay.
 
-Durable run metadata should record the prompt assembly version and
-`source_digest` for diagnostics. If exact mid-run recovery or replay is later
-required, the complete AgentRunPrompt and resolved tool/model snapshot must be
-persisted before the first Model Step; rebuilding from current files is not
-equivalent.
+### 12.3 Persistence and privacy
 
-## 13. Persistence and Privacy
+The baseline policy is:
 
-Normative initial policy:
+- persist AgentSpec snapshots and provenance;
+- persist transcript messages in Agent JSONL shards;
+- persist run prompt version/digest/cache-plan metadata;
+- persist step request digests and transcript selection metadata;
+- do not append instruction prompts to the user-visible transcript;
+- do not log or project full prompt content by default;
+- never place credentials or authorization secrets in prompt blocks.
 
-- persist AgentSpec snapshots with AgentInstance metadata;
-- persist transcript Messages in Agent JSONL shards;
-- persist Agent run prompt digest/version in internal run metadata;
-- do not append system prompts to the user-visible transcript;
-- do not persist the full rendered AgentRunPrompt solely for convenience.
+Full prompt inspection or replay capture requires explicit operator/user action,
+access control, redaction policy, and retention policy. A system prompt MUST NOT
+be assumed secret.
 
-Diagnostics must not log full prompts by default because context files and
-skills may contain secrets. Debug tooling may expose section names, source
-paths, lengths, versions, and digests. Full prompt inspection requires an
-explicit user action and appropriate redaction policy.
+## 13. Failure and diagnostics
 
-## 14. Target Protocol Shape
+Required assembly inputs fail closed. Tool-catalog ambiguity, duplicate public
+tool names, invalid required prompt resources, unsupported authority mapping,
+or fixed-overhead overflow MUST reject the run or step with a bounded error.
+They MUST NOT silently degrade to an empty catalog or incomplete prompt.
 
-The target contracts separate durable Agent configuration, run prompt, and
-conversation context:
+Optional-resource failures MAY omit a resource only when policy marks it
+optional. Diagnostics MUST include source locator, category, omission reason,
+and digest/length where safe, but not full content.
+
+Normal diagnostics expose:
+
+- assembly and adapter versions;
+- run prompt, catalog, and step request digests;
+- block ids, authority, trust, sources, lengths, and token estimates;
+- cache plan and cache usage;
+- selected transcript range/head and compaction provenance.
+
+## 14. Target protocol and ports
 
 ```rust
 struct AgentSpec {
     id: AgentSpecId,
+    version: String,
+    provenance: PromptSource,
     name: String,
     role: String,
-    description: Option<String>,
-    base_system_prompt: String,
+    base_instructions: String,
     model: Option<String>,
     thinking_level: Option<ThinkingLevel>,
     tool_set_ids: Vec<String>,
     active_tool_names: Option<Vec<String>>,
 }
 
-struct ConversationContext {
-    messages: Vec<Message>,
-    head_message_id: Option<MessageId>,
-}
-
-struct StartExecutionRequest {
-    // identities and input omitted
-    agent_spec: AgentSpec,
-    run_prompt: AgentRunPrompt,
-    context: ConversationContext,
-}
-```
-
-`ConversationContext.system_prompt` is removed. There must be exactly one
-system-prompt source at Execution start: `run_prompt.system_prompt`.
-
-The root Turn adapter needs a trusted PromptResourceSnapshot field in its
-internal input. Public multi-agent tools cannot provide arbitrary resource
-snapshots or system-prompt overrides.
-
-The AgentRuntime boundary additionally needs a host-provided prompt capability:
-
-```rust
 struct PromptAssemblyRequest {
     session_id: SessionId,
     agent_instance_id: AgentInstanceId,
     agent_spec: AgentSpec,
     resources: PromptResourceSnapshot,
-    tool_catalog: Vec<ToolDef>,
+    tool_catalog: ResolvedToolCatalog,
 }
 
-trait PromptAssemblyPort {
-    async fn assemble(request: PromptAssemblyRequest)
-        -> Result<AgentRunPrompt, PromptAssemblyError>;
+struct SemanticRunPrompt {
+    blocks: Vec<PromptBlock>,
+    assembly_version: u32,
+    source_digest: String,
+    cache_plan: PromptCachePlan,
+}
+
+struct StartExecutionRequest {
+    agent_spec: AgentSpec,
+    run_prompt: SemanticRunPrompt,
+    context: ConversationContext,
+    input: MessageContent,
+    tool_catalog: ResolvedToolCatalog,
+    // identities and model configuration omitted
+}
+
+struct SemanticModelRequest {
+    run_prompt: SemanticRunPrompt,
+    transcript: Vec<Message>,
+    tools: ResolvedToolCatalog,
+    model: ResolvedModelSettings,
+    run_id: RunId,
+    step_id: StepId,
 }
 ```
 
-This port is installed as a trusted Session capability. Public multi-agent tools
-cannot call it or supply arbitrary PromptResourceSnapshot values.
+`ConversationContext` has no system-prompt channel. PromptAssemblyPort is a
+trusted Session capability. Public tools cannot call it or construct trusted
+PromptResourceSnapshot values.
 
-## 15. Implementation Boundaries
+## 15. Current implementation status and migration
 
-### Implemented baseline
+This section describes current code and is non-normative.
 
-The runtime now keeps durable `AgentSpec.base_system_prompt` separate from
-per-run resources, restores the durable spec during attach, resolves tools
-before host-owned assembly, and freezes one prompt/catalog pair for the run.
-`ConversationContext` no longer carries a second system-prompt channel. Run
-metadata records the assembly version and prompt digest without persisting the
-full rendered prompt.
+### 15.1 Implemented target path
 
-The remaining work in this design is advanced context budgeting and broader
-provider retry/replay diagnostics; it does not alter the ownership or lifetime
-model defined here.
+- protocol v2 defines authority, trust, source, block, cache-plan,
+  `SemanticRunPrompt`, and `ResolvedToolCatalog` DTOs;
+- `AgentSpec` records a durable version and provenance; workspace definitions
+  remain `WorkspaceControlled` when rendered;
+- hostd snapshots deterministic semantic blocks and assembles block, source,
+  catalog, segment, and stable-prefix digests;
+- the platform block contains no hard-coded available-tool names, skill
+  visibility checks `WorkspaceRead`, and template metadata describes host-side
+  expansion;
+- orchd resolves the effective catalog before assembly, freezes the semantic
+  prompt for the run, routes resolved thinking settings, and fails catalog
+  conflicts explicitly;
+- llmd derives provider messages from authority instead of accepting a rendered
+  system string: Platform/Operator/Agent map to system, while Project and
+  data-only blocks map to labeled context messages;
+- llmd preserves user/assistant images, reasoning content, and reasoning
+  signatures, and maps the cache plan to message breakpoints, provider cache
+  keys, and request cache controls;
+- cache keys include provider, model, assembly version, provider-mapping
+  version, stable semantic prefix, and effective catalog input;
+- compaction now selects summary plus retained messages instead of replaying the
+  summarized prefix, and hostd performs a pre-turn check using the resolved
+  model context window;
+- compaction summaries use a data-only `Message::Context` value with
+  `InstructionAuthority::None` semantics and `Untrusted` trust, even when a
+  provider adapter must encode that context through a user-role message;
+- orchd performs a final fixed-overhead and total-context budget gate before
+  provider dispatch, reserving output, reasoning, provider safety margin, tool
+  framing, and conservative multimodal cost;
+- every ToolDef carries required definition version and provenance; the
+  resolved catalog additionally records canonical contributing sources;
+- malformed skill omissions emit bounded source-path diagnostics without
+  logging skill bodies;
+- diagnostics log identities, counts, versions, and digests without logging
+  prompt bodies.
 
-### hostd
+The stateless `LlmGateway::llm_call(system_prompt, ...)` path is reserved for
+the host-owned compaction summarizer. It is converted immediately into a local
+Platform block and is not used by normal Agent executions.
 
-- split base AgentSpec loading from run prompt resource loading;
-- make prompt assembly pure over explicit snapshot values;
-- load resources once for each started root run;
-- pass a trusted PromptResourceSnapshot without rewriting AgentSpec;
-- restore stored AgentSpec on Session resume.
+### 15.2 Recommended follow-up hardening
 
-### protocol / orchd-api
+These items improve operations and adapter coverage; they do not change the
+semantic request contract implemented above.
 
-- rename AgentSpec system prompt to base system prompt;
-- add AgentRunPrompt at the Agent run/Execution boundary;
-- remove system prompt from ConversationContext;
-- add the internal PromptAssemblyPort needed to bind prompt prose and structured
-  tools to one catalog snapshot;
-- keep run prompt input inaccessible to untrusted LLM tools.
+| Priority | Remaining behavior | Normative completion |
+|---:|---|---|
+| P1 | Cache policy is currently `ProviderDefault`, and cache usage is available only through aggregate usage fields | Add operator policy/retention configuration and per-request cache diagnostics |
+| P1 | Provider mapping has unit coverage but not serialized golden requests for every provider adapter | Add OpenAI, Anthropic, Gemini, and compatible-provider golden fixtures |
 
-### orchd
+## 16. Validation and eval requirements
 
-- resolve one tool catalog per Agent run;
-- invoke PromptAssemblyPort and freeze its AgentRunPrompt with that catalog;
-- pass them unchanged to its internal Execution;
-- reuse the prompt for all Model Steps;
-- recover AgentActors from durable AgentSpec snapshots rather than the live
-  registry;
-- keep child prompt policy explicit.
+### 16.1 Deterministic runtime tests
 
-### llmd
+1. identical canonical inputs produce identical blocks, order, digests, and
+   cache segments;
+2. two Model Steps in one run reuse the identical SemanticRunPrompt/catalog;
+3. only committed messages enter later transcript snapshots;
+4. changing a resource affects the next run, never an in-flight run;
+5. resume reuses AgentSpec and assembles a fresh run prompt;
+6. queued input preserves the expansion and resource snapshot captured at
+   Interaction-Turn acceptance;
+7. child runs do not inherit parent prompt/transcript;
+8. tool prose, ToolDef[], and execution routes use one effective catalog;
+9. retries reuse the exact semantic and provider request;
+10. cache enable/disable and hit/miss do not change semantics;
+11. fixed-overhead overflow fails before provider invocation;
+12. compaction selection preserves summary/current input/tool groups;
+13. logs and Session projections do not expose prompt bodies by default.
 
-- remain stateless;
-- accept the already resolved system prompt, transcript, and tool definitions;
-- preserve ordering and provider-specific system-role adaptation;
-- never load project prompt resources.
+### 16.2 Security and provider evals
 
-### Delivered order
+The eval suite MUST include:
 
-1. Added the target prompt DTOs and pure assembly tests without changing runtime
-   behavior.
-2. Added PromptAssemblyPort to the Session Agent capabilities.
-3. Resolved/froze tool catalog and AgentRunPrompt together at Agent run start.
-4. Routed root Turn resources through the trusted snapshot input.
-5. Restored captured AgentSpec during attach/recovery and removed the dynamic
-   registry override.
-6. Removed `ConversationContext.system_prompt` and the legacy fallback path.
-7. Added resume/resource-change regressions while retaining only the serialized
-   `systemPrompt` field alias needed to read existing schema-v3 sessions.
+- malicious project instructions, skill metadata/body, template bodies, tool
+  results, retrieved content, MCP output, and compaction summaries;
+- attempts by lower authority to override Platform/Operator/Agent policy;
+- tool escalation, approval bypass, secret exfiltration, and prompt leakage;
+- provider golden requests for roles, tools, multimodal blocks, reasoning
+  signatures, and cache boundaries;
+- tool-selection accuracy with filtered catalogs and strict schemas;
+- context-budget edge cases and lost-in-the-middle regressions;
+- compaction fidelity and source-provenance preservation;
+- prompt cache hit rate, cache token usage, latency, and invalidation tests;
+- pinned model-version regression runs before changing production model aliases.
 
-## 16. Validation
+## 17. Invariants
 
-Required tests:
+1. Platform policy is immutable from project, Agent, user, model, and tool input.
+2. Every prompt block has explicit authority, trust, provenance, and digest.
+3. AgentSpec is immutable for the AgentInstance unless an explicit versioned
+   update/replacement protocol runs.
+4. Every accepted Agent run freezes exactly one SemanticRunPrompt and effective
+   tool catalog.
+5. Every Model Step uses that frozen pair and a newly selected committed
+   transcript snapshot.
+6. Prompt caching never changes semantic input or correctness.
+7. Tool definitions, guidance, routes, and execution policy share one resolved
+   catalog snapshot.
+8. Runtime authorization and safety never depend solely on model obedience.
+9. Dynamic resources never mutate an in-flight run.
+10. Child runs never implicitly inherit a parent's rendered prompt/transcript.
+11. Compaction output is untrusted transcript data, not system instruction.
+12. llmd loads no Session/project prompt resources.
+13. Full prompt content is neither logged nor projected by default.
 
-1. two Model Steps in one run use the identical system prompt;
-2. tool results and steering appear only in subsequent transcript snapshots;
-3. changing AGENTS.md between runs changes the next AgentRunPrompt;
-4. changing AGENTS.md during a run does not change later steps in that run;
-5. resume plus new input reuses AgentSpec and assembles a fresh run prompt;
-6. crossing a date boundary does not produce an AgentSpec conflict;
-7. `Create` remains idempotent and still rejects genuinely different immutable
-   AgentSpecs for the same identity;
-8. prompt tool prose and structured tools come from one catalog snapshot;
-9. child runs do not inherit the parent's rendered system prompt;
-10. provider retry reuses the same prompt/transcript/tool snapshot;
-11. prompt rendering is deterministic for identical inputs;
-12. context budgeting preserves tool-call/result groups and current input;
-13. fixed prompt/tool overhead overflow fails before a provider call;
-14. logs and normal session projection do not expose full rendered prompts.
+## 18. Non-goals
 
-The resume regression test must open a schema-v3 Session created with one
-resource/date snapshot, attach it in a new runtime, submit another Turn with a
-different snapshot, and verify successful completion with the same root
-AgentInstance identity.
+- treating prompt text as an authorization or sandbox boundary;
+- exposing arbitrary trusted system-prompt mutation to the model;
+- storing provider-rendered instruction messages as ordinary transcript data;
+- requiring prompt caching for correctness;
+- exact replay without explicit protected replay capture;
+- hot-swapping prompt blocks or tools during an Agent run;
+- silently updating durable AgentSpecs from changed TOML;
+- defining provider pricing or cache economics.
 
-## 17. Non-Goals
+## 19. Code map
 
-- exposing arbitrary system-prompt mutation to the model;
-- storing system prompts as ordinary transcript Messages;
-- making llmd aware of Sessions, Turns, AgentInstances, skills, or AGENTS.md;
-- defining prompt caching economics at provider level;
-- exact replay of historical completed runs in the initial implementation;
-- hot-swapping prompt or tools in the middle of an Agent run;
-- silently updating existing AgentSpec snapshots from changed TOML.
+| Responsibility | Current primary code |
+|---|---|
+| Host-directed snapshot and template expansion | `packages/hostd/src/application/turns/submit.rs` |
+| Context/template loading | `packages/hostd/src/adapters/prompts/loader.rs` |
+| Skill loading | `packages/hostd/src/adapters/prompts/skill_loader.rs` |
+| Agent definition loading | `packages/hostd/src/adapters/prompts/agent_loader.rs` |
+| Semantic resource snapshot and assembly | `packages/hostd/src/domain/prompts/build.rs` |
+| Skill catalog rendering | `packages/hostd/src/domain/prompts/skills.rs` |
+| Template argument expansion | `packages/hostd/src/domain/prompts/template.rs` |
+| Shared prompt DTOs | `packages/protocol/src/prompt.rs` |
+| Tool discovery/filtering | `packages/orchd/src/adapters/tools/registry.rs` |
+| Run prompt/catalog freeze | `packages/orchd/src/runtime/execution/mod.rs` |
+| Transcript and GatewayRequest | `packages/orchd/src/runtime/execution/actor.rs` |
+| Final context-budget gate | `packages/orchd/src/runtime/execution/budget.rs` |
+| Provider adaptation and caching | `packages/llmd/src/executor.rs`, `packages/llmd/src/executor/prompt_mapping.rs` |
+| Compaction prompt | `packages/hostd/src/domain/compaction/summarizer.rs` |
 
-## 18. Invariants
+## 20. Industry references
 
-1. AgentSpec is immutable for the lifetime of an AgentInstance.
-2. AgentSpec contains a base prompt, never a rendered per-run prompt.
-3. Every accepted Agent run has exactly one immutable AgentRunPrompt.
-4. Every Model Step in a run uses that same AgentRunPrompt.
-5. Only committed Messages enter a later Model Step transcript.
-6. Prompt tool guidance and structured tools share one resolved catalog.
-7. Resume never performs semantic Agent creation for an existing identity.
-8. Dynamic resource changes affect a new run, never an in-flight run.
-9. Child runs never implicitly inherit a parent's system prompt.
-10. Compaction prompt and Agent run prompt are separate workloads.
-11. llmd receives resolved prompt data and performs no business resolution.
-12. Full prompt contents are not logged or projected by default.
+The normative security, tool, provider, and caching requirements are informed
+by these primary references:
+
+- [OpenAI Model Spec — chain of command and untrusted data](https://model-spec.openai.com/2025-10-27)
+- [OWASP GenAI LLM01 — Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
+- [OWASP GenAI LLM07 — System Prompt Leakage](https://genai.owasp.org/llmrisk/llm072025-system-prompt-leakage/)
+- [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling)
+- [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)
+- [Anthropic Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+- [Anthropic Tool Use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)

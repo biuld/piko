@@ -155,10 +155,7 @@ async fn mock_turn_runner_completes_turn() {
             agent_instance_id: "agent_session-test_root".into(),
             prompt: "hello".into(),
             source_turn_id: Some("turn-test".into()),
-            prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
-                product_instructions: "system prompt".into(),
-                ..Default::default()
-            }),
+            prompt_resources: Some(piko_protocol::PromptResourceSnapshot::default()),
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
@@ -242,10 +239,7 @@ async fn turn_runner_returns_streaming_events() {
             agent_instance_id: "agent_session-test_root".into(),
             prompt: "hello".into(),
             source_turn_id: Some("turn-test".into()),
-            prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
-                product_instructions: "system prompt".into(),
-                ..Default::default()
-            }),
+            prompt_resources: Some(piko_protocol::PromptResourceSnapshot::default()),
             cwd: "".into(),
             active_tool_names: None,
             session_dir: std::env::temp_dir().join("piko-test-turn-runner"),

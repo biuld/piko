@@ -75,6 +75,17 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "role", rename_all = "camelCase")]
 pub enum Message {
+    /// Data-only context injected by a trusted runtime component. It has no
+    /// User instruction authority even when a provider must render it using a
+    /// user-role transport message.
+    #[serde(rename = "context")]
+    Context {
+        content: MessageContent,
+        trust: crate::ContentTrust,
+        source: crate::PromptSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timestamp: Option<i64>,
+    },
     #[serde(rename = "user")]
     User {
         content: MessageContent,
@@ -139,6 +150,7 @@ pub enum MessageContent {
 impl Message {
     pub fn role(&self) -> &str {
         match self {
+            Message::Context { .. } => "context",
             Message::User { .. } => "user",
             Message::Assistant { .. } => "assistant",
             Message::ToolCall { .. } => "toolCall",

@@ -103,6 +103,8 @@ impl UserInteractionProvider {
         vec![
             ToolDef {
                 name: "ask_user".into(),
+                version: "1".into(),
+                provenance: piko_protocol::PromptSource::new("built-in-tool", "interaction/ask_user"),
                 description: "Ask the user a direct question through the host/TUI.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
@@ -127,6 +129,8 @@ impl UserInteractionProvider {
             },
             ToolDef {
                 name: "request_user_input".into(),
+                version: "1".into(),
+                provenance: piko_protocol::PromptSource::new("built-in-tool", "interaction/request_user_input"),
                 description: "Ask the user one or more structured multiple-choice questions through the host/TUI.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",

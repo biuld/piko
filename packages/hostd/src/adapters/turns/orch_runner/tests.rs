@@ -72,10 +72,12 @@ fn create_command() -> AgentDurableCommand {
         },
         spec: AgentSpec {
             id: "worker".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "worker"),
             name: "Worker".into(),
             role: "worker".into(),
             description: None,
-            base_system_prompt: "work".into(),
+            base_instructions: "work".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: Vec::new(),
@@ -151,10 +153,12 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
                 },
                 spec: AgentSpec {
                     id: "worker".into(),
+                    version: "1".into(),
+                    provenance: piko_protocol::PromptSource::new("test", "worker"),
                     name: "Worker".into(),
                     role: "worker".into(),
                     description: None,
-                    base_system_prompt: "Respond directly".into(),
+                    base_instructions: "Respond directly".into(),
                     model: None,
                     thinking_level: None,
                     tool_set_ids: Vec::new(),
@@ -176,10 +180,12 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
                 },
                 spec: AgentSpec {
                     id: "worker".into(),
+                    version: "1".into(),
+                    provenance: piko_protocol::PromptSource::new("test", "worker"),
                     name: "Worker".into(),
                     role: "worker".into(),
                     description: None,
-                    base_system_prompt: "Respond directly".into(),
+                    base_instructions: "Respond directly".into(),
                     model: None,
                     thinking_level: None,
                     tool_set_ids: Vec::new(),
@@ -286,10 +292,12 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
 fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
     let mut spec = AgentSpec {
         id: "main".into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "Main".into(),
         role: "root".into(),
         description: None,
-        base_system_prompt: "hi".into(),
+        base_instructions: "hi".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: vec!["todo".into(), "workspace".into()],
@@ -311,10 +319,12 @@ fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
 fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback() {
     let root_agent_spec = AgentSpec {
         id: "main".into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "Main".into(),
         role: "root".into(),
         description: None,
-        base_system_prompt: "stable root prompt".into(),
+        base_instructions: "stable root prompt".into(),
         model: None,
         thinking_level: None,
         tool_set_ids: vec![
@@ -330,10 +340,12 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         "main".into(),
         AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "Main".into(),
             role: "root".into(),
             description: None,
-            base_system_prompt: "raw toml".into(),
+            base_instructions: "raw toml".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: vec!["todo".into(), "workspace".into()],
@@ -344,10 +356,12 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         "coder".into(),
         AgentSpec {
             id: "coder".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "coder"),
             name: "Coder".into(),
             role: "worker".into(),
             description: None,
-            base_system_prompt: "code".into(),
+            base_instructions: "code".into(),
             model: None,
             thinking_level: None,
             tool_set_ids: vec!["todo".into(), "workspace".into(), "multi_agent".into()],
@@ -363,7 +377,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         &resolved_specs,
         &root_agent_spec,
     );
-    assert_eq!(root.base_system_prompt, "stable root prompt");
+    assert_eq!(root.base_instructions, "stable root prompt");
     assert!(root.tool_set_ids.iter().any(|id| id == "multi_agent"));
     assert!(root.tool_set_ids.iter().any(|id| id == "user_interaction"));
 
@@ -375,7 +389,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         &resolved_specs,
         &root_agent_spec,
     );
-    assert_eq!(durable_root.base_system_prompt, "raw toml");
+    assert_eq!(durable_root.base_instructions, "raw toml");
     assert!(
         !durable_root
             .tool_set_ids
@@ -391,7 +405,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         &resolved_specs,
         &root_agent_spec,
     );
-    assert_eq!(child.base_system_prompt, "code");
+    assert_eq!(child.base_instructions, "code");
     assert_eq!(
         child.tool_set_ids,
         vec![

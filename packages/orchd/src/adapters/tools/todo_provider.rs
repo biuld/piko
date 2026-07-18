@@ -45,6 +45,8 @@ impl TodoProvider {
         vec![
             ToolDef {
                 name: "todo_write".into(),
+                version: "1".into(),
+                provenance: piko_protocol::PromptSource::new("built-in-tool", "todo/todo_write"),
                 description: "Create or replace a structured task list for your current coding session. Use this to plan and track multi-step work. Each item should have 'id' (number), 'status' (pending/in_progress/completed), and 'content' (description).".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
@@ -74,6 +76,8 @@ impl TodoProvider {
             },
             ToolDef {
                 name: "todo_read".into(),
+                version: "1".into(),
+                provenance: piko_protocol::PromptSource::new("built-in-tool", "todo/todo_read"),
                 description: "Read the current todo list for this task.".into(),
                 input_schema: serde_json::json!({
                     "type": "object",

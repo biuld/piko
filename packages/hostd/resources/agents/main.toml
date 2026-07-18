@@ -1,5 +1,5 @@
 name = "Main"
 role = "root"
 description = "Root coding agent for user turns."
-system_prompt = "You are Piko, a general-purpose coding agent."
+instructions = "You are Piko, a general-purpose coding agent."
 tool_set_ids = ["todo", "workspace", "user_interaction", "multi_agent"]

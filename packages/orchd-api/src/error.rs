@@ -50,6 +50,10 @@ pub enum AgentApiError {
     PersistenceFailed(String),
     #[error("prompt assembly failed: {0}")]
     PromptAssemblyFailed(String),
+    #[error("tool catalog resolution failed: {0}")]
+    ToolCatalogFailed(String),
+    #[error("model context budget exceeded: {0}")]
+    ContextBudgetExceeded(String),
     #[error("runtime unavailable")]
     RuntimeUnavailable,
     #[error("a fresh snapshot is required")]

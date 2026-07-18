@@ -368,6 +368,8 @@ fn required_string(value: &serde_json::Value, name: &str) -> Result<String, Agen
 fn tool(name: &str, description: &str, input_schema: serde_json::Value) -> ToolDef {
     ToolDef {
         name: name.into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("built-in-tool", name),
         description: description.into(),
         input_schema,
         executor: ToolExecutorRef {

@@ -78,6 +78,8 @@ impl OrchAgentRunRunner {
             model_id,
             None,
             None,
+            128_000,
+            4_096,
             &[],
             None,
         )
@@ -92,6 +94,8 @@ impl OrchAgentRunRunner {
         model_id: &str,
         thinking_level: Option<piko_protocol::model::ThinkingLevel>,
         thinking_level_map: piko_protocol::model::ThinkingLevelMap,
+        context_window: u64,
+        max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
     ) -> Self {
@@ -132,6 +136,8 @@ impl OrchAgentRunRunner {
             default_model: ModelRef {
                 provider: provider.to_string(),
                 model_id: model_id.to_string(),
+                context_window,
+                max_output_tokens,
             },
             default_settings,
             runtime: Default::default(),

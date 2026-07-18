@@ -247,6 +247,7 @@ fn append_committed_message(
 fn message_timestamp(message: &Message) -> &i64 {
     const DEFAULT: i64 = 0;
     match message {
+        Message::Context { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
         Message::User { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
         Message::Assistant { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),
         Message::ToolCall { timestamp, .. } => timestamp.as_ref().unwrap_or(&DEFAULT),

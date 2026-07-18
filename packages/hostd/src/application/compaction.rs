@@ -7,6 +7,34 @@ use crate::domain::compaction::{
 use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
+    pub(crate) async fn resolved_model_context_window(&self) -> u64 {
+        let (model, provider, fallback) = {
+            let settings = self.settings.lock().await;
+            let reserve = settings
+                .compaction
+                .as_ref()
+                .and_then(|value| value.reserve_tokens)
+                .unwrap_or(16384);
+            let recent = settings
+                .compaction
+                .as_ref()
+                .and_then(|value| value.keep_recent_tokens)
+                .unwrap_or(20000);
+            (
+                settings.default_model.clone(),
+                settings.default_provider.clone(),
+                reserve + recent,
+            )
+        };
+        self.model_registry
+            .lock()
+            .await
+            .resolve(model.as_deref(), provider.as_deref())
+            .map(|resolved| resolved.model.context_window)
+            .filter(|window| *window > 0)
+            .unwrap_or(fallback)
+    }
+
     pub(crate) async fn compact_session_if_needed(
         &self,
         _command_id: &str,

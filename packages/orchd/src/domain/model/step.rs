@@ -22,6 +22,8 @@ pub struct ModelConfig {
     /// None = use defaults (level.as_str()).
     #[allow(clippy::type_complexity)]
     pub thinking_level_map: ThinkingLevelMap,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
 }
 
 impl ModelConfig {

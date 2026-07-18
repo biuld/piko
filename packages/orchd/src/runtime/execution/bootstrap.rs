@@ -66,6 +66,8 @@ impl AgentExecutionRuntime {
                     provider: c.provider,
                     settings: c.settings,
                     thinking_level_map: c.thinking_level_map,
+                    context_window: config.default_model.context_window,
+                    max_output_tokens: config.default_model.max_output_tokens,
                 })
                 .await;
         }

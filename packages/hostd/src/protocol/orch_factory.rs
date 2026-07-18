@@ -66,6 +66,8 @@ pub(crate) async fn build_orch_turn_runner(
             &resolved.model.id,
             thinking,
             thinking_map,
+            resolved.model.context_window,
+            resolved.model.max_tokens,
             &settings.mcp_servers,
             settings.sandbox.as_ref(),
         )

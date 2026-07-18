@@ -14,7 +14,7 @@ use piko_protocol::tools::ToolDef;
 pub struct GatewayRequest {
     pub provider: String,
     pub model: String,
-    pub system_prompt: String,
+    pub run_prompt: piko_protocol::SemanticRunPrompt,
     pub transcript: Vec<Message>,
     pub tools: Vec<ToolDef>,
     pub run_id: String,

@@ -2,7 +2,9 @@
 
 mod actor;
 mod bootstrap;
+mod budget;
 mod mailbox;
+mod prompt;
 mod scope;
 mod services;
 pub(crate) mod state;
@@ -35,8 +37,8 @@ use crate::runtime::reliability::TerminalSelector;
 use piko_protocol::agents::AgentSpec;
 
 pub(crate) struct PreparedRunContext {
-    pub prompt: piko_protocol::AgentRunPrompt,
-    pub tools: Vec<piko_protocol::ToolDef>,
+    pub prompt: piko_protocol::SemanticRunPrompt,
+    pub tool_catalog: piko_protocol::ResolvedToolCatalog,
     pub routes: HashMap<String, CatalogRoute>,
 }
 
@@ -145,7 +147,6 @@ impl AgentExecutionRuntime {
     pub(crate) async fn prepare_execution(
         &self,
         request: StartExecutionRequest,
-        tools: Vec<piko_protocol::ToolDef>,
         routes: HashMap<String, CatalogRoute>,
     ) -> Result<PreparedExecution, AgentApiError> {
         if !self.accepting.load(Ordering::SeqCst) {
@@ -198,6 +199,7 @@ impl AgentExecutionRuntime {
             status: ExecutionStatus::Accepted,
         };
 
+        let tools = request.tool_catalog.tools.clone();
         let actor = ExecutionActor::new(
             identity,
             request,
@@ -248,23 +250,26 @@ impl AgentExecutionRuntime {
                 tool_set_ids: agent_spec.tool_set_ids.clone(),
                 active_tool_names,
             })
-            .await;
+            .await
+            .map_err(AgentApiError::ToolCatalogFailed)?;
         let scope = self.scope(&request.session_id).await?;
+        let tool_catalog = prompt::resolved_tool_catalog(tools.clone());
+        let frozen_catalog = tool_catalog.clone();
         let assembly = piko_protocol::PromptAssemblyRequest {
             session_id: request.session_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_spec: agent_spec.clone(),
             resources: request.prompt_resources.clone().unwrap_or_default(),
-            tool_catalog: tools.clone(),
+            tool_catalog,
         };
         let prompt = if let Some(port) = &scope.ports().prompt {
             port.assemble_prompt(assembly).await?
         } else {
-            fallback_run_prompt(&assembly)
+            prompt::fallback_run_prompt(&assembly)
         };
         Ok(PreparedRunContext {
             prompt,
-            tools,
+            tool_catalog: frozen_catalog,
             routes,
         })
     }
@@ -317,25 +322,6 @@ impl AgentExecutionRuntime {
                 accepted: true,
             }),
         }
-    }
-}
-
-fn fallback_run_prompt(
-    request: &piko_protocol::PromptAssemblyRequest,
-) -> piko_protocol::AgentRunPrompt {
-    let system_prompt = request.agent_spec.base_system_prompt.clone();
-    let mut tools = request.tool_catalog.clone();
-    tools.sort_by(|left, right| left.name.cmp(&right.name));
-    let catalog_digest_input = serde_json::to_string(&tools)
-        .expect("resolved tool catalog must serialize for prompt diagnostics");
-    let assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION.to_string();
-    piko_protocol::AgentRunPrompt {
-        source_digest: piko_orchd_api::stable_internal_id(
-            "prompt",
-            &[&assembly_version, &system_prompt, &catalog_digest_input],
-        ),
-        assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
-        system_prompt,
     }
 }
 

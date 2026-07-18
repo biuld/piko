@@ -146,6 +146,9 @@ impl Timeline {
         let message_id = event.message_id.clone();
         let message = event.message.clone();
         match &message {
+            Message::Context { .. } => {
+                // Runtime-only context is not a user-authored timeline entry.
+            }
             Message::User { .. } => {
                 let text = crate::text::message_to_text(&message);
                 self.push_user(message_id.clone(), text);

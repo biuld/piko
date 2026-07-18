@@ -18,12 +18,8 @@ pub struct PromptTemplate {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BuildSystemPromptOptions {
-    pub custom_prompt: Option<String>,
-    pub selected_tools: Option<Vec<String>>,
-    pub tool_snippets: Option<std::collections::HashMap<String, String>>,
-    pub prompt_guidelines: Vec<String>,
-    pub append_system_prompt: Option<String>,
+pub struct PromptSnapshotOptions {
+    pub operator_instructions: Vec<String>,
     pub cwd: PathBuf,
     pub context_files: Vec<ContextFile>,
     pub skills: Vec<Skill>,

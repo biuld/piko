@@ -126,26 +126,40 @@ impl McpProvider {
         let tools: Vec<ToolDef> = result
             .tools
             .into_iter()
-            .map(|mcp_tool| ToolDef {
-                name: mcp_tool.name,
-                description: mcp_tool.description,
-                input_schema: mcp_tool.input_schema,
-                executor: ToolExecutorRef {
-                    kind: "mcp".into(),
-                    target: self.id.clone(),
-                    extra: None,
-                },
-                execution_mode: Some(ToolExecutionMode::Sequential),
-                exposure: Some(ToolExposure::Direct),
-                capabilities: Some(vec![ToolCapability::Network]),
-                approval: Some(ToolApprovalRequirement::OnRequest),
-                metadata: Some(ToolMetadata {
-                    title: None,
-                    read_only: Some(false),
-                    destructive: Some(false),
-                    mutates_workspace: Some(false),
-                    produces_artifact: Some(false),
-                }),
+            .map(|mcp_tool| {
+                let version_input = serde_json::json!({
+                    "name": &mcp_tool.name,
+                    "description": &mcp_tool.description,
+                    "inputSchema": &mcp_tool.input_schema,
+                });
+                let version = piko_orchd_api::stable_internal_id(
+                    "mcp-tool",
+                    &[&self.id, &version_input.to_string()],
+                );
+                ToolDef {
+                    name: mcp_tool.name,
+                    version: version.clone(),
+                    provenance: piko_protocol::PromptSource::new("mcp-server", &self.id)
+                        .with_version(version),
+                    description: mcp_tool.description,
+                    input_schema: mcp_tool.input_schema,
+                    executor: ToolExecutorRef {
+                        kind: "mcp".into(),
+                        target: self.id.clone(),
+                        extra: None,
+                    },
+                    execution_mode: Some(ToolExecutionMode::Sequential),
+                    exposure: Some(ToolExposure::Direct),
+                    capabilities: Some(vec![ToolCapability::Network]),
+                    approval: Some(ToolApprovalRequirement::OnRequest),
+                    metadata: Some(ToolMetadata {
+                        title: None,
+                        read_only: Some(false),
+                        destructive: Some(false),
+                        mutates_workspace: Some(false),
+                        produces_artifact: Some(false),
+                    }),
+                }
             })
             .collect();
 

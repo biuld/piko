@@ -114,6 +114,8 @@ fn workspace_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "read".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/read"),
             description:
                 "Read file contents. Supports text files. Output truncated to 2000 lines / 50KB."
                     .into(),
@@ -139,6 +141,8 @@ fn workspace_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "bash".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/bash"),
             description: "Execute a bash command. Output truncated to 2000 lines / 50KB.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -161,6 +165,8 @@ fn workspace_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "edit".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/edit"),
             description: "Edit a file with exact text replacement.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -193,6 +199,8 @@ fn workspace_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "write".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/write"),
             description: "Write content to a file. Creates parent directories.".into(),
             input_schema: serde_json::json!({
                 "type": "object",

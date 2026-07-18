@@ -435,5 +435,5 @@ async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
         !tool_names.contains(&"spawn_agent"),
         "recovery must not replace the durable tool snapshot, got {tool_names:?}"
     );
-    assert_eq!(requests[0].system_prompt, "test");
+    assert_eq!(gateway_prompt_text(&requests[0]), "test");
 }

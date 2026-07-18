@@ -35,19 +35,19 @@ pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
     let project_dir = workspace_root.join(".piko").join("agents");
 
     // Load from global dir first
-    for spec in load_from_dir(&global_dir) {
+    for spec in load_from_dir(&global_dir, "global-agent") {
         agents.insert(spec.id.clone(), spec);
     }
 
     // Load from project dir, overriding global
-    for spec in load_from_dir(&project_dir) {
+    for spec in load_from_dir(&project_dir, "workspace-agent") {
         agents.insert(spec.id.clone(), spec);
     }
 
     agents
 }
 
-fn load_from_dir(dir: &Path) -> Vec<AgentSpec> {
+fn load_from_dir(dir: &Path, provenance_kind: &str) -> Vec<AgentSpec> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -68,7 +68,16 @@ fn load_from_dir(dir: &Path) -> Vec<AgentSpec> {
         };
 
         match parse_agent_toml(agent_id, &content) {
-            Ok(spec) => agents.push(spec),
+            Ok(mut spec) => {
+                spec.version =
+                    piko_orchd_api::stable_internal_id("agent-spec", &[agent_id, &content]);
+                spec.provenance = piko_protocol::PromptSource::new(
+                    provenance_kind,
+                    path.to_string_lossy().replace('\\', "/"),
+                )
+                .with_version(spec.version.clone());
+                agents.push(spec);
+            }
             Err(e) => {
                 tracing::warn!("Failed to parse agent config {}: {}", path.display(), e);
             }
@@ -84,7 +93,7 @@ struct TomlAgentSpec {
     name: String,
     role: String,
     description: Option<String>,
-    system_prompt: String,
+    instructions: String,
     model: Option<String>,
     thinking_level: Option<piko_protocol::model::ThinkingLevel>,
     tool_set_ids: Option<Vec<String>>,
@@ -95,10 +104,12 @@ impl TomlAgentSpec {
     fn into_agent_spec(self, fallback_id: &str) -> AgentSpec {
         AgentSpec {
             id: self.id.unwrap_or_else(|| fallback_id.to_string()),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("unclassified-agent", fallback_id),
             name: self.name,
             role: self.role,
             description: self.description,
-            base_system_prompt: self.system_prompt,
+            base_instructions: self.instructions,
             model: self.model,
             thinking_level: self.thinking_level,
             tool_set_ids: self
@@ -117,7 +128,14 @@ fn built_in_agents() -> HashMap<String, AgentSpec> {
     let mut map = HashMap::new();
     for (agent_id, content) in BUILT_IN_AGENT_RESOURCES {
         match parse_agent_toml(agent_id, content) {
-            Ok(spec) => {
+            Ok(mut spec) => {
+                spec.version =
+                    piko_orchd_api::stable_internal_id("agent-spec", &[agent_id, content]);
+                spec.provenance = piko_protocol::PromptSource::new(
+                    "built-in-agent",
+                    format!("agents/{agent_id}"),
+                )
+                .with_version(spec.version.clone());
                 map.insert(spec.id.clone(), spec);
             }
             Err(error) => {
@@ -192,7 +210,7 @@ mod tests {
 name = "Reviewer"
 role = "reviewer"
 description = "Reviews code."
-system_prompt = "Review carefully."
+instructions = "Review carefully."
 thinking_level = "medium"
 tool_set_ids = ["todo"]
 active_tool_names = ["read"]

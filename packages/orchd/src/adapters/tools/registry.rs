@@ -50,7 +50,7 @@ pub trait ToolRegistry: Send + Sync {
     async fn discover_tools(
         &self,
         context: &ToolDiscoveryContext,
-    ) -> (Vec<ToolDef>, HashMap<String, CatalogRoute>);
+    ) -> Result<(Vec<ToolDef>, HashMap<String, CatalogRoute>), String>;
 
     /// Execute a tool call through its registered provider.
     ///
@@ -267,11 +267,8 @@ impl ToolRegistry for ToolRegistryImpl {
     async fn discover_tools(
         &self,
         context: &ToolDiscoveryContext,
-    ) -> (Vec<ToolDef>, HashMap<String, CatalogRoute>) {
-        let catalog = match self.build_catalog(context).await {
-            Ok(c) => c,
-            Err(_) => return (vec![], HashMap::new()),
-        };
+    ) -> Result<(Vec<ToolDef>, HashMap<String, CatalogRoute>), String> {
+        let catalog = self.build_catalog(context).await?;
 
         // Apply active tool name restrictions
         let tools: Vec<ToolDef> = if let Some(ref active) = context.active_tool_names {
@@ -303,7 +300,7 @@ impl ToolRegistry for ToolRegistryImpl {
             );
         }
 
-        (tools, routes)
+        Ok((tools, routes))
     }
 
     /// Execute a tool call with approval checks.
@@ -617,6 +614,8 @@ mod tests {
     async fn test_project_tool_def_never_approval() {
         let tool = ToolDef {
             name: "test_tool".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test-tool", "test_tool"),
             description: "".into(),
             input_schema: serde_json::json!({}),
             executor: crate::domain::tools::definition::ToolExecutorRef {
@@ -644,6 +643,8 @@ mod tests {
     async fn test_project_tool_def_dangerous_sensitivity() {
         let tool = ToolDef {
             name: "dangerous_tool".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test-tool", "dangerous_tool"),
             description: "".into(),
             input_schema: serde_json::json!({}),
             executor: crate::domain::tools::definition::ToolExecutorRef {

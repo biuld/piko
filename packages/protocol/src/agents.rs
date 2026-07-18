@@ -22,12 +22,13 @@ pub enum AgentStatus {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSpec {
     pub id: String,
+    pub version: String,
+    pub provenance: crate::PromptSource,
     pub name: String,
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(rename = "baseSystemPrompt", alias = "systemPrompt")]
-    pub base_system_prompt: String,
+    pub base_instructions: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Thinking level override for this agent (e.g. "off", "low", "medium", "high").
@@ -72,19 +73,20 @@ mod tests {
     use super::AgentSpec;
 
     #[test]
-    fn agent_spec_reads_legacy_system_prompt_and_writes_base_system_prompt() {
+    fn agent_spec_uses_base_instructions() {
         let spec: AgentSpec = serde_json::from_value(serde_json::json!({
             "id": "main",
+            "version": "1",
+            "provenance": {"kind": "built-in-agent", "locator": "agents/main"},
             "name": "Main",
             "role": "root",
-            "systemPrompt": "durable prompt",
+            "baseInstructions": "durable prompt",
             "toolSetIds": []
         }))
         .unwrap();
-        assert_eq!(spec.base_system_prompt, "durable prompt");
+        assert_eq!(spec.base_instructions, "durable prompt");
 
         let serialized = serde_json::to_value(spec).unwrap();
-        assert_eq!(serialized["baseSystemPrompt"], "durable prompt");
-        assert!(serialized.get("systemPrompt").is_none());
+        assert_eq!(serialized["baseInstructions"], "durable prompt");
     }
 }

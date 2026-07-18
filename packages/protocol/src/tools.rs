@@ -117,6 +117,8 @@ pub struct ToolMetadata {
 #[serde(rename_all = "camelCase")]
 pub struct ToolDef {
     pub name: String,
+    pub version: String,
+    pub provenance: crate::PromptSource,
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,

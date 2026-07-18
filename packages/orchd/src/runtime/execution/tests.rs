@@ -7,6 +7,39 @@ use piko_protocol::execution::{CommitAck, CommitError};
 
 use super::*;
 
+#[test]
+fn context_budget_rejects_fixed_prompt_overhead_before_dispatch() {
+    let prompt = piko_protocol::SemanticRunPrompt {
+        blocks: vec![piko_protocol::PromptBlock {
+            id: "large".into(),
+            kind: piko_protocol::PromptBlockKind::Instruction,
+            authority: piko_protocol::InstructionAuthority::Platform,
+            trust: piko_protocol::ContentTrust::Trusted,
+            source: piko_protocol::PromptSource::new("test", "large"),
+            content: "x".repeat(4_000),
+            content_digest: "digest".into(),
+            cache_scope: piko_protocol::CacheScope::GlobalStable,
+        }],
+        ..Default::default()
+    };
+    let error = super::budget::enforce_context_budget(&prompt, &[], &[], 100, 50, false)
+        .expect_err("fixed overhead must fail closed");
+    assert!(matches!(error, AgentApiError::ContextBudgetExceeded(_)));
+}
+
+#[test]
+fn context_budget_accepts_request_below_window() {
+    let result = super::budget::enforce_context_budget(
+        &piko_protocol::SemanticRunPrompt::default(),
+        &[],
+        &[],
+        10_000,
+        100,
+        false,
+    );
+    assert!(result.is_ok());
+}
+
 struct NoopGateway;
 
 #[async_trait]
@@ -61,20 +94,23 @@ fn request() -> StartExecutionRequest {
         agent_instance_id: "agent".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
+            version: "1".into(),
+            provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "main".into(),
             role: "test".into(),
             description: None,
-            base_system_prompt: String::new(),
+            base_instructions: String::new(),
             model: None,
             thinking_level: None,
             tool_set_ids: Vec::new(),
             active_tool_names: None,
         },
-        run_prompt: piko_protocol::AgentRunPrompt {
-            system_prompt: String::new(),
+        run_prompt: piko_protocol::SemanticRunPrompt {
             assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
             source_digest: "digest".into(),
+            ..Default::default()
         },
+        tool_catalog: piko_protocol::ResolvedToolCatalog::default(),
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
         context: piko_protocol::ConversationContext::empty(),
@@ -104,7 +140,7 @@ async fn dropping_prepared_execution_releases_its_reservation() {
         .await
         .unwrap();
     let prepared = runtime
-        .prepare_execution(request(), Vec::new(), HashMap::new())
+        .prepare_execution(request(), HashMap::new())
         .await
         .unwrap();
     let scope = runtime.scope("session").await.unwrap();
@@ -130,7 +166,7 @@ async fn aborting_task_that_owns_prepared_execution_releases_reservation() {
         .await
         .unwrap();
     let prepared = runtime
-        .prepare_execution(request(), Vec::new(), HashMap::new())
+        .prepare_execution(request(), HashMap::new())
         .await
         .unwrap();
     let scope = runtime.scope("session").await.unwrap();
@@ -160,20 +196,12 @@ async fn prepare_failure_leaves_no_second_reservation_and_can_retry() {
         .await
         .unwrap();
     let first = runtime
-        .prepare_execution(
-            request_with("first", "message-first"),
-            Vec::new(),
-            HashMap::new(),
-        )
+        .prepare_execution(request_with("first", "message-first"), HashMap::new())
         .await
         .unwrap();
     assert!(matches!(
         runtime
-            .prepare_execution(
-                request_with("second", "message-second"),
-                Vec::new(),
-                HashMap::new(),
-            )
+            .prepare_execution(request_with("second", "message-second"), HashMap::new(),)
             .await,
         Err(AgentApiError::ExecutionAlreadyActive)
     ));
@@ -181,11 +209,7 @@ async fn prepare_failure_leaves_no_second_reservation_and_can_retry() {
     assert!(scope.get_execution("second").await.is_none());
     first.rollback().await;
     let retry = runtime
-        .prepare_execution(
-            request_with("second", "message-second"),
-            Vec::new(),
-            HashMap::new(),
-        )
+        .prepare_execution(request_with("second", "message-second"), HashMap::new())
         .await
         .unwrap();
     retry.rollback().await;

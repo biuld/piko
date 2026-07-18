@@ -416,6 +416,7 @@ pub struct ToolCallRef {
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     Assistant,
+    Context,
     ToolResult,
     User,
     Tool,
