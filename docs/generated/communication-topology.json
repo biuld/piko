@@ -246,6 +246,26 @@
     "cancellation": "disconnect_only"
   },
   {
+    "id": "gui.host.process_bridge",
+    "kind": "thread_bridge",
+    "owner": "GuiHostTransport",
+    "producers": [
+      "GuiHostStdoutReaderThread"
+    ],
+    "consumer": "GuiClientBridgePoll",
+    "scope": "process",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "unbounded",
+      "value": {
+        "justification": "blocking host stdout reader crosses into the GPUI foreground poll loop"
+      }
+    },
+    "overflow": "not_applicable",
+    "closure": "process_exited",
+    "cancellation": "disconnect_only"
+  },
+  {
     "id": "hostd.client.output",
     "kind": "client_output",
     "owner": "HostClientConnection",

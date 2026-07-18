@@ -1,7 +1,8 @@
 # Client Core Design
 
-> Status: proposed normative design (not yet implemented)
+> Status: implemented normative baseline; release validation remains tracked in the GUI plan
 > Replaces: `tui-hostd-interaction-design.md`
+> Phase 0 baseline: [Client Core Contract Baseline](client-core-contract-baseline.md)
 > GUI consumer: [GPUI Desktop Client Design](gui-design.md)
 > Execution plan: [GPUI Desktop Client Implementation Plan](gui-implementation-plan.md)
 > Related: [Single-Agent Runtime Model](single-agent-runtime-model.md),

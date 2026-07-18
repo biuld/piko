@@ -1,0 +1,15 @@
+[package]
+name = "piko-client-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Headless hostd projection and product intents for piko frontends"
+
+[dependencies]
+piko-protocol = { path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

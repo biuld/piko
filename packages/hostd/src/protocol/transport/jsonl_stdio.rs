@@ -17,11 +17,10 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = tokio::io::stdout();
     let cwd = std::env::current_dir()?;
     let settings = SettingsManager::create(&cwd)?;
-    let session_root = settings
-        .settings()
-        .session_dir
-        .clone()
+    let session_root = std::env::var("PIKO_SESSION_DIR")
+        .ok()
         .map(PathBuf::from)
+        .or_else(|| settings.settings().session_dir.clone().map(PathBuf::from))
         .unwrap_or_else(JsonlSessionRepository::default_root);
     let (turn_runner, model_executor) = build_orch_turn_runner(&settings.settings())
         .await

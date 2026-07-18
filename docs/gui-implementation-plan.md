@@ -1,9 +1,10 @@
 # GPUI Desktop Client Implementation Plan
 
-> Status: proposed execution plan
+> Status: M0–M3 implemented; M4 automated gates pass and native manual gates remain open
 > Product contract: [GUI Workbench](gui-workbench-feature.md)
 > Architecture: [GPUI Desktop Client Design](gui-design.md)
 > Headless projection: [Client Core Design](client-core-design.md)
+> Phase 0 baseline: [Client Core Contract Baseline](client-core-contract-baseline.md)
 
 ## 1. Objective
 
@@ -53,6 +54,9 @@ These rules apply to every phase:
 
 M1 is the first integration checkpoint, not the first release. M2 satisfies the
 protocol path. M3 adds the required qualitative improvement over the TUI.
+The current workspace reaches M3 and passes the Phase 8 automated commands,
+including the real-hostd smoke. It must not be called M4 until the native macOS
+checklist also passes.
 
 ### 3.1 Multi-Agent Worktree Strategy
 
@@ -181,6 +185,11 @@ architecture decisions while appearing to work on separate files.
 Turn the existing protocol and TUI behavior into explicit implementation cases
 before creating runtime code.
 
+### Status
+
+**Accepted.** Normative cases, ownership map, and resolved assumptions live in
+[Client Core Contract Baseline](client-core-contract-baseline.md).
+
 ### Work
 
 - Record canonical message sequences for:
@@ -222,6 +231,8 @@ No protocol edit is planned up front. If an audit case cannot be expressed:
 - Agent subscription and Conversation Map assumptions are resolved in writing.
 - No unresolved gap blocks Session open, transcript render, submit, stop,
   approval, or interaction.
+
+All exit criteria are satisfied by the contract baseline document.
 
 ## 5. Phase 1 — GPUI Compatibility Spike
 
@@ -420,8 +431,9 @@ sidebars mandatory.
   - Session Sidebar;
   - center Timeline / Activity / Composer / StatusBar;
   - right Inspector with Agent Tree above Conversation Map.
-- Add persisted window-local split sizes, panel collapse state, expansion, and
-  per-Agent tree/map scroll state under `[gui]` only after defaults stabilize.
+- Persist outer split sizes, sidebar visibility, and reduced-motion preference
+  under `[gui]`. Keep focus, map expansion, and per-Agent scroll/follow state
+  window-local until their recovery semantics stabilize.
 - Implement Conversation Map labels, active path, current leaf, preview
   selection, Timeline scroll-to-entry, and explicit Switch Branch action.
 - Route any branch change requiring summary/confirmation through a focused

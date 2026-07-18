@@ -81,3 +81,18 @@ fn apply_overrides_merges_nested_settings() {
 
     assert_eq!(manager.get_compaction_settings(), (false, 100, 300));
 }
+
+#[test]
+fn gui_namespace_is_opaque_and_project_overridable() {
+    let mut manager = SettingsManager::in_memory(HostSettings {
+        gui: Some(serde_json::json!({"session-open": true})),
+        ..HostSettings::default()
+    });
+    assert_eq!(manager.settings().gui.unwrap()["session-open"], true);
+
+    manager.apply_overrides(HostSettings {
+        gui: Some(serde_json::json!({"session-open": false})),
+        ..HostSettings::default()
+    });
+    assert_eq!(manager.settings().gui.unwrap()["session-open"], false);
+}

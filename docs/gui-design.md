@@ -1,11 +1,13 @@
 # GPUI Desktop Client Design
 
-> Status: draft design
+> Status: implemented through M3; M4 automated gates pass and native manual gates remain open
 > Feature contract: [GUI Workbench](gui-workbench-feature.md)
 > Runtime dependency: [Client Core Design](client-core-design.md)
+> Phase 0 baseline: [Client Core Contract Baseline](client-core-contract-baseline.md)
 > Execution plan: [GPUI Desktop Client Implementation Plan](gui-implementation-plan.md)
 > External references: [GPUI](https://gpui.rs/),
 > [GPUI Component](https://longbridge.github.io/gpui-component/docs/components/)
+> Visual system: [Piko GUI UI Guidelines](../packages/gui/docs/ui-guidelines.md)
 
 ## 1. Purpose
 
@@ -142,7 +144,7 @@ product behavior.
 | Activity Center | `Badge`, `Collapsible`, compact rows | Between Timeline and Composer; bounded, not an event log |
 | Conversation Map | `Tree` with custom rows | Lower Inspector panel for selected Agent; not a second Timeline |
 | Settings/transient navigation | `Sheet` | Layer above the Workbench on demand |
-| Pane sizing | `Resizable` | Own outer horizontal and right Inspector vertical persisted sizes |
+| Pane sizing | `Resizable` | Persist outer widths; retain the right Inspector vertical split for the window lifetime |
 | Agent/tool state | `Badge`, `Spinner`, `Collapsible` | Compose into piko-specific rows/cards |
 | Errors | `Notification` | Recoverable transport/command feedback |
 | Shortcuts/help | `Kbd`, `Tooltip`, `Menu` | Display bound actions rather than hardcoded labels where possible |
@@ -158,9 +160,9 @@ responsibilities.
 - Dock/Tiles: too much layout freedom before panel responsibilities stabilize.
 - Full code editor: the Composer needs multi-line text, not LSP or line numbers.
 - DataTable: not required for the first conversation path.
-- Custom title bar: use the native macOS title bar with a dynamic
-  `piko — <project>` title; revisit custom chrome only when requirements are
-  concrete.
+- Fully custom window controls: use GPUI's native-integrated transparent title
+  bar and retain native macOS traffic lights, dragging, and double-click
+  behavior.
 
 ## 7. Workbench Layout
 
@@ -169,17 +171,18 @@ near 760 × 600. Exact platform bounds are validated during the GPUI spike.
 
 ```text
 DesktopApp
-└── Horizontal Resizable
-    ├── SessionSidebar     default 240, minimum 190
-    ├── CenterWorkbench    minimum readable width 680
-    │   ├── TimelineViewport
-    │   ├── ActivityCenter    auto, collapsed 36, maximum 180
-    │   ├── ComposerCard
-    │   └── StatusBar
-    └── InspectorSidebar   default 280, minimum 220
-        └── Vertical Resizable
-            ├── AgentTree         default 40%, minimum 160
-            └── ConversationMap  default 60%, minimum 180
+├── Native-integrated TitleBar
+├── Window canvas + Horizontal Resizable
+│   ├── SessionSidebar island     default 300, minimum 220
+│   ├── CenterWorkbench island    minimum readable width 620
+│   │   ├── TimelineViewport
+│   │   ├── ActivityCenter        auto, collapsed, maximum 180
+│   │   └── ComposerCard
+│   └── Inspector column          default 340, minimum 260
+│       └── Vertical Resizable
+│           ├── AgentTree island         minimum 160
+│           └── ConversationMap island  minimum 180
+└── Edge-to-edge StatusBar
 ```
 
 The center Workbench never depends on a side panel. Responsive layout uses
@@ -225,10 +228,9 @@ success.
 
 The right sidebar is one Inspector surface with two vertically stacked panels.
 Agent Tree and Conversation Map divide its height through a resizable split.
-Their split position and each panel's collapsed state are window-local and
-persisted independently of host state. Collapsing one grants its height to the
-other. The Inspector is hidden as a unit when responsive layout cannot preserve
-the center minimum.
+Their split position is window-local. The Inspector is hidden as a unit when
+responsive layout cannot preserve the center minimum; the narrow Sheet switches
+between the two panels explicitly.
 
 On narrow windows the Inspector opens as a right Sheet. It presents Agent Tree
 or Conversation Map one at a time with an explicit panel switcher, preserving
@@ -541,6 +543,10 @@ milestone sequence is:
 7. UX/rendering hardening;
 8. regression and release gate.
 
+GUI crate operator docs for M4 live under `packages/gui/docs/` (`launch.md`,
+`known-limitations.md`, `support.md`, `release-checklist.md`,
+`dependency-pins.md`, `manual-ux-checklist.md`).
+
 Every phase keeps the single-column Workbench path operational. Dock/Tiles,
 multiple windows, TUI migration, and complete feature parity remain deferred.
 
@@ -555,6 +561,6 @@ multiple windows, TUI migration, and complete feature parity remain deferred.
 | GUI and TUI semantics drift | Shared normative cases and scenario comparison |
 | Three-pane layout crowds the conversation | Enforce center minimum and collapse outer sidebars responsively |
 | Two Inspector trees appear interchangeable | Distinct titles, row vocabulary, and selection effects; Agent Tree answers who, Conversation Map answers where |
-| Inspector trees become too short | Let either tree collapse and use one-at-a-time trees in the narrow Sheet |
+| Inspector trees become too short | Use the resizable vertical split and one-at-a-time trees in the narrow Sheet |
 | Activity reduces Timeline height | Collapse quiet state to one row and cap expanded height; overflow scrolls internally |
 | Activity duplicates StatusBar or toast content | StatusBar is ambient summary, Activity is inspectable/actionable state, and toasts are short-lived feedback |

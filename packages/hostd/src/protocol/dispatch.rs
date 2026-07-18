@@ -312,6 +312,10 @@ impl HostServer {
                         .tui
                         .clone()
                         .unwrap_or(serde_json::Value::Object(Default::default())),
+                    "gui" => settings
+                        .gui
+                        .clone()
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
                     _ => serde_json::Value::Object(Default::default()),
                 };
                 Ok(vec![ServerMessage::CommandResponse {

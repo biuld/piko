@@ -272,6 +272,26 @@ pub mod contracts {
         }
     );
     contract!(
+        GuiHostBridge,
+        ThreadBridgeContract,
+        GUI_HOST_BRIDGE,
+        CommunicationSpec {
+            id: "gui.host.process_bridge",
+            kind: CommunicationKind::ThreadBridge,
+            owner: "GuiHostTransport",
+            producers: &["GuiHostStdoutReaderThread"],
+            consumer: "GuiClientBridgePoll",
+            scope: CommunicationScope::Process,
+            delivery: DeliveryGuarantee::InMemory,
+            capacity: CapacityPolicy::Unbounded {
+                justification: "blocking host stdout reader crosses into the GPUI foreground poll loop",
+            },
+            overflow: OverflowPolicy::NotApplicable,
+            closure: ClosureMeaning::ProcessExited,
+            cancellation: CancellationMeaning::DisconnectOnly,
+        }
+    );
+    contract!(
         HostCommandOutput,
         MailboxContract,
         HOST_COMMAND_OUTPUT,
@@ -305,6 +325,7 @@ pub mod contracts {
         APPROVAL_REPLY,
         INTERACTION_REPLY,
         TUI_HOST_BRIDGE,
+        GUI_HOST_BRIDGE,
         HOST_COMMAND_OUTPUT,
     ];
 }

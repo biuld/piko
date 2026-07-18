@@ -50,6 +50,9 @@ pub struct HostSettings {
     /// The TUI owns the schema; hostd just stores and forwards it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tui: Option<serde_json::Value>,
+    /// GUI-specific settings stored as an opaque JSON value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gui: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -290,6 +293,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
             overrides.mcp_servers
         },
         tui: overrides.tui.or(base.tui),
+        gui: overrides.gui.or(base.gui),
     }
 }
 

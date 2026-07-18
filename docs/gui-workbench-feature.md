@@ -1,6 +1,6 @@
 # GUI Workbench
 
-> Status: draft feature contract
+> Status: implemented feature contract; automated gates pass and native M4 UX validation remains open
 
 ## Overview
 
@@ -106,8 +106,8 @@ second transcript.
 - The Timeline shows the selected Agent's active branch in chronological order.
 - User, assistant, tool, thinking, system, and error content have distinct but
   visually related presentation.
-- Assistant Markdown and code blocks are selectable and readable at desktop
-  widths.
+- Assistant Markdown and code blocks are readable at desktop widths. Rendered
+  transcript selection/export is deferred; Composer selection remains native.
 - Tool calls are compact by default and can be expanded to inspect arguments,
   results, and failure details.
 - Realtime assistant output appears as an in-progress entry and becomes the
@@ -261,13 +261,14 @@ authority before the matching host event or reconciliation.
 - Closing both outer sidebars returns to the single-column Workbench with
   no loss of functionality.
 - Sidebar visibility, size, expansion, and selection are presentation state.
-- Sidebar visibility and size may later persist under `[gui]`.
+- Sidebar visibility and size persist under hostd's opaque `[gui]` namespace.
 
 ## Configuration
 
-GUI-specific settings use the `[gui]` namespace stored by hostd. The initial
-slice needs only defaults; persistence of panel sizes, visibility, typography,
-and animation preferences is deferred until those controls are stable.
+GUI-specific settings use the `[gui]` namespace stored by hostd. Panel sizes,
+sidebar visibility, and reduced-motion preference persist there. Typography,
+map expansion, focus, drafts, and per-Agent scroll/follow state remain
+frontend-local until their controls and recovery semantics are stable.
 
 Physical GUI shortcuts are frontend-specific even when their action names match
 TUI command intent.
