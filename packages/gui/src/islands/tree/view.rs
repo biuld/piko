@@ -1,4 +1,4 @@
-//! Tree island: Entity-owned conversation tree navigation.
+//! Tree island: Entity-owned conversation tree (display / navigation preview).
 //!
 use gpui::*;
 
@@ -9,8 +9,8 @@ use crate::chrome::{IslandId, IslandMsg, IslandSessionPhase};
 use super::render::render_tree_panel;
 use super::vm::ConversationTreeViewModel;
 
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
+type IdClickFactory =
+    Box<dyn Fn(String) -> Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>;
 
 pub struct TreeIsland {
     focus_handle: FocusHandle,
@@ -53,10 +53,6 @@ impl TreeIsland {
 
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Tree, msg, window, cx);
-    }
-
-    fn on_switch_branch(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.emit(IslandMsg::SwitchBranch, window, cx);
     }
 
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -115,15 +111,12 @@ impl Render for TreeIsland {
             }
         });
 
-        let on_switch_branch: ClickHandler = Box::new(cx.listener(Self::on_switch_branch));
-
         let panel = render_tree_panel(
             &self.vm,
             self.phase,
             self.chrome_focused,
             on_tree_activate,
             on_tree_toggle_expand,
-            on_switch_branch,
         );
 
         div()

@@ -51,7 +51,10 @@ impl RenderOnce for IslandContentViewport {
                         div()
                             .w_full()
                             .px(m.space_xs)
-                            .py(m.space_xs)
+                            // No top pad here: header islands sit under the
+                            // 40px header; Timeline owns top inset via its
+                            // spacer (`panel_header_title_inset`).
+                            .pb(m.space_xs)
                             .child(self.body),
                     ),
             )

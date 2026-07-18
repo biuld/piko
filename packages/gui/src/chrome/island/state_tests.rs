@@ -1,6 +1,6 @@
 //! Lightweight tests for island content-state helpers (no GPUI widgets).
 
-use crate::chrome::island_state::{IslandBody, IslandMedia, IslandPlaceholder};
+use crate::chrome::island::{IslandBody, IslandMedia, IslandPlaceholder};
 
 #[test]
 fn placeholder_builder_sets_fields() {

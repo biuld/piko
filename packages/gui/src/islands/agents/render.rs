@@ -1,20 +1,27 @@
 //! Compact file-tree-style rendering for Agent instances.
 
-use gpui::prelude::FluentBuilder;
+use std::collections::HashSet;
+
 use gpui::*;
 
-use crate::chrome::{IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase};
-use crate::theme::{RoleAccent, metrics, tokens};
+use crate::chrome::{
+    IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
+    TreeRowSpec, render_tree_list,
+};
+use crate::theme::metrics;
 
-use super::vm::{AgentTreeNode, AgentTreeViewModel};
+use super::vm::{AgentTreeNode, AgentTreeViewModel, agent_node_visible};
 
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type ClickHandler = TreeClickHandler;
+type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
 
 pub fn render_agent_tree_panel(
     vm: &AgentTreeViewModel,
+    collapsed: &HashSet<String>,
     phase: IslandSessionPhase,
     focused: bool,
-    on_select: impl Fn(String) -> ClickHandler,
+    on_select: IdClickFactory,
+    on_toggle: IdClickFactory,
 ) -> impl IntoElement {
     let header = IslandHeader::title("Agents");
     match phase {
@@ -43,94 +50,71 @@ pub fn render_agent_tree_panel(
         .header(header)
         .focused(focused)
         .into_any_element(),
-        IslandSessionPhase::Ready => {
-            IslandPanel::new("agent-tree", render_agent_tree_body(vm, on_select))
-                .header(header)
-                .focused(focused)
-                .into_any_element()
-        }
+        IslandSessionPhase::Ready => IslandPanel::new(
+            "agent-tree",
+            render_agent_tree_body(vm, collapsed, &on_select, &on_toggle),
+        )
+        .header(header)
+        .focused(focused)
+        .into_any_element(),
     }
 }
 
-pub fn render_agent_tree_body(
+fn render_agent_tree_body(
     vm: &AgentTreeViewModel,
-    on_select: impl Fn(String) -> ClickHandler,
+    collapsed: &HashSet<String>,
+    on_select: &IdClickFactory,
+    on_toggle: &IdClickFactory,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .children(vm.nodes.iter().enumerate().map(|(ix, node)| {
-            let handler = on_select(node.agent_instance_id.clone());
-            render_agent_node(ix, node, handler)
-        }))
-}
-
-fn render_agent_node(ix: usize, node: &AgentTreeNode, on_click: ClickHandler) -> impl IntoElement {
-    let t = tokens();
-    let m = metrics();
-    let marker = if node.has_children { "▾" } else { "•" };
-    div()
-        .id(SharedString::from(format!("agent-tree-{ix}")))
-        .h(px(32.))
-        .w_full()
-        .px(m.space_sm)
-        .flex()
-        .items_center()
-        .gap(m.space_xs)
-        .rounded_sm()
-        .cursor_pointer()
-        .hover(|style| style.bg(t.elevated_rgba()))
-        .when(node.selected, |d| d.bg(t.elevated_rgba()))
-        .children(tree_guides(node.depth))
-        .child(
-            div()
-                .w(px(16.))
-                .flex_shrink_0()
-                .text_center()
-                .text_size(m.meta_size)
-                .text_color(if node.selected {
-                    t.role_accent(RoleAccent::Accent)
-                } else {
-                    t.muted_fg_rgba()
-                })
-                .child(marker),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(m.label_size)
-                .line_height(m.label_line_height)
-                .when(node.selected, |d| {
-                    d.font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.role_accent(RoleAccent::Accent))
-                })
-                .child(node.name.clone()),
-        )
-        .child(
-            div()
-                .flex_shrink_0()
-                .text_size(m.meta_size)
-                .line_height(m.meta_line_height)
-                .text_color(t.muted_fg_rgba())
-                .child(format!("{} · {}", node.role, node.activity_label)),
-        )
-        .on_click(move |ev, window, cx| on_click(ev, window, cx))
-}
-
-pub fn tree_guides(depth: usize) -> Vec<AnyElement> {
-    let t = tokens();
-    (0..depth)
-        .map(|_| {
-            div()
-                .w(px(16.))
-                .h_full()
-                .flex_shrink_0()
-                .border_l_1()
-                .border_color(t.border_rgba())
-                .into_any_element()
+    let meta_size = metrics().meta_size;
+    let meta_line = metrics().meta_line_height;
+    let rows: Vec<_> = vm
+        .nodes
+        .iter()
+        .filter(|node| agent_node_visible(node, &vm.nodes, collapsed))
+        .map(|node| {
+            let id = node.agent_instance_id.clone();
+            let activate = on_select(id.clone());
+            let toggle = if node.has_children {
+                Some(on_toggle(id))
+            } else {
+                None
+            };
+            (
+                agent_row_spec(node, collapsed, meta_size, meta_line),
+                activate,
+                toggle,
+            )
         })
-        .collect()
+        .collect();
+    render_tree_list(rows)
+}
+
+fn agent_row_spec(
+    node: &AgentTreeNode,
+    collapsed: &HashSet<String>,
+    meta_size: Pixels,
+    meta_line: Pixels,
+) -> TreeRowSpec {
+    let trailing = div()
+        .flex_shrink_0()
+        .text_size(meta_size)
+        .line_height(meta_line)
+        .text_color(crate::theme::tokens().muted_fg_rgba())
+        .child(format!("{} · {}", node.role, node.activity_label))
+        .into_any_element();
+
+    TreeRowSpec {
+        id: SharedString::from(node.agent_instance_id.clone()),
+        depth: node.depth,
+        has_children: node.has_children,
+        expanded: !collapsed.contains(&node.agent_instance_id),
+        selected: node.selected,
+        emphasized: false,
+        show_guides: true,
+        label: SharedString::from(node.name.clone()),
+        label_color: None,
+        leading: None,
+        trailing: Some(trailing),
+    }
 }

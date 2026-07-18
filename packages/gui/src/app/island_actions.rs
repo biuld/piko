@@ -1,4 +1,4 @@
-//! DesktopApp layout chrome: panes, sheets, tree navigation, branch switch.
+//! DesktopApp layout chrome: panes, sheets, and tree navigation.
 
 use std::collections::{HashMap, HashSet};
 
@@ -7,14 +7,13 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Placement, WindowExt};
-use piko_client_core::ClientIntent;
 
 use crate::chrome::IslandId;
 use crate::islands::{
     default_tree_expansion, derive_conversation_tree, derive_timeline, prune_tree_expansion,
 };
 
-use super::desktop_app::{DesktopApp, ToggleAgentsTree, ToggleSessions};
+use super::desktop_app::{DesktopApp, ToggleRightColumn, ToggleSessions};
 
 impl DesktopApp {
     pub(crate) fn layout(&self) -> &super::layout_state::LayoutState {
@@ -48,20 +47,20 @@ impl DesktopApp {
         }
     }
 
-    pub(crate) fn action_toggle_agents_tree(
+    pub(crate) fn action_toggle_right_column(
         &mut self,
-        _: &ToggleAgentsTree,
+        _: &ToggleRightColumn,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match self.layout.breakpoint {
             super::layout_state::LayoutBreakpoint::Wide => {
-                self.layout.toggle_agents_tree();
+                self.layout.toggle_right_column();
                 self.persist_gui_config();
                 cx.notify();
             }
             _ => {
-                self.open_agents_tree_sheet(window, cx);
+                self.open_right_column_sheet(window, cx);
             }
         }
     }
@@ -77,7 +76,7 @@ impl DesktopApp {
         self.focus_island(IslandId::Sessions, window, cx);
     }
 
-    pub(crate) fn open_agents_tree_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_right_column_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.island_focus.save_and_focus(IslandId::Agents);
         self.apply_island_focus_chrome(cx);
         let agents_height = self.layout.agents_height;
@@ -86,7 +85,7 @@ impl DesktopApp {
         let tree = self.tree.clone();
         window.open_sheet_at(Placement::Right, cx, move |sheet, _window, _cx| {
             let entity_resize = entity.clone();
-            sheet.child(crate::chrome::render_agents_tree_entities(
+            sheet.child(crate::chrome::render_right_column(
                 agents.clone(),
                 tree.clone(),
                 true,
@@ -170,73 +169,6 @@ impl DesktopApp {
         }
     }
 
-    pub(crate) fn confirm_switch_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(entry_id) = self.tree_preview_entry_id.clone() else {
-            return;
-        };
-        let entity = cx.entity().downgrade();
-        let entry_for_ok = entry_id.clone();
-        let m = crate::theme::metrics();
-
-        window.open_dialog(cx, move |dialog, _window, _cx| {
-            dialog
-                .title("Switch Branch")
-                .overlay_closable(false)
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(m.space_sm)
-                        .child(
-                            div()
-                                .text_size(m.body_size)
-                                .line_height(m.body_line_height)
-                                .child(
-                                    "Navigate the session to the selected entry? The current branch will be summarized.",
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap(m.space_sm)
-                                .child(
-                                    Button::new("branch-confirm")
-                                        .primary()
-                                        .label("Switch")
-                                        .on_click({
-                                            let entity = entity.clone();
-                                            let entry_id = entry_for_ok.clone();
-                                            move |_, window, cx| {
-                                                if let Some(view) = entity.upgrade() {
-                                                    view.update(cx, |this, cx| {
-                                                        this.bridge_mut().intent(
-                                                            ClientIntent::NavigateSession {
-                                                                entry_id: entry_id.clone(),
-                                                                summarize: true,
-                                                                custom_instructions: None,
-                                                            },
-                                                        );
-                                                        this.tree_preview_entry_id = None;
-                                                        window.close_dialog(cx);
-                                                        this.refresh_islands(cx);
-                                                        cx.notify();
-                                                    });
-                                                }
-                                            }
-                                        }),
-                                )
-                                .child(Button::new("branch-cancel").label("Cancel").on_click(
-                                    |_, window, cx| {
-                                        window.close_dialog(cx);
-                                    },
-                                )),
-                        ),
-                )
-                .footer(|_, _, _, _| Vec::<AnyElement>::new())
-                .on_cancel(|_, _, _| true)
-        });
-    }
-
     pub(crate) fn tree_expanded_for_selected(&self) -> HashSet<String> {
         let agent = self.selected_agent_id_pub().unwrap_or_else(|| "_".into());
         self.tree_expanded_by_agent
@@ -299,8 +231,8 @@ pub(crate) fn render_pane_toggles(
     entity: WeakEntity<DesktopApp>,
 ) -> impl IntoElement {
     let show_session = app.layout().is_docked_visible(IslandId::Sessions, true);
-    let show_agents_tree = app.layout().any_agents_tree_docked(true);
-    let need_bar = !show_session || !show_agents_tree;
+    let show_right = app.layout().any_right_column_docked(true);
+    let need_bar = !show_session || !show_right;
     let t = crate::theme::tokens();
     let m = crate::theme::metrics();
     div().when(need_bar, |d| {
@@ -328,15 +260,15 @@ pub(crate) fn render_pane_toggles(
                         .compact(),
                 )
             })
-            .when(!show_agents_tree, |d| {
+            .when(!show_right, |d| {
                 let entity = entity.clone();
                 d.child(
-                    Button::new("open-agents-tree")
+                    Button::new("open-right-column")
                         .label("Agents")
                         .on_click(move |_, window, cx| {
                             if let Some(view) = entity.upgrade() {
                                 view.update(cx, |this, cx| {
-                                    this.action_toggle_agents_tree(&ToggleAgentsTree, window, cx);
+                                    this.action_toggle_right_column(&ToggleRightColumn, window, cx);
                                 });
                             }
                         })

@@ -1,21 +1,26 @@
 //! Session sidebar panel body for [`super::SessionsIsland`].
 
-use gpui::prelude::FluentBuilder;
+use std::collections::HashSet;
+
 use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 
-use crate::chrome::{IslandHeader, IslandPanel, IslandPlaceholder};
+use crate::chrome::{
+    IslandHeader, IslandPanel, IslandPlaceholder, TreeClickHandler, TreeRowSpec, render_tree_list,
+};
 use crate::projections::{SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel};
 use crate::theme::{metrics, tokens};
 
-pub(crate) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub(crate) type ClickHandler = TreeClickHandler;
 pub(crate) type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
 
 pub(crate) fn render_sidebar_panel(
     vm: &SidebarViewModel,
+    collapsed: &HashSet<String>,
     on_new_session: ClickHandler,
     on_open_session: IdClickFactory,
+    on_toggle_dir: IdClickFactory,
     focused: bool,
 ) -> IslandPanel {
     let new_session = Button::new("new-session")
@@ -42,99 +47,127 @@ pub(crate) fn render_sidebar_panel(
         .focused(focused);
     }
 
-    let body = div().w_full().flex().flex_col().children(
-        vm.groups
-            .iter()
-            .enumerate()
-            .map(|(gix, group)| render_cwd_group(gix, group, &on_open_session)),
-    );
+    let body = render_tree_list(flatten_session_rows(
+        vm,
+        collapsed,
+        &on_open_session,
+        &on_toggle_dir,
+    ));
 
     IslandPanel::new("sessions-island", body)
         .header(header)
         .focused(focused)
 }
 
-fn render_cwd_group(
-    gix: usize,
-    group: &SidebarGroup,
-    on_open: &IdClickFactory,
-) -> impl IntoElement {
-    let m = metrics();
-    let t = tokens();
-    let group_id = if group.cwd.is_empty() {
-        format!("session-group-pending-{gix}")
+fn group_key(group: &SidebarGroup) -> String {
+    if group.cwd.is_empty() {
+        String::new()
     } else {
-        format!("session-group-{}", group.cwd)
-    };
-    div()
-        .id(SharedString::from(group_id))
-        .w_full()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .px(m.space_sm)
-                .pt(if gix == 0 { m.space_xs } else { m.space_sm })
-                .pb(m.space_xs)
-                .text_size(m.meta_size)
-                .line_height(m.meta_line_height)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(t.muted_fg_rgba())
-                .truncate()
-                .child(group.label.clone()),
-        )
-        .children(group.rows.iter().enumerate().map(|(rix, row)| {
-            let handler = on_open(row.session_id.clone());
-            render_session_row(gix, rix, row, handler)
-        }))
+        group.cwd.clone()
+    }
 }
 
-fn render_session_row(
-    gix: usize,
-    rix: usize,
-    row: &SessionRow,
-    on_click: ClickHandler,
-) -> impl IntoElement {
+fn flatten_session_rows(
+    vm: &SidebarViewModel,
+    collapsed: &HashSet<String>,
+    on_open: &IdClickFactory,
+    on_toggle: &IdClickFactory,
+) -> Vec<(TreeRowSpec, ClickHandler, Option<ClickHandler>)> {
     let m = metrics();
+    let t = tokens();
+    let mut out = Vec::new();
+
+    for group in &vm.groups {
+        if group.rows.is_empty() {
+            continue;
+        }
+        let key = group_key(group);
+        let expanded = !collapsed.contains(&key);
+        let dir_id = if key.is_empty() {
+            "session-dir-pending".to_string()
+        } else {
+            format!("session-dir-{key}")
+        };
+
+        let toggle = on_toggle(key.clone());
+        let activate = on_toggle(key.clone());
+
+        out.push((
+            TreeRowSpec {
+                id: SharedString::from(dir_id),
+                depth: 0,
+                has_children: true,
+                expanded,
+                selected: false,
+                emphasized: false,
+                show_guides: false,
+                label: SharedString::from(group.label.clone()),
+                label_color: Some(t.muted_fg_rgba()),
+                leading: None,
+                trailing: None,
+            },
+            activate,
+            Some(toggle),
+        ));
+
+        if !expanded {
+            continue;
+        }
+
+        for row in &group.rows {
+            out.push(session_tree_row(row, m.meta_size, on_open));
+        }
+    }
+
+    out
+}
+
+fn session_tree_row(
+    row: &SessionRow,
+    meta_size: Pixels,
+    on_open: &IdClickFactory,
+) -> (TreeRowSpec, ClickHandler, Option<ClickHandler>) {
     let t = tokens();
     let is_live = row.kind == SessionRowKind::LiveTarget;
     let is_pending = row.kind == SessionRowKind::PendingTarget;
 
-    div()
-        .id(SharedString::from(format!("session-row-{gix}-{rix}")))
-        .h(px(32.))
-        .w_full()
-        .px(m.space_sm)
-        .flex()
-        .items_center()
-        .gap(m.space_sm)
-        .rounded_sm()
-        .cursor_pointer()
-        .hover(|style| style.bg(t.elevated_rgba()))
-        .when(is_live || is_pending, |d| d.bg(t.elevated_rgba()))
-        .child(
+    let label_color = if is_pending {
+        Some(t.muted_fg_rgba())
+    } else if is_live {
+        None // selected drives accent
+    } else {
+        Some(t.fg_rgba())
+    };
+
+    let trailing = if row.message_count > 0 {
+        Some(
             div()
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(m.label_size)
-                .line_height(m.label_line_height)
-                .when(is_live, |d| {
-                    d.font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.role_accent(crate::theme::RoleAccent::Accent))
-                })
-                .when(is_pending, |d| d.text_color(t.muted_fg_rgba()))
-                .child(row.label.clone()),
+                .flex_shrink_0()
+                .text_size(meta_size)
+                .line_height(metrics().meta_line_height)
+                .text_color(t.muted_fg_rgba())
+                .child(row.message_count.to_string())
+                .into_any_element(),
         )
-        .when(row.message_count > 0, |d| {
-            d.child(
-                div()
-                    .flex_shrink_0()
-                    .text_size(m.meta_size)
-                    .line_height(m.meta_line_height)
-                    .text_color(t.muted_fg_rgba())
-                    .child(row.message_count.to_string()),
-            )
-        })
-        .on_click(move |ev, window, cx| on_click(ev, window, cx))
+    } else {
+        None
+    };
+
+    (
+        TreeRowSpec {
+            id: SharedString::from(format!("session-{}", row.session_id)),
+            depth: 1,
+            has_children: false,
+            expanded: false,
+            selected: is_live,
+            emphasized: is_pending,
+            show_guides: false,
+            label: SharedString::from(row.label.clone()),
+            label_color,
+            leading: None,
+            trailing,
+        },
+        on_open(row.session_id.clone()),
+        None,
+    )
 }

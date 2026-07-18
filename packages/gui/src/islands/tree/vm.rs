@@ -33,7 +33,6 @@ pub struct ConversationTreeViewModel {
     pub nodes: Vec<TreeNode>,
     pub current_leaf_id: Option<String>,
     pub preview_entry_id: Option<String>,
-    pub can_switch_branch: bool,
 }
 
 /// Default expansion: every on-path parent that has children.
@@ -130,15 +129,11 @@ pub fn derive_conversation_tree(
     let preview = preview_entry_id
         .filter(|id| id_set.contains(*id))
         .map(str::to_string);
-    let can_switch = preview
-        .as_ref()
-        .is_some_and(|id| !path_ids.contains(id.as_str()));
 
     ConversationTreeViewModel {
         nodes: visible,
         current_leaf_id: leaf,
         preview_entry_id: preview,
-        can_switch_branch: can_switch,
     }
 }
 
@@ -278,12 +273,11 @@ mod tests {
         let c = vm.nodes.iter().find(|n| n.id == "c").unwrap();
         assert!(a.on_path && b.on_path && !c.on_path);
         assert!(b.is_leaf);
-        assert!(vm.can_switch_branch);
         assert_eq!(vm.preview_entry_id.as_deref(), Some("c"));
     }
 
     #[test]
-    fn on_path_preview_does_not_enable_switch() {
+    fn on_path_preview_stays_display_only() {
         let mut state = ClientState::default();
         state.session_phase = SessionPhase::Live;
         let entries = vec![
@@ -299,7 +293,7 @@ mod tests {
         });
         let expanded = default_tree_expansion(&entries, Some("b"));
         let vm = derive_conversation_tree(&state, Some("a"), &expanded);
-        assert!(!vm.can_switch_branch);
+        assert_eq!(vm.preview_entry_id.as_deref(), Some("a"));
     }
 
     #[test]

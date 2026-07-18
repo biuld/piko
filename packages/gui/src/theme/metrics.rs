@@ -10,6 +10,9 @@ pub struct UiMetrics {
     pub space_md: Pixels,
     pub space_lg: Pixels,
     pub panel_header_height: Pixels,
+    /// Distance from island top to vertically-centered header title
+    /// (`(panel_header_height - label_line_height) / 2`).
+    pub panel_header_title_inset: Pixels,
     pub compact_bar_height: Pixels,
     pub title_bar_height: Pixels,
     pub status_bar_height: Pixels,
@@ -35,6 +38,7 @@ impl UiMetrics {
             space_md: px(12.),
             space_lg: px(16.),
             panel_header_height: px(40.),
+            panel_header_title_inset: px(11.),
             compact_bar_height: px(28.),
             title_bar_height: px(34.),
             status_bar_height: px(28.),
@@ -66,6 +70,7 @@ mod tests {
     fn compact_scale_is_stable() {
         let m = metrics();
         assert_eq!(m.panel_header_height, px(40.));
+        assert_eq!(m.panel_header_title_inset, px(11.));
         assert_eq!(m.title_bar_height, px(34.));
         assert_eq!(m.status_bar_height, px(28.));
         assert_eq!(m.title_bar_safe_inset, px(80.));

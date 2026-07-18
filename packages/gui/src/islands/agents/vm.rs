@@ -6,6 +6,7 @@ use piko_protocol::AgentActivity;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentTreeNode {
     pub agent_instance_id: String,
+    pub parent_agent_instance_id: Option<String>,
     pub name: String,
     pub role: String,
     pub depth: usize,
@@ -45,6 +46,7 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
             });
             out.push(AgentTreeNode {
                 agent_instance_id: agent.agent_instance_id.clone(),
+                parent_agent_instance_id: agent.parent_agent_instance_id.clone(),
                 name: agent.name.clone(),
                 role: agent.role.clone(),
                 depth,
@@ -64,6 +66,25 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
 
     walk(&session.agents, None, 0, selected, &mut nodes);
     AgentTreeViewModel { nodes }
+}
+
+/// Whether `node` should appear given collapsed ancestors.
+pub(crate) fn agent_node_visible(
+    node: &AgentTreeNode,
+    nodes: &[AgentTreeNode],
+    collapsed: &std::collections::HashSet<String>,
+) -> bool {
+    let mut parent = node.parent_agent_instance_id.as_deref();
+    while let Some(pid) = parent {
+        if collapsed.contains(pid) {
+            return false;
+        }
+        parent = nodes
+            .iter()
+            .find(|n| n.agent_instance_id == pid)
+            .and_then(|n| n.parent_agent_instance_id.as_deref());
+    }
+    true
 }
 
 fn activity_label(activity: &AgentActivity) -> String {

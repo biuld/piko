@@ -56,7 +56,6 @@ impl DesktopApp {
             IslandMsg::TreeToggleExpand { entry_id } => {
                 self.handle_tree_toggle_expand(entry_id, cx)
             }
-            IslandMsg::SwitchBranch => self.confirm_switch_branch(window, cx),
             IslandMsg::JumpToLatest => self.action_jump_to_latest(&JumpToLatest, window, cx),
             // Local UI state already updated inside TimelineIsland / ComposerIsland.
             IslandMsg::ToggleToolDetail { .. } | IslandMsg::ToggleActivity => {}

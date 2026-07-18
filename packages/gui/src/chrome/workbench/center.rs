@@ -1,10 +1,10 @@
-//! Center column assembly: Timeline + Composer island Entities.
+//! Center column: Timeline + Composer island Entities.
 
 use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_actions::render_pane_toggles;
-use crate::chrome::{IslandPanel, IslandPlaceholder};
+use crate::chrome::island::{IslandPanel, IslandPlaceholder};
 use crate::projections::{SessionPhaseView, derive_phase_view};
 use crate::theme::metrics;
 

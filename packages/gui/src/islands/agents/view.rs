@@ -1,5 +1,7 @@
 //! Agents island: Entity-owned agent instance tree.
 //!
+use std::collections::HashSet;
+
 use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
@@ -10,6 +12,7 @@ use super::render::render_agent_tree_panel;
 use super::vm::AgentTreeViewModel;
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
 
 pub struct AgentsIsland {
     focus_handle: FocusHandle,
@@ -17,6 +20,8 @@ pub struct AgentsIsland {
     chrome_focused: bool,
     vm: AgentTreeViewModel,
     phase: IslandSessionPhase,
+    /// Agent ids that are collapsed (absent ⇒ expanded).
+    collapsed: HashSet<String>,
 }
 
 impl AgentsIsland {
@@ -27,6 +32,7 @@ impl AgentsIsland {
             chrome_focused: false,
             vm: AgentTreeViewModel::default(),
             phase: IslandSessionPhase::Idle,
+            collapsed: HashSet::new(),
         }
     }
 
@@ -53,6 +59,13 @@ impl AgentsIsland {
         schedule_island_msg(self.host.clone(), IslandId::Agents, msg, window, cx);
     }
 
+    fn toggle_expand(&mut self, agent_id: String, cx: &mut Context<Self>) {
+        if !self.collapsed.remove(&agent_id) {
+            self.collapsed.insert(agent_id);
+        }
+        cx.notify();
+    }
+
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
@@ -69,24 +82,48 @@ impl Render for AgentsIsland {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity().downgrade();
 
-        let on_select = move |agent_instance_id: String| -> ClickHandler {
+        let on_select: IdClickFactory = Box::new({
             let entity = entity.clone();
-            Box::new(move |_, window, cx| {
-                if let Some(view) = entity.upgrade() {
-                    view.update(cx, |this, cx| {
-                        this.emit(
-                            IslandMsg::SelectAgent {
-                                agent_instance_id: agent_instance_id.clone(),
-                            },
-                            window,
-                            cx,
-                        );
-                    });
-                }
-            })
-        };
+            move |agent_instance_id| {
+                let entity = entity.clone();
+                Box::new(move |_, window, cx| {
+                    if let Some(view) = entity.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.emit(
+                                IslandMsg::SelectAgent {
+                                    agent_instance_id: agent_instance_id.clone(),
+                                },
+                                window,
+                                cx,
+                            );
+                        });
+                    }
+                })
+            }
+        });
 
-        let panel = render_agent_tree_panel(&self.vm, self.phase, self.chrome_focused, on_select);
+        let on_toggle: IdClickFactory = Box::new({
+            let entity = entity.clone();
+            move |agent_id| {
+                let entity = entity.clone();
+                Box::new(move |_, _window, cx| {
+                    if let Some(view) = entity.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.toggle_expand(agent_id.clone(), cx);
+                        });
+                    }
+                })
+            }
+        });
+
+        let panel = render_agent_tree_panel(
+            &self.vm,
+            &self.collapsed,
+            self.phase,
+            self.chrome_focused,
+            on_select,
+            on_toggle,
+        );
 
         div()
             .id("agents-island-root")

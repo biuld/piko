@@ -31,10 +31,13 @@ pub fn render_timeline_body(
         rows.push(render_timeline_row(row, expanded, toggle, window, cx));
     }
 
-    // Explicit top/bottom spacers (not container padding): padding on the
-    // scroll parent is easy to clip, and scroll-to-bottom must still leave
-    // breathing room under the last row.
-    let edge_pad = m.space_lg;
+    // Top spacer matches island header title inset so headerless Timeline
+    // aligns with titled panels (Sessions / Agents / Tree). Bottom keeps
+    // space_lg so scroll-to-bottom still leaves room under the last row.
+    // Spacers (not container padding): padding on the scroll parent is easy
+    // to clip.
+    let top_pad = m.panel_header_title_inset;
+    let bottom_pad = m.space_lg;
 
     div()
         .id("timeline-body")
@@ -53,7 +56,7 @@ pub fn render_timeline_body(
                     div()
                         .id("timeline-pad-top")
                         .w_full()
-                        .h(edge_pad)
+                        .h(top_pad)
                         .flex_shrink_0(),
                 )
                 .children(rows)
@@ -61,7 +64,7 @@ pub fn render_timeline_body(
                     div()
                         .id("timeline-pad-bottom")
                         .w_full()
-                        .h(edge_pad)
+                        .h(bottom_pad)
                         .flex_shrink_0(),
                 ),
         )

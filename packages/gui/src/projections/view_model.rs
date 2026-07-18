@@ -11,7 +11,7 @@ use piko_client_core::{ClientState, SessionPhase};
 
 // ─── Session phase view ──────────────────────────────────────────────────────
 
-/// High-level phase for chrome/layout decisions.
+/// High-level phase for chrome/workbench layout decisions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionPhaseView {
     /// No session active, show welcome / session picker.

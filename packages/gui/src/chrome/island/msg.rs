@@ -5,7 +5,7 @@
 //! Workbench render tree yet, so variants may be temporarily unconstructed.
 #![allow(dead_code)]
 
-use crate::chrome::IslandId;
+use crate::chrome::workbench::IslandId;
 use crate::islands::ActivityItem;
 
 /// Messages emitted by islands or chrome and routed by [`DesktopApp`].
@@ -29,7 +29,6 @@ pub enum IslandMsg {
     TreeToggleExpand {
         entry_id: String,
     },
-    SwitchBranch,
     JumpToLatest,
     ToggleToolDetail {
         row_id: String,

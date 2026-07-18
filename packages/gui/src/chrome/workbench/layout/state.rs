@@ -1,9 +1,9 @@
 //! Window-local island open prefs, sizes, and breakpoint rules.
 //!
-//! Size fields (`session_width`, `agents_tree_width`, `agents_height`) are
+//! Size fields (`session_width`, `right_column_width`, `agents_height`) are
 //! persistence for the fixed Workbench tree — not layout units.
 
-use super::tree::IslandId;
+use super::island_tree::IslandId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutBreakpoint {
@@ -26,8 +26,8 @@ impl LayoutBreakpoint {
 
 pub const SESSION_DEFAULT_WIDTH: f32 = 300.0;
 pub const SESSION_MIN_WIDTH: f32 = 220.0;
-pub const AGENTS_TREE_DEFAULT_WIDTH: f32 = 340.0;
-pub const AGENTS_TREE_MIN_WIDTH: f32 = 260.0;
+pub const RIGHT_COLUMN_DEFAULT_WIDTH: f32 = 340.0;
+pub const RIGHT_COLUMN_MIN_WIDTH: f32 = 260.0;
 pub const CENTER_MIN_WIDTH: f32 = 620.0;
 pub const AGENTS_DEFAULT_HEIGHT: f32 = 220.0;
 
@@ -42,7 +42,7 @@ pub struct IslandLayoutState {
     pub tree_open: bool,
     pub session_width: f32,
     /// Shared width when Agents and/or Tree appear as the trailing horizontal split.
-    pub agents_tree_width: f32,
+    pub right_column_width: f32,
     /// Preferred height for the Agents island inside the Agents ↕ Tree split.
     pub agents_height: f32,
     pub close_session_sheet_on_live: bool,
@@ -56,7 +56,7 @@ impl Default for IslandLayoutState {
             agents_open: true,
             tree_open: true,
             session_width: SESSION_DEFAULT_WIDTH,
-            agents_tree_width: AGENTS_TREE_DEFAULT_WIDTH,
+            right_column_width: RIGHT_COLUMN_DEFAULT_WIDTH,
             agents_height: AGENTS_DEFAULT_HEIGHT,
             close_session_sheet_on_live: false,
         }
@@ -91,13 +91,13 @@ impl IslandLayoutState {
     }
 
     /// Convenience: toggle Agents and Tree together (`cmd-i`).
-    pub fn toggle_agents_tree(&mut self) {
+    pub fn toggle_right_column(&mut self) {
         let next = !(self.agents_open && self.tree_open);
         self.agents_open = next;
         self.tree_open = next;
     }
 
-    pub fn agents_tree_pref_open(&self) -> bool {
+    pub fn right_column_pref_open(&self) -> bool {
         self.agents_open && self.tree_open
     }
 
@@ -120,7 +120,7 @@ impl IslandLayoutState {
     }
 
     /// Whether Agents and/or Tree are docked (trailing horizontal sibling present).
-    pub fn any_agents_tree_docked(&self, session_live: bool) -> bool {
+    pub fn any_right_column_docked(&self, session_live: bool) -> bool {
         self.is_docked_visible(IslandId::Agents, session_live)
             || self.is_docked_visible(IslandId::Tree, session_live)
     }

@@ -1,6 +1,6 @@
 //! Pure layout tree tests.
 
-use super::tree::{IslandAxis, IslandNode};
+use super::island_tree::{IslandAxis, IslandNode};
 use super::*;
 
 #[test]
@@ -59,27 +59,27 @@ fn medium_hides_right_keeps_sessions_pref() {
     s.sync_breakpoint(1000.);
     assert!(s.is_docked_visible(IslandId::Sessions, true));
     assert!(!s.is_docked_visible(IslandId::Agents, true));
-    assert!(!s.any_agents_tree_docked(true));
+    assert!(!s.any_right_column_docked(true));
     s.sessions_open = false;
     assert!(!s.is_docked_visible(IslandId::Sessions, true));
 }
 
 #[test]
-fn wide_respects_agents_tree_pref() {
+fn wide_respects_right_column_pref() {
     let mut s = IslandLayoutState::default();
     s.sync_breakpoint(1400.);
-    s.toggle_agents_tree();
-    assert!(!s.any_agents_tree_docked(true));
-    s.toggle_agents_tree();
-    assert!(s.any_agents_tree_docked(true));
+    s.toggle_right_column();
+    assert!(!s.any_right_column_docked(true));
+    s.toggle_right_column();
+    assert!(s.any_right_column_docked(true));
 }
 
 #[test]
-fn agents_tree_docks_on_wide_without_live_session() {
+fn right_column_docks_on_wide_without_live_session() {
     let mut s = IslandLayoutState::default();
     s.sync_breakpoint(1400.);
-    assert!(s.any_agents_tree_docked(false));
-    assert!(s.any_agents_tree_docked(true));
+    assert!(s.any_right_column_docked(false));
+    assert!(s.any_right_column_docked(true));
     s.sync_breakpoint(1000.);
-    assert!(!s.any_agents_tree_docked(false));
+    assert!(!s.any_right_column_docked(false));
 }

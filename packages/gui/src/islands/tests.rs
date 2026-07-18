@@ -219,10 +219,30 @@ fn agent_tree_hierarchy_and_selection() {
     assert_eq!(vm.nodes[0].depth, 0);
     assert!(vm.nodes[0].selected);
     assert!(vm.nodes[0].has_children);
+    assert!(vm.nodes[0].parent_agent_instance_id.is_none());
     assert_eq!(vm.nodes[1].name, "Researcher");
     assert_eq!(vm.nodes[1].depth, 1);
     assert!(!vm.nodes[1].selected);
     assert!(!vm.nodes[1].has_children);
+    assert_eq!(
+        vm.nodes[1].parent_agent_instance_id.as_deref(),
+        Some(vm.nodes[0].agent_instance_id.as_str())
+    );
+}
+
+#[test]
+fn agent_tree_collapse_hides_descendants() {
+    use std::collections::HashSet;
+
+    use super::agents::agent_node_visible;
+
+    let vm = derive_agent_tree(&live_state());
+    let root = vm.nodes[0].agent_instance_id.clone();
+    let mut collapsed = HashSet::new();
+    assert!(agent_node_visible(&vm.nodes[1], &vm.nodes, &collapsed));
+    collapsed.insert(root);
+    assert!(!agent_node_visible(&vm.nodes[1], &vm.nodes, &collapsed));
+    assert!(agent_node_visible(&vm.nodes[0], &vm.nodes, &collapsed));
 }
 
 #[test]

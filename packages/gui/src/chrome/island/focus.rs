@@ -4,7 +4,7 @@
 //! `DesktopApp::dispatch_island_msg`; cycling / restore land once Tab
 //! navigation and sheet dismissal are wired to the island Entities.
 
-use super::IslandId;
+use crate::chrome::workbench::IslandId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusCycleDir {

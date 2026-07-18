@@ -1,4 +1,6 @@
-//! Island ids and the default Workbench split tree.
+//! Island ids and the default Workbench split tree (`IslandNode`).
+//!
+//! Not the Tree island UI (`islands::tree`) or shared list rows (`chrome::widgets::tree_list`).
 
 /// First-class Workbench islands (layout atoms).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

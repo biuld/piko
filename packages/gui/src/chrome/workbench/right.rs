@@ -1,7 +1,7 @@
-//! Fixed Agents ↕ Tree vertical split (part of the Workbench layout tree).
+//! Right column: Agents ↕ Tree vertical split.
 //!
-//! This is not a layout unit. Agents and Tree remain separate
-//! islands; chrome only stacks them when both are visible.
+//! Not a layout unit. Agents and Tree remain separate islands; chrome only
+//! stacks them when both are visible.
 
 use gpui::*;
 use gpui_component::PixelsExt;
@@ -13,7 +13,7 @@ use crate::theme::metrics;
 type AgentsHeightHandler = Box<dyn Fn(f32, &mut App) + 'static>;
 
 /// Mount Agents / Tree Entity islands in the dock or sheet split.
-pub fn render_agents_tree_entities(
+pub fn render_right_column(
     agents: Entity<AgentsIsland>,
     tree: Entity<TreeIsland>,
     show_agents: bool,
@@ -25,7 +25,7 @@ pub fn render_agents_tree_entities(
     let gutter = m.island_gutter;
 
     div()
-        .id("agents-tree-split")
+        .id("right-column-split")
         .w_full()
         .h_full()
         .flex()
@@ -35,7 +35,7 @@ pub fn render_agents_tree_entities(
             (true, true) => div()
                 .size_full()
                 .child(
-                    v_resizable("agents-tree-v")
+                    v_resizable("right-column-v")
                         .on_resize(move |state, _, cx| {
                             let sizes = state.read(cx).sizes();
                             if let Some(size) = sizes.first() {

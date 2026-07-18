@@ -8,23 +8,23 @@ pub struct GuiSettings {
     #[serde(default = "default_session_width")]
     pub session_width: f32,
     #[serde(
-        default = "default_agents_tree_width",
-        alias = "right-column-width",
-        alias = "right_column_width",
+        default = "default_right_column_width",
+        alias = "agents-tree-width",
+        alias = "agents_tree_width",
         alias = "inspector-width",
         alias = "inspector_width"
     )]
-    pub agents_tree_width: f32,
+    pub right_column_width: f32,
     #[serde(default = "default_true")]
     pub session_open: bool,
     #[serde(
         default = "default_true",
-        alias = "right-column-open",
-        alias = "right_column_open",
+        alias = "agents-tree-open",
+        alias = "agents_tree_open",
         alias = "inspector-open",
         alias = "inspector_open"
     )]
-    pub agents_tree_open: bool,
+    pub right_column_open: bool,
     #[serde(default)]
     pub reduced_motion: bool,
 }
@@ -33,9 +33,9 @@ impl Default for GuiSettings {
     fn default() -> Self {
         Self {
             session_width: default_session_width(),
-            agents_tree_width: default_agents_tree_width(),
+            right_column_width: default_right_column_width(),
             session_open: true,
-            agents_tree_open: true,
+            right_column_open: true,
             reduced_motion: false,
         }
     }
@@ -45,8 +45,8 @@ fn default_session_width() -> f32 {
     crate::app::layout_state::SESSION_DEFAULT_WIDTH
 }
 
-fn default_agents_tree_width() -> f32 {
-    crate::app::layout_state::AGENTS_TREE_DEFAULT_WIDTH
+fn default_right_column_width() -> f32 {
+    crate::app::layout_state::RIGHT_COLUMN_DEFAULT_WIDTH
 }
 
 fn default_true() -> bool {
@@ -70,7 +70,18 @@ mod tests {
             "inspector-open": false,
         }))
         .unwrap();
-        assert_eq!(settings.agents_tree_width, 360.0);
-        assert!(!settings.agents_tree_open);
+        assert_eq!(settings.right_column_width, 360.0);
+        assert!(!settings.right_column_open);
+    }
+
+    #[test]
+    fn reads_legacy_agents_tree_keys() {
+        let settings: GuiSettings = serde_json::from_value(serde_json::json!({
+            "agents-tree-width": 380.0,
+            "agents-tree-open": false,
+        }))
+        .unwrap();
+        assert_eq!(settings.right_column_width, 380.0);
+        assert!(!settings.right_column_open);
     }
 }

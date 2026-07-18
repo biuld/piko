@@ -5,8 +5,8 @@ use gpui::*;
 
 use crate::theme::{island, metrics, tokens};
 
-use super::island_state::{IslandBody, IslandPlaceholder, render_island_placeholder};
-use super::island_viewport::IslandContentViewport;
+use super::state::{IslandBody, IslandPlaceholder, render_island_placeholder};
+use super::viewport::IslandContentViewport;
 /// Header for tool-window islands (title + optional trailing actions).
 pub enum IslandHeader {
     Title {

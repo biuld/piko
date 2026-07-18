@@ -1,5 +1,7 @@
 //! Sessions island: Entity-owned session sidebar.
 //!
+use std::collections::HashSet;
+
 use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
@@ -14,6 +16,8 @@ pub struct SessionsIsland {
     host: WeakEntity<DesktopApp>,
     chrome_focused: bool,
     vm: SidebarViewModel,
+    /// Directory cwd keys that are collapsed (absent ⇒ expanded).
+    collapsed_dirs: HashSet<String>,
 }
 
 impl SessionsIsland {
@@ -23,6 +27,7 @@ impl SessionsIsland {
             host,
             chrome_focused: false,
             vm: SidebarViewModel { groups: Vec::new() },
+            collapsed_dirs: HashSet::new(),
         }
     }
 
@@ -46,6 +51,13 @@ impl SessionsIsland {
 
     fn on_new_session(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.emit(IslandMsg::NewSession, window, cx);
+    }
+
+    fn toggle_dir(&mut self, key: String, cx: &mut Context<Self>) {
+        if !self.collapsed_dirs.remove(&key) {
+            self.collapsed_dirs.insert(key);
+        }
+        cx.notify();
     }
 
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -86,7 +98,28 @@ impl Render for SessionsIsland {
             }
         });
 
-        let panel = render_sidebar_panel(&self.vm, on_new, on_open, self.chrome_focused);
+        let on_toggle_dir: IdClickFactory = Box::new({
+            let entity = entity.clone();
+            move |dir_key| {
+                let entity = entity.clone();
+                Box::new(move |_, _window, cx| {
+                    if let Some(view) = entity.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.toggle_dir(dir_key.clone(), cx);
+                        });
+                    }
+                })
+            }
+        });
+
+        let panel = render_sidebar_panel(
+            &self.vm,
+            &self.collapsed_dirs,
+            on_new,
+            on_open,
+            on_toggle_dir,
+            self.chrome_focused,
+        );
 
         div()
             .id("sessions-island-root")

@@ -1,8 +1,8 @@
 //! Compatibility re-exports for the island layout system.
 //!
-//! Prefer `crate::chrome::layout` for new code.
+//! Prefer `crate::chrome::workbench::layout` for new code.
 
-pub use crate::chrome::layout::{
-    AGENTS_TREE_DEFAULT_WIDTH, AGENTS_TREE_MIN_WIDTH, CENTER_MIN_WIDTH,
-    IslandLayoutState as LayoutState, LayoutBreakpoint, SESSION_DEFAULT_WIDTH, SESSION_MIN_WIDTH,
+pub use crate::chrome::workbench::layout::{
+    CENTER_MIN_WIDTH, IslandLayoutState as LayoutState, LayoutBreakpoint,
+    RIGHT_COLUMN_DEFAULT_WIDTH, RIGHT_COLUMN_MIN_WIDTH, SESSION_DEFAULT_WIDTH, SESSION_MIN_WIDTH,
 };

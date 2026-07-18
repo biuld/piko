@@ -104,7 +104,7 @@ The implementation source of truth is `src/theme/metrics.rs`.
 
 ### IslandPanel
 
-Workbench islands use the shared `IslandPanel` chrome in `src/chrome/`:
+Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
 
 - Shell: surface fill, 10 px radius, no idle outline.
 - Header: optional. Tool windows (Sessions, Agents, Tree, Sheet) set

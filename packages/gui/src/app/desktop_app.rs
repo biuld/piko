@@ -33,7 +33,7 @@ actions!(
         CancelTurn,
         JumpToLatest,
         ToggleSessions,
-        ToggleAgentsTree
+        ToggleRightColumn
     ]
 );
 
@@ -224,10 +224,10 @@ impl DesktopApp {
         match serde_json::from_value::<crate::config::GuiSettings>(value) {
             Ok(settings) => {
                 self.layout.session_width = settings.session_width;
-                self.layout.agents_tree_width = settings.agents_tree_width;
+                self.layout.right_column_width = settings.right_column_width;
                 self.layout.sessions_open = settings.session_open;
-                self.layout.agents_open = settings.agents_tree_open;
-                self.layout.tree_open = settings.agents_tree_open;
+                self.layout.agents_open = settings.right_column_open;
+                self.layout.tree_open = settings.right_column_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
                 self.gui_config_fingerprint = Some(fingerprint);
             }
@@ -240,9 +240,9 @@ impl DesktopApp {
     pub(crate) fn persist_gui_config(&mut self) {
         let settings = crate::config::GuiSettings {
             session_width: self.layout.session_width,
-            agents_tree_width: self.layout.agents_tree_width,
+            right_column_width: self.layout.right_column_width,
             session_open: self.layout.sessions_open,
-            agents_tree_open: self.layout.agents_tree_pref_open(),
+            right_column_open: self.layout.right_column_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
         };
         if let Ok(value) = serde_json::to_value(settings) {
@@ -270,7 +270,7 @@ impl Render for DesktopApp {
         let on_focus = cx.listener(Self::action_focus_composer);
         let on_jump = cx.listener(Self::action_jump_to_latest);
         let on_sessions = cx.listener(Self::action_toggle_sessions);
-        let on_agents_tree = cx.listener(Self::action_toggle_agents_tree);
+        let on_right_column = cx.listener(Self::action_toggle_right_column);
         let on_focus_next = cx.listener(Self::action_focus_next_island);
         let on_focus_prev = cx.listener(Self::action_focus_prev_island);
         let show_session = self.layout.is_docked_visible(IslandId::Sessions, true);
@@ -291,7 +291,7 @@ impl Render for DesktopApp {
             .on_action(on_focus)
             .on_action(on_jump)
             .on_action(on_sessions)
-            .on_action(on_agents_tree)
+            .on_action(on_right_column)
             .on_action(on_focus_next)
             .on_action(on_focus_prev)
             .key_context("DesktopApp")

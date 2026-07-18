@@ -3,11 +3,11 @@
 //! Product layout (before visibility pruning):
 //! ```text
 //! Horizontal
-//! ├─ Sessions
+//! ├─ Sessions (left)
 //! ├─ Vertical (center)
 //! │  ├─ Timeline
 //! │  └─ Composer
-//! └─ Vertical (Agents ↕ Tree, only when either is visible)
+//! └─ Vertical (right: Agents ↕ Tree, only when either is visible)
 //!    ├─ Agents
 //!    └─ Tree
 //! ```
@@ -17,11 +17,11 @@ use gpui_component::PixelsExt;
 use gpui_component::resizable::{h_resizable, resizable_panel};
 
 use crate::app::desktop_app::DesktopApp;
-use crate::app::layout_state::{AGENTS_TREE_MIN_WIDTH, CENTER_MIN_WIDTH, SESSION_MIN_WIDTH};
-use crate::chrome::center::render_center;
-use crate::chrome::{
-    IslandId, prune_island_tree, render_agents_tree_entities, workbench_island_tree,
-};
+use crate::app::layout_state::{CENTER_MIN_WIDTH, RIGHT_COLUMN_MIN_WIDTH, SESSION_MIN_WIDTH};
+use crate::chrome::workbench::center::render_center;
+use crate::chrome::workbench::left::{column_slot, render_left_column};
+use crate::chrome::workbench::right::render_right_column;
+use crate::chrome::workbench::{IslandId, prune_island_tree, workbench_island_tree};
 use crate::theme::metrics;
 
 impl DesktopApp {
@@ -38,7 +38,7 @@ impl DesktopApp {
         let show_session = self.layout.is_docked_visible(IslandId::Sessions, live);
         let show_agents = self.layout.is_docked_visible(IslandId::Agents, live);
         let show_tree = self.layout.is_docked_visible(IslandId::Tree, live);
-        let show_agents_tree = show_agents || show_tree;
+        let show_right = show_agents || show_tree;
 
         let _pruned = prune_island_tree(&workbench_island_tree(), &|id| {
             self.layout.is_docked_visible(id, live)
@@ -60,8 +60,8 @@ impl DesktopApp {
                     .child(render_center(self, window, cx)),
             );
 
-        if show_session && show_agents_tree {
-            let agents_tree = self.render_agents_tree_stack(cx);
+        if show_session && show_right {
+            let right = self.render_right_column_stack(cx);
             h_resizable("workbench-h")
                 .on_resize({
                     let entity = entity.clone();
@@ -72,7 +72,7 @@ impl DesktopApp {
                         {
                             view.update(cx, |this, _| {
                                 this.layout.session_width = sizes[0].as_f32();
-                                this.layout.agents_tree_width = sizes[2].as_f32();
+                                this.layout.right_column_width = sizes[2].as_f32();
                                 this.persist_gui_config();
                             });
                         }
@@ -82,18 +82,18 @@ impl DesktopApp {
                     resizable_panel()
                         .size(px(self.layout.session_width))
                         .size_range(px(SESSION_MIN_WIDTH)..px(480.))
-                        .child(island_slot(self.sessions.clone(), px(0.), gutter)),
+                        .child(render_left_column(self.sessions.clone(), gutter)),
                 )
                 .child(
                     resizable_panel()
                         .size_range(px(CENTER_MIN_WIDTH)..px(4000.))
-                        .child(island_slot(center, px(0.), gutter)),
+                        .child(column_slot(center, px(0.), gutter)),
                 )
                 .child(
                     resizable_panel()
-                        .size(px(self.layout.agents_tree_width))
-                        .size_range(px(AGENTS_TREE_MIN_WIDTH)..px(520.))
-                        .child(island_slot(agents_tree, px(0.), px(0.))),
+                        .size(px(self.layout.right_column_width))
+                        .size_range(px(RIGHT_COLUMN_MIN_WIDTH)..px(520.))
+                        .child(column_slot(right, px(0.), px(0.))),
                 )
                 .into_any_element()
         } else if show_session {
@@ -116,17 +116,17 @@ impl DesktopApp {
                     resizable_panel()
                         .size(px(self.layout.session_width))
                         .size_range(px(SESSION_MIN_WIDTH)..px(480.))
-                        .child(island_slot(self.sessions.clone(), px(0.), gutter)),
+                        .child(render_left_column(self.sessions.clone(), gutter)),
                 )
                 .child(
                     resizable_panel()
                         .size_range(px(CENTER_MIN_WIDTH)..px(4000.))
-                        .child(island_slot(center, px(0.), px(0.))),
+                        .child(column_slot(center, px(0.), px(0.))),
                 )
                 .into_any_element()
-        } else if show_agents_tree {
-            let agents_tree = self.render_agents_tree_stack(cx);
-            h_resizable("workbench-center-agents-tree")
+        } else if show_right {
+            let right = self.render_right_column_stack(cx);
+            h_resizable("workbench-center-right")
                 .on_resize({
                     let entity = entity.clone();
                     move |state, _, cx| {
@@ -135,7 +135,7 @@ impl DesktopApp {
                             && let Some(view) = entity.upgrade()
                         {
                             view.update(cx, |this, _| {
-                                this.layout.agents_tree_width = size.as_f32();
+                                this.layout.right_column_width = size.as_f32();
                                 this.persist_gui_config();
                             });
                         }
@@ -144,13 +144,13 @@ impl DesktopApp {
                 .child(
                     resizable_panel()
                         .size_range(px(CENTER_MIN_WIDTH)..px(4000.))
-                        .child(island_slot(center, px(0.), gutter)),
+                        .child(column_slot(center, px(0.), gutter)),
                 )
                 .child(
                     resizable_panel()
-                        .size(px(self.layout.agents_tree_width))
-                        .size_range(px(AGENTS_TREE_MIN_WIDTH)..px(520.))
-                        .child(island_slot(agents_tree, px(0.), px(0.))),
+                        .size(px(self.layout.right_column_width))
+                        .size_range(px(RIGHT_COLUMN_MIN_WIDTH)..px(520.))
+                        .child(column_slot(right, px(0.), px(0.))),
                 )
                 .into_any_element()
         } else {
@@ -171,13 +171,13 @@ impl DesktopApp {
         }
     }
 
-    fn render_agents_tree_stack(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_right_column_stack(&self, cx: &Context<Self>) -> AnyElement {
         let live = self.bridge_state().is_live();
         let entity = cx.entity().downgrade();
         let agents_height = self.layout.agents_height;
         let show_agents = self.layout.is_docked_visible(IslandId::Agents, live);
         let show_tree = self.layout.is_docked_visible(IslandId::Tree, live);
-        render_agents_tree_entities(
+        render_right_column(
             self.agents.clone(),
             self.tree.clone(),
             show_agents,
@@ -197,18 +197,4 @@ impl DesktopApp {
         )
         .into_any_element()
     }
-}
-
-fn island_slot(
-    child: impl IntoElement,
-    leading: Pixels,
-    trailing_gutter: Pixels,
-) -> impl IntoElement {
-    div()
-        .size_full()
-        .min_h(px(0.))
-        .pl(leading)
-        .pr(trailing_gutter)
-        .overflow_hidden()
-        .child(child)
 }

@@ -20,7 +20,7 @@ use gpui_component::Root;
 
 use crate::app::desktop_app::{
     CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
-    NewSession, ToggleAgentsTree, ToggleSessions,
+    NewSession, ToggleRightColumn, ToggleSessions,
 };
 use crate::bridge::spawn_bridge;
 use crate::theme::apply_piko_dark_theme;
@@ -42,7 +42,7 @@ fn main() {
             KeyBinding::new("cmd-l", FocusComposer, Some("DesktopApp")),
             KeyBinding::new("cmd-j", JumpToLatest, Some("DesktopApp")),
             KeyBinding::new("cmd-b", ToggleSessions, Some("DesktopApp")),
-            KeyBinding::new("cmd-i", ToggleAgentsTree, Some("DesktopApp")),
+            KeyBinding::new("cmd-i", ToggleRightColumn, Some("DesktopApp")),
             KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),
             KeyBinding::new("shift-tab", FocusPrevIsland, Some("DesktopApp")),
         ]);
