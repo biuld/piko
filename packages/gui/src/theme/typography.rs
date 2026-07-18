@@ -4,7 +4,10 @@
 //! must not apply `UiMetrics` font sizes directly — use [`text`], [`label_text`],
 //! or [`body_markdown`].
 
-use gpui::{App, Div, ElementId, FontWeight, SharedString, Styled, Window, div};
+use std::sync::Arc;
+
+use gpui::{App, Div, ElementId, FontWeight, SharedString, Styled, Window, div, rems};
+use gpui_component::highlighter::HighlightTheme;
 use gpui_component::text::{TextView, TextViewStyle};
 
 use super::metrics::metrics;
@@ -57,11 +60,24 @@ pub fn label_text(semibold: bool) -> Div {
     }
 }
 
-/// [`TextView`] style pinned to the Body type scale (heading base = body size).
+/// [`TextView`] style pinned to the Body type scale and 12 px vertical rhythm.
+///
+/// Conversation markdown should read as a document: modest heading steps,
+/// dark syntax theme, and paragraph gaps aligned with [`metrics`]`::space_md`.
 pub fn markdown_style() -> TextViewStyle {
     let m = metrics();
+    // paragraph_gap is Rems; 0.75 rem ≈ 12 px when rem size is 16 (space_md).
     TextViewStyle {
         heading_base_font_size: m.body_size,
+        paragraph_gap: rems(0.75),
+        heading_font_size: Some(Arc::new(|level, base| match level {
+            1 => base * 1.2,
+            2 => base * 1.12,
+            3 => base * 1.06,
+            _ => base,
+        })),
+        highlight_theme: HighlightTheme::default_dark(),
+        is_dark: true,
         ..TextViewStyle::default()
     }
 }
@@ -70,6 +86,9 @@ pub fn markdown_style() -> TextViewStyle {
 ///
 /// This is the TextView counterpart of [`text`]`(`[`TextRole::Body`]`)`. GPUI
 /// Component has no TextRole API, so Body metrics are applied here once.
+///
+/// Call sites should place the result in a `w_full` container so list item
+/// text is not clipped by nested `overflow_hidden` flex rows inside TextView.
 pub fn body_markdown(
     id: impl Into<ElementId>,
     markdown: impl Into<SharedString>,
@@ -79,6 +98,7 @@ pub fn body_markdown(
     let m = metrics();
     TextView::markdown(id, markdown, window, cx)
         .style(markdown_style())
+        .w_full()
         .text_size(m.body_size)
         .line_height(m.body_line_height)
         .text_color(tokens().fg_rgba())
@@ -95,9 +115,22 @@ mod tests {
         assert_eq!(m.meta_size, px(12.));
         assert_eq!(m.label_size, px(13.));
         assert_eq!(m.body_size, px(14.));
-        assert_eq!(markdown_style().heading_base_font_size, m.body_size);
+        let style = markdown_style();
+        assert_eq!(style.heading_base_font_size, m.body_size);
+        assert!(style.is_dark);
+        assert_eq!(style.paragraph_gap, rems(0.75));
         let _ = text(TextRole::Meta);
         let _ = text(TextRole::Body);
         let _ = text(TextRole::BodyMono);
+    }
+
+    #[test]
+    fn conversation_heading_scale_stays_modest() {
+        let style = markdown_style();
+        let f = style.heading_font_size.as_ref().expect("heading fn");
+        let base = px(14.);
+        assert_eq!(f(1, base), base * 1.2);
+        assert_eq!(f(2, base), base * 1.12);
+        assert_eq!(f(6, base), base);
     }
 }

@@ -21,14 +21,15 @@ and designed in
   `MessageSquare`, Agents `Bot`, Tree `Network`, Loading `CircleDashed`, Error
   `TriangleAlert`.
 - Sessions rows: directory `Folder` / `FolderOpen`, session `MessageSquare`.
-- Timeline roles: user `User`, assistant `Bot` (tool/system keep status color
-  without a role icon for now).
+- Timeline roles: user `User`, assistant `Bot`; tools use `Wrench` on chips.
+  Thinking is muted text (no Brain row chrome in Timeline).
 - Agents rows: `Bot`.
 - Composer: target `Bot`; model `Cpu`; thinking `Brain`; Send `Send`; Stop
   `CircleStop`. Activity header `Activity` (status via icon/summary color);
   activity items use kind icons (`Bell` / `Wrench` / `TriangleAlert` / …).
-- Tree rows by kind: user `User`, assistant `Bot`, tool `Wrench`, model `Cpu`,
-  thinking `Brain`, branch `GitBranch`, compaction `Layers`, other `Circle`.
+- Tree rows by kind: user `User`, assistant `Bot`, tool `Wrench` (including
+  message-shaped tool call/result entries), model `Cpu`, thinking `Brain`,
+  branch `GitBranch`, compaction `Layers`, other `Circle`.
 - Keep 6 px status / role / connection markers as colored dots — they are not
   icons. Timeline still uses a left accent border alongside role icons.
 
@@ -38,8 +39,10 @@ and designed in
   one-off size pairs. Numbers live in `metrics.rs`; application lives in
   `typography.rs`.
 - Timeline conversation body: plain text → `TextRole::Body`; markdown →
-  `body_markdown` (Body metrics + heading base). Do not call `text_size` with
-  metrics outside `theme/typography.rs` and `theme/icons.rs`.
+  `body_markdown` (Body 14/21, heading base = body, ~12 px paragraph gap,
+  dark highlight theme). Place markdown in a `w_full` container so list item
+  text is not clipped. Do not call `text_size` with metrics outside
+  `theme/typography.rs` and `theme/icons.rs`.
 
 ### Chrome copy
 
@@ -207,11 +210,16 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
 - User prompts use an elevated rounded block. Assistant answers remain open on
   the island surface so longer prose reads like a document.
 - System messages stay on the island surface with muted text and reduced
-  emphasis. Thinking is subordinate to the committed answer and uses muted
-  blockquote styling. Do not add a redundant `thinking` heading or prefix.
-- Tool calls use an elevated rounded block because they are interactive. Their
-  own status marker uses `info` while running, `success` when completed, and
-  `danger` when failed. Expanded detail drops back to the island surface.
+  emphasis. Thinking is subordinate to the committed answer: muted text with a
+  light left border, always expanded. Do not add a redundant `thinking`
+  heading, prefix, or right-side Detail control.
+- Tool calls are left-aligned compact chips (`Wrench` + name · status). Click
+  the chip to expand args/result downward and grow the reading column (no
+  Popover, no right-aligned Detail button). Status uses `info` while running,
+  `success` when completed, and `danger` when failed.
+- Within an Assistant group, thinking and tools that precede the answer body
+  share one muted CoT stream (block-interleaved, left-aligned). Body prose and
+  later tools sit outside that stream.
 - Role color identifies authorship; status color identifies runtime state. Do
   not use warning or danger merely as decoration.
 

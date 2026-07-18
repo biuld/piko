@@ -120,6 +120,12 @@ impl Render for TimelineIsland {
             })
         };
 
+        let allow_motion = self
+            .host
+            .upgrade()
+            .map(|host| host.read(cx).ux_prefs.allow_motion())
+            .unwrap_or(true);
+
         let panel = if self.vm.rows.is_empty() {
             IslandPanel::empty(
                 "timeline-island",
@@ -132,7 +138,14 @@ impl Render for TimelineIsland {
         } else {
             IslandPanel::new(
                 "timeline-island",
-                render_timeline_body(&self.vm, &self.expanded_tools, on_toggle_tool, window, cx),
+                render_timeline_body(
+                    &self.vm,
+                    &self.expanded_tools,
+                    allow_motion,
+                    on_toggle_tool,
+                    window,
+                    cx,
+                ),
             )
             .scroll_handle(self.scroll.clone())
             .focused(self.chrome_focused)

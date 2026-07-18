@@ -11,4 +11,6 @@ pub use view::TimelineIsland;
 pub use vm::derive_timeline;
 
 #[cfg(test)]
-pub(crate) use vm::{TimelineRowKind, ToolCardStatus};
+pub(crate) use vm::{
+    TimelineRow, TimelineRowKind, ToolCardStatus, VisualSender, group_timeline_rows,
+};

@@ -5,7 +5,9 @@ use piko_client_core::{AgentTimeline, ClientState, SessionPhase, TimelineItem};
 use piko_protocol::{AgentActivity, AgentInfo, AgentInstanceLifecycle, AgentStatus, TurnStatus};
 
 use super::composer::ActivityItemKind;
-use super::timeline::{TimelineRowKind, ToolCardStatus};
+use super::timeline::{
+    TimelineRow, TimelineRowKind, ToolCardStatus, VisualSender, group_timeline_rows,
+};
 use super::*;
 
 fn agent(instance: &str, parent: Option<&str>, name: &str) -> AgentInfo {
@@ -94,7 +96,7 @@ fn committed_assistant_marks_markdown_path() {
 }
 
 #[test]
-fn assistant_thinking_uses_style_without_a_redundant_label() {
+fn assistant_thinking_is_separate_payload_not_inlined_in_body() {
     let mut state = live_state();
     let session = state.live_session.as_mut().unwrap();
     let tl = session.timelines.get_mut("root").unwrap();
@@ -124,8 +126,8 @@ fn assistant_thinking_uses_style_without_a_redundant_label() {
 
     let vm = derive_timeline(&state);
     let row = vm.rows.iter().find(|r| r.id == "msg-thinking").unwrap();
-    assert!(row.body.contains("> consider alternatives"));
-    assert!(row.body.contains("final answer"));
+    assert_eq!(row.body, "final answer");
+    assert_eq!(row.thinking.as_deref(), Some("consider alternatives"));
     assert!(!row.body.to_lowercase().contains("thinking"));
 }
 
@@ -159,7 +161,7 @@ fn timeline_includes_realtime_draft() {
 }
 
 #[test]
-fn streaming_thinking_uses_the_same_unlabeled_quote_style() {
+fn streaming_thinking_shows_text_with_live_flag() {
     let mut state = live_state();
     let session = state.live_session.as_mut().unwrap();
     let tl = session.timelines.get_mut("root").unwrap();
@@ -174,9 +176,11 @@ fn streaming_thinking_uses_the_same_unlabeled_quote_style() {
 
     let vm = derive_timeline(&state);
     let draft = vm.rows.iter().find(|r| r.id == "draft-thinking").unwrap();
-    assert!(draft.render_markdown);
-    assert_eq!(draft.body, "> working through it");
-    assert!(!draft.body.to_lowercase().contains("thinking"));
+    assert!(draft.body.is_empty());
+    assert_eq!(draft.thinking.as_deref(), Some("working through it"));
+    assert!(draft.thinking_live);
+    assert!(draft.streaming);
+    assert!(!draft.render_markdown);
 }
 
 #[test]
@@ -324,12 +328,16 @@ fn timeline_tool_card_running_then_completed() {
     );
 
     let vm = derive_timeline(&state);
-    let call_row = vm
-        .rows
-        .iter()
-        .find(|r| r.label.contains("tool read_file"))
-        .unwrap();
+    let call_row = vm.rows.iter().find(|r| r.label == "read_file").unwrap();
     assert_eq!(call_row.tool_status, Some(ToolCardStatus::Completed));
+    assert_eq!(
+        vm.rows
+            .iter()
+            .filter(|r| r.kind == TimelineRowKind::Tool)
+            .count(),
+        1,
+        "ToolResult must fold into the ToolCall row"
+    );
 }
 
 #[test]
@@ -372,13 +380,16 @@ fn timeline_tool_card_failed_on_error_result() {
     );
 
     let vm = derive_timeline(&state);
-    let call_row = vm
-        .rows
-        .iter()
-        .find(|r| r.label.contains("tool bash"))
-        .unwrap();
+    let call_row = vm.rows.iter().find(|r| r.label == "bash").unwrap();
     assert_eq!(call_row.tool_status, Some(ToolCardStatus::Failed));
-    assert!(call_row.body.contains("failed"));
+    assert!(call_row.body.contains("boom"));
+    assert_eq!(
+        vm.rows
+            .iter()
+            .filter(|r| r.kind == TimelineRowKind::Tool)
+            .count(),
+        1
+    );
 
     let activity = derive_activity(&state);
     assert!(
@@ -471,4 +482,104 @@ fn timeline_renders_authoritative_tool_projection() {
     let vm = derive_timeline(&state);
     assert_eq!(vm.rows[0].tool_status, Some(ToolCardStatus::Completed));
     assert!(vm.rows[0].detail.as_deref().unwrap().contains("Arguments"));
+}
+
+fn sample_row(id: &str, kind: TimelineRowKind) -> TimelineRow {
+    TimelineRow {
+        id: id.into(),
+        kind,
+        label: String::new(),
+        body: String::new(),
+        streaming: false,
+        render_markdown: false,
+        tool_status: None,
+        detail: None,
+        thinking: None,
+        thinking_live: false,
+    }
+}
+
+#[test]
+fn visual_sender_maps_tool_to_assistant() {
+    assert_eq!(
+        TimelineRowKind::Tool.visual_sender(),
+        VisualSender::Assistant
+    );
+    assert_eq!(TimelineRowKind::User.visual_sender(), VisualSender::You);
+    assert_eq!(
+        TimelineRowKind::System.visual_sender(),
+        VisualSender::System
+    );
+}
+
+#[test]
+fn group_timeline_keeps_assistant_and_tool_together() {
+    let rows = vec![
+        sample_row("u1", TimelineRowKind::User),
+        sample_row("a1", TimelineRowKind::Assistant),
+        sample_row("t1", TimelineRowKind::Tool),
+        sample_row("t2", TimelineRowKind::Tool),
+    ];
+    let groups = group_timeline_rows(&rows);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].len(), 1);
+    assert_eq!(groups[1].len(), 3);
+    assert_eq!(groups[1][0].kind, TimelineRowKind::Assistant);
+}
+
+#[test]
+fn group_timeline_system_breaks_assistant_grouping() {
+    let rows = vec![
+        sample_row("a1", TimelineRowKind::Assistant),
+        sample_row("s1", TimelineRowKind::System),
+        sample_row("a2", TimelineRowKind::Assistant),
+        sample_row("t1", TimelineRowKind::Tool),
+    ];
+    let groups = group_timeline_rows(&rows);
+    assert_eq!(groups.len(), 3);
+    assert_eq!(groups[0].len(), 1);
+    assert_eq!(groups[1][0].kind, TimelineRowKind::System);
+    assert_eq!(groups[2].len(), 2);
+}
+
+#[test]
+fn consecutive_users_share_one_group() {
+    let rows = vec![
+        sample_row("u1", TimelineRowKind::User),
+        sample_row("u2", TimelineRowKind::User),
+        sample_row("a1", TimelineRowKind::Assistant),
+    ];
+    let groups = group_timeline_rows(&rows);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].len(), 2);
+    assert_eq!(groups[0][0].kind.visual_sender(), VisualSender::You);
+}
+
+#[test]
+fn user_and_assistant_labels_are_chat_senders() {
+    crate::i18n::init();
+    let vm = derive_timeline(&live_state());
+    assert_eq!(vm.rows[0].label, "You");
+
+    let mut state = live_state();
+    let session = state.live_session.as_mut().unwrap();
+    let tl = session.timelines.get_mut("root").unwrap();
+    tl.apply_committed(
+        "msg-a".into(),
+        2,
+        piko_protocol::Message::Assistant {
+            content: vec![piko_protocol::ContentBlock::Text { text: "hi".into() }],
+            api: "chat".into(),
+            provider: "test".into(),
+            model: "test-model".into(),
+            usage: None,
+            stop_reason: None,
+            error_message: None,
+            timestamp: Some(2),
+        },
+        "turn-1".into(),
+    );
+    let vm = derive_timeline(&state);
+    let row = vm.rows.iter().find(|r| r.id == "msg-a").unwrap();
+    assert_eq!(row.label, "Assistant");
 }

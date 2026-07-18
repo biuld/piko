@@ -19,7 +19,9 @@ mod tokens;
 mod typography;
 
 pub use apply::apply_piko_dark_theme;
-pub use icons::{IconSize, PikoIcon, disclosure, icon, placeholder_icon, row_leading};
+pub use icons::{
+    IconSize, PikoIcon, disclosure, icon, placeholder_icon, rotating_gear, row_leading,
+};
 pub use metrics::metrics;
 pub use surfaces::island;
 pub use tokens::{PikoTokens, RoleAccent, tokens};

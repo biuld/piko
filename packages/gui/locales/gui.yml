@@ -43,8 +43,16 @@ island.timeline.empty.title:
   en: No messages yet
 island.timeline.empty.subtitle:
   en: Send a message to start the conversation
+island.timeline.sender.you:
+  en: You
+island.timeline.sender.assistant:
+  en: Assistant
 island.timeline.streaming:
   en: streaming
+island.timeline.thought:
+  en: Thought
+island.timeline.thinking_live:
+  en: Thinking…
 island.timeline.tool.running:
   en: running
 island.timeline.tool.done:

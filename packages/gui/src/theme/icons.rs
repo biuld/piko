@@ -49,6 +49,8 @@ pub enum PikoIcon {
     Activity,
     Bell,
     Inbox,
+    /// Gear / settings — used as the streaming Assistant spinner.
+    Settings,
     /// Optional narrow Sheet openers (not wired in v1 chrome).
     #[expect(dead_code)]
     PanelLeft,
@@ -81,6 +83,7 @@ impl IconNamed for PikoIcon {
             Self::Activity => "icons/activity.svg",
             Self::Bell => "icons/bell.svg",
             Self::Inbox => "icons/inbox.svg",
+            Self::Settings => "icons/settings.svg",
             Self::PanelLeft => "icons/panel-left.svg",
             Self::PanelRight => "icons/panel-right.svg",
         }
@@ -104,6 +107,30 @@ pub fn row_leading(name: PikoIcon, color: impl Into<Hsla>) -> gpui::AnyElement {
         .items_center()
         .justify_center()
         .child(icon(name, IconSize::Meta, color))
+        .into_any_element()
+}
+
+/// Rotating gear mark for streaming Assistant (gear is meant to spin).
+///
+/// Reduced motion shows a static gear instead of animating.
+pub fn rotating_gear(color: impl Into<Hsla>, animate: bool) -> gpui::AnyElement {
+    let color = color.into();
+    let mark: gpui::AnyElement = if animate {
+        gpui_component::spinner::Spinner::new()
+            .icon(Icon::new(PikoIcon::Settings))
+            .with_size(Size::Size(IconSize::Meta.pixels()))
+            .color(color)
+            .into_any_element()
+    } else {
+        icon(PikoIcon::Settings, IconSize::Meta, color).into_any_element()
+    };
+    div()
+        .w(px(16.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(mark)
         .into_any_element()
 }
 
@@ -134,6 +161,7 @@ mod tests {
         assert_eq!(PikoIcon::Plus.path().as_ref(), "icons/plus.svg");
         assert_eq!(PikoIcon::Bot.path().as_ref(), "icons/bot.svg");
         assert_eq!(PikoIcon::User.path().as_ref(), "icons/user.svg");
+        assert_eq!(PikoIcon::Settings.path().as_ref(), "icons/settings.svg");
         assert_eq!(PikoIcon::Folder.path().as_ref(), "icons/folder.svg");
         assert_eq!(PikoIcon::Network.path().as_ref(), "icons/network.svg");
         assert_eq!(IconSize::Placeholder.pixels(), px(28.));

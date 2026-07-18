@@ -170,35 +170,48 @@ fn entry_agent_instance(entry: &SessionTreeEntry) -> Option<String> {
 fn entry_label(entry: &SessionTreeEntry) -> (TreeEntryKind, String) {
     match entry {
         SessionTreeEntry::Message(m) => {
-            let kind = match &m.message {
-                Message::User { .. } => TreeEntryKind::User,
-                Message::Assistant { .. } => TreeEntryKind::Assistant,
-                _ => TreeEntryKind::Other,
-            };
-            let body = match &m.message {
-                Message::User { content, .. } => match content {
-                    piko_protocol::MessageContent::String(s) => s.clone(),
-                    piko_protocol::MessageContent::Blocks(blocks) => blocks
+            let (kind, body) = match &m.message {
+                Message::User { content, .. } => {
+                    let body = match content {
+                        piko_protocol::MessageContent::String(s) => s.clone(),
+                        piko_protocol::MessageContent::Blocks(blocks) => blocks
+                            .iter()
+                            .filter_map(|b| match b {
+                                piko_protocol::ContentBlock::Text { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    };
+                    (TreeEntryKind::User, body)
+                }
+                Message::Assistant { content, .. } => {
+                    let body = content
                         .iter()
                         .filter_map(|b| match b {
                             piko_protocol::ContentBlock::Text { text } => Some(text.as_str()),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
-                        .join(" "),
-                },
-                Message::Assistant { content, .. } => content
-                    .iter()
-                    .filter_map(|b| match b {
-                        piko_protocol::ContentBlock::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                other => other.role().to_string(),
+                        .join(" ");
+                    (TreeEntryKind::Assistant, body)
+                }
+                Message::ToolCall { name, .. } => {
+                    return (
+                        TreeEntryKind::Tool,
+                        crate::t!("tree.entry.tool", name = name.as_str()),
+                    );
+                }
+                Message::ToolResult { tool_name, .. } => {
+                    let name = tool_name.as_deref().unwrap_or("tool");
+                    return (
+                        TreeEntryKind::Tool,
+                        crate::t!("tree.entry.tool", name = name),
+                    );
+                }
+                other => (TreeEntryKind::Other, other.role().to_string()),
             };
-            let label = truncate(&body, 48);
-            (kind, label)
+            (kind, truncate(&body, 48))
         }
         SessionTreeEntry::ToolCall(t) => (
             TreeEntryKind::Tool,
@@ -345,5 +358,30 @@ mod tests {
         let surviving: HashSet<String> = ["a", "b"].into_iter().map(str::to_string).collect();
         prune_tree_expansion(&mut expanded, &surviving);
         assert_eq!(expanded, ["a".into()].into_iter().collect());
+    }
+
+    #[test]
+    fn message_tool_call_uses_tool_kind_for_wrench_icon() {
+        crate::i18n::init();
+        let entry = SessionTreeEntry::Message(MessageEntry {
+            id: "tc".into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            agent_id: "spec".into(),
+            agent_instance_id: "root".into(),
+            source_turn_id: "t".into(),
+            transcript_seq: 1,
+            message: Message::ToolCall {
+                id: "call-1".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({}),
+                model: None,
+                provider: None,
+                timestamp: Some(1),
+            },
+        });
+        let (kind, label) = entry_label(&entry);
+        assert_eq!(kind, TreeEntryKind::Tool);
+        assert!(label.contains("bash"));
     }
 }

@@ -25,7 +25,7 @@ hostd process.
 - [ ] `cmd-j` reattaches follow and scrolls to end (no in-panel Jump button)
 - [ ] Opening or hydrating an existing session starts at the top and does not
       implicitly enable bottom-follow
-- [ ] Expanding a tool Detail card does not force scroll when detached
+- [ ] Expanding a tool chip detail does not force scroll when detached
 - [ ] Switching Agent restores that Agent’s follow preference
 - [ ] A long Timeline scrolls inside its own island without moving or shrinking
       Composer
@@ -34,13 +34,14 @@ hostd process.
 
 ## Conversation center
 
-- [ ] Assistant prose reads as an open document; user prompts and tool calls
-      use lightweight elevated blocks
+- [ ] Assistant prose reads as an open document; user prompts use lightweight
+      elevated blocks; tools are left-aligned chips that expand detail downward
 - [ ] Messages have no full-width separator lines or persistent left role rails
 - [ ] Role markers remain distinct without overpowering mixed CJK/Latin body
       text
-- [ ] Thinking content is visually subordinate without a visible `thinking`
-      heading or prefix
+- [ ] Thinking is always visible as muted CoT text (no Detail / collapse chrome)
+- [ ] Tools before the answer body sit in the muted CoT stream with thinking;
+      tools after the body stay beside the prose
 - [ ] Running, completed, and failed tool markers use info, success, and danger
       colors respectively
 - [ ] Collapsed Activity is a 32 px borderless row and gains a container only

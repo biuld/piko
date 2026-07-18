@@ -53,6 +53,9 @@ impl AssetSource for GuiAssets {
             ))),
             "icons/bell.svg" => Some(Cow::Borrowed(include_bytes!("../assets/icons/bell.svg"))),
             "icons/inbox.svg" => Some(Cow::Borrowed(include_bytes!("../assets/icons/inbox.svg"))),
+            "icons/settings.svg" => Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/settings.svg"
+            ))),
             "icons/panel-left.svg" => Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/panel-left.svg"
             ))),
@@ -89,6 +92,7 @@ impl AssetSource for GuiAssets {
                 "activity.svg".into(),
                 "bell.svg".into(),
                 "inbox.svg".into(),
+                "settings.svg".into(),
                 "panel-left.svg".into(),
                 "panel-right.svg".into(),
             ])
