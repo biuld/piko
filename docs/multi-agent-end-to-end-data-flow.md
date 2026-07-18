@@ -6,7 +6,7 @@
 > [Multi-Agent Runtime Model](multi-agent-execution-model.md),
 > [hostd Turn Model and Agent Run API](hostd-turn-model.md),
 > [Turn–Agent Run Boundary](turn-agent-run-boundary-design.md),
-> [TUI ↔ hostd Interaction Design](tui-hostd-interaction-design.md), and
+> [Client Core Design](client-core-design.md), and
 > [Single-Agent Runtime Model](single-agent-runtime-model.md).
 
 ## 1. Overview
