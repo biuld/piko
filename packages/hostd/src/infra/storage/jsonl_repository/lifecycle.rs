@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use crate::api::SessionSummary;
-use crate::domain::sessions::SessionState;
-
 use super::super::session_store::SessionStore;
 use super::super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use super::helpers::{encode_cwd, timestamp};
 use super::load::load_session_dir;
+use crate::api::SessionSummary;
 
 impl JsonlSessionRepository {
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -48,17 +46,11 @@ impl JsonlSessionRepository {
         })?;
         SessionStore::create_session(
             dir.clone(),
-            session_id.clone(),
+            session_id,
             cwd.to_string(),
             created_at.parse().unwrap_or_default(),
         )?;
-        // PersistedSession.path is the *directory*
-        Ok(PersistedSession {
-            state: SessionState::new(session_id.clone(), cwd.to_string()),
-            path: dir,
-            created_at,
-            parent_session_path: None,
-        })
+        load_session_dir(&dir)
     }
 
     pub fn open(

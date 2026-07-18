@@ -16,6 +16,8 @@ a Panel, Slot, overlay, focus target, setting, or key binding.
 ## User-visible contract
 
 - Timeline shows the selected AgentInstance transcript.
+- A newly created Session starts with its root AgentInstance selected, so the
+  first Editor submission has a concrete target without manual selection.
 - Enter captures the selected `agent_instance_id` and sends the text to that
   target.
 - Every accepted submission creates one hostd Turn.

@@ -42,6 +42,26 @@ fn message_commit(id: &str, parent: Option<&str>) -> MessageCommit {
     }
 }
 
+#[test]
+fn repository_create_returns_the_persisted_root_agent_selected() {
+    let temp = tempdir().unwrap();
+    let created = JsonlSessionRepository::new(temp.path())
+        .create("/project")
+        .unwrap();
+    let root_agent_instance_id = format!("agent_{}_root", created.state.session_id);
+
+    assert_eq!(
+        created.state.active_agent_instance_id.as_deref(),
+        Some(root_agent_instance_id.as_str())
+    );
+    assert!(
+        created
+            .state
+            .active_agents
+            .contains_key(&root_agent_instance_id)
+    );
+}
+
 #[tokio::test]
 async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
     let temp = tempdir().unwrap();
