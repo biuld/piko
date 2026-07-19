@@ -275,6 +275,7 @@ impl Render for DesktopApp {
         let on_focus_next = cx.listener(Self::action_focus_next_island);
         let on_focus_prev = cx.listener(Self::action_focus_prev_island);
         let show_session = self.layout.is_docked_visible(IslandId::Sessions, true);
+        let show_right = self.layout.any_right_column_docked(true);
         let status_vm = derive_status_bar(self.bridge.state(), show_session);
         let t = tokens();
         let m = metrics();
@@ -283,6 +284,7 @@ impl Render for DesktopApp {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "workspace".into());
+        let title_entity = cx.entity().downgrade();
 
         div()
             .id("desktop-app")
@@ -301,7 +303,13 @@ impl Render for DesktopApp {
             .flex_col()
             .bg(t.canvas_rgba())
             .text_color(t.fg_rgba())
-            .child(render_title_bar(self.bridge.state(), &project_name))
+            .child(render_title_bar(
+                self.bridge.state(),
+                &project_name,
+                show_session,
+                show_right,
+                title_entity,
+            ))
             .child(
                 div()
                     .flex_1()

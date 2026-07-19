@@ -168,8 +168,11 @@ responsibilities.
 
 ## 7. Workbench Layout
 
-Default window size is approximately 1360 × 840 points with a practical minimum
-near 760 × 600. Exact platform bounds are validated during the GPUI spike.
+Default window size is approximately 1360 × 840 points. The native window
+minimum is locked to the single-column center budget: width is
+`CENTER_MIN_WIDTH` (620) plus the left/right canvas gutters (8+8), height is
+600. That keeps the window floor consistent with the center readable minimum
+and prevents shrink-below-center overflow.
 
 ```text
 DesktopApp
@@ -188,16 +191,20 @@ DesktopApp
 ```
 
 The center Workbench never depends on a side panel. Responsive layout uses
-available center width rather than treating window width alone as authority:
+available width against the center minimum (plus docked column minima and
+gutters) rather than fixed pixel breakpoints as dock authority:
 
-- wide: both outer sidebars visible by default;
-- medium: Session sidebar visible, Inspector collapsed;
-- narrow: both collapsed and available through left/right Sheets.
+- when prefs and width allow, both outer sidebars dock;
+- when both are preferred but space is tight, the right column collapses first,
+  then the left;
+- columns that cannot dock remain available through left/right Sheets via the
+  TitleBar toggles or `cmd-b` / `cmd-i`.
 
-Hidden panels are removed from the resizable group rather than collapsed to
-unusable slivers. Manual visibility choices win until the window can no longer
-maintain the center minimum. Responsive collapse does not overwrite the user's
-stored wide-window preference.
+TitleBar hosts Fleet-style left/right panel icon toggles. Pressed state tracks
+effective dock visibility. Hidden panels are removed from the resizable group
+rather than collapsed to unusable slivers. Manual visibility preferences win
+until the window can no longer maintain the center minimum. Responsive
+collapse does not overwrite the user's stored open preference.
 
 The center has no persistent header and starts directly with Timeline.
 `SessionSidebar` and the native window title own Session/project context.

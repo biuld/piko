@@ -24,6 +24,7 @@ use crate::app::desktop_app::{
     CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
     NewSession, ToggleRightColumn, ToggleSessions,
 };
+use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
 use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
 use crate::theme::apply_piko_dark_theme;
@@ -75,6 +76,7 @@ fn main() {
                         origin: Point::default(),
                         size: size(px(1360.), px(840.)),
                     })),
+                    window_min_size: Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT))),
                     titlebar: Some(TitlebarOptions {
                         title: None,
                         appears_transparent: true,

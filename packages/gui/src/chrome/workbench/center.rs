@@ -3,7 +3,6 @@
 use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
-use crate::app::island_actions::render_pane_toggles;
 use crate::chrome::island::{IslandPanel, IslandPlaceholder};
 use crate::projections::{SessionPhaseView, derive_phase_view};
 use crate::theme::{PikoIcon, metrics};
@@ -11,10 +10,9 @@ use crate::theme::{PikoIcon, metrics};
 pub(crate) fn render_center(
     app: &DesktopApp,
     _window: &mut Window,
-    cx: &mut Context<DesktopApp>,
+    _cx: &mut Context<DesktopApp>,
 ) -> AnyElement {
     let phase = derive_phase_view(app.bridge_state());
-    let entity = cx.entity().downgrade();
     let m = metrics();
 
     let timeline_slot = match phase {
@@ -61,7 +59,6 @@ pub(crate) fn render_center(
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .child(render_pane_toggles(app, entity))
                 .child(div().flex_1().min_h(px(0.)).child(timeline_slot)),
         )
         .child(app.composer.clone())

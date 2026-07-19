@@ -37,9 +37,10 @@ approval or interaction prompts.
 
 Wide windows show the Sessions island on the left and, when open, Agents above
 Tree on the right. Those right-hand islands share a column width
-and a vertical split. Both outer docks are independently hideable and
-resizable. The center Workbench remains fully usable as a single column and
-never depends on either side.
+and a vertical split. TitleBar panel icons (and `cmd-b` / `cmd-i`) toggle the
+outer docks; both are independently hideable and resizable. The center
+Workbench remains fully usable as a single column and never depends on either
+side.
 
 ## Island isolation and focus
 
@@ -263,18 +264,22 @@ authority before the matching host event or reconciliation.
 
 ## Responsive Sidebars
 
-- Wide windows show Sessions and the right column (Agents + Tree)
-  by default. Agents and Tree share column width through a vertically resizable
-  split; each island has its own open preference (UI still toggles them together).
+- TitleBar hosts two always-visible icon toggles for the Sessions column and
+  the right column (Agents + Tree). Pressed state follows effective dock
+  visibility. `cmd-b` / `cmd-i` share the same actions.
+- Dock visibility is resolved from user prefs plus available width so the
+  center column keeps its minimum readable width. When both columns are
+  preferred but space is tight, the right column collapses first, then the
+  left. Auto-collapse does not overwrite stored `[gui]` open prefs; widening
+  the window restores docked columns from prefs.
+- Agents and Tree share column width through a vertically resizable split and
+  are toggled together as one right column.
 - Activity Center remains between Timeline and Composer at every window width.
   It has a compact bounded height and can be collapsed to its summary row.
-- Medium windows keep Sessions docked and collapse Agents/Tree behind a toolbar
-  action (`cmd-i`).
-- Narrow windows undock Sessions, Agents, and Map. They remain available as
-  temporary sheets above the Workbench; the right sheet keeps Agents above Map
-  in the same vertical split as the docked column.
-- Outer islands are resizable and hideable. Closing Sessions and both right
-  islands returns to the single-column Workbench with no loss of functionality.
+- When a preferred column cannot dock, the matching TitleBar / shortcut action
+  opens a temporary Sheet (left for Sessions, right for Agents above Tree).
+- Outer islands are resizable and hideable. Closing Sessions and the right
+  column returns to the single-column Workbench with no loss of functionality.
 - Island visibility, size, expansion, and selection are presentation state.
 - Visibility and size persist under hostd's opaque `[gui]` namespace.
 

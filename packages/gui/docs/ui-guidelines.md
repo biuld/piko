@@ -293,13 +293,17 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
 
 ## 6. Responsive behavior
 
-- Wide: dock Sessions, Timeline, Composer, and (when open) Agents + Tree.
-  Islands stay visible without a live session and show Empty / Loading until
-  the session is ready.
-- Medium: keep Sessions and center islands; Agents/Tree stay behind the
-  action (`cmd-i` toggles both islands together).
-- Narrow: keep Timeline + Composer; open Sessions in a Sheet, and Agents + Tree
-  as the same vertical island stack in a right Sheet.
+- TitleBar left/right panel icons toggle the Sessions column and the Agents+Tree
+  column. Selected state follows effective dock visibility; `cmd-b` / `cmd-i`
+  share those actions.
+- Dock when prefs and width allow (center minimum 620 plus column minima and
+  gutters). If both columns are preferred but width is tight, collapse the
+  right column first, then the left. Auto-collapse does not clear open prefs.
+- Native window minimum matches that center budget: width =
+  `CENTER_MIN_WIDTH + 2×gutter` (636), height 600, so the window cannot shrink
+  below a usable single-column Workbench.
+- When a preferred column cannot dock, the toggle opens a Sheet instead (left
+  Sessions; right Agents above Tree in the same vertical stack).
 - Removing an island also removes its gutter slot; do not leave empty rails.
 - Persist user widths, but always protect the center-column minimum width.
 

@@ -91,6 +91,11 @@ sheet.open.sessions:
 sheet.open.agents:
   en: Agents
 
+chrome.toggle.sessions:
+  en: Toggle Sessions sidebar
+chrome.toggle.right_column:
+  en: Toggle Agents sidebar
+
 status.connection.connected:
   en: hostd connected
 status.connection.disconnected:

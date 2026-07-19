@@ -1,0 +1,36 @@
+<!-- @license lucide-static v0.468.0 - ISC (hollow base) + piko diagonal hatch -->
+<svg
+  class="lucide lucide-panel-right-filled"
+  xmlns="http://www.w3.org/2000/svg"
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+>
+  <defs>
+    <clipPath id="pane">
+      <rect x="15" y="3" width="6" height="18" />
+    </clipPath>
+  </defs>
+  <rect width="18" height="18" x="3" y="3" rx="2" />
+  <path d="M15 3v18" />
+  <g
+    clip-path="url(#pane)"
+    stroke="currentColor"
+    stroke-width="1"
+    stroke-linecap="butt"
+  >
+    <path d="M12 10 L24 -2" />
+    <path d="M12 13 L24 1" />
+    <path d="M12 16 L24 4" />
+    <path d="M12 19 L24 7" />
+    <path d="M12 22 L24 10" />
+    <path d="M12 25 L24 13" />
+    <path d="M12 28 L24 16" />
+    <path d="M12 31 L24 19" />
+  </g>
+</svg>

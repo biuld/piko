@@ -59,8 +59,14 @@ impl AssetSource for GuiAssets {
             "icons/panel-left.svg" => Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/panel-left.svg"
             ))),
+            "icons/panel-left-filled.svg" => Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/panel-left-filled.svg"
+            ))),
             "icons/panel-right.svg" => Some(Cow::Borrowed(include_bytes!(
                 "../assets/icons/panel-right.svg"
+            ))),
+            "icons/panel-right-filled.svg" => Some(Cow::Borrowed(include_bytes!(
+                "../assets/icons/panel-right-filled.svg"
             ))),
             _ => None,
         })
@@ -94,7 +100,9 @@ impl AssetSource for GuiAssets {
                 "inbox.svg".into(),
                 "settings.svg".into(),
                 "panel-left.svg".into(),
+                "panel-left-filled.svg".into(),
                 "panel-right.svg".into(),
+                "panel-right-filled.svg".into(),
             ])
         } else {
             Ok(Vec::new())
@@ -113,8 +121,24 @@ mod tests {
     }
 
     #[test]
+    fn loads_panel_filled_icons() {
+        for path in [
+            "icons/panel-left-filled.svg",
+            "icons/panel-right-filled.svg",
+        ] {
+            let data = GuiAssets.load(path).unwrap().unwrap();
+            assert!(
+                std::str::from_utf8(&data).unwrap().contains("clipPath"),
+                "{path} should embed hatch clip"
+            );
+        }
+    }
+
+    #[test]
     fn lists_icon_dir() {
         let names = GuiAssets.list("icons").unwrap();
         assert!(names.iter().any(|n| n.as_ref() == "plus.svg"));
+        assert!(names.iter().any(|n| n.as_ref() == "panel-left-filled.svg"));
+        assert!(names.iter().any(|n| n.as_ref() == "panel-right-filled.svg"));
     }
 }

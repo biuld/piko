@@ -14,6 +14,14 @@ mod tests {
         assert_eq!(crate::t!("island.sessions.title"), "Sessions");
         assert_eq!(crate::t!("composer.action.send"), "Send");
         assert_eq!(
+            crate::t!("chrome.toggle.sessions"),
+            "Toggle Sessions sidebar"
+        );
+        assert_eq!(
+            crate::t!("chrome.toggle.right_column"),
+            "Toggle Agents sidebar"
+        );
+        assert_eq!(
             crate::t!("activity.item.tool_running", name = "bash"),
             "Tool running: bash"
         );

@@ -36,7 +36,7 @@ Useful environment variables:
 | Binding | Action |
 |---|---|
 | `cmd-n` | New Session |
-| `cmd-b` / `cmd-i` | Toggle Sessions / Agents+Tree (Sheet on narrow) |
+| `cmd-b` / `cmd-i` | Toggle Sessions / Agents+Tree (TitleBar icons; Sheet when undockable) |
 | `cmd-l` | Focus Composer |
 | `tab` / `shift-tab` | Cycle focus among visible islands |
 | `cmd-j` | Jump to latest Timeline |

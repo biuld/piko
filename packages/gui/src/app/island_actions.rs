@@ -2,10 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::Sizable;
-use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{Placement, WindowExt};
 
 use crate::chrome::IslandId;
@@ -16,17 +13,13 @@ use crate::islands::{
 use super::desktop_app::{DesktopApp, ToggleRightColumn, ToggleSessions};
 
 impl DesktopApp {
-    pub(crate) fn layout(&self) -> &super::layout_state::LayoutState {
-        &self.layout
-    }
-
     pub(crate) fn tree_preview_id(&self) -> Option<&str> {
         self.tree_preview_entry_id.as_deref()
     }
 
     pub(crate) fn sync_layout_breakpoint(&mut self, window: &Window) {
         let width: f32 = window.viewport_size().width.into();
-        self.layout.sync_breakpoint(width);
+        self.layout.sync_window_width(width);
     }
 
     pub(crate) fn action_toggle_sessions(
@@ -35,15 +28,19 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.layout.breakpoint {
-            super::layout_state::LayoutBreakpoint::Narrow => {
-                self.open_sessions_sheet(window, cx);
-            }
-            _ => {
-                self.layout.toggle(IslandId::Sessions);
-                self.persist_gui_config();
-                cx.notify();
-            }
+        let live = self.bridge_state().is_live();
+        if self.layout.is_docked_visible(IslandId::Sessions, live) {
+            self.layout.set_open(IslandId::Sessions, false);
+            self.persist_gui_config();
+            cx.notify();
+            return;
+        }
+        self.layout.set_open(IslandId::Sessions, true);
+        self.persist_gui_config();
+        if self.layout.is_docked_visible(IslandId::Sessions, live) {
+            cx.notify();
+        } else {
+            self.open_sessions_sheet(window, cx);
         }
     }
 
@@ -53,15 +50,19 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.layout.breakpoint {
-            super::layout_state::LayoutBreakpoint::Wide => {
-                self.layout.toggle_right_column();
-                self.persist_gui_config();
-                cx.notify();
-            }
-            _ => {
-                self.open_right_column_sheet(window, cx);
-            }
+        let live = self.bridge_state().is_live();
+        if self.layout.any_right_column_docked(live) {
+            self.layout.set_right_column_open(false);
+            self.persist_gui_config();
+            cx.notify();
+            return;
+        }
+        self.layout.set_right_column_open(true);
+        self.persist_gui_config();
+        if self.layout.any_right_column_docked(live) {
+            cx.notify();
+        } else {
+            self.open_right_column_sheet(window, cx);
         }
     }
 
@@ -231,60 +232,6 @@ impl DesktopApp {
             self.tree_expanded_by_agent.entry(agent).or_insert(seed);
         }
     }
-}
-
-pub(crate) fn render_pane_toggles(
-    app: &DesktopApp,
-    entity: WeakEntity<DesktopApp>,
-) -> impl IntoElement {
-    let show_session = app.layout().is_docked_visible(IslandId::Sessions, true);
-    let show_right = app.layout().any_right_column_docked(true);
-    let need_bar = !show_session || !show_right;
-    let t = crate::theme::tokens();
-    let m = crate::theme::metrics();
-    div().when(need_bar, |d| {
-        d.h(m.compact_bar_height)
-            .px(m.space_sm)
-            .flex()
-            .items_center()
-            .gap(m.space_sm)
-            .border_b_1()
-            .border_color(t.border_rgba())
-            .when(!show_session, |d| {
-                let entity = entity.clone();
-                d.child(
-                    Button::new("open-sessions")
-                        .label(crate::t!("sheet.open.sessions"))
-                        .on_click(move |_, window, cx| {
-                            if let Some(view) = entity.upgrade() {
-                                view.update(cx, |this, cx| {
-                                    this.action_toggle_sessions(&ToggleSessions, window, cx);
-                                });
-                            }
-                        })
-                        .ghost()
-                        .small()
-                        .compact(),
-                )
-            })
-            .when(!show_right, |d| {
-                let entity = entity.clone();
-                d.child(
-                    Button::new("open-right-column")
-                        .label(crate::t!("sheet.open.agents"))
-                        .on_click(move |_, window, cx| {
-                            if let Some(view) = entity.upgrade() {
-                                view.update(cx, |this, cx| {
-                                    this.action_toggle_right_column(&ToggleRightColumn, window, cx);
-                                });
-                            }
-                        })
-                        .ghost()
-                        .small()
-                        .compact(),
-                )
-            })
-    })
 }
 
 pub(crate) type TreeExpandedByAgent = HashMap<String, HashSet<String>>;

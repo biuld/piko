@@ -7,6 +7,7 @@ hostd process.
 ## Keyboard main path
 
 - [ ] `cmd-n` create session, `cmd-b` / `cmd-i` toggle Sessions / Agents+Tree
+      (same as TitleBar panel icons; Sheet when the column cannot dock)
 - [ ] `cmd-l` focus Composer, Enter submit, Shift+Enter newline
 - [ ] `cmd-.` cancel Turn, `cmd-j` jump to latest when detached
 - [ ] Tab / Shift+Tab traverses focusable chrome without trapping in StatusBar
@@ -57,7 +58,12 @@ hostd process.
 
 ## Layout / StatusBar
 
-- [ ] Wide (≥1200): Sessions + center + Agents/Tree; medium hides Agents/Tree; narrow uses Sheets
+- [ ] TitleBar PanelLeft / PanelRight toggles dock or open Sheets; pressed =
+      currently docked
+- [ ] Width squeeze collapses right column before left; prefs stay open and
+      restore when widened
+- [ ] Wide enough for both minima: Sessions + center + Agents/Tree; too narrow
+      for a column uses Sheets instead of a center reveal bar
 - [ ] Wide layout shows an 8 px canvas gutter between the three columns
 - [ ] Agents and Tree are separate rounded islands with an 8 px vertical gutter
 - [ ] Sessions / Agents / Tree scrollbars match Timeline (themed thumb, island

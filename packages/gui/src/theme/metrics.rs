@@ -17,6 +17,8 @@ pub struct UiMetrics {
     /// Distance from island top to vertically-centered header title
     /// (`(panel_header_height - label_line_height) / 2`).
     pub panel_header_title_inset: Pixels,
+    /// Reserved for compact chrome rows (secondary strips, etc.).
+    #[allow(dead_code)]
     pub compact_bar_height: Pixels,
     pub title_bar_height: Pixels,
     pub status_bar_height: Pixels,
@@ -75,6 +77,7 @@ mod tests {
         let m = metrics();
         assert_eq!(m.panel_header_height, px(40.));
         assert_eq!(m.panel_header_title_inset, px(11.));
+        assert_eq!(m.compact_bar_height, px(28.));
         assert_eq!(m.title_bar_height, px(34.));
         assert_eq!(m.status_bar_height, px(28.));
         assert_eq!(m.title_bar_safe_inset, px(80.));
