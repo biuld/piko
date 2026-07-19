@@ -35,7 +35,7 @@ Useful environment variables:
 
 | Binding | Action |
 |---|---|
-| `cmd-n` | New Session |
+| `cmd-n` | New Session in the live Session's directory; Open Directory when idle |
 | `cmd-b` / `cmd-i` | Toggle Sessions / Agents+Tree (TitleBar icons; Sheet when undockable) |
 | `cmd-l` | Focus Composer |
 | `tab` / `shift-tab` | Cycle focus among visible islands |

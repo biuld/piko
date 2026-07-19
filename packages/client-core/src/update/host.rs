@@ -2,10 +2,10 @@
 
 mod events;
 
-use piko_protocol::{Command, CommandResult, ServerMessage};
+use piko_protocol::{Command, CommandResult, ServerMessage, SessionSummary};
 
 use crate::effect::ClientEffect;
-use crate::state::{ClientState, LiveSession, PendingOp, SessionPhase};
+use crate::state::{ClientState, LiveSession, PendingOp, SessionListProjection, SessionPhase};
 use crate::timeline::ApplyOutcome;
 use crate::update::UpdateContext;
 
@@ -163,7 +163,13 @@ fn handle_command_response(
                     };
                 }
             }
-            (PendingOp::Create, CommandResult::SessionCreated { session_id, .. }) => {
+            (
+                PendingOp::Create,
+                CommandResult::SessionCreated {
+                    session_id, cwd, ..
+                },
+            ) => {
+                upsert_created_session(&mut state.session_list, &session_id, &cwd);
                 state.session_phase = SessionPhase::Hydrating {
                     target_id: session_id,
                 };
@@ -348,6 +354,34 @@ fn handle_session_cleared(state: &mut ClientState, previous_session_id: &str) {
         state.live_session = None;
         state.session_phase = SessionPhase::IdleNoSession;
     }
+}
+
+/// Insert or refresh a Session row after `SessionCreated` so frontends do not
+/// wait for another `SessionList` discover to see the new identity.
+fn upsert_created_session(list: &mut SessionListProjection, session_id: &str, cwd: &str) {
+    if let Some(existing) = list
+        .sessions
+        .iter_mut()
+        .find(|s| s.session_id == session_id)
+    {
+        existing.cwd = cwd.to_string();
+        return;
+    }
+    list.sessions.insert(
+        0,
+        SessionSummary {
+            session_id: session_id.to_string(),
+            cwd: cwd.to_string(),
+            seq: 0,
+            name: None,
+            first_message: None,
+            message_count: 0,
+            created_at: None,
+            modified_at: None,
+            session_path: None,
+            parent_session_path: None,
+        },
+    );
 }
 
 pub(super) fn is_live_session_event(state: &ClientState, session_id: &str) -> bool {

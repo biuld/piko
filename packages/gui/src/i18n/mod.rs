@@ -12,6 +12,10 @@ mod tests {
     fn english_catalog_resolves() {
         super::init();
         assert_eq!(crate::t!("island.sessions.title"), "Sessions");
+        assert_eq!(
+            crate::t!("island.sessions.action.open_directory"),
+            "Open Directory"
+        );
         assert_eq!(crate::t!("composer.action.send"), "Send");
         assert_eq!(
             crate::t!("chrome.toggle.sessions"),

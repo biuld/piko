@@ -112,6 +112,7 @@ fn agent_row_spec(node: &AgentTreeNode, collapsed: &HashSet<String>) -> TreeRowS
         label: SharedString::from(node.name.clone()),
         label_color: None,
         leading: Some(row_leading(PikoIcon::Bot, leading_color)),
-        trailing: Some(trailing),
+        detail: Some(trailing),
+        accessory: None,
     }
 }

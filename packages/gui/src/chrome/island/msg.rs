@@ -19,7 +19,12 @@ pub enum IslandMsg {
     OpenSession {
         session_id: String,
     },
-    NewSession,
+    /// Create a Session in the given working directory.
+    NewSession {
+        cwd: String,
+    },
+    /// Pick a directory; create a Session there unless the cwd is already listed.
+    OpenDirectory,
     SelectAgent {
         agent_instance_id: String,
     },

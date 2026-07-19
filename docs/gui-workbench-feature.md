@@ -18,16 +18,15 @@ approval or interaction prompts.
 
 ```text
 ┌──────────────────┬──────────────────────────────────────┬───────────────────┐
-│ Sessions         │                                      │ Agents            │
+│ Sessions      [↗]│                                      │ Agents            │
 │                  │                                      │ ● Main            │
-│ + New Session    │        Conversation Timeline         │ ├─ Researcher     │
-│                  │                                      │ └─ Reviewer       │
-│ Folder groups    │                                      ├───────────────────┤
-│  ● alpha         │                                      │ Tree              │
-│    myapp         │                                      │ ● current leaf    │
-│    other         ├──────────────────────────────────────┤ ├─ prompt         │
-│                  │ Activity: 1 approval · 2 running     │ └─ branch         │
-│                  ├──────────────────────────────────────┤                   │
+│ Folder groups    │        Conversation Timeline         │ ├─ Researcher     │
+│  ▾ alpha      [+]│                                      │ └─ Reviewer       │
+│    myapp         │                                      ├───────────────────┤
+│  ▾ other      [+]│                                      │ Tree              │
+│    session…      ├──────────────────────────────────────┤ ● current leaf    │
+│                  │ Activity: 1 approval · 2 running     │ ├─ prompt         │
+│                  ├──────────────────────────────────────┤ └─ branch         │
 │                  │ Main ▾ · Model ▾ · Think ▾    Send   │                   │
 │                  │ Multi-line Composer                  │                   │
 │                  ├──────────────────────────────────────┤                   │
@@ -63,15 +62,23 @@ window title; the Composer identifies its target Agent and submission settings.
 
 - The left Sessions island lists all Sessions globally, grouped by working
   directory and sorted alphabetically.
+- Island-level **Open Directory** picks a folder, then immediately creates a
+  Session in that cwd and opens it. If that cwd already appears in the list,
+  the client shows a notice and does not create another Session.
+- **New Session** is per directory group (not a global header action). It
+  creates a Session in that group's cwd.
+- Every Session row shows its message count, including zero, in the same
+  trailing accessory column used by Open Directory and New Session.
 - Starting with a requested Session opens that Session and shows a loading
   state until its complete view is available.
-- Starting without a requested Session shows the global Sessions list and an
-  action to create a new Session (create still uses the process cwd).
+- Starting without a requested Session shows the global Sessions list and
+  Open Directory as the primary way to add a project.
 - Selecting a Session opens it in the same Workbench window.
 - While a different Session is opening, the list distinguishes the live
   Session from the pending target.
-- Creating a Session enters the Workbench immediately, but conversation state
-  remains loading until the Session is ready.
+- Creating a Session enters the Workbench immediately; the Sessions list
+  includes the new Session as soon as creation succeeds, while conversation
+  state remains loading until the Session is ready.
 - Failed open or create operations preserve the previous live Session when
   possible and show an actionable error.
 - Local Composer drafts may be retained per Session within the current window.

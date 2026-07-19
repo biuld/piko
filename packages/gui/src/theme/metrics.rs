@@ -17,6 +17,12 @@ pub struct UiMetrics {
     /// Distance from island top to vertically-centered header title
     /// (`(panel_header_height - label_line_height) / 2`).
     pub panel_header_title_inset: Pixels,
+    /// Shared left/right inset for tool-window headers and tree rows.
+    pub tool_row_inset: Pixels,
+    /// Fixed width for the Meta-or-Action accessory rail (header + tree).
+    pub tool_accessory_width: Pixels,
+    /// Fixed disclosure rail before the terminal accessory (chevron or spacer).
+    pub tool_disclosure_width: Pixels,
     /// Reserved for compact chrome rows (secondary strips, etc.).
     #[allow(dead_code)]
     pub compact_bar_height: Pixels,
@@ -45,6 +51,9 @@ impl UiMetrics {
             space_lg: px(16.),
             panel_header_height: px(40.),
             panel_header_title_inset: px(11.),
+            tool_row_inset: px(8.),
+            tool_accessory_width: px(24.),
+            tool_disclosure_width: px(16.),
             compact_bar_height: px(28.),
             title_bar_height: px(34.),
             status_bar_height: px(28.),
@@ -77,6 +86,9 @@ mod tests {
         let m = metrics();
         assert_eq!(m.panel_header_height, px(40.));
         assert_eq!(m.panel_header_title_inset, px(11.));
+        assert_eq!(m.tool_row_inset, px(8.));
+        assert_eq!(m.tool_accessory_width, px(24.));
+        assert_eq!(m.tool_disclosure_width, px(16.));
         assert_eq!(m.compact_bar_height, px(28.));
         assert_eq!(m.title_bar_height, px(34.));
         assert_eq!(m.status_bar_height, px(28.));

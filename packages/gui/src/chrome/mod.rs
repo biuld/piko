@@ -19,5 +19,5 @@ pub use island::{
 pub use island::{IslandBody, IslandMedia};
 pub use status_bar::render_status_bar;
 pub use title_bar::render_title_bar;
-pub use widgets::{TreeClickHandler, TreeRowSpec, render_tree_list};
+pub use widgets::{TreeClickHandler, TreeRowAccessory, TreeRowSpec, render_tree_list};
 pub use workbench::{IslandId, render_right_column};

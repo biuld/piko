@@ -3,11 +3,14 @@
 use std::collections::HashSet;
 
 use gpui::*;
+use gpui_component::WindowExt;
+use gpui_component::notification::{Notification, NotificationType};
 use piko_client_core::state::PendingOp;
 use piko_client_core::{ClientIntent, SessionPhase};
 
 use crate::chrome::IslandId;
 use crate::islands::derive_composer;
+use crate::projections::normalize_cwd_key;
 
 use super::desktop_app::{CancelTurn, DesktopApp, FocusComposer, JumpToLatest, NewSession};
 use super::model_cycle::{next_model_intent, next_thinking_intent};
@@ -20,18 +23,93 @@ impl DesktopApp {
             .unwrap_or(false)
     }
 
+    /// `cmd-n`: New Session in the live Session's cwd, or Open Directory when idle.
     pub(crate) fn action_new_session(
         &mut self,
         _: &NewSession,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.persist_composer_draft(cx);
-        self.bridge.intent(ClientIntent::CreateSession {
-            cwd: self.cwd.clone(),
+        if let Some(cwd) = self
+            .bridge_state()
+            .live_session
+            .as_ref()
+            .map(|s| s.cwd.clone())
+        {
+            self.create_session_in_cwd(cwd, cx);
+        } else {
+            self.action_open_directory(window, cx);
+        }
+    }
+
+    pub(crate) fn action_open_directory(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::from(crate::t!(
+                "island.sessions.action.open_directory"
+            ))),
         });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(result) = rx.await else {
+                return;
+            };
+            let paths = match result {
+                Ok(Some(paths)) => paths,
+                _ => return,
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let cwd = path.to_string_lossy().into_owned();
+            let _ = cx.update(|window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.handle_directory_picked(cwd, window, cx);
+                });
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn create_session_in_cwd(&mut self, cwd: String, cx: &mut Context<Self>) {
+        self.persist_composer_draft(cx);
+        self.bridge.intent(ClientIntent::CreateSession { cwd });
         self.refresh_islands(cx);
         cx.notify();
+    }
+
+    fn handle_directory_picked(
+        &mut self,
+        cwd: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.session_list_has_cwd(&cwd) {
+            let path = cwd.clone();
+            window.push_notification(
+                Notification::new()
+                    .title(crate::t!("island.sessions.notice.directory_exists.title"))
+                    .message(crate::t!(
+                        "island.sessions.notice.directory_exists.message",
+                        path = path
+                    ))
+                    .with_type(NotificationType::Info)
+                    .autohide(true),
+                cx,
+            );
+            return;
+        }
+        self.create_session_in_cwd(cwd, cx);
+    }
+
+    fn session_list_has_cwd(&self, cwd: &str) -> bool {
+        let key = normalize_cwd_key(cwd);
+        self.bridge_state()
+            .session_list
+            .sessions
+            .iter()
+            .any(|s| normalize_cwd_key(&s.cwd) == key)
     }
 
     pub(crate) fn action_cancel_turn(

@@ -20,6 +20,9 @@ inside `packages/gui`:
 This design does not change Client Core, protocol DTOs, or hostd Session
 semantics. No new `[gui]` keys were required for this wave.
 
+Header/tree trailing alignment and tool-window row geometry are **not** part of
+this feature; see [Tool-Window Row Layout](gui-chrome-tool-window-layout-design.md).
+
 ## 2. Responsibilities
 
 | Owner | Owns | Does not own |
@@ -51,7 +54,7 @@ product Empty / Loading paths should prefer `IslandMedia::Element` built from
 
 | `PikoIcon` | Typical use | Replaces |
 |---|---|---|
-| `Plus` | New Session header action | `"+"` label |
+| `Plus` | Per-directory New Session action | `"+"` label |
 | `ChevronRight` | Collapsed disclosure | `▸` |
 | `ChevronDown` | Expanded disclosure | `▾` |
 | `CircleDashed` | Loading placeholders | `◌` |
@@ -59,7 +62,7 @@ product Empty / Loading paths should prefer `IslandMedia::Element` built from
 | `Circle` | Sessions empty / center no-session | `○` |
 | `Bot` | Agents empty / agent rows; Timeline assistant; Tree assistant | `◇` |
 | `User` | Timeline / Tree user rows | none |
-| `Folder` / `FolderOpen` | Sessions directory rows | none |
+| `Folder` / `FolderOpen` | Sessions directory rows; Open Directory header uses `FolderOpen` | none |
 | `Wrench` | Tree tool call | none |
 | `Brain` | Tree thinking-level change | none |
 | `Cpu` | Tree model change | none |
@@ -91,7 +94,8 @@ via existing token HSLA / RGBA helpers.
 1. `tree_list.rs` — disclosure column uses `Chevron*`.
 2. `composer/render.rs` — Activity disclosure uses the same chevrons.
 3. `IslandPlaceholder` — Empty / Loading use `Placeholder` size icons.
-4. Sessions header — `Button` with `Plus` icon, tooltip from i18n.
+4. Sessions header — `Button` with `FolderOpen` icon (Open Directory); directory
+   rows use `Plus` for New Session.
 5. Tests — assert `PikoIcon` path mapping; render tests may keep string icons
    only where they exercise `IslandMedia::Icon`.
 

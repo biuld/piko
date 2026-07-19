@@ -128,6 +128,10 @@ Shared chrome in `src/chrome/island/`:
 - Shell: surface fill, 10 px radius, no idle outline.
 - Header: optional. Sessions / Agents / Tree / Sheet use a title header;
   Timeline and Composer omit it.
+- Header and tree rows share one tool-window row geometry (inset, main, optional
+  detail, fixed accessory rail, disclosure gutter). Islands fill slots only;
+  they do not add edge padding to align trailing controls. See
+  [Tool-Window Row Layout](../../../docs/gui-chrome-tool-window-layout-design.md).
 - Composer: `.scroll(false)` + `.fill(false)` for intrinsic height. Timeline
   uses the shared scroll viewport with an injected `ScrollHandle`.
 - Content states: Ready, Loading, Empty, or Custom. Loading/Empty use
@@ -147,7 +151,9 @@ Shared chrome in `src/chrome/island/`:
 
 ### Sessions
 
-- `IslandPanel` with title + Plus icon action.
+- `IslandPanel` with title + Open Directory header action.
+- Directory groups expose New Session in the shared accessory rail.
+- Every Session shows its message count, including zero, in that same rail.
 - Rows use shared list-item states; metadata is muted.
 
 ### Timeline
@@ -193,10 +199,15 @@ Shared chrome in `src/chrome/island/`:
 
 ### Trees
 
-- 32 px rows, 16 px depth slots, fixed **trailing** disclosure column.
+- 32 px rows, 16 px depth slots, fixed 24 px **accessory** and 16 px
+  **disclosure** columns (chrome-owned and always reserved). Accessory content
+  is either read-only Meta or interactive Action; optional long **detail** text
+  sits before the rails. Disclosure precedes accessory, leaving header actions
+  and row accessories on the terminal right-edge rail. Geometry:
+  [Tool-Window Row Layout](../../../docs/gui-chrome-tool-window-layout-design.md).
 - Expand/collapse only at true branch points (parent with two or more filtered
   children). Single-child chains stay flat with no chevron. Leaves keep the
-  empty disclosure gutter for label alignment.
+  empty disclosure gutter to preserve trailing rail alignment.
 - Hide bookkeeping entries (`model_change`, `thinking_level_change`, session
   info, labels, …) by default — same as TUI. `parentId` is the path edge.
 - Subtle vertical depth guides. Disclosure has its own hit target and must not

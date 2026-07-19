@@ -382,6 +382,9 @@ fn c3_create_session_to_live() {
             target_id: "new-sess".into()
         }
     );
+    assert_eq!(state.session_list.sessions.len(), 1);
+    assert_eq!(state.session_list.sessions[0].session_id, "new-sess");
+    assert_eq!(state.session_list.sessions[0].cwd, "/home/user");
 
     // Reconcile
     let (state, _) = host(

@@ -69,7 +69,8 @@ status bar · connection · usage
   | Tree other | `Circle` |
   | Loading (any island) | `CircleDashed` |
   | Error placeholder | `TriangleAlert` |
-  | New Session action | `Plus` |
+  | New Session action (per directory) | `Plus` |
+  | Open Directory action (Sessions header) | `FolderOpen` |
   | Disclosure collapsed / expanded | `ChevronRight` / `ChevronDown` |
 
 - Disclosure hits remain separate from row activation.

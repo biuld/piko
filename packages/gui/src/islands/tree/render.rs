@@ -102,7 +102,8 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
         label: SharedString::from(node.label.clone()),
         label_color: Some(label_color),
         leading: Some(row_leading(kind_icon, kind_color)),
-        trailing: None,
+        detail: None,
+        accessory: None,
     }
 }
 

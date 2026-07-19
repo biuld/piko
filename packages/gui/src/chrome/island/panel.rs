@@ -11,7 +11,7 @@ use super::viewport::IslandContentViewport;
 pub enum IslandHeader {
     Title {
         title: SharedString,
-        actions: Vec<AnyElement>,
+        action: Option<AnyElement>,
     },
 }
 
@@ -19,17 +19,14 @@ impl IslandHeader {
     pub fn title(title: impl Into<SharedString>) -> Self {
         Self::Title {
             title: title.into(),
-            actions: Vec::new(),
+            action: None,
         }
     }
 
-    pub fn title_with_actions(
-        title: impl Into<SharedString>,
-        actions: impl IntoIterator<Item = AnyElement>,
-    ) -> Self {
+    pub fn title_with_action(title: impl Into<SharedString>, action: AnyElement) -> Self {
         Self::Title {
             title: title.into(),
-            actions: actions.into_iter().collect(),
+            action: Some(action),
         }
     }
 }
@@ -203,29 +200,23 @@ fn render_header(header: IslandHeader) -> impl IntoElement {
         .h(m.panel_header_height)
         .w_full()
         .flex_shrink_0()
+        // Match IslandContentViewport's outer content gutter. The nested
+        // row inset then places header and tree actions on the same rail.
         .px(m.space_xs)
         .flex()
         .items_center()
-        .child(
-            div()
-                .w_full()
-                .px(m.space_sm)
-                .flex()
-                .items_center()
-                .gap(m.space_sm)
-                .child(match header {
-                    IslandHeader::Title { title, actions } => render_title_header(title, actions),
-                }),
-        )
+        .child(div().w_full().px(m.tool_row_inset).child(match header {
+            IslandHeader::Title { title, action } => render_title_header(title, action),
+        }))
 }
 
-fn render_title_header(title: SharedString, actions: Vec<AnyElement>) -> impl IntoElement {
+fn render_title_header(title: SharedString, action: Option<AnyElement>) -> impl IntoElement {
     let m = metrics();
     div()
         .w_full()
         .flex()
         .items_center()
-        .gap(m.space_sm)
+        .gap(m.space_xs)
         .child(
             crate::theme::label_text(true)
                 .min_w_0()
@@ -233,5 +224,19 @@ fn render_title_header(title: SharedString, actions: Vec<AnyElement>) -> impl In
                 .truncate()
                 .child(title),
         )
-        .children(actions)
+        .child(
+            // Header has no disclosure, but reserves the shared rail before
+            // its terminal accessory.
+            div().w(m.tool_disclosure_width).h_full().flex_shrink_0(),
+        )
+        .child(
+            div()
+                .w(m.tool_accessory_width)
+                .h_full()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .children(action),
+        )
 }

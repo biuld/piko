@@ -2,7 +2,7 @@
 //!
 //! Islands own expansion filtering and domain view-models; this module only
 //! renders flat visible rows with depth guides and a separate disclosure hit
-//! target (see ui-guidelines Trees).
+//! target (see ui-guidelines Trees and tool-window row layout).
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -10,6 +10,12 @@ use gpui::*;
 use crate::theme::{metrics, tokens};
 
 pub type TreeClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// Mutually exclusive content for the fixed trailing accessory rail.
+pub enum TreeRowAccessory {
+    Meta(SharedString),
+    Action(AnyElement),
+}
 
 /// One visible flattened tree row. Islands filter collapsed children before
 /// building the list.
@@ -28,7 +34,10 @@ pub struct TreeRowSpec {
     /// Overrides default / selected label color when set.
     pub label_color: Option<Rgba>,
     pub leading: Option<AnyElement>,
-    pub trailing: Option<AnyElement>,
+    /// Optional intrinsic-width context before the fixed trailing rails.
+    pub detail: Option<AnyElement>,
+    /// Centered read-only metadata or action in the fixed accessory rail.
+    pub accessory: Option<TreeRowAccessory>,
 }
 
 /// Depth indent slots: one 16 px column per ancestor level.
@@ -89,7 +98,7 @@ pub fn render_tree_row(
         .id(row_id)
         .h(px(32.))
         .w_full()
-        .px(m.space_sm)
+        .px(m.tool_row_inset)
         .flex()
         .items_center()
         .gap(m.space_xs)
@@ -107,13 +116,13 @@ pub fn render_tree_row(
                 .text_color(label_color)
                 .child(spec.label),
         )
-        .children(spec.trailing)
-        // Fixed disclosure column on the right (ui-guidelines): always 16 px;
-        // chevron only when the row is expandable (`has_children`).
+        .children(spec.detail)
+        // Disclosure describes tree structure, so it precedes the terminal
+        // accessory rail. The rail is reserved even for leaf rows.
         .child(
             div()
                 .id(toggle_id)
-                .w(px(16.))
+                .w(m.tool_disclosure_width)
                 .h_full()
                 .flex_shrink_0()
                 .flex()
@@ -130,6 +139,28 @@ pub fn render_tree_row(
                         })
                         .child(crate::theme::disclosure(spec.expanded, mute))
                 }),
+        )
+        // Always reserve one stable accessory rail. Its content semantics do
+        // not affect its terminal right-edge position.
+        .child(
+            div()
+                .w(m.tool_accessory_width)
+                .h_full()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .children(spec.accessory.map(|accessory| {
+                    match accessory {
+                        TreeRowAccessory::Meta(value) => {
+                            crate::theme::text(crate::theme::TextRole::Meta)
+                                .text_color(t.muted_fg_rgba())
+                                .child(value)
+                                .into_any_element()
+                        }
+                        TreeRowAccessory::Action(action) => action,
+                    }
+                })),
         )
         .on_click(move |ev, window, cx| on_activate(ev, window, cx))
 }

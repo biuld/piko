@@ -7,9 +7,15 @@ island.sessions.title:
 island.sessions.empty.title:
   en: No sessions
 island.sessions.empty.subtitle:
-  en: Create a session to get started
+  en: Open a directory to create a session
 island.sessions.action.new:
   en: New Session
+island.sessions.action.open_directory:
+  en: Open Directory
+island.sessions.notice.directory_exists.title:
+  en: Directory already open
+island.sessions.notice.directory_exists.message:
+  en: "This directory is already in Sessions: %{path}"
 
 island.agents.title:
   en: Agents

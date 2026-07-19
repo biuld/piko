@@ -10,5 +10,5 @@ mod tests;
 
 pub use view_model::{
     ConnectionStatus, SessionPhaseView, SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel,
-    StatusBarViewModel, derive_phase_view, derive_sidebar, derive_status_bar,
+    StatusBarViewModel, derive_phase_view, derive_sidebar, derive_status_bar, normalize_cwd_key,
 };

@@ -4,7 +4,7 @@ use gpui::*;
 
 use crate::chrome::{IslandId, IslandMsg};
 
-use super::desktop_app::{CancelTurn, DesktopApp, JumpToLatest, NewSession};
+use super::desktop_app::{CancelTurn, DesktopApp, JumpToLatest};
 
 /// Deliver an island message after the current effect cycle.
 ///
@@ -48,7 +48,8 @@ impl DesktopApp {
                 return;
             }
             IslandMsg::OpenSession { session_id } => self.handle_open_session(session_id, cx),
-            IslandMsg::NewSession => self.action_new_session(&NewSession, window, cx),
+            IslandMsg::NewSession { cwd } => self.create_session_in_cwd(cwd, cx),
+            IslandMsg::OpenDirectory => self.action_open_directory(window, cx),
             IslandMsg::SelectAgent { agent_instance_id } => {
                 self.handle_select_agent(agent_instance_id, window, cx)
             }

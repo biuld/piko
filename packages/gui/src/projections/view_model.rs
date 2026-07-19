@@ -193,6 +193,11 @@ pub fn derive_sidebar(state: &ClientState) -> SidebarViewModel {
 }
 
 fn cwd_key(cwd: &str) -> String {
+    normalize_cwd_key(cwd)
+}
+
+/// Normalize a working-directory path for sidebar grouping and equality checks.
+pub fn normalize_cwd_key(cwd: &str) -> String {
     let trimmed = cwd.trim_end_matches('/');
     if trimmed.is_empty() {
         "/".to_string()

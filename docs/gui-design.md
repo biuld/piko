@@ -9,6 +9,7 @@
 > Visual system: [Piko GUI UI Guidelines](../packages/gui/docs/ui-guidelines.md)
 > Chrome presentation: [Feature](gui-chrome-presentation-feature.md) ·
 > [Design](gui-chrome-presentation-design.md)
+> Chrome tool-window layout: [Design](gui-chrome-tool-window-layout-design.md)
 
 ## 1. Purpose
 
@@ -222,18 +223,26 @@ Sessions is a navigation surface over global `SessionList` results
 (`SessionListScope::All`), not a second source of Session authority. It
 contains:
 
-- New Session (create still uses the process cwd);
+- Open Directory (island header): native folder picker; if the cwd is new,
+  create a Session there immediately; if the cwd already appears in the list,
+  show a notice and skip create;
+- New Session on each directory group (create uses that group's cwd);
 - all Sessions grouped by working directory, sorted alphabetically by path;
 - current live Session, pending open target, and loading/error indicators.
 
-Selecting a row emits the Client Core open intent. The sidebar marks the target
-as pending, while the center changes authority only through the normal
-reconcile path. GUI drafts are stored by Session id when known, with a separate
-no-session draft for first-submit creation.
+`SessionCreated` upserts the new Session into Client Core's `session_list` so
+the sidebar updates without waiting for another discover. Selecting a row
+emits the Client Core open intent. The sidebar marks the target as pending,
+while the center changes authority only through the normal reconcile path.
+GUI drafts are stored by Session id when known, with a separate no-session
+draft for first-submit creation.
 
 On narrow windows the same view is hosted in a left Sheet. Opening a Session
 closes the Sheet after successful reconciliation, not after identity-only open
 success.
+
+Header/tree trailing action alignment is chrome layout ownership; see
+[Tool-Window Row Layout](gui-chrome-tool-window-layout-design.md).
 
 ### 7.2 Right column (Agents + Tree)
 
@@ -423,10 +432,10 @@ queue remains the source for opening the next dialog.
 ## 11. Session Entry and Loading
 
 Without a requested Session, Sessions lists all Sessions globally (grouped by
-cwd) and New Session while the center shows a lightweight welcome/empty state.
-On a narrow window, the same Sessions view opens as the initial left Sheet.
-After a Session is live, the persistent sidebar or Sheet can switch Sessions
-without replacing the Workbench layout.
+cwd) with Open Directory while the center shows a lightweight welcome/empty
+state. On a narrow window, the same Sessions view opens as the initial left
+Sheet. After a Session is live, the persistent sidebar or Sheet can switch
+Sessions without replacing the Workbench layout.
 
 Client Core phases drive visible states:
 

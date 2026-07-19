@@ -49,8 +49,8 @@ impl SessionsIsland {
         schedule_island_msg(self.host.clone(), IslandId::Sessions, msg, window, cx);
     }
 
-    fn on_new_session(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.emit(IslandMsg::NewSession, window, cx);
+    fn on_open_directory(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.emit(IslandMsg::OpenDirectory, window, cx);
     }
 
     fn toggle_dir(&mut self, key: String, cx: &mut Context<Self>) {
@@ -76,7 +76,7 @@ impl Render for SessionsIsland {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity().downgrade();
 
-        let on_new: ClickHandler = Box::new(cx.listener(Self::on_new_session));
+        let on_open_directory: ClickHandler = Box::new(cx.listener(Self::on_open_directory));
 
         let on_open: IdClickFactory = Box::new({
             let entity = entity.clone();
@@ -92,6 +92,20 @@ impl Render for SessionsIsland {
                                 window,
                                 cx,
                             );
+                        });
+                    }
+                })
+            }
+        });
+
+        let on_new: IdClickFactory = Box::new({
+            let entity = entity.clone();
+            move |cwd| {
+                let entity = entity.clone();
+                Box::new(move |_, window, cx| {
+                    if let Some(view) = entity.upgrade() {
+                        view.update(cx, |this, cx| {
+                            this.emit(IslandMsg::NewSession { cwd: cwd.clone() }, window, cx);
                         });
                     }
                 })
@@ -115,8 +129,9 @@ impl Render for SessionsIsland {
         let panel = render_sidebar_panel(
             &self.vm,
             &self.collapsed_dirs,
-            on_new,
+            on_open_directory,
             on_open,
+            on_new,
             on_toggle_dir,
             self.chrome_focused,
         );
