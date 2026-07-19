@@ -63,8 +63,6 @@ impl DesktopApp {
             IslandMsg::ActivityActivate { item } => self.handle_activity_item(item, window, cx),
             IslandMsg::SubmitComposer => self.submit_composer(window, cx),
             IslandMsg::CancelTurn => self.action_cancel_turn(&CancelTurn, window, cx),
-            IslandMsg::CycleModel => self.cycle_model(cx),
-            IslandMsg::CycleThinking => self.cycle_thinking(cx),
         }
         self.refresh_islands(cx);
         cx.notify();

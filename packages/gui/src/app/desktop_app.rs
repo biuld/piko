@@ -8,9 +8,11 @@ use gpui_component::input::{InputEvent, InputState};
 
 use crate::bridge::ClientBridge;
 use crate::chrome::{
-    FocusCycleDir, IslandFocusRing, IslandId, render_status_bar, render_title_bar,
+    CommandPalette, FocusCycleDir, IslandFocusRing, IslandId, OverlayHost, render_status_bar,
+    render_title_bar,
 };
 use crate::islands::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
+use crate::overlays::InteractionForm;
 use crate::projections::derive_status_bar;
 use crate::theme::metrics;
 use crate::theme::tokens;
@@ -34,7 +36,9 @@ actions!(
         JumpToLatest,
         ToggleSessions,
         ToggleRightColumn,
-        Quit
+        Quit,
+        OpenCommandPalette,
+        CloseTransientOverlay,
     ]
 );
 
@@ -60,8 +64,9 @@ pub struct DesktopApp {
     pub(crate) submit_recovery: SubmitRecovery,
     pub(crate) pending_first_submit: FirstSubmitRecovery,
     pub(crate) clear_composer_on_render: bool,
-    pub(crate) open_prompt_fp: Option<String>,
-    pub(crate) open_prompt_flight: Option<bool>,
+    pub(crate) overlay: OverlayHost,
+    pub(crate) interaction_form: Option<Entity<InteractionForm>>,
+    pub(crate) command_palette: Option<Entity<CommandPalette>>,
     pub(crate) layout: LayoutState,
     pub(crate) tree_preview_entry_id: Option<String>,
     pub(crate) tree_expanded_by_agent: super::island_actions::TreeExpandedByAgent,
@@ -123,6 +128,7 @@ impl DesktopApp {
                             let before_err = this.bridge.state().last_error.clone();
                             if this.bridge.poll() {
                                 this.sync_gui_config();
+                                this.sync_command_catalog(cx);
                                 this.on_bridge_polled(before_err);
                                 this.sync_timeline_follow(cx);
                                 if this.bridge.state().is_live() {
@@ -164,8 +170,9 @@ impl DesktopApp {
             submit_recovery: SubmitRecovery::default(),
             pending_first_submit: FirstSubmitRecovery::default(),
             clear_composer_on_render: false,
-            open_prompt_fp: None,
-            open_prompt_flight: None,
+            overlay: OverlayHost::default(),
+            interaction_form: None,
+            command_palette: None,
             layout: LayoutState::default(),
             tree_preview_entry_id: None,
             tree_expanded_by_agent: HashMap::new(),
@@ -275,6 +282,8 @@ impl Render for DesktopApp {
         let on_right_column = cx.listener(Self::action_toggle_right_column);
         let on_focus_next = cx.listener(Self::action_focus_next_island);
         let on_focus_prev = cx.listener(Self::action_focus_prev_island);
+        let on_palette = cx.listener(Self::action_open_command_palette);
+        let on_close_overlay = cx.listener(Self::action_close_transient_overlay);
         let show_session = self.layout.is_docked_visible(IslandId::Sessions, true);
         let show_right = self.layout.any_right_column_docked(true);
         let status_vm = derive_status_bar(self.bridge.state(), show_session);
@@ -282,9 +291,11 @@ impl Render for DesktopApp {
         let m = metrics();
         let allow_motion = self.ux_prefs.allow_motion();
         let title_entity = cx.entity().downgrade();
+        let overlay = self.render_active_overlay(window, cx);
 
         div()
             .id("desktop-app")
+            .relative()
             .track_focus(&self.focus_handle)
             .on_action(on_new)
             .on_action(on_cancel)
@@ -294,6 +305,8 @@ impl Render for DesktopApp {
             .on_action(on_right_column)
             .on_action(on_focus_next)
             .on_action(on_focus_prev)
+            .on_action(on_palette)
+            .on_action(on_close_overlay)
             .key_context("DesktopApp")
             .size_full()
             .flex()
@@ -310,7 +323,7 @@ impl Render for DesktopApp {
                     .child(self.render_workbench_row(window, cx)),
             )
             .child(render_status_bar(&status_vm, allow_motion))
-            .children(Root::render_dialog_layer(window, cx))
+            .children(overlay)
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
     }

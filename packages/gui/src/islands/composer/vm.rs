@@ -11,8 +11,6 @@ pub struct ComposerViewModel {
     pub placeholder: String,
     pub model_label: String,
     pub thinking_label: String,
-    pub can_cycle_model: bool,
-    pub can_cycle_thinking: bool,
 }
 
 pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
@@ -29,18 +27,6 @@ pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
         .thinking_level
         .clone()
         .unwrap_or_else(|| "off".into());
-    let model_update_pending = state
-        .pending_commands
-        .values()
-        .any(|op| matches!(op, piko_client_core::state::PendingOp::SetModel { .. }));
-    let thinking_update_pending = state.pending_commands.values().any(|op| {
-        matches!(
-            op,
-            piko_client_core::state::PendingOp::SetThinkingLevel { .. }
-        )
-    });
-    let can_cycle_model = !state.model.providers.is_empty() && !model_update_pending;
-    let can_cycle_thinking = !thinking_update_pending;
 
     if !state.is_live() {
         let idle = matches!(
@@ -58,8 +44,6 @@ pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
             },
             model_label,
             thinking_label,
-            can_cycle_model,
-            can_cycle_thinking,
         };
     }
 
@@ -72,8 +56,6 @@ pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
             placeholder: "Select an agent…".into(),
             model_label,
             thinking_label,
-            can_cycle_model,
-            can_cycle_thinking,
         };
     };
 
@@ -103,7 +85,5 @@ pub fn derive_composer(state: &ClientState) -> ComposerViewModel {
         placeholder: crate::t!("composer.placeholder"),
         model_label,
         thinking_label,
-        can_cycle_model,
-        can_cycle_thinking,
     }
 }

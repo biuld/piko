@@ -44,6 +44,4 @@ pub enum IslandMsg {
     },
     SubmitComposer,
     CancelTurn,
-    CycleModel,
-    CycleThinking,
 }

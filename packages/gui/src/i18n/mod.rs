@@ -25,9 +25,10 @@ mod tests {
             crate::t!("chrome.toggle.right_column"),
             "Toggle Agents sidebar"
         );
+        assert_eq!(crate::t!("palette.title"), "Command Palette");
         assert_eq!(
-            crate::t!("activity.item.tool_running", name = "bash"),
-            "Tool running: bash"
+            crate::t!("overlay.approval.title_pending", count = 3),
+            "Approval (3 pending)"
         );
     }
 }

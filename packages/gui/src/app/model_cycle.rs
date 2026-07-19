@@ -1,9 +1,9 @@
-//! Pure helpers for cycling default model / thinking from Core projection.
+//! Model / thinking catalog helpers for the Command Palette.
 
-use piko_client_core::ClientIntent;
 use piko_protocol::{ProviderInfo, ThinkingLevel};
 
-const THINKING_CYCLE: &[ThinkingLevel] = &[
+/// Fixed thinking levels offered in the Palette submenu (and formerly cycle order).
+pub const THINKING_LEVELS: &[ThinkingLevel] = &[
     ThinkingLevel::Off,
     ThinkingLevel::Minimal,
     ThinkingLevel::Low,
@@ -29,40 +29,6 @@ pub fn catalog_models(providers: &[ProviderInfo]) -> Vec<(String, String, String
                 .map(move |m| (p.provider.clone(), m.id.clone(), m.name.clone()))
         })
         .collect()
-}
-
-/// Next model in the flattened catalog, wrapping around.
-pub fn next_model_intent(
-    providers: &[ProviderInfo],
-    current_provider: Option<&str>,
-    current_model: Option<&str>,
-) -> Option<ClientIntent> {
-    let models = catalog_models(providers);
-    if models.is_empty() {
-        return None;
-    }
-
-    let current_ix = models.iter().position(|(p, id, _)| {
-        Some(p.as_str()) == current_provider && Some(id.as_str()) == current_model
-    });
-    let next_ix = match current_ix {
-        Some(ix) => (ix + 1) % models.len(),
-        None => 0,
-    };
-    let (provider, model_id, _) = &models[next_ix];
-    Some(ClientIntent::SetModel {
-        provider: provider.clone(),
-        model_id: model_id.clone(),
-    })
-}
-
-/// Next thinking level in the fixed cycle.
-pub fn next_thinking_intent(current: Option<&str>) -> ClientIntent {
-    let ix = current
-        .and_then(|s| THINKING_CYCLE.iter().position(|l| l.as_str() == s))
-        .unwrap_or(0);
-    let next = THINKING_CYCLE[(ix + 1) % THINKING_CYCLE.len()].clone();
-    ClientIntent::SetThinkingLevel { level: next }
 }
 
 #[cfg(test)]
@@ -101,25 +67,8 @@ mod tests {
     }
 
     #[test]
-    fn cycles_model() {
-        let providers = vec![provider("p", true, &["m1", "m2"])];
-        let intent = next_model_intent(&providers, Some("p"), Some("m1")).unwrap();
-        match intent {
-            ClientIntent::SetModel { provider, model_id } => {
-                assert_eq!(provider, "p");
-                assert_eq!(model_id, "m2");
-            }
-            _ => panic!("expected SetModel"),
-        }
-    }
-
-    #[test]
-    fn cycles_thinking() {
-        match next_thinking_intent(Some("off")) {
-            ClientIntent::SetThinkingLevel { level } => {
-                assert_eq!(level, ThinkingLevel::Minimal);
-            }
-            _ => panic!("expected SetThinkingLevel"),
-        }
+    fn thinking_levels_are_stable() {
+        assert_eq!(THINKING_LEVELS[0], ThinkingLevel::Off);
+        assert_eq!(THINKING_LEVELS.last(), Some(&ThinkingLevel::XHigh));
     }
 }

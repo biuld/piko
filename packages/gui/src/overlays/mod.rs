@@ -1,9 +1,9 @@
-//! PromptCoordinator and approval / interaction dialogs.
+//! PromptCoordinator projections and HostPrompt bodies.
 
-mod approval_dialog;
-mod interaction_dialog;
+mod approval_view;
+mod interaction_view;
 mod prompt_coordinator;
 
-pub use approval_dialog::open_approval_dialog;
-pub use interaction_dialog::open_interaction_dialog;
+pub use approval_view::{approval_title, render_approval_body};
+pub use interaction_view::{InteractionForm, interaction_title};
 pub use prompt_coordinator::{PromptFront, PromptKind, derive_prompt_front, prompt_fingerprint};

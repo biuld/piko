@@ -27,7 +27,7 @@ approval or interaction prompts.
 │    session…      ├──────────────────────────────────────┤ ● current leaf    │
 │                  │ Activity: 1 approval · 2 running     │ ├─ prompt         │
 │                  ├──────────────────────────────────────┤ └─ branch         │
-│                  │ Main ▾ · Model ▾ · Think ▾    Send   │                   │
+│                  │ Main · model · think:off      Send   │                   │
 │                  │ Multi-line Composer                  │                   │
 │                  ├──────────────────────────────────────┤                   │
 │                  │ connected · context 12k/200k · $0.42 │                   │
@@ -184,11 +184,12 @@ Timeline or an unbounded event log.
   then scrolls internally.
 - Activity and Composer share the full center-column width (not the Timeline
   reading-width cap) so they stay aligned as the window resizes.
-- Its action row shows the selected target Agent plus model and thinking
-  controls. These values affect the next submission and do not occupy a
-  persistent Workbench header.
-- The target is a compact selector such as `Main ▾` or `@Main`, not prose such
-  as `To Main`.
+- Its action row shows the selected target Agent plus **read-only** model and
+  thinking labels for the next submission. Changing those defaults happens in
+  the Command Palette (`Cmd+Shift+P` → Models / Thinking), not by cycling from
+  the Composer.
+- The target is a compact label such as `Main` or `@Main`, not prose such as
+  `To Main`.
 - `Enter` submits non-empty text.
 - `Shift+Enter` inserts a newline.
 - `Command+.` requests cancellation of the selected Agent's active Turn.
@@ -206,7 +207,10 @@ Timeline or an unbounded event log.
 ## Overlay Stack
 
 Focused workflows appear above the Workbench with a dimmed backdrop. The
-underlying Timeline remains visible but is not interactive.
+underlying Timeline remains visible but is not interactive. Overlay chrome is
+owned by the Workbench Overlay Stack (see
+[GUI Overlay Stack](gui-overlay-stack-feature.md)); toasts and narrow-window
+Sheets stay on separate layers.
 
 ### Approval
 
@@ -232,9 +236,11 @@ underlying Timeline remains visible but is not interactive.
 
 ### Other overlays
 
-- Session selection may use a side sheet or focused dialog while retaining the
-  Workbench underneath.
-- Palette and Settings overlays are later additions and do not occupy permanent
+- Session selection may use a side sheet while retaining the Workbench
+  underneath.
+- Command Palette is a Transient overlay opened with `Cmd+Shift+P` (see
+  [GUI Command Palette](gui-command-palette-feature.md)).
+- Settings overlays remain later additions and do not occupy permanent
   Workbench space.
 
 ## Status and Notifications

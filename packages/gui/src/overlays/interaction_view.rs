@@ -1,11 +1,10 @@
-//! Structured user-interaction dialog with explicit choices and inline input.
+//! Structured user-interaction HostPrompt body.
 
 use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::Disableable;
-use gpui_component::WindowExt;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use piko_client_core::state::PendingInteraction;
@@ -13,7 +12,7 @@ use piko_protocol::{InteractionAnswer, UserInteractionResponse};
 
 type RespondFn = Rc<dyn Fn(UserInteractionResponse, &mut Window, &mut App) + 'static>;
 
-struct InteractionForm {
+pub struct InteractionForm {
     interaction: PendingInteraction,
     selected_choices: Vec<Option<usize>>,
     inputs: Vec<Option<Entity<InputState>>>,
@@ -21,6 +20,52 @@ struct InteractionForm {
 }
 
 impl InteractionForm {
+    pub fn new(
+        window: &mut Window,
+        cx: &mut App,
+        interaction: PendingInteraction,
+        on_respond: RespondFn,
+    ) -> Entity<Self> {
+        let inputs = interaction
+            .questions
+            .iter()
+            .map(|question| {
+                question
+                    .choices
+                    .iter()
+                    .find_map(|choice| choice.input.as_ref())
+                    .map(|input| {
+                        cx.new(|cx| {
+                            let mut state = InputState::new(window, cx);
+                            if let Some(placeholder) = &input.placeholder {
+                                state = state.placeholder(placeholder.clone());
+                            }
+                            state
+                        })
+                    })
+            })
+            .collect();
+        let selected_choices = vec![None; interaction.questions.len()];
+        cx.new(|_| Self {
+            interaction,
+            selected_choices,
+            inputs,
+            on_respond,
+        })
+    }
+
+    pub fn send_cancel(&self, window: &mut Window, cx: &mut App) {
+        if !self.interaction.response_in_flight {
+            (self.on_respond)(
+                UserInteractionResponse::Cancel {
+                    reason: Some("dismissed".into()),
+                },
+                window,
+                cx,
+            );
+        }
+    }
+
     fn answers(&self, cx: &App) -> Vec<InteractionAnswer> {
         self.selected_choices
             .iter()
@@ -165,69 +210,10 @@ impl Render for InteractionForm {
     }
 }
 
-/// Open the interaction dialog. Cancel sends an explicit host response and the
-/// dialog remains until host resolution or reconcile.
-pub fn open_interaction_dialog(
-    window: &mut Window,
-    cx: &mut App,
-    interaction: PendingInteraction,
-    remaining: usize,
-    on_respond: RespondFn,
-) {
-    let inputs = interaction
-        .questions
-        .iter()
-        .map(|question| {
-            question
-                .choices
-                .iter()
-                .find_map(|choice| choice.input.as_ref())
-                .map(|input| {
-                    cx.new(|cx| {
-                        let mut state = InputState::new(window, cx);
-                        if let Some(placeholder) = &input.placeholder {
-                            state = state.placeholder(placeholder.clone());
-                        }
-                        state
-                    })
-                })
-        })
-        .collect();
-    let selected_choices = vec![None; interaction.questions.len()];
-    let form = cx.new(|_| InteractionForm {
-        interaction: interaction.clone(),
-        selected_choices,
-        inputs,
-        on_respond: on_respond.clone(),
-    });
-    let title = if remaining > 1 {
-        format!("Questions ({remaining} pending)")
+pub fn interaction_title(remaining: usize) -> String {
+    if remaining > 1 {
+        crate::t!("overlay.interaction.title_pending", count = remaining)
     } else {
-        "Questions".into()
-    };
-    let in_flight = interaction.response_in_flight;
-
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let on_respond = on_respond.clone();
-        dialog
-            .title(title.clone())
-            .overlay_closable(false)
-            .close_button(false)
-            .keyboard(true)
-            .on_cancel(move |_, window, cx| {
-                if !in_flight {
-                    on_respond(
-                        UserInteractionResponse::Cancel {
-                            reason: Some("dismissed".into()),
-                        },
-                        window,
-                        cx,
-                    );
-                }
-                false
-            })
-            .w(px(620.))
-            .child(form.clone())
-            .footer(|_, _, _, _| Vec::<AnyElement>::new())
-    });
+        crate::t!("overlay.interaction.title")
+    }
 }

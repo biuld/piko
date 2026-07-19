@@ -10,6 +10,9 @@
 > Chrome presentation: [Feature](gui-chrome-presentation-feature.md) ·
 > [Design](gui-chrome-presentation-design.md)
 > Chrome tool-window layout: [Design](gui-chrome-tool-window-layout-design.md)
+> Overlay stack: [Feature](gui-overlay-stack-feature.md) ·
+> [Design](gui-overlay-stack-design.md) ·
+> [Command Palette](gui-command-palette-feature.md)
 
 ## 1. Purpose
 
@@ -46,9 +49,9 @@ packages/gui
 ├── app              DesktopApp, actions, layout prefs, island dispatch/refresh
 ├── transport        hostd process and JSONL reader/writer
 ├── bridge           Client Core effects and GPUI foreground updates
-├── chrome           Workbench layout, TitleBar, StatusBar, IslandPanel, IslandMsg
+├── chrome           Workbench layout, TitleBar, StatusBar, IslandPanel, OverlayHost, IslandMsg
 ├── islands          Sessions, Timeline, Composer (+ Activity), Agents, Tree
-├── overlays         approval, interaction, PromptCoordinator
+├── overlays         approval / interaction prompt bodies (mounted by OverlayHost)
 ├── projections      Client Core → island view models
 ├── config           `[gui]` schema and defaults
 ├── theme            tokens, typography, icons mapped onto GPUI Component
@@ -92,8 +95,12 @@ Root
     │   ├── Agents island
     │   └── Tree island
     ├── StatusBar
-    └── PromptCoordinator
-        └── maps pending core prompts to Root overlay layers
+    ├── OverlayHost (chrome)
+    │   ├── HostPrompt → approval / interaction bodies
+    │   ├── LocalConfirm → busy quit
+    │   └── Transient → Command Palette
+    ├── Sheet layer (GPUI Component; dock fallback)
+    └── Notification layer (GPUI Component; toasts)
 ```
 
 Client Core remains ordinary Rust state. GPUI entities notify and rerender after
@@ -141,23 +148,24 @@ product behavior.
 | Composer | multi-line `InputState` + `Input` | Auto-grow input plus target/model/thinking action row |
 | Timeline scrolling | `Scrollable` initially | Own bottom anchoring and detached-scroll behavior |
 | Large Timeline | `VirtualList` later | Adopt only after variable-height measurement and streaming updates are proven |
-| Approval | `AlertDialog` or non-closable `Dialog` | Disable backdrop/Escape close; resolution stays host-driven |
-| User interaction | `Dialog` | Structured questions with explicit submit/cancel |
+| Approval / interaction | chrome `OverlayHost` HostPrompt | Custom elevated surface; approval ignores Escape/backdrop |
+| Busy quit | OverlayHost LocalConfirm | Must not cover an active HostPrompt |
+| Command Palette | OverlayHost Transient | `Cmd+Shift+P`; see overlay stack design |
 | Session navigation | `Sidebar` + list rows | Persistent left Sessions island on wide windows; Sheet on narrow windows |
 | Agents | `Tree` with custom rows | Upper right island and primary Agent selector |
 | Activity Center | Compact rows inside Composer island | Between Timeline and input; bounded, not an event log |
 | Tree | Custom tree list | Lower right island for selected Agent; not a second Timeline |
-| Settings/transient navigation | `Sheet` | Layer above the Workbench on demand |
+| Narrow dock fallback | GPUI `Sheet` | Left/right sheets; Escape routed through OverlayHost |
 | Pane sizing | `Resizable` | Persist outer widths; retain the right column Agents/Tree split for the window lifetime |
 | Agent/tool state | `Badge`, `Spinner`, `Collapsible` | Compose into piko-specific rows/cards |
 | Errors | `Notification` | Recoverable transport/command feedback |
 | Shortcuts/help | `Kbd`, `Tooltip`, `Menu` | Display bound actions rather than hardcoded labels where possible |
 | Assistant content | Markdown/text primitives | Committed Markdown; lightweight realtime rendering while streaming |
 
-GPUI Component `Root` already provides dialog, sheet, and notification layers.
-Piko uses those layers rather than creating an unrelated absolute-position
-overlay system. Prompt ordering and protocol response semantics remain piko
-responsibilities.
+Product center modals use the chrome `OverlayHost` absolute layer, not GPUI
+Component `open_dialog`. Sheet and notification Root layers remain for dock
+fallback and toasts. Prompt ordering and protocol response semantics remain
+piko responsibilities.
 
 ### 6.1 Components deliberately deferred
 
@@ -381,18 +389,19 @@ The Composer owns one GPUI Component `InputState` configured for multi-line,
 soft-wrapped, auto-growing input. It subscribes to change, Enter, focus, and blur
 events. Its action row owns:
 
-- selected Agent target, opening or focusing Agents when activated;
-- model and thinking controls for the next submission;
+- selected Agent target label;
+- read-only model and thinking labels for the next submission (changed via
+  Command Palette submenus, not Composer clicks);
 - Send action for a new submission;
 - a distinct Stop action only while the selected Agent has a cancellable Turn;
 - command-local pending state.
 
 Agent display name and model/thinking values come from Client Core projections.
 The Composer does not keep an authoritative parallel copy. Removing the former
-top toolbar does not remove access to these controls. The action row renders
-separate controls, for example `Main ▾`, `Model ▾`, `Think ▾`, `Stop`, and
-`Send`; it is not a sentence or a combined `Send/Cancel` control. Send remains
-available when product rules permit queueing behind a running Turn.
+top toolbar does not remove access to these values. The action row renders
+separate items, for example `Main`, `provider/model`, `think:medium`, `Stop`,
+and `Send`; it is not a sentence or a combined `Send/Cancel` control. Send
+remains available when product rules permit queueing behind a running Turn.
 
 Actions are semantic GPUI actions with frontend-specific bindings:
 
@@ -402,7 +411,8 @@ Actions are semantic GPUI actions with frontend-specific bindings:
 | InsertNewline | `Shift+Enter` | Keep editing |
 | CancelTurn | `Command+.` | Request selected Agent Turn cancellation |
 | FocusComposer | `Command+L` | Restore Composer focus |
-| CloseTransientOverlay | `Escape` | Close local overlays only; never resolve a host prompt |
+| CloseTransientOverlay | `Escape` | Close Transient → LocalConfirm → Sheet; never resolve an approval |
+| OpenCommandPalette | `Command+Shift+P` | Open Command Palette Transient when no HostPrompt is active |
 
 The bridge snapshots submitted text with the pending command. On rejection it
 restores that text only when the current Composer has not diverged, so newer
@@ -426,9 +436,9 @@ Dialogs trap focus. On resolution, focus returns to the previously focused
 element, normally the Composer. A prompt restored by reconcile opens after the
 new projection is installed, never during partial hydrate.
 
-The coordinator treats GPUI Component's dialog layer as rendering machinery,
-not as prompt authority. If the library supports only one active dialog, piko's
-queue remains the source for opening the next dialog.
+The coordinator treats chrome `OverlayHost` as rendering machinery, not as
+prompt authority. Client Core's queue remains the source for which HostPrompt
+is interactive.
 
 ## 11. Session Entry and Loading
 

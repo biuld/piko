@@ -89,14 +89,6 @@ impl ComposerIsland {
         self.emit(IslandMsg::CancelTurn, window, cx);
     }
 
-    fn on_cycle_model(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.emit(IslandMsg::CycleModel, window, cx);
-    }
-
-    fn on_cycle_thinking(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.emit(IslandMsg::CycleThinking, window, cx);
-    }
-
     /// Local expand/collapse toggle; host is also notified via
     /// [`IslandMsg::ToggleActivity`] from the click handler.
     fn on_toggle_activity(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -167,8 +159,6 @@ impl Render for ComposerIsland {
                 &self.input,
                 cx.listener(Self::on_submit),
                 cx.listener(Self::on_cancel),
-                cx.listener(Self::on_cycle_model),
-                cx.listener(Self::on_cycle_thinking),
             ));
 
         let panel = IslandPanel::new("composer-island", body)

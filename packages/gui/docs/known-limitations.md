@@ -31,7 +31,10 @@
   generic executable glyph. Red-close and Cmd+Q share the same busy confirm
   path (active turn or unresolved approval). See
   [GUI App Identity & Safe Quit](../../../docs/gui-app-identity-quit-feature.md).
-- **Settings / Palette / Dock.** Deferred after M4.
+- **Settings / Dock.** Settings UI remains deferred after M4. Command Palette
+  is available as a Transient overlay (`Cmd+Shift+P`); see
+  [GUI Command Palette](../../../docs/gui-command-palette-feature.md) and
+  [GUI Overlay Stack](../../../docs/gui-overlay-stack-feature.md).
 - **Approvals on live models.** Deterministic Core/GUI tests cover prompts;
   real-hostd smoke exercises submit/cancel when a model catalog is present, and
   skips that slice without auth.

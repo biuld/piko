@@ -122,6 +122,54 @@ dialog.quit.body:
 dialog.quit.confirm:
   en: Quit
 
+overlay.approval.title:
+  en: Approval
+overlay.approval.title_pending:
+  en: "Approval (%{count} pending)"
+overlay.approval.tool:
+  en: Tool
+overlay.approval.accept_once:
+  en: Accept once
+overlay.approval.accept_session:
+  en: Accept session
+overlay.approval.accept_workspace:
+  en: Accept workspace
+overlay.approval.accept_forever:
+  en: Accept forever
+overlay.interaction.title:
+  en: Questions
+overlay.interaction.title_pending:
+  en: "Questions (%{count} pending)"
+
+palette.search.placeholder:
+  en: Search commands…
+palette.disabled.needs_args:
+  en: Requires slash arguments
+palette.disabled.deferred:
+  en: Not available in GUI yet
+palette.title:
+  en: Command Palette
+palette.submenu.marker:
+  en: ">"
+palette.models.title:
+  en: Models
+palette.models.empty:
+  en: No models available
+palette.thinking.title:
+  en: Thinking level
+palette.thinking.detail:
+  en: Set default thinking level
+palette.empty:
+  en: No matching commands
+palette.hint.root:
+  en: "↑↓ navigate · Enter run · Esc close"
+palette.hint.submenu:
+  en: "↑↓ navigate · Enter select · Esc back"
+palette.new_session.title:
+  en: New Session
+palette.new_session.message:
+  en: Use Open Directory or New Session in the Sessions island.
+
 activity.idle:
   en: Idle
 activity.agent_idle:

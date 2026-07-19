@@ -17,7 +17,7 @@ use piko_client_core::{
     ClientEffect, ClientIntent, ClientMsg, ClientState, CommandIdSource, TransportObservation,
     UpdateContext, update,
 };
-use piko_protocol::Command;
+use piko_protocol::{Command, CommandCatalogItem};
 
 use crate::transport::{HostTransport, TransportEvent};
 
@@ -28,6 +28,7 @@ pub struct ClientBridge {
     transport: Option<HostTransport>,
     id_source: Box<dyn CommandIdSource>,
     gui_config: Option<serde_json::Value>,
+    command_catalog: Option<Vec<CommandCatalogItem>>,
     /// Commands sent since the last `take_sent()` (diagnostic/test hook).
     #[cfg(test)]
     sent_log: Vec<Command>,
@@ -41,6 +42,7 @@ impl ClientBridge {
             transport: Some(transport),
             id_source,
             gui_config: None,
+            command_catalog: None,
             #[cfg(test)]
             sent_log: Vec::new(),
         }
@@ -54,6 +56,7 @@ impl ClientBridge {
             transport: None,
             id_source,
             gui_config: None,
+            command_catalog: None,
             sent_log: Vec::new(),
         }
     }
@@ -66,6 +69,10 @@ impl ClientBridge {
 
     pub fn gui_config(&self) -> Option<&serde_json::Value> {
         self.gui_config.as_ref()
+    }
+
+    pub fn command_catalog(&self) -> Option<&Vec<CommandCatalogItem>> {
+        self.command_catalog.as_ref()
     }
 
     // ── Intent / dispatch ───────────────────────────────────────────────
@@ -104,14 +111,22 @@ impl ClientBridge {
     }
 
     fn apply_transport_event(&mut self, event: TransportEvent) {
-        if let TransportEvent::Message(message) = &event
-            && let piko_protocol::ServerMessage::CommandResponse {
-                result: Ok(piko_protocol::CommandResult::ConfigEntry { namespace, value }),
-                ..
-            } = message.as_ref()
-            && namespace == "gui"
-        {
-            self.gui_config = Some(value.clone());
+        if let TransportEvent::Message(message) = &event {
+            match message.as_ref() {
+                piko_protocol::ServerMessage::CommandResponse {
+                    result: Ok(piko_protocol::CommandResult::ConfigEntry { namespace, value }),
+                    ..
+                } if namespace == "gui" => {
+                    self.gui_config = Some(value.clone());
+                }
+                piko_protocol::ServerMessage::CommandResponse {
+                    result: Ok(piko_protocol::CommandResult::CommandCatalogListed { commands, .. }),
+                    ..
+                } => {
+                    self.command_catalog = Some(commands.clone());
+                }
+                _ => {}
+            }
         }
         self.apply(transport_event_to_msg(event));
     }
@@ -128,6 +143,13 @@ impl ClientBridge {
         self.execute_effects(vec![ClientEffect::Send(Command::ConfigGet {
             command_id,
             namespace: "gui".into(),
+        })]);
+    }
+
+    pub fn request_command_catalog(&mut self) {
+        let command_id = self.id_source.next_command_id();
+        self.execute_effects(vec![ClientEffect::Send(Command::CommandCatalogGet {
+            command_id,
         })]);
     }
 

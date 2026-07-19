@@ -13,7 +13,6 @@ use crate::islands::derive_composer;
 use crate::projections::normalize_cwd_key;
 
 use super::desktop_app::{CancelTurn, DesktopApp, FocusComposer, JumpToLatest, NewSession};
-use super::model_cycle::{next_model_intent, next_thinking_intent};
 use super::timeline_follow::{TimelineContentFp, is_near_bottom, should_scroll_on_growth};
 
 impl DesktopApp {
@@ -215,26 +214,6 @@ impl DesktopApp {
             }
         }
         self.last_selected_agent = selected;
-    }
-
-    pub(crate) fn cycle_model(&mut self, cx: &mut Context<Self>) {
-        let model = &self.bridge.state().model;
-        if let Some(intent) = next_model_intent(
-            &model.providers,
-            model.provider.as_deref(),
-            model.model_id.as_deref(),
-        ) {
-            self.bridge.intent(intent);
-            self.refresh_islands(cx);
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn cycle_thinking(&mut self, cx: &mut Context<Self>) {
-        let current = self.bridge.state().model.thinking_level.clone();
-        self.bridge.intent(next_thinking_intent(current.as_deref()));
-        self.refresh_islands(cx);
-        cx.notify();
     }
 
     pub(crate) fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {

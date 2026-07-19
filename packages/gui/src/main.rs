@@ -21,13 +21,14 @@ use gpui::*;
 use gpui_component::Root;
 
 use crate::app::desktop_app::{
-    CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
-    NewSession, Quit, ToggleRightColumn, ToggleSessions,
+    CancelTurn, CloseTransientOverlay, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland,
+    JumpToLatest, NewSession, OpenCommandPalette, Quit, ToggleRightColumn, ToggleSessions,
 };
 use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
-use crate::app::quit::{is_quit_busy, open_quit_confirm};
+use crate::app::quit::is_quit_busy;
 use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
+use crate::chrome::{PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
 use crate::theme::apply_piko_dark_theme;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -62,9 +63,14 @@ fn main() {
             KeyBinding::new("cmd-j", JumpToLatest, Some("DesktopApp")),
             KeyBinding::new("cmd-b", ToggleSessions, Some("DesktopApp")),
             KeyBinding::new("cmd-i", ToggleRightColumn, Some("DesktopApp")),
+            KeyBinding::new("cmd-shift-p", OpenCommandPalette, Some("DesktopApp")),
+            KeyBinding::new("escape", CloseTransientOverlay, None),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),
             KeyBinding::new("shift-tab", FocusPrevIsland, Some("DesktopApp")),
+            KeyBinding::new("up", PaletteSelectPrev, Some("CommandPalette")),
+            KeyBinding::new("down", PaletteSelectNext, Some("CommandPalette")),
+            KeyBinding::new("enter", PaletteConfirm, Some("CommandPalette")),
         ]);
 
         cx.set_menus(vec![Menu {
@@ -117,8 +123,11 @@ fn main() {
                             let Some(entity) = weak.upgrade() else {
                                 return true;
                             };
-                            if is_quit_busy(entity.read(cx).bridge_state()) {
-                                open_quit_confirm(window, cx);
+                            let busy = is_quit_busy(entity.read(cx).bridge_state());
+                            if busy {
+                                entity.update(cx, |app, cx| {
+                                    app.request_busy_quit_confirm(window, cx);
+                                });
                                 false
                             } else {
                                 true
@@ -158,6 +167,10 @@ fn request_quit(weak: &WeakEntity<DesktopApp>, cx: &mut App) {
         return;
     };
     let _ = handle.update(cx, |_root, window, cx| {
-        open_quit_confirm(window, cx);
+        if let Some(app) = weak.upgrade() {
+            app.update(cx, |app, cx| {
+                app.request_busy_quit_confirm(window, cx);
+            });
+        }
     });
 }

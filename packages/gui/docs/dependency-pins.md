@@ -63,11 +63,10 @@ Minimum: latest stable Rust (gpui tracks latest stable).
 | `TreeState::set_selected_index` | Works | Programmatic selection |
 | `h_resizable` / `v_resizable` | Works | Horizontal and vertical resizable panes |
 | `resizable_panel().size(px)` | Works | Sized panels |
-| `window.open_dialog(cx, \|...\|)` | Works | Modal dialogs |
-| Dialog `.overlay_closable(false).keyboard(false).close_button(false)` | Works | Non-dismissable approval dialog |
-| `window.open_sheet(cx, \|...\|)` | Works | Sheet slide-in panels |
+| `window.open_sheet(cx, \|...\|)` | Works | Sheet slide-in panels (dock fallback) |
 | `window.push_notification(...)` | Works | Toast notifications with types |
 | `Notification::new().title().message()` | Works | Builder API |
+| chrome `OverlayHost` (custom absolute layer) | Works | Product center modals; not `open_dialog` |
 | `FocusHandle` / `track_focus` / `Focusable` | Works | Focus tracking |
 | `on_action` / `cx.listener` / `KeyBinding` | Works | Action dispatch and keybindings |
 | `actions!` macro | Works | Custom action types |

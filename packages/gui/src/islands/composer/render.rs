@@ -142,8 +142,6 @@ pub fn render_composer_panel(
     input: &Entity<InputState>,
     on_send: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_stop: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_cycle_model: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_cycle_thinking: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
@@ -170,30 +168,20 @@ pub fn render_composer_panel(
                         .text_color(t.role_accent(RoleAccent::Accent))
                         .child(vm.target_label.clone()),
                 )
+                .child(row_leading(PikoIcon::Cpu, mute))
                 .child(
-                    Button::new("cycle-model")
-                        .icon(icon(PikoIcon::Cpu, IconSize::Meta, mute))
-                        .label(vm.model_label.clone())
-                        .ghost()
-                        .small()
-                        .compact()
+                    crate::theme::text(crate::theme::TextRole::Meta)
                         .text_color(t.muted_fg_rgba())
-                        .disabled(!vm.can_cycle_model)
-                        .on_click(on_cycle_model),
+                        .child(vm.model_label.clone()),
                 )
+                .child(row_leading(PikoIcon::Brain, mute))
                 .child(
-                    Button::new("cycle-thinking")
-                        .icon(icon(PikoIcon::Brain, IconSize::Meta, mute))
-                        .label(crate::t!(
+                    crate::theme::text(crate::theme::TextRole::Meta)
+                        .text_color(t.muted_fg_rgba())
+                        .child(crate::t!(
                             "composer.thinking.prefix",
                             level = vm.thinking_label.as_str()
-                        ))
-                        .ghost()
-                        .small()
-                        .compact()
-                        .text_color(t.muted_fg_rgba())
-                        .disabled(!vm.can_cycle_thinking)
-                        .on_click(on_cycle_thinking),
+                        )),
                 )
                 .child(div().flex_1())
                 .when(vm.show_stop, |d| {

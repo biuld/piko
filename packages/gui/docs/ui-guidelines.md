@@ -44,6 +44,11 @@ edge-to-edge status bar
 - Activity belongs to the Composer island as its operational status layer.
 - Agents and Tree are separate islands with the same 8 px canvas gutter used
   horizontally. Their resize handle is invisible until dragging.
+- Center modals (HostPrompt, LocalConfirm, Transient such as Command Palette)
+  belong to chrome `OverlayHost`: full-window absolute layer, dimmed backdrop,
+  elevated panel. They are not islands and do not use GPUI `open_dialog`.
+- Side Sheets (narrow dock fallback) and toast notifications stay on separate
+  Root layers; Escape for Sheets is routed through OverlayHost.
 
 ## 3. Surfaces
 
@@ -51,7 +56,8 @@ edge-to-edge status bar
 |---|---|---:|---|
 | Canvas | `canvas` / `chrome` | `#090909` | title bar, gutters, StatusBar |
 | Island | `surface` | `#18191B` | Sessions, Timeline, Composer shell, Agents, Tree |
-| Elevated | `elevated` | `#252629` | Composer input, tool detail, hover/selection fills |
+| Elevated | `elevated` | `#252629` | Composer input, tool detail, hover/selection, overlay panels |
+| Overlay dim | black ~45% alpha | backdrop behind OverlayHost surfaces |
 | Separator | `border` | `#3E4147` | internal dividers and focus-neutral edges |
 | Focus | `ring` | `#2A7DEB` | keyboard focus and active input only |
 
