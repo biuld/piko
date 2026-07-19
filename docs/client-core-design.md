@@ -3,7 +3,7 @@
 > Status: implemented normative baseline; GUI M4 release validation remains open
 > Replaces: `tui-hostd-interaction-design.md`
 > Phase 0 baseline: [Client Core Contract Baseline](client-core-contract-baseline.md)
-> GUI consumer: [GPUI Desktop Client Design](gui-design.md)
+> GUI consumer: [GPUI Desktop Client Design](../packages/gui/docs/design/overview.md)
 > Related: [Single-Agent Runtime Model](single-agent-runtime-model.md),
 > [Turn-Agent Run Boundary](turn-agent-run-boundary-design.md),
 > [TUI Elm-ish Runtime](../packages/tui/docs/design/elmish-runtime.md),

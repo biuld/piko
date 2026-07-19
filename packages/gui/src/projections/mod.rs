@@ -1,7 +1,7 @@
 //! Pure ClientState → view-model projections (no GPUI).
 //!
 //! Session phase, sidebar rows, and status bar summary. Island-specific
-//! projections live under `crate::islands`.
+//! projections live under `crate::features`.
 
 mod view_model;
 

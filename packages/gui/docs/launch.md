@@ -21,7 +21,7 @@ open target/Piko.app
 ```
 
 The bundle ships `AppIcon.icns` and a sibling `piko-hostd` discovered via
-`PIKO_HOSTD_PATH`. See [GUI App Identity & Safe Quit](../../../docs/gui-app-identity-quit-feature.md).
+`PIKO_HOSTD_PATH`. See [GUI App Identity & Safe Quit](features/app-identity-quit.md).
 
 The TitleBar shows the brand mark only. Session and project context live in
 the left Sessions island, which lists all Sessions globally, grouped by working

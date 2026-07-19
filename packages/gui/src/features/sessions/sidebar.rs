@@ -1,0 +1,244 @@
+//! Session sidebar panel body for [`super::SessionsIsland`].
+
+use std::collections::HashSet;
+
+use gpui::*;
+use gpui_component::Sizable;
+use gpui_component::button::{Button, ButtonVariants};
+
+use crate::projections::{SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel};
+use crate::shell::{
+    IslandHeader, IslandPanel, IslandPlaceholder, TreeClickHandler, TreeRowAccessory, TreeRowSpec,
+    render_tree_list,
+};
+use crate::theme::{IconSize, PikoIcon, PikoTokens, icon, row_leading, tokens};
+
+pub(crate) type ClickHandler = TreeClickHandler;
+pub(crate) type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
+
+pub(crate) fn render_sidebar_panel(
+    vm: &SidebarViewModel,
+    collapsed: &HashSet<String>,
+    on_open_directory: ClickHandler,
+    on_open_session: IdClickFactory,
+    on_new_session: IdClickFactory,
+    on_toggle_dir: IdClickFactory,
+    focused: bool,
+) -> IslandPanel {
+    let open_directory = Button::new("open-directory")
+        .icon(icon(
+            PikoIcon::FolderOpen,
+            IconSize::Label,
+            PikoTokens::hsla(tokens().muted_fg),
+        ))
+        .tooltip(crate::t!("island.sessions.action.open_directory"))
+        .ghost()
+        .small()
+        .compact()
+        .px(px(0.))
+        .on_click(move |ev, window, cx| on_open_directory(ev, window, cx))
+        .into_any_element();
+
+    let has_rows = vm.groups.iter().any(|g| !g.rows.is_empty());
+    let header =
+        IslandHeader::title_with_action(crate::t!("island.sessions.title"), open_directory);
+
+    if !has_rows {
+        return IslandPanel::empty(
+            "sessions-island",
+            IslandPlaceholder::new(crate::t!("island.sessions.empty.title"))
+                .piko_icon(PikoIcon::Circle)
+                .subtitle(crate::t!("island.sessions.empty.subtitle")),
+        )
+        .header(header)
+        .focused(focused);
+    }
+
+    let body = render_tree_list(flatten_session_rows(
+        vm,
+        collapsed,
+        &on_open_session,
+        &on_new_session,
+        &on_toggle_dir,
+    ));
+
+    IslandPanel::new("sessions-island", body)
+        .header(header)
+        .focused(focused)
+}
+
+fn group_key(group: &SidebarGroup) -> String {
+    if group.cwd.is_empty() {
+        String::new()
+    } else {
+        group.cwd.clone()
+    }
+}
+
+fn flatten_session_rows(
+    vm: &SidebarViewModel,
+    collapsed: &HashSet<String>,
+    on_open: &IdClickFactory,
+    on_new: &IdClickFactory,
+    on_toggle: &IdClickFactory,
+) -> Vec<(TreeRowSpec, ClickHandler, Option<ClickHandler>)> {
+    let t = tokens();
+    let mut out = Vec::new();
+
+    for group in &vm.groups {
+        if group.rows.is_empty() {
+            continue;
+        }
+        let key = group_key(group);
+        let expanded = !collapsed.contains(&key);
+        let dir_id = if key.is_empty() {
+            "session-dir-pending".to_string()
+        } else {
+            format!("session-dir-{key}")
+        };
+
+        let toggle = on_toggle(key.clone());
+        let activate = on_toggle(key.clone());
+        let new_session = if key.is_empty() {
+            None
+        } else {
+            Some(dir_new_session_button(&key, on_new))
+        };
+
+        let mute = PikoTokens::hsla(t.muted_fg);
+        let dir_icon = if expanded {
+            PikoIcon::FolderOpen
+        } else {
+            PikoIcon::Folder
+        };
+
+        out.push((
+            TreeRowSpec {
+                id: SharedString::from(dir_id),
+                depth: 0,
+                has_children: true,
+                expanded,
+                selected: false,
+                emphasized: false,
+                show_guides: false,
+                label: SharedString::from(group.label.clone()),
+                label_color: Some(t.muted_fg_rgba()),
+                leading: Some(row_leading(dir_icon, mute)),
+                detail: None,
+                accessory: new_session.map(TreeRowAccessory::Action),
+            },
+            activate,
+            Some(toggle),
+        ));
+
+        if !expanded {
+            continue;
+        }
+
+        for row in &group.rows {
+            out.push(session_tree_row(row, on_open));
+        }
+    }
+
+    out
+}
+
+fn dir_new_session_button(cwd: &str, on_new: &IdClickFactory) -> AnyElement {
+    let handler = on_new(cwd.to_string());
+    Button::new(SharedString::from(format!("new-session-{cwd}")))
+        .icon(icon(
+            PikoIcon::Plus,
+            IconSize::Meta,
+            PikoTokens::hsla(tokens().muted_fg),
+        ))
+        .tooltip(crate::t!("island.sessions.action.new"))
+        .ghost()
+        .small()
+        .compact()
+        .px(px(0.))
+        .on_click(move |ev, window, cx| {
+            cx.stop_propagation();
+            handler(ev, window, cx);
+        })
+        .into_any_element()
+}
+
+fn session_tree_row(
+    row: &SessionRow,
+    on_open: &IdClickFactory,
+) -> (TreeRowSpec, ClickHandler, Option<ClickHandler>) {
+    let t = tokens();
+    let is_live = row.kind == SessionRowKind::LiveTarget;
+    let is_pending = row.kind == SessionRowKind::PendingTarget;
+
+    let label_color = if is_pending {
+        Some(t.muted_fg_rgba())
+    } else if is_live {
+        None // selected drives accent
+    } else {
+        Some(t.fg_rgba())
+    };
+
+    let leading_color = if is_pending {
+        PikoTokens::hsla(t.muted_fg)
+    } else if is_live {
+        PikoTokens::hsla(t.accent)
+    } else {
+        PikoTokens::hsla(t.fg)
+    };
+
+    (
+        TreeRowSpec {
+            id: SharedString::from(format!("session-{}", row.session_id)),
+            depth: 1,
+            has_children: false,
+            expanded: false,
+            selected: is_live,
+            emphasized: is_pending,
+            show_guides: false,
+            label: SharedString::from(row.label.clone()),
+            label_color,
+            leading: Some(row_leading(PikoIcon::MessageSquare, leading_color)),
+            detail: None,
+            accessory: Some(TreeRowAccessory::Meta(SharedString::from(
+                row.message_count.to_string(),
+            ))),
+        },
+        on_open(row.session_id.clone()),
+        None,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::SharedString;
+
+    use crate::projections::{SessionRow, SessionRowKind};
+    use crate::shell::TreeRowAccessory;
+
+    use super::{IdClickFactory, session_tree_row};
+
+    fn noop_open_factory() -> IdClickFactory {
+        Box::new(|_| Box::new(|_, _, _| {}))
+    }
+
+    #[test]
+    fn zero_message_session_keeps_a_meta_accessory() {
+        let row = SessionRow {
+            session_id: "empty".into(),
+            label: "Empty session".into(),
+            kind: SessionRowKind::Listed,
+            message_count: 0,
+            modified_at: None,
+        };
+
+        let (spec, _, _) = session_tree_row(&row, &noop_open_factory());
+        match spec.accessory {
+            Some(TreeRowAccessory::Meta(value)) => {
+                assert_eq!(value, SharedString::from("0"));
+            }
+            Some(TreeRowAccessory::Action(_)) => panic!("count must be read-only metadata"),
+            None => panic!("zero count must keep the accessory rail populated"),
+        }
+    }
+}

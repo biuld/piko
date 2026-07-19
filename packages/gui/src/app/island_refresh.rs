@@ -2,11 +2,11 @@
 
 use gpui::*;
 
-use crate::chrome::{IslandId, IslandSessionPhase};
-use crate::islands::{
+use crate::features::{
     derive_activity, derive_agent_tree, derive_composer, derive_conversation_tree, derive_timeline,
 };
 use crate::projections::{derive_phase_view, derive_sidebar};
+use crate::shell::{IslandId, IslandSessionPhase};
 
 use super::desktop_app::DesktopApp;
 
@@ -161,7 +161,7 @@ impl DesktopApp {
 
     pub(crate) fn visible_focus_islands(&self) -> Vec<IslandId> {
         let live = self.bridge_state().is_live();
-        crate::chrome::focus_order(|id| match id {
+        crate::shell::focus_order(|id| match id {
             IslandId::Timeline | IslandId::Composer => true,
             other => self.layout.is_docked_visible(other, live),
         })

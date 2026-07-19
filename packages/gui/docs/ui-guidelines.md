@@ -3,10 +3,10 @@
 Status: normative for the macOS GPUI client.
 
 Visual and layout rules for the Islands Workbench. Product behavior lives in
-[GUI Workbench](../../../docs/gui-workbench-feature.md). Chrome icons, named
+[GUI Workbench](features/workbench.md). Chrome icons, named
 type roles (`TextRole`), and the English string catalog live in
-[GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md)
-and its [design](../../../docs/gui-chrome-presentation-design.md).
+[GUI Chrome Presentation](features/chrome-presentation.md)
+and its [design](design/chrome-presentation.md).
 
 These guidelines define a product-specific system inspired by JetBrains Fleet's
 Islands UI (canvas vs island surfaces, compact density). They do not require
@@ -111,7 +111,7 @@ with metrics outside `typography.rs` and `icons.rs`.
 ## 5. Chrome marks
 
 Locked Empty / Loading / row icon mappings and chrome copy keys live in
-[GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md).
+[GUI Chrome Presentation](features/chrome-presentation.md).
 Guidelines only fix the visual rules:
 
 - Use `PikoIcon` / `theme::icon` for chrome actions, Empty / Loading marks, and
@@ -129,7 +129,7 @@ Guidelines only fix the visual rules:
 
 ### IslandPanel
 
-Shared chrome in `src/chrome/island/`:
+Shared island chrome in `src/shell/island/`:
 
 - Shell: surface fill, 10 px radius, no idle outline.
 - Header: optional. Sessions / Agents / Tree / Sheet use a title header;
@@ -137,7 +137,7 @@ Shared chrome in `src/chrome/island/`:
 - Header and tree rows share one tool-window row geometry (inset, main, optional
   detail, fixed accessory rail, disclosure gutter). Islands fill slots only;
   they do not add edge padding to align trailing controls. See
-  [Tool-Window Row Layout](../../../docs/gui-chrome-tool-window-layout-design.md).
+  [Tool-Window Row Layout](design/chrome-tool-window-layout.md).
 - Composer: `.scroll(false)` + `.fill(false)` for intrinsic height. Timeline
   uses the shared scroll viewport with an injected `ScrollHandle`.
 - Content states: Ready, Loading, Empty, or Custom. Loading/Empty use
@@ -212,7 +212,7 @@ Shared chrome in `src/chrome/island/`:
   is either read-only Meta or interactive Action; optional long **detail** text
   sits before the rails. Disclosure precedes accessory, leaving header actions
   and row accessories on the terminal right-edge rail. Geometry:
-  [Tool-Window Row Layout](../../../docs/gui-chrome-tool-window-layout-design.md).
+  [Tool-Window Row Layout](design/chrome-tool-window-layout.md).
 - Expand/collapse only at true branch points (parent with two or more filtered
   children). Single-child chains stay flat with no chevron. Leaves keep the
   empty disclosure gutter to preserve trailing rail alignment.

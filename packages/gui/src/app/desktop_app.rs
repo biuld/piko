@@ -7,18 +7,21 @@ use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
 
 use crate::bridge::ClientBridge;
-use crate::chrome::{
-    CommandPalette, FocusCycleDir, IslandFocusRing, OverlayHost, PrimarySurface, SettingsSection,
-    mount_settings_frame, mount_workbench_frame,
+use crate::features::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
+use crate::features::{
+    CommandPalette, InteractionForm, SettingsSection,
+    settings::{render_nav, render_panel},
 };
-use crate::islands::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
-use crate::overlays::InteractionForm;
+use crate::shell::{
+    FocusCycleDir, IslandFocusRing, OverlayHost, mount_settings_frame, mount_workbench_frame,
+};
 use crate::theme::tokens;
 use gpui_component::Root;
 use piko_client_core::{ClientIntent, ClientState};
 use piko_protocol::SessionListScope;
 
 use super::layout_state::LayoutState;
+use super::primary_surface::PrimarySurface;
 use super::submit_recovery::{FirstSubmitRecovery, SubmitRecovery};
 use super::timeline_follow::TimelineContentFp;
 use super::ux_prefs::GuiUxPrefs;
@@ -324,7 +327,12 @@ impl Render for DesktopApp {
 
         root = match self.primary_surface {
             PrimarySurface::Workbench => mount_workbench_frame(root, self, window, cx),
-            PrimarySurface::Settings { section } => mount_settings_frame(root, self, section, cx),
+            PrimarySurface::Settings { section } => {
+                let entity = cx.entity().downgrade();
+                let nav = render_nav(section, entity.clone());
+                let panel = render_panel(section, self, entity.clone());
+                mount_settings_frame(root, entity, nav, panel)
+            }
         };
 
         root.children(overlay)

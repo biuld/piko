@@ -3,7 +3,7 @@
 > Status: Phase 1+ landed — presentation lives only under `[tui]` / `[gui]`;
 > top-level `theme` / `hide-thinking-block` are not read. GUI Settings MVP
 > exists; TUI Settings tree trim (§10 step 6) remains open.
-> Related: [GUI Primary Surface Design](gui-primary-surface-design.md),
+> Related: [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md),
 > [Host Command Catalog Design](host-command-catalog-design.md),
 > [Client Core Design](client-core-design.md) §1.3,
 > [Client Core Contract Baseline](client-core-contract-baseline.md)
@@ -180,7 +180,7 @@ is not a substitute for the command catalog.
 ## 8. GUI Settings IA (product page)
 
 Aligns with Primary Surface two-column nav. Chrome entry: **TitleBar trailing
-gear** (see [GUI Primary Surface Design](gui-primary-surface-design.md)).
+gear** (see [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md)).
 
 ```text
 General              host defaults (model, thinking, show-thinking policy)

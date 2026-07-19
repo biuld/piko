@@ -1,9 +1,9 @@
 # Client Core Contract Baseline
 
 > Status: accepted and implemented Phase 0/2 baseline
-> Product contract: [GUI Workbench](gui-workbench-feature.md)
+> Product contract: [GUI Workbench](../packages/gui/docs/features/workbench.md)
 > Architecture: [Client Core Design](client-core-design.md),
-> [GPUI Desktop Client Design](gui-design.md)
+> [GPUI Desktop Client Design](../packages/gui/docs/design/overview.md)
 > Behavioral reference: unchanged `packages/tui` (especially
 > `packages/tui/docs/features/session-view-lifecycle.md`)
 

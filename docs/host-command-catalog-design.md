@@ -7,9 +7,9 @@
 > export, delete, fork, clone, compact, login, logout) and GUI Primary
 > Surface Settings (`open.settings` is currently a stub).
 > Related: [Settings Ownership Design](settings-ownership-design.md),
-> [GUI Primary Surface Design](gui-primary-surface-design.md),
-> [GUI Overlay Stack Design](gui-overlay-stack-design.md),
-> [GUI Command Palette Feature](gui-command-palette-feature.md) (supersedes catalog assumptions)
+> [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md),
+> [GUI Overlay Stack Design](../packages/gui/docs/design/overlay-stack.md),
+> [GUI Command Palette Feature](../packages/gui/docs/features/command-palette.md) (supersedes catalog assumptions)
 > Protocol: `packages/protocol` (`command_catalog.rs`, `Command` / `Event`)
 
 ## 1. Purpose
@@ -286,7 +286,7 @@ Neither is a hostd command.
 5. TUI: slash/palette adapter onto new ids; keep local commands local.
 6. Delete legacy `CommandCatalogAction` UI variants when both frontends are
    migrated.
-7. Update `gui-command-palette-feature.md` and TUI command docs to match.
+7. Update `packages/gui/docs/features/command-palette.md` and TUI command docs to match.
 
 ## 11. Open questions
 

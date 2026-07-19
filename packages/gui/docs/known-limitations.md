@@ -25,16 +25,16 @@
 - **Chrome presentation.** Vendored Lucide icons, typography roles, and an
   English chrome catalog are landed. Additional locales (for example `zh-CN`)
   and `[gui].locale` remain deferred. See
-  [GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md).
+  [GUI Chrome Presentation](features/chrome-presentation.md).
 - **App icon on bare binary.** Custom Dock / Finder icons require `Piko.app`
   from `packages/gui/scripts/bundle-macos.sh`. `cargo run -p piko-gui` keeps the
   generic executable glyph. Red-close and Cmd+Q share the same busy confirm
   path (active turn or unresolved approval). See
-  [GUI App Identity & Safe Quit](../../../docs/gui-app-identity-quit-feature.md).
+  [GUI App Identity & Safe Quit](features/app-identity-quit.md).
 - **Settings / Dock.** Settings UI remains deferred after M4. Command Palette
   is available as a Transient overlay (`Cmd+Shift+P`); see
-  [GUI Command Palette](../../../docs/gui-command-palette-feature.md) and
-  [GUI Overlay Stack](../../../docs/gui-overlay-stack-feature.md).
+  [GUI Command Palette](features/command-palette.md) and
+  [GUI Overlay Stack](features/overlay-stack.md).
 - **Approvals on live models.** Deterministic Core/GUI tests cover prompts;
   real-hostd smoke exercises submit/cancel when a model catalog is present, and
   skips that slice without auth.

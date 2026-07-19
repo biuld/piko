@@ -8,9 +8,9 @@ use gpui_component::notification::{Notification, NotificationType};
 use piko_client_core::state::PendingOp;
 use piko_client_core::{ClientIntent, SessionPhase};
 
-use crate::chrome::IslandId;
-use crate::islands::derive_composer;
+use crate::features::derive_composer;
 use crate::projections::normalize_cwd_key;
+use crate::shell::IslandId;
 
 use super::desktop_app::{CancelTurn, DesktopApp, FocusComposer, JumpToLatest, NewSession};
 use super::timeline_follow::{TimelineContentFp, is_near_bottom, should_scroll_on_growth};
@@ -310,7 +310,7 @@ impl DesktopApp {
     }
 
     pub(crate) fn sync_timeline_follow(&mut self, cx: &mut Context<Self>) {
-        let timeline = crate::islands::derive_timeline(self.bridge_state());
+        let timeline = crate::features::derive_timeline(self.bridge_state());
         let fp = TimelineContentFp {
             agent_id: self.selected_agent_id(),
             row_count: timeline.rows.len(),

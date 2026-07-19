@@ -21,6 +21,7 @@ sandbox (leaf)
 | Crate | Type | Description |
 |---|---|---|
 | `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
+| `piko-gui` | binary | GPUI desktop client (app / features / shell). Talks to hostd over stdio via client-core. See `packages/gui/AGENTS.md`. |
 | `piko-hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
 | `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
@@ -42,8 +43,9 @@ sandbox (leaf)
 2. Sessions, settings, auth, models, prompts, skills, compaction, queue, approvals, command routing → `hostd`
 3. Agent loops, tool execution, multi-agent supervision → `orchd`
 4. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md` and `.agents/skills/tui-feature-workflow/`)
-5. Provider abstraction, OAuth, token tracking → `llmd`
-6. Sandboxed file/process access → `sandbox`
+5. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md` and `.agents/skills/gui-feature-workflow/`)
+6. Provider abstraction, OAuth, token tracking → `llmd`
+7. Sandboxed file/process access → `sandbox`
 
 ## Session storage
 
@@ -64,6 +66,7 @@ JSONL. No migration from older layouts.
 - `.piko/settings.toml` — project overrides
 - `.piko/skills/*.md`, `.piko/prompts/*.md`, `.piko/themes/*.json`
 - `[tui]` in settings.toml — TUI-specific settings (stored by hostd)
+- `[gui]` in settings.toml — GUI-specific settings (stored by hostd)
 
 ## Docs
 
@@ -79,12 +82,19 @@ Normative runtime docs live under `docs/`:
 
 Proposed GUI / config / catalog designs:
 
-- `docs/gui-primary-surface-design.md`
+- `packages/gui/docs/features/` — GUI feature contracts
+- `packages/gui/docs/design/` — GUI implementation designs
+- `packages/gui/docs/ui-guidelines.md` — visual system
 - `docs/settings-ownership-design.md`
 - `docs/host-command-catalog-design.md`
-- `docs/gui-code-organization-design.md`
 
-Crate-local context: `packages/tui/AGENTS.md`, `packages/protocol/AGENTS.md`.
+Key GUI designs:
+
+- `packages/gui/docs/design/overview.md`
+- `packages/gui/docs/design/primary-surface.md`
+- `packages/gui/docs/design/code-organization.md`
+
+Crate-local context: `packages/tui/AGENTS.md`, `packages/gui/AGENTS.md`, `packages/protocol/AGENTS.md`.
 
 ## Before committing
 
@@ -101,6 +111,7 @@ cargo test --workspace
 cargo test -p piko-hostd
 cargo test -p piko-orchd
 cargo test -p piko-tui
+cargo test -p piko-gui
 cargo test -p piko-llmd
 cargo test -p piko-protocol
 cargo test -p piko-sandbox

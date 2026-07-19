@@ -5,13 +5,12 @@
 mod app;
 mod assets;
 mod bridge;
-mod chrome;
 mod cli;
 mod config;
+mod features;
 mod i18n;
-mod islands;
-mod overlays;
 mod projections;
+mod shell;
 mod theme;
 mod transport;
 
@@ -29,7 +28,7 @@ use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
 use crate::app::quit::is_quit_busy;
 use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
-use crate::chrome::{PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
+use crate::features::{PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
 use crate::theme::apply_piko_dark_theme;
 
 rust_i18n::i18n!("locales", fallback = "en");
