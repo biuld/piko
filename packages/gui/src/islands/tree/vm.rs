@@ -39,20 +39,27 @@ pub struct ConversationTreeViewModel {
     pub preview_entry_id: Option<String>,
 }
 
-/// Default expansion: every on-path parent that has children.
+/// Default expansion: every on-path parent that is a branch point (≥2
+/// visible children for `selected_agent`).
 pub fn default_tree_expansion(
     entries: &[SessionTreeEntry],
     leaf_id: Option<&str>,
+    selected_agent: Option<&str>,
 ) -> HashSet<String> {
     let path: HashSet<String> = active_path_ids(entries, leaf_id).into_iter().collect();
     let mut child_counts: HashMap<String, usize> = HashMap::new();
     for entry in entries {
+        if let (Some(sel), Some(aid)) = (selected_agent, entry_agent_instance(entry).as_deref())
+            && aid != sel
+        {
+            continue;
+        }
         if let Some(parent) = entry.parent_id() {
             *child_counts.entry(parent.to_string()).or_default() += 1;
         }
     }
     path.into_iter()
-        .filter(|id| child_counts.get(id).copied().unwrap_or(0) > 0)
+        .filter(|id| child_counts.get(id).copied().unwrap_or(0) >= 2)
         .collect()
 }
 
@@ -62,6 +69,9 @@ pub fn prune_tree_expansion(expanded: &mut HashSet<String>, surviving_ids: &Hash
 }
 
 /// Derive tree for the selected agent. `preview_entry_id` / `expanded` are GUI-local.
+///
+/// Display depth follows TUI session-tree rules: indent only at branch points
+/// (a visible parent with ≥2 visible children). Single-child chains stay flat.
 pub fn derive_conversation_tree(
     state: &ClientState,
     preview_entry_id: Option<&str>,
@@ -77,37 +87,27 @@ pub fn derive_conversation_tree(
             .collect();
     let leaf = session.current_leaf_id.clone();
 
-    let mut all_nodes = Vec::new();
-    let mut depth_by_id: HashMap<String, usize> = HashMap::new();
-    let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
-
+    // First pass: agent-filter + drop bookkeeping (match TUI Default tree filter).
+    let mut candidates: Vec<TreeNode> = Vec::new();
     for entry in &session.entries {
-        let id = entry.id().to_string();
-        let parent_id = entry.parent_id().map(str::to_string);
-        let depth = parent_id
-            .as_ref()
-            .and_then(|p| depth_by_id.get(p).copied())
-            .map(|d| d + 1)
-            .unwrap_or(0);
-        depth_by_id.insert(id.clone(), depth);
-        if let Some(parent) = parent_id.clone() {
-            children_of.entry(parent).or_default().push(id.clone());
+        if is_tree_bookkeeping(entry) {
+            continue;
         }
-
         let agent_id = entry_agent_instance(entry);
         if let (Some(sel), Some(aid)) = (selected, agent_id.as_deref())
             && aid != sel
         {
             continue;
         }
-
+        let id = entry.id().to_string();
+        let parent_id = entry.parent_id().map(str::to_string);
         let (kind, label) = entry_label(entry);
         let on_path = path_ids.contains(&id);
         let is_leaf = leaf.as_deref() == Some(id.as_str());
-        all_nodes.push(TreeNode {
+        candidates.push(TreeNode {
             id,
             parent_id,
-            depth,
+            depth: 0,
             label,
             kind,
             on_path,
@@ -118,16 +118,49 @@ pub fn derive_conversation_tree(
         });
     }
 
-    for node in &mut all_nodes {
-        let count = children_of.get(&node.id).map(|c| c.len()).unwrap_or(0);
-        node.has_children = count > 0;
+    // Visible children only (same filter set) — drives branch points + disclosure.
+    let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
+    let candidate_ids: HashSet<String> = candidates.iter().map(|n| n.id.clone()).collect();
+    for node in &candidates {
+        if let Some(parent) = &node.parent_id
+            && candidate_ids.contains(parent)
+        {
+            children_of
+                .entry(parent.clone())
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+
+    let mut depth_by_id: HashMap<String, usize> = HashMap::new();
+    let mut parent_by_id: HashMap<String, Option<String>> = HashMap::new();
+    let mut branch_ids: HashSet<String> = HashSet::new();
+    for (id, kids) in &children_of {
+        if kids.len() >= 2 {
+            branch_ids.insert(id.clone());
+        }
+    }
+    for node in &mut candidates {
+        parent_by_id.insert(node.id.clone(), node.parent_id.clone());
+        let depth = match node.parent_id.as_ref() {
+            Some(parent) if depth_by_id.contains_key(parent) => {
+                let parent_depth = depth_by_id[parent];
+                let branch = branch_ids.contains(parent);
+                parent_depth + usize::from(branch)
+            }
+            _ => 0,
+        };
+        depth_by_id.insert(node.id.clone(), depth);
+        node.depth = depth;
+        // Disclosure only at branch points; single-child chains stay open + flat.
+        node.has_children = branch_ids.contains(&node.id);
         node.expanded = node.has_children && expanded.contains(&node.id);
     }
 
-    let id_set: HashSet<String> = all_nodes.iter().map(|n| n.id.clone()).collect();
-    let visible: Vec<TreeNode> = all_nodes
+    let id_set: HashSet<String> = candidates.iter().map(|n| n.id.clone()).collect();
+    let visible: Vec<TreeNode> = candidates
         .into_iter()
-        .filter(|node| ancestors_expanded(node, expanded, &session.entries))
+        .filter(|node| ancestors_expanded(node, expanded, &branch_ids, &parent_by_id))
         .collect();
 
     let preview = preview_entry_id
@@ -144,19 +177,35 @@ pub fn derive_conversation_tree(
 fn ancestors_expanded(
     node: &TreeNode,
     expanded: &HashSet<String>,
-    entries: &[SessionTreeEntry],
+    branch_ids: &HashSet<String>,
+    parent_by_id: &HashMap<String, Option<String>>,
 ) -> bool {
     let mut parent = node.parent_id.clone();
-    let by_id: HashMap<&str, &SessionTreeEntry> = entries.iter().map(|e| (e.id(), e)).collect();
+    let mut visited = HashSet::new();
     while let Some(pid) = parent {
-        if !expanded.contains(&pid) {
+        if !visited.insert(pid.clone()) {
+            break;
+        }
+        // Only branch points can collapse descendants.
+        if branch_ids.contains(&pid) && !expanded.contains(&pid) {
             return false;
         }
-        parent = by_id
-            .get(pid.as_str())
-            .and_then(|e| e.parent_id().map(str::to_string));
+        parent = parent_by_id.get(&pid).cloned().flatten();
     }
     true
+}
+
+fn is_tree_bookkeeping(entry: &SessionTreeEntry) -> bool {
+    matches!(
+        entry,
+        SessionTreeEntry::ModelChange(_)
+            | SessionTreeEntry::ThinkingLevelChange(_)
+            | SessionTreeEntry::ActiveToolsChange(_)
+            | SessionTreeEntry::SessionInfo(_)
+            | SessionTreeEntry::Custom(_)
+            | SessionTreeEntry::Leaf(_)
+            | SessionTreeEntry::Label(_)
+    )
 }
 
 fn entry_agent_instance(entry: &SessionTreeEntry) -> Option<String> {
@@ -186,7 +235,7 @@ fn entry_label(entry: &SessionTreeEntry) -> (TreeEntryKind, String) {
                     (TreeEntryKind::User, body)
                 }
                 Message::Assistant { content, .. } => {
-                    let body = content
+                    let text_body = content
                         .iter()
                         .filter_map(|b| match b {
                             piko_protocol::ContentBlock::Text { text } => Some(text.as_str()),
@@ -194,7 +243,24 @@ fn entry_label(entry: &SessionTreeEntry) -> (TreeEntryKind, String) {
                         })
                         .collect::<Vec<_>>()
                         .join(" ");
-                    (TreeEntryKind::Assistant, body)
+                    let thinking_body = content
+                        .iter()
+                        .filter_map(|b| match b {
+                            piko_protocol::ContentBlock::Thinking { thinking, .. } => {
+                                Some(thinking.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !text_body.trim().is_empty() {
+                        (TreeEntryKind::Assistant, text_body)
+                    } else if !thinking_body.trim().is_empty() {
+                        // Thinking-only steps: show thought preview, not "(empty)".
+                        (TreeEntryKind::Thinking, thinking_body)
+                    } else {
+                        (TreeEntryKind::Assistant, String::new())
+                    }
                 }
                 Message::ToolCall { name, .. } => {
                     return (
@@ -245,7 +311,7 @@ fn truncate(s: &str, max: usize) -> String {
     let trimmed = s.trim().replace('\n', " ");
     if trimmed.chars().count() <= max {
         if trimmed.is_empty() {
-            "(empty)".into()
+            crate::t!("tree.entry.no_content")
         } else {
             trimmed
         }
@@ -256,132 +322,5 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use piko_client_core::SessionPhase;
-    use piko_client_core::state::LiveSession;
-    use piko_protocol::session::MessageEntry;
-
-    fn msg(id: &str, parent: Option<&str>, agent: &str, text: &str) -> SessionTreeEntry {
-        SessionTreeEntry::Message(MessageEntry {
-            id: id.into(),
-            parent_id: parent.map(str::to_string),
-            timestamp: "1".into(),
-            agent_id: "spec".into(),
-            agent_instance_id: agent.into(),
-            source_turn_id: "t".into(),
-            transcript_seq: 1,
-            message: Message::User {
-                content: piko_protocol::MessageContent::String(text.into()),
-                timestamp: Some(1),
-            },
-        })
-    }
-
-    #[test]
-    fn marks_active_path_and_off_path_preview() {
-        let mut state = ClientState::default();
-        state.session_phase = SessionPhase::Live;
-        let entries = vec![
-            msg("a", None, "root", "first"),
-            msg("b", Some("a"), "root", "second"),
-            msg("c", Some("a"), "root", "branch"),
-        ];
-        state.live_session = Some(LiveSession {
-            session_id: "s1".into(),
-            selected_agent: Some("root".into()),
-            current_leaf_id: Some("b".into()),
-            entries: entries.clone(),
-            ..Default::default()
-        });
-
-        let expanded = default_tree_expansion(&entries, Some("b"));
-        let vm = derive_conversation_tree(&state, Some("c"), &expanded);
-        assert!(vm.nodes.iter().any(|n| n.id == "a"));
-        assert!(vm.nodes.iter().any(|n| n.id == "b"));
-        assert!(vm.nodes.iter().any(|n| n.id == "c"));
-        let a = vm.nodes.iter().find(|n| n.id == "a").unwrap();
-        let b = vm.nodes.iter().find(|n| n.id == "b").unwrap();
-        let c = vm.nodes.iter().find(|n| n.id == "c").unwrap();
-        assert!(a.on_path && b.on_path && !c.on_path);
-        assert!(b.is_leaf);
-        assert_eq!(vm.preview_entry_id.as_deref(), Some("c"));
-    }
-
-    #[test]
-    fn on_path_preview_stays_display_only() {
-        let mut state = ClientState::default();
-        state.session_phase = SessionPhase::Live;
-        let entries = vec![
-            msg("a", None, "root", "first"),
-            msg("b", Some("a"), "root", "second"),
-        ];
-        state.live_session = Some(LiveSession {
-            session_id: "s1".into(),
-            selected_agent: Some("root".into()),
-            current_leaf_id: Some("b".into()),
-            entries: entries.clone(),
-            ..Default::default()
-        });
-        let expanded = default_tree_expansion(&entries, Some("b"));
-        let vm = derive_conversation_tree(&state, Some("a"), &expanded);
-        assert_eq!(vm.preview_entry_id.as_deref(), Some("a"));
-    }
-
-    #[test]
-    fn collapsed_parent_hides_children() {
-        let mut state = ClientState::default();
-        state.session_phase = SessionPhase::Live;
-        let entries = vec![
-            msg("a", None, "root", "first"),
-            msg("b", Some("a"), "root", "second"),
-            msg("c", Some("a"), "root", "branch"),
-        ];
-        state.live_session = Some(LiveSession {
-            session_id: "s1".into(),
-            selected_agent: Some("root".into()),
-            current_leaf_id: Some("b".into()),
-            entries,
-            ..Default::default()
-        });
-        let expanded = HashSet::new();
-        let vm = derive_conversation_tree(&state, None, &expanded);
-        assert_eq!(vm.nodes.len(), 1);
-        assert_eq!(vm.nodes[0].id, "a");
-        assert!(vm.nodes[0].has_children);
-        assert!(!vm.nodes[0].expanded);
-    }
-
-    #[test]
-    fn prune_keeps_surviving_expansion_ids() {
-        let mut expanded: HashSet<String> = ["a", "gone"].into_iter().map(str::to_string).collect();
-        let surviving: HashSet<String> = ["a", "b"].into_iter().map(str::to_string).collect();
-        prune_tree_expansion(&mut expanded, &surviving);
-        assert_eq!(expanded, ["a".into()].into_iter().collect());
-    }
-
-    #[test]
-    fn message_tool_call_uses_tool_kind_for_wrench_icon() {
-        crate::i18n::init();
-        let entry = SessionTreeEntry::Message(MessageEntry {
-            id: "tc".into(),
-            parent_id: None,
-            timestamp: "1".into(),
-            agent_id: "spec".into(),
-            agent_instance_id: "root".into(),
-            source_turn_id: "t".into(),
-            transcript_seq: 1,
-            message: Message::ToolCall {
-                id: "call-1".into(),
-                name: "bash".into(),
-                arguments: serde_json::json!({}),
-                model: None,
-                provider: None,
-                timestamp: Some(1),
-            },
-        });
-        let (kind, label) = entry_label(&entry);
-        assert_eq!(kind, TreeEntryKind::Tool);
-        assert!(label.contains("bash"));
-    }
-}
+#[path = "vm_tests.rs"]
+mod tests;

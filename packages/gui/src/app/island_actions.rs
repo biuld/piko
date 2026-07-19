@@ -183,7 +183,11 @@ impl DesktopApp {
         let Some(session) = self.bridge_state().live_session.as_ref() else {
             return HashSet::new();
         };
-        default_tree_expansion(&session.entries, session.current_leaf_id.as_deref())
+        default_tree_expansion(
+            &session.entries,
+            session.current_leaf_id.as_deref(),
+            session.selected_agent.as_deref(),
+        )
     }
 
     fn seed_full_expansion(&self) -> HashSet<String> {
@@ -210,7 +214,8 @@ impl DesktopApp {
             session.entries.iter().map(|e| e.id().to_string()).collect();
         let leaf = session.current_leaf_id.clone();
         let selected_agent = session.selected_agent.clone();
-        let seed = default_tree_expansion(&session.entries, leaf.as_deref());
+        let seed =
+            default_tree_expansion(&session.entries, leaf.as_deref(), selected_agent.as_deref());
 
         if let Some(preview) = self.tree_preview_entry_id.clone()
             && (!surviving.contains(&preview) || leaf.as_deref() == Some(preview.as_str()))

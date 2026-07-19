@@ -217,9 +217,9 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
   the chip to expand args/result downward and grow the reading column (no
   Popover, no right-aligned Detail button). Status uses `info` while running,
   `success` when completed, and `danger` when failed.
-- Within an Assistant group, thinking and tools that precede the answer body
-  share one muted CoT stream (block-interleaved, left-aligned). Body prose and
-  later tools sit outside that stream.
+- Render timeline rows in hostd / Client Core order. Do not bucket or reorder
+  thinking, tools, and body across rows. Thinking on a message keeps muted
+  text with a light left border; tool chips stay left-aligned compact chips.
 - Role color identifies authorship; status color identifies runtime state. Do
   not use warning or danger merely as decoration.
 
@@ -231,7 +231,9 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
   `info` for running, `warning` for an action the user must take. Do not draw
   a separate status dot beside the icon.
 - Header content uses `space_sm` horizontal padding inside the hit target.
-  The whole row toggles expand/collapse; do not add a disclosure chevron.
+  The whole row toggles expand/collapse. A muted disclosure chevron sits on
+  the trailing edge for visual balance (right when collapsed, down when
+  expanded); it is not a separate hit target.
 - Expanded Activity uses one elevated rounded container. Items remain flat
   rows with kind icons; do not put a card around every event.
 - Keep operational detail here instead of competing with conversation prose in
@@ -259,13 +261,21 @@ Workbench islands use the shared `IslandPanel` chrome in `src/chrome/island/`:
 
 ### Trees
 
-- Use one 32 px row per node with a fixed disclosure column and 16 px depth
-  slots.
+- Use one 32 px row per node with 16 px depth slots and a fixed **trailing**
+  disclosure column. Indentation and expand/collapse apply only at branch
+  points (a visible parent with two or more filtered children). Single-child
+  chains stay flat, always visible, and show no chevron. Leaves keep the empty
+  trailing disclosure gutter so labels stay aligned. Hide bookkeeping entries
+  (`model_change`, `thinking_level_change`, session info, labels, …) — same
+  default as TUI. `parentId` remains the path edge — branch storage is
+  one-parent-many-children, not a special flag.
 - Draw subtle vertical depth guides to make ancestry scannable.
-- Give disclosure arrows their own hit target and do not activate the row when
-  toggling expansion.
-- Keep the primary label on one line. Put compact kind/path/activity metadata
-  beside it, not in a bordered sub-card.
+- Give disclosure arrows their own hit target on the trailing edge and do not
+  activate the row when toggling expansion.
+- Keep the primary label on one line. Active path is color + weight (fg /
+  semibold vs muted off-path); leaf uses accent, preview uses warning. Put
+  compact kind/activity metadata beside the label when needed, not a "path"
+  badge.
 - Hover and selection use background fills; focus may additionally use the
   theme focus ring.
 

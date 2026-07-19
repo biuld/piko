@@ -1,7 +1,8 @@
 //! Timeline row body for IslandPanel's scroll viewport.
 //!
-//! Chat-primary presentation: You / Assistant headers, grouped speakers,
-//! block-interleaved thinking / left-aligned tool chips / assistant prose.
+//! Chat-primary presentation: You / Assistant headers, grouped speakers.
+//! Rows render in timeline order from Client Core / hostd — no CoT bucketing
+//! or cross-row reordering of thinking / tools / body.
 
 use std::collections::HashSet;
 
@@ -98,7 +99,7 @@ pub fn render_timeline_body(
         )
 }
 
-/// Block-interleave thinking / tools / body within one Assistant speaker group.
+/// Render assistant-side rows in timeline order (tools and messages as given).
 fn render_assistant_group(
     group: &[TimelineRow],
     expanded: &HashSet<String>,
@@ -108,75 +109,86 @@ fn render_assistant_group(
     cx: &mut App,
 ) -> AnyElement {
     let m = metrics();
-    let t = tokens();
-    let has_thinking = group
-        .iter()
-        .any(|r| r.thinking.as_ref().is_some_and(|s| !s.trim().is_empty()) || r.thinking_live);
-
-    let mut header: Option<AnyElement> = None;
-    let mut cot: Vec<AnyElement> = Vec::new();
-    let mut main: Vec<AnyElement> = Vec::new();
-    let mut seen_body = false;
+    let mut children: Vec<AnyElement> = Vec::new();
     let mut header_done = false;
 
     for row in group {
         match row.kind {
             TimelineRowKind::Tool => {
-                let chip =
-                    render_tool_chip(row, expanded.contains(&row.id), on_toggle(row.id.clone()));
-                if has_thinking && !seen_body {
-                    cot.push(chip);
-                } else {
-                    main.push(chip);
-                }
+                children.push(render_tool_chip(
+                    row,
+                    expanded.contains(&row.id),
+                    on_toggle(row.id.clone()),
+                ));
             }
             TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
-                if !header_done {
-                    header = Some(render_assistant_header(row, allow_motion));
-                    header_done = true;
-                }
-                if let Some(thinking) = row.thinking.as_ref().filter(|s| !s.trim().is_empty()) {
-                    cot.push(render_thinking_segment(thinking, row.thinking_live));
-                } else if row.thinking_live {
-                    cot.push(render_thinking_live_mark());
-                }
-                if let Some(body) = render_message_body(row, window, cx) {
-                    seen_body = true;
-                    main.push(body);
-                }
+                let show_header = !header_done;
+                header_done = true;
+                children.push(render_assistant_row(
+                    row,
+                    show_header,
+                    allow_motion,
+                    window,
+                    cx,
+                ));
             }
             TimelineRowKind::User | TimelineRowKind::System => {}
         }
     }
 
-    let mut root = div().flex().flex_col().gap(m.space_xs);
-    if let Some(h) = header {
-        root = root.child(h);
+    div()
+        .flex()
+        .flex_col()
+        .gap(m.space_xs)
+        .children(children)
+        .into_any_element()
+}
+
+fn render_assistant_row(
+    row: &TimelineRow,
+    show_header: bool,
+    allow_motion: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let m = metrics();
+    let mut root = div()
+        .id(SharedString::from(row.id.clone()))
+        .flex()
+        .flex_col()
+        .gap(m.space_xs);
+
+    if show_header {
+        root = root.child(render_assistant_header(row, allow_motion));
     }
-    if !cot.is_empty() {
-        root = root.child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(m.space_xs)
-                .pl(m.space_sm)
-                .border_l_2()
-                .border_color(t.role_accent_hsla(RoleAccent::Thinking))
-                .children(cot),
-        );
+    if let Some(thinking) = row.thinking.as_ref().filter(|s| !s.trim().is_empty()) {
+        root = root.child(render_thinking_block(thinking, row.thinking_live));
+    } else if row.thinking_live {
+        root = root.child(render_thinking_block("", true));
     }
-    if !main.is_empty() {
-        root = root.child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(m.space_xs)
-                .children(main),
-        );
+    if let Some(body) = render_message_body(row, window, cx) {
+        root = root.child(body);
     }
     root.into_any_element()
+}
+
+fn render_thinking_block(thinking: &str, live: bool) -> AnyElement {
+    let m = metrics();
+    let t = tokens();
+    let inner = if thinking.trim().is_empty() && live {
+        render_thinking_live_mark()
+    } else {
+        render_thinking_segment(thinking, live)
+    };
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .pl(m.space_sm)
+        .border_l_2()
+        .border_color(t.role_accent_hsla(RoleAccent::Thinking))
+        .child(inner)
+        .into_any_element()
 }
 
 fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement {
@@ -235,7 +247,6 @@ fn render_timeline_row(
     match row.kind {
         TimelineRowKind::System => render_system_row(row),
         TimelineRowKind::User => render_user_row(row, show_header, window, cx),
-        // Assistant groups go through render_assistant_group; tools too.
         TimelineRowKind::Tool | TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
             div().into_any_element()
         }
@@ -371,7 +382,7 @@ fn render_tool_chip(row: &TimelineRow, expanded: bool, on_toggle: ClickHandler) 
                 .flex_row()
                 .items_center()
                 .gap(m.space_sm)
-                .px(m.space_sm)
+                .pr(m.space_sm)
                 .py(m.space_xs)
                 .rounded_md()
                 .when(can_expand, |d| {

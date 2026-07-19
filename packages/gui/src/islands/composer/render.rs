@@ -8,7 +8,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 
 use crate::theme::{
-    IconSize, PikoIcon, PikoTokens, RoleAccent, icon, metrics, row_leading, tokens,
+    IconSize, PikoIcon, PikoTokens, RoleAccent, disclosure, icon, metrics, row_leading, tokens,
 };
 
 use super::activity_vm::{ActivityItem, ActivityItemKind, ActivityViewModel};
@@ -56,6 +56,7 @@ pub fn render_activity_center(
                 .child(row_leading(PikoIcon::Activity, header_color))
                 .child(
                     crate::theme::text(crate::theme::TextRole::Meta)
+                        .flex_1()
                         .min_w_0()
                         .truncate()
                         .text_color(if vm.has_actionable {
@@ -66,7 +67,8 @@ pub fn render_activity_center(
                             t.muted_fg_rgba()
                         })
                         .child(vm.summary.clone()),
-                ),
+                )
+                .child(disclosure(expanded, PikoTokens::hsla(t.muted_fg))),
         )
         .when(expanded && !vm.items.is_empty(), |d| {
             d.child(

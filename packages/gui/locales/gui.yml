@@ -36,8 +36,6 @@ island.tree.empty.title:
   en: No conversation tree
 island.tree.empty.subtitle:
   en: Tree entries appear as the agent works
-island.tree.meta.path:
-  en: path
 
 island.timeline.empty.title:
   en: No messages yet
@@ -161,6 +159,8 @@ tree.entry.model:
   en: "model %{id}"
 tree.entry.thinking:
   en: "thinking %{level}"
+tree.entry.no_content:
+  en: (no content)
 tree.entry.branch_summary:
   en: branch summary
 tree.entry.compaction:

@@ -80,7 +80,7 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
     let kind_icon = tree_kind_icon(node.kind);
     let kind_color = tree_kind_color(node.kind);
 
-    // Path / leaf / preview still drive label emphasis; kind owns the icon tint.
+    // Active path / leaf / preview via label color + weight; kind owns icon tint.
     let label_color = if node.is_leaf {
         t.role_accent(RoleAccent::Accent)
     } else if previewed {
@@ -91,30 +91,18 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
         t.muted_fg_rgba()
     };
 
-    let trailing = if node.on_path {
-        Some(
-            crate::theme::text(crate::theme::TextRole::Meta)
-                .flex_shrink_0()
-                .text_color(t.muted_fg_rgba())
-                .child(crate::t!("island.tree.meta.path"))
-                .into_any_element(),
-        )
-    } else {
-        None
-    };
-
     TreeRowSpec {
         id: SharedString::from(node.id.clone()),
         depth: node.depth,
         has_children: node.has_children,
         expanded: node.expanded,
         selected: false,
-        emphasized: node.is_leaf || previewed,
+        emphasized: node.is_leaf || previewed || node.on_path,
         show_guides: true,
         label: SharedString::from(node.label.clone()),
         label_color: Some(label_color),
         leading: Some(row_leading(kind_icon, kind_color)),
-        trailing,
+        trailing: None,
     }
 }
 

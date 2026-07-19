@@ -98,26 +98,6 @@ pub fn render_tree_row(
         .hover(|style| style.bg(t.elevated_rgba()))
         .when(fill, |d| d.bg(t.elevated_rgba()))
         .children(tree_guides(spec.depth, spec.show_guides))
-        .when(spec.has_children, |d| {
-            let toggle = on_toggle
-                .unwrap_or_else(|| Box::new(|_: &ClickEvent, _: &mut Window, _: &mut App| {}));
-            d.child(
-                div()
-                    .id(toggle_id)
-                    .w(px(16.))
-                    .h_full()
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .on_click(move |ev, w, cx| {
-                        cx.stop_propagation();
-                        toggle(ev, w, cx);
-                    })
-                    .child(crate::theme::disclosure(spec.expanded, mute)),
-            )
-        })
         .children(spec.leading)
         .child(
             crate::theme::label_text(semibold)
@@ -128,5 +108,28 @@ pub fn render_tree_row(
                 .child(spec.label),
         )
         .children(spec.trailing)
+        // Fixed disclosure column on the right (ui-guidelines): always 16 px;
+        // chevron only when the row is expandable (`has_children`).
+        .child(
+            div()
+                .id(toggle_id)
+                .w(px(16.))
+                .h_full()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(spec.has_children, |d| {
+                    let toggle = on_toggle.unwrap_or_else(|| {
+                        Box::new(|_: &ClickEvent, _: &mut Window, _: &mut App| {})
+                    });
+                    d.cursor_pointer()
+                        .on_click(move |ev, w, cx| {
+                            cx.stop_propagation();
+                            toggle(ev, w, cx);
+                        })
+                        .child(crate::theme::disclosure(spec.expanded, mute))
+                }),
+        )
         .on_click(move |ev, window, cx| on_activate(ev, window, cx))
 }

@@ -2,7 +2,7 @@
 //!
 //! Chat-primary projection: tools are one compact row (call+result merged),
 //! thinking is a separate always-visible muted payload, ToolResult rows are
-//! not shown. Render interleaves thinking / tool / body as block segments.
+//! not shown. Render follows timeline item order from Client Core.
 
 use std::collections::{HashMap, HashSet};
 

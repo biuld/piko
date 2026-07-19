@@ -40,12 +40,12 @@ hostd process.
 - [ ] Role markers remain distinct without overpowering mixed CJK/Latin body
       text
 - [ ] Thinking is always visible as muted CoT text (no Detail / collapse chrome)
-- [ ] Tools before the answer body sit in the muted CoT stream with thinking;
-      tools after the body stay beside the prose
+- [ ] Timeline rows follow hostd order; thinking stays on its message with a
+      muted left border; tool chips stay left-aligned and are not folded into CoT
 - [ ] Running, completed, and failed tool markers use info, success, and danger
       colors respectively
 - [ ] Collapsed Activity is a 32 px borderless row and gains a container only
-      when expanded
+      when expanded; a muted trailing chevron reflects expand/collapse state
 - [ ] Activity warning color appears only for actionable or failed state; idle
       and queued state remain muted
 - [ ] Timeline and Composer are independent islands separated by an 8 px canvas

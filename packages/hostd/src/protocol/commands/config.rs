@@ -85,6 +85,10 @@ impl ConfigObserver for SessionStorageObserver {
             || new.default_thinking_level != old.default_thinking_level;
 
         if changed {
+            let model_changed = new.default_model != old.default_model
+                || new.default_provider != old.default_provider;
+            let thinking_changed = new.default_thinking_level != old.default_thinking_level;
+
             let model_id = new.default_model.clone().unwrap_or_default();
             let provider = new.default_provider.clone().unwrap_or_default();
             let thinking_level = new.default_thinking_level.clone();
@@ -105,20 +109,26 @@ impl ConfigObserver for SessionStorageObserver {
                             .ok()
                             .and_then(|s| s.current_leaf_id.clone())
                     };
+                    // Only persist the fields that actually changed — otherwise every
+                    // thinking tweak also appends a redundant ModelChange.
                     match storage.append_config_metadata(
                         &path,
                         parent_id.as_deref(),
-                        if model_id.is_empty() {
-                            None
+                        if model_changed && !model_id.is_empty() {
+                            Some(model_id.as_str())
                         } else {
-                            Some(&model_id)
-                        },
-                        if provider.is_empty() {
                             None
-                        } else {
-                            Some(&provider)
                         },
-                        thinking_level.as_ref().map(|l| l.as_str()),
+                        if model_changed && !provider.is_empty() {
+                            Some(provider.as_str())
+                        } else {
+                            None
+                        },
+                        if thinking_changed {
+                            thinking_level.as_ref().map(|t| t.as_str())
+                        } else {
+                            None
+                        },
                         None,
                     ) {
                         Ok(entries) => {
