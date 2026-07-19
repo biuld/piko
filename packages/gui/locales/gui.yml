@@ -101,6 +101,99 @@ chrome.toggle.sessions:
   en: Toggle Sessions sidebar
 chrome.toggle.right_column:
   en: Toggle Agents sidebar
+chrome.action.settings:
+  en: "Settings (⌘,)"
+chrome.action.settings.close:
+  en: "Close Settings (⌘,)"
+
+settings.title:
+  en: Settings
+settings.placeholder:
+  en: Settings controls for this section will appear in a future update.
+settings.general.lede:
+  en: Default model and thinking level apply to new sessions. You can also change them from the command palette.
+settings.general.model.label:
+  en: Default model
+settings.general.model.detail:
+  en: Host default provider and model id for new sessions.
+settings.general.model.unset:
+  en: Not set
+settings.general.model.catalog:
+  en: Available models
+settings.general.model.refresh:
+  en: Refresh catalog
+settings.general.model.empty:
+  en: No models in the catalog yet. Refresh after configuring provider authentication.
+settings.general.thinking.label:
+  en: Default thinking level
+settings.general.thinking.detail:
+  en: Reasoning budget for models that support extended thinking.
+settings.general.hide_thinking.label:
+  en: Hide thinking blocks
+settings.general.hide_thinking.detail:
+  en: Hide reasoning/thinking content in the GUI timeline. This applies only to the desktop client.
+settings.appearance.lede:
+  en: GUI-only presentation preferences stored under the [gui] namespace.
+settings.appearance.reduced_motion.label:
+  en: Reduced motion
+settings.appearance.reduced_motion.detail:
+  en: Prefer instant transitions instead of animated motion in the desktop client.
+settings.account.lede:
+  en: Provider authentication status from the model catalog. API keys and OAuth are stored separately in auth.json.
+settings.account.providers.empty:
+  en: No providers loaded. Refresh the catalog after hostd starts.
+settings.account.providers.authenticated:
+  en: Authenticated
+settings.account.providers.not_authenticated:
+  en: Not authenticated
+settings.account.providers.models:
+  en: models
+settings.account.auth_hint:
+  en: Use the TUI /login flow or host auth commands to add API keys or complete OAuth. The GUI does not collect secrets yet.
+settings.account.refresh:
+  en: Refresh provider status
+settings.agent_tools.lede:
+  en: Shared runtime tool execution settings stored by hostd.
+settings.agent_tools.sandbox.label:
+  en: Enable sandbox
+settings.agent_tools.sandbox.detail:
+  en: Apply filesystem and shell sandbox rules to tool execution.
+settings.agent_tools.tools_restricted.label:
+  en: Disable all tools
+settings.agent_tools.tools_restricted.detail:
+  en: When enabled, active-tool-names is set to an empty list so no tools run.
+settings.agent_tools.mcp_hint:
+  en: MCP server management is not available in Settings yet. Edit ~/.piko/settings.toml or use host tooling.
+settings.context.lede:
+  en: Automatic context management and API reliability settings.
+settings.context.compaction.label:
+  en: Automatic compaction
+settings.context.compaction.detail:
+  en: Let hostd compact long transcripts when they exceed configured thresholds.
+settings.context.retry.label:
+  en: API retries
+settings.context.retry.detail:
+  en: Retry failed model API requests with exponential backoff.
+settings.advanced.lede:
+  en: Paths and low-level configuration live on disk. GUI editing for session-dir and project scope is deferred.
+settings.advanced.open_config:
+  en: Open config folder
+settings.advanced.deferred:
+  en: Session directory editing and write-scope controls will ship in a later release.
+settings.section.general:
+  en: General
+settings.section.account:
+  en: Account
+settings.section.agent_tools:
+  en: Agent & Tools
+settings.section.context_reliability:
+  en: Context & Reliability
+settings.section.appearance:
+  en: Appearance
+settings.section.keyboard:
+  en: Keyboard
+settings.section.advanced:
+  en: Advanced
 
 status.connection.connected:
   en: hostd connected
@@ -144,7 +237,9 @@ overlay.interaction.title_pending:
 palette.search.placeholder:
   en: Search commands…
 palette.disabled.needs_args:
-  en: Requires slash arguments
+  en: Needs additional input
+palette.disabled.needs_confirm:
+  en: Needs confirmation
 palette.disabled.deferred:
   en: Not available in GUI yet
 palette.title:
@@ -165,10 +260,30 @@ palette.hint.root:
   en: "↑↓ navigate · Enter run · Esc close"
 palette.hint.submenu:
   en: "↑↓ navigate · Enter select · Esc back"
-palette.new_session.title:
-  en: New Session
-palette.new_session.message:
-  en: Use Open Directory or New Session in the Sessions island.
+palette.local.sessions.title:
+  en: Sessions
+palette.local.sessions.detail:
+  en: Focus or open the Sessions panel
+palette.local.agents.title:
+  en: Agents
+palette.local.agents.detail:
+  en: Focus or open the Agents panel
+palette.local.tree.title:
+  en: Session tree
+palette.local.tree.detail:
+  en: Focus or open the session tree panel
+palette.local.settings.title:
+  en: Settings
+palette.local.settings.detail:
+  en: Open application settings
+palette.local.clear_notifications.title:
+  en: Clear notifications
+palette.local.clear_notifications.detail:
+  en: Dismiss all toast notifications
+palette.local.quit.title:
+  en: Quit
+palette.local.quit.detail:
+  en: Quit the application
 
 activity.idle:
   en: Idle

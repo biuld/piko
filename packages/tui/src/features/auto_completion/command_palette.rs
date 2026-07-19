@@ -1,6 +1,6 @@
-use piko_protocol::CommandCatalogItem;
 use std::path::Path;
 
+use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::{
     CellStyle, CompletionCell, CompletionRow, provider::AutoCompleteProvider,
 };
@@ -23,7 +23,7 @@ impl AutoCompleteProvider for CommandPaletteProvider {
     fn update(
         &mut self,
         _cwd: &Path,
-        commands: &[CommandCatalogItem],
+        commands: &[TuiCommandEntry],
         text: &str,
         cursor: usize,
     ) -> Vec<CompletionRow> {
@@ -38,14 +38,14 @@ impl AutoCompleteProvider for CommandPaletteProvider {
 
         commands
             .iter()
-            .filter(|command| command.slash_name.starts_with(prefix))
+            .filter(|command| command.slash.starts_with(prefix))
             .map(|command| CompletionRow {
-                replacement: format!("{} ", command.slash_name),
+                replacement: format!("{} ", command.slash),
                 start: 0,
                 end,
                 cells: vec![
                     CompletionCell {
-                        text: command.slash_name.clone(),
+                        text: command.slash.clone(),
                         style: CellStyle::Accent,
                     },
                     CompletionCell {

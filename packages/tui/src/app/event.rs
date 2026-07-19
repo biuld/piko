@@ -595,7 +595,7 @@ impl AppState {
                 command_id,
                 result: Ok(piko_protocol::CommandResult::CommandCatalogListed { commands, .. }),
             } => {
-                self.command_catalog = commands;
+                self.command_catalog = super::command::merge_command_catalog(&commands);
                 self.refresh_suggestions();
                 self.finish_bootstrap_command(&command_id);
             }
@@ -696,6 +696,7 @@ impl AppState {
                 if namespace == "tui" {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);
+                    self.timeline.thinking_visible = !self.tui_config.hide_thinking_block;
                 }
                 self.finish_bootstrap_command(&command_id);
             }

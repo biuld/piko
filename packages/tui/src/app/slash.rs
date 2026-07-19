@@ -1,9 +1,11 @@
 use crate::app::{
     AppState,
-    command::{CommandActionArgs, SlashAction, action_for_command_catalog},
+    command::{
+        CommandTarget, HostCommandArgs, SlashAction, action_for_host_command,
+        action_for_local_command,
+    },
     effect::Effect,
 };
-use piko_protocol::CommandCatalogAction;
 
 impl AppState {
     // ── slash command parsing ─────────────────────────────────────────────────
@@ -11,30 +13,51 @@ impl AppState {
     pub fn try_slash_command(&mut self, text: &str) -> Option<Vec<Effect>> {
         let mut parts = text.split_whitespace();
         let command = parts.next()?;
-        let action = self
+        let target = self
             .command_catalog
             .iter()
-            .find(|item| item.slash_name == command)
-            .map(|item| item.action.clone())?;
+            .find(|entry| entry.slash == command)
+            .map(|entry| entry.target.clone())?;
 
-        let effects = match action {
-            CommandCatalogAction::ForkSession => {
+        let effects = match target {
+            CommandTarget::Local(id) => self.dispatch(action_for_local_command(id)),
+            CommandTarget::Host(id) => self.run_host_slash(&id, parts),
+        };
+        Some(effects)
+    }
+
+    /// Host ids with bespoke argument parsing from slash text. Ids not
+    /// listed here fall through to the generic `action_for_host_command`
+    /// mapping with no extra text arguments.
+    fn run_host_slash<'a>(
+        &mut self,
+        id: &str,
+        mut parts: impl Iterator<Item = &'a str>,
+    ) -> Vec<Effect> {
+        match id {
+            "session.fork" => {
                 let entry_id = parts
                     .next()
                     .map(ToString::to_string)
                     .or_else(|| self.tree.selected_filtered_entry_id());
-                self.dispatch_catalog_action(&action, entry_id, None)
+                self.dispatch_host_command(
+                    id,
+                    HostCommandArgs {
+                        fork_entry_id: entry_id,
+                        provider: None,
+                    },
+                )
             }
-            CommandCatalogAction::RenameSession => {
+            "session.rename" => {
                 let name = parts.collect::<Vec<_>>().join(" ");
                 if name.is_empty() {
-                    self.status = "usage: /name <session name>".to_string();
+                    self.status = "usage: /rename <session name>".to_string();
                     Vec::new()
                 } else {
                     self.dispatch(SlashAction::Rename(name).into())
                 }
             }
-            CommandCatalogAction::ImportSession => {
+            "session.import" => {
                 let path = parts.collect::<Vec<_>>().join(" ");
                 if path.is_empty() {
                     self.status = "usage: /import <jsonl path>".to_string();
@@ -43,7 +66,7 @@ impl AppState {
                     self.dispatch(SlashAction::Import(path).into())
                 }
             }
-            CommandCatalogAction::ExportSession => {
+            "session.export" => {
                 if let Some(ref session_id) = self.session.id {
                     self.status = format!(
                         "Session saved in ~/.piko/agent/sessions/ under ID: {}",
@@ -54,7 +77,7 @@ impl AppState {
                 }
                 Vec::new()
             }
-            CommandCatalogAction::DeleteSession => {
+            "session.delete" => {
                 if parts.next() == Some("confirm") {
                     self.dispatch(SlashAction::Delete.into())
                 } else {
@@ -62,42 +85,24 @@ impl AppState {
                     Vec::new()
                 }
             }
-            CommandCatalogAction::Login => {
+            "auth.login" | "auth.logout" => {
                 let provider = parts.next().map(|s| s.to_string());
-                self.dispatch_catalog_action(&action, None, provider)
+                self.dispatch_host_command(
+                    id,
+                    HostCommandArgs {
+                        fork_entry_id: None,
+                        provider,
+                    },
+                )
             }
-            CommandCatalogAction::Logout => {
-                let provider = parts.next().map(|s| s.to_string());
-                self.dispatch_catalog_action(&action, None, provider)
-            }
-            CommandCatalogAction::SetThinking { level } => {
-                self.run_command_action(CommandCatalogAction::SetThinking { level })
-            }
-            CommandCatalogAction::ToggleToolsExpanded => {
-                self.run_command_action(CommandCatalogAction::ToggleToolsExpanded)
-            }
-            _ => self.dispatch_catalog_action(&action, None, None),
-        };
-        Some(effects)
+            _ => self.dispatch_host_command(id, HostCommandArgs::default()),
+        }
     }
 
-    fn dispatch_catalog_action(
-        &mut self,
-        action: &CommandCatalogAction,
-        fork_entry_id: Option<String>,
-        provider: Option<String>,
-    ) -> Vec<Effect> {
-        if let Some(action) = action_for_command_catalog(
-            action,
-            CommandActionArgs {
-                fork_entry_id,
-                provider,
-                clear_notifications_and_close: true,
-            },
-        ) {
-            self.dispatch(action)
-        } else {
-            Vec::new()
+    fn dispatch_host_command(&mut self, id: &str, args: HostCommandArgs) -> Vec<Effect> {
+        match action_for_host_command(id, args) {
+            Some(action) => self.dispatch(action),
+            None => Vec::new(),
         }
     }
 }

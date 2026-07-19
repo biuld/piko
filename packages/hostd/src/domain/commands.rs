@@ -1,166 +1,209 @@
-use crate::api::{CommandCatalogAction, CommandCatalogItem};
+//! Neutral host command catalog (see `docs/host-command-catalog-design.md`).
+//!
+//! This module emits only frontend-neutral product commands: session
+//! lifecycle, auth, runtime/agent, and model/thinking "set" intents. It must
+//! never mention TUI, GUI, ratatui, or GPUI, and must never carry UI-opener
+//! semantics (Settings/Quit/Help/Tree/Models/Thinking openers, slash names,
+//! or palette visibility flags) — those are frontend-owned presentation
+//! commands layered on top by each client.
+//!
+//! Ids are stable and dotted (`session.new`, `auth.login`, ...). Frontends
+//! own the `id -> Command` / `id -> ClientIntent` mapping table used to
+//! actually execute a row.
 
-pub fn command_catalog() -> Vec<CommandCatalogItem> {
-    use CommandCatalogAction::*;
+use crate::api::HostCommandInvoke::{self, Args, Confirm, Immediate};
+use crate::api::{HostCommandArg, HostCommandArgKind, HostCommandDescriptor, HostCommandGroup};
 
+pub fn command_catalog() -> Vec<HostCommandDescriptor> {
     vec![
+        // ── Session ──────────────────────────────────────────────────────
         item(
-            "help",
-            "Help",
-            "Show keyboard shortcuts and slash commands",
-            Help,
-            "/help",
-        ),
-        item(
-            "sessions",
-            "Sessions",
-            "List and open hostd sessions",
-            Sessions,
-            "/resume",
-        ),
-        item(
-            "tree",
-            "Session tree",
-            "Inspect and navigate the current session branch tree",
-            Tree,
-            "/tree",
-        ),
-        item(
-            "models",
-            "Models",
-            "List and set default model",
-            Models,
-            "/models",
-        ),
-        item(
-            "settings",
-            "Settings",
-            "Open hostd-backed runtime settings",
-            Settings,
-            "/settings",
-        ),
-        item(
-            "status",
-            "Status",
-            "Show turn, queue, approval, and tool state",
-            Status,
-            "/status",
-        ),
-        item(
-            "new",
+            "session.new",
             "New session",
-            "Create a fresh session in the current working directory",
-            NewSession,
-            "/new",
+            "Create a new session in the current working directory",
+            Immediate,
+            HostCommandGroup::Session,
         ),
         item(
-            "fork",
+            "session.fork",
             "Fork session",
-            "Fork current session at the selected tree entry",
-            ForkSession,
-            "/fork",
+            "Create a new branch from a session tree entry",
+            Immediate,
+            HostCommandGroup::Session,
         ),
         item(
-            "clone",
+            "session.clone",
             "Clone session",
-            "Clone current session at the current leaf",
-            CloneSession,
-            "/clone",
+            "Clone the current session at its current leaf",
+            Immediate,
+            HostCommandGroup::Session,
         ),
         item(
-            "rename",
+            "session.rename",
             "Rename session",
-            "Rename current session",
-            RenameSession,
-            "/rename",
+            "Set a new name for the current session",
+            Args {
+                schema: vec![arg("name", HostCommandArgKind::String, true)],
+            },
+            HostCommandGroup::Session,
         ),
         item(
-            "import",
-            "Import session",
-            "Import a session JSONL file",
-            ImportSession,
-            "/import",
-        ),
-        item(
-            "export",
-            "Export session",
-            "Show current session JSONL file path",
-            ExportSession,
-            "/export",
-        ),
-        item(
-            "delete",
+            "session.delete",
             "Delete session",
-            "Delete current session; requires confirm",
-            DeleteSession,
-            "/delete",
+            "Permanently delete the current session",
+            Confirm,
+            HostCommandGroup::Session,
         ),
         item(
-            "login",
-            "Login",
-            "Start OAuth login, optional provider argument",
-            Login,
-            "/login",
+            "session.import",
+            "Import session",
+            "Import a session from a JSONL file",
+            Args {
+                schema: vec![arg("path", HostCommandArgKind::String, true)],
+            },
+            HostCommandGroup::Session,
         ),
         item(
-            "logout",
-            "Logout",
-            "Remove credentials, optional provider argument",
-            Logout,
-            "/logout",
+            "session.export",
+            "Export session",
+            "Get the file path of the current session",
+            Immediate,
+            HostCommandGroup::Session,
+        ),
+        // ── Auth ─────────────────────────────────────────────────────────
+        item(
+            "auth.login",
+            "Sign in",
+            "Start OAuth login for a model provider",
+            Args {
+                schema: vec![arg("provider", HostCommandArgKind::Provider, false)],
+            },
+            HostCommandGroup::Auth,
         ),
         item(
-            "compact",
+            "auth.logout",
+            "Sign out",
+            "Remove stored credentials for a model provider",
+            Args {
+                schema: vec![arg("provider", HostCommandArgKind::Provider, false)],
+            },
+            HostCommandGroup::Auth,
+        ),
+        // ── Agent / runtime ──────────────────────────────────────────────
+        item(
+            "session.compact",
             "Compact session",
-            "Request hostd session compaction",
-            Compact,
-            "/compact",
+            "Reduce transcript size while preserving context",
+            Immediate,
+            HostCommandGroup::Runtime,
+        ),
+        // ── Model / thinking (set, not browse UI) ───────────────────────
+        item(
+            "model.set",
+            "Set model",
+            "Set the default provider and model",
+            Args {
+                schema: vec![
+                    arg("provider", HostCommandArgKind::String, true),
+                    arg("model", HostCommandArgKind::String, true),
+                ],
+            },
+            HostCommandGroup::Model,
         ),
         item(
-            "thinking",
-            "Thinking level",
-            "List and set default thinking/reasoning level",
-            Thinking,
-            "/thinking",
+            "thinking.set",
+            "Set thinking level",
+            "Set the default reasoning/thinking level",
+            Args {
+                schema: vec![arg("level", HostCommandArgKind::String, true)],
+            },
+            HostCommandGroup::Model,
         ),
-        item(
-            "tools.toggle",
-            "Toggle tool details",
-            "Switch between folded and expanded tool result rendering",
-            ToggleToolsExpanded,
-            "/tools",
-        ),
-        item(
-            "notifications.clear",
-            "Clear notifications",
-            "Dismiss all notification messages",
-            ClearNotifications,
-            "/clear",
-        ),
-        item(
-            "agents",
-            "Agents",
-            "List available named agents and their capabilities",
-            Agents,
-            "/agents",
-        ),
-        item("quit", "Quit", "Exit the TUI", Quit, "/quit"),
     ]
+}
+
+fn arg(name: &str, kind: HostCommandArgKind, required: bool) -> HostCommandArg {
+    HostCommandArg {
+        name: name.to_string(),
+        kind,
+        required,
+    }
 }
 
 fn item(
     id: &str,
     title: &str,
     detail: &str,
-    action: CommandCatalogAction,
-    slash_name: &str,
-) -> CommandCatalogItem {
-    CommandCatalogItem {
+    invoke: HostCommandInvoke,
+    group: HostCommandGroup,
+) -> HostCommandDescriptor {
+    HostCommandDescriptor {
         id: id.to_string(),
         title: title.to_string(),
         detail: detail.to_string(),
-        action,
-        slash_name: slash_name.to_string(),
-        visible_in_palette: true,
+        invoke,
+        group: Some(group),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Presentation-only ids must never leak into the neutral host catalog.
+    const FORBIDDEN_IDS: &[&str] = &[
+        "quit",
+        "help",
+        "settings",
+        "tree",
+        "tools.toggle",
+        "notifications.clear",
+        "sessions",
+        "models",
+        "thinking",
+        "status",
+        "agents",
+        "commands",
+    ];
+
+    #[test]
+    fn catalog_excludes_presentation_ids() {
+        let catalog = command_catalog();
+        for forbidden in FORBIDDEN_IDS {
+            assert!(
+                !catalog.iter().any(|c| c.id == *forbidden),
+                "presentation-only id {forbidden:?} leaked into host catalog"
+            );
+        }
+    }
+
+    #[test]
+    fn catalog_titles_and_details_are_frontend_neutral() {
+        let banned = ["tui", "gui", "ratatui", "gpui", "palette", "slash"];
+        for command in command_catalog() {
+            let haystack = format!("{} {}", command.title, command.detail).to_lowercase();
+            for word in banned {
+                assert!(
+                    !haystack.contains(word),
+                    "command {:?} mentions frontend-coupled word {word:?}",
+                    command.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_ids_are_stable_and_unique() {
+        let catalog = command_catalog();
+        let mut ids: Vec<&str> = catalog.iter().map(|c| c.id.as_str()).collect();
+        let unique_count = {
+            ids.sort_unstable();
+            ids.dedup();
+            ids.len()
+        };
+        assert_eq!(unique_count, catalog.len());
+        assert!(catalog.iter().any(|c| c.id == "session.new"));
+        assert!(catalog.iter().any(|c| c.id == "model.set"));
+        assert!(catalog.iter().any(|c| c.id == "thinking.set"));
     }
 }

@@ -1,4 +1,4 @@
-use piko_protocol::{ApprovalDecision, CommandCatalogAction};
+use piko_protocol::{ApprovalDecision, HostCommandDescriptor};
 
 /// Root user intent. This is intentionally only a router over smaller intent
 /// domains; feature-specific behavior should live in the nested action types.
@@ -12,7 +12,6 @@ pub enum Action {
     Model(ModelAction),
     AgentList(AgentAction),
     Tree(TreeAction),
-    Config(ConfigAction),
     Approval(ApprovalAction),
     ToolInteraction(ToolInteractionAction),
     Notifications(NotificationAction),
@@ -120,11 +119,6 @@ pub enum NotificationAction {
 }
 
 #[derive(Debug)]
-pub enum ConfigAction {
-    SetThinkingLevel { level: String },
-}
-
-#[derive(Debug)]
 pub enum SlashAction {
     New,
     Fork(Option<String>),
@@ -217,61 +211,197 @@ impl From<NotificationAction> for Action {
     }
 }
 
-impl From<ConfigAction> for Action {
-    fn from(action: ConfigAction) -> Self {
-        Self::Config(action)
-    }
-}
-
 impl From<SlashAction> for Action {
     fn from(action: SlashAction) -> Self {
         Self::Slash(action)
     }
 }
 
-#[derive(Default)]
-pub struct CommandActionArgs {
-    pub fork_entry_id: Option<String>,
-    pub provider: Option<String>,
-    pub clear_notifications_and_close: bool,
+// ── Command catalog adapter ─────────────────────────────────────────────────
+//
+// hostd's catalog (`HostCommandDescriptor`) is frontend-neutral: id + title +
+// detail + invoke kind only, no slash names (see
+// `docs/host-command-catalog-design.md`). The TUI keeps slash commands as a
+// *local* mapping layer on top of that neutral catalog plus its own
+// presentation-only commands. Slash strings never leave this module.
+
+/// TUI-local presentation command ids. These are never sent to hostd as a
+/// catalog id — hostd does not own Help/Settings/Tree/Models-opener/Quit/etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalCommandId {
+    Help,
+    Settings,
+    Tree,
+    Status,
+    Sessions,
+    Models,
+    Thinking,
+    ToolsToggle,
+    ClearNotifications,
+    Agents,
+    Quit,
 }
 
-pub fn action_for_command_catalog(
-    action: &CommandCatalogAction,
-    args: CommandActionArgs,
-) -> Option<Action> {
-    Some(match action {
-        CommandCatalogAction::Help => SurfaceAction::OpenHelp.into(),
-        CommandCatalogAction::Commands => EditorAction::OpenCommands.into(),
-        CommandCatalogAction::Sessions => SessionAction::RequestList.into(),
-        CommandCatalogAction::Models => ModelAction::RequestList.into(),
-        CommandCatalogAction::Agents => AgentAction::RequestList.into(),
-        CommandCatalogAction::Thinking => SurfaceAction::OpenThinking.into(),
-        CommandCatalogAction::Tree => SurfaceAction::OpenTree.into(),
-        CommandCatalogAction::Settings => SurfaceAction::OpenSettings.into(),
-        CommandCatalogAction::Status => SurfaceAction::OpenStatus.into(),
-        CommandCatalogAction::NewSession => SlashAction::New.into(),
-        CommandCatalogAction::ForkSession => SlashAction::Fork(args.fork_entry_id).into(),
-        CommandCatalogAction::CloneSession => SlashAction::Clone.into(),
-        CommandCatalogAction::Login => SlashAction::Login(args.provider).into(),
-        CommandCatalogAction::Logout => SlashAction::Logout(args.provider).into(),
-        CommandCatalogAction::Compact => SlashAction::Compact.into(),
-        CommandCatalogAction::SetThinking { level } => ConfigAction::SetThinkingLevel {
-            level: level.clone(),
+/// Where a merged command row's confirm/slash-submit should be routed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandTarget {
+    /// TUI-local presentation command.
+    Local(LocalCommandId),
+    /// Neutral host catalog id, e.g. `"session.new"`.
+    Host(String),
+}
+
+/// One slash-addressable row in the merged TUI command list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuiCommandEntry {
+    pub slash: String,
+    pub title: String,
+    pub detail: String,
+    pub target: CommandTarget,
+}
+
+/// Local slash aliases and their target — always present, independent of
+/// what hostd advertises.
+const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
+    (
+        "/help",
+        LocalCommandId::Help,
+        "Help",
+        "Show keyboard shortcuts and slash commands",
+    ),
+    (
+        "/resume",
+        LocalCommandId::Sessions,
+        "Sessions",
+        "List and open hostd sessions",
+    ),
+    (
+        "/tree",
+        LocalCommandId::Tree,
+        "Session tree",
+        "Inspect and navigate the current session branch tree",
+    ),
+    (
+        "/models",
+        LocalCommandId::Models,
+        "Models",
+        "List and set default model",
+    ),
+    (
+        "/settings",
+        LocalCommandId::Settings,
+        "Settings",
+        "Open hostd-backed runtime settings",
+    ),
+    (
+        "/status",
+        LocalCommandId::Status,
+        "Status",
+        "Show turn, queue, approval, and tool state",
+    ),
+    (
+        "/thinking",
+        LocalCommandId::Thinking,
+        "Thinking level",
+        "List and set default thinking/reasoning level",
+    ),
+    (
+        "/tools",
+        LocalCommandId::ToolsToggle,
+        "Toggle tool details",
+        "Switch between folded and expanded tool result rendering",
+    ),
+    (
+        "/clear",
+        LocalCommandId::ClearNotifications,
+        "Clear notifications",
+        "Dismiss all notification messages",
+    ),
+    (
+        "/agents",
+        LocalCommandId::Agents,
+        "Agents",
+        "List available named agents and their capabilities",
+    ),
+    ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
+];
+
+/// TUI-chosen slash aliases for neutral host catalog ids. A host id only
+/// becomes slash-addressable once hostd actually advertises it.
+const HOST_SLASH_TABLE: &[(&str, &str)] = &[
+    ("/new", "session.new"),
+    ("/fork", "session.fork"),
+    ("/clone", "session.clone"),
+    ("/rename", "session.rename"),
+    ("/import", "session.import"),
+    ("/export", "session.export"),
+    ("/delete", "session.delete"),
+    ("/login", "auth.login"),
+    ("/logout", "auth.logout"),
+    ("/compact", "session.compact"),
+];
+
+/// Merge TUI-local presentation commands with the fetched neutral host
+/// catalog into one slash-addressable list.
+pub fn merge_command_catalog(host: &[HostCommandDescriptor]) -> Vec<TuiCommandEntry> {
+    let mut entries: Vec<TuiCommandEntry> = LOCAL_SLASH_TABLE
+        .iter()
+        .map(|(slash, id, title, detail)| TuiCommandEntry {
+            slash: slash.to_string(),
+            title: title.to_string(),
+            detail: detail.to_string(),
+            target: CommandTarget::Local(*id),
+        })
+        .collect();
+    for (slash, id) in HOST_SLASH_TABLE {
+        if let Some(descriptor) = host.iter().find(|d| d.id == *id) {
+            entries.push(TuiCommandEntry {
+                slash: slash.to_string(),
+                title: descriptor.title.clone(),
+                detail: descriptor.detail.clone(),
+                target: CommandTarget::Host(descriptor.id.clone()),
+            });
         }
-        .into(),
-        CommandCatalogAction::ToggleToolsExpanded => TimelineAction::ToggleToolsExpanded.into(),
-        CommandCatalogAction::ClearNotifications => {
-            if args.clear_notifications_and_close {
-                NotificationAction::ClearAndClose.into()
-            } else {
-                NotificationAction::Clear.into()
-            }
-        }
-        CommandCatalogAction::Quit => AppAction::Quit.into(),
-        CommandCatalogAction::RenameSession
-        | CommandCatalogAction::ImportSession
-        | CommandCatalogAction::ExportSession
-        | CommandCatalogAction::DeleteSession => return None,
+    }
+    entries
+}
+
+/// Extra arguments a host command may need beyond its slash text (resolved
+/// locally by the TUI: current tree selection, active provider, ...).
+#[derive(Default)]
+pub struct HostCommandArgs {
+    pub fork_entry_id: Option<String>,
+    pub provider: Option<String>,
+}
+
+/// Always-available mapping for a TUI-local presentation command.
+pub fn action_for_local_command(id: LocalCommandId) -> Action {
+    match id {
+        LocalCommandId::Help => SurfaceAction::OpenHelp.into(),
+        LocalCommandId::Sessions => SessionAction::RequestList.into(),
+        LocalCommandId::Models => ModelAction::RequestList.into(),
+        LocalCommandId::Agents => AgentAction::RequestList.into(),
+        LocalCommandId::Thinking => SurfaceAction::OpenThinking.into(),
+        LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
+        LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
+        LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
+        LocalCommandId::ToolsToggle => TimelineAction::ToggleToolsExpanded.into(),
+        LocalCommandId::ClearNotifications => NotificationAction::ClearAndClose.into(),
+        LocalCommandId::Quit => AppAction::Quit.into(),
+    }
+}
+
+/// Mapping for neutral host ids that need no dedicated argument parsing
+/// beyond `HostCommandArgs`. Ids with bespoke text parsing (rename, import,
+/// delete-confirm, export) are handled directly in `slash.rs`.
+pub fn action_for_host_command(id: &str, args: HostCommandArgs) -> Option<Action> {
+    Some(match id {
+        "session.new" => SlashAction::New.into(),
+        "session.fork" => SlashAction::Fork(args.fork_entry_id).into(),
+        "session.clone" => SlashAction::Clone.into(),
+        "auth.login" => SlashAction::Login(args.provider).into(),
+        "auth.logout" => SlashAction::Logout(args.provider).into(),
+        "session.compact" => SlashAction::Compact.into(),
+        _ => return None,
     })
 }

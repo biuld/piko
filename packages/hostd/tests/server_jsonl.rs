@@ -51,7 +51,7 @@ impl AgentRunRunner for SlowRunner {
 }
 
 #[tokio::test]
-async fn command_catalog_get_returns_slash_commands() {
+async fn command_catalog_get_returns_neutral_commands() {
     let server = HostServer::new();
     let events = server
         .handle_command(Command::CommandCatalogGet {
@@ -68,7 +68,7 @@ async fn command_catalog_get_returns_slash_commands() {
     else {
         panic!("expected command catalog event, got {events:?}");
     };
-    assert!(commands.iter().any(|command| command.slash_name == "/help"));
+    assert!(commands.iter().any(|command| command.id == "session.new"));
 }
 
 struct AssistantRunner;

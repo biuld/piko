@@ -77,6 +77,13 @@ Normative runtime docs live under `docs/`:
 - `docs/tool-sets-design.md`
 - `docs/agent-prompt-assembly-design.md`
 
+Proposed GUI / config / catalog designs:
+
+- `docs/gui-primary-surface-design.md`
+- `docs/settings-ownership-design.md`
+- `docs/host-command-catalog-design.md`
+- `docs/gui-code-organization-design.md`
+
 Crate-local context: `packages/tui/AGENTS.md`, `packages/protocol/AGENTS.md`.
 
 ## Before committing

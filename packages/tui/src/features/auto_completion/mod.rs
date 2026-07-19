@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::path::Path;
 
-use piko_protocol::CommandCatalogItem;
+use crate::app::command::TuiCommandEntry;
 
 pub mod command_palette;
 pub mod file_browser;
@@ -106,13 +106,7 @@ impl AutoComplete {
     }
 
     /// Updates completions state based on current editor text and cursor.
-    pub fn update(
-        &mut self,
-        cwd: &Path,
-        commands: &[CommandCatalogItem],
-        text: &str,
-        cursor: usize,
-    ) {
+    pub fn update(&mut self, cwd: &Path, commands: &[TuiCommandEntry], text: &str, cursor: usize) {
         let matched_idx = self
             .providers
             .iter()
@@ -254,16 +248,14 @@ impl AutoComplete {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use piko_protocol::CommandCatalogAction;
+    use crate::app::command::{CommandTarget, LocalCommandId};
 
-    fn commands() -> Vec<CommandCatalogItem> {
-        vec![CommandCatalogItem {
-            id: "help".to_string(),
+    fn commands() -> Vec<TuiCommandEntry> {
+        vec![TuiCommandEntry {
+            slash: "/help".to_string(),
             title: "Help".to_string(),
             detail: "show help".to_string(),
-            action: CommandCatalogAction::Help,
-            slash_name: "/help".to_string(),
-            visible_in_palette: true,
+            target: CommandTarget::Local(LocalCommandId::Help),
         }]
     }
 

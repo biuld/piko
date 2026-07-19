@@ -1,4 +1,9 @@
-//! GUI-owned presentation settings persisted by hostd under `[gui]`.
+//! GUI-owned presentation settings persisted by hostd under `[gui]`,
+//! plus typed views of shared host runtime settings.
+
+mod host;
+
+pub use host::HostRuntimeSettings;
 
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +32,11 @@ pub struct GuiSettings {
     pub right_column_open: bool,
     #[serde(default)]
     pub reduced_motion: bool,
+    /// GUI-only: hide thinking/reasoning blocks in the timeline. Independent
+    /// of the TUI's `[tui].hide_thinking_block` — see
+    /// docs/settings-ownership-design.md.
+    #[serde(default)]
+    pub hide_thinking_block: bool,
 }
 
 impl Default for GuiSettings {
@@ -37,6 +47,7 @@ impl Default for GuiSettings {
             session_open: true,
             right_column_open: true,
             reduced_motion: false,
+            hide_thinking_block: false,
         }
     }
 }

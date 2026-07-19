@@ -28,6 +28,9 @@ pub struct UiMetrics {
     pub compact_bar_height: Pixels,
     pub title_bar_height: Pixels,
     pub status_bar_height: Pixels,
+    /// Reserved for traffic-light / system chrome inset if TitleBar content
+    /// ever needs an explicit leading pad beyond the component default.
+    #[allow(dead_code)]
     pub title_bar_safe_inset: Pixels,
     pub chrome_horizontal_padding: Pixels,
     pub status_content_offset_y: Pixels,

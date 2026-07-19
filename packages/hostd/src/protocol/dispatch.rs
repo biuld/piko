@@ -307,17 +307,7 @@ impl HostServer {
             }
             Command::ConfigGet { namespace, .. } => {
                 let settings = self.settings.lock().await;
-                let value = match namespace.as_str() {
-                    "tui" => settings
-                        .tui
-                        .clone()
-                        .unwrap_or(serde_json::Value::Object(Default::default())),
-                    "gui" => settings
-                        .gui
-                        .clone()
-                        .unwrap_or(serde_json::Value::Object(Default::default())),
-                    _ => serde_json::Value::Object(Default::default()),
-                };
+                let value = settings.namespace_value(&namespace);
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id: command_id.clone(),
                     result: Ok(crate::api::CommandResult::ConfigEntry { namespace, value }),

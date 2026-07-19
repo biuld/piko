@@ -10,14 +10,21 @@
 # Default thinking level for reasoning models ("off", "minimal", "low", "medium", "high", "xhigh")
 # default-thinking-level = "medium"
 
-# TUI theme preference ("dark" or "light")
-# theme = "dark"
-
-# Whether to hide thinking/reasoning blocks in the timeline view
-# hide-thinking-block = false
-
 # Stdio framing transport protocol ("stdio")
 # transport = "stdio"
+
+# Presentation preferences (theme, hide-thinking-block, etc.) are NOT host
+# fields. They belong to the frontend-owned [tui] / [gui] tables below — see
+# docs/settings-ownership-design.md. hostd persists these tables opaquely and
+# does not validate their contents. Unknown top-level keys are ignored.
+#
+# [tui]
+# [tui.theme]
+# name = "dark"
+# hide_thinking_block = false
+#
+# [gui]
+# hide-thinking-block = false
 
 [compaction]
 # Enable automatic history compaction when token count exceeds thresholds

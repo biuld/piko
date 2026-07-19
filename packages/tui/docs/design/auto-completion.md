@@ -34,6 +34,11 @@ This design establishes:
              └───────────────────┘└───────────────────┘
 ```
 
+> `commands: &[TuiCommandEntry]` is the TUI-local merge of hostd's neutral
+> `HostCommandDescriptor` catalog with TUI-local presentation commands
+> (`app::command::merge_command_catalog`). Slash aliases live only in this
+> merge, never on the wire — see `docs/host-command-catalog-design.md`.
+
 ## Module Structure
 
 We organize code under `packages/tui/src/features/auto_completion/`:
@@ -88,7 +93,7 @@ pub trait AutoCompleteProvider {
     fn update(
         &mut self,
         cwd: &Path,
-        commands: &[CommandCatalogItem],
+        commands: &[TuiCommandEntry],
         text: &str,
         cursor: usize,
     ) -> Vec<CompletionRow>;

@@ -68,7 +68,7 @@ fn json_patch_for_action(action: SettingsAction) -> serde_json::Value {
         }
         SettingsAction::HideThinking(value) => {
             serde_json::json!({
-                "hide-thinking-block": value
+                "tui": { "hide_thinking_block": value }
             })
         }
         SettingsAction::Compaction(value) => {
@@ -80,7 +80,7 @@ fn json_patch_for_action(action: SettingsAction) -> serde_json::Value {
         }
         SettingsAction::Theme(value) => {
             serde_json::json!({
-                "theme": value
+                "tui": { "theme": { "name": value } }
             })
         }
         SettingsAction::Transport(value) => {

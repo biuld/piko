@@ -150,6 +150,9 @@ impl DesktopApp {
                 cx.notify();
             }
             EscapeOutcome::NotHandled => {
+                if self.try_close_settings_on_escape(window, cx) {
+                    return;
+                }
                 if window.has_active_sheet(cx) {
                     window.close_sheet(cx);
                     self.island_focus.restore();

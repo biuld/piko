@@ -8,13 +8,11 @@ use gpui_component::input::{InputEvent, InputState};
 
 use crate::bridge::ClientBridge;
 use crate::chrome::{
-    CommandPalette, FocusCycleDir, IslandFocusRing, IslandId, OverlayHost, render_status_bar,
-    render_title_bar,
+    CommandPalette, FocusCycleDir, IslandFocusRing, OverlayHost, PrimarySurface, SettingsSection,
+    mount_settings_frame, mount_workbench_frame,
 };
 use crate::islands::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
 use crate::overlays::InteractionForm;
-use crate::projections::derive_status_bar;
-use crate::theme::metrics;
 use crate::theme::tokens;
 use gpui_component::Root;
 use piko_client_core::{ClientIntent, ClientState};
@@ -24,6 +22,7 @@ use super::layout_state::LayoutState;
 use super::submit_recovery::{FirstSubmitRecovery, SubmitRecovery};
 use super::timeline_follow::TimelineContentFp;
 use super::ux_prefs::GuiUxPrefs;
+use crate::config::HostRuntimeSettings;
 
 actions!(
     piko,
@@ -39,6 +38,7 @@ actions!(
         Quit,
         OpenCommandPalette,
         CloseTransientOverlay,
+        OpenSettings,
     ]
 );
 
@@ -76,6 +76,8 @@ pub struct DesktopApp {
     pub(crate) last_connection_connected: bool,
     pub(crate) last_live_session_for_draft: Option<String>,
     gui_config_fingerprint: Option<String>,
+    pub(crate) host_config_fingerprint: Option<String>,
+    pub(crate) host_runtime: HostRuntimeSettings,
     pub(crate) island_focus: IslandFocusRing,
     pub(crate) fp_sessions: Option<String>,
     pub(crate) fp_timeline: Option<String>,
@@ -83,6 +85,8 @@ pub struct DesktopApp {
     pub(crate) fp_agents: Option<String>,
     pub(crate) fp_tree: Option<String>,
     pub(crate) last_chrome_fp: Option<String>,
+    pub(crate) primary_surface: PrimarySurface,
+    pub(crate) last_settings_section: SettingsSection,
 }
 
 impl DesktopApp {
@@ -128,6 +132,7 @@ impl DesktopApp {
                             let before_err = this.bridge.state().last_error.clone();
                             if this.bridge.poll() {
                                 this.sync_gui_config();
+                                this.sync_host_runtime_config();
                                 this.sync_command_catalog(cx);
                                 this.on_bridge_polled(before_err);
                                 this.sync_timeline_follow(cx);
@@ -182,6 +187,8 @@ impl DesktopApp {
             last_connection_connected: true,
             last_live_session_for_draft: None,
             gui_config_fingerprint: None,
+            host_config_fingerprint: None,
+            host_runtime: HostRuntimeSettings::default(),
             island_focus: IslandFocusRing::default(),
             fp_sessions: None,
             fp_timeline: None,
@@ -189,18 +196,21 @@ impl DesktopApp {
             fp_agents: None,
             fp_tree: None,
             last_chrome_fp: None,
+            primary_surface: PrimarySurface::Workbench,
+            last_settings_section: SettingsSection::default(),
         }
     }
 
     fn chrome_fingerprint(&self) -> String {
         format!(
-            "{:?}|{:?}|{}|{}|{}|{:?}",
+            "{:?}|{:?}|{}|{}|{}|{:?}|{:?}",
             self.bridge.state().shell.connection,
             self.bridge.state().last_error,
             self.layout.sessions_open,
             self.layout.agents_open,
             self.layout.tree_open,
             self.island_focus.focused(),
+            self.primary_surface,
         )
     }
 
@@ -212,6 +222,7 @@ impl DesktopApp {
         self.bridge.intent(ClientIntent::ListModels);
         self.bridge.intent(ClientIntent::SyncModelConfig);
         self.bridge.request_gui_config();
+        self.bridge.request_host_config();
     }
 
     pub(crate) fn bridge_state(&self) -> &ClientState {
@@ -238,6 +249,7 @@ impl DesktopApp {
                 self.layout.agents_open = settings.right_column_open;
                 self.layout.tree_open = settings.right_column_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
+                self.ux_prefs.hide_thinking_block = settings.hide_thinking_block;
                 self.gui_config_fingerprint = Some(fingerprint);
             }
             Err(error) => {
@@ -253,6 +265,7 @@ impl DesktopApp {
             session_open: self.layout.sessions_open,
             right_column_open: self.layout.right_column_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
+            hide_thinking_block: self.ux_prefs.hide_thinking_block,
         };
         if let Ok(value) = serde_json::to_value(settings) {
             self.gui_config_fingerprint = Some(value.to_string());
@@ -284,16 +297,10 @@ impl Render for DesktopApp {
         let on_focus_prev = cx.listener(Self::action_focus_prev_island);
         let on_palette = cx.listener(Self::action_open_command_palette);
         let on_close_overlay = cx.listener(Self::action_close_transient_overlay);
-        let show_session = self.layout.is_docked_visible(IslandId::Sessions, true);
-        let show_right = self.layout.any_right_column_docked(true);
-        let status_vm = derive_status_bar(self.bridge.state(), show_session);
-        let t = tokens();
-        let m = metrics();
-        let allow_motion = self.ux_prefs.allow_motion();
-        let title_entity = cx.entity().downgrade();
+        let on_open_settings = cx.listener(Self::action_open_settings);
         let overlay = self.render_active_overlay(window, cx);
 
-        div()
+        let mut root = div()
             .id("desktop-app")
             .relative()
             .track_focus(&self.focus_handle)
@@ -307,23 +314,20 @@ impl Render for DesktopApp {
             .on_action(on_focus_prev)
             .on_action(on_palette)
             .on_action(on_close_overlay)
+            .on_action(on_open_settings)
             .key_context("DesktopApp")
             .size_full()
             .flex()
             .flex_col()
-            .bg(t.canvas_rgba())
-            .text_color(t.fg_rgba())
-            .child(render_title_bar(show_session, show_right, title_entity))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    .p(m.island_gutter)
-                    .child(self.render_workbench_row(window, cx)),
-            )
-            .child(render_status_bar(&status_vm, allow_motion))
-            .children(overlay)
+            .bg(tokens().canvas_rgba())
+            .text_color(tokens().fg_rgba());
+
+        root = match self.primary_surface {
+            PrimarySurface::Workbench => mount_workbench_frame(root, self, window, cx),
+            PrimarySurface::Settings { section } => mount_settings_frame(root, self, section, cx),
+        };
+
+        root.children(overlay)
             .children(Root::render_sheet_layer(window, cx))
             .children(Root::render_notification_layer(window, cx))
     }
@@ -348,6 +352,9 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.primary_surface.is_workbench() {
+            return;
+        }
         let visible = self.visible_focus_islands();
         self.island_focus.cycle(FocusCycleDir::Next, &visible);
         let id = self.island_focus.focused();
@@ -361,6 +368,9 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.primary_surface.is_workbench() {
+            return;
+        }
         let visible = self.visible_focus_islands();
         self.island_focus.cycle(FocusCycleDir::Prev, &visible);
         let id = self.island_focus.focused();

@@ -4,6 +4,9 @@
 pub struct GuiUxPrefs {
     /// When true, skip decorative animations / spinners.
     pub prefer_reduced_motion: bool,
+    /// When true, hide thinking/reasoning blocks in the timeline.
+    /// GUI-only; independent of the TUI's own `[tui].hide_thinking_block`.
+    pub hide_thinking_block: bool,
 }
 
 impl GuiUxPrefs {

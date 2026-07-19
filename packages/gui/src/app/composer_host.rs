@@ -29,6 +29,12 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.trigger_new_session(window, cx);
+    }
+
+    /// Shared `session.new` behavior for the `cmd-n` keybinding and the host
+    /// catalog's `session.new` id run from the Command Palette.
+    pub(crate) fn trigger_new_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(cwd) = self
             .bridge_state()
             .live_session

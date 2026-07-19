@@ -1,17 +1,18 @@
-//! Shared Workbench chrome: window bars, column assembly, island shell, overlay, widgets.
+//! Shared chrome: Primary Surfaces, island shell, overlay stack, widgets.
 //!
-//! - [`workbench`] — left / center / right column assembly + layout state
-//! - [`island`] — IslandPanel shell (header, viewport, focus, messaging)
-//! - [`overlay`] — OverlayHost surface + Command Palette
+//! - [`primary_surface`] — Workbench vs Settings frame state
+//! - [`workbench`] — session Primary Surface (TitleBar, body, StatusBar)
+//! - [`settings`] — settings Primary Surface (TitleBar, nav body)
+//! - [`island`] — IslandPanel shell (Workbench building block)
+//! - [`overlay`] — OverlayHost surface + Command Palette (above all surfaces)
 //! - [`widgets`] — shared presentational primitives (tree list rows)
 
 pub mod island;
 pub mod overlay;
+pub mod primary_surface;
+pub mod settings;
 pub mod widgets;
 pub mod workbench;
-
-mod status_bar;
-mod title_bar;
 
 pub use island::{
     FocusCycleDir, IslandFocusRing, IslandHeader, IslandMsg, IslandPanel, IslandPlaceholder,
@@ -24,7 +25,7 @@ pub use overlay::{
     OverlayPanelStyle, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev, TransientKind,
     render_overlay_layer,
 };
-pub use status_bar::render_status_bar;
-pub use title_bar::render_title_bar;
+pub use primary_surface::{PrimarySurface, SettingsSection};
+pub use settings::mount_frame as mount_settings_frame;
 pub use widgets::{TreeClickHandler, TreeRowAccessory, TreeRowSpec, render_tree_list};
-pub use workbench::{IslandId, render_right_column};
+pub use workbench::{IslandId, mount_frame as mount_workbench_frame, render_right_column};

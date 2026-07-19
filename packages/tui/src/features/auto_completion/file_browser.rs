@@ -1,7 +1,7 @@
-use piko_protocol::CommandCatalogItem;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::{
     CellStyle, CompletionCell, CompletionRow, provider::AutoCompleteProvider,
 };
@@ -17,7 +17,7 @@ impl AutoCompleteProvider for FileBrowserProvider {
     fn update(
         &mut self,
         cwd: &Path,
-        _commands: &[CommandCatalogItem],
+        _commands: &[TuiCommandEntry],
         text: &str,
         cursor: usize,
     ) -> Vec<CompletionRow> {

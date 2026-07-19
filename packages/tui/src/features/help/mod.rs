@@ -5,20 +5,14 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use piko_protocol::CommandCatalogItem;
-
+use crate::app::command::TuiCommandEntry;
 use crate::theme::Theme;
 
 /// Help panel: static keybinding reference.
 pub struct HelpPanel;
 
 impl HelpPanel {
-    pub fn render(
-        frame: &mut Frame<'_>,
-        area: Rect,
-        theme: &Theme,
-        commands: &[CommandCatalogItem],
-    ) {
+    pub fn render(frame: &mut Frame<'_>, area: Rect, theme: &Theme, commands: &[TuiCommandEntry]) {
         frame.render_widget(Clear, area);
         let mut lines = vec![
             "Core",
@@ -47,11 +41,8 @@ impl HelpPanel {
         .into_iter()
         .map(str::to_string)
         .collect::<Vec<_>>();
-        for command in commands
-            .iter()
-            .filter(|command| !command.slash_name.is_empty())
-        {
-            let name = &command.slash_name;
+        for command in commands {
+            let name = &command.slash;
             lines.push(format!("  {name:<18} {}", command.detail));
         }
         lines.extend(

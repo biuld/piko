@@ -17,7 +17,7 @@ use piko_client_core::{
     ClientEffect, ClientIntent, ClientMsg, ClientState, CommandIdSource, TransportObservation,
     UpdateContext, update,
 };
-use piko_protocol::{Command, CommandCatalogItem};
+use piko_protocol::{Command, HostCommandDescriptor};
 
 use crate::transport::{HostTransport, TransportEvent};
 
@@ -28,7 +28,8 @@ pub struct ClientBridge {
     transport: Option<HostTransport>,
     id_source: Box<dyn CommandIdSource>,
     gui_config: Option<serde_json::Value>,
-    command_catalog: Option<Vec<CommandCatalogItem>>,
+    host_config: Option<serde_json::Value>,
+    command_catalog: Option<Vec<HostCommandDescriptor>>,
     /// Commands sent since the last `take_sent()` (diagnostic/test hook).
     #[cfg(test)]
     sent_log: Vec<Command>,
@@ -42,6 +43,7 @@ impl ClientBridge {
             transport: Some(transport),
             id_source,
             gui_config: None,
+            host_config: None,
             command_catalog: None,
             #[cfg(test)]
             sent_log: Vec::new(),
@@ -56,6 +58,7 @@ impl ClientBridge {
             transport: None,
             id_source,
             gui_config: None,
+            host_config: None,
             command_catalog: None,
             sent_log: Vec::new(),
         }
@@ -71,7 +74,11 @@ impl ClientBridge {
         self.gui_config.as_ref()
     }
 
-    pub fn command_catalog(&self) -> Option<&Vec<CommandCatalogItem>> {
+    pub fn host_config(&self) -> Option<&serde_json::Value> {
+        self.host_config.as_ref()
+    }
+
+    pub fn command_catalog(&self) -> Option<&Vec<HostCommandDescriptor>> {
         self.command_catalog.as_ref()
     }
 
@@ -120,6 +127,12 @@ impl ClientBridge {
                     self.gui_config = Some(value.clone());
                 }
                 piko_protocol::ServerMessage::CommandResponse {
+                    result: Ok(piko_protocol::CommandResult::ConfigEntry { namespace, value }),
+                    ..
+                } if namespace == "host" => {
+                    self.host_config = Some(value.clone());
+                }
+                piko_protocol::ServerMessage::CommandResponse {
                     result: Ok(piko_protocol::CommandResult::CommandCatalogListed { commands, .. }),
                     ..
                 } => {
@@ -146,6 +159,14 @@ impl ClientBridge {
         })]);
     }
 
+    pub fn request_host_config(&mut self) {
+        let command_id = self.id_source.next_command_id();
+        self.execute_effects(vec![ClientEffect::Send(Command::ConfigGet {
+            command_id,
+            namespace: "host".into(),
+        })]);
+    }
+
     pub fn request_command_catalog(&mut self) {
         let command_id = self.id_source.next_command_id();
         self.execute_effects(vec![ClientEffect::Send(Command::CommandCatalogGet {
@@ -158,6 +179,14 @@ impl ClientBridge {
         self.execute_effects(vec![ClientEffect::Send(Command::ConfigUpdate {
             command_id,
             patch: serde_json::json!({ "gui": value }),
+        })]);
+    }
+
+    pub fn update_host_config(&mut self, patch: serde_json::Value) {
+        let command_id = self.id_source.next_command_id();
+        self.execute_effects(vec![ClientEffect::Send(Command::ConfigUpdate {
+            command_id,
+            patch,
         })]);
     }
 

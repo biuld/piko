@@ -426,6 +426,36 @@ fn gui_config_commands_stay_in_frontend_bridge() {
     ));
 }
 
+#[test]
+fn host_config_get_and_update_use_host_fields() {
+    let mut bridge = headless();
+    bridge.request_host_config();
+    assert!(matches!(
+        bridge.take_sent().as_slice(),
+        [piko_protocol::Command::ConfigGet { namespace, .. }] if namespace == "host"
+    ));
+
+    bridge.apply_transport_event(crate::transport::TransportEvent::Message(Box::new(
+        piko_protocol::ServerMessage::CommandResponse {
+            command_id: "host-get".into(),
+            result: Ok(piko_protocol::CommandResult::ConfigEntry {
+                namespace: "host".into(),
+                value: serde_json::json!({
+                    "sandbox": { "enabled": false }
+                }),
+            }),
+        },
+    )));
+    assert_eq!(bridge.host_config().unwrap()["sandbox"]["enabled"], false);
+
+    bridge.update_host_config(serde_json::json!({ "retry": { "enabled": false } }));
+    assert!(matches!(
+        bridge.take_sent().as_slice(),
+        [piko_protocol::Command::ConfigUpdate { patch, .. }]
+            if patch["retry"]["enabled"] == false && patch.get("gui").is_none()
+    ));
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn extract_command_id(bridge: &mut ClientBridge) -> String {

@@ -1,16 +1,19 @@
-//! Native-integrated custom title bar for the desktop window chrome.
+//! Workbench TitleBar — dock toggles, brand, Settings gear (toggle).
 
 use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::TitleBar;
 use gpui_component::button::{Button, ButtonVariants};
 
-use crate::app::desktop_app::{DesktopApp, ToggleRightColumn, ToggleSessions};
-use crate::theme::{PanelSide, PikoTokens, label_text, metrics, panel_toggle_icon, tokens};
+use crate::app::desktop_app::{DesktopApp, OpenSettings, ToggleRightColumn, ToggleSessions};
+use crate::theme::{
+    IconSize, PanelSide, PikoIcon, PikoTokens, icon, label_text, metrics, panel_toggle_icon, tokens,
+};
 
 pub fn render_title_bar(
     sessions_docked: bool,
     right_docked: bool,
+    settings_active: bool,
     entity: WeakEntity<DesktopApp>,
 ) -> impl IntoElement {
     let m = metrics();
@@ -54,7 +57,6 @@ pub fn render_title_bar(
         div()
             .relative()
             .size_full()
-            .pr(m.title_bar_safe_inset)
             .child(
                 div()
                     .absolute()
@@ -68,6 +70,16 @@ pub fn render_title_bar(
                     .child(right_toggle),
             )
             .child(
+                div()
+                    .absolute()
+                    .right(m.island_gutter)
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .child(settings_gear(settings_active, entity)),
+            )
+            .child(
                 label_text(false)
                     .size_full()
                     .flex()
@@ -78,6 +90,33 @@ pub fn render_title_bar(
                     .child("piko"),
             ),
     )
+}
+
+pub(crate) fn settings_gear(active: bool, entity: WeakEntity<DesktopApp>) -> Button {
+    let t = tokens();
+    let color = if active {
+        PikoTokens::hsla(t.fg)
+    } else {
+        PikoTokens::hsla(t.muted_fg)
+    };
+    let tooltip = if active {
+        crate::t!("chrome.action.settings.close")
+    } else {
+        crate::t!("chrome.action.settings")
+    };
+    Button::new("title-toggle-settings")
+        .icon(icon(PikoIcon::Settings, IconSize::Label, color))
+        .tooltip(tooltip)
+        .ghost()
+        .small()
+        .compact()
+        .on_click(move |_, window, cx| {
+            if let Some(view) = entity.upgrade() {
+                view.update(cx, |this, cx| {
+                    this.action_open_settings(&OpenSettings, window, cx);
+                });
+            }
+        })
 }
 
 /// Ghost icon button; open/closed is carried only by hollow vs hatched SVG.

@@ -24,10 +24,8 @@ pub struct HostSettings {
     pub default_model: Option<String>,
     pub default_thinking_level: Option<piko_protocol::model::ThinkingLevel>,
 
-    // ---- Transport / TUI ----
+    // ---- Transport ----
     pub transport: Option<String>,
-    pub theme: Option<String>,
-    pub hide_thinking_block: Option<bool>,
 
     // ---- Execution ----
     pub compaction: Option<CompactionSettings>,
@@ -45,14 +43,42 @@ pub struct HostSettings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerConfig>,
 
-    // ---- TUI ----
-    /// TUI-specific settings stored as an opaque JSON value.
-    /// The TUI owns the schema; hostd just stores and forwards it.
+    // ---- Frontend namespaces (opaque to hostd) ----
+    /// TUI-specific settings. The TUI owns the schema; hostd stores and forwards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tui: Option<serde_json::Value>,
-    /// GUI-specific settings stored as an opaque JSON value.
+    /// GUI-specific settings. The GUI owns the schema; hostd stores and forwards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gui: Option<serde_json::Value>,
+}
+
+impl HostSettings {
+    /// Resolve the JSON blob for a `ConfigGet` namespace.
+    /// Unknown namespaces return an empty object.
+    pub fn namespace_value(&self, namespace: &str) -> serde_json::Value {
+        match namespace {
+            "tui" => self.tui.clone().unwrap_or_else(|| serde_json::json!({})),
+            "gui" => self.gui.clone().unwrap_or_else(|| serde_json::json!({})),
+            "host" => self.host_namespace_value(),
+            _ => serde_json::Value::Object(Default::default()),
+        }
+    }
+
+    /// Shared runtime fields for `ConfigGet { namespace: "host" }`.
+    /// Excludes frontend blobs (`[tui]`, `[gui]`).
+    pub fn host_namespace_value(&self) -> serde_json::Value {
+        serde_json::json!({
+            "default-provider": self.default_provider,
+            "default-model": self.default_model,
+            "default-thinking-level": self.default_thinking_level,
+            "compaction": self.compaction,
+            "retry": self.retry,
+            "sandbox": self.sandbox,
+            "active-tool-names": self.active_tool_names,
+            "session-dir": self.session_dir,
+            "mcp-servers": self.mcp_servers,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -214,10 +240,6 @@ impl SettingsManager {
         &self.project_path
     }
 
-    pub fn get_theme(&self) -> Option<&str> {
-        self.merged.theme.as_deref()
-    }
-
     pub fn get_compaction_settings(&self) -> (bool, u64, u64) {
         let compaction = self.merged.compaction.as_ref();
         (
@@ -280,8 +302,6 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
             .default_thinking_level
             .or(base.default_thinking_level),
         transport: overrides.transport.or(base.transport),
-        theme: overrides.theme.or(base.theme),
-        hide_thinking_block: overrides.hide_thinking_block.or(base.hide_thinking_block),
         compaction: merge_compaction(base.compaction, overrides.compaction),
         retry: merge_retry(base.retry, overrides.retry),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),

@@ -1,16 +1,19 @@
-//! Map Command Catalog / Palette submenu selections → DesktopApp intents.
+//! Map Command Palette selections → DesktopApp behavior.
+//!
+//! Two id spaces meet here (see `docs/host-command-catalog-design.md`):
+//! - host catalog ids (`RunHost`) map to a real `Command` / `ClientIntent`
+//! - GUI-local ids (`RunLocal`) map to frontend-only presentation behavior
+//!   (focus/dock a panel, open Settings, quit, clear notifications)
 
 use gpui::*;
 use gpui_component::WindowExt;
-use gpui_component::notification::{Notification, NotificationType};
 use piko_client_core::ClientIntent;
-use piko_protocol::CommandCatalogAction;
 
 use crate::app::model_cycle::{THINKING_LEVELS, catalog_models};
 use crate::chrome::IslandId;
-use crate::chrome::overlay::palette::{PaletteConfirmResult, palette_runnable};
+use crate::chrome::overlay::palette::{LocalCommandId, PaletteConfirmResult, RootSubmenu};
 
-use super::desktop_app::DesktopApp;
+use super::desktop_app::{DesktopApp, OpenSettings};
 
 impl DesktopApp {
     pub(crate) fn run_selected_palette_command(
@@ -23,9 +26,9 @@ impl DesktopApp {
         };
 
         // Submenu entry from root (Models / Thinking) before confirm consumes StayOpen.
-        if let Some(action) = palette.read(cx).selected_root_action() {
-            match action {
-                CommandCatalogAction::Models => {
+        if let Some(submenu) = palette.read(cx).selected_root_submenu() {
+            match submenu {
+                RootSubmenu::Models => {
                     if self.bridge_state().model.providers.is_empty() {
                         self.bridge.intent(ClientIntent::ListModels);
                     }
@@ -34,20 +37,22 @@ impl DesktopApp {
                     cx.notify();
                     return;
                 }
-                CommandCatalogAction::Thinking => {
+                RootSubmenu::Thinking => {
                     palette.update(cx, |p, cx| p.push_thinking(THINKING_LEVELS, window, cx));
                     cx.notify();
                     return;
                 }
-                _ => {}
             }
         }
 
         let result = palette.update(cx, |p, _| p.confirm());
         match result {
             PaletteConfirmResult::None | PaletteConfirmResult::StayOpen => {}
-            PaletteConfirmResult::RunCatalog(action) => {
-                self.run_catalog_action(action, window, cx);
+            PaletteConfirmResult::RunHost(id) => {
+                self.run_host_command(&id, window, cx);
+            }
+            PaletteConfirmResult::RunLocal(id) => {
+                self.run_local_command(id, window, cx);
             }
             PaletteConfirmResult::SetModel { provider, model_id } => {
                 self.overlay.close_transient();
@@ -65,47 +70,40 @@ impl DesktopApp {
         }
     }
 
-    fn run_catalog_action(
-        &mut self,
-        action: CommandCatalogAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(action, CommandCatalogAction::Commands) {
-            return;
-        }
-        if !palette_runnable(&action) {
-            return;
-        }
-
+    /// Run a neutral host catalog id. Only ids the GUI has a real flow for
+    /// reach here (see `GUI_RUNNABLE_HOST_IDS` in the palette module);
+    /// everything else is disabled in the palette itself.
+    fn run_host_command(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay.close_transient();
         self.restore_overlay_focus(window, cx);
 
-        match action {
-            CommandCatalogAction::Sessions => {
-                self.focus_or_open_sessions(window, cx);
-            }
-            CommandCatalogAction::Agents | CommandCatalogAction::Tree => {
+        if id == "session.new" {
+            self.trigger_new_session(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn run_local_command(
+        &mut self,
+        id: LocalCommandId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.overlay.close_transient();
+        self.restore_overlay_focus(window, cx);
+
+        match id {
+            LocalCommandId::FocusSessions => self.focus_or_open_sessions(window, cx),
+            LocalCommandId::FocusAgents | LocalCommandId::FocusTree => {
                 self.focus_or_open_right_column(window, cx);
             }
-            CommandCatalogAction::Quit => {
-                self.request_quit_from_palette(window, cx);
+            LocalCommandId::OpenSettings => {
+                if self.primary_surface.is_workbench() {
+                    self.action_open_settings(&OpenSettings, window, cx);
+                }
             }
-            CommandCatalogAction::ClearNotifications => {
-                window.clear_notifications(cx);
-            }
-            CommandCatalogAction::NewSession => {
-                window.push_notification(
-                    Notification::new()
-                        .title(crate::t!("palette.new_session.title"))
-                        .message(crate::t!("palette.new_session.message"))
-                        .with_type(NotificationType::Info)
-                        .autohide(true),
-                    cx,
-                );
-                self.focus_or_open_sessions(window, cx);
-            }
-            _ => {}
+            LocalCommandId::ClearNotifications => window.clear_notifications(cx),
+            LocalCommandId::Quit => self.request_quit_from_palette(window, cx),
         }
         cx.notify();
     }

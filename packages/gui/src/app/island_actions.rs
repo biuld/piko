@@ -28,6 +28,9 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.primary_surface.is_workbench() {
+            return;
+        }
         let live = self.bridge_state().is_live();
         if self.layout.is_docked_visible(IslandId::Sessions, live) {
             self.layout.set_open(IslandId::Sessions, false);
@@ -50,6 +53,9 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.primary_surface.is_workbench() {
+            return;
+        }
         let live = self.bridge_state().is_live();
         if self.layout.any_right_column_docked(live) {
             self.layout.set_right_column_open(false);

@@ -1,6 +1,4 @@
-//! StatusBar rendering — always visible, single-line, read-only.
-//!
-//! Stable order: connection, optional cwd, context/cost.
+//! Workbench StatusBar — connection, cwd, context/cost.
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;

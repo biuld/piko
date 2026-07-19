@@ -1,4 +1,14 @@
 //! Command Palette Transient body with a root → submenu navigation stack.
+//!
+//! The palette root merges two sources (see `docs/host-command-catalog-design.md`):
+//! - the neutral `HostCommandDescriptor` catalog fetched from hostd
+//! - a small GUI-local command list for presentation actions hostd does not
+//!   own (open Settings, focus/dock Sessions/Agents/Tree, quit, clear
+//!   notifications)
+//!
+//! `model.set` / `thinking.set` host rows do not run directly — they open a
+//! GUI-local nested picker; confirming a pick sends the real `SetModel` /
+//! `SetThinkingLevel` `ClientIntent`.
 
 mod render;
 #[cfg(test)]
@@ -6,18 +16,76 @@ mod tests;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
-use piko_protocol::{CommandCatalogAction, CommandCatalogItem, ThinkingLevel};
+use piko_protocol::{HostCommandDescriptor, HostCommandGroup, HostCommandInvoke, ThinkingLevel};
 
 actions!(
     palette,
     [PaletteSelectPrev, PaletteSelectNext, PaletteConfirm]
 );
 
+/// Host ids the GUI currently knows how to run immediately from the palette.
+/// Everything else in the host catalog is listed but disabled until GUI adds
+/// the matching flow (args form, confirm dialog, ...).
+const GUI_RUNNABLE_HOST_IDS: &[&str] = &["session.new"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PaletteFrameKind {
     Root,
     Models,
     Thinking,
+}
+
+/// Submenu the palette root would open next, resolved before `confirm()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootSubmenu {
+    Models,
+    Thinking,
+}
+
+/// GUI-owned presentation commands not carried by the host catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalCommandId {
+    OpenSettings,
+    FocusSessions,
+    FocusAgents,
+    FocusTree,
+    ClearNotifications,
+    Quit,
+}
+
+fn local_commands() -> Vec<(LocalCommandId, SharedString, SharedString)> {
+    vec![
+        (
+            LocalCommandId::FocusSessions,
+            crate::t!("palette.local.sessions.title").into(),
+            crate::t!("palette.local.sessions.detail").into(),
+        ),
+        (
+            LocalCommandId::FocusAgents,
+            crate::t!("palette.local.agents.title").into(),
+            crate::t!("palette.local.agents.detail").into(),
+        ),
+        (
+            LocalCommandId::FocusTree,
+            crate::t!("palette.local.tree.title").into(),
+            crate::t!("palette.local.tree.detail").into(),
+        ),
+        (
+            LocalCommandId::OpenSettings,
+            crate::t!("palette.local.settings.title").into(),
+            crate::t!("palette.local.settings.detail").into(),
+        ),
+        (
+            LocalCommandId::ClearNotifications,
+            crate::t!("palette.local.clear_notifications.title").into(),
+            crate::t!("palette.local.clear_notifications.detail").into(),
+        ),
+        (
+            LocalCommandId::Quit,
+            crate::t!("palette.local.quit.title").into(),
+            crate::t!("palette.local.quit.detail").into(),
+        ),
+    ]
 }
 
 #[derive(Debug, Clone)]
@@ -31,10 +99,16 @@ pub(crate) struct PaletteRow {
 
 #[derive(Debug, Clone)]
 pub(crate) enum PaletteRowAction {
-    Catalog(CommandCatalogAction),
+    /// GUI-local presentation command.
+    Local(LocalCommandId),
+    /// Host catalog id the GUI can run directly (see `GUI_RUNNABLE_HOST_IDS`).
+    Host(String),
     EnterModels,
     EnterThinking,
-    SetModel { provider: String, model_id: String },
+    SetModel {
+        provider: String,
+        model_id: String,
+    },
     SetThinking(ThinkingLevel),
 }
 
@@ -42,9 +116,10 @@ pub(crate) enum PaletteRowAction {
 #[derive(Debug, Clone)]
 pub enum PaletteConfirmResult {
     None,
-    /// Entered a submenu or no-op (e.g. Commands); keep palette open.
+    /// Entered a submenu; keep palette open.
     StayOpen,
-    RunCatalog(CommandCatalogAction),
+    RunLocal(LocalCommandId),
+    RunHost(String),
     SetModel {
         provider: String,
         model_id: String,
@@ -90,7 +165,7 @@ impl PaletteFrame {
 
 pub struct CommandPalette {
     pub(crate) filter_input: Entity<InputState>,
-    catalog: Vec<CommandCatalogItem>,
+    catalog: Vec<HostCommandDescriptor>,
     /// Stack bottom is always Root when catalog is loaded.
     pub(crate) stack: Vec<PaletteFrame>,
     pub(crate) focus_handle: FocusHandle,
@@ -119,11 +194,8 @@ impl CommandPalette {
         }
     }
 
-    pub fn set_catalog(&mut self, catalog: Vec<CommandCatalogItem>, cx: &mut Context<Self>) {
-        self.catalog = catalog
-            .into_iter()
-            .filter(|item| item.visible_in_palette)
-            .collect();
+    pub fn set_catalog(&mut self, catalog: Vec<HostCommandDescriptor>, cx: &mut Context<Self>) {
+        self.catalog = catalog;
         // Refresh root; keep submenu if still open.
         if self.stack.is_empty()
             || self
@@ -248,22 +320,8 @@ impl CommandPalette {
                 // DesktopApp opens the submenu with data.
                 PaletteConfirmResult::StayOpen
             }
-            PaletteRowAction::Catalog(CommandCatalogAction::Commands) => {
-                PaletteConfirmResult::StayOpen
-            }
-            PaletteRowAction::Catalog(CommandCatalogAction::Models) => {
-                PaletteConfirmResult::StayOpen
-            }
-            PaletteRowAction::Catalog(CommandCatalogAction::Thinking) => {
-                PaletteConfirmResult::StayOpen
-            }
-            PaletteRowAction::Catalog(action) => {
-                if palette_runnable(&action) {
-                    PaletteConfirmResult::RunCatalog(action)
-                } else {
-                    PaletteConfirmResult::None
-                }
-            }
+            PaletteRowAction::Local(id) => PaletteConfirmResult::RunLocal(id),
+            PaletteRowAction::Host(id) => PaletteConfirmResult::RunHost(id),
             PaletteRowAction::SetModel { provider, model_id } => {
                 PaletteConfirmResult::SetModel { provider, model_id }
             }
@@ -271,15 +329,16 @@ impl CommandPalette {
         }
     }
 
-    /// Catalog action for the selected root row (for DesktopApp to open submenus).
-    pub fn selected_root_action(&self) -> Option<CommandCatalogAction> {
+    /// The submenu the selected root row would open (Models / Thinking), if
+    /// any. DesktopApp checks this before `confirm()` so it can open the
+    /// submenu with freshly fetched data instead of just seeing `StayOpen`.
+    pub fn selected_root_submenu(&self) -> Option<RootSubmenu> {
         if self.stack.len() != 1 {
             return None;
         }
-        match self.stack[0].selected_row()?.action.clone() {
-            PaletteRowAction::Catalog(action) => Some(action),
-            PaletteRowAction::EnterModels => Some(CommandCatalogAction::Models),
-            PaletteRowAction::EnterThinking => Some(CommandCatalogAction::Thinking),
+        match self.stack[0].selected_row()?.action {
+            PaletteRowAction::EnterModels => Some(RootSubmenu::Models),
+            PaletteRowAction::EnterThinking => Some(RootSubmenu::Thinking),
             _ => None,
         }
     }
@@ -332,45 +391,19 @@ impl CommandPalette {
         });
     }
 
-    pub(crate) fn root_frame(catalog: &[CommandCatalogItem]) -> PaletteFrame {
-        let rows = catalog
-            .iter()
-            .map(|item| {
-                let (enabled, detail, trailing, action) = match &item.action {
-                    CommandCatalogAction::Models => (
-                        true,
-                        item.detail.clone(),
-                        crate::t!("palette.submenu.marker"),
-                        PaletteRowAction::EnterModels,
-                    ),
-                    CommandCatalogAction::Thinking => (
-                        true,
-                        item.detail.clone(),
-                        crate::t!("palette.submenu.marker"),
-                        PaletteRowAction::EnterThinking,
-                    ),
-                    other if palette_runnable(other) => (
-                        true,
-                        item.detail.clone(),
-                        item.slash_name.clone(),
-                        PaletteRowAction::Catalog(other.clone()),
-                    ),
-                    other => (
-                        false,
-                        palette_disabled_detail(other),
-                        item.slash_name.clone(),
-                        PaletteRowAction::Catalog(other.clone()),
-                    ),
-                };
-                PaletteRow {
-                    title: item.title.clone(),
-                    detail,
-                    trailing,
-                    enabled,
-                    action,
-                }
-            })
-            .collect();
+    pub(crate) fn root_frame(catalog: &[HostCommandDescriptor]) -> PaletteFrame {
+        let mut rows: Vec<PaletteRow> = catalog.iter().map(host_row).collect();
+        rows.extend(
+            local_commands()
+                .into_iter()
+                .map(|(id, title, detail)| PaletteRow {
+                    title: title.to_string(),
+                    detail: detail.to_string(),
+                    trailing: String::new(),
+                    enabled: true,
+                    action: PaletteRowAction::Local(id),
+                }),
+        );
         let mut frame = PaletteFrame {
             kind: PaletteFrameKind::Root,
             rows,
@@ -399,28 +432,54 @@ impl Focusable for CommandPalette {
     }
 }
 
-pub fn palette_runnable(action: &CommandCatalogAction) -> bool {
-    matches!(
-        action,
-        CommandCatalogAction::Sessions
-            | CommandCatalogAction::Agents
-            | CommandCatalogAction::Tree
-            | CommandCatalogAction::Quit
-            | CommandCatalogAction::ClearNotifications
-            | CommandCatalogAction::NewSession
-            | CommandCatalogAction::Commands
-            | CommandCatalogAction::Models
-            | CommandCatalogAction::Thinking
-    )
+fn host_row(item: &HostCommandDescriptor) -> PaletteRow {
+    let trailing = group_trailing(item.group);
+    match item.id.as_str() {
+        "model.set" => PaletteRow {
+            title: item.title.clone(),
+            detail: item.detail.clone(),
+            trailing: crate::t!("palette.submenu.marker"),
+            enabled: true,
+            action: PaletteRowAction::EnterModels,
+        },
+        "thinking.set" => PaletteRow {
+            title: item.title.clone(),
+            detail: item.detail.clone(),
+            trailing: crate::t!("palette.submenu.marker"),
+            enabled: true,
+            action: PaletteRowAction::EnterThinking,
+        },
+        id if GUI_RUNNABLE_HOST_IDS.contains(&id) => PaletteRow {
+            title: item.title.clone(),
+            detail: item.detail.clone(),
+            trailing,
+            enabled: true,
+            action: PaletteRowAction::Host(item.id.clone()),
+        },
+        _ => PaletteRow {
+            title: item.title.clone(),
+            detail: disabled_detail(&item.invoke),
+            trailing,
+            enabled: false,
+            action: PaletteRowAction::Host(item.id.clone()),
+        },
+    }
 }
 
-fn palette_disabled_detail(action: &CommandCatalogAction) -> String {
-    match action {
-        CommandCatalogAction::RenameSession
-        | CommandCatalogAction::ImportSession
-        | CommandCatalogAction::ExportSession
-        | CommandCatalogAction::DeleteSession
-        | CommandCatalogAction::ForkSession => crate::t!("palette.disabled.needs_args"),
-        _ => crate::t!("palette.disabled.deferred"),
+fn disabled_detail(invoke: &HostCommandInvoke) -> String {
+    match invoke {
+        HostCommandInvoke::Args { .. } => crate::t!("palette.disabled.needs_args"),
+        HostCommandInvoke::Confirm => crate::t!("palette.disabled.needs_confirm"),
+        HostCommandInvoke::Immediate => crate::t!("palette.disabled.deferred"),
+    }
+}
+
+fn group_trailing(group: Option<HostCommandGroup>) -> String {
+    match group {
+        Some(HostCommandGroup::Session) => "session".to_string(),
+        Some(HostCommandGroup::Auth) => "auth".to_string(),
+        Some(HostCommandGroup::Runtime) => "runtime".to_string(),
+        Some(HostCommandGroup::Model) => "model".to_string(),
+        None => String::new(),
     }
 }

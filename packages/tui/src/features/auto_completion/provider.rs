@@ -1,6 +1,6 @@
-use piko_protocol::CommandCatalogItem;
 use std::path::Path;
 
+use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::CompletionRow;
 
 pub trait AutoCompleteProvider {
@@ -11,7 +11,7 @@ pub trait AutoCompleteProvider {
     fn update(
         &mut self,
         cwd: &Path,
-        commands: &[CommandCatalogItem],
+        commands: &[TuiCommandEntry],
         text: &str,
         cursor: usize,
     ) -> Vec<CompletionRow>;

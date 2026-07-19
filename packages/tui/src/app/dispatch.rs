@@ -3,7 +3,7 @@ use piko_protocol::Command;
 use crate::app::{
     AppMode, AppState,
     command::{
-        Action, AgentAction, AppAction, ApprovalAction, ConfigAction, EditorAction, ModelAction,
+        Action, AgentAction, AppAction, ApprovalAction, EditorAction, ModelAction,
         NotificationAction, SessionAction, SlashAction, SurfaceAction, TimelineAction,
         ToolInteractionAction, TreeAction,
     },
@@ -26,7 +26,6 @@ impl AppState {
             Action::Model(action) => self.dispatch_model_action(action),
             Action::AgentList(action) => self.dispatch_agent_list_action(action),
             Action::Tree(action) => self.dispatch_tree_action(action),
-            Action::Config(action) => self.dispatch_config_action(action),
             Action::Approval(action) => self.dispatch_approval_action(action),
             Action::ToolInteraction(action) => self.dispatch_tool_interaction_action(action),
             Action::Notifications(action) => self.dispatch_notification_action(action),
@@ -40,21 +39,6 @@ impl AppState {
             AppAction::Quit => self.quit = true,
         }
         Vec::new()
-    }
-
-    fn dispatch_config_action(&mut self, action: ConfigAction) -> Vec<Effect> {
-        match action {
-            ConfigAction::SetThinkingLevel { level } => {
-                self.clear_focus();
-                self.status = format!("thinking level {level}");
-                vec![Effect::send(Command::ConfigUpdate {
-                    command_id: command_id(),
-                    patch: serde_json::json!({
-                        "default-thinking-level": level
-                    }),
-                })]
-            }
-        }
     }
 
     fn dispatch_editor_action(&mut self, action: EditorAction) -> Vec<Effect> {

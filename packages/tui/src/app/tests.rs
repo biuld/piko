@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use piko_protocol::{CommandCatalogAction, CommandCatalogItem, Message, ServerMessage as Event};
+use piko_protocol::{HostCommandDescriptor, Message, ServerMessage as Event};
 use serde_json::json;
 
 use crate::app::{
@@ -1149,24 +1149,9 @@ fn test_completion_cycling_fills_editor() {
     let mut app = app();
     app.apply_event(Event::CommandResponse {
         result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
-            commands: vec![
-                CommandCatalogItem {
-                    id: "help".to_string(),
-                    title: "Help".to_string(),
-                    detail: "Show help".to_string(),
-                    action: CommandCatalogAction::Help,
-                    slash_name: "/help".to_string(),
-                    visible_in_palette: true,
-                },
-                CommandCatalogItem {
-                    id: "quit".to_string(),
-                    title: "Quit".to_string(),
-                    detail: "Quit".to_string(),
-                    action: CommandCatalogAction::Quit,
-                    slash_name: "/quit".to_string(),
-                    visible_in_palette: true,
-                },
-            ],
+            // `/help` and `/quit` are TUI-local commands, always merged in
+            // regardless of what hostd advertises.
+            commands: Vec::new(),
             timestamp: 0,
         }),
         command_id: "test".into(),
@@ -1314,13 +1299,9 @@ fn tool_execution_scopes_to_non_active_agent_timeline() {
     );
 }
 
-fn test_command_catalog() -> Vec<CommandCatalogItem> {
-    vec![CommandCatalogItem {
-        id: "help".to_string(),
-        title: "Help".to_string(),
-        detail: "Show help".to_string(),
-        action: CommandCatalogAction::Help,
-        slash_name: "/help".to_string(),
-        visible_in_palette: true,
-    }]
+/// `/help` is a TUI-local command, always merged in regardless of what
+/// hostd advertises; an empty host catalog is enough to exercise the
+/// bootstrap round-trip this fixture supports.
+fn test_command_catalog() -> Vec<HostCommandDescriptor> {
+    Vec::new()
 }

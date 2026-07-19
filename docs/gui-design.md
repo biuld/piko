@@ -13,6 +13,10 @@
 > Overlay stack: [Feature](gui-overlay-stack-feature.md) ·
 > [Design](gui-overlay-stack-design.md) ·
 > [Command Palette](gui-command-palette-feature.md)
+> Primary Surface: [Design](gui-primary-surface-design.md)
+> Settings ownership: [Design](settings-ownership-design.md)
+> Host command catalog / palette: [Design](host-command-catalog-design.md)
+> Code organization (target): [Design](gui-code-organization-design.md)
 
 ## 1. Purpose
 
@@ -37,6 +41,10 @@ is a read-only behavior and product reference during this work.
 
 ## 3. Crate and Module Boundaries
 
+> **Target layout** (shell / features / app / platform): see
+> [GUI Code Organization Design](gui-code-organization-design.md).
+> The tree below is the **current** on-disk layout during migration.
+
 ```text
 packages/client-core
 ├── state            authoritative client-side projection
@@ -49,7 +57,8 @@ packages/gui
 ├── app              DesktopApp, actions, layout prefs, island dispatch/refresh
 ├── transport        hostd process and JSONL reader/writer
 ├── bridge           Client Core effects and GPUI foreground updates
-├── chrome           Workbench layout, TitleBar, StatusBar, IslandPanel, OverlayHost, IslandMsg
+├── chrome           shell (Primary Surface, Workbench layout, IslandPanel, OverlayHost)
+│                    ⚠ product Settings forms currently misplaced here — migrate to features/
 ├── islands          Sessions, Timeline, Composer (+ Activity), Agents, Tree
 ├── overlays         approval / interaction prompt bodies (mounted by OverlayHost)
 ├── projections      Client Core → island view models

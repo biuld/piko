@@ -22,7 +22,8 @@ use gpui_component::Root;
 
 use crate::app::desktop_app::{
     CancelTurn, CloseTransientOverlay, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland,
-    JumpToLatest, NewSession, OpenCommandPalette, Quit, ToggleRightColumn, ToggleSessions,
+    JumpToLatest, NewSession, OpenCommandPalette, OpenSettings, Quit, ToggleRightColumn,
+    ToggleSessions,
 };
 use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
 use crate::app::quit::is_quit_busy;
@@ -64,6 +65,7 @@ fn main() {
             KeyBinding::new("cmd-b", ToggleSessions, Some("DesktopApp")),
             KeyBinding::new("cmd-i", ToggleRightColumn, Some("DesktopApp")),
             KeyBinding::new("cmd-shift-p", OpenCommandPalette, Some("DesktopApp")),
+            KeyBinding::new("cmd-comma", OpenSettings, Some("DesktopApp")),
             KeyBinding::new("escape", CloseTransientOverlay, None),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),

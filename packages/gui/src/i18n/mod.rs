@@ -25,6 +25,12 @@ mod tests {
             crate::t!("chrome.toggle.right_column"),
             "Toggle Agents sidebar"
         );
+        assert_eq!(crate::t!("settings.title"), "Settings");
+        assert_eq!(
+            crate::t!("chrome.action.settings.close"),
+            "Close Settings (⌘,)"
+        );
+        assert_eq!(crate::t!("settings.section.agent_tools"), "Agent & Tools");
         assert_eq!(crate::t!("palette.title"), "Command Palette");
         assert_eq!(
             crate::t!("overlay.approval.title_pending", count = 3),

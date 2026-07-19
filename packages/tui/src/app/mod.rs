@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 
-use piko_protocol::{Command, CommandCatalogItem, ProviderInfo, SessionTreeEntry};
+use piko_protocol::{Command, ProviderInfo, SessionTreeEntry};
 
 use crate::{
     config::TuiConfig,
@@ -28,7 +28,6 @@ pub mod confirm;
 mod dispatch;
 pub mod effect;
 mod event;
-mod palette;
 mod pending;
 mod runtime;
 mod session_ops;
@@ -129,7 +128,7 @@ pub struct AppState {
 
     // core input
     pub editor: Editor,
-    pub command_catalog: Vec<CommandCatalogItem>,
+    pub command_catalog: Vec<command::TuiCommandEntry>,
 
     // session-level status
     pub status: String,
@@ -427,8 +426,9 @@ fn config_command_for_setting(action: SettingsAction) -> Command {
             })
         }
         SettingsAction::HideThinking(value) => {
+            // TUI-only presentation; lives under `[tui]`, not shared with GUI.
             serde_json::json!({
-                "hide-thinking-block": value
+                "tui": { "hide_thinking_block": value }
             })
         }
         SettingsAction::Compaction(value) => {
@@ -453,8 +453,9 @@ fn config_command_for_setting(action: SettingsAction) -> Command {
             })
         }
         SettingsAction::Theme(value) => {
+            // Theme is TUI presentation; lives under `[tui].theme.name`.
             serde_json::json!({
-                "theme": value
+                "tui": { "theme": { "name": value } }
             })
         }
         SettingsAction::Transport(value) => {

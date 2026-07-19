@@ -43,6 +43,13 @@ impl IslandFocusRing {
         self.focused = id;
     }
 
+    /// Remember the current island for restore when leaving Settings.
+    pub fn save_for_restore(&mut self) {
+        if self.saved.is_none() {
+            self.saved = Some(self.focused);
+        }
+    }
+
     pub fn restore(&mut self) {
         if let Some(id) = self.saved.take() {
             self.focused = id;

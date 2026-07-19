@@ -6,12 +6,10 @@ use piko_hostd::domain::config::{CompactionSettings, HostSettings, SettingsManag
 fn in_memory_settings_apply_defaults_and_overrides() {
     let manager = SettingsManager::in_memory(HostSettings {
         default_model: Some("gpt-test".into()),
-        theme: Some("dark".into()),
         ..HostSettings::default()
     });
 
     assert_eq!(manager.get_default_model(), Some("gpt-test"));
-    assert_eq!(manager.get_theme(), Some("dark"));
     assert_eq!(manager.get_transport(), "auto");
     assert_eq!(manager.get_compaction_settings(), (true, 16384, 20000));
 }
@@ -26,7 +24,6 @@ fn project_settings_override_global_settings_and_preserve_nested_defaults() {
         global_dir.join("settings.toml"),
         r#"
 default-model = "global-model"
-theme = "global-theme"
 
 [compaction]
 reserve-tokens = 111
@@ -55,7 +52,6 @@ keep-recent-tokens = 222
     .unwrap();
 
     assert_eq!(manager.get_default_model(), Some("project-model"));
-    assert_eq!(manager.get_theme(), Some("global-theme"));
     assert_eq!(manager.get_compaction_settings(), (true, 111, 222));
 }
 
@@ -95,4 +91,75 @@ fn gui_namespace_is_opaque_and_project_overridable() {
         ..HostSettings::default()
     });
     assert_eq!(manager.settings().gui.unwrap()["session-open"], false);
+}
+
+#[test]
+fn namespace_value_returns_frontend_blobs_as_stored() {
+    let settings = HostSettings {
+        tui: Some(serde_json::json!({
+            "theme": {"name": "dark"},
+            "hide_thinking_block": false,
+        })),
+        gui: Some(serde_json::json!({
+            "hide-thinking-block": true,
+        })),
+        ..HostSettings::default()
+    };
+
+    let tui_value = settings.namespace_value("tui");
+    assert_eq!(tui_value["theme"]["name"], "dark");
+    assert_eq!(tui_value["hide_thinking_block"], false);
+
+    let gui_value = settings.namespace_value("gui");
+    assert_eq!(gui_value["hide-thinking-block"], true);
+}
+
+#[test]
+fn host_namespace_excludes_frontend_blobs() {
+    let settings = HostSettings {
+        default_provider: Some("openai".into()),
+        default_model: Some("gpt-test".into()),
+        compaction: Some(CompactionSettings {
+            enabled: Some(false),
+            reserve_tokens: None,
+            keep_recent_tokens: None,
+        }),
+        tui: Some(serde_json::json!({ "theme": { "name": "dark" } })),
+        gui: Some(serde_json::json!({ "reduced-motion": true })),
+        ..HostSettings::default()
+    };
+
+    let host_value = settings.namespace_value("host");
+    assert_eq!(host_value["default-provider"], "openai");
+    assert_eq!(host_value["default-model"], "gpt-test");
+    assert!(host_value.get("tui").is_none());
+    assert!(host_value.get("gui").is_none());
+    assert!(host_value.get("theme").is_none());
+    assert_eq!(host_value["compaction"]["enabled"], false);
+}
+
+#[test]
+fn unknown_top_level_keys_are_ignored_on_load() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.toml");
+    fs::write(
+        &path,
+        r#"
+default-model = "kept"
+theme = "ignored-legacy"
+hide-thinking-block = true
+"#,
+    )
+    .unwrap();
+
+    let manager = SettingsManager::from_paths(
+        &path,
+        temp.path().join("missing.toml"),
+        HostSettings::default(),
+    )
+    .unwrap();
+
+    assert_eq!(manager.get_default_model(), Some("kept"));
+    assert!(manager.settings().tui.is_none());
+    assert!(manager.settings().gui.is_none());
 }

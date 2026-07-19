@@ -44,12 +44,19 @@ chosen explicitly instead of cycling from the Composer.
   - a model or thinking level → apply via host config and close the palette
   - other runnable commands → run and close the palette
 - Escape pops one submenu level; at the root it closes the palette.
-- Catalog entries come from hostd. Only items marked visible in the palette
-  appear.
-- Commands that need arguments (rename, import, export, delete, fork) do not
-  run from the palette; the UI shows that arguments are required.
-- Other deferred surfaces (Help, Settings, Login, and similar) appear disabled
-  with a deferred detail.
+- Root rows merge two sources (see
+  [Host Command Catalog Design](host-command-catalog-design.md)): the neutral
+  `HostCommandDescriptor` list fetched from hostd, and a small GUI-local list
+  (Sessions, Agents, session tree, Settings, Clear notifications, Quit).
+  hostd no longer sends slash names, palette-visibility flags, or UI-opener
+  actions — the GUI owns that presentation layer.
+- `model.set` / `thinking.set` host rows do not run directly; they open the
+  Models / Thinking nested picker, same as before.
+- Host ids the GUI does not yet have a flow for (rename, import, export,
+  delete, fork, clone, compact, login, logout) show as disabled with a
+  reason (needs input / needs confirmation / not available in GUI yet).
+- `open.settings` is currently a stub notification until the GUI Primary
+  Surface Settings view lands.
 
 ## Configuration
 

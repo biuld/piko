@@ -1,4 +1,4 @@
-use crate::CommandCatalogItem;
+use crate::HostCommandDescriptor;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
 
@@ -221,7 +221,7 @@ pub enum CommandResult {
         timestamp: i64,
     },
     CommandCatalogListed {
-        commands: Vec<CommandCatalogItem>,
+        commands: Vec<HostCommandDescriptor>,
         timestamp: i64,
     },
     AgentSpecListed {
