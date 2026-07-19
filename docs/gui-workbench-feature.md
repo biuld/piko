@@ -55,8 +55,9 @@ Keyboard focus is island-owned:
 - The focused island shows the theme `ring` on its shell.
 
 There is no persistent center header. The center starts directly with the
-Timeline. Session and cwd context belong to Sessions and the native
-window title; the Composer identifies its target Agent and submission settings.
+Timeline. Session and cwd context belong to Sessions (with abbreviated cwd in
+StatusBar when Sessions is hidden). The TitleBar shows the brand mark only.
+The Composer identifies its target Agent and submission settings.
 
 ## Session Entry
 

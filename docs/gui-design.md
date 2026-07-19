@@ -210,7 +210,8 @@ until the window can no longer maintain the center minimum. Responsive
 collapse does not overwrite the user's stored open preference.
 
 The center has no persistent header and starts directly with Timeline.
-Sessions and the native window title own Session/project context. Agents is the
+Sessions owns Session/project context; StatusBar may show abbreviated cwd when
+Sessions is hidden. The TitleBar shows the brand mark only. Agents is the
 primary Agent selector; Composer repeats its target and owns model/thinking
 controls because they affect the next submission. `StatusBar` is stable
 environment telemetry. Activity Center lives in the Composer island, owns
@@ -327,7 +328,7 @@ required to understand an action.
 
 | Information | Primary surface | Allowed fallback |
 |---|---|---|
-| Session and project | Sessions | Native window title |
+| Session and project | Sessions | Abbreviated StatusBar cwd while Sessions is hidden |
 | Full cwd | Sessions tooltip/detail | Abbreviated StatusBar item only while Sessions is hidden |
 | Selected Agent | Agents | Composer target label |
 | Model and thinking | Composer action row | None |

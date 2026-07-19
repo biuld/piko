@@ -135,7 +135,7 @@ the rules above. They are not required to enter `Live`.
 |---|---|---|
 | Session list rows | `SessionListed` | search filter, sheet open/close |
 | Live vs pending open target | core session phase + open target | sidebar pending chrome |
-| Session / project title | `SessionSnapshot` + cwd | native window title formatting |
+| Session / project title | `SessionSnapshot` + cwd | Sessions island; abbreviated StatusBar cwd when Sessions is hidden |
 | Agent tree | `agents` / `AgentChanged` | expansion, scroll, focus |
 | Selected Agent | reconcile selection + `AgentSubscribe` | row highlight before result |
 | Timeline committed items | reconcile branch + `TranscriptCommitted` | Markdown, folding, virtualization |

@@ -281,10 +281,6 @@ impl Render for DesktopApp {
         let t = tokens();
         let m = metrics();
         let allow_motion = self.ux_prefs.allow_motion();
-        let project_name = std::path::Path::new(&self.cwd)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "workspace".into());
         let title_entity = cx.entity().downgrade();
 
         div()
@@ -304,13 +300,7 @@ impl Render for DesktopApp {
             .flex_col()
             .bg(t.canvas_rgba())
             .text_color(t.fg_rgba())
-            .child(render_title_bar(
-                self.bridge.state(),
-                &project_name,
-                show_session,
-                show_right,
-                title_entity,
-            ))
+            .child(render_title_bar(show_session, show_right, title_entity))
             .child(
                 div()
                     .flex_1()

@@ -144,8 +144,10 @@ Shared chrome in `src/chrome/island/`:
 
 - Native-integrated transparent title bar (macOS traffic lights, drag,
   double-click).
-- 80 px safe inset on both sides of centered `piko / session` context so title
-  text is optically centered in the full window.
+- Centered brand mark only: semibold `piko`. Session and project context live
+  in Sessions (and abbreviated cwd in StatusBar when Sessions is hidden).
+- 80 px safe inset on both sides so the brand is optically centered in the full
+  window.
 - Vertically center 13 / 18 px title text in the 34 px bar.
 - Sparse icon/ghost actions only when the action exists (panel toggles).
 

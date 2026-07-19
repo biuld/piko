@@ -7,22 +7,14 @@ use gpui_component::button::{Button, ButtonVariants};
 
 use crate::app::desktop_app::{DesktopApp, ToggleRightColumn, ToggleSessions};
 use crate::theme::{PanelSide, PikoTokens, label_text, metrics, panel_toggle_icon, tokens};
-use piko_client_core::ClientState;
 
 pub fn render_title_bar(
-    state: &ClientState,
-    project_name: &str,
     sessions_docked: bool,
     right_docked: bool,
     entity: WeakEntity<DesktopApp>,
 ) -> impl IntoElement {
     let m = metrics();
     let t = tokens();
-    let context = state
-        .live_session
-        .as_ref()
-        .and_then(|session| session.name.clone())
-        .unwrap_or_else(|| project_name.to_string());
 
     let sessions_toggle = {
         let entity = entity.clone();
@@ -81,21 +73,9 @@ pub fn render_title_bar(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .gap(m.space_sm)
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(t.fg_rgba())
-                            .child("piko"),
-                    )
-                    .child(div().text_color(t.muted_fg_rgba()).child("/"))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .text_color(t.muted_fg_rgba())
-                            .child(context),
-                    ),
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.fg_rgba())
+                    .child("piko"),
             ),
     )
 }
