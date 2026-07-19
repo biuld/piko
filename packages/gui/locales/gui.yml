@@ -115,6 +115,12 @@ dialog.approval.decline:
   en: Decline
 dialog.approval.arguments:
   en: Arguments
+dialog.quit.title:
+  en: Quit piko?
+dialog.quit.body:
+  en: A turn is still running or an approval is waiting.
+dialog.quit.confirm:
+  en: Quit
 
 activity.idle:
   en: Idle

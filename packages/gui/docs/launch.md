@@ -12,6 +12,17 @@ cargo build -p piko-gui
 cargo run -p piko-gui
 ```
 
+`cargo run` launches a bare binary: the Dock uses the generic executable glyph.
+For a branded Dock / Finder icon, build the macOS app bundle:
+
+```bash
+./packages/gui/scripts/bundle-macos.sh
+open target/Piko.app
+```
+
+The bundle ships `AppIcon.icns` and a sibling `piko-hostd` discovered via
+`PIKO_HOSTD_PATH`. See [GUI App Identity & Safe Quit](../../../docs/gui-app-identity-quit-feature.md).
+
 The window title includes the process working directory’s leaf name. The left
 Sessions island lists all Sessions globally, grouped by working directory and
 sorted alphabetically.
@@ -41,6 +52,7 @@ Useful environment variables:
 | `tab` / `shift-tab` | Cycle focus among visible islands |
 | `cmd-j` | Jump to latest Timeline |
 | `cmd-.` | Cancel Turn |
+| `cmd-q` | Quit (confirms when a turn is running or an approval is pending) |
 
 ## Validation smoke
 

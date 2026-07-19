@@ -9,6 +9,11 @@ description = "GPUI desktop client for piko hostd"
 name = "piko-gui"
 path = "src/main.rs"
 
+[package.metadata.bundle]
+name = "Piko"
+identifier = "dev.piko.gui"
+icon = ["assets/app/AppIcon.png"]
+
 [dependencies]
 piko-client-core = { path = "../client-core" }
 piko-comms = { path = "../comms" }

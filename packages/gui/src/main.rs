@@ -22,9 +22,10 @@ use gpui_component::Root;
 
 use crate::app::desktop_app::{
     CancelTurn, DesktopApp, FocusComposer, FocusNextIsland, FocusPrevIsland, JumpToLatest,
-    NewSession, ToggleRightColumn, ToggleSessions,
+    NewSession, Quit, ToggleRightColumn, ToggleSessions,
 };
 use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
+use crate::app::quit::{is_quit_busy, open_quit_confirm};
 use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
 use crate::theme::apply_piko_dark_theme;
@@ -61,9 +62,27 @@ fn main() {
             KeyBinding::new("cmd-j", JumpToLatest, Some("DesktopApp")),
             KeyBinding::new("cmd-b", ToggleSessions, Some("DesktopApp")),
             KeyBinding::new("cmd-i", ToggleRightColumn, Some("DesktopApp")),
+            KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),
             KeyBinding::new("shift-tab", FocusPrevIsland, Some("DesktopApp")),
         ]);
+
+        cx.set_menus(vec![Menu {
+            name: "piko".into(),
+            items: vec![
+                MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Quit", Quit),
+            ],
+        }]);
+
+        // Close last window → quit process (关窗即退出).
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
 
         let cwd_clone = cwd.clone();
         cx.spawn(async move |cx| {
@@ -90,6 +109,31 @@ fn main() {
                         app.bootstrap();
                         app
                     });
+
+                    let weak = view.downgrade();
+                    window.on_window_should_close(cx, {
+                        let weak = weak.clone();
+                        move |window, cx| {
+                            let Some(entity) = weak.upgrade() else {
+                                return true;
+                            };
+                            if is_quit_busy(entity.read(cx).bridge_state()) {
+                                open_quit_confirm(window, cx);
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                    });
+
+                    // Menu / global cmd-q: same busy path as traffic-light close.
+                    cx.on_action({
+                        let weak = weak.clone();
+                        move |_: &Quit, cx: &mut App| {
+                            request_quit(&weak, cx);
+                        }
+                    });
+
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             )?;
@@ -97,5 +141,23 @@ fn main() {
             Ok::<_, anyhow::Error>(())
         })
         .detach();
+    });
+}
+
+fn request_quit(weak: &WeakEntity<DesktopApp>, cx: &mut App) {
+    let Some(entity) = weak.upgrade() else {
+        cx.quit();
+        return;
+    };
+    if !is_quit_busy(entity.read(cx).bridge_state()) {
+        cx.quit();
+        return;
+    }
+    let Some(handle) = cx.windows().first().copied() else {
+        cx.quit();
+        return;
+    };
+    let _ = handle.update(cx, |_root, window, cx| {
+        open_quit_confirm(window, cx);
     });
 }

@@ -26,6 +26,11 @@
   English chrome catalog are landed. Additional locales (for example `zh-CN`)
   and `[gui].locale` remain deferred. See
   [GUI Chrome Presentation](../../../docs/gui-chrome-presentation-feature.md).
+- **App icon on bare binary.** Custom Dock / Finder icons require `Piko.app`
+  from `packages/gui/scripts/bundle-macos.sh`. `cargo run -p piko-gui` keeps the
+  generic executable glyph. Red-close and Cmd+Q share the same busy confirm
+  path (active turn or unresolved approval). See
+  [GUI App Identity & Safe Quit](../../../docs/gui-app-identity-quit-feature.md).
 - **Settings / Palette / Dock.** Deferred after M4.
 - **Approvals on live models.** Deterministic Core/GUI tests cover prompts;
   real-hostd smoke exercises submit/cancel when a model catalog is present, and

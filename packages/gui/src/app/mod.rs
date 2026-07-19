@@ -9,6 +9,8 @@ pub mod layout_state;
 pub mod model_cycle;
 mod notifications;
 mod prompt_host;
+pub(crate) mod quit;
+pub(crate) mod quit_busy;
 mod submit_recovery;
 pub mod timeline_follow;
 pub mod ux_prefs;

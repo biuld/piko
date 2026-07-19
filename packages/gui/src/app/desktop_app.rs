@@ -33,7 +33,8 @@ actions!(
         CancelTurn,
         JumpToLatest,
         ToggleSessions,
-        ToggleRightColumn
+        ToggleRightColumn,
+        Quit
     ]
 );
 
