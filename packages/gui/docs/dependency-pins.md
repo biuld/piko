@@ -1,6 +1,7 @@
 # GPUI Dependency Pins
 
-> Phase 1 spike result — compatibility verified on macOS (aarch64).
+> Phase 1 spike result — compatibility verified on macOS (aarch64). Pins remain
+> the live dependency policy for `piko-gui`.
 
 ## Pinned Versions
 
@@ -71,19 +72,15 @@ Minimum: latest stable Rust (gpui tracks latest stable).
 | `on_action` / `cx.listener` / `KeyBinding` | Works | Action dispatch and keybindings |
 | `actions!` macro | Works | Custom action types |
 
-## Known Limitations
+## API notes
 
-1. **`block` crate future-incompat**: transitive dep `block v0.1.6` triggers a
-   future-incompatibility warning for Rust editions. Not blocking; tracked
-   upstream in Zed.
-2. **No `FocusableView` trait**: gpui 0.2.2 uses `Focusable` instead. Docs and
-   examples that reference `FocusableView` are outdated.
+1. **`block` crate future-incompat**: transitive dep `block v0.1.6` may trigger
+   a future-incompatibility warning. Not blocking; tracked upstream in Zed.
+2. **No `FocusableView` trait**: gpui 0.2.2 uses `Focusable`. Docs/examples that
+   reference `FocusableView` are outdated.
 3. **`TreeEntry` vs `TreeItem`**: the Tree render callback receives `&TreeEntry`
-   which wraps a `TreeItem` via `.item()`. Direct field access requires going
-   through the accessor.
-4. **`Button::primary()`**: requires importing `ButtonVariants` trait.
-5. **Dead code warnings**: the existing transport module produces dead-code
-   warnings because main.rs no longer calls into it. Acceptable for the spike.
+   which wraps a `TreeItem` via `.item()`.
+4. **`Button::primary()`**: requires importing `ButtonVariants`.
 
 ## Upgrade Procedure
 
@@ -91,9 +88,19 @@ Minimum: latest stable Rust (gpui tracks latest stable).
 2. Update the `=X.Y.Z` version pins in `packages/gui/Cargo.toml`.
 3. Run `cargo update -p gpui -p gpui-component` to refresh the lockfile.
 4. Run `cargo check -p piko-gui` — fix any API breaks.
-5. Run the full spike or a smoke test to verify rendering.
+5. Run focused GUI tests and a real-hostd smoke when practical.
 6. Update this document with the new versions and any API migration notes.
-7. Coordinate with the integration owner before merging lockfile changes.
+
+## hostd discovery
+
+`piko-gui` resolves the hostd binary in this order (see
+`src/transport/discovery.rs`):
+
+1. `PIKO_HOSTD_PATH` or `PIKO_HOSTD_COMMAND`
+2. `piko-hostd` adjacent to the running `piko-gui` executable
+3. `<workspace-root>/target/debug/piko-hostd`
+4. `<workspace-root>/target/release/piko-hostd`
+5. bare `"piko-hostd"` via `PATH`
 
 ## Upstream References
 

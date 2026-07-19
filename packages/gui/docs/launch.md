@@ -19,8 +19,8 @@ sorted alphabetically.
 ## hostd discovery
 
 `piko-gui` resolves the hostd binary via [`dependency-pins.md`](dependency-pins.md)
-discovery rules (`PIKO_HOSTD` / sibling target paths). Startup fails fast if the
-binary cannot be spawned.
+discovery rules (`PIKO_HOSTD_PATH` / `PIKO_HOSTD_COMMAND` / sibling target
+paths). Startup fails fast if the binary cannot be spawned.
 
 Useful environment variables:
 
@@ -50,5 +50,4 @@ With a built `piko-hostd` on the discovery path:
 cargo test -p piko-gui hostd_smoke -- --nocapture
 ```
 
-See also [`manual-ux-checklist.md`](manual-ux-checklist.md) and
-[`release-checklist.md`](release-checklist.md).
+See also [`known-limitations.md`](known-limitations.md).

@@ -9,8 +9,8 @@
 
 ## 1. Purpose
 
-Satisfy the Chrome Presentation feature contract by introducing three
-coordinated modules inside `packages/gui`:
+Satisfy the Chrome Presentation feature contract with three coordinated modules
+inside `packages/gui`:
 
 1. **Icons** — vendored Lucide-compatible SVG subset + typed names.
 2. **Typography** — named text styles built on existing `UiMetrics`.
@@ -18,17 +18,17 @@ coordinated modules inside `packages/gui`:
    keys so later locales do not require island rewrites.
 
 This design does not change Client Core, protocol DTOs, or hostd Session
-semantics. No new `[gui]` keys are required in this wave.
+semantics. No new `[gui]` keys were required for this wave.
 
 ## 2. Responsibilities
 
 | Owner | Owns | Does not own |
 |---|---|---|
 | `theme/metrics.rs` | Spacing + type sizes / line heights | Copy or icons |
-| `theme/typography.rs` (new) | Named text styles (`Meta`, `Label`, `Body`, …) | Island layout |
-| `theme/icons.rs` (new) | `PikoIcon` enum, sizes, `IconNamed` paths | Asset bytes on disk |
-| `assets/icons/*.svg` (new) | Vendored SVG files | Runtime tint |
-| `i18n/` (new) | `rust_i18n` catalog + thin `t!` helpers | Host / transcript text |
+| `theme/typography.rs` | Named text styles (`Meta`, `Label`, `Body`, …) | Island layout |
+| `theme/icons.rs` | `PikoIcon` enum, sizes, `IconNamed` paths | Asset bytes on disk |
+| `assets/icons/*.svg` | Vendored SVG files | Runtime tint |
+| `i18n/` | `rust_i18n` catalog + thin `t!` helpers | Host / transcript text |
 | Island / chrome renderers | Call icons + typography + `t!` | Hardcoded glyphs / string literals |
 
 `IslandMedia::Icon(SharedString)` remains for tests and escape hatches, but
@@ -99,9 +99,9 @@ via existing token HSLA / RGBA helpers.
 
 ### 4.1 Text styles
 
-Add `TextStyle` (name TBD) on top of `UiMetrics`:
+Add `TextRole` helpers on top of `UiMetrics`:
 
-| Style | Size / LH | Weight default | Font |
+| Style (`TextRole`) | Size / LH | Weight default | Font |
 |---|---:|---|---|
 | `Meta` | 12 / 16 | Regular | UI |
 | `Label` | 13 / 18 | Regular / Semibold when selected | UI |
@@ -121,10 +121,10 @@ Add `TextStyle` (name TBD) on top of `UiMetrics`:
 
 ### 4.3 Relationship to UI Guidelines
 
-`packages/gui/docs/ui-guidelines.md` §4 remains normative for numbers. The
-typography module is the implementation source of truth that checklist items
-and render code must call. When metrics change, update guidelines and
-`UiMetrics` together.
+`packages/gui/docs/ui-guidelines.md` §4 (Density and typography) remains
+normative for numbers. The typography module is the implementation source of
+truth that checklist items and render code must call. When metrics change,
+update guidelines and `UiMetrics` together.
 
 ## 5. i18n
 
@@ -211,8 +211,8 @@ packages/gui/
 └── src/
     ├── i18n/mod.rs
     └── theme/
-        ├── metrics.rs        # existing sizes
-        ├── typography.rs     # new text styles
+        ├── metrics.rs        # sizes
+        ├── typography.rs     # text styles
         └── icons.rs          # PikoIcon + sizes
 ```
 
@@ -223,20 +223,16 @@ Startup in `main.rs` / `DesktopApp::new`:
 3. `i18n::init` + force `en`
 4. `apply_piko_dark_theme`
 
-## 8. Migration sequence
+## 8. Landed sequence
 
-Implement in this order so each step stays reviewable:
+Implementation landed in this order:
 
-1. **Typography helpers** — no user-visible change if sizes match today.
-2. **Assets + `PikoIcon` + AssetSource** — still unused in UI.
-3. **i18n catalog (`en`) + force locale** — move chrome literals behind keys,
-   including all Activity templates.
-4. **Replace Unicode glyphs** in tree, Activity, placeholders, New Session.
-5. **Update UI Guidelines / manual checklist / known-limitations**.
-6. **Validate** English chrome + mixed CJK content beside icons on Retina.
-
-Avoid a single mega-PR that mixes asset vendoring with every island rewrite if
-review cost is high; keep steps 1–3 separable from step 4.
+1. Typography helpers
+2. Assets + `PikoIcon` + AssetSource
+3. i18n catalog (`en`) + force locale, including all Activity templates
+4. Replacement of Unicode glyphs in tree, Activity, placeholders, New Session
+5. UI Guidelines / known-limitations updates
+6. Validation of English chrome + mixed CJK content beside icons on Retina
 
 ## 9. Tradeoffs
 

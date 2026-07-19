@@ -4,7 +4,6 @@
 > Product contract: [GUI Workbench](gui-workbench-feature.md)
 > Architecture: [Client Core Design](client-core-design.md),
 > [GPUI Desktop Client Design](gui-design.md)
-> Execution plan: [GPUI Desktop Client Implementation Plan](gui-implementation-plan.md)
 > Behavioral reference: unchanged `packages/tui` (especially
 > `packages/tui/docs/features/session-view-lifecycle.md`)
 

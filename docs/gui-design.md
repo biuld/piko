@@ -4,11 +4,10 @@
 > Feature contract: [GUI Workbench](gui-workbench-feature.md)
 > Runtime dependency: [Client Core Design](client-core-design.md)
 > Phase 0 baseline: [Client Core Contract Baseline](client-core-contract-baseline.md)
-> Execution plan: [GPUI Desktop Client Implementation Plan](gui-implementation-plan.md)
 > External references: [GPUI](https://gpui.rs/),
 > [GPUI Component](https://longbridge.github.io/gpui-component/docs/components/)
 > Visual system: [Piko GUI UI Guidelines](../packages/gui/docs/ui-guidelines.md)
-> Chrome presentation (draft): [Feature](gui-chrome-presentation-feature.md) ·
+> Chrome presentation: [Feature](gui-chrome-presentation-feature.md) ·
 > [Design](gui-chrome-presentation-design.md)
 
 ## 1. Purpose
@@ -28,8 +27,8 @@ is a read-only behavior and product reference during this work.
 5. Use official GPUI plus `gpui-component` as the desktop component layer.
 6. Target macOS first; other GPUI platforms are compatibility follow-ups.
 7. Use a responsive three-pane Workbench: Sessions, conversation, and a stacked
-   Agent/Conversation Inspector. Activity remains in the center workflow; the
-   center pane remains independently complete.
+   Agents / Tree column. Activity lives in the Composer island; the center
+   column remains independently complete.
 8. Do not change `packages/tui` in the GUI-first phase.
 
 ## 3. Crate and Module Boundaries
@@ -43,19 +42,17 @@ packages/client-core
 └── tests            protocol conformance and projection cases
 
 packages/gui
-├── app              GPUI startup, window, actions, key bindings
+├── app              DesktopApp, actions, layout prefs, island dispatch/refresh
 ├── transport        hostd process and JSONL reader/writer
 ├── bridge           Client Core effects and GPUI foreground updates
-├── workbench        Timeline, Activity Center, Composer, status
-├── session_sidebar  Session discovery, search, create, and open
-├── inspector        right-side Agent Tree and Conversation Map composition
-├── agent_tree       AgentInstance hierarchy and selection
-├── activity_center  bounded live status and attention items
-├── conversation_map selected Agent branch/tree navigation
-├── overlays         approval, interaction, Session selection
-├── components       piko-specific visual components only
+├── chrome           Workbench layout, TitleBar, StatusBar, IslandPanel, IslandMsg
+├── islands          Sessions, Timeline, Composer (+ Activity), Agents, Tree
+├── overlays         approval, interaction, PromptCoordinator
+├── projections      Client Core → island view models
 ├── config           `[gui]` schema and defaults
-├── theme            piko tokens mapped onto GPUI Component theme
+├── theme            tokens, typography, icons mapped onto GPUI Component
+├── i18n / locales   English chrome catalog (`rust_i18n`)
+├── assets           vendored Lucide-compatible SVG icons
 └── cli              cwd/session/hostd launch options
 ```
 
@@ -63,16 +60,19 @@ packages/gui
 GPUI, and GPUI Component. It does not depend on TUI, hostd, or orchd libraries.
 The hostd executable is a child process, as it is for the TUI.
 
+Each Workbench island is an independent GPUI Entity. Cross-island actions use
+directed `IslandMsg` routing through `DesktopApp`, not a full Workbench rebuild.
+
 ## 4. GPUI Application Structure
 
 Application startup performs:
 
-1. create the platform application;
-2. initialize GPUI Component;
-3. register piko actions and GUI key bindings;
-4. spawn hostd and start the stdout pump;
-5. open the Workbench window;
-6. wrap the root Workbench entity in GPUI Component `Root`;
+1. create the platform application with GUI assets;
+2. initialize GPUI Component and force chrome locale `en`;
+3. apply the piko dark theme;
+4. register piko actions and GUI key bindings;
+5. spawn hostd and start the stdout pump;
+6. open the Workbench window wrapped in GPUI Component `Root`;
 7. execute Client Core bootstrap effects;
 8. deliver decoded host messages to Client Core on the GPUI foreground.
 
@@ -84,12 +84,13 @@ Root
     ├── ClientBridge
     │   ├── ClientState
     │   └── HostTransport handle
-    ├── WorkbenchView
-    │   ├── TimelineView
-    │   ├── ActivityCenter
-    │   ├── Composer InputState
-    │   ├── StatusBar
-    │   └── local scroll/focus/layout state
+    ├── Workbench layout
+    │   ├── Sessions island
+    │   ├── Timeline island
+    │   ├── Composer island (Activity Center + InputState)
+    │   ├── Agents island
+    │   └── Tree island
+    ├── StatusBar
     └── PromptCoordinator
         └── maps pending core prompts to Root overlay layers
 ```
@@ -141,12 +142,12 @@ product behavior.
 | Large Timeline | `VirtualList` later | Adopt only after variable-height measurement and streaming updates are proven |
 | Approval | `AlertDialog` or non-closable `Dialog` | Disable backdrop/Escape close; resolution stays host-driven |
 | User interaction | `Dialog` | Structured questions with explicit submit/cancel |
-| Session navigation | `Sidebar` + `List` | Persistent left pane on wide windows; Sheet on narrow windows |
-| Agent Tree | `Tree` with custom rows | Upper Inspector panel and primary Agent selector |
-| Activity Center | `Badge`, `Collapsible`, compact rows | Between Timeline and Composer; bounded, not an event log |
-| Conversation Map | `Tree` with custom rows | Lower Inspector panel for selected Agent; not a second Timeline |
+| Session navigation | `Sidebar` + list rows | Persistent left Sessions island on wide windows; Sheet on narrow windows |
+| Agents | `Tree` with custom rows | Upper right island and primary Agent selector |
+| Activity Center | Compact rows inside Composer island | Between Timeline and input; bounded, not an event log |
+| Tree | Custom tree list | Lower right island for selected Agent; not a second Timeline |
 | Settings/transient navigation | `Sheet` | Layer above the Workbench on demand |
-| Pane sizing | `Resizable` | Persist outer widths; retain the right Inspector vertical split for the window lifetime |
+| Pane sizing | `Resizable` | Persist outer widths; retain the right column Agents/Tree split for the window lifetime |
 | Agent/tool state | `Badge`, `Spinner`, `Collapsible` | Compose into piko-specific rows/cards |
 | Errors | `Notification` | Recoverable transport/command feedback |
 | Shortcuts/help | `Kbd`, `Tooltip`, `Menu` | Display bound actions rather than hardcoded labels where possible |
@@ -178,15 +179,16 @@ and prevents shrink-below-center overflow.
 DesktopApp
 ├── Native-integrated TitleBar
 ├── Window canvas + Horizontal Resizable
-│   ├── SessionSidebar island     default 300, minimum 220
-│   ├── CenterWorkbench island    minimum readable width 620
-│   │   ├── TimelineViewport
-│   │   ├── ActivityCenter        auto, collapsed, maximum 180
-│   │   └── ComposerCard
-│   └── Inspector column          default 340, minimum 260
-│       └── Vertical Resizable
-│           ├── AgentTree island         minimum 160
-│           └── ConversationMap island  minimum 180
+│   ├── Sessions island           default 300, minimum 220
+│   ├── Center column             minimum readable width 620
+│   │   ├── Timeline island
+│   │   └── Composer island
+│   │       ├── Activity Center   auto, collapsed, maximum 180
+│   │       └── Composer input
+│   └── Right column              default 340, minimum 260
+│       └── Agents + Tree islands (8 px canvas gutter; vertical resize)
+│           ├── Agents island     minimum 160
+│           └── Tree island       minimum 180
 └── Edge-to-edge StatusBar
 ```
 
@@ -207,22 +209,22 @@ until the window can no longer maintain the center minimum. Responsive
 collapse does not overwrite the user's stored open preference.
 
 The center has no persistent header and starts directly with Timeline.
-`SessionSidebar` and the native window title own Session/project context.
-`AgentTree` is the primary Agent selector; `ComposerCard` repeats its target and
-owns model/thinking controls because they affect the next submission.
-`StatusBar` is stable environment telemetry. Activity Center owns operational
-and actionable state and remains available when Inspector is hidden.
+Sessions and the native window title own Session/project context. Agents is the
+primary Agent selector; Composer repeats its target and owns model/thinking
+controls because they affect the next submission. `StatusBar` is stable
+environment telemetry. Activity Center lives in the Composer island, owns
+operational/actionable state, and remains available when the right column is
+hidden.
 
-### 7.1 Session Sidebar
+### 7.1 Sessions
 
-The Session sidebar is a navigation surface over `SessionList` results, not a
-second source of Session authority. It contains:
+Sessions is a navigation surface over global `SessionList` results
+(`SessionListScope::All`), not a second source of Session authority. It
+contains:
 
-- a compact search field;
-- New Session;
-- current-directory Sessions in host-provided order;
-- current live Session, pending open target, and loading/error indicators;
-- later groups for recent folders or imported Sessions.
+- New Session (create still uses the process cwd);
+- all Sessions grouped by working directory, sorted alphabetically by path;
+- current live Session, pending open target, and loading/error indicators.
 
 Selecting a row emits the Client Core open intent. The sidebar marks the target
 as pending, while the center changes authority only through the normal
@@ -233,38 +235,35 @@ On narrow windows the same view is hosted in a left Sheet. Opening a Session
 closes the Sheet after successful reconciliation, not after identity-only open
 success.
 
-### 7.2 Inspector Sidebar
+### 7.2 Right column (Agents + Tree)
 
-The right sidebar is one Inspector surface with two vertically stacked panels.
-Agent Tree and Conversation Map divide its height through a resizable split.
-Their split position is window-local. The Inspector is hidden as a unit when
-responsive layout cannot preserve the center minimum; the narrow Sheet switches
-between the two panels explicitly.
+The right column stacks two independent islands: Agents above Tree. They share
+column width and divide height through a resizable split separated by the same
+8 px canvas gutter used horizontally. Their split position is window-local.
+The column is hidden as a unit when responsive layout cannot preserve the
+center minimum.
 
-On narrow windows the Inspector opens as a right Sheet. It presents Agent Tree
-or Conversation Map one at a time with an explicit panel switcher, preserving
-the same selection semantics without squeezing both trees into short regions.
+On narrow windows the right column opens as a Sheet that stacks Agents above
+Tree with the same selection semantics.
 
-### 7.3 Agent Tree
+### 7.3 Agents
 
-The Agent Tree projects the reconciled AgentInstance parent/child hierarchy.
-GPUI Component `Tree` supplies expansion and keyboard navigation, while piko
-owns row content and selection behavior. Rows may show display name, role,
+Agents projects the reconciled AgentInstance parent/child hierarchy. GPUI
+Component `Tree` supplies expansion and keyboard navigation, while piko owns
+row content and selection behavior. Rows may show display name, role,
 lifecycle, active Turn, queued work, unread activity, and failure indicators;
 they do not expose transient internal runs as durable Agents.
 
 Activating a row selects that Agent through Client Core. Selection changes the
-Timeline, Composer target, selected-Agent Turn status, and Conversation Map as
-one projection. It never starts work. Expansion, tree focus, and scroll are
+Timeline, Composer target, selected-Agent Turn status, and Tree as one
+projection. It never starts work. Expansion, tree focus, and scroll are
 GUI-local; hierarchy, identity, and runtime state remain reconciled host data.
 
-### 7.4 Conversation Map
+### 7.4 Tree
 
-The Conversation Map projects the selected Agent's entries and current leaf
-into a compact outline. GPUI Component `Tree` is a suitable base because it
-supports expansion, keyboard navigation, custom item rows, programmatic
-selection, and scroll-to-item behavior. Piko owns the conversion from entries
-to tree nodes and all navigation semantics.
+Tree projects the selected Agent's entries and current leaf into a compact
+outline (closer to a symbol tree/minimap than a second Timeline). Piko owns
+conversion from entries to tree nodes and all navigation semantics.
 
 Map rows contain only structural information:
 
@@ -288,10 +287,10 @@ selection alone never changes the authoritative branch.
 
 ### 7.5 Activity Center
 
-Activity Center is a bounded projection of live operational state between the
-Timeline and Composer. This placement keeps pending work adjacent to both its
-conversation context and the user's next input, and keeps it available when
-either outer sidebar is hidden. It combines:
+Activity Center is a bounded projection of live operational state rendered
+inside the Composer island, visually between Timeline and the input. This
+placement keeps pending work adjacent to conversation context and the next
+input, and keeps it available when either outer sidebar is hidden. It combines:
 
 - host-authoritative Agent activity, active or failed tool state, queue counts,
   pending approvals, pending interactions, and unread inbox/report counts;
@@ -305,11 +304,11 @@ removed only by the corresponding host event or reconcile. GUI notifications
 are bounded and may be dismissed locally. Ordinary informational success uses
 GPUI Component notifications instead of occupying the panel.
 
-The default collapsed row shows aggregate badges. Actionable items expand the
+The default collapsed row shows aggregate status. Actionable items expand the
 panel up to its maximum height; overflow scrolls inside the panel. User collapse
 is respected except that a newly arrived approval, interaction, or error raises
-a visible badge and accessibility announcement. Expanded height is taken only
-from `TimelineViewport`; `ComposerCard` and `StatusBar` retain their layout.
+a visible badge. Expanded height is taken from Timeline; Composer input and
+StatusBar retain their layout.
 
 ### 7.6 Information Ownership and StatusBar
 
@@ -319,9 +318,9 @@ required to understand an action.
 
 | Information | Primary surface | Allowed fallback |
 |---|---|---|
-| Session and project | Session Sidebar | Native window title |
-| Full cwd | Session Sidebar tooltip/detail | Abbreviated StatusBar item only while Session Sidebar is hidden |
-| Selected Agent | Agent Tree | Composer target label |
+| Session and project | Sessions | Native window title |
+| Full cwd | Sessions tooltip/detail | Abbreviated StatusBar item only while Sessions is hidden |
+| Selected Agent | Agents | Composer target label |
 | Model and thinking | Composer action row | None |
 | Host connection | StatusBar | Connection warning in Activity Center when actionable |
 | Turn, tool, queue, prompt, and Agent report state | Activity Center | Compact markers on owning Agent/Timeline rows |
@@ -347,19 +346,19 @@ piko-specific GPUI elements:
 - error notice;
 - realtime assistant draft.
 
-Initial rendering uses a vertical `Scrollable` container. This is simpler and
-safer for streaming content whose height changes while text arrives. The view
-tracks:
+Initial rendering uses a vertical `Scrollable` container (via shared
+`IslandPanel` viewport). This is simpler and safer for streaming content whose
+height changes while text arrives. The view tracks:
 
-- whether it is near the bottom;
+- whether it is near the bottom (follow preference);
 - the selected Agent's scroll handle/state;
-- whether unseen content arrived;
+- whether unseen content arrived while detached;
 - the anchor required when an item above the viewport changes height.
 
-Virtualization is an optimization gate, not a first-slice requirement. Adopt
-`VirtualList` only after tests prove correct variable-size measurement, message
-expansion, Agent switching, and live-delta anchoring. The Client Core projection
-may retain a bounded live view while hostd remains the durable authority.
+When detached, `cmd-j` reattaches follow and scrolls to the end. There is no
+in-panel Jump button. Virtualization is an optimization gate, not a first-slice
+requirement. Adopt `VirtualList` only after tests prove correct variable-size
+measurement, message expansion, Agent switching, and live-delta anchoring.
 
 Committed assistant content may use GPUI Component Markdown. Realtime output is
 rendered with a lightweight text path and re-rendered as committed Markdown
@@ -372,7 +371,7 @@ The Composer owns one GPUI Component `InputState` configured for multi-line,
 soft-wrapped, auto-growing input. It subscribes to change, Enter, focus, and blur
 events. Its action row owns:
 
-- selected Agent target, opening or focusing Agent Tree when activated;
+- selected Agent target, opening or focusing Agents when activated;
 - model and thinking controls for the next submission;
 - Send action for a new submission;
 - a distinct Stop action only while the selected Agent has a cancellable Turn;
@@ -423,11 +422,11 @@ queue remains the source for opening the next dialog.
 
 ## 11. Session Entry and Loading
 
-Without a requested Session, the left sidebar shows current-directory Sessions
-and New Session while the center shows a lightweight welcome/empty state. On a
-narrow window, the same Session view opens as the initial left Sheet. After a
-Session is live, the persistent sidebar or Sheet can switch Sessions without
-replacing the Workbench layout.
+Without a requested Session, Sessions lists all Sessions globally (grouped by
+cwd) and New Session while the center shows a lightweight welcome/empty state.
+On a narrow window, the same Sessions view opens as the initial left Sheet.
+After a Session is live, the persistent sidebar or Sheet can switch Sessions
+without replacing the Workbench layout.
 
 Client Core phases drive visible states:
 
@@ -452,8 +451,8 @@ state:
 | Host connect or reconnect | StatusBar connection item | transport state |
 | Session open/create | pending Session row | correlated command result followed by reconcile |
 | Initial hydrate with no live content | Timeline skeleton | matching `SessionReconciled` or `SessionCleared` |
-| Agent running | owning Agent Tree row and Activity item | reconciled Agent activity |
-| Tool running | owning Timeline tool card and Activity item | authoritative tool update |
+| Agent running | owning Agents row and Activity item | reconciled Agent activity |
+| Tool running | owning Timeline tool chip and Activity item | authoritative tool update |
 | Submit awaiting result | Composer Send action | correlated command or Turn event |
 | Prompt response awaiting resolution | active dialog action | resolved event or reconcile |
 
@@ -485,28 +484,13 @@ roles and localizable chrome copy are specified in
 
 ## 13. Dependency Policy
 
-GPUI and GPUI Component are pre-1.0 and their current documentation follows git
-`main`. Before implementation, create a dependency spike that compiles:
+GPUI and GPUI Component are pre-1.0. Phase 1 pinned them to exact crates.io
+releases (`gpui = "=0.2.2"`, `gpui-component = "=0.5.1"`). Wildcard versions,
+moving branches, and unpinned `main` remain forbidden.
 
-1. `gpui_platform::application()` on macOS with `font-kit`;
-2. GPUI Component `init` and `Root`;
-3. auto-growing Input and Enter/Shift+Enter events;
-4. Scrollable content;
-5. non-closable AlertDialog;
-6. Sheet and Resizable primitives.
-
-After the spike, pin all three repositories to exact compatible revisions:
-
-- `gpui` and `gpui_platform` use the same Zed revision;
-- `gpui-component` uses one exact revision or release tag;
-- the selected GPUI revision matches the component revision's lock/dependency
-  expectation;
-- wildcard versions, moving branches, and unpinned `main` are forbidden.
-
-The current GPUI Component release may be used as a baseline candidate, but the
-revision is chosen from the successful compatibility spike, not from the latest
-label alone. Record the revisions, Rust toolchain, macOS deployment target, and
-upgrade procedure in the GUI crate documentation.
+Proven pins, toolchain, macOS deployment target, verified primitives, and the
+upgrade procedure live in
+[GPUI Dependency Pins](../packages/gui/docs/dependency-pins.md).
 
 ## 14. Validation
 
@@ -540,27 +524,19 @@ verify on macOS:
 The unchanged TUI is used only for scenario comparison. GUI validation must not
 require TUI source changes.
 
-## 15. Delivery Slices
+## 15. Delivery Status
 
-The normative phase gates, deliverables, and validation steps live in the
-[GPUI Desktop Client Implementation Plan](gui-implementation-plan.md). Its
-milestone sequence is:
+M0–M3 are landed (pinned GPUI stack, Client Core Session kernel, shell/transport,
+conversation path, Activity/tools/prompts, and desktop Workbench). Operator and
+validation docs live under `packages/gui/docs/`:
 
-1. contract baseline and GPUI compatibility spike;
-2. Client Core Session kernel;
-3. GUI shell, transport, and Session entry;
-4. conversation vertical slice;
-5. Activity, tools, and prompts;
-6. desktop Workbench structure;
-7. UX/rendering hardening;
-8. regression and release gate.
+- [`launch.md`](../packages/gui/docs/launch.md)
+- [`known-limitations.md`](../packages/gui/docs/known-limitations.md)
+- [`dependency-pins.md`](../packages/gui/docs/dependency-pins.md)
+- [`ui-guidelines.md`](../packages/gui/docs/ui-guidelines.md)
 
-GUI crate operator docs for M4 live under `packages/gui/docs/` (`launch.md`,
-`known-limitations.md`, `support.md`, `release-checklist.md`,
-`dependency-pins.md`, `manual-ux-checklist.md`).
-
-Every phase keeps the single-column Workbench path operational. Dock/Tiles,
-multiple windows, TUI migration, and complete feature parity remain deferred.
+Dock/Tiles, multiple windows, TUI migration, and complete feature parity remain
+deferred.
 
 ## 16. Risks
 
@@ -572,7 +548,7 @@ multiple windows, TUI migration, and complete feature parity remain deferred.
 | Dialog lifecycle diverges from host prompts | PromptCoordinator remains host-event-driven |
 | GUI and TUI semantics drift | Shared normative cases and scenario comparison |
 | Three-pane layout crowds the conversation | Enforce center minimum and collapse outer sidebars responsively |
-| Two Inspector trees appear interchangeable | Distinct titles, row vocabulary, and selection effects; Agent Tree answers who, Conversation Map answers where |
-| Inspector trees become too short | Use the resizable vertical split and one-at-a-time trees in the narrow Sheet |
+| Agents and Tree appear interchangeable | Distinct titles, row vocabulary, and selection effects; Agents answers who, Tree answers where |
+| Right-column islands become too short | Keep Agents and Tree as separate islands with a resizable gutter; Sheet stacks both |
 | Activity reduces Timeline height | Collapse quiet state to one row and cap expanded height; overflow scrolls internally |
 | Activity duplicates StatusBar or toast content | StatusBar is ambient summary, Activity is inspectable/actionable state, and toasts are short-lived feedback |

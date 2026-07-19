@@ -18,15 +18,15 @@ approval or interaction prompts.
 
 ```text
 ┌──────────────────┬──────────────────────────────────────┬───────────────────┐
-│ Sessions         │                                      │ Agent Tree        │
+│ Sessions         │                                      │ Agents            │
 │                  │                                      │ ● Main            │
-│ Search           │        Conversation Timeline         │ ├─ Researcher     │
-│ + New Session    │                                      │ └─ Reviewer       │
-│                  │                                      ├───────────────────┤
-│ Folder groups    │                                      │ Tree              │
-│  ● alpha         │                                      │ ● current leaf    │
-│    myapp         ├──────────────────────────────────────┤ ├─ prompt         │
-│    other         │ Activity: 1 approval · 2 running     │ └─ branch         │
+│ + New Session    │        Conversation Timeline         │ ├─ Researcher     │
+│                  │                                      │ └─ Reviewer       │
+│ Folder groups    │                                      ├───────────────────┤
+│  ● alpha         │                                      │ Tree              │
+│    myapp         │                                      │ ● current leaf    │
+│    other         ├──────────────────────────────────────┤ ├─ prompt         │
+│                  │ Activity: 1 approval · 2 running     │ └─ branch         │
 │                  ├──────────────────────────────────────┤                   │
 │                  │ Main ▾ · Model ▾ · Think ▾    Send   │                   │
 │                  │ Multi-line Composer                  │                   │
@@ -76,7 +76,7 @@ window title; the Composer identifies its target Agent and submission settings.
   possible and show an actionable error.
 - Local Composer drafts may be retained per Session within the current window.
 
-## Agent Tree
+## Agents
 
 The Agents island is the primary Agent selector and runtime overview for the
 visible Session.
@@ -135,9 +135,9 @@ second transcript.
 
 ## Activity Center
 
-Activity Center sits in the center Workbench between Timeline and Composer. It
-answers "what is happening or needs attention" at the point where the user
-decides the next action. It is a compact operational surface, not a second
+Activity Center sits in the Composer island, visually between Timeline and the
+input. It answers "what is happening or needs attention" at the point where the
+user decides the next action. It is a compact operational surface, not a second
 Timeline or an unbounded event log.
 
 - Its collapsed header summarizes running Agents and tools, queued work, pending
@@ -160,7 +160,7 @@ Timeline or an unbounded event log.
 
 ## Agent Selection and Turn State
 
-- Agent Tree uses host-provided display names and status; Composer repeats only
+- Agents uses host-provided display names and status; Composer repeats only
   the selected target needed to understand the next submission.
 - Selecting an Agent changes both the visible Timeline and the target of the
   next Turn.
@@ -237,7 +237,7 @@ underlying Timeline remains visible but is not interactive.
 - Session Sidebar and the native title expose project context. When Session
   Sidebar is hidden, StatusBar adds an abbreviated cwd so the single-column
   Workbench remains oriented without reintroducing a center header.
-- Current Agent belongs to Composer target and Agent Tree, not StatusBar.
+- Current Agent belongs to Composer target and Agents, not StatusBar.
 - Model and thinking controls belong to Composer because they affect the next
   submission; StatusBar may show context consumption but does not duplicate
   those controls.
@@ -253,7 +253,7 @@ status:
 - connecting or reconnecting animates the connection item in StatusBar;
 - opening, creating, or hydrating marks the pending Session row and uses a
   Timeline skeleton only when no previous live Session can remain visible;
-- a running Agent animates its Agent Tree row and has a corresponding Activity
+- a running Agent animates its Agents row and has a corresponding Activity
   item;
 - a running tool animates its Timeline card and corresponding Activity item;
 - submit and prompt-response buttons show progress only while their command is

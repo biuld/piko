@@ -11,11 +11,11 @@
 Chrome Presentation is the Workbench's shared visual language for chrome that
 is not conversation content: icons, type roles, and a keyed chrome copy catalog.
 
-Today the Workbench already has surfaces, density, and status color markers.
-This feature replaces Unicode glyph placeholders and ad-hoc English string
-literals with a small, consistent system so Empty / Loading / actions /
-disclosures look and read the same across islands, and so mixed CJK/Latin
-content beside icons keeps stable baselines.
+The Workbench has surfaces, density, and status color markers. This feature
+replaces Unicode glyph placeholders and ad-hoc English string literals with a
+small, consistent system so Empty / Loading / actions / disclosures look and
+read the same across islands, and so mixed CJK/Latin content beside icons keeps
+stable baselines.
 
 Conversation transcripts, tool payloads, Agent display names from hostd, and
 user-typed Composer text remain content — they are not rewritten by this
@@ -90,11 +90,11 @@ status bar · connection · usage
 
 ### Localization
 
-- All Workbench chrome strings that the GUI owns move behind stable catalog
-  keys: island titles, Empty / Loading copy, tooltips, Composer chrome
-  (placeholder, Send, Stop), **all Activity summary and item label templates**,
-  StatusBar connection labels, Sheet titles, and dialog chrome (Submit, Cancel,
-  Decline, section labels such as Arguments).
+- All Workbench chrome strings that the GUI owns use stable catalog keys: island
+  titles, Empty / Loading copy, tooltips, Composer chrome (placeholder, Send,
+  Stop), **all Activity summary and item label templates**, StatusBar connection
+  labels, Sheet titles, and dialog chrome (Submit, Cancel, Decline, section
+  labels such as Arguments).
 - v1 ships **English (`en`) only**. The catalog and call sites are structured so
   additional locales can be added later without rewriting islands.
 - There is no locale override, OS-locale following, or language picker in this

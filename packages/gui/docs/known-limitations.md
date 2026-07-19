@@ -30,6 +30,3 @@
 - **Approvals on live models.** Deterministic Core/GUI tests cover prompts;
   real-hostd smoke exercises submit/cancel when a model catalog is present, and
   skips that slice without auth.
-
-See [`manual-ux-checklist.md`](manual-ux-checklist.md) for IME/focus/pointer gates
-that cannot be automated in pure Rust tests.
