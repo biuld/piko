@@ -16,8 +16,8 @@ pub mod widgets;
 pub mod workbench;
 
 pub use island::{
-    FocusCycleDir, IslandFocusRing, IslandHeader, IslandMsg, IslandPanel, IslandPlaceholder,
-    IslandSessionPhase, focus_order,
+    FocusCycleDir, FocusReason, IslandContentViewport, IslandFocusRing, IslandHeader, IslandMsg,
+    IslandPanel, IslandPlaceholder, IslandSessionPhase, focus_order,
 };
 #[allow(unused_imports)] // public override API for islands
 pub use island::{IslandBody, IslandMedia};
@@ -26,5 +26,7 @@ pub use overlay::{
     OverlayPanelStyle, TransientKind, render_overlay_layer,
 };
 pub use settings::mount_frame as mount_settings_frame;
-pub use widgets::{TreeClickHandler, TreeRowAccessory, TreeRowSpec, render_tree_list};
+pub use widgets::{
+    TreeClickHandler, TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
+};
 pub use workbench::{IslandId, mount_frame as mount_workbench_frame, render_right_column};

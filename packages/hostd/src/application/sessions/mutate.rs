@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
@@ -7,6 +7,48 @@ use crate::util::{now_ms, storage_error};
 use super::helpers::{server_response_ok, session_reconciled_message};
 
 impl HostApp {
+    async fn resolve_session_storage_path(
+        &self,
+        session_id: &str,
+    ) -> Result<PathBuf, ProtocolError> {
+        if let Some(path) = self.session_paths.lock().await.get(session_id).cloned() {
+            return Ok(path);
+        }
+        let Some(storage) = &self.storage else {
+            return Err(ProtocolError::SessionNotFound(session_id.into()));
+        };
+        let summaries = storage.summaries(None).map_err(storage_error)?;
+        let Some(summary) = summaries.iter().find(|s| s.session_id == session_id) else {
+            return Err(ProtocolError::SessionNotFound(session_id.into()));
+        };
+        summary
+            .session_path
+            .as_ref()
+            .map(PathBuf::from)
+            .ok_or_else(|| ProtocolError::SessionNotFound(session_id.into()))
+    }
+
+    async fn ensure_session_hydrated_for_mutate(
+        &self,
+        session_id: &str,
+        path: &Path,
+    ) -> Result<(), ProtocolError> {
+        let mut state = self.state.lock().await;
+        if state.has_session(session_id) {
+            return Ok(());
+        }
+        let Some(storage) = &self.storage else {
+            return Err(ProtocolError::SessionNotFound(session_id.into()));
+        };
+        let persisted = storage.load_by_path(path).map_err(storage_error)?;
+        self.session_paths
+            .lock()
+            .await
+            .insert(session_id.to_string(), path.to_path_buf());
+        state.insert_session(persisted.state);
+        Ok(())
+    }
+
     pub(crate) async fn apply_session_fork(
         &self,
         command_id: &str,
@@ -91,19 +133,17 @@ impl HostApp {
         session_id: String,
         name: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let path = self.resolve_session_storage_path(&session_id).await?;
+        self.ensure_session_hydrated_for_mutate(&session_id, &path)
+            .await?;
+
         let mut state = self.state.lock().await;
         let session = state.session_mut(&session_id)?;
         session.name = Some(name.clone());
         if let Some(storage) = &self.storage {
-            let path = {
-                let paths = self.session_paths.lock().await;
-                paths.get(&session_id).cloned()
-            };
-            if let Some(path) = path {
-                storage
-                    .append_session_info(&path, session.current_leaf_id.as_deref(), &name, None)
-                    .map_err(storage_error)?;
-            }
+            storage
+                .append_session_info(&path, session.current_leaf_id.as_deref(), &name, None)
+                .map_err(storage_error)?;
         }
         drop(state);
         let (snapshot, agents) = self.session_view(&session_id).await?;
@@ -123,8 +163,10 @@ impl HostApp {
         command_id: &str,
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let path = self.resolve_session_storage_path(&session_id).await.ok();
         self.state.lock().await.delete_session(&session_id);
-        let path = self.session_paths.lock().await.remove(&session_id);
+        let mapped = self.session_paths.lock().await.remove(&session_id);
+        let path = path.or(mapped);
         if let Some(path) = path {
             std::fs::remove_dir_all(path).map_err(|error| {
                 ProtocolError::InvalidCommand(format!("delete session storage: {error}"))

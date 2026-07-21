@@ -1,28 +1,47 @@
 //! Session sidebar panel body for [`super::SessionsIsland`].
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::input::{Input, InputState};
+use gpui_component::menu::PopupMenuItem;
 
 use crate::projections::{SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel};
 use crate::shell::{
-    IslandHeader, IslandPanel, IslandPlaceholder, TreeClickHandler, TreeRowAccessory, TreeRowSpec,
-    render_tree_list,
+    IslandContentViewport, IslandHeader, IslandPanel, IslandPlaceholder, TreeClickHandler,
+    TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
 };
-use crate::theme::{IconSize, PikoIcon, PikoTokens, icon, row_leading, tokens};
+use crate::theme::{
+    IconSize, PikoIcon, PikoTokens, TextRole, icon, metrics, row_leading, text, tokens,
+};
 
 pub(crate) type ClickHandler = TreeClickHandler;
 pub(crate) type IdClickFactory = Box<dyn Fn(String) -> ClickHandler>;
+pub(crate) type SessionMenuAction = Rc<dyn Fn(&mut Window, &mut App)>;
+pub(crate) type SessionMenuFactory = Box<dyn Fn(&SessionRow) -> Option<TreeContextMenuBuilder>>;
+pub(crate) type SearchFocusHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
+pub(crate) struct SidebarPanelHandlers<'a> {
+    pub on_open_session: &'a IdClickFactory,
+    pub on_new_session: &'a IdClickFactory,
+    pub on_toggle_dir: &'a IdClickFactory,
+    pub session_menu: &'a SessionMenuFactory,
+    pub on_search_focus: &'a SearchFocusHandler,
+}
+
+/// `has_sessions` is true when the host list has rows before search filter.
 pub(crate) fn render_sidebar_panel(
     vm: &SidebarViewModel,
+    has_sessions: bool,
     collapsed: &HashSet<String>,
+    search_input: Entity<InputState>,
+    list_scroll: ScrollHandle,
     on_open_directory: ClickHandler,
-    on_open_session: IdClickFactory,
-    on_new_session: IdClickFactory,
-    on_toggle_dir: IdClickFactory,
+    handlers: SidebarPanelHandlers<'_>,
     focused: bool,
 ) -> IslandPanel {
     let open_directory = Button::new("open-directory")
@@ -39,11 +58,10 @@ pub(crate) fn render_sidebar_panel(
         .on_click(move |ev, window, cx| on_open_directory(ev, window, cx))
         .into_any_element();
 
-    let has_rows = vm.groups.iter().any(|g| !g.rows.is_empty());
     let header =
         IslandHeader::title_with_action(crate::t!("island.sessions.title"), open_directory);
 
-    if !has_rows {
+    if !has_sessions {
         return IslandPanel::empty(
             "sessions-island",
             IslandPlaceholder::new(crate::t!("island.sessions.empty.title"))
@@ -54,15 +72,68 @@ pub(crate) fn render_sidebar_panel(
         .focused(focused);
     }
 
-    let body = render_tree_list(flatten_session_rows(
+    let tree_rows = flatten_session_rows(
         vm,
         collapsed,
-        &on_open_session,
-        &on_new_session,
-        &on_toggle_dir,
-    ));
+        handlers.on_open_session,
+        handlers.on_new_session,
+        handlers.on_toggle_dir,
+        handlers.session_menu,
+    );
+
+    let m = metrics();
+    let on_search_focus = handlers.on_search_focus.clone();
+    let list_body = if tree_rows.is_empty() {
+        div()
+            .w_full()
+            .px(m.tool_row_inset)
+            .py(m.space_lg)
+            .child(
+                text(TextRole::Meta)
+                    .text_color(tokens().muted_fg_rgba())
+                    .child(crate::t!("island.sessions.search.no_matches")),
+            )
+            .into_any_element()
+    } else {
+        render_tree_list(tree_rows).into_any_element()
+    };
+    let list = IslandContentViewport::new("sessions-island-viewport", list_scroll, list_body);
+
+    let body = div()
+        .flex()
+        .flex_col()
+        .size_full()
+        .min_h(px(0.))
+        .child(
+            div()
+                .id("sessions-search")
+                .key_context("IslandSessionsSearch")
+                .px(m.tool_row_inset)
+                .pb(m.space_sm)
+                .flex_shrink_0()
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    cx.stop_propagation();
+                    on_search_focus(window, cx);
+                })
+                .child(Input::new(&search_input).w_full()),
+        )
+        .when(!vm.pinned.is_empty(), |d| {
+            d.child(
+                div()
+                    .px(m.tool_row_inset)
+                    .pb(m.space_xs)
+                    .flex_shrink_0()
+                    .child(
+                        text(TextRole::Meta)
+                            .text_color(tokens().muted_fg_rgba())
+                            .child(crate::t!("island.sessions.section.pinned")),
+                    ),
+            )
+        })
+        .child(list);
 
     IslandPanel::new("sessions-island", body)
+        .scroll(false)
         .header(header)
         .focused(focused)
 }
@@ -81,9 +152,14 @@ fn flatten_session_rows(
     on_open: &IdClickFactory,
     on_new: &IdClickFactory,
     on_toggle: &IdClickFactory,
+    session_menu: &SessionMenuFactory,
 ) -> Vec<(TreeRowSpec, ClickHandler, Option<ClickHandler>)> {
     let t = tokens();
     let mut out = Vec::new();
+
+    for row in &vm.pinned {
+        out.push(session_tree_row(row, on_open, session_menu, true));
+    }
 
     for group in &vm.groups {
         if group.rows.is_empty() {
@@ -126,6 +202,7 @@ fn flatten_session_rows(
                 leading: Some(row_leading(dir_icon, mute)),
                 detail: None,
                 accessory: new_session.map(TreeRowAccessory::Action),
+                context_menu: None,
             },
             activate,
             Some(toggle),
@@ -136,7 +213,7 @@ fn flatten_session_rows(
         }
 
         for row in &group.rows {
-            out.push(session_tree_row(row, on_open));
+            out.push(session_tree_row(row, on_open, session_menu, false));
         }
     }
 
@@ -166,6 +243,8 @@ fn dir_new_session_button(cwd: &str, on_new: &IdClickFactory) -> AnyElement {
 fn session_tree_row(
     row: &SessionRow,
     on_open: &IdClickFactory,
+    session_menu: &SessionMenuFactory,
+    in_pinned_band: bool,
 ) -> (TreeRowSpec, ClickHandler, Option<ClickHandler>) {
     let t = tokens();
     let is_live = row.kind == SessionRowKind::LiveTarget;
@@ -174,39 +253,106 @@ fn session_tree_row(
     let label_color = if is_pending {
         Some(t.muted_fg_rgba())
     } else if is_live {
-        None // selected drives accent
+        None
     } else {
         Some(t.fg_rgba())
+    };
+
+    let leading_icon = if row.is_pinned || in_pinned_band {
+        PikoIcon::Pin
+    } else {
+        PikoIcon::MessageSquare
     };
 
     let leading_color = if is_pending {
         PikoTokens::hsla(t.muted_fg)
     } else if is_live {
         PikoTokens::hsla(t.accent)
+    } else if row.is_pinned || in_pinned_band {
+        PikoTokens::hsla(t.muted_fg)
     } else {
         PikoTokens::hsla(t.fg)
+    };
+
+    let detail = if in_pinned_band && !row.cwd_hint.is_empty() {
+        Some(
+            text(TextRole::Meta)
+                .text_color(t.muted_fg_rgba())
+                .child(format!("· {}", row.cwd_hint))
+                .into_any_element(),
+        )
+    } else {
+        None
     };
 
     (
         TreeRowSpec {
             id: SharedString::from(format!("session-{}", row.session_id)),
-            depth: 1,
+            depth: if in_pinned_band { 0 } else { 1 },
             has_children: false,
             expanded: false,
             selected: is_live,
             emphasized: is_pending,
+            // Sessions is a directory list, not the conversation Tree — indent
+            // without vertical depth guides (ui-guidelines: guides are tree-only).
             show_guides: false,
             label: SharedString::from(row.label.clone()),
             label_color,
-            leading: Some(row_leading(PikoIcon::MessageSquare, leading_color)),
-            detail: None,
+            leading: Some(row_leading(leading_icon, leading_color)),
+            detail,
             accessory: Some(TreeRowAccessory::Meta(SharedString::from(
                 row.message_count.to_string(),
             ))),
+            context_menu: session_menu(row),
         },
         on_open(row.session_id.clone()),
         None,
     )
+}
+
+pub(crate) fn build_session_context_menu(
+    row: &SessionRow,
+    open: SessionMenuAction,
+    rename: SessionMenuAction,
+    toggle_pin: SessionMenuAction,
+    delete: SessionMenuAction,
+) -> Option<TreeContextMenuBuilder> {
+    if row.kind == SessionRowKind::PendingTarget {
+        return None;
+    }
+    let pin_label = if row.is_pinned {
+        crate::t!("island.sessions.menu.unpin")
+    } else {
+        crate::t!("island.sessions.menu.pin")
+    };
+    let open = open.clone();
+    let rename = rename.clone();
+    let toggle_pin = toggle_pin.clone();
+    let delete = delete.clone();
+    Some(Rc::new(move |menu, _window, _cx| {
+        menu.item(
+            PopupMenuItem::new(crate::t!("island.sessions.menu.open")).on_click({
+                let open = open.clone();
+                move |_, window, cx| open(window, cx)
+            }),
+        )
+        .item(
+            PopupMenuItem::new(crate::t!("island.sessions.menu.rename")).on_click({
+                let rename = rename.clone();
+                move |_, window, cx| rename(window, cx)
+            }),
+        )
+        .item(PopupMenuItem::new(pin_label.clone()).on_click({
+            let toggle_pin = toggle_pin.clone();
+            move |_, window, cx| toggle_pin(window, cx)
+        }))
+        .item(
+            PopupMenuItem::new(crate::t!("island.sessions.menu.delete")).on_click({
+                let delete = delete.clone();
+                move |_, window, cx| delete(window, cx)
+            }),
+        )
+    }))
 }
 
 #[cfg(test)]
@@ -222,6 +368,10 @@ mod tests {
         Box::new(|_| Box::new(|_, _, _| {}))
     }
 
+    fn noop_menu() -> super::SessionMenuFactory {
+        Box::new(|_| None)
+    }
+
     #[test]
     fn zero_message_session_keeps_a_meta_accessory() {
         let row = SessionRow {
@@ -229,10 +379,12 @@ mod tests {
             label: "Empty session".into(),
             kind: SessionRowKind::Listed,
             message_count: 0,
-            modified_at: None,
+            is_pinned: false,
+            cwd_hint: String::new(),
         };
 
-        let (spec, _, _) = session_tree_row(&row, &noop_open_factory());
+        let (spec, _, _) = session_tree_row(&row, &noop_open_factory(), &noop_menu(), false);
+        assert!(!spec.show_guides, "sessions rows must not draw tree guides");
         match spec.accessory {
             Some(TreeRowAccessory::Meta(value)) => {
                 assert_eq!(value, SharedString::from("0"));

@@ -165,10 +165,10 @@ impl DesktopApp {
             island.set_offset(point(px(0.), px(0.)));
         });
         self.bridge.intent(ClientIntent::OpenSession {
-            session_id,
+            session_id: session_id.clone(),
             session_path: None,
         });
-        self.refresh_islands(cx);
+        self.bump_session_mru(&session_id, cx);
         cx.notify();
     }
 

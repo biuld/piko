@@ -33,6 +33,7 @@ pub enum PendingOp {
     Create,
     Refresh,
     Delete { session_id: SessionId },
+    Rename { session_id: SessionId, name: String },
     Navigate { session_id: SessionId },
     Submit,
     Cancel,

@@ -16,6 +16,34 @@ island.sessions.notice.directory_exists.title:
   en: Directory already open
 island.sessions.notice.directory_exists.message:
   en: "This directory is already in Sessions: %{path}"
+island.sessions.search.placeholder:
+  en: Search sessions…
+island.sessions.search.no_matches:
+  en: No matching sessions
+island.sessions.section.pinned:
+  en: Pinned
+island.sessions.menu.open:
+  en: Open
+island.sessions.menu.rename:
+  en: Rename…
+island.sessions.menu.pin:
+  en: Pin
+island.sessions.menu.unpin:
+  en: Unpin
+island.sessions.menu.delete:
+  en: Delete…
+island.sessions.rename.title:
+  en: Rename session
+island.sessions.rename.placeholder:
+  en: Session name
+island.sessions.rename.save:
+  en: Save
+island.sessions.delete.title:
+  en: Delete session?
+island.sessions.delete.body:
+  en: '"%{name}" will be permanently deleted.'
+island.sessions.delete.confirm:
+  en: Delete
 
 island.agents.title:
   en: Agents

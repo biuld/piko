@@ -6,6 +6,10 @@ use piko_protocol::SessionSummary;
 
 use super::view_model::*;
 
+fn empty_prefs() -> SidebarPrefs {
+    SidebarPrefs::default()
+}
+
 fn default_state() -> ClientState {
     ClientState::default()
 }
@@ -95,7 +99,7 @@ fn sidebar_rows_from_session_list() {
         ],
     };
 
-    let vm = derive_sidebar(&state);
+    let vm = derive_sidebar(&state, &empty_prefs());
     assert_eq!(vm.groups.len(), 1);
     assert_eq!(vm.groups[0].label, "myapp");
     assert_eq!(vm.groups[0].cwd, "/projects/myapp");
@@ -106,26 +110,37 @@ fn sidebar_rows_from_session_list() {
 }
 
 #[test]
-fn sidebar_groups_by_working_directory_alphabetically() {
+fn sidebar_rows_within_group_sort_by_mru() {
     let mut state = default_state();
     state.session_list = SessionListProjection {
         sessions: vec![
-            stub_summary_modified("other-new", "/projects/other", Some("Other"), "2026-07-18"),
-            stub_summary("cur-a", "/projects/myapp", Some("Current A")),
-            stub_summary_modified("other-old", "/projects/alpha", Some("Alpha"), "2026-01-01"),
-            stub_summary("cur-b", "/projects/myapp", Some("Current B")),
+            stub_summary("cur-a", "/projects/myapp", Some("A")),
+            stub_summary("cur-b", "/projects/myapp", Some("B")),
         ],
     };
+    let mut prefs = empty_prefs();
+    prefs.session_last_used_at_ms.insert("cur-a".into(), 100);
+    prefs.session_last_used_at_ms.insert("cur-b".into(), 200);
 
-    let vm = derive_sidebar(&state);
-    assert_eq!(vm.groups.len(), 3);
-    // Groups sorted alphabetically by path (not recency, no current folder).
-    assert_eq!(vm.groups[0].label, "alpha");
-    assert_eq!(vm.groups[0].cwd, "/projects/alpha");
-    assert_eq!(vm.groups[1].label, "myapp");
-    assert_eq!(vm.groups[1].cwd, "/projects/myapp");
-    assert_eq!(vm.groups[1].rows.len(), 2);
-    assert_eq!(vm.groups[2].label, "other");
+    let vm = derive_sidebar(&state, &prefs);
+    assert_eq!(vm.groups.len(), 1);
+    assert_eq!(vm.groups[0].rows[0].session_id, "cur-b");
+    assert_eq!(vm.groups[0].rows[1].session_id, "cur-a");
+}
+
+#[test]
+fn pinned_sessions_appear_in_global_strip_only() {
+    let mut state = default_state();
+    state.session_list = SessionListProjection {
+        sessions: vec![stub_summary("s1", "/projects/myapp", Some("Pinned"))],
+    };
+    let mut prefs = empty_prefs();
+    prefs.pinned_session_ids.insert("s1".into());
+
+    let vm = derive_sidebar(&state, &prefs);
+    assert_eq!(vm.pinned.len(), 1);
+    assert_eq!(vm.pinned[0].session_id, "s1");
+    assert!(vm.groups.is_empty());
 }
 
 #[test]
@@ -135,7 +150,7 @@ fn sidebar_marks_live_session() {
         sessions: vec![stub_summary("s1", "/projects/myapp", Some("My Session"))],
     };
 
-    let vm = derive_sidebar(&state);
+    let vm = derive_sidebar(&state, &empty_prefs());
     assert_eq!(vm.groups[0].rows[0].kind, SessionRowKind::LiveTarget);
 }
 
@@ -152,13 +167,45 @@ fn sidebar_marks_pending_target() {
         ],
     };
 
-    let vm = derive_sidebar(&state);
+    let vm = derive_sidebar(&state, &empty_prefs());
     let s2_row = vm.groups[0]
         .rows
         .iter()
         .find(|r| r.session_id == "s2")
         .unwrap();
     assert_eq!(s2_row.kind, SessionRowKind::PendingTarget);
+}
+
+#[test]
+fn sidebar_switch_does_not_dual_highlight_old_live_and_pending() {
+    // Simulate A → B: previous live A is still in `live_session` while B hydrates.
+    let mut state = live_state("s1");
+    state.session_phase = SessionPhase::Hydrating {
+        target_id: "s2".into(),
+    };
+    state.session_list = SessionListProjection {
+        sessions: vec![
+            stub_summary("s1", "/tmp", Some("First")),
+            stub_summary("s2", "/tmp", Some("Second")),
+        ],
+    };
+
+    let vm = derive_sidebar(&state, &empty_prefs());
+    let rows = &vm.groups[0].rows;
+    let s1 = rows.iter().find(|r| r.session_id == "s1").unwrap();
+    let s2 = rows.iter().find(|r| r.session_id == "s2").unwrap();
+    assert_eq!(s1.kind, SessionRowKind::Listed);
+    assert_eq!(s2.kind, SessionRowKind::PendingTarget);
+    assert!(
+        rows.iter()
+            .filter(|r| matches!(
+                r.kind,
+                SessionRowKind::LiveTarget | SessionRowKind::PendingTarget
+            ))
+            .count()
+            <= 1,
+        "at most one session row may look selected during open/hydrate"
+    );
 }
 
 #[test]
@@ -171,7 +218,7 @@ fn sidebar_orphan_pending_gets_opening_group() {
         sessions: vec![stub_summary("s1", "/projects/alpha", Some("Alpha"))],
     };
 
-    let vm = derive_sidebar(&state);
+    let vm = derive_sidebar(&state, &empty_prefs());
     assert_eq!(vm.groups.len(), 2);
     assert_eq!(vm.groups[0].label, "Opening…");
     assert_eq!(vm.groups[0].rows[0].session_id, "orphan");
@@ -220,15 +267,4 @@ fn stub_summary(id: &str, cwd: &str, name: Option<&str>) -> SessionSummary {
         session_path: None,
         parent_session_path: None,
     }
-}
-
-fn stub_summary_modified(
-    id: &str,
-    cwd: &str,
-    name: Option<&str>,
-    modified_at: &str,
-) -> SessionSummary {
-    let mut s = stub_summary(id, cwd, name);
-    s.modified_at = Some(modified_at.into());
-    s
 }

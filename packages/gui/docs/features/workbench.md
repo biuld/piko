@@ -62,7 +62,9 @@ The Composer identifies its target Agent and submission settings.
 ## Session Entry
 
 - The left Sessions island lists all Sessions globally, grouped by working
-  directory and sorted alphabetically.
+  directory. Sort order (groups and rows) follows GUI MRU; pinned sessions live
+  in a global strip — see
+  [Sessions Island — Pin, Search, Rename, and Delete](sessions-island-management.md).
 - Island-level **Open Directory** picks a folder, then immediately creates a
   Session in that cwd and opens it. If that cwd already appears in the list,
   the client shows a notice and does not create another Session.

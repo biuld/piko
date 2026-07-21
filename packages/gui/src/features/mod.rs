@@ -23,7 +23,7 @@ pub use prompts::{
     InteractionForm, PromptFront, PromptKind, approval_title, derive_prompt_front,
     interaction_title, render_approval_body,
 };
-pub use sessions::SessionsIsland;
+pub use sessions::{ClearSessionSearch, SessionsIsland};
 pub use settings::SettingsSection;
 pub use timeline::TimelineIsland;
 pub use timeline::derive_timeline;

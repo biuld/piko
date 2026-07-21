@@ -233,6 +233,21 @@ fn handle_intent(
                 session_id,
             }));
         }
+        ClientIntent::RenameSession { session_id, name } => {
+            let id = ctx.command_ids.next_command_id();
+            state.pending_commands.insert(
+                id.clone(),
+                PendingOp::Rename {
+                    session_id: session_id.clone(),
+                    name: name.clone(),
+                },
+            );
+            effects.push(ClientEffect::Send(Command::SessionRename {
+                command_id: id,
+                session_id,
+                name,
+            }));
+        }
         ClientIntent::NavigateSession {
             entry_id,
             summarize,

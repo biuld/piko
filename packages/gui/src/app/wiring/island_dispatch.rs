@@ -40,7 +40,39 @@ impl DesktopApp {
     ) {
         match msg {
             IslandMsg::ClaimFocus => {
-                self.focus_island(id, window, cx);
+                // Claimed: island already placed window focus (chrome handle or
+                // an inner Input). Sync chrome, then hand off with Claimed so
+                // the island can no-op (default) without Activate stealing.
+                use crate::shell::FocusReason;
+                self.island_focus.set_focused(id);
+                self.apply_island_focus_chrome(cx);
+                match id {
+                    IslandId::Sessions => {
+                        self.sessions.update(cx, |island, cx| {
+                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
+                        });
+                    }
+                    IslandId::Timeline => {
+                        self.timeline.update(cx, |island, cx| {
+                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
+                        });
+                    }
+                    IslandId::Composer => {
+                        self.composer.update(cx, |island, cx| {
+                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
+                        });
+                    }
+                    IslandId::Agents => {
+                        self.agents.update(cx, |island, cx| {
+                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
+                        });
+                    }
+                    IslandId::Tree => {
+                        self.tree.update(cx, |island, cx| {
+                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
+                        });
+                    }
+                }
                 return;
             }
             IslandMsg::FocusIsland { id: target } => {
@@ -66,6 +98,15 @@ impl DesktopApp {
             } => self.handle_activity_item(agent_instance_id, prompt_id, window, cx),
             IslandMsg::SubmitComposer => self.submit_composer(window, cx),
             IslandMsg::CancelTurn => self.action_cancel_turn(&CancelTurn, window, cx),
+            IslandMsg::RenameSession { session_id } => {
+                self.handle_rename_session_request(session_id, window, cx);
+            }
+            IslandMsg::DeleteSession { session_id } => {
+                self.handle_delete_session_request(session_id, cx);
+            }
+            IslandMsg::TogglePinSession { session_id } => {
+                self.handle_toggle_pin_session(&session_id, cx);
+            }
         }
         self.refresh_islands(cx);
         cx.notify();

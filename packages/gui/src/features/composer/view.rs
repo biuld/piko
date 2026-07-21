@@ -77,6 +77,22 @@ impl ComposerIsland {
         }
     }
 
+    /// Place keyboard focus when chrome activates this island.
+    pub fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if reason != crate::shell::FocusReason::Activate {
+            return;
+        }
+        window.focus(&self.focus_handle);
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+        });
+    }
+
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Composer, msg, window, cx);
     }
@@ -98,7 +114,8 @@ impl ComposerIsland {
     }
 
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus_handle);
+        // Pointer claim: place caret in the composer input, then sync chrome.
+        self.take_keyboard_focus(crate::shell::FocusReason::Activate, window, cx);
         self.emit(IslandMsg::ClaimFocus, window, cx);
     }
 }

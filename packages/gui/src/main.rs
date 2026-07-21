@@ -28,7 +28,7 @@ use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
 use crate::app::quit::is_quit_busy;
 use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
-use crate::features::{PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
+use crate::features::{ClearSessionSearch, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
 use crate::theme::apply_piko_dark_theme;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -66,6 +66,7 @@ fn main() {
             KeyBinding::new("cmd-shift-p", OpenCommandPalette, Some("DesktopApp")),
             KeyBinding::new("cmd-comma", OpenSettings, Some("DesktopApp")),
             KeyBinding::new("escape", CloseTransientOverlay, None),
+            KeyBinding::new("escape", ClearSessionSearch, Some("IslandSessionsSearch")),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("tab", FocusNextIsland, Some("DesktopApp")),
             KeyBinding::new("shift-tab", FocusPrevIsland, Some("DesktopApp")),

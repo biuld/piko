@@ -104,6 +104,7 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
         leading: Some(row_leading(kind_icon, kind_color)),
         detail: None,
         accessory: None,
+        context_menu: None,
     }
 }
 

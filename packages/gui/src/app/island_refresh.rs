@@ -17,14 +17,19 @@ impl DesktopApp {
         let phase_view = derive_phase_view(self.bridge_state());
         let island_phase = IslandSessionPhase::from_session_phase(&phase_view);
 
-        let sessions_vm = derive_sidebar(self.bridge_state());
-        let sessions_fp = format!("{:?}", sessions_vm.groups.len())
-            + &sessions_vm
-                .groups
+        let sessions_vm = derive_sidebar(self.bridge_state(), &self.sidebar_prefs());
+        let sessions_fp = format!(
+            "{:?}|{:?}|{}",
+            sessions_vm.pinned.len(),
+            sessions_vm.groups.len(),
+            sessions_vm
+                .pinned
                 .iter()
-                .flat_map(|g| g.rows.iter().map(|r| r.session_id.as_str()))
+                .chain(sessions_vm.groups.iter().flat_map(|g| g.rows.iter()))
+                .map(|r| r.session_id.as_str())
                 .collect::<Vec<_>>()
-                .join("|");
+                .join("|")
+        );
         if self.fp_sessions.as_ref() != Some(&sessions_fp) {
             self.fp_sessions = Some(sessions_fp);
             self.sessions.update(cx, |island, cx| {
@@ -135,26 +140,35 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        use crate::shell::FocusReason;
+
         self.island_focus.set_focused(id);
         self.apply_island_focus_chrome(cx);
         match id {
             IslandId::Sessions => {
-                window.focus(&self.sessions.focus_handle(cx));
+                self.sessions.update(cx, |island, cx| {
+                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
+                });
             }
             IslandId::Timeline => {
-                window.focus(&self.timeline.focus_handle(cx));
+                self.timeline.update(cx, |island, cx| {
+                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
+                });
             }
             IslandId::Composer => {
-                window.focus(&self.composer.focus_handle(cx));
-                self.composer_input.update(cx, |state, cx| {
-                    state.focus(window, cx);
+                self.composer.update(cx, |island, cx| {
+                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
                 });
             }
             IslandId::Agents => {
-                window.focus(&self.agents.focus_handle(cx));
+                self.agents.update(cx, |island, cx| {
+                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
+                });
             }
             IslandId::Tree => {
-                window.focus(&self.tree.focus_handle(cx));
+                self.tree.update(cx, |island, cx| {
+                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
+                });
             }
         }
     }

@@ -39,6 +39,10 @@ pub enum ClientIntent {
     DeleteSession {
         session_id: SessionId,
     },
+    RenameSession {
+        session_id: SessionId,
+        name: String,
+    },
     NavigateSession {
         entry_id: String,
         summarize: bool,

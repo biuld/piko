@@ -209,11 +209,26 @@ fn handle_command_response(
                 }
             }
             (PendingOp::Refresh, CommandResult::Empty)
-            | (PendingOp::Delete { .. }, CommandResult::Empty)
             | (PendingOp::Submit, CommandResult::Empty)
             | (PendingOp::Cancel, CommandResult::Empty)
             | (PendingOp::ApprovalRespond { .. }, CommandResult::Empty)
             | (PendingOp::InteractionRespond { .. }, CommandResult::Empty) => {}
+            (PendingOp::Delete { session_id }, CommandResult::Empty) => {
+                state
+                    .session_list
+                    .sessions
+                    .retain(|s| s.session_id != session_id);
+            }
+            (PendingOp::Rename { session_id, name }, CommandResult::Empty) => {
+                if let Some(summary) = state
+                    .session_list
+                    .sessions
+                    .iter_mut()
+                    .find(|s| s.session_id == session_id)
+                {
+                    summary.name = Some(name);
+                }
+            }
             (PendingOp::Navigate { .. }, CommandResult::SessionNavigated { .. }) => {}
             (PendingOp::ListModels, CommandResult::ModelListed { providers, .. }) => {
                 state.model.providers = providers;
@@ -350,6 +365,10 @@ fn apply_model_config_changed(state: &mut ClientState, event: piko_protocol::Mod
 }
 
 fn handle_session_cleared(state: &mut ClientState, previous_session_id: &str) {
+    state
+        .session_list
+        .sessions
+        .retain(|s| s.session_id != previous_session_id);
     if state.live_session_id() == Some(previous_session_id) {
         state.live_session = None;
         state.session_phase = SessionPhase::IdleNoSession;

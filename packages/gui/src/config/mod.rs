@@ -37,6 +37,10 @@ pub struct GuiSettings {
     /// docs/settings-ownership-design.md.
     #[serde(default)]
     pub hide_thinking_block: bool,
+    #[serde(default)]
+    pub pinned_session_ids: Vec<String>,
+    #[serde(default)]
+    pub session_last_used_at_ms: std::collections::HashMap<String, u64>,
 }
 
 impl Default for GuiSettings {
@@ -48,6 +52,8 @@ impl Default for GuiSettings {
             right_column_open: true,
             reduced_motion: false,
             hide_thinking_block: false,
+            pinned_session_ids: Vec::new(),
+            session_last_used_at_ms: std::collections::HashMap::new(),
         }
     }
 }

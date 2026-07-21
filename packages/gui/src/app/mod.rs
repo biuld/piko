@@ -9,6 +9,7 @@ mod notifications;
 pub mod primary_surface;
 pub(crate) mod quit;
 pub(crate) mod quit_busy;
+mod session_prefs;
 mod submit_recovery;
 pub mod timeline_follow;
 pub mod ux_prefs;

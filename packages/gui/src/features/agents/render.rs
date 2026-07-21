@@ -114,5 +114,6 @@ fn agent_row_spec(node: &AgentTreeNode, collapsed: &HashSet<String>) -> TreeRowS
         leading: Some(row_leading(PikoIcon::Bot, leading_color)),
         detail: Some(trailing),
         accessory: None,
+        context_menu: None,
     }
 }

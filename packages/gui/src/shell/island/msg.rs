@@ -46,4 +46,13 @@ pub enum IslandMsg {
     },
     SubmitComposer,
     CancelTurn,
+    RenameSession {
+        session_id: String,
+    },
+    DeleteSession {
+        session_id: String,
+    },
+    TogglePinSession {
+        session_id: String,
+    },
 }

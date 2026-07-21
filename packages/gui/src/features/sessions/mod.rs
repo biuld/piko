@@ -3,4 +3,4 @@
 mod sidebar;
 mod view;
 
-pub use view::SessionsIsland;
+pub use view::{ClearSessionSearch, SessionsIsland};

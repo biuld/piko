@@ -1,6 +1,6 @@
 //! Root DesktopApp view: owns ClientBridge, island Entities, and chrome.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use gpui::*;
@@ -90,6 +90,9 @@ pub struct DesktopApp {
     pub(crate) last_chrome_fp: Option<String>,
     pub(crate) primary_surface: PrimarySurface,
     pub(crate) last_settings_section: SettingsSection,
+    pub(crate) pinned_session_ids: HashSet<String>,
+    pub(crate) session_last_used_at_ms: HashMap<String, u64>,
+    pub(crate) session_rename_input: Option<Entity<InputState>>,
 }
 
 impl DesktopApp {
@@ -119,7 +122,10 @@ impl DesktopApp {
         .detach();
 
         let host = cx.entity().downgrade();
-        let sessions = cx.new(|cx| SessionsIsland::new(host.clone(), cx));
+        let sessions = cx.new(|cx| SessionsIsland::new(host.clone(), window, cx));
+        sessions.update(cx, |island, cx| {
+            island.subscribe_search(window, cx);
+        });
         let timeline = cx.new(|cx| TimelineIsland::new(host.clone(), cx));
         let composer = cx.new(|cx| ComposerIsland::new(host.clone(), composer_input.clone(), cx));
         let agents = cx.new(|cx| AgentsIsland::new(host.clone(), cx));
@@ -201,6 +207,9 @@ impl DesktopApp {
             last_chrome_fp: None,
             primary_surface: PrimarySurface::Workbench,
             last_settings_section: SettingsSection::default(),
+            pinned_session_ids: HashSet::new(),
+            session_last_used_at_ms: HashMap::new(),
+            session_rename_input: None,
         }
     }
 
@@ -253,6 +262,7 @@ impl DesktopApp {
                 self.layout.tree_open = settings.right_column_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
                 self.ux_prefs.hide_thinking_block = settings.hide_thinking_block;
+                self.sync_session_prefs_from_gui(&settings);
                 self.gui_config_fingerprint = Some(fingerprint);
             }
             Err(error) => {
@@ -262,14 +272,17 @@ impl DesktopApp {
     }
 
     pub(crate) fn persist_gui_config(&mut self) {
-        let settings = crate::config::GuiSettings {
+        let mut settings = crate::config::GuiSettings {
             session_width: self.layout.session_width,
             right_column_width: self.layout.right_column_width,
             session_open: self.layout.sessions_open,
             right_column_open: self.layout.right_column_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
             hide_thinking_block: self.ux_prefs.hide_thinking_block,
+            pinned_session_ids: Vec::new(),
+            session_last_used_at_ms: HashMap::new(),
         };
+        self.session_prefs_into_gui(&mut settings);
         if let Ok(value) = serde_json::to_value(settings) {
             self.gui_config_fingerprint = Some(value.to_string());
             self.bridge.update_gui_config(value);

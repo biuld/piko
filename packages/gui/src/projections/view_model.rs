@@ -8,6 +8,8 @@
 
 use piko_client_core::state::ConnectionState;
 use piko_client_core::{ClientState, SessionPhase};
+use piko_protocol::SessionSummary;
+use std::collections::{HashMap, HashSet};
 
 // ─── Session phase view ──────────────────────────────────────────────────────
 
@@ -57,14 +59,21 @@ pub enum SessionRowKind {
     PendingTarget,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SidebarPrefs {
+    pub pinned_session_ids: HashSet<String>,
+    pub session_last_used_at_ms: HashMap<String, u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionRow {
     pub session_id: String,
     pub label: String,
     pub kind: SessionRowKind,
     pub message_count: u64,
-    #[allow(dead_code)] // reserved for future sidebar metadata chrome
-    pub modified_at: Option<String>,
+    pub is_pinned: bool,
+    /// Folder leaf shown in the global Pinned band (`detail` slot).
+    pub cwd_hint: String,
 }
 
 /// Sessions for one working directory.
@@ -78,6 +87,7 @@ pub struct SidebarGroup {
 
 #[derive(Debug, Clone)]
 pub struct SidebarViewModel {
+    pub pinned: Vec<SessionRow>,
     pub groups: Vec<SidebarGroup>,
 }
 
@@ -88,34 +98,34 @@ struct GroupBucket {
 
 const PENDING_GROUP_KEY: &str = "";
 
-/// Derive sidebar groups from the global session list + live/pending state.
-///
-/// Groups by working directory and sorts groups alphabetically by path.
-/// The GUI session list is global (`SessionListScope::All`); there is no
-/// privileged "current folder" group.
-pub fn derive_sidebar(state: &ClientState) -> SidebarViewModel {
+/// Derive sidebar from session list, GUI pin/MRU prefs, and live/pending state.
+pub fn derive_sidebar(state: &ClientState, prefs: &SidebarPrefs) -> SidebarViewModel {
     let list = &state.session_list;
-    let live_id = state.live_session.as_ref().map(|s| s.session_id.as_str());
+    // Only mark LiveTarget when phase is Live. During open/hydrate the previous
+    // `live_session` is still present until reconcile; marking it selected while
+    // the pending target is also emphasized produces a dual-highlight flash.
+    let live_id = match &state.session_phase {
+        SessionPhase::Live => state.live_session.as_ref().map(|s| s.session_id.as_str()),
+        _ => None,
+    };
     let pending_id = pending_target_id(&state.session_phase);
 
-    let mut by_cwd: std::collections::HashMap<String, GroupBucket> =
-        std::collections::HashMap::new();
+    let summary_by_id: HashMap<&str, &SessionSummary> = list
+        .sessions
+        .iter()
+        .map(|s| (s.session_id.as_str(), s))
+        .collect();
+
+    let mut by_cwd: HashMap<String, GroupBucket> = HashMap::new();
+    let mut pinned_rows: Vec<SessionRow> = Vec::new();
 
     for s in &list.sessions {
-        let kind = if live_id == Some(s.session_id.as_str()) {
-            SessionRowKind::LiveTarget
-        } else if pending_id == Some(s.session_id.as_str()) {
-            SessionRowKind::PendingTarget
-        } else {
-            SessionRowKind::Listed
-        };
-        let row = SessionRow {
-            session_id: s.session_id.clone(),
-            label: session_label(s),
-            kind,
-            message_count: s.message_count,
-            modified_at: s.modified_at.clone(),
-        };
+        let is_pinned = prefs.pinned_session_ids.contains(&s.session_id);
+        let row = make_row(s, live_id, pending_id, is_pinned);
+        if is_pinned && row.kind != SessionRowKind::PendingTarget {
+            pinned_rows.push(row);
+            continue;
+        }
         let key = cwd_key(&s.cwd);
         by_cwd
             .entry(key)
@@ -127,11 +137,11 @@ pub fn derive_sidebar(state: &ClientState) -> SidebarViewModel {
             .push(row);
     }
 
-    // Pending target missing from the list gets a temporary Opening group.
     if let Some(pid) = pending_id {
         let already = by_cwd
             .values()
-            .any(|bucket| bucket.rows.iter().any(|r| r.session_id == pid));
+            .any(|bucket| bucket.rows.iter().any(|r| r.session_id == pid))
+            || pinned_rows.iter().any(|r| r.session_id == pid);
         if !already {
             by_cwd
                 .entry(PENDING_GROUP_KEY.to_string())
@@ -147,32 +157,37 @@ pub fn derive_sidebar(state: &ClientState) -> SidebarViewModel {
                         label: format!("Opening {}…", &pid[..pid.len().min(8)]),
                         kind: SessionRowKind::PendingTarget,
                         message_count: 0,
-                        modified_at: None,
+                        is_pinned: false,
+                        cwd_hint: String::new(),
                     },
                 );
         }
     }
 
-    let mut keys: Vec<String> = by_cwd.keys().cloned().collect();
-    keys.sort_by(|a, b| {
-        // Keep the transient Opening group first; otherwise sort by path.
+    sort_rows_by_mru(&mut pinned_rows, &summary_by_id, prefs);
+    for bucket in by_cwd.values_mut() {
+        sort_rows_by_mru(&mut bucket.rows, &summary_by_id, prefs);
+    }
+
+    let mut group_entries: Vec<(String, GroupBucket)> = by_cwd.into_iter().collect();
+    group_entries.sort_by(|(ka, a), (kb, b)| {
         match (
-            a.as_str() == PENDING_GROUP_KEY,
-            b.as_str() == PENDING_GROUP_KEY,
+            ka.as_str() == PENDING_GROUP_KEY,
+            kb.as_str() == PENDING_GROUP_KEY,
         ) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => a
-                .to_lowercase()
-                .cmp(&b.to_lowercase())
-                .then_with(|| a.cmp(b)),
+            _ => {
+                let ra = group_mru_rank(a, &summary_by_id, prefs);
+                let rb = group_mru_rank(b, &summary_by_id, prefs);
+                rb.cmp(&ra).then_with(|| ka.cmp(kb))
+            }
         }
     });
 
-    let groups = keys
+    let groups = group_entries
         .into_iter()
-        .filter_map(|key| {
-            let bucket = by_cwd.remove(&key)?;
+        .filter_map(|(key, bucket)| {
             if bucket.rows.is_empty() {
                 return None;
             }
@@ -189,7 +204,105 @@ pub fn derive_sidebar(state: &ClientState) -> SidebarViewModel {
         })
         .collect();
 
-    SidebarViewModel { groups }
+    SidebarViewModel {
+        pinned: pinned_rows,
+        groups,
+    }
+}
+
+fn make_row(
+    s: &SessionSummary,
+    live_id: Option<&str>,
+    pending_id: Option<&str>,
+    is_pinned: bool,
+) -> SessionRow {
+    let kind = if live_id == Some(s.session_id.as_str()) {
+        SessionRowKind::LiveTarget
+    } else if pending_id == Some(s.session_id.as_str()) {
+        SessionRowKind::PendingTarget
+    } else {
+        SessionRowKind::Listed
+    };
+    SessionRow {
+        session_id: s.session_id.clone(),
+        label: session_label(s),
+        kind,
+        message_count: s.message_count,
+        is_pinned,
+        cwd_hint: folder_group_label(&s.cwd),
+    }
+}
+
+fn effective_timestamp(
+    session_id: &str,
+    summary: Option<&SessionSummary>,
+    prefs: &SidebarPrefs,
+) -> u64 {
+    if let Some(ms) = prefs.session_last_used_at_ms.get(session_id) {
+        return *ms;
+    }
+    if let Some(s) = summary {
+        if let Some(ms) = parse_timestamp_ms(s.modified_at.as_deref()) {
+            return ms;
+        }
+        if let Some(ms) = parse_timestamp_ms(s.created_at.as_deref()) {
+            return ms;
+        }
+    }
+    0
+}
+
+fn parse_timestamp_ms(value: Option<&str>) -> Option<u64> {
+    let s = value?;
+    if let Ok(ms) = s.parse::<u64>() {
+        return Some(ms);
+    }
+    // ISO-8601 strings sort lexicographically; use as pseudo-ms for ordering.
+    Some(simple_string_rank(s))
+}
+
+fn simple_string_rank(s: &str) -> u64 {
+    s.bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+}
+
+fn sort_rows_by_mru(
+    rows: &mut [SessionRow],
+    summaries: &HashMap<&str, &SessionSummary>,
+    prefs: &SidebarPrefs,
+) {
+    rows.sort_by(|a, b| {
+        let ta = effective_timestamp(
+            &a.session_id,
+            summaries.get(a.session_id.as_str()).copied(),
+            prefs,
+        );
+        let tb = effective_timestamp(
+            &b.session_id,
+            summaries.get(b.session_id.as_str()).copied(),
+            prefs,
+        );
+        tb.cmp(&ta).then_with(|| a.session_id.cmp(&b.session_id))
+    });
+}
+
+fn group_mru_rank(
+    bucket: &GroupBucket,
+    summaries: &HashMap<&str, &SessionSummary>,
+    prefs: &SidebarPrefs,
+) -> u64 {
+    bucket
+        .rows
+        .iter()
+        .map(|r| {
+            effective_timestamp(
+                &r.session_id,
+                summaries.get(r.session_id.as_str()).copied(),
+                prefs,
+            )
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 fn cwd_key(cwd: &str) -> String {
@@ -214,7 +327,7 @@ fn folder_group_label(cwd: &str) -> String {
         .unwrap_or_else(|| abbreviate_cwd(cwd))
 }
 
-fn session_label(s: &piko_protocol::SessionSummary) -> String {
+fn session_label(s: &SessionSummary) -> String {
     if let Some(name) = &s.name {
         return name.clone();
     }

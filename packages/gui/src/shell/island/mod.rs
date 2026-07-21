@@ -10,9 +10,10 @@ mod state;
 mod state_tests;
 mod viewport;
 
-pub use focus::{FocusCycleDir, IslandFocusRing, focus_order};
+pub use focus::{FocusCycleDir, FocusReason, IslandFocusRing, focus_order};
 pub use msg::IslandMsg;
 pub use panel::{IslandHeader, IslandPanel};
 pub use phase::IslandSessionPhase;
 #[allow(unused_imports)] // public override API for islands
 pub use state::{IslandBody, IslandMedia, IslandPlaceholder};
+pub use viewport::IslandContentViewport;

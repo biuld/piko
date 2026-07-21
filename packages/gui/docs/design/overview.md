@@ -76,6 +76,23 @@ The hostd executable is a child process, as it is for the TUI.
 Each Workbench island is an independent GPUI Entity. Cross-island actions use
 directed `IslandMsg` routing through `DesktopApp`, not a full Workbench rebuild.
 
+### Island focus handoff
+
+Chrome ownership (`IslandFocusRing` + focus ring borders) is separate from
+keyboard placement:
+
+- **Activate** (`DesktopApp::focus_island`: Tab, palette focus, overlay restore):
+  host sets chrome, then calls `island.take_keyboard_focus(Activate)`. Default
+  implementation focuses the island `Focusable` handle. Composer overrides to
+  also focus its `InputState`.
+- **Claimed** (`IslandMsg::ClaimFocus` after pointer down): the island already
+  focused a handle or inner input; host updates chrome only and must not call
+  Activate / re-focus the island chrome handle (that would steal from Inputs
+  such as Sessions search).
+
+Sessions search focuses `InputState` on click, then emits ClaimFocus. Tab into
+Sessions Activates the island chrome handle, not the search field.
+
 ## 4. GPUI Application Structure
 
 Application startup performs:

@@ -59,6 +59,7 @@ pub enum PikoIcon {
     PanelRight,
     /// TitleBar Agents/Tree toggle — filled pane when the column is docked.
     PanelRightFilled,
+    Pin,
 }
 
 impl IconNamed for PikoIcon {
@@ -91,6 +92,7 @@ impl IconNamed for PikoIcon {
             Self::PanelLeftFilled => "icons/panel-left-filled.svg",
             Self::PanelRight => "icons/panel-right.svg",
             Self::PanelRightFilled => "icons/panel-right-filled.svg",
+            Self::Pin => "icons/pin.svg",
         }
         .into()
     }

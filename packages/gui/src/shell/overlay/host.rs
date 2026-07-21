@@ -20,19 +20,47 @@ impl OverlayHost {
         if self.host_prompt.is_some() {
             return Some(OverlayLayer::HostPrompt);
         }
-        if let Some(kind) = self.local_confirm {
-            return Some(OverlayLayer::LocalConfirm(kind));
+        if let Some(kind) = &self.local_confirm {
+            return Some(OverlayLayer::LocalConfirm(kind.clone()));
         }
-        if let Some(kind) = self.transient {
-            return Some(OverlayLayer::Transient(kind));
+        if let Some(kind) = &self.transient {
+            return Some(OverlayLayer::Transient(kind.clone()));
         }
         None
     }
 
     pub fn is_command_palette_open(&self) -> bool {
-        self.transient == Some(TransientKind::CommandPalette)
+        matches!(self.transient, Some(TransientKind::CommandPalette))
             && self.host_prompt.is_none()
             && self.local_confirm.is_none()
+    }
+
+    pub fn try_open_session_delete_confirm(
+        &mut self,
+        session_id: String,
+        display_name: String,
+    ) -> bool {
+        if self.host_prompt.is_some() {
+            return false;
+        }
+        self.transient = None;
+        self.local_confirm = Some(LocalConfirmKind::DeleteSession {
+            session_id,
+            display_name,
+        });
+        true
+    }
+
+    pub fn try_open_session_rename(&mut self, session_id: String, initial_name: String) -> bool {
+        if self.host_prompt.is_some() {
+            return false;
+        }
+        self.local_confirm = None;
+        self.transient = Some(TransientKind::SessionRename {
+            session_id,
+            initial_name,
+        });
+        true
     }
 
     /// Sync HostPrompt from Core front; returns true when presentation changed.

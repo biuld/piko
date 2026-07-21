@@ -1,8 +1,11 @@
 //! Keyboard focus ownership across Workbench islands.
 //!
-//! `IslandFocusRing::set_focused` is driven today by
-//! `DesktopApp::dispatch_island_msg`; cycling / restore land once Tab
-//! navigation and sheet dismissal are wired to the island Entities.
+//! Chrome ownership ([`IslandFocusRing`]) is separate from keyboard placement.
+//! `DesktopApp` sets the ring / chrome border, then either:
+//! - [`FocusReason::Activate`]: calls `take_keyboard_focus` on the island Entity
+//!   (Tab, palette focus, overlay restore).
+//! - [`FocusReason::Claimed`]: pointer path — island already focused a handle or
+//!   input; host updates chrome only and must not steal window focus.
 
 use crate::shell::workbench::IslandId;
 
@@ -10,6 +13,15 @@ use crate::shell::workbench::IslandId;
 pub enum FocusCycleDir {
     Next,
     Prev,
+}
+
+/// Why chrome is handing keyboard focus to an island.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusReason {
+    /// Entered the island (Tab, command, restore). Island places the caret.
+    Activate,
+    /// Pointer already focused something inside the island; host must not steal.
+    Claimed,
 }
 
 /// Which island currently owns keyboard focus.

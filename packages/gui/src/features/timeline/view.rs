@@ -82,6 +82,17 @@ impl TimelineIsland {
         }
     }
 
+    pub fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        if reason == crate::shell::FocusReason::Activate {
+            window.focus(&self.focus_handle);
+        }
+    }
+
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Timeline, msg, window, cx);
     }

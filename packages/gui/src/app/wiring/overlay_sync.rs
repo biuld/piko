@@ -187,7 +187,7 @@ impl DesktopApp {
         }
     }
 
-    fn save_overlay_focus_if_needed(&mut self, id: IslandId) {
+    pub(crate) fn save_overlay_focus_if_needed(&mut self, id: IslandId) {
         if !self.overlay.focus_saved {
             self.island_focus.save_and_focus(id);
             self.overlay.focus_saved = true;
@@ -213,23 +213,25 @@ impl DesktopApp {
     ) -> Option<AnyElement> {
         let layer = self.overlay.visible_layer()?;
         match layer {
-            crate::shell::OverlayLayer::HostPrompt => {
-                Some(self.render_host_prompt_overlay(window, cx))
-            }
-            crate::shell::OverlayLayer::LocalConfirm(LocalConfirmKind::QuitBusy) => {
-                Some(self.render_quit_confirm_overlay(cx))
-            }
-            crate::shell::OverlayLayer::Transient(TransientKind::CommandPalette) => {
-                Some(self.render_palette_overlay(window, cx))
-            }
+            crate::shell::OverlayLayer::HostPrompt => Some(self.render_host_prompt_overlay(cx)),
+            crate::shell::OverlayLayer::LocalConfirm(kind) => match kind {
+                LocalConfirmKind::QuitBusy => Some(self.render_quit_confirm_overlay(cx)),
+                LocalConfirmKind::DeleteSession {
+                    session_id,
+                    display_name,
+                } => Some(self.render_delete_session_confirm_overlay(session_id, display_name, cx)),
+            },
+            crate::shell::OverlayLayer::Transient(kind) => match kind {
+                TransientKind::CommandPalette => Some(self.render_palette_overlay(window, cx)),
+                TransientKind::SessionRename {
+                    session_id,
+                    initial_name: _,
+                } => Some(self.render_session_rename_overlay(session_id, cx)),
+            },
         }
     }
 
-    fn render_host_prompt_overlay(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_host_prompt_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let front = self.overlay.host_prompt.clone().expect("host prompt layer");
         let Some(session) = self.bridge_state().live_session.clone() else {
             return div().into_any_element();
@@ -371,6 +373,148 @@ impl DesktopApp {
                 style: OverlayPanelStyle::Palette,
             },
             panel,
+            move |_, window, cx| {
+                if let Some(view) = entity_backdrop.upgrade() {
+                    view.update(cx, |this, cx| {
+                        this.overlay.close_transient();
+                        this.restore_overlay_focus(window, cx);
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_delete_session_confirm_overlay(
+        &mut self,
+        session_id: String,
+        display_name: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let entity = cx.entity().downgrade();
+        let sid = session_id.clone();
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(text(TextRole::Body).child(crate::t!(
+                "island.sessions.delete.body",
+                name = display_name
+            )))
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .justify_end()
+                    .child({
+                        let entity = entity.clone();
+                        Button::new("delete-cancel")
+                            .label(crate::t!("dialog.action.cancel"))
+                            .on_click(move |_, window, cx| {
+                                if let Some(view) = entity.upgrade() {
+                                    view.update(cx, |this, cx| {
+                                        this.overlay.close_local_confirm();
+                                        this.restore_overlay_focus(window, cx);
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                    })
+                    .child({
+                        let entity = entity.clone();
+                        let sid = sid.clone();
+                        Button::new("delete-confirm")
+                            .danger()
+                            .label(crate::t!("island.sessions.delete.confirm"))
+                            .on_click(move |_, window, cx| {
+                                if let Some(view) = entity.upgrade() {
+                                    view.update(cx, |this, cx| {
+                                        this.confirm_session_delete(&sid, cx);
+                                        this.restore_overlay_focus(window, cx);
+                                    });
+                                }
+                            })
+                    }),
+            );
+        let entity_backdrop = cx.entity().downgrade();
+        render_overlay_layer(
+            OverlayPanelSpec {
+                title: crate::t!("island.sessions.delete.title").into(),
+                width: px(420.),
+                backdrop_dismiss: true,
+                style: OverlayPanelStyle::Dialog,
+            },
+            body,
+            move |_, window, cx| {
+                if let Some(view) = entity_backdrop.upgrade() {
+                    view.update(cx, |this, cx| {
+                        this.overlay.close_local_confirm();
+                        this.restore_overlay_focus(window, cx);
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_session_rename_overlay(
+        &mut self,
+        session_id: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let entity = cx.entity().downgrade();
+        let sid = session_id.clone();
+        let input = self
+            .session_rename_input
+            .clone()
+            .expect("rename input entity");
+        let body = div().flex().flex_col().gap_3().child(input.clone()).child(
+            div()
+                .flex()
+                .gap_2()
+                .justify_end()
+                .child({
+                    let entity = entity.clone();
+                    Button::new("rename-cancel")
+                        .label(crate::t!("dialog.action.cancel"))
+                        .on_click(move |_, window, cx| {
+                            if let Some(view) = entity.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    this.overlay.close_transient();
+                                    this.restore_overlay_focus(window, cx);
+                                    cx.notify();
+                                });
+                            }
+                        })
+                })
+                .child({
+                    let entity = entity.clone();
+                    let sid = sid.clone();
+                    let input = input.clone();
+                    Button::new("rename-save")
+                        .primary()
+                        .label(crate::t!("island.sessions.rename.save"))
+                        .on_click(move |_, window, cx| {
+                            let name = input.read(cx).value().to_string();
+                            if let Some(view) = entity.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    this.confirm_session_rename(&sid, name, window, cx);
+                                });
+                            }
+                        })
+                }),
+        );
+        let entity_backdrop = cx.entity().downgrade();
+        render_overlay_layer(
+            OverlayPanelSpec {
+                title: crate::t!("island.sessions.rename.title").into(),
+                width: px(420.),
+                backdrop_dismiss: true,
+                style: OverlayPanelStyle::Dialog,
+            },
+            body,
             move |_, window, cx| {
                 if let Some(view) = entity_backdrop.upgrade() {
                     view.update(cx, |this, cx| {

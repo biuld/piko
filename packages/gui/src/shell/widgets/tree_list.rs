@@ -6,10 +6,16 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::menu::ContextMenuExt;
+use gpui_component::menu::PopupMenu;
+use std::rc::Rc;
 
 use crate::theme::{metrics, tokens};
 
 pub type TreeClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+pub type TreeContextMenuBuilder =
+    Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
 /// Mutually exclusive content for the fixed trailing accessory rail.
 pub enum TreeRowAccessory {
@@ -38,6 +44,8 @@ pub struct TreeRowSpec {
     pub detail: Option<AnyElement>,
     /// Centered read-only metadata or action in the fixed accessory rail.
     pub accessory: Option<TreeRowAccessory>,
+    /// Right-click menu for session rows and similar.
+    pub context_menu: Option<TreeContextMenuBuilder>,
 }
 
 /// Depth indent slots: one 16 px column per ancestor level.
@@ -78,7 +86,7 @@ pub fn render_tree_row(
     spec: TreeRowSpec,
     on_activate: TreeClickHandler,
     on_toggle: Option<TreeClickHandler>,
-) -> impl IntoElement {
+) -> AnyElement {
     let m = metrics();
     let t = tokens();
     let mute = crate::theme::PikoTokens::hsla(t.muted_fg);
@@ -94,7 +102,7 @@ pub fn render_tree_row(
     });
     let semibold = spec.selected || spec.emphasized;
 
-    div()
+    let row = div()
         .id(row_id)
         .h(px(32.))
         .w_full()
@@ -162,5 +170,12 @@ pub fn render_tree_row(
                     }
                 })),
         )
-        .on_click(move |ev, window, cx| on_activate(ev, window, cx))
+        .on_click(move |ev, window, cx| on_activate(ev, window, cx));
+
+    if let Some(build_menu) = spec.context_menu {
+        row.context_menu(move |menu, window, cx| build_menu(menu, window, cx))
+            .into_any_element()
+    } else {
+        row.into_any_element()
+    }
 }
