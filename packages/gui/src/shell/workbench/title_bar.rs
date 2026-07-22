@@ -7,7 +7,8 @@ use gpui_component::button::{Button, ButtonVariants};
 
 use crate::app::desktop_app::{DesktopApp, OpenSettings, ToggleRightColumn, ToggleSessions};
 use crate::theme::{
-    IconSize, PanelSide, PikoIcon, PikoTokens, icon, label_text, metrics, panel_toggle_icon, tokens,
+    ChromeIcon, ChromeTokens, IconSize, PanelSide, icon, label_text, metrics, panel_toggle_icon,
+    tokens,
 };
 
 pub fn render_title_bar(
@@ -95,9 +96,9 @@ pub fn render_title_bar(
 pub(crate) fn settings_gear(active: bool, entity: WeakEntity<DesktopApp>) -> Button {
     let t = tokens();
     let color = if active {
-        PikoTokens::hsla(t.fg)
+        ChromeTokens::hsla(t.fg)
     } else {
-        PikoTokens::hsla(t.muted_fg)
+        ChromeTokens::hsla(t.muted_fg)
     };
     let tooltip = if active {
         crate::t!("chrome.action.settings.close")
@@ -105,7 +106,7 @@ pub(crate) fn settings_gear(active: bool, entity: WeakEntity<DesktopApp>) -> But
         crate::t!("chrome.action.settings")
     };
     Button::new("title-toggle-settings")
-        .icon(icon(PikoIcon::Settings, IconSize::Label, color))
+        .icon(icon(ChromeIcon::Settings, IconSize::Label, color))
         .tooltip(tooltip)
         .ghost()
         .small()
@@ -127,7 +128,7 @@ fn panel_toggle(
     tooltip: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Button {
-    let color = PikoTokens::hsla(tokens().muted_fg);
+    let color = ChromeTokens::hsla(tokens().muted_fg);
     Button::new(id)
         .icon(panel_toggle_icon(side, docked, color))
         .tooltip(tooltip)

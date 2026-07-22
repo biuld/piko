@@ -1,4 +1,4 @@
-//! Assemble the Workbench Primary Surface frame (TitleBar + body + StatusBar).
+//! Assemble the Workbench Archipelago frame (TitleBar + body + StatusBar).
 
 use gpui::*;
 

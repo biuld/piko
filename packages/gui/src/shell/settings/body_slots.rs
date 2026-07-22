@@ -1,9 +1,10 @@
-//! Settings body slots — nav island + panel island chrome (no section forms).
+//! Settings body: horizontal Nav | Panel island workspaces.
 
 use gpui::*;
 
-use crate::theme::{island, metrics};
+use crate::theme::metrics;
 
+/// Lay out the two Settings islands (already `IslandPanel` chrome + focus ring).
 pub fn body_slots(nav: impl IntoElement, panel: impl IntoElement) -> impl IntoElement {
     let m = metrics();
 
@@ -16,30 +17,22 @@ pub fn body_slots(nav: impl IntoElement, panel: impl IntoElement) -> impl IntoEl
         .flex()
         .flex_row()
         .gap(m.island_gutter)
-        .child(render_nav_island(nav))
-        .child(render_panel_island(panel))
-}
-
-fn render_nav_island(nav: impl IntoElement) -> impl IntoElement {
-    island()
-        .id("settings-nav-island")
-        .w(px(220.))
-        .flex_shrink_0()
-        .h_full()
-        .flex()
-        .flex_col()
-        .overflow_hidden()
-        .child(nav)
-}
-
-fn render_panel_island(panel: impl IntoElement) -> impl IntoElement {
-    island()
-        .id("settings-panel-island")
-        .flex_1()
-        .min_w(px(0.))
-        .h_full()
-        .flex()
-        .flex_col()
-        .overflow_hidden()
-        .child(panel)
+        .child(
+            div()
+                .id("settings-nav-slot")
+                .w(px(220.))
+                .flex_shrink_0()
+                .h_full()
+                .min_h(px(0.))
+                .child(nav),
+        )
+        .child(
+            div()
+                .id("settings-panel-slot")
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .min_h(px(0.))
+                .child(panel),
+        )
 }

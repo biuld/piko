@@ -7,24 +7,26 @@ use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
 
 use crate::bridge::ClientBridge;
-use crate::features::{AgentsIsland, ComposerIsland, SessionsIsland, TimelineIsland, TreeIsland};
 use crate::features::{
-    CommandPalette, InteractionForm, SettingsSection,
-    settings::{render_nav, render_panel},
+    AgentsIsland, ComposerIsland, SETTINGS_FOCUS_ORDER, SessionsIsland, SettingsIslandId,
+    SettingsNavIsland, SettingsPanelIsland, TimelineIsland, TreeIsland,
 };
+use crate::features::{CommandPalette, InteractionForm, SettingsSection};
 use crate::shell::{
-    FocusCycleDir, IslandFocusRing, OverlayHost, mount_settings_frame, mount_workbench_frame,
+    ALL_ISLAND_IDS, FocusCycleDir, IslandFocusRing, IslandFocusTable, IslandId, OverlayHost,
+    focus_order, mount_settings_frame, mount_workbench_frame,
 };
 use crate::theme::tokens;
 use gpui_component::Root;
 use piko_client_core::{ClientIntent, ClientState};
 use piko_protocol::SessionListScope;
 
+use super::archipelago::{AppArchipelago, ArchipelagoId};
 use super::layout_state::LayoutState;
-use super::primary_surface::PrimarySurface;
 use super::submit_recovery::{FirstSubmitRecovery, SubmitRecovery};
 use super::timeline_follow::TimelineContentFp;
 use super::ux_prefs::GuiUxPrefs;
+use super::wiring::archipelago_nav::SettingsFocusRing;
 use crate::config::HostRuntimeSettings;
 
 actions!(
@@ -82,13 +84,21 @@ pub struct DesktopApp {
     pub(crate) host_config_fingerprint: Option<String>,
     pub(crate) host_runtime: HostRuntimeSettings,
     pub(crate) island_focus: IslandFocusRing,
+    /// Chrome focus registry ([`IslandView`] slots). Prefer this over matching
+    /// on concrete island Entities for ring / keyboard handoff.
+    pub(crate) island_focus_table: IslandFocusTable<IslandId>,
+    /// Settings archipelago body islands (Nav | Panel).
+    pub(crate) settings_nav: Entity<SettingsNavIsland>,
+    pub(crate) settings_panel: Entity<SettingsPanelIsland>,
+    pub(crate) settings_focus: SettingsFocusRing,
+    pub(crate) settings_focus_table: IslandFocusTable<SettingsIslandId>,
     pub(crate) fp_sessions: Option<String>,
     pub(crate) fp_timeline: Option<String>,
     pub(crate) fp_composer: Option<String>,
     pub(crate) fp_agents: Option<String>,
     pub(crate) fp_tree: Option<String>,
     pub(crate) last_chrome_fp: Option<String>,
-    pub(crate) primary_surface: PrimarySurface,
+    pub(crate) archipelago: AppArchipelago,
     pub(crate) last_settings_section: SettingsSection,
     pub(crate) pinned_session_ids: HashSet<String>,
     pub(crate) session_last_used_at_ms: HashMap<String, u64>,
@@ -129,7 +139,45 @@ impl DesktopApp {
         let timeline = cx.new(|cx| TimelineIsland::new(host.clone(), cx));
         let composer = cx.new(|cx| ComposerIsland::new(host.clone(), composer_input.clone(), cx));
         let agents = cx.new(|cx| AgentsIsland::new(host.clone(), cx));
-        let tree = cx.new(|cx| TreeIsland::new(host, cx));
+        let tree = cx.new(|cx| TreeIsland::new(host.clone(), cx));
+
+        let mut island_focus_table = IslandFocusTable::new();
+        island_focus_table.register(IslandId::Sessions, sessions.clone());
+        island_focus_table.register(IslandId::Timeline, timeline.clone());
+        island_focus_table.register(IslandId::Composer, composer.clone());
+        island_focus_table.register(IslandId::Agents, agents.clone());
+        island_focus_table.register(IslandId::Tree, tree.clone());
+        // Fail fast if a focusable island is missing from the chrome table.
+        island_focus_table.assert_covers(&ALL_ISLAND_IDS);
+        debug_assert_eq!(
+            focus_order(|_| true).as_slice(),
+            ALL_ISLAND_IDS.as_slice(),
+            "focus_order must list every IslandId in stable Tab sequence"
+        );
+
+        let section0 = SettingsSection::default();
+        let settings_nav = cx.new(|cx| SettingsNavIsland::new(host.clone(), section0, cx));
+        let settings_panel = cx.new(|cx| SettingsPanelIsland::new(host.clone(), section0, cx));
+        let mut settings_focus_table = IslandFocusTable::new();
+        settings_focus_table.register(SettingsIslandId::Nav, settings_nav.clone());
+        settings_focus_table.register(SettingsIslandId::Panel, settings_panel.clone());
+        settings_focus_table.assert_covers(
+            crate::app::archipelago::settings_workspace()
+                .focus_order
+                .as_slice(),
+        );
+        debug_assert_eq!(
+            crate::app::archipelago::settings_workspace()
+                .focus_order
+                .as_slice(),
+            SETTINGS_FOCUS_ORDER.as_slice(),
+        );
+        debug_assert_eq!(
+            crate::app::archipelago::workbench_workspace()
+                .focus_order
+                .as_slice(),
+            ALL_ISLAND_IDS.as_slice(),
+        );
 
         let entity = cx.entity().downgrade();
         cx.spawn_in(window, async move |_window, cx| {
@@ -140,7 +188,7 @@ impl DesktopApp {
                         view.update(cx, |this, cx| {
                             let before_err = this.bridge.state().last_error.clone();
                             if this.bridge.poll() {
-                                this.sync_gui_config();
+                                this.sync_gui_config(cx);
                                 this.sync_host_runtime_config();
                                 this.sync_command_catalog(cx);
                                 this.on_bridge_polled(before_err);
@@ -199,13 +247,18 @@ impl DesktopApp {
             host_config_fingerprint: None,
             host_runtime: HostRuntimeSettings::default(),
             island_focus: IslandFocusRing::default(),
+            island_focus_table,
+            settings_nav,
+            settings_panel,
+            settings_focus: SettingsFocusRing::default(),
+            settings_focus_table,
             fp_sessions: None,
             fp_timeline: None,
             fp_composer: None,
             fp_agents: None,
             fp_tree: None,
             last_chrome_fp: None,
-            primary_surface: PrimarySurface::Workbench,
+            archipelago: AppArchipelago::new(ArchipelagoId::Workbench),
             last_settings_section: SettingsSection::default(),
             pinned_session_ids: HashSet::new(),
             session_last_used_at_ms: HashMap::new(),
@@ -222,7 +275,7 @@ impl DesktopApp {
             self.layout.agents_open,
             self.layout.tree_open,
             self.island_focus.focused(),
-            self.primary_surface,
+            self.archipelago.active(),
         )
     }
 
@@ -245,7 +298,7 @@ impl DesktopApp {
         &mut self.bridge
     }
 
-    fn sync_gui_config(&mut self) {
+    fn sync_gui_config(&mut self, cx: &mut Context<Self>) {
         let Some(value) = self.bridge.gui_config().cloned() else {
             return;
         };
@@ -262,6 +315,11 @@ impl DesktopApp {
                 self.layout.tree_open = settings.right_column_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
                 self.ux_prefs.hide_thinking_block = settings.hide_thinking_block;
+                let palette = super::ux_prefs::parse_chrome_palette(&settings.chrome_palette);
+                if self.ux_prefs.chrome_palette != palette {
+                    self.ux_prefs.chrome_palette = palette;
+                    piko_chrome::apply_chrome_theme(cx, palette);
+                }
                 self.sync_session_prefs_from_gui(&settings);
                 self.gui_config_fingerprint = Some(fingerprint);
             }
@@ -278,6 +336,8 @@ impl DesktopApp {
             session_open: self.layout.sessions_open,
             right_column_open: self.layout.right_column_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
+            chrome_palette: super::ux_prefs::chrome_palette_key(self.ux_prefs.chrome_palette)
+                .to_string(),
             hide_thinking_block: self.ux_prefs.hide_thinking_block,
             pinned_session_ids: Vec::new(),
             session_last_used_at_ms: HashMap::new(),
@@ -338,13 +398,16 @@ impl Render for DesktopApp {
             .bg(tokens().canvas_rgba())
             .text_color(tokens().fg_rgba());
 
-        root = match self.primary_surface {
-            PrimarySurface::Workbench => mount_workbench_frame(root, self, window, cx),
-            PrimarySurface::Settings { section } => {
+        root = match self.archipelago.active() {
+            ArchipelagoId::Workbench => mount_workbench_frame(root, self, window, cx),
+            ArchipelagoId::Settings => {
                 let entity = cx.entity().downgrade();
-                let nav = render_nav(section, entity.clone());
-                let panel = render_panel(section, self, entity.clone());
-                mount_settings_frame(root, entity, nav, panel)
+                mount_settings_frame(
+                    root,
+                    entity,
+                    self.settings_nav.clone(),
+                    self.settings_panel.clone(),
+                )
             }
         };
 
@@ -373,13 +436,21 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.primary_surface.is_workbench() {
-            return;
+        match self.archipelago.active() {
+            ArchipelagoId::Workbench => {
+                // Visibility-pruned Tab order; base membership comes from workspace.
+                let visible = self.visible_focus_islands();
+                self.island_focus.cycle(FocusCycleDir::Next, &visible);
+                let id = self.island_focus.focused();
+                self.focus_island(id, window, cx);
+            }
+            ArchipelagoId::Settings => {
+                let order = super::archipelago::settings_workspace().focus_order;
+                self.settings_focus.cycle(FocusCycleDir::Next, &order);
+                let id = self.settings_focus.focused();
+                self.focus_settings_island(id, window, cx);
+            }
         }
-        let visible = self.visible_focus_islands();
-        self.island_focus.cycle(FocusCycleDir::Next, &visible);
-        let id = self.island_focus.focused();
-        self.focus_island(id, window, cx);
         cx.notify();
     }
 
@@ -389,13 +460,20 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.primary_surface.is_workbench() {
-            return;
+        match self.archipelago.active() {
+            ArchipelagoId::Workbench => {
+                let visible = self.visible_focus_islands();
+                self.island_focus.cycle(FocusCycleDir::Prev, &visible);
+                let id = self.island_focus.focused();
+                self.focus_island(id, window, cx);
+            }
+            ArchipelagoId::Settings => {
+                let order = super::archipelago::settings_workspace().focus_order;
+                self.settings_focus.cycle(FocusCycleDir::Prev, &order);
+                let id = self.settings_focus.focused();
+                self.focus_settings_island(id, window, cx);
+            }
         }
-        let visible = self.visible_focus_islands();
-        self.island_focus.cycle(FocusCycleDir::Prev, &visible);
-        let id = self.island_focus.focused();
-        self.focus_island(id, window, cx);
         cx.notify();
     }
 }

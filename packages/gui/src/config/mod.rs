@@ -32,6 +32,9 @@ pub struct GuiSettings {
     pub right_column_open: bool,
     #[serde(default)]
     pub reduced_motion: bool,
+    /// Chrome palette: `"dark"` (default) or `"light"`.
+    #[serde(default = "default_chrome_palette")]
+    pub chrome_palette: String,
     /// GUI-only: hide thinking/reasoning blocks in the timeline. Independent
     /// of the TUI's `[tui].hide_thinking_block` — see
     /// docs/settings-ownership-design.md.
@@ -51,6 +54,7 @@ impl Default for GuiSettings {
             session_open: true,
             right_column_open: true,
             reduced_motion: false,
+            chrome_palette: default_chrome_palette(),
             hide_thinking_block: false,
             pinned_session_ids: Vec::new(),
             session_last_used_at_ms: std::collections::HashMap::new(),
@@ -68,6 +72,10 @@ fn default_right_column_width() -> f32 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_chrome_palette() -> String {
+    "dark".into()
 }
 
 #[cfg(test)]

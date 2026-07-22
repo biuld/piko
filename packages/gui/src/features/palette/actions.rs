@@ -98,7 +98,10 @@ impl DesktopApp {
                 self.focus_or_open_right_column(window, cx);
             }
             LocalCommandId::OpenSettings => {
-                if self.primary_surface.is_workbench() {
+                if self
+                    .archipelago
+                    .is_active(crate::app::archipelago::ArchipelagoId::Workbench)
+                {
                     self.action_open_settings(&OpenSettings, window, cx);
                 }
             }

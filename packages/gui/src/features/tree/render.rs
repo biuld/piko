@@ -6,7 +6,9 @@ use crate::shell::{
     IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
     TreeRowSpec, render_tree_list,
 };
-use crate::theme::{PikoIcon, PikoTokens, RoleAccent, row_leading, tokens};
+use crate::theme::{
+    ChromeIcon, ChromeTokens, DomainRole, RoleAccent, domain_role_hsla, row_leading, tokens,
+};
 
 use super::vm::{ConversationTreeViewModel, TreeEntryKind, TreeNode};
 
@@ -24,7 +26,7 @@ pub fn render_tree_panel(
         IslandSessionPhase::Idle => IslandPanel::empty(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.empty_no_session.title"))
-                .piko_icon(PikoIcon::Network)
+                .chrome_icon(ChromeIcon::Network)
                 .subtitle(crate::t!("island.tree.empty_no_session.subtitle")),
         )
         .header(header)
@@ -32,14 +34,14 @@ pub fn render_tree_panel(
         IslandSessionPhase::Loading => IslandPanel::loading(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.loading"))
-                .piko_icon(PikoIcon::CircleDashed),
+                .chrome_icon(ChromeIcon::CircleDashed),
         )
         .header(header)
         .focused(focused),
         IslandSessionPhase::Ready if tree.nodes.is_empty() => IslandPanel::empty(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.empty.title"))
-                .piko_icon(PikoIcon::Network)
+                .chrome_icon(ChromeIcon::Network)
                 .subtitle(crate::t!("island.tree.empty.subtitle")),
         )
         .header(header)
@@ -98,6 +100,7 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
         expanded: node.expanded,
         selected: false,
         emphasized: node.is_leaf || previewed || node.on_path,
+        keyboard_focused: false,
         show_guides: true,
         label: SharedString::from(node.label.clone()),
         label_color: Some(label_color),
@@ -108,29 +111,29 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
     }
 }
 
-fn tree_kind_icon(kind: TreeEntryKind) -> PikoIcon {
+fn tree_kind_icon(kind: TreeEntryKind) -> ChromeIcon {
     match kind {
-        TreeEntryKind::User => PikoIcon::User,
-        TreeEntryKind::Assistant => PikoIcon::Bot,
-        TreeEntryKind::Tool => PikoIcon::Wrench,
-        TreeEntryKind::Model => PikoIcon::Cpu,
-        TreeEntryKind::Thinking => PikoIcon::Brain,
-        TreeEntryKind::Branch => PikoIcon::GitBranch,
-        TreeEntryKind::Compaction => PikoIcon::Layers,
-        TreeEntryKind::Other => PikoIcon::Circle,
+        TreeEntryKind::User => ChromeIcon::User,
+        TreeEntryKind::Assistant => ChromeIcon::Bot,
+        TreeEntryKind::Tool => ChromeIcon::Wrench,
+        TreeEntryKind::Model => ChromeIcon::Cpu,
+        TreeEntryKind::Thinking => ChromeIcon::Brain,
+        TreeEntryKind::Branch => ChromeIcon::GitBranch,
+        TreeEntryKind::Compaction => ChromeIcon::Layers,
+        TreeEntryKind::Other => ChromeIcon::Circle,
     }
 }
 
 fn tree_kind_color(kind: TreeEntryKind) -> gpui::Hsla {
     let t = tokens();
     match kind {
-        TreeEntryKind::User => t.role_accent_hsla(RoleAccent::User),
-        TreeEntryKind::Assistant => t.role_accent_hsla(RoleAccent::Assistant),
-        TreeEntryKind::Tool => t.role_accent_hsla(RoleAccent::Tool),
-        TreeEntryKind::Thinking => t.role_accent_hsla(RoleAccent::Thinking),
+        TreeEntryKind::User => domain_role_hsla(DomainRole::User),
+        TreeEntryKind::Assistant => domain_role_hsla(DomainRole::Assistant),
+        TreeEntryKind::Tool => domain_role_hsla(DomainRole::Tool),
+        TreeEntryKind::Thinking => domain_role_hsla(DomainRole::Thinking),
         TreeEntryKind::Model | TreeEntryKind::Branch | TreeEntryKind::Compaction => {
-            t.role_accent_hsla(RoleAccent::System)
+            domain_role_hsla(DomainRole::System)
         }
-        TreeEntryKind::Other => PikoTokens::hsla(t.muted_fg),
+        TreeEntryKind::Other => ChromeTokens::hsla(t.muted_fg),
     }
 }

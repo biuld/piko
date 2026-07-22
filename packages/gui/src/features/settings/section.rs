@@ -1,6 +1,6 @@
 //! Settings IA — section identity and i18n keys.
 
-/// Active section within the Settings Primary Surface.
+/// Active section within the Settings Archipelago.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsSection {
     #[default]
@@ -35,6 +35,17 @@ impl SettingsSection {
             Self::Advanced => "settings.section.advanced",
         }
     }
+
+    /// Move selection by `delta` positions (wraps). Test/helper only —
+    /// production nav cursor uses `piko_chrome::ListKeyboard`.
+    #[cfg(test)]
+    pub fn offset(self, delta: isize) -> Self {
+        let all = Self::ALL;
+        let ix = all.iter().position(|s| *s == self).unwrap_or(0) as isize;
+        let n = all.len() as isize;
+        let next = (ix + delta).rem_euclid(n) as usize;
+        all[next]
+    }
 }
 
 #[cfg(test)]
@@ -47,5 +58,18 @@ mod tests {
         for section in SettingsSection::ALL {
             assert!(keys.insert(section.i18n_key()));
         }
+    }
+
+    #[test]
+    fn section_offset_wraps() {
+        assert_eq!(
+            SettingsSection::General.offset(-1),
+            SettingsSection::Advanced
+        );
+        assert_eq!(
+            SettingsSection::Advanced.offset(1),
+            SettingsSection::General
+        );
+        assert_eq!(SettingsSection::General.offset(1), SettingsSection::Account);
     }
 }

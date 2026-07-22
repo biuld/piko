@@ -1,12 +1,12 @@
 //! GPUI application root: DesktopApp, actions, host wiring, persist.
 
+pub mod archipelago;
 mod composer_host;
 pub mod desktop_app;
 mod island_refresh;
 pub mod layout_state;
 pub mod model_cycle;
 mod notifications;
-pub mod primary_surface;
 pub(crate) mod quit;
 pub(crate) mod quit_busy;
 mod session_prefs;

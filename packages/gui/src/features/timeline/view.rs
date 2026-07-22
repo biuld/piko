@@ -6,7 +6,9 @@ use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
-use crate::shell::{IslandId, IslandMsg, IslandPanel, IslandPlaceholder};
+use crate::shell::{
+    IslandId, IslandMsg, IslandPanel, IslandPlaceholder, IslandView, activate_focus_handle,
+};
 
 use super::render::render_timeline_body;
 use super::vm::TimelineViewModel;
@@ -75,24 +77,6 @@ impl TimelineIsland {
         self.scroll.offset()
     }
 
-    pub fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.chrome_focused != focused {
-            self.chrome_focused = focused;
-            cx.notify();
-        }
-    }
-
-    pub fn take_keyboard_focus(
-        &mut self,
-        reason: crate::shell::FocusReason,
-        window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if reason == crate::shell::FocusReason::Activate {
-            window.focus(&self.focus_handle);
-        }
-    }
-
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Timeline, msg, window, cx);
     }
@@ -100,6 +84,26 @@ impl TimelineIsland {
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
+    }
+}
+
+impl IslandView for TimelineIsland {
+    type Id = IslandId;
+
+    fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.chrome_focused != focused {
+            self.chrome_focused = focused;
+            cx.notify();
+        }
+    }
+
+    fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        activate_focus_handle(&self.focus_handle, reason, window);
     }
 }
 
@@ -141,7 +145,7 @@ impl Render for TimelineIsland {
             IslandPanel::empty(
                 "timeline-island",
                 IslandPlaceholder::new(crate::t!("island.timeline.empty.title"))
-                    .piko_icon(crate::theme::PikoIcon::MessageSquare)
+                    .chrome_icon(crate::theme::ChromeIcon::MessageSquare)
                     .subtitle(crate::t!("island.timeline.empty.subtitle")),
             )
             .focused(self.chrome_focused)

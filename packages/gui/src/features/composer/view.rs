@@ -5,7 +5,7 @@ use gpui_component::input::InputState;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
-use crate::shell::{IslandId, IslandMsg, IslandPanel};
+use crate::shell::{IslandId, IslandMsg, IslandPanel, IslandView};
 use crate::theme::metrics;
 
 use super::ActivityItem;
@@ -70,29 +70,6 @@ impl ComposerIsland {
         cx.notify();
     }
 
-    pub fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.chrome_focused != focused {
-            self.chrome_focused = focused;
-            cx.notify();
-        }
-    }
-
-    /// Place keyboard focus when chrome activates this island.
-    pub fn take_keyboard_focus(
-        &mut self,
-        reason: crate::shell::FocusReason,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if reason != crate::shell::FocusReason::Activate {
-            return;
-        }
-        window.focus(&self.focus_handle);
-        self.input.update(cx, |state, cx| {
-            state.focus(window, cx);
-        });
-    }
-
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Composer, msg, window, cx);
     }
@@ -115,8 +92,35 @@ impl ComposerIsland {
 
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // Pointer claim: place caret in the composer input, then sync chrome.
-        self.take_keyboard_focus(crate::shell::FocusReason::Activate, window, cx);
+        IslandView::take_keyboard_focus(self, crate::shell::FocusReason::Activate, window, cx);
         self.emit(IslandMsg::ClaimFocus, window, cx);
+    }
+}
+
+impl IslandView for ComposerIsland {
+    type Id = IslandId;
+
+    fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.chrome_focused != focused {
+            self.chrome_focused = focused;
+            cx.notify();
+        }
+    }
+
+    /// Place keyboard focus when chrome activates this island (input + handle).
+    fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if reason != crate::shell::FocusReason::Activate {
+            return;
+        }
+        window.focus(&self.focus_handle);
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+        });
     }
 }
 

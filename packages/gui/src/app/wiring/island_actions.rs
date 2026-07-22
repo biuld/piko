@@ -28,7 +28,10 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.primary_surface.is_workbench() {
+        if !self
+            .archipelago
+            .is_active(crate::app::archipelago::ArchipelagoId::Workbench)
+        {
             return;
         }
         let live = self.bridge_state().is_live();
@@ -53,7 +56,10 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.primary_surface.is_workbench() {
+        if !self
+            .archipelago
+            .is_active(crate::app::archipelago::ArchipelagoId::Workbench)
+        {
             return;
         }
         let live = self.bridge_state().is_live();

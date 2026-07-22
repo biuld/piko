@@ -1,29 +1,10 @@
-//! Piko visual theme for the GPUI Workbench.
+//! Piko visual theme — chrome kit re-exports + product domain accents.
 //!
-//! Submodules own one concern each; numbers and colors live here, not in islands:
-//!
-//! | Module | Owns |
-//! |---|---|
-//! | [`metrics`] | Density + type-scale numbers (spacing, sizes, layout constants) |
-//! | [`tokens`] | Semantic color palette |
-//! | [`typography`] | Applying the type scale (`TextRole`, markdown Body) |
-//! | [`icons`] | Vendored icon set sized against the type scale |
-//! | [`surfaces`] | Island surface helpers |
-//! | [`apply`] | Mapping tokens onto GPUI Component `Theme` |
+//! Prefer `piko_chrome` for chrome-only code. This module keeps existing
+//! `crate::theme::…` import paths working and owns domain role colors that must
+//! not live in chrome core.
 
-mod apply;
-mod icons;
-mod metrics;
-mod surfaces;
-mod tokens;
-mod typography;
+mod domain;
 
-pub use apply::apply_piko_dark_theme;
-pub use icons::{
-    IconSize, PanelSide, PikoIcon, disclosure, icon, panel_toggle_icon, placeholder_icon,
-    rotating_gear, row_leading,
-};
-pub use metrics::metrics;
-pub use surfaces::island;
-pub use tokens::{PikoTokens, RoleAccent, tokens};
-pub use typography::{TextRole, body_markdown, label_text, text};
+pub use domain::{DomainRole, domain_role_hsla, domain_role_rgba};
+pub use piko_chrome::theme::*;

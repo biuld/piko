@@ -29,14 +29,14 @@ this feature; see [Tool-Window Row Layout](chrome-tool-window-layout.md).
 |---|---|---|
 | `theme/metrics.rs` | Spacing + type sizes / line heights | Copy or icons |
 | `theme/typography.rs` | Named text styles (`Meta`, `Label`, `Body`, …) | Island layout |
-| `theme/icons.rs` | `PikoIcon` enum, sizes, `IconNamed` paths | Asset bytes on disk |
+| `theme/icons.rs` | `ChromeIcon` enum, sizes, `IconNamed` paths | Asset bytes on disk |
 | `assets/icons/*.svg` | Vendored SVG files | Runtime tint |
 | `i18n/` | `rust_i18n` catalog + thin `t!` helpers | Host / transcript text |
 | Island / chrome renderers | Call icons + typography + `t!` | Hardcoded glyphs / string literals |
 
 `IslandMedia::Icon(SharedString)` remains for tests and escape hatches, but
 product Empty / Loading paths should prefer `IslandMedia::Element` built from
-`PikoIcon`, or a small `IslandPlaceholder::piko_icon(...)` helper.
+`ChromeIcon`, or a small `IslandPlaceholder::chrome_icon(...)` helper.
 
 ## 3. Icons
 
@@ -52,7 +52,7 @@ product Empty / Loading paths should prefer `IslandMedia::Element` built from
 
 ### 3.2 Typed names (v1 subset, locked)
 
-| `PikoIcon` | Typical use | Replaces |
+| `ChromeIcon` | Typical use | Replaces |
 |---|---|---|
 | `Plus` | Per-directory New Session action | `"+"` label |
 | `ChevronRight` | Collapsed disclosure | `▸` |
@@ -96,7 +96,7 @@ via existing token HSLA / RGBA helpers.
 3. `IslandPlaceholder` — Empty / Loading use `Placeholder` size icons.
 4. Sessions header — `Button` with `FolderOpen` icon (Open Directory); directory
    rows use `Plus` for New Session.
-5. Tests — assert `PikoIcon` path mapping; render tests may keep string icons
+5. Tests — assert `ChromeIcon` path mapping; render tests may keep string icons
    only where they exercise `IslandMedia::Icon`.
 
 ## 4. Typography
@@ -217,7 +217,7 @@ packages/gui/
     └── theme/
         ├── metrics.rs        # sizes
         ├── typography.rs     # text styles
-        └── icons.rs          # PikoIcon + sizes
+        └── icons.rs          # ChromeIcon + sizes
 ```
 
 Startup in `main.rs` / `DesktopApp::new`:
@@ -225,14 +225,14 @@ Startup in `main.rs` / `DesktopApp::new`:
 1. `gpui_component::init`
 2. register GUI assets
 3. `i18n::init` + force `en`
-4. `apply_piko_dark_theme`
+4. `apply_chrome_dark_theme`
 
 ## 8. Landed sequence
 
 Implementation landed in this order:
 
 1. Typography helpers
-2. Assets + `PikoIcon` + AssetSource
+2. Assets + `ChromeIcon` + AssetSource
 3. i18n catalog (`en`) + force locale, including all Activity templates
 4. Replacement of Unicode glyphs in tree, Activity, placeholders, New Session
 5. UI Guidelines / known-limitations updates

@@ -114,24 +114,10 @@ impl DesktopApp {
         self.apply_island_focus_chrome(cx);
     }
 
-    /// Sync keyboard-focus ring borders onto island Entities.
+    /// Sync keyboard-focus ring borders onto island Entities via the chrome table.
     pub(crate) fn apply_island_focus_chrome(&mut self, cx: &mut Context<Self>) {
         let focused = self.island_focus.focused();
-        self.sessions.update(cx, |i, cx| {
-            i.set_chrome_focused(focused == IslandId::Sessions, cx);
-        });
-        self.timeline.update(cx, |i, cx| {
-            i.set_chrome_focused(focused == IslandId::Timeline, cx);
-        });
-        self.composer.update(cx, |i, cx| {
-            i.set_chrome_focused(focused == IslandId::Composer, cx);
-        });
-        self.agents.update(cx, |i, cx| {
-            i.set_chrome_focused(focused == IslandId::Agents, cx);
-        });
-        self.tree.update(cx, |i, cx| {
-            i.set_chrome_focused(focused == IslandId::Tree, cx);
-        });
+        self.island_focus_table.apply_chrome_rings(focused, cx);
     }
 
     pub(crate) fn focus_island(
@@ -142,35 +128,13 @@ impl DesktopApp {
     ) {
         use crate::shell::FocusReason;
 
-        self.island_focus.set_focused(id);
-        self.apply_island_focus_chrome(cx);
-        match id {
-            IslandId::Sessions => {
-                self.sessions.update(cx, |island, cx| {
-                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
-                });
-            }
-            IslandId::Timeline => {
-                self.timeline.update(cx, |island, cx| {
-                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
-                });
-            }
-            IslandId::Composer => {
-                self.composer.update(cx, |island, cx| {
-                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
-                });
-            }
-            IslandId::Agents => {
-                self.agents.update(cx, |island, cx| {
-                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
-                });
-            }
-            IslandId::Tree => {
-                self.tree.update(cx, |island, cx| {
-                    island.take_keyboard_focus(FocusReason::Activate, window, cx);
-                });
-            }
-        }
+        self.island_focus_table.focus(
+            &mut *self.island_focus,
+            id,
+            FocusReason::Activate,
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn visible_focus_islands(&self) -> Vec<IslandId> {

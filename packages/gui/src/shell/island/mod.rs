@@ -1,19 +1,68 @@
-//! Island shell: panel chrome, viewport, focus ownership, directed messaging.
+//! Island shell for the piko Workbench.
+//!
+//! Panel / focus primitives come from [`piko_chrome`]. Product messages and
+//! session-phase mapping stay here so `piko-chrome` never depends on Client Core.
 
-mod focus;
 mod msg;
-mod panel;
 mod phase;
-mod state;
-#[cfg(test)]
-#[path = "state_tests.rs"]
-mod state_tests;
-mod viewport;
 
-pub use focus::{FocusCycleDir, FocusReason, IslandFocusRing, focus_order};
+use std::ops::{Deref, DerefMut};
+
 pub use msg::IslandMsg;
-pub use panel::{IslandHeader, IslandPanel};
 pub use phase::IslandSessionPhase;
-#[allow(unused_imports)] // public override API for islands
-pub use state::{IslandBody, IslandMedia, IslandPlaceholder};
-pub use viewport::IslandContentViewport;
+pub use piko_chrome::island::{
+    FocusCycleDir, FocusReason, FocusRing, IslandBody, IslandContentViewport, IslandFocusTable,
+    IslandHeader, IslandHost, IslandMedia, IslandMessage, IslandPanel, IslandPlaceholder,
+    IslandView, activate_focus_handle, route_focus_message, schedule_island_message,
+};
+
+use crate::shell::workbench::IslandId;
+
+/// Workbench focus ring specialized to piko [`IslandId`].
+///
+/// Newtype so we can implement [`Default`] without orphan-rule issues on
+/// [`FocusRing`].
+#[derive(Debug, Clone)]
+pub struct IslandFocusRing(FocusRing<IslandId>);
+
+impl Default for IslandFocusRing {
+    fn default() -> Self {
+        Self(FocusRing::new(IslandId::Sessions))
+    }
+}
+
+impl Deref for IslandFocusRing {
+    type Target = FocusRing<IslandId>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for IslandFocusRing {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// Stable Tab order for visible piko Workbench docks.
+///
+/// Order matches [`crate::shell::workbench::ALL_ISLAND_IDS`].
+pub fn focus_order(visible: impl Fn(IslandId) -> bool) -> Vec<IslandId> {
+    crate::shell::workbench::ALL_ISLAND_IDS
+        .into_iter()
+        .filter(|id| visible(*id))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell::workbench::ALL_ISLAND_IDS;
+
+    #[test]
+    fn focus_order_covers_all_island_ids() {
+        let all = focus_order(|_| true);
+        assert_eq!(all.as_slice(), ALL_ISLAND_IDS.as_slice());
+    }
+}

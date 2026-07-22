@@ -7,7 +7,7 @@
 > export, delete, fork, clone, compact, login, logout) and GUI Primary
 > Surface Settings (`open.settings` is currently a stub).
 > Related: [Settings Ownership Design](settings-ownership-design.md),
-> [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md),
+> [GUI Archipelago Design](../packages/gui/docs/design/archipelago.md),
 > [GUI Overlay Stack Design](../packages/gui/docs/design/overlay-stack.md),
 > [GUI Command Palette Feature](../packages/gui/docs/features/command-palette.md) (supersedes catalog assumptions)
 > Protocol: `packages/protocol` (`command_catalog.rs`, `Command` / `Event`)
@@ -105,7 +105,7 @@ Optional discoverability helpers (data, not menus):
 |---|---|
 | `Quit` / Exit the TUI | GUI: quit app; TUI: exit process — local |
 | `Help` | Frontend help overlay |
-| `Settings` | GUI: PrimarySurface Settings; TUI: local settings menu |
+| `Settings` | GUI: Settings Archipelago; TUI: local settings menu |
 | `Tree` | TUI panel / GUI focus Tree island — local |
 | `Sessions` as "open list" | GUI focus/dock Sessions; TUI panel — local |
 | `ToggleToolsExpanded` | Frontend presentation |
@@ -233,9 +233,9 @@ Both palettes:
 
 ### 7.2 GUI Command Palette
 
-- Remains Overlay **Transient** (`Cmd+Shift+P`); not a Primary Surface.
+- Remains Overlay **Transient** (`Cmd+Shift+P`); not an Archipelago.
 - Local commands include at least:
-  - `open.settings` → Primary Surface Settings (also TitleBar trailing gear)
+  - `open.settings` → Settings Archipelago (also TitleBar trailing gear)
   - focus/dock Sessions, Agents, Tree
   - quit app (with existing busy-quit confirm)
 - Models / Thinking: keep nested pickers; confirm → `model.set` /
@@ -254,7 +254,7 @@ Both palettes:
 
 | Frontend | Behavior |
 |---|---|
-| GUI | `PrimarySurface::Settings` via TitleBar gear, `Cmd+,`, or palette |
+| GUI | `ArchipelagoId::Settings` via TitleBar gear, `Cmd+,`, or palette |
 | TUI | Existing settings menu / panel |
 
 Neither is a hostd command.

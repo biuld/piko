@@ -33,12 +33,15 @@ pub fn render_general(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> impl 
     let models_empty = models.is_empty();
 
     div()
+        .w_full()
         .flex()
         .flex_col()
-        .gap(m.space_lg)
+        .flex_shrink_0()
+        .gap(m.space_md)
         .child(section_lede(crate::t!("settings.general.lede")))
         .child(setting_group(
             div()
+                .w_full()
                 .flex()
                 .flex_col()
                 .gap(m.space_md)
@@ -50,11 +53,15 @@ pub fn render_general(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> impl 
                 ))
                 .child(
                     div()
+                        .w_full()
                         .flex()
                         .items_center()
                         .justify_between()
+                        .gap(m.space_md)
                         .child(
                             crate::theme::label_text(false)
+                                .flex_1()
+                                .min_w(px(0.))
                                 .child(crate::t!("settings.general.model.catalog")),
                         )
                         .child({
@@ -136,7 +143,7 @@ pub fn render_general(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> impl 
                     }),
                 )),
         ))
-        .child(setting_row(
+        .child(setting_group(setting_row(
             "settings-general-hide-thinking",
             crate::t!("settings.general.hide_thinking.label"),
             Some(crate::t!("settings.general.hide_thinking.detail").into()),
@@ -155,5 +162,5 @@ pub fn render_general(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> impl 
                     },
                 )
             },
-        ))
+        )))
 }

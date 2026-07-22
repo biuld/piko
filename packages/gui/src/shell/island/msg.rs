@@ -1,13 +1,18 @@
 //! Directed island ↔ shell messages (not a broadcast bus).
 //!
 //! Constructed by Entity island views under `crate::features`; consumed by
-//! `DesktopApp::dispatch_island_msg`. Payloads stay shell-owned primitives so
+//! `DesktopApp::dispatch_island_msg`. Payloads stay shell-facing primitives so
 //! shell never depends on feature VM types.
+//!
+//! **Product surface** — lives in `piko-gui`, not `piko-chrome`.
+//! Focus variants map to chrome [`FocusMsg`] via [`IslandMessage`].
 #![allow(dead_code)]
+
+use piko_chrome::{FocusMsg, IslandMessage};
 
 use crate::shell::workbench::IslandId;
 
-/// Messages emitted by islands or shell and routed by [`DesktopApp`].
+/// Messages emitted by islands or shell and routed by [`crate::app::desktop_app::DesktopApp`].
 #[derive(Debug, Clone)]
 pub enum IslandMsg {
     /// Claim keyboard focus for this island (pointer down / activate).
@@ -55,4 +60,40 @@ pub enum IslandMsg {
     TogglePinSession {
         session_id: String,
     },
+}
+
+impl IslandMessage for IslandMsg {
+    type Id = IslandId;
+
+    fn as_focus_msg(&self) -> Option<FocusMsg<IslandId>> {
+        match self {
+            IslandMsg::ClaimFocus => Some(FocusMsg::ClaimFocus),
+            IslandMsg::FocusIsland { id } => Some(FocusMsg::FocusIsland { id: *id }),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focus_variants_map_to_chrome_focus_msg() {
+        assert_eq!(
+            IslandMsg::ClaimFocus.as_focus_msg(),
+            Some(FocusMsg::ClaimFocus)
+        );
+        assert_eq!(
+            IslandMsg::FocusIsland {
+                id: IslandId::Composer
+            }
+            .as_focus_msg(),
+            Some(FocusMsg::FocusIsland {
+                id: IslandId::Composer
+            })
+        );
+        assert!(IslandMsg::SubmitComposer.as_focus_msg().is_none());
+        assert!(IslandMsg::OpenDirectory.as_focus_msg().is_none());
+    }
 }

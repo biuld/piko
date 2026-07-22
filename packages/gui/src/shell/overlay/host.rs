@@ -1,5 +1,9 @@
-//! OverlayHost state: priority stack, fingerprint, focus-save flag.
+//! OverlayHost state: priority stack, fingerprint, overlay focus session.
+//!
+//! Focus open/close uses chrome [`OverlayFocusSession`] (roadmap E4) so
+//! product wiring does not invent a parallel bool stack.
 
+use super::OverlayFocusSession;
 use super::kinds::{LocalConfirmKind, OverlayLayer, TransientKind};
 use super::prompt_front::{PromptFront, PromptKind, prompt_fingerprint};
 
@@ -11,8 +15,8 @@ pub struct OverlayHost {
     pub open_prompt_flight: Option<bool>,
     pub local_confirm: Option<LocalConfirmKind>,
     pub transient: Option<TransientKind>,
-    /// True when opening an overlay saved island focus for later restore.
-    pub focus_saved: bool,
+    /// Chrome overlay focus episode (begin on first open, end on last close).
+    pub focus_session: OverlayFocusSession,
 }
 
 impl OverlayHost {
@@ -109,6 +113,21 @@ impl OverlayHost {
         self.transient = None;
     }
 
+    /// Start an overlay focus episode. Returns `true` when the caller should
+    /// save outer island focus now (fresh open only).
+    pub fn begin_focus_session(&mut self) -> bool {
+        self.focus_session.begin()
+    }
+
+    /// End the focus episode when no overlay layer remains. Returns `true`
+    /// when the caller should restore island keyboard focus.
+    pub fn end_focus_session_if_idle(&mut self) -> bool {
+        if self.visible_layer().is_some() {
+            return false;
+        }
+        self.focus_session.end()
+    }
+
     /// Apply Escape policy for overlay layers (Sheet is handled by the caller).
     pub fn handle_escape(&mut self) -> EscapeOutcome {
         match self.visible_layer() {
@@ -199,5 +218,37 @@ mod tests {
         host.sync_host_prompt(Some(approval_front()));
         assert_eq!(host.handle_escape(), EscapeOutcome::Swallowed);
         assert!(host.host_prompt.is_some());
+    }
+
+    #[test]
+    fn focus_session_begin_once_and_end_when_idle() {
+        let mut host = OverlayHost::default();
+        assert!(host.begin_focus_session());
+        assert!(!host.begin_focus_session()); // already open
+        assert!(host.focus_session.is_open());
+
+        // Layer still open — must not end/restore yet.
+        host.try_open_command_palette();
+        assert!(!host.end_focus_session_if_idle());
+        assert!(host.focus_session.is_open());
+
+        host.close_transient();
+        assert!(host.end_focus_session_if_idle());
+        assert!(!host.focus_session.is_open());
+        assert!(!host.end_focus_session_if_idle());
+    }
+
+    #[test]
+    fn focus_session_survives_host_prompt_replacing_palette() {
+        let mut host = OverlayHost::default();
+        assert!(host.try_open_command_palette());
+        assert!(host.begin_focus_session());
+        assert!(host.sync_host_prompt(Some(approval_front())));
+        assert!(host.transient.is_none());
+        // Still have a layer — session stays open.
+        assert!(!host.end_focus_session_if_idle());
+        assert!(host.focus_session.is_open());
+        host.sync_host_prompt(None);
+        assert!(host.end_focus_session_if_idle());
     }
 }

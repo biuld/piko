@@ -22,6 +22,7 @@ sandbox (leaf)
 |---|---|---|
 | `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
 | `piko-gui` | binary | GPUI desktop client (app / features / shell). Talks to hostd over stdio via client-core. See `packages/gui/AGENTS.md`. |
+| `piko-chrome` | lib | GPUI Islands chrome kit (theme, island panel, layout tree, overlay surface, widgets). No product ids/messages. See `packages/chrome/AGENTS.md`. |
 | `piko-hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
 | `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
@@ -44,6 +45,8 @@ sandbox (leaf)
 3. Agent loops, tool execution, multi-agent supervision → `orchd`
 4. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md` and `.agents/skills/tui-feature-workflow/`)
 5. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md` and `.agents/skills/gui-feature-workflow/`)
+5b. Reusable Islands chrome (panel, theme, generic layout, overlay surface) → `packages/chrome` (`piko-chrome`); product ids/messages stay in `gui`
+5c. Chrome infra docs → `packages/chrome/docs/` (`features/` · `design/` · `roadmap/`)
 6. Provider abstraction, OAuth, token tracking → `llmd`
 7. Sandboxed file/process access → `sandbox`
 
@@ -91,7 +94,7 @@ Proposed GUI / config / catalog designs:
 Key GUI designs:
 
 - `packages/gui/docs/design/overview.md`
-- `packages/gui/docs/design/primary-surface.md`
+- `packages/gui/docs/design/archipelago.md`
 - `packages/gui/docs/design/code-organization.md`
 
 Crate-local context: `packages/tui/AGENTS.md`, `packages/gui/AGENTS.md`, `packages/protocol/AGENTS.md`.

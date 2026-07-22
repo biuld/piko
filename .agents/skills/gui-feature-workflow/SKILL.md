@@ -74,7 +74,7 @@ Write a design doc before implementation when the feature affects any of these:
 - more than one crate
 - protocol DTOs or hostd-to-GUI commands/events
 - `[gui]` or host runtime settings schemas
-- Primary Surface switching (Workbench ↔ Settings)
+- Archipelago switching (Workbench ↔ Settings)
 - overlay stack / Escape / focus restore
 - island focus or `IslandMsg` shapes
 - a new shared shell primitive (IslandPanel chrome, overlay panel, workbench column)

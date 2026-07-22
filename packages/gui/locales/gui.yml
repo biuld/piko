@@ -162,6 +162,10 @@ settings.general.hide_thinking.detail:
   en: Hide reasoning/thinking content in the GUI timeline. This applies only to the desktop client.
 settings.appearance.lede:
   en: GUI-only presentation preferences stored under the [gui] namespace.
+settings.appearance.light_theme.label:
+  en: Light theme
+settings.appearance.light_theme.detail:
+  en: Use the light chrome palette for surfaces, text, and elevated panels.
 settings.appearance.reduced_motion.label:
   en: Reduced motion
 settings.appearance.reduced_motion.detail:

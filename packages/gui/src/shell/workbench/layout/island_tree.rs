@@ -1,6 +1,7 @@
-//! Island ids and the default Workbench split tree (`IslandNode`).
+//! Piko Workbench island ids and the default split tree.
 //!
-//! Not the Tree island UI (`islands::tree`) or shared list rows (`chrome::widgets::tree_list`).
+//! Generic tree/prune live in [`piko_chrome::layout`]. Product leaf ids and the
+//! fixed five-island preset stay here.
 
 /// First-class Workbench islands (layout atoms).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -12,40 +13,23 @@ pub enum IslandId {
     Tree,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IslandAxis {
-    Horizontal,
-    Vertical,
-}
+/// Every focusable Workbench island (must match [`crate::shell::focus_order`]
+/// membership and `IslandFocusTable` registration).
+pub const ALL_ISLAND_IDS: [IslandId; 5] = [
+    IslandId::Sessions,
+    IslandId::Timeline,
+    IslandId::Composer,
+    IslandId::Agents,
+    IslandId::Tree,
+];
 
-/// Layout tree node: a single island or a split of children.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IslandNode {
-    Island(IslandId),
-    Split {
-        axis: IslandAxis,
-        children: Vec<IslandNode>,
-    },
-}
-
-impl IslandNode {
-    pub fn island(id: IslandId) -> Self {
-        Self::Island(id)
-    }
-
-    pub fn split(axis: IslandAxis, children: impl IntoIterator<Item = IslandNode>) -> Self {
-        Self::Split {
-            axis,
-            children: children.into_iter().collect(),
-        }
-    }
-}
+pub use piko_chrome::layout::{IslandAxis, IslandNode, prune_island_tree};
 
 /// Default docked Workbench tree (before visibility pruning).
 ///
 /// Fixed product layout: Sessions | (Timeline/Composer) | (Agents/Tree).
 /// The trailing vertical split is not a layout unit — only Agents and Tree are.
-pub fn workbench_island_tree() -> IslandNode {
+pub fn workbench_island_tree() -> IslandNode<IslandId> {
     IslandNode::split(
         IslandAxis::Horizontal,
         [
@@ -66,34 +50,4 @@ pub fn workbench_island_tree() -> IslandNode {
             ),
         ],
     )
-}
-
-/// Drop closed islands and empty splits. Adjacent gutters disappear with slots.
-pub fn prune_island_tree(
-    node: &IslandNode,
-    is_visible: &dyn Fn(IslandId) -> bool,
-) -> Option<IslandNode> {
-    match node {
-        IslandNode::Island(id) => {
-            if is_visible(*id) {
-                Some(IslandNode::Island(*id))
-            } else {
-                None
-            }
-        }
-        IslandNode::Split { axis, children } => {
-            let kept: Vec<IslandNode> = children
-                .iter()
-                .filter_map(|child| prune_island_tree(child, is_visible))
-                .collect();
-            match kept.len() {
-                0 => None,
-                1 => kept.into_iter().next(),
-                _ => Some(IslandNode::Split {
-                    axis: *axis,
-                    children: kept,
-                }),
-            }
-        }
-    }
 }

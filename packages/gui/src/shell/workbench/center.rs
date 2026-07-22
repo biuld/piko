@@ -5,7 +5,7 @@ use gpui::*;
 use crate::app::desktop_app::DesktopApp;
 use crate::projections::{SessionPhaseView, derive_phase_view};
 use crate::shell::island::{IslandPanel, IslandPlaceholder};
-use crate::theme::{PikoIcon, metrics};
+use crate::theme::{ChromeIcon, metrics};
 
 pub(crate) fn render_center(
     app: &DesktopApp,
@@ -20,25 +20,27 @@ pub(crate) fn render_center(
         SessionPhaseView::IdleNoSession => IslandPanel::empty(
             "pre-live-island",
             IslandPlaceholder::new(crate::t!("center.no_session.title"))
-                .piko_icon(PikoIcon::Circle)
+                .chrome_icon(ChromeIcon::Circle)
                 .subtitle(crate::t!("center.no_session.subtitle")),
         )
         .scroll(false)
         .into_any_element(),
         SessionPhaseView::Opening { .. } => IslandPanel::loading(
             "pre-live-island",
-            IslandPlaceholder::new(crate::t!("center.opening")).piko_icon(PikoIcon::CircleDashed),
+            IslandPlaceholder::new(crate::t!("center.opening"))
+                .chrome_icon(ChromeIcon::CircleDashed),
         )
         .into_any_element(),
         SessionPhaseView::Hydrating { .. } => IslandPanel::loading(
             "pre-live-island",
-            IslandPlaceholder::new(crate::t!("center.loading")).piko_icon(PikoIcon::CircleDashed),
+            IslandPlaceholder::new(crate::t!("center.loading"))
+                .chrome_icon(ChromeIcon::CircleDashed),
         )
         .into_any_element(),
         SessionPhaseView::Error { message } => IslandPanel::empty(
             "error-island",
             IslandPlaceholder::new(crate::t!("center.error.title"))
-                .piko_icon(PikoIcon::TriangleAlert)
+                .chrome_icon(ChromeIcon::TriangleAlert)
                 .subtitle(message),
         )
         .scroll(false)

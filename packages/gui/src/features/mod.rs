@@ -16,6 +16,7 @@ mod island_tests;
 
 pub use agents::AgentsIsland;
 pub use agents::derive_agent_tree;
+pub use agents::{AgentsConfirm, AgentsSelectNext, AgentsSelectPrev, AgentsToggleExpand};
 pub use composer::ComposerIsland;
 pub use composer::{derive_activity, derive_composer};
 pub use palette::{CommandPalette, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
@@ -24,7 +25,10 @@ pub use prompts::{
     interaction_title, render_approval_body,
 };
 pub use sessions::{ClearSessionSearch, SessionsIsland};
-pub use settings::SettingsSection;
+pub use settings::{
+    ConfirmSection, SETTINGS_FOCUS_ORDER, SelectNextSection, SelectPrevSection, SettingsIslandId,
+    SettingsNavIsland, SettingsPanelIsland, SettingsSection,
+};
 pub use timeline::TimelineIsland;
 pub use timeline::derive_timeline;
 pub use tree::TreeIsland;

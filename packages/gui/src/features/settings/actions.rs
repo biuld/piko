@@ -45,6 +45,29 @@ impl DesktopApp {
         cx.notify();
     }
 
+    pub(crate) fn settings_set_chrome_palette(
+        &mut self,
+        light: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use piko_chrome::{ChromePalette, apply_chrome_theme};
+        let palette = if light {
+            ChromePalette::Light
+        } else {
+            ChromePalette::Dark
+        };
+        if self.ux_prefs.chrome_palette == palette {
+            return;
+        }
+        self.ux_prefs.chrome_palette = palette;
+        apply_chrome_theme(cx, palette);
+        self.persist_gui_config();
+        // Re-paint frame so surfaces/tokens pick up the new snapshot.
+        let _ = window;
+        cx.notify();
+    }
+
     pub(crate) fn settings_set_compaction_enabled(
         &mut self,
         enabled: bool,

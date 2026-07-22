@@ -3,14 +3,21 @@
 ## Architecture overview
 
 The GUI is a macOS-first GPUI desktop client. It talks to hostd over JSONL
-stdio via `piko-client-core`. Module boundaries follow
-[GUI Code Organization Design](docs/design/code-organization.md).
+stdio via `piko-client-core`. Shared Islands chrome lives in **`piko-chrome`**
+(theme, island panel, generic layout tree, overlay surface, widgets). Module
+boundaries follow [GUI Code Organization Design](docs/design/code-organization.md).
 
 ```
-app        →  composition root (DesktopApp, wiring, PrimarySurface state)
+app        →  composition root (DesktopApp, wiring, ArchipelagoRouter state)
 features   →  product vertical slices (UI + local VM + feature actions)
-shell      →  window chrome & surface hosts only (workbench, overlay, island panel)
-platform   →  edges: bridge, transport, config, theme, i18n, assets (top-level today)
+shell      →  piko product shell (Workbench assembly, product OverlayHost, IslandMsg)
+piko-chrome→  reusable chrome kit (no product ids / domain messages)
+platform   →  edges: bridge, transport, config, theme re-export, i18n, assets
+```
+
+```text
+piko-gui ──► piko-chrome
+piko-chrome ✗ piko-gui | client-core | protocol | hostd
 ```
 
 TUI vocabulary maps roughly as:
@@ -33,29 +40,35 @@ features ✗ sibling feature internals
 Cross-feature needs go through `DesktopApp` wiring or shared projections — not
 direct `use` of another feature’s private modules.
 
-### Shell vs features
+### Shell vs features vs chrome
 
 | Concern | Home | Not home |
 |---|---|---|
-| Workbench column layout / resize | `shell/workbench` | features |
-| IslandPanel / focus ring | `shell/island` | features |
-| Overlay stack / Escape policy | `shell/overlay` | features |
-| Settings Primary Surface frame | `shell/settings` | features |
-| Sessions / Timeline / Composer / … | `features/<name>` | shell |
+| IslandPanel / FocusRing / body states | **`piko-chrome`** (`crate::theme` / shell re-export) | features |
+| Generic split tree / prune | **`piko-chrome::layout`** | product ids |
+| Overlay panel geometry | **`piko-chrome::overlay`** | stack kinds |
+| Theme tokens / metrics / typography | **`piko-chrome::theme`** (`crate::theme` re-export) | hard-coded sizes in features |
+| Tree list row chrome | **`piko-chrome::widgets`** | feature VMs |
+| Workbench column layout / resize / dock-fit | `shell/workbench` | features |
+| Product `IslandId` / default tree / `IslandMsg` | `shell/island` + `shell/workbench` | **piko-chrome** |
+| Overlay stack kinds / Escape / HostPrompt | `shell/overlay` | **piko-chrome** |
+| Settings Archipelago frame | `shell/settings` | features |
+| Sessions / Timeline / Composer / … | `features/<name>` | shell / chrome |
 | Settings section forms / IA | `features/settings` | shell |
 | Command Palette UI + local merge | `features/palette` | shell |
 | Approval / interaction bodies | `features/prompts` | shell |
-| Theme tokens / typography | `theme/` | features (consume only) |
 | `[gui]` schema | `config/` | feature UI |
 
-**CR rule:** no new product forms under `shell/`.
+**CR rule:** no new product forms under `shell/`.  
+**Chrome rule:** no product island ids, domain messages, or host types in `piko-chrome`
+(see `packages/chrome/AGENTS.md`).
 
 ### App composition root
 
 `DesktopApp` should:
 
 1. own platform handles (`ClientBridge`) and shell hosts (`OverlayHost`,
-   `PrimarySurface`);
+   `ArchipelagoRouter`);
 2. own feature Entities (islands, palette, prompt forms);
 3. register actions / keybindings;
 4. poll / apply bridge updates → refresh feature VMs;
@@ -63,7 +76,7 @@ direct `use` of another feature’s private modules.
    `features/*/actions.rs`).
 
 Routing helpers live under `app/wiring/` (`island_*`, `overlay_sync`,
-`surface_nav`).
+`archipelago_nav`).
 
 ### Feature module contract
 
@@ -79,6 +92,13 @@ features/<name>/
 Island → host messaging uses `shell::IslandMsg` with **shell-owned primitive
 payloads** (no feature VM types in the enum). Features project VM rows into
 those fields at emit time.
+
+**Chrome contracts (required):** each island Entity implements
+`piko_chrome::IslandView`; product msgs implement `IslandMessage`; `DesktopApp`
+implements `IslandHost`, holds `IslandFocusTable` (`assert_covers` on startup),
+and islands emit only via `schedule_island_message` (see
+`packages/chrome/src/island/contract.rs`). Interaction model:
+[chrome island design](../chrome/docs/design/island-interaction.md).
 
 ## Design rules
 
@@ -134,7 +154,10 @@ Normative architecture entry points:
 
 - [design/overview.md](docs/design/overview.md) — overall GUI design
 - [design/code-organization.md](docs/design/code-organization.md) — module boundaries
-- [design/primary-surface.md](docs/design/primary-surface.md) — Workbench vs Settings
+- [chrome docs](../chrome/docs/README.md) — features / design / roadmap
+- [chrome archipelago feature](../chrome/docs/features/archipelago.md)
+- [chrome island design](../chrome/docs/design/island-interaction.md)
+- [design/archipelago.md](docs/design/archipelago.md) — piko product Workbench ↔ Settings
 - [design/overlay-stack.md](docs/design/overlay-stack.md) — overlay priority / Escape
 - [features/workbench.md](docs/features/workbench.md) — Workbench product contract
 

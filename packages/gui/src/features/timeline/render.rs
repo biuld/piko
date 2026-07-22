@@ -11,8 +11,8 @@ use gpui::*;
 use gpui_component::scroll::ScrollableElement;
 
 use crate::theme::{
-    IconSize, PikoIcon, PikoTokens, RoleAccent, TextRole, body_markdown, icon, metrics,
-    rotating_gear, row_leading, text, tokens,
+    ChromeIcon, ChromeTokens, DomainRole, IconSize, RoleAccent, TextRole, body_markdown,
+    domain_role_hsla, domain_role_rgba, icon, metrics, rotating_gear, row_leading, text, tokens,
 };
 
 use super::vm::{
@@ -174,7 +174,6 @@ fn render_assistant_row(
 
 fn render_thinking_block(thinking: &str, live: bool) -> AnyElement {
     let m = metrics();
-    let t = tokens();
     let inner = if thinking.trim().is_empty() && live {
         render_thinking_live_mark()
     } else {
@@ -186,7 +185,7 @@ fn render_thinking_block(thinking: &str, live: bool) -> AnyElement {
         .flex_col()
         .pl(m.space_sm)
         .border_l_2()
-        .border_color(t.role_accent_hsla(RoleAccent::Thinking))
+        .border_color(domain_role_hsla(DomainRole::Thinking))
         .child(inner)
         .into_any_element()
 }
@@ -194,13 +193,13 @@ fn render_thinking_block(thinking: &str, live: bool) -> AnyElement {
 fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement {
     let m = metrics();
     let t = tokens();
-    let accent = t.role_accent(RoleAccent::Assistant);
-    let accent_hsla = t.role_accent_hsla(RoleAccent::Assistant);
+    let accent = domain_role_rgba(DomainRole::Assistant);
+    let accent_hsla = domain_role_hsla(DomainRole::Assistant);
     div()
         .flex()
         .gap(m.space_sm)
         .items_center()
-        .child(row_leading(PikoIcon::Bot, accent_hsla))
+        .child(row_leading(ChromeIcon::Bot, accent_hsla))
         .child(
             text(TextRole::Meta)
                 .font_weight(FontWeight::SEMIBOLD)
@@ -208,7 +207,7 @@ fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement 
                 .child(row.label.clone()),
         )
         .when(row.streaming, |d| {
-            d.child(rotating_gear(PikoTokens::hsla(t.muted_fg), allow_motion))
+            d.child(rotating_gear(ChromeTokens::hsla(t.muted_fg), allow_motion))
         })
         .into_any_element()
 }
@@ -216,7 +215,7 @@ fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement 
 fn render_thinking_segment(thinking: &str, live: bool) -> AnyElement {
     let t = tokens();
     let color = if live {
-        t.role_accent(RoleAccent::Thinking)
+        domain_role_rgba(DomainRole::Thinking)
     } else {
         t.muted_fg_rgba()
     };
@@ -228,9 +227,8 @@ fn render_thinking_segment(thinking: &str, live: bool) -> AnyElement {
 }
 
 fn render_thinking_live_mark() -> AnyElement {
-    let t = tokens();
     text(TextRole::Meta)
-        .text_color(t.role_accent(RoleAccent::Thinking))
+        .text_color(domain_role_rgba(DomainRole::Thinking))
         .child(crate::t!("island.timeline.thinking_live"))
         .into_any_element()
 }
@@ -282,8 +280,8 @@ fn render_user_row(
 ) -> AnyElement {
     let m = metrics();
     let t = tokens();
-    let accent = t.role_accent(RoleAccent::User);
-    let accent_hsla = t.role_accent_hsla(RoleAccent::User);
+    let accent = domain_role_rgba(DomainRole::User);
+    let accent_hsla = domain_role_hsla(DomainRole::User);
 
     let mut root = div()
         .id(SharedString::from(row.id.clone()))
@@ -297,7 +295,7 @@ fn render_user_row(
                 .flex()
                 .gap(m.space_sm)
                 .items_center()
-                .child(row_leading(PikoIcon::User, accent_hsla))
+                .child(row_leading(ChromeIcon::User, accent_hsla))
                 .child(
                     text(TextRole::Meta)
                         .font_weight(FontWeight::SEMIBOLD)
@@ -391,9 +389,9 @@ fn render_tool_chip(row: &TimelineRow, expanded: bool, on_toggle: ClickHandler) 
                         .on_click(move |ev, window, cx| on_toggle(ev, window, cx))
                 })
                 .child(icon(
-                    PikoIcon::Wrench,
+                    ChromeIcon::Wrench,
                     IconSize::Meta,
-                    t.role_accent_hsla(RoleAccent::Tool),
+                    domain_role_hsla(DomainRole::Tool),
                 ))
                 .child(
                     text(TextRole::Meta)

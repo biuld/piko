@@ -1,7 +1,5 @@
-//! Shared presentational widgets reused across Workbench islands.
+//! Shared presentational widgets — re-exported from [`piko_chrome::widgets`].
 
-mod tree_list;
-
-pub use tree_list::{
+pub use piko_chrome::widgets::{
     TreeClickHandler, TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
 };

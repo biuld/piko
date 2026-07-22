@@ -16,12 +16,13 @@ use gpui::*;
 use gpui_component::PixelsExt;
 use gpui_component::resizable::{h_resizable, resizable_panel};
 
+use crate::app::archipelago::workbench_workspace;
 use crate::app::desktop_app::DesktopApp;
 use crate::app::layout_state::{CENTER_MIN_WIDTH, RIGHT_COLUMN_MIN_WIDTH, SESSION_MIN_WIDTH};
 use crate::shell::workbench::center::render_center;
 use crate::shell::workbench::left::{column_slot, render_left_column};
 use crate::shell::workbench::right::render_right_column;
-use crate::shell::workbench::{IslandId, prune_island_tree, workbench_island_tree};
+use crate::shell::workbench::{IslandId, prune_island_tree};
 use crate::theme::metrics;
 
 impl DesktopApp {
@@ -40,7 +41,10 @@ impl DesktopApp {
         let show_tree = self.layout.is_docked_visible(IslandId::Tree, live);
         let show_right = show_agents || show_tree;
 
-        let _pruned = prune_island_tree(&workbench_island_tree(), &|id| {
+        // Layout membership comes from the Workbench workspace declaration
+        // (roadmap A2). Column resize/dock-fit remains shell policy; the tree is
+        // the source of truth for which islands exist.
+        let _pruned = prune_island_tree(&workbench_workspace().island_tree, &|id| {
             self.layout.is_docked_visible(id, live)
         });
 

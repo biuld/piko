@@ -1,4 +1,4 @@
-//! Settings Primary Surface shell — TitleBar + body slots (no product forms).
+//! Settings Archipelago shell — TitleBar + body slots (no product forms).
 
 mod body_slots;
 mod frame;

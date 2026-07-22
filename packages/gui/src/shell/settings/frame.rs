@@ -1,4 +1,4 @@
-//! Assemble the Settings Primary Surface frame (TitleBar + body, no StatusBar v1).
+//! Assemble the Settings Archipelago frame (TitleBar + body, no StatusBar v1).
 
 use gpui::*;
 

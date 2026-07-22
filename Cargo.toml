@@ -3,7 +3,7 @@ members = [
   "packages/hostd", "packages/llmd",
   "packages/orchd", "packages/orchd-api", "packages/protocol", "packages/comms",
   "packages/sandbox", "packages/tui",
-  "packages/client-core", "packages/gui",
+  "packages/client-core", "packages/chrome", "packages/gui",
 ]
 resolver = "2"
 

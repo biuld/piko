@@ -1,17 +1,17 @@
 //! Routes `IslandMsg` from Entity islands to DesktopApp handlers.
+//!
+//! Focus layer: [`IslandMessage`] + [`route_focus_message`] (chrome).
+//! Defer + host sink: [`schedule_island_message`] / [`IslandHost`].
 
 use gpui::*;
 
-use crate::shell::{IslandId, IslandMsg};
+use crate::shell::{
+    IslandHost, IslandId, IslandMessage, IslandMsg, route_focus_message, schedule_island_message,
+};
 
 use crate::app::desktop_app::{CancelTurn, DesktopApp, JumpToLatest};
 
-/// Deliver an island message after the current effect cycle.
-///
-/// Island click/focus handlers run inside that island's `Entity::update`. Host
-/// handlers often update the same island again (focus chrome, dirty push),
-/// which panics if done synchronously ("cannot update while already being
-/// updated"). Deferring drops the island off the GPUI update stack first.
+/// App-facing alias: deferred island → [`DesktopApp`] message delivery.
 pub(crate) fn schedule_island_msg(
     host: WeakEntity<DesktopApp>,
     id: IslandId,
@@ -19,13 +19,22 @@ pub(crate) fn schedule_island_msg(
     window: &Window,
     cx: &mut App,
 ) {
-    window.defer(cx, move |window, cx| {
-        if let Some(host) = host.upgrade() {
-            host.update(cx, |app, cx| {
-                app.dispatch_island_msg(id, msg, window, cx);
-            });
-        }
-    });
+    schedule_island_message(host, id, msg, window, cx);
+}
+
+impl IslandHost for DesktopApp {
+    type Id = IslandId;
+    type Msg = IslandMsg;
+
+    fn handle_island_message(
+        &mut self,
+        from: IslandId,
+        msg: IslandMsg,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dispatch_island_msg(from, msg, window, cx);
+    }
 }
 
 impl DesktopApp {
@@ -38,46 +47,23 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Chrome focus layer — must not fall through to product refresh.
+        if let Some(focus) = msg.as_focus_msg() {
+            let _ = route_focus_message(
+                &self.island_focus_table,
+                &mut *self.island_focus,
+                id,
+                focus,
+                window,
+                cx,
+            );
+            return;
+        }
+
         match msg {
-            IslandMsg::ClaimFocus => {
-                // Claimed: island already placed window focus (chrome handle or
-                // an inner Input). Sync chrome, then hand off with Claimed so
-                // the island can no-op (default) without Activate stealing.
-                use crate::shell::FocusReason;
-                self.island_focus.set_focused(id);
-                self.apply_island_focus_chrome(cx);
-                match id {
-                    IslandId::Sessions => {
-                        self.sessions.update(cx, |island, cx| {
-                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
-                        });
-                    }
-                    IslandId::Timeline => {
-                        self.timeline.update(cx, |island, cx| {
-                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
-                        });
-                    }
-                    IslandId::Composer => {
-                        self.composer.update(cx, |island, cx| {
-                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
-                        });
-                    }
-                    IslandId::Agents => {
-                        self.agents.update(cx, |island, cx| {
-                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
-                        });
-                    }
-                    IslandId::Tree => {
-                        self.tree.update(cx, |island, cx| {
-                            island.take_keyboard_focus(FocusReason::Claimed, window, cx);
-                        });
-                    }
-                }
-                return;
-            }
-            IslandMsg::FocusIsland { id: target } => {
-                self.focus_island(target, window, cx);
-                return;
+            // Focus variants handled above via IslandMessage.
+            IslandMsg::ClaimFocus | IslandMsg::FocusIsland { .. } => {
+                unreachable!("focus IslandMsg must be classified by IslandMessage::as_focus_msg")
             }
             IslandMsg::OpenSession { session_id } => self.handle_open_session(session_id, cx),
             IslandMsg::NewSession { cwd } => self.create_session_in_cwd(cwd, cx),

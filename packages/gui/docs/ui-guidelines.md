@@ -114,7 +114,7 @@ Locked Empty / Loading / row icon mappings and chrome copy keys live in
 [GUI Chrome Presentation](features/chrome-presentation.md).
 Guidelines only fix the visual rules:
 
-- Use `PikoIcon` / `theme::icon` for chrome actions, Empty / Loading marks, and
+- Use `ChromeIcon` / `theme::icon` for chrome actions, Empty / Loading marks, and
   disclosures. Do not introduce Unicode glyph icons.
 - TitleBar dock toggles use `PanelLeft` / `PanelLeftFilled` and `PanelRight` /
   `PanelRightFilled` (hollow when closed, filled when docked).

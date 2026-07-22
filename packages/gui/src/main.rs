@@ -3,7 +3,6 @@
 //! Launches DesktopApp with hostd transport.
 
 mod app;
-mod assets;
 mod bridge;
 mod cli;
 mod config;
@@ -26,10 +25,13 @@ use crate::app::desktop_app::{
 };
 use crate::app::layout_state::{WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH};
 use crate::app::quit::is_quit_busy;
-use crate::assets::GuiAssets;
 use crate::bridge::spawn_bridge;
-use crate::features::{ClearSessionSearch, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
-use crate::theme::apply_piko_dark_theme;
+use crate::features::{
+    AgentsConfirm, AgentsSelectNext, AgentsSelectPrev, AgentsToggleExpand, ClearSessionSearch,
+    ConfirmSection, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev, SelectNextSection,
+    SelectPrevSection,
+};
+use piko_chrome::{ChromeAssets, ChromePalette, apply_chrome_theme};
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -49,12 +51,13 @@ fn main() {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".into());
 
-    let app = Application::new().with_assets(GuiAssets);
+    let app = Application::new().with_assets(ChromeAssets);
 
     app.run(move |cx| {
         gpui_component::init(cx);
         i18n::init();
-        apply_piko_dark_theme(cx);
+        // Default dark; hostd [gui].chrome-palette may re-apply after hydrate.
+        apply_chrome_theme(cx, ChromePalette::Dark);
 
         cx.bind_keys([
             KeyBinding::new("cmd-n", NewSession, Some("DesktopApp")),
@@ -73,6 +76,15 @@ fn main() {
             KeyBinding::new("up", PaletteSelectPrev, Some("CommandPalette")),
             KeyBinding::new("down", PaletteSelectNext, Some("CommandPalette")),
             KeyBinding::new("enter", PaletteConfirm, Some("CommandPalette")),
+            KeyBinding::new("up", SelectPrevSection, Some("SettingsNav")),
+            KeyBinding::new("down", SelectNextSection, Some("SettingsNav")),
+            KeyBinding::new("enter", ConfirmSection, Some("SettingsNav")),
+            KeyBinding::new("space", ConfirmSection, Some("SettingsNav")),
+            KeyBinding::new("up", AgentsSelectPrev, Some("IslandAgents")),
+            KeyBinding::new("down", AgentsSelectNext, Some("IslandAgents")),
+            KeyBinding::new("enter", AgentsConfirm, Some("IslandAgents")),
+            KeyBinding::new("right", AgentsToggleExpand, Some("IslandAgents")),
+            KeyBinding::new("left", AgentsToggleExpand, Some("IslandAgents")),
         ]);
 
         cx.set_menus(vec![Menu {

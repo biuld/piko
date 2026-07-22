@@ -3,7 +3,7 @@
 > Status: Phase 1+ landed — presentation lives only under `[tui]` / `[gui]`;
 > top-level `theme` / `hide-thinking-block` are not read. GUI Settings MVP
 > exists; TUI Settings tree trim (§10 step 6) remains open.
-> Related: [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md),
+> Related: [GUI Archipelago Design](../packages/gui/docs/design/archipelago.md),
 > [Host Command Catalog Design](host-command-catalog-design.md),
 > [Client Core Design](client-core-design.md) §1.3,
 > [Client Core Contract Baseline](client-core-contract-baseline.md)
@@ -36,7 +36,7 @@ stops hostd from appearing to "own" TUI/GUI UI preferences.
    round-trip.
 4. **Frontends own their namespace schema** in their crates (`TuiConfig`,
    `GuiSettings`).
-5. **GUI Settings UI** (Primary Surface) shows Host sections + GUI sections.
+5. **GUI Settings UI** (Archipelago) shows Host sections + GUI sections.
 6. **TUI Settings UI** shows Host sections + TUI sections.
 7. Neither frontend edits the other frontend's namespace.
 8. Auth remains **`auth.json`** (and env / runtime overrides), not `HostSettings`.
@@ -179,8 +179,8 @@ is not a substitute for the command catalog.
 
 ## 8. GUI Settings IA (product page)
 
-Aligns with Primary Surface two-column nav. Chrome entry: **TitleBar trailing
-gear** (see [GUI Primary Surface Design](../packages/gui/docs/design/primary-surface.md)).
+Aligns with Archipelago two-column nav. Chrome entry: **TitleBar trailing
+gear** (see [GUI Archipelago Design](../packages/gui/docs/design/archipelago.md)).
 
 ```text
 General              host defaults (model, thinking, show-thinking policy)

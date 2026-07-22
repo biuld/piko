@@ -31,7 +31,7 @@ impl Render for CommandPalette {
                 let Some(item) = frame.rows.get(data_ix) else {
                     continue;
                 };
-                let selected = row_ix == frame.selected;
+                let selected = frame.list_kb.is_row_focused(row_ix);
                 let enabled = item.enabled;
                 let title = item.title.clone();
                 let detail = item.detail.clone();
@@ -59,7 +59,9 @@ impl Render for CommandPalette {
                                 if let Some(view) = entity.upgrade() {
                                     view.update(cx, |this, cx| {
                                         if let Some(frame) = this.stack.last_mut() {
-                                            frame.selected = row_ix;
+                                            frame
+                                                .list_kb
+                                                .set_cursor(frame.filtered_ix.len(), row_ix);
                                         }
                                         cx.notify();
                                     });

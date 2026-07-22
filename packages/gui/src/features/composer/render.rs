@@ -8,7 +8,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 
 use crate::theme::{
-    IconSize, PikoIcon, PikoTokens, RoleAccent, disclosure, icon, metrics, row_leading, tokens,
+    ChromeIcon, ChromeTokens, IconSize, RoleAccent, disclosure, icon, metrics, row_leading, tokens,
 };
 
 use super::activity_vm::{ActivityItem, ActivityItemKind, ActivityViewModel};
@@ -32,7 +32,7 @@ pub fn render_activity_center(
     } else if vm.show_stop {
         t.role_accent_hsla(RoleAccent::Info)
     } else {
-        PikoTokens::hsla(t.muted_fg)
+        ChromeTokens::hsla(t.muted_fg)
     };
     div()
         .id("activity-center")
@@ -53,7 +53,7 @@ pub fn render_activity_center(
                 .hover(|style| style.bg(t.elevated_rgba()))
                 .cursor_pointer()
                 .on_click(on_toggle)
-                .child(row_leading(PikoIcon::Activity, header_color))
+                .child(row_leading(ChromeIcon::Activity, header_color))
                 .child(
                     crate::theme::text(crate::theme::TextRole::Meta)
                         .flex_1()
@@ -68,7 +68,7 @@ pub fn render_activity_center(
                         })
                         .child(vm.summary.clone()),
                 )
-                .child(disclosure(expanded, PikoTokens::hsla(t.muted_fg))),
+                .child(disclosure(expanded, ChromeTokens::hsla(t.muted_fg))),
         )
         .when(expanded && !vm.items.is_empty(), |d| {
             d.child(
@@ -101,7 +101,7 @@ fn render_activity_item(item: &ActivityItem, on_click: ClickHandler) -> impl Int
     };
     let accent_hsla = match accent_role {
         Some(role) => t.role_accent_hsla(role),
-        None => PikoTokens::hsla(t.muted_fg),
+        None => ChromeTokens::hsla(t.muted_fg),
     };
     div()
         .id(SharedString::from(item.id.clone()))
@@ -122,18 +122,18 @@ fn render_activity_item(item: &ActivityItem, on_click: ClickHandler) -> impl Int
         )
 }
 
-fn activity_item_icon(kind: ActivityItemKind) -> (PikoIcon, Option<RoleAccent>) {
+fn activity_item_icon(kind: ActivityItemKind) -> (ChromeIcon, Option<RoleAccent>) {
     match kind {
         ActivityItemKind::Approval | ActivityItemKind::Interaction => {
-            (PikoIcon::Bell, Some(RoleAccent::Warning))
+            (ChromeIcon::Bell, Some(RoleAccent::Warning))
         }
-        ActivityItemKind::TurnRunning => (PikoIcon::Activity, Some(RoleAccent::Info)),
-        ActivityItemKind::TurnQueued => (PikoIcon::CircleDashed, None),
-        ActivityItemKind::ToolRunning => (PikoIcon::Wrench, Some(RoleAccent::Info)),
+        ActivityItemKind::TurnRunning => (ChromeIcon::Activity, Some(RoleAccent::Info)),
+        ActivityItemKind::TurnQueued => (ChromeIcon::CircleDashed, None),
+        ActivityItemKind::ToolRunning => (ChromeIcon::Wrench, Some(RoleAccent::Info)),
         ActivityItemKind::ToolFailed | ActivityItemKind::Warning => {
-            (PikoIcon::TriangleAlert, Some(RoleAccent::Danger))
+            (ChromeIcon::TriangleAlert, Some(RoleAccent::Danger))
         }
-        ActivityItemKind::UnreadReport => (PikoIcon::Inbox, Some(RoleAccent::Accent)),
+        ActivityItemKind::UnreadReport => (ChromeIcon::Inbox, Some(RoleAccent::Accent)),
     }
 }
 
@@ -145,7 +145,7 @@ pub fn render_composer_panel(
 ) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
-    let mute = PikoTokens::hsla(t.muted_fg);
+    let mute = ChromeTokens::hsla(t.muted_fg);
     let accent = t.role_accent_hsla(RoleAccent::Accent);
     let danger = t.role_accent_hsla(RoleAccent::Danger);
     div()
@@ -161,20 +161,20 @@ pub fn render_composer_panel(
                 .flex()
                 .items_center()
                 .gap(m.space_sm)
-                .child(row_leading(PikoIcon::Bot, accent))
+                .child(row_leading(ChromeIcon::Bot, accent))
                 .child(
                     crate::theme::text(crate::theme::TextRole::Label)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(t.role_accent(RoleAccent::Accent))
                         .child(vm.target_label.clone()),
                 )
-                .child(row_leading(PikoIcon::Cpu, mute))
+                .child(row_leading(ChromeIcon::Cpu, mute))
                 .child(
                     crate::theme::text(crate::theme::TextRole::Meta)
                         .text_color(t.muted_fg_rgba())
                         .child(vm.model_label.clone()),
                 )
-                .child(row_leading(PikoIcon::Brain, mute))
+                .child(row_leading(ChromeIcon::Brain, mute))
                 .child(
                     crate::theme::text(crate::theme::TextRole::Meta)
                         .text_color(t.muted_fg_rgba())
@@ -187,7 +187,7 @@ pub fn render_composer_panel(
                 .when(vm.show_stop, |d| {
                     d.child(
                         Button::new("stop-turn")
-                            .icon(icon(PikoIcon::CircleStop, IconSize::Meta, danger))
+                            .icon(icon(ChromeIcon::CircleStop, IconSize::Meta, danger))
                             .label(crate::t!("composer.action.stop"))
                             .ghost()
                             .small()
@@ -198,7 +198,11 @@ pub fn render_composer_panel(
                 })
                 .child(
                     Button::new("send-turn")
-                        .icon(icon(PikoIcon::Send, IconSize::Meta, PikoTokens::hsla(t.fg)))
+                        .icon(icon(
+                            ChromeIcon::Send,
+                            IconSize::Meta,
+                            ChromeTokens::hsla(t.fg),
+                        ))
                         .primary()
                         .small()
                         .compact()

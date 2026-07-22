@@ -1,0 +1,15 @@
+[package]
+name = "piko-chrome"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GPUI Islands chrome infrastructure: archipelago, island contracts, theme, layout, overlay, widgets"
+
+[dependencies]
+anyhow = "1"
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
+gpui-component = { version = "=0.5.1" }
+
+[lib]
+name = "piko_chrome"
+path = "src/lib.rs"

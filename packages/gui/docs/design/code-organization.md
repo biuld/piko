@@ -2,7 +2,7 @@
 
 > Status: normative / migrated (M1–M7 landed; physical `platform/` grouping deferred)
 > Parent: [GPUI Desktop Client Design](overview.md)
-> Related: [GUI Primary Surface Design](primary-surface.md),
+> Related: [GUI Archipelago Design](archipelago.md),
 > [Settings Ownership Design](../../../../docs/settings-ownership-design.md),
 > [Host Command Catalog Design](../../../../docs/host-command-catalog-design.md),
 > [GUI Overlay Stack Design](overlay-stack.md)
@@ -42,10 +42,10 @@ Concrete failures:
 | Shell owns feature tools | Command Palette body under `chrome/overlay/palette` |
 | Inconsistent product homes | Islands vs overlays vs settings-in-chrome |
 | Fat `app/` | settings/palette/quit/island/composer hosts all siblings |
-| IA enums in shell | `SettingsSection` in `chrome/primary_surface.rs` |
+| IA enums in shell | `SettingsSection` in `app/archipelago.rs` |
 | Unclear dependency direction | Settings render reaches into `DesktopApp` methods freely |
 
-Primary Surface and Overlay stack concepts are fine; **folder ownership** drifted.
+Archipelago and Overlay stack concepts are fine; **folder ownership** drifted.
 
 ## 3. Industry principles (applied to piko)
 
@@ -72,17 +72,24 @@ Primary Surface and Overlay stack concepts are fine; **folder ownership** drifte
 │ features/            Product vertical slices                 │
 │   workbench islands, settings, palette, prompts, …           │
 ├─────────────────────────────────────────────────────────────┤
-│ shell/               Window chrome & surface hosts only      │
-│   primary surface, workbench layout, overlay host, island    │
-│   panel shell, title/status frame slots                      │
+│ shell/               Piko product shell on top of chrome     │
+│   workbench assembly, product OverlayHost, IslandMsg/Id,     │
+│   settings frame slots                                       │
+├─────────────────────────────────────────────────────────────┤
+│ piko-chrome (crate)  Islands chrome kit (no product domain)  │
+│   theme, IslandPanel, FocusRing<Id>, IslandNode<Id>,         │
+│   overlay surface geometry, tree widgets                     │
 ├─────────────────────────────────────────────────────────────┤
 │ platform/            Edges: bridge, transport, config,       │
-│                      theme, i18n, assets                     │
+│                      theme re-export, i18n, assets           │
 ├─────────────────────────────────────────────────────────────┤
 │ projections/         Shared Client Core → VM mappers         │
 │                      (prefer feature-local VMs over time)    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+`piko-chrome` must not depend on `piko-gui`, client-core, or protocol. See
+`packages/chrome/AGENTS.md`.
 
 ### 4.1 Dependency direction (must hold)
 
@@ -111,17 +118,17 @@ packages/gui/src/
 │
 ├── app/                          # composition root ONLY
 │   ├── mod.rs
-│   ├── desktop_app.rs            # owns Entities, PrimarySurface, OverlayHost
+│   ├── desktop_app.rs            # owns Entities, ArchipelagoRouter, OverlayHost
 │   ├── bindings.rs               # keybindings / actions registration helpers
 │   ├── layout_state.rs           # Workbench dock prefs (or move under features/workbench)
 │   └── wiring/                   # optional: thin adapters that call feature APIs
 │       ├── island_routing.rs     # IslandMsg fan-in (today island_dispatch/actions)
 │       ├── overlay_sync.rs       # prompt queue → OverlayHost
-│       └── surface_nav.rs        # PrimarySurface open/close (today primary_surface_nav)
+│       └── archipelago_nav.rs     # Archipelago open/close
 │
 ├── shell/                        # rename from chrome/ — name matches role
 │   ├── mod.rs
-│   ├── primary_surface.rs        # enum Workbench | Settings { section_id }
+│   ├── archipelago.rs           # ArchipelagoId + ArchipelagoRouter; section separate
 │   ├── workbench/                # layout ONLY (assemble columns, gutters)
 │   │   ├── frame.rs              # TitleBar slot + body + StatusBar slot
 │   │   ├── assemble.rs
@@ -182,7 +189,7 @@ still “platform”; physical `platform/` folder is optional Phase B.
 
 | Concern | Home | Not home |
 |---|---|---|
-| PrimarySurface enum / frame switch | `shell` + `app/wiring/surface_nav` | features |
+| ArchipelagoRouter / frame switch | `shell` + `app/wiring/archipelago_nav` | features |
 | Workbench column layout / resize | `shell/workbench` | features |
 | IslandPanel / focus ring | `shell/island` | features |
 | Overlay stack / Escape policy | `shell/overlay` | features |
@@ -230,7 +237,7 @@ features/<name>/
 `DesktopApp` should read as:
 
 1. own platform handles (`ClientBridge`) and shell hosts (`OverlayHost`,
-   `PrimarySurface`);
+   `ArchipelagoRouter`);
 2. own feature Entities (islands, palette, prompt forms);
 3. register actions/keybindings;
 4. poll/apply bridge updates → refresh feature VMs;
@@ -246,7 +253,7 @@ handlers, quit-busy body policy toward features; keep only routing.
 |---|---|
 | `chrome` as catch-all | `shell` (window chrome + hosts) |
 | `overlays` vs `chrome/overlay` confusion | `shell/overlay` + `features/prompts` |
-| Settings “in chrome because Primary Surface” | Settings **feature** + settings **frame** shell |
+| Settings “in chrome because Archipelago” | Settings **feature** + settings **frame** shell |
 | `widgets` meaning everything | `shell/widgets` vs `features/<x>/widgets` |
 
 Keep user-facing product name “Workbench”; keep code name `shell/workbench` for
@@ -306,4 +313,4 @@ After M1, the original Settings layering bug is fixed even if renames lag.
 | **platform** | How we talk to hostd and draw tokens |
 
 Fix Settings first (M1): product settings leave chrome; chrome keeps only the
-Settings Primary Surface frame.
+Settings Archipelago frame.

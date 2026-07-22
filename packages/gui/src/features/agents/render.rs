@@ -8,7 +8,7 @@ use crate::shell::{
     IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
     TreeRowSpec, render_tree_list,
 };
-use crate::theme::{PikoIcon, PikoTokens, row_leading, tokens};
+use crate::theme::{ChromeIcon, ChromeTokens, row_leading, tokens};
 
 use super::vm::{AgentTreeNode, AgentTreeViewModel, agent_node_visible};
 
@@ -20,6 +20,7 @@ pub fn render_agent_tree_panel(
     collapsed: &HashSet<String>,
     phase: IslandSessionPhase,
     focused: bool,
+    keyboard_id: Option<&str>,
     on_select: IdClickFactory,
     on_toggle: IdClickFactory,
 ) -> impl IntoElement {
@@ -28,7 +29,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Idle => IslandPanel::empty(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.empty_no_session.title"))
-                .piko_icon(PikoIcon::Bot)
+                .chrome_icon(ChromeIcon::Bot)
                 .subtitle(crate::t!("island.agents.empty_no_session.subtitle")),
         )
         .header(header)
@@ -37,7 +38,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Loading => IslandPanel::loading(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.loading"))
-                .piko_icon(PikoIcon::CircleDashed),
+                .chrome_icon(ChromeIcon::CircleDashed),
         )
         .header(header)
         .focused(focused)
@@ -45,7 +46,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Ready if vm.nodes.is_empty() => IslandPanel::empty(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.empty.title"))
-                .piko_icon(PikoIcon::Bot)
+                .chrome_icon(ChromeIcon::Bot)
                 .subtitle(crate::t!("island.agents.empty.subtitle")),
         )
         .header(header)
@@ -53,7 +54,7 @@ pub fn render_agent_tree_panel(
         .into_any_element(),
         IslandSessionPhase::Ready => IslandPanel::new(
             "agent-tree",
-            render_agent_tree_body(vm, collapsed, &on_select, &on_toggle),
+            render_agent_tree_body(vm, collapsed, keyboard_id, &on_select, &on_toggle),
         )
         .header(header)
         .focused(focused)
@@ -61,9 +62,19 @@ pub fn render_agent_tree_panel(
     }
 }
 
+/// Visible agent rows (same filter as the panel body) for keyboard indexing.
+pub fn visible_agent_ids(vm: &AgentTreeViewModel, collapsed: &HashSet<String>) -> Vec<String> {
+    vm.nodes
+        .iter()
+        .filter(|node| agent_node_visible(node, &vm.nodes, collapsed))
+        .map(|n| n.agent_instance_id.clone())
+        .collect()
+}
+
 fn render_agent_tree_body(
     vm: &AgentTreeViewModel,
     collapsed: &HashSet<String>,
+    keyboard_id: Option<&str>,
     on_select: &IdClickFactory,
     on_toggle: &IdClickFactory,
 ) -> impl IntoElement {
@@ -79,18 +90,26 @@ fn render_agent_tree_body(
             } else {
                 None
             };
-            (agent_row_spec(node, collapsed), activate, toggle)
+            (
+                agent_row_spec(node, collapsed, keyboard_id),
+                activate,
+                toggle,
+            )
         })
         .collect();
     render_tree_list(rows)
 }
 
-fn agent_row_spec(node: &AgentTreeNode, collapsed: &HashSet<String>) -> TreeRowSpec {
+fn agent_row_spec(
+    node: &AgentTreeNode,
+    collapsed: &HashSet<String>,
+    keyboard_id: Option<&str>,
+) -> TreeRowSpec {
     let t = tokens();
     let leading_color = if node.selected {
-        PikoTokens::hsla(t.accent)
+        ChromeTokens::hsla(t.accent)
     } else {
-        PikoTokens::hsla(t.muted_fg)
+        ChromeTokens::hsla(t.muted_fg)
     };
     let trailing = div()
         .flex_shrink_0()
@@ -108,10 +127,11 @@ fn agent_row_spec(node: &AgentTreeNode, collapsed: &HashSet<String>) -> TreeRowS
         expanded: !collapsed.contains(&node.agent_instance_id),
         selected: node.selected,
         emphasized: false,
+        keyboard_focused: keyboard_id == Some(node.agent_instance_id.as_str()),
         show_guides: true,
         label: SharedString::from(node.name.clone()),
         label_color: None,
-        leading: Some(row_leading(PikoIcon::Bot, leading_color)),
+        leading: Some(row_leading(ChromeIcon::Bot, leading_color)),
         detail: Some(trailing),
         accessory: None,
         context_menu: None,

@@ -314,7 +314,7 @@ Rendering (`sidebar.rs`):
 - **Search row** above scroll body (compact input).
 - **Pinned** subheader + flat rows (`depth: 0`, no disclosure).
 - Tree list for groups unchanged structurally; pinned ids absent from groups.
-- Pinned rows: `PikoIcon::Pin` leading; **required** `detail` = muted folder
+- Pinned rows: `ChromeIcon::Pin` leading; **required** `detail` = muted folder
   leaf (`folder_group_label(cwd)`), formatted as `· {leaf}` in Meta style via
   tool-window row `detail` slot (directory tree session rows omit this detail).
 - Accessory remains message count.

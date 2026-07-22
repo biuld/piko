@@ -9,7 +9,7 @@ use gpui_component::input::{InputEvent, InputState};
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
 use crate::projections::{SidebarViewModel, apply_sidebar_search};
-use crate::shell::{IslandId, IslandMsg};
+use crate::shell::{IslandId, IslandMsg, IslandView, activate_focus_handle};
 
 use super::sidebar::{
     ClickHandler, IdClickFactory, SearchFocusHandler, SessionMenuFactory, SidebarPanelHandlers,
@@ -63,25 +63,6 @@ impl SessionsIsland {
         cx.notify();
     }
 
-    pub fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.chrome_focused != focused {
-            self.chrome_focused = focused;
-            cx.notify();
-        }
-    }
-
-    /// Place keyboard focus when chrome activates this island ([`FocusReason::Activate`]).
-    pub fn take_keyboard_focus(
-        &mut self,
-        reason: crate::shell::FocusReason,
-        window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if reason == crate::shell::FocusReason::Activate {
-            window.focus(&self.focus_handle);
-        }
-    }
-
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Sessions, msg, window, cx);
     }
@@ -130,6 +111,26 @@ impl SessionsIsland {
     }
 }
 
+impl IslandView for SessionsIsland {
+    type Id = IslandId;
+
+    fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.chrome_focused != focused {
+            self.chrome_focused = focused;
+            cx.notify();
+        }
+    }
+
+    fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        activate_focus_handle(&self.focus_handle, reason, window);
+    }
+}
+
 impl Focusable for SessionsIsland {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -141,12 +142,8 @@ impl Render for SessionsIsland {
         let entity = cx.entity().downgrade();
         let query = self.search_input.read(cx).value().to_string();
         let vm = apply_sidebar_search(&self.vm, &query);
-        let has_sessions = !self.vm.pinned.is_empty()
-            || self
-                .vm
-                .groups
-                .iter()
-                .any(|group| !group.rows.is_empty());
+        let has_sessions =
+            !self.vm.pinned.is_empty() || self.vm.groups.iter().any(|group| !group.rows.is_empty());
 
         let on_open_directory: ClickHandler = Box::new(cx.listener(Self::on_open_directory));
 

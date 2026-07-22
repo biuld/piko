@@ -4,7 +4,7 @@ use gpui::*;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
-use crate::shell::{IslandId, IslandMsg, IslandSessionPhase};
+use crate::shell::{IslandId, IslandMsg, IslandSessionPhase, IslandView, activate_focus_handle};
 
 use super::render::render_tree_panel;
 use super::vm::ConversationTreeViewModel;
@@ -44,24 +44,6 @@ impl TreeIsland {
         cx.notify();
     }
 
-    pub fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        if self.chrome_focused != focused {
-            self.chrome_focused = focused;
-            cx.notify();
-        }
-    }
-
-    pub fn take_keyboard_focus(
-        &mut self,
-        reason: crate::shell::FocusReason,
-        window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) {
-        if reason == crate::shell::FocusReason::Activate {
-            window.focus(&self.focus_handle);
-        }
-    }
-
     fn emit(&self, msg: IslandMsg, window: &mut Window, cx: &mut Context<Self>) {
         schedule_island_msg(self.host.clone(), IslandId::Tree, msg, window, cx);
     }
@@ -69,6 +51,26 @@ impl TreeIsland {
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
+    }
+}
+
+impl IslandView for TreeIsland {
+    type Id = IslandId;
+
+    fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.chrome_focused != focused {
+            self.chrome_focused = focused;
+            cx.notify();
+        }
+    }
+
+    fn take_keyboard_focus(
+        &mut self,
+        reason: crate::shell::FocusReason,
+        window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        activate_focus_handle(&self.focus_handle, reason, window);
     }
 }
 

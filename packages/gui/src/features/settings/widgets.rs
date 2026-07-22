@@ -1,4 +1,8 @@
 //! Shared Settings form primitives (theme tokens + typography roles).
+//!
+//! Rows use a two-column pattern:
+//! - **Leading:** label + optional detail (flex, wraps)
+//! - **Trailing:** control (intrinsic width, vertically centered with the label)
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -9,23 +13,29 @@ use crate::theme::{TextRole, label_text, metrics, text, tokens};
 
 pub fn section_lede(body: impl Into<SharedString>) -> impl IntoElement {
     text(TextRole::Body)
+        .w_full()
         .text_color(tokens().muted_fg_rgba())
         .child(body.into())
 }
 
+/// Elevated card that groups related rows. Height follows content only.
 pub fn setting_group(children: impl IntoElement) -> impl IntoElement {
     let m = metrics();
     let t = tokens();
     div()
+        .w_full()
         .flex()
         .flex_col()
-        .gap(m.space_sm)
-        .p(m.space_md)
+        .flex_shrink_0()
+        .gap(m.space_md)
+        .px(m.space_md)
+        .py(m.space_md)
         .rounded(m.island_radius)
         .bg(t.elevated_rgba())
         .child(children)
 }
 
+/// One preference: label (+ detail) on the left, control on the right.
 pub fn setting_row(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -36,29 +46,39 @@ pub fn setting_row(
     let t = tokens();
     div()
         .id(id)
+        .w_full()
         .flex()
-        .flex_col()
-        .gap(m.space_xs)
+        .items_start()
+        .justify_between()
+        .gap(m.space_md)
         .child(
             div()
+                .flex_1()
+                .min_w(px(0.))
                 .flex()
-                .items_center()
-                .justify_between()
-                .gap(m.space_md)
+                .flex_col()
+                .gap(px(2.))
                 .child(
                     label_text(false)
                         .text_color(t.fg_rgba())
                         .child(label.into()),
                 )
+                .when_some(detail, |col, detail| {
+                    col.child(
+                        text(TextRole::Meta)
+                            .text_color(t.muted_fg_rgba())
+                            .child(detail),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .h(m.label_line_height)
                 .child(control),
         )
-        .when_some(detail, |row, detail| {
-            row.child(
-                text(TextRole::Meta)
-                    .text_color(t.muted_fg_rgba())
-                    .child(detail),
-            )
-        })
 }
 
 pub fn bool_switch(
@@ -76,6 +96,7 @@ pub fn value_chip(label: impl Into<SharedString>) -> impl IntoElement {
     let t = tokens();
     let m = metrics();
     div()
+        .max_w(px(280.))
         .px(m.space_sm)
         .py(px(2.))
         .rounded_sm()
@@ -83,6 +104,7 @@ pub fn value_chip(label: impl Into<SharedString>) -> impl IntoElement {
         .child(
             text(TextRole::Meta)
                 .text_color(t.fg_rgba())
+                .truncate()
                 .child(label.into()),
         )
 }
@@ -128,6 +150,7 @@ pub fn model_row(
     let m = metrics();
     div()
         .id(id)
+        .w_full()
         .px(m.space_sm)
         .py(m.space_xs)
         .rounded_md()

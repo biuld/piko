@@ -17,6 +17,7 @@ mod tests;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
+use piko_chrome::{ListKeyIntent, ListKeyboard};
 use piko_protocol::{HostCommandDescriptor, HostCommandGroup, HostCommandInvoke, ThinkingLevel};
 
 actions!(
@@ -132,10 +133,22 @@ pub(crate) struct PaletteFrame {
     pub(crate) kind: PaletteFrameKind,
     pub(crate) rows: Vec<PaletteRow>,
     pub(crate) filtered_ix: Vec<usize>,
-    pub(crate) selected: usize,
+    /// Keyboard / highlight cursor over filtered rows ([`ListKeyboard`]).
+    pub(crate) list_kb: ListKeyboard,
 }
 
 impl PaletteFrame {
+    fn new(kind: PaletteFrameKind, rows: Vec<PaletteRow>) -> Self {
+        let mut frame = Self {
+            kind,
+            rows,
+            filtered_ix: Vec::new(),
+            list_kb: ListKeyboard::new(),
+        };
+        frame.refilter("");
+        frame
+    }
+
     fn refilter(&mut self, query: &str) {
         let q = query.trim().to_lowercase();
         self.filtered_ix = self
@@ -152,15 +165,17 @@ impl PaletteFrame {
             })
             .map(|(ix, _)| ix)
             .collect();
-        if self.selected >= self.filtered_ix.len() {
-            self.selected = self.filtered_ix.len().saturating_sub(1);
+        let len = self.filtered_ix.len();
+        if self.list_kb.cursor().is_none() && len > 0 {
+            self.list_kb.ensure_cursor(len, Some(0));
+        } else {
+            self.list_kb.sync_len(len);
         }
     }
 
     fn selected_row(&self) -> Option<&PaletteRow> {
-        self.filtered_ix
-            .get(self.selected)
-            .and_then(|ix| self.rows.get(*ix))
+        let ix = self.list_kb.cursor()?;
+        self.filtered_ix.get(ix).and_then(|ix| self.rows.get(*ix))
     }
 }
 
@@ -270,14 +285,8 @@ impl CommandPalette {
                 })
                 .collect()
         };
-        let mut frame = PaletteFrame {
-            kind: PaletteFrameKind::Models,
-            rows,
-            filtered_ix: Vec::new(),
-            selected: 0,
-        };
-        frame.refilter("");
-        self.stack.push(frame);
+        self.stack
+            .push(PaletteFrame::new(PaletteFrameKind::Models, rows));
         cx.notify();
     }
 
@@ -298,14 +307,8 @@ impl CommandPalette {
                 action: PaletteRowAction::SetThinking(level.clone()),
             })
             .collect();
-        let mut frame = PaletteFrame {
-            kind: PaletteFrameKind::Thinking,
-            rows,
-            filtered_ix: Vec::new(),
-            selected: 0,
-        };
-        frame.refilter("");
-        self.stack.push(frame);
+        self.stack
+            .push(PaletteFrame::new(PaletteFrameKind::Thinking, rows));
         cx.notify();
     }
 
@@ -364,12 +367,7 @@ impl CommandPalette {
             })
             .collect();
         let query = self.filter_input.read(cx).value().to_string();
-        let mut frame = PaletteFrame {
-            kind: PaletteFrameKind::Models,
-            rows,
-            filtered_ix: Vec::new(),
-            selected: 0,
-        };
+        let mut frame = PaletteFrame::new(PaletteFrameKind::Models, rows);
         frame.refilter(&query);
         if let Some(last) = self.stack.last_mut() {
             *last = frame;
@@ -405,25 +403,20 @@ impl CommandPalette {
                     action: PaletteRowAction::Local(id),
                 }),
         );
-        let mut frame = PaletteFrame {
-            kind: PaletteFrameKind::Root,
-            rows,
-            filtered_ix: Vec::new(),
-            selected: 0,
-        };
-        frame.refilter("");
-        frame
+        PaletteFrame::new(PaletteFrameKind::Root, rows)
     }
 
     pub(crate) fn move_sel(&mut self, delta: isize) {
         let Some(frame) = self.stack.last_mut() else {
             return;
         };
-        if frame.filtered_ix.is_empty() {
-            return;
-        }
-        let len = frame.filtered_ix.len() as isize;
-        frame.selected = (frame.selected as isize + delta).rem_euclid(len) as usize;
+        let len = frame.filtered_ix.len();
+        let intent = if delta < 0 {
+            ListKeyIntent::Prev
+        } else {
+            ListKeyIntent::Next
+        };
+        let _ = frame.list_kb.apply(len, intent);
     }
 }
 

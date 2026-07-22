@@ -13,7 +13,7 @@
 > Overlay stack: [Feature](../features/overlay-stack.md) ·
 > [Design](overlay-stack.md) ·
 > [Command Palette](../features/command-palette.md)
-> Primary Surface: [Design](primary-surface.md)
+> Archipelago: [Design](archipelago.md)
 > Settings ownership: [Design](../../../../docs/settings-ownership-design.md)
 > Host command catalog / palette: [Design](../../../../docs/host-command-catalog-design.md)
 > Code organization (target): [Design](code-organization.md)
@@ -57,7 +57,7 @@ packages/gui
 ├── app              DesktopApp, actions, layout prefs, island dispatch/refresh
 ├── transport        hostd process and JSONL reader/writer
 ├── bridge           Client Core effects and GPUI foreground updates
-├── chrome           shell (Primary Surface, Workbench layout, IslandPanel, OverlayHost)
+├── chrome           shell (Archipelago frames, Workbench layout, IslandPanel, OverlayHost)
 │                    ⚠ product Settings forms currently misplaced here — migrate to features/
 ├── islands          Sessions, Timeline, Composer (+ Activity), Agents, Tree
 ├── overlays         approval / interaction prompt bodies (mounted by OverlayHost)
@@ -65,7 +65,7 @@ packages/gui
 ├── config           `[gui]` schema and defaults
 ├── theme            tokens, typography, icons mapped onto GPUI Component
 ├── i18n / locales   English chrome catalog (`rust_i18n`)
-├── assets           vendored Lucide-compatible SVG icons
+├── assets           app branding only (window icon); chrome SVGs in piko-chrome
 └── cli              cwd/session/hostd launch options
 ```
 
@@ -75,6 +75,10 @@ The hostd executable is a child process, as it is for the TUI.
 
 Each Workbench island is an independent GPUI Entity. Cross-island actions use
 directed `IslandMsg` routing through `DesktopApp`, not a full Workbench rebuild.
+
+**Normative island relationship model** (contracts, messaging, focus):
+[Island Interaction Design](../../../chrome/docs/design/island-interaction.md)
+in `piko-chrome`. Product graphs and `IslandMsg` stay in `piko-gui`.
 
 ### Island focus handoff
 
@@ -356,8 +360,8 @@ StatusBar retain their layout.
 
 ### 7.6 Information Ownership and StatusBar
 
-Each recurring fact has one primary surface. Other surfaces may expose a
-minimal fallback only when their primary surface is hidden or when the fact is
+Each recurring fact has one archipelago. Other surfaces may expose a
+minimal fallback only when their archipelago is hidden or when the fact is
 required to understand an action.
 
 | Information | Primary surface | Allowed fallback |

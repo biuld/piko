@@ -16,7 +16,7 @@ use crate::shell::{
     TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
 };
 use crate::theme::{
-    IconSize, PikoIcon, PikoTokens, TextRole, icon, metrics, row_leading, text, tokens,
+    ChromeIcon, ChromeTokens, IconSize, TextRole, icon, metrics, row_leading, text, tokens,
 };
 
 pub(crate) type ClickHandler = TreeClickHandler;
@@ -34,6 +34,7 @@ pub(crate) struct SidebarPanelHandlers<'a> {
 }
 
 /// `has_sessions` is true when the host list has rows before search filter.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_sidebar_panel(
     vm: &SidebarViewModel,
     has_sessions: bool,
@@ -46,9 +47,9 @@ pub(crate) fn render_sidebar_panel(
 ) -> IslandPanel {
     let open_directory = Button::new("open-directory")
         .icon(icon(
-            PikoIcon::FolderOpen,
+            ChromeIcon::FolderOpen,
             IconSize::Label,
-            PikoTokens::hsla(tokens().muted_fg),
+            ChromeTokens::hsla(tokens().muted_fg),
         ))
         .tooltip(crate::t!("island.sessions.action.open_directory"))
         .ghost()
@@ -65,7 +66,7 @@ pub(crate) fn render_sidebar_panel(
         return IslandPanel::empty(
             "sessions-island",
             IslandPlaceholder::new(crate::t!("island.sessions.empty.title"))
-                .piko_icon(PikoIcon::Circle)
+                .chrome_icon(ChromeIcon::Circle)
                 .subtitle(crate::t!("island.sessions.empty.subtitle")),
         )
         .header(header)
@@ -181,11 +182,11 @@ fn flatten_session_rows(
             Some(dir_new_session_button(&key, on_new))
         };
 
-        let mute = PikoTokens::hsla(t.muted_fg);
+        let mute = ChromeTokens::hsla(t.muted_fg);
         let dir_icon = if expanded {
-            PikoIcon::FolderOpen
+            ChromeIcon::FolderOpen
         } else {
-            PikoIcon::Folder
+            ChromeIcon::Folder
         };
 
         out.push((
@@ -196,6 +197,7 @@ fn flatten_session_rows(
                 expanded,
                 selected: false,
                 emphasized: false,
+                keyboard_focused: false,
                 show_guides: false,
                 label: SharedString::from(group.label.clone()),
                 label_color: Some(t.muted_fg_rgba()),
@@ -224,9 +226,9 @@ fn dir_new_session_button(cwd: &str, on_new: &IdClickFactory) -> AnyElement {
     let handler = on_new(cwd.to_string());
     Button::new(SharedString::from(format!("new-session-{cwd}")))
         .icon(icon(
-            PikoIcon::Plus,
+            ChromeIcon::Plus,
             IconSize::Meta,
-            PikoTokens::hsla(tokens().muted_fg),
+            ChromeTokens::hsla(tokens().muted_fg),
         ))
         .tooltip(crate::t!("island.sessions.action.new"))
         .ghost()
@@ -259,19 +261,19 @@ fn session_tree_row(
     };
 
     let leading_icon = if row.is_pinned || in_pinned_band {
-        PikoIcon::Pin
+        ChromeIcon::Pin
     } else {
-        PikoIcon::MessageSquare
+        ChromeIcon::MessageSquare
     };
 
     let leading_color = if is_pending {
-        PikoTokens::hsla(t.muted_fg)
+        ChromeTokens::hsla(t.muted_fg)
     } else if is_live {
-        PikoTokens::hsla(t.accent)
+        ChromeTokens::hsla(t.accent)
     } else if row.is_pinned || in_pinned_band {
-        PikoTokens::hsla(t.muted_fg)
+        ChromeTokens::hsla(t.muted_fg)
     } else {
-        PikoTokens::hsla(t.fg)
+        ChromeTokens::hsla(t.fg)
     };
 
     let detail = if in_pinned_band && !row.cwd_hint.is_empty() {
@@ -293,6 +295,7 @@ fn session_tree_row(
             expanded: false,
             selected: is_live,
             emphasized: is_pending,
+            keyboard_focused: false,
             // Sessions is a directory list, not the conversation Tree — indent
             // without vertical depth guides (ui-guidelines: guides are tree-only).
             show_guides: false,

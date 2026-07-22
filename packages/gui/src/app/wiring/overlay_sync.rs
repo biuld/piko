@@ -187,19 +187,16 @@ impl DesktopApp {
         }
     }
 
+    /// Save island focus on first overlay open via chrome [`OverlayFocusSession`].
     pub(crate) fn save_overlay_focus_if_needed(&mut self, id: IslandId) {
-        if !self.overlay.focus_saved {
+        if self.overlay.begin_focus_session() {
             self.island_focus.save_and_focus(id);
-            self.overlay.focus_saved = true;
         }
     }
 
+    /// Restore island focus when the last overlay layer closes (session end).
     pub(crate) fn restore_overlay_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.overlay.visible_layer().is_some() {
-            return;
-        }
-        if self.overlay.focus_saved {
-            self.overlay.focus_saved = false;
+        if self.overlay.end_focus_session_if_idle() {
             self.island_focus.restore();
             self.apply_island_focus_chrome(cx);
             self.focus_island(self.island_focus.focused(), window, cx);
@@ -213,25 +210,36 @@ impl DesktopApp {
     ) -> Option<AnyElement> {
         let layer = self.overlay.visible_layer()?;
         match layer {
-            crate::shell::OverlayLayer::HostPrompt => Some(self.render_host_prompt_overlay(cx)),
+            crate::shell::OverlayLayer::HostPrompt => {
+                Some(self.render_host_prompt_overlay(window, cx))
+            }
             crate::shell::OverlayLayer::LocalConfirm(kind) => match kind {
-                LocalConfirmKind::QuitBusy => Some(self.render_quit_confirm_overlay(cx)),
+                LocalConfirmKind::QuitBusy => Some(self.render_quit_confirm_overlay(window, cx)),
                 LocalConfirmKind::DeleteSession {
                     session_id,
                     display_name,
-                } => Some(self.render_delete_session_confirm_overlay(session_id, display_name, cx)),
+                } => Some(self.render_delete_session_confirm_overlay(
+                    session_id,
+                    display_name,
+                    window,
+                    cx,
+                )),
             },
             crate::shell::OverlayLayer::Transient(kind) => match kind {
                 TransientKind::CommandPalette => Some(self.render_palette_overlay(window, cx)),
                 TransientKind::SessionRename {
                     session_id,
                     initial_name: _,
-                } => Some(self.render_session_rename_overlay(session_id, cx)),
+                } => Some(self.render_session_rename_overlay(session_id, window, cx)),
             },
         }
     }
 
-    fn render_host_prompt_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_host_prompt_overlay(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let front = self.overlay.host_prompt.clone().expect("host prompt layer");
         let Some(session) = self.bridge_state().live_session.clone() else {
             return div().into_any_element();
@@ -262,6 +270,7 @@ impl DesktopApp {
                     OverlayPanelSpec {
                         title: approval_title(front.remaining).into(),
                         width: px(560.),
+                        viewport: Some(window.viewport_size()),
                         backdrop_dismiss: false,
                         style: OverlayPanelStyle::Dialog,
                     },
@@ -278,6 +287,7 @@ impl DesktopApp {
                     OverlayPanelSpec {
                         title: interaction_title(front.remaining).into(),
                         width: px(620.),
+                        viewport: Some(window.viewport_size()),
                         backdrop_dismiss: false,
                         style: OverlayPanelStyle::Dialog,
                     },
@@ -289,7 +299,7 @@ impl DesktopApp {
         }
     }
 
-    fn render_quit_confirm_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_quit_confirm_overlay(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let t = tokens();
         let entity = cx.entity().downgrade();
         let body = div()
@@ -334,6 +344,7 @@ impl DesktopApp {
             OverlayPanelSpec {
                 title: crate::t!("dialog.quit.title").into(),
                 width: px(420.),
+                viewport: Some(window.viewport_size()),
                 backdrop_dismiss: true,
                 style: OverlayPanelStyle::Dialog,
             },
@@ -369,6 +380,7 @@ impl DesktopApp {
             OverlayPanelSpec {
                 title: title.into(),
                 width: px(480.),
+                viewport: Some(window.viewport_size()),
                 backdrop_dismiss: true,
                 style: OverlayPanelStyle::Palette,
             },
@@ -390,6 +402,7 @@ impl DesktopApp {
         &mut self,
         session_id: String,
         display_name: String,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let entity = cx.entity().downgrade();
@@ -442,6 +455,7 @@ impl DesktopApp {
             OverlayPanelSpec {
                 title: crate::t!("island.sessions.delete.title").into(),
                 width: px(420.),
+                viewport: Some(window.viewport_size()),
                 backdrop_dismiss: true,
                 style: OverlayPanelStyle::Dialog,
             },
@@ -462,6 +476,7 @@ impl DesktopApp {
     fn render_session_rename_overlay(
         &mut self,
         session_id: String,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let entity = cx.entity().downgrade();
@@ -511,6 +526,7 @@ impl DesktopApp {
             OverlayPanelSpec {
                 title: crate::t!("island.sessions.rename.title").into(),
                 width: px(420.),
+                viewport: Some(window.viewport_size()),
                 backdrop_dismiss: true,
                 style: OverlayPanelStyle::Dialog,
             },
@@ -526,5 +542,34 @@ impl DesktopApp {
             },
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod e5_viewport_tests {
+    /// Roadmap E5: product overlay paints pass window viewport into chrome
+    /// geometry. This module is the only GUI construction site for
+    /// `OverlayPanelSpec` product layers.
+    #[test]
+    fn all_overlay_panel_specs_pass_window_viewport() {
+        let src = include_str!("overlay_sync.rs");
+        // Count only production lines (exclude this test module).
+        let production = src
+            .split("mod e5_viewport_tests")
+            .next()
+            .expect("production source");
+        let viewport_sites = production
+            .matches("viewport: Some(window.viewport_size())")
+            .count();
+        // Palette, host prompt, local confirm, session delete, rename, …
+        assert!(
+            viewport_sites >= 6,
+            "expected every OverlayPanelSpec to pass viewport; found {viewport_sites}"
+        );
+        // No product path should omit viewport when constructing a panel.
+        assert!(
+            !production.contains("viewport: None"),
+            "product overlay path must not omit viewport"
+        );
     }
 }
