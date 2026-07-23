@@ -52,14 +52,14 @@ edge-to-edge status bar
 
 ## 3. Surfaces
 
-| Level | Token | Fleet Dark value | Use |
-|---|---|---:|---|
-| Canvas | `canvas` / `chrome` | `#090909` | title bar, gutters, StatusBar |
-| Island | `surface` | `#18191B` | Sessions, Timeline, Composer shell, Agents, Tree |
-| Elevated | `elevated` | `#252629` | Composer input, tool detail, hover/selection, overlay panels |
-| Overlay dim | black ~45% alpha | backdrop behind OverlayHost surfaces |
-| Separator | `border` | `#3E4147` | internal dividers and focus-neutral edges |
-| Focus | `ring` | `#2A7DEB` | keyboard focus and active input only |
+| Level | Token | Fleet Dark | Fleet Light | Use |
+|---|---|---:|---:|---|
+| Canvas | `canvas` / `chrome` | `#090909` | `#EEEFF0` | title bar, gutters, StatusBar |
+| Island | `surface` | `#18191B` | `#FFFFFF` | Sessions, Timeline, Composer shell, Agents, Tree |
+| Elevated | `elevated` | `#252629` | `#F8F8F9` | Composer input, tool detail, hover/selection, overlay panels |
+| Overlay dim | black ~45% alpha | black ~35% alpha | backdrop behind OverlayHost surfaces |
+| Separator | `border` | `#3E4147` | `#D1D1D2` | internal dividers and focus-neutral edges |
+| Focus | `ring` | `#2A7DEB` | `#2A7DEB` | keyboard focus and active input only |
 
 Rules:
 
@@ -163,6 +163,8 @@ Shared island chrome in `src/shell/island/`:
 - Directory groups expose New Session in the shared accessory rail.
 - Every Session shows its message count, including zero, in that same rail.
 - Rows use shared list-item states; metadata is muted.
+- Context menus use a compact, nearly centered shadow. Avoid large downward
+  offsets that form a dark tail against the island canvas.
 
 ### Timeline
 

@@ -14,6 +14,7 @@ machine; the app owns row data and domain meaning of activate / expand.
 - Report effects (cursor moved, activate index, toggle-expand index) for the
   app to map to product actions.
 - Clamp or clear the cursor when the list length changes.
+- Skip disabled rows when the app supplies an enabled mask.
 - Tree/list row paint can show a keyboard focus ring independent of selection.
 
 ## Recommended key map (app bindings)
@@ -36,4 +37,5 @@ machine; the app owns row data and domain meaning of activate / expand.
 
 - Product messages (open item, select node, …).
 - Search-field vs list focus policy inside a sidebar (app).
-- Full platform a11y role tree (progressive; not required for core cursor).
+- Full platform a11y role tree; GPUI 0.2 does not expose the required semantic
+  role primitives. Keyboard parity remains required.

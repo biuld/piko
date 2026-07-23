@@ -15,7 +15,7 @@ real consumer use (no speculative public surface).
 2. **ListKeyboard** as the only list cursor in consumers  
 3. List/tree **composite** contracts  
 4. Overlay **focus pipeline** in app host lifecycle  
-5. Context-driven **theme** + domain palette split  
+5. Application-global **theme** + domain palette split
 
 ## Epic status
 
@@ -53,7 +53,7 @@ real consumer use (no speculative public surface).
 | D3 | Shared selectable list row primitive | done |
 | D4 | TreeList composite contract | done |
 | D5 | Consumers use ListKeyboard only | done |
-| D6 | A11y roles progressive | todo (optional) |
+| D6 | A11y semantic roles | blocked by GPUI 0.2 role API; keyboard parity done |
 
 ### E — Overlay composite
 
@@ -70,7 +70,7 @@ real consumer use (no speculative public surface).
 
 | ID | Item | Status |
 |---|---|---|
-| F1 | Context theme snapshot | done |
+| F1 | Application-global theme snapshot; per-window explicitly unsupported | done |
 | F2 | Palette variants | done |
 | F3 | Chrome vs domain role colors | done |
 | F4 | Helpers read theme handle only | done |
@@ -90,4 +90,5 @@ real consumer use (no speculative public surface).
 | Status | IDs |
 |---|---|
 | done | A1 A2 A3 A4 B1 B2 B3 C1 C2 D1 D2 D3 D4 D5 E1 E2 E3 E4 E5 F1 F2 F3 F4 |
-| todo (optional) | C3 D6 E6 |
+| todo (optional) | C3 E6 |
+| upstream-limited | D6 |

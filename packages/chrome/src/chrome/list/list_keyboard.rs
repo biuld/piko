@@ -169,6 +169,52 @@ impl ListKeyboard {
             },
         }
     }
+
+    /// Apply an intent while skipping disabled rows.
+    ///
+    /// The mask is the visible-row order (`true` = interactive). This is the
+    /// companion to `ListRowSpec::enabled`; callers with disabled items should
+    /// use this method instead of treating muted rows as keyboard targets.
+    pub fn apply_enabled(&mut self, enabled: &[bool], intent: ListKeyIntent) -> ListKeyEffect {
+        let selectable: Vec<usize> = enabled
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, enabled)| enabled.then_some(ix))
+            .collect();
+        if selectable.is_empty() {
+            self.cursor = None;
+            return ListKeyEffect::None;
+        }
+
+        let current = self
+            .cursor
+            .and_then(|cursor| selectable.iter().position(|ix| *ix == cursor));
+        let selected_pos = match intent {
+            ListKeyIntent::Prev => current
+                .map(|ix| {
+                    if ix == 0 {
+                        selectable.len() - 1
+                    } else {
+                        ix - 1
+                    }
+                })
+                .unwrap_or(selectable.len() - 1),
+            ListKeyIntent::Next => current.map(|ix| (ix + 1) % selectable.len()).unwrap_or(0),
+            ListKeyIntent::Home => 0,
+            ListKeyIntent::End => selectable.len() - 1,
+            ListKeyIntent::Activate | ListKeyIntent::ToggleExpand => current.unwrap_or(0),
+        };
+        let index = selectable[selected_pos];
+        self.cursor = Some(index);
+        match intent {
+            ListKeyIntent::Prev
+            | ListKeyIntent::Next
+            | ListKeyIntent::Home
+            | ListKeyIntent::End => ListKeyEffect::CursorMoved { index },
+            ListKeyIntent::Activate => ListKeyEffect::Activate { index },
+            ListKeyIntent::ToggleExpand => ListKeyEffect::ToggleExpand { index },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +278,23 @@ mod tests {
         assert_eq!(kb.cursor(), Some(4));
         kb.set_cursor(0, 0);
         assert_eq!(kb.cursor(), None);
+    }
+
+    #[test]
+    fn enabled_navigation_skips_disabled_rows() {
+        let mut kb = ListKeyboard::new();
+        let enabled = [false, true, false, true];
+        assert_eq!(
+            kb.apply_enabled(&enabled, ListKeyIntent::Next),
+            ListKeyEffect::CursorMoved { index: 1 }
+        );
+        assert_eq!(
+            kb.apply_enabled(&enabled, ListKeyIntent::Next),
+            ListKeyEffect::CursorMoved { index: 3 }
+        );
+        assert_eq!(
+            kb.apply_enabled(&enabled, ListKeyIntent::Activate),
+            ListKeyEffect::Activate { index: 3 }
+        );
     }
 }

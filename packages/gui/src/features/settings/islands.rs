@@ -65,7 +65,7 @@ impl SettingsNavIsland {
         window.defer(cx, move |window, cx| {
             if let Some(host) = host.upgrade() {
                 host.update(cx, |app, cx| {
-                    app.focus_settings_island(SettingsIslandId::Nav, window, cx);
+                    app.claim_settings_island_focus(SettingsIslandId::Nav, window, cx);
                 });
             }
         });
@@ -222,7 +222,7 @@ impl SettingsPanelIsland {
         window.defer(cx, move |window, cx| {
             if let Some(host) = host.upgrade() {
                 host.update(cx, |app, cx| {
-                    app.focus_settings_island(SettingsIslandId::Panel, window, cx);
+                    app.claim_settings_island_focus(SettingsIslandId::Panel, window, cx);
                 });
             }
         });

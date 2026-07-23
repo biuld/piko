@@ -8,11 +8,12 @@
 
 ## Overview
 
-The Overlay Stack is the Workbench's chrome-owned layer for focused workflows
-that appear above the islands. It dims the Workbench with a backdrop, traps
-keyboard focus inside the active overlay, and restores focus when the overlay
-closes. Host prompts, local confirms, and transient tools share one stack and
-one Escape policy.
+The Overlay Stack is the window-level layer for focused workflows above the
+active Archipelago. It dims that frame with a backdrop, moves keyboard focus
+into the active overlay, and restores the opening Archipelago's focus when the
+overlay closes. Full Tab trapping awaits platform focus-containment support.
+Host prompts, local confirms, and transient tools share one stack and one
+Escape policy.
 
 ## Layout
 
@@ -66,9 +67,10 @@ Escape never implicitly accepts or declines an approval.
 
 ### Focus
 
-Opening an overlay saves the previous island focus and traps input in the
-overlay. Closing restores the saved island, normally the Composer when the user
-was writing.
+Opening an overlay saves an archipelago-tagged focus target and moves input
+into the overlay. Closing restores the saved island in the opening
+Archipelago—normally Composer when the user was writing, or the active Settings
+island when opened from Settings.
 
 ### Existing workflows covered
 

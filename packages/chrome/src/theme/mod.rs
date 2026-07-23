@@ -11,8 +11,11 @@
 //! | [`surfaces`] | Island surface helpers |
 //! | [`apply`] | Mapping tokens onto GPUI Component `Theme` |
 //!
-//! Active palette is a process snapshot (`set_chrome_palette` /
-//! `apply_chrome_theme`). Domain role colors stay in the consuming app.
+//! Active palette follows GPUI Component's application-global Theme
+//! (`set_chrome_palette` / `apply_chrome_theme`). Domain role colors stay in
+//! the consuming app. Context-free helpers read a UI-thread-local mirror;
+//! per-window palette variation is not supported by the current GPUI Component
+//! theme API.
 //!
 //! Icon SVG bytes live in `packages/chrome/assets/icons/` and are served by
 //! [`crate::ChromeAssets`] (`icons/*.svg` paths match [`ChromeIcon`]).

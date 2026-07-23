@@ -5,7 +5,7 @@ use gpui_component::theme::{Theme, ThemeColor, ThemeMode};
 
 use super::tokens::{ChromePalette, ChromeTokens, set_chrome_palette};
 
-/// Apply a chrome palette: process snapshot + GPUI component theme overlay.
+/// Apply a chrome palette: UI-thread snapshot + GPUI component theme overlay.
 pub fn apply_chrome_theme(cx: &mut App, palette: ChromePalette) {
     set_chrome_palette(palette);
     let mode = match palette {
@@ -130,9 +130,19 @@ mod tests {
     #[test]
     fn light_tokens_are_stable() {
         let t = ChromeTokens::light();
-        assert_eq!(t.canvas, 0xf4f5f6);
-        assert_eq!(t.fg, 0x1a1b1e);
+        assert_eq!(t.canvas, 0xeeeff0);
+        assert_eq!(t.chrome, 0xeeeff0);
         assert_eq!(t.surface, 0xffffff);
+        assert_eq!(t.elevated, 0xf8f8f9);
+        assert_eq!(t.fg, 0x090909);
+        assert_eq!(t.muted_fg, 0x6e747b);
+        assert_eq!(t.border, 0xd1d1d2);
+        assert_eq!(t.ring, 0x2a7deb);
+        assert_eq!(t.accent, 0x1d61ba);
+        assert_eq!(t.success, 0x169068);
+        assert_eq!(t.warning, 0xb07203);
+        assert_eq!(t.danger, 0xe1465e);
+        assert_eq!(t.info, 0x4b8dec);
     }
 
     #[test]

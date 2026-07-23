@@ -99,8 +99,11 @@ Escape-as-cancel when that is the HostPrompt dismiss path) sends
 
 ## 7. Focus restore
 
-Reuse `IslandFocusRing::save_and_focus` / `restore` patterns already used for
-sheets. OverlayHost records whether it saved focus and restores on close.
+OverlayHost records one focus episode. The app captures an archipelago-tagged
+target (`Workbench(IslandId)` or `Settings(SettingsIslandId)`) on first open
+and restores only that visible workspace when the final overlay closes. If the
+active Archipelago changed unexpectedly, restore its current ring rather than
+focusing a hidden entity.
 
 ## 8. Non-goals
 

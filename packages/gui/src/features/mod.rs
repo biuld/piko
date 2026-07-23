@@ -24,12 +24,15 @@ pub use prompts::{
     InteractionForm, PromptFront, PromptKind, approval_title, derive_prompt_front,
     interaction_title, render_approval_body,
 };
-pub use sessions::{ClearSessionSearch, SessionsIsland};
+pub use sessions::{
+    ClearSessionSearch, SessionsConfirm, SessionsIsland, SessionsSelectNext, SessionsSelectPrev,
+    SessionsToggleFocused,
+};
 pub use settings::{
     ConfirmSection, SETTINGS_FOCUS_ORDER, SelectNextSection, SelectPrevSection, SettingsIslandId,
     SettingsNavIsland, SettingsPanelIsland, SettingsSection,
 };
 pub use timeline::TimelineIsland;
 pub use timeline::derive_timeline;
-pub use tree::TreeIsland;
+pub use tree::{TreeConfirm, TreeIsland, TreeSelectNext, TreeSelectPrev, TreeToggleFocused};
 pub use tree::{default_tree_expansion, derive_conversation_tree, prune_tree_expansion};

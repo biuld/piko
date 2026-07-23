@@ -36,7 +36,9 @@ and restore were left to each product path without a shared lifecycle.
 - On close: `session.end()` then restore when true.
 - **Consumer path:** GUI `OverlayHost` owns `OverlayFocusSession`;
   `begin_focus_session` / `end_focus_session_if_idle` gate island save/restore
-  (palette, host prompts, local confirms).
+  (palette, host prompts, local confirms). The app snapshot includes the
+  opening archipelago, so a secondary workspace restores its own focus rather
+  than a hidden primary-workspace island.
 
 ### E5 — Viewport on product path (done)
 

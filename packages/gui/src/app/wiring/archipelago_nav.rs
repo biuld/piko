@@ -95,13 +95,29 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_focus_table.focus(
-            &mut self.settings_focus,
-            id,
-            FocusReason::Activate,
-            window,
-            cx,
-        );
+        self.focus_settings_island_with_reason(id, FocusReason::Activate, window, cx);
+    }
+
+    /// Synchronize Settings chrome ownership without stealing focus from an
+    /// inner form control on pointer-driven claims.
+    pub(crate) fn claim_settings_island_focus(
+        &mut self,
+        id: SettingsIslandId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_settings_island_with_reason(id, FocusReason::Claimed, window, cx);
+    }
+
+    fn focus_settings_island_with_reason(
+        &mut self,
+        id: SettingsIslandId,
+        reason: FocusReason,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_focus_table
+            .focus(&mut self.settings_focus, id, reason, window, cx);
     }
 
     #[allow(dead_code)] // used when re-syncing rings without keyboard handoff

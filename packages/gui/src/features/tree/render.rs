@@ -18,6 +18,7 @@ pub fn render_tree_panel(
     tree: &ConversationTreeViewModel,
     phase: IslandSessionPhase,
     focused: bool,
+    keyboard_index: Option<usize>,
     on_tree_activate: IdClickFactory,
     on_tree_toggle_expand: IdClickFactory,
 ) -> IslandPanel {
@@ -48,7 +49,12 @@ pub fn render_tree_panel(
         .focused(focused),
         IslandSessionPhase::Ready => IslandPanel::new(
             "conversation-tree",
-            render_tree_nodes(tree, &on_tree_activate, &on_tree_toggle_expand),
+            render_tree_nodes(
+                tree,
+                keyboard_index,
+                &on_tree_activate,
+                &on_tree_toggle_expand,
+            ),
         )
         .header(header)
         .focused(focused),
@@ -57,18 +63,20 @@ pub fn render_tree_panel(
 
 fn render_tree_nodes(
     tree: &ConversationTreeViewModel,
+    keyboard_index: Option<usize>,
     on_tree_activate: &IdClickFactory,
     on_tree_toggle_expand: &IdClickFactory,
 ) -> impl IntoElement {
     let rows: Vec<_> = tree
         .nodes
         .iter()
-        .map(|node| {
+        .enumerate()
+        .map(|(index, node)| {
             let previewed = tree.preview_entry_id.as_deref() == Some(node.id.as_str());
             let activate = on_tree_activate(node.id.clone());
             let toggle = on_tree_toggle_expand(node.id.clone());
             (
-                conversation_row_spec(node, previewed),
+                conversation_row_spec(node, previewed, keyboard_index == Some(index)),
                 activate,
                 Some(toggle),
             )
@@ -77,7 +85,7 @@ fn render_tree_nodes(
     render_tree_list(rows)
 }
 
-fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
+fn conversation_row_spec(node: &TreeNode, previewed: bool, keyboard_focused: bool) -> TreeRowSpec {
     let t = tokens();
     let kind_icon = tree_kind_icon(node.kind);
     let kind_color = tree_kind_color(node.kind);
@@ -100,7 +108,7 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool) -> TreeRowSpec {
         expanded: node.expanded,
         selected: false,
         emphasized: node.is_leaf || previewed || node.on_path,
-        keyboard_focused: false,
+        keyboard_focused,
         show_guides: true,
         label: SharedString::from(node.label.clone()),
         label_color: Some(label_color),

@@ -1,6 +1,7 @@
 //! Tree island: Entity-owned conversation tree (display / navigation preview).
 //!
 use gpui::*;
+use piko_chrome::{ListKeyEffect, ListKeyIntent, ListKeyboard};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
@@ -8,6 +9,16 @@ use crate::shell::{IslandId, IslandMsg, IslandSessionPhase, IslandView, activate
 
 use super::render::render_tree_panel;
 use super::vm::ConversationTreeViewModel;
+
+actions!(
+    tree,
+    [
+        TreeSelectPrev,
+        TreeSelectNext,
+        TreeConfirm,
+        TreeToggleFocused
+    ]
+);
 
 type IdClickFactory =
     Box<dyn Fn(String) -> Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>;
@@ -18,6 +29,7 @@ pub struct TreeIsland {
     chrome_focused: bool,
     vm: ConversationTreeViewModel,
     phase: IslandSessionPhase,
+    list_kb: ListKeyboard,
 }
 
 impl TreeIsland {
@@ -28,6 +40,7 @@ impl TreeIsland {
             chrome_focused: false,
             vm: ConversationTreeViewModel::default(),
             phase: IslandSessionPhase::Idle,
+            list_kb: ListKeyboard::new(),
         }
     }
 
@@ -41,6 +54,7 @@ impl TreeIsland {
     ) {
         self.vm = vm;
         self.phase = phase;
+        self.list_kb.sync_len(self.vm.nodes.len());
         cx.notify();
     }
 
@@ -52,6 +66,65 @@ impl TreeIsland {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
     }
+
+    fn select_prev(&mut self, _: &TreeSelectPrev, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Prev, window, cx);
+    }
+
+    fn select_next(&mut self, _: &TreeSelectNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Next, window, cx);
+    }
+
+    fn confirm(&mut self, _: &TreeConfirm, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Activate, window, cx);
+    }
+
+    fn toggle_focused(
+        &mut self,
+        _: &TreeToggleFocused,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_list_key(ListKeyIntent::ToggleExpand, window, cx);
+    }
+
+    fn apply_list_key(
+        &mut self,
+        intent: ListKeyIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.list_kb.apply(self.vm.nodes.len(), intent) {
+            ListKeyEffect::None => {}
+            ListKeyEffect::CursorMoved { .. } => cx.notify(),
+            ListKeyEffect::Activate { index } => {
+                if let Some(node) = self.vm.nodes.get(index) {
+                    self.emit(
+                        IslandMsg::TreeActivate {
+                            entry_id: node.id.clone(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+                cx.notify();
+            }
+            ListKeyEffect::ToggleExpand { index } => {
+                if let Some(node) = self.vm.nodes.get(index)
+                    && node.has_children
+                {
+                    self.emit(
+                        IslandMsg::TreeToggleExpand {
+                            entry_id: node.id.clone(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+                cx.notify();
+            }
+        }
+    }
 }
 
 impl IslandView for TreeIsland {
@@ -60,6 +133,13 @@ impl IslandView for TreeIsland {
     fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
         if self.chrome_focused != focused {
             self.chrome_focused = focused;
+            if focused {
+                let preferred = self.vm.nodes.iter().position(|node| {
+                    self.vm.preview_entry_id.as_deref() == Some(node.id.as_str())
+                        || self.vm.current_leaf_id.as_deref() == Some(node.id.as_str())
+                });
+                self.list_kb.ensure_cursor(self.vm.nodes.len(), preferred);
+            }
             cx.notify();
         }
     }
@@ -128,6 +208,7 @@ impl Render for TreeIsland {
             &self.vm,
             self.phase,
             self.chrome_focused,
+            self.list_kb.cursor().filter(|_| self.chrome_focused),
             on_tree_activate,
             on_tree_toggle_expand,
         );
@@ -137,6 +218,10 @@ impl Render for TreeIsland {
             .track_focus(&self.focus_handle)
             .key_context("IslandTree")
             .size_full()
+            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::confirm))
+            .on_action(cx.listener(Self::toggle_focused))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::claim_focus))
             .child(panel)
     }

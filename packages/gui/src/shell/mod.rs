@@ -22,7 +22,7 @@ pub mod workbench;
 pub use island::{
     FocusCycleDir, FocusReason, IslandContentViewport, IslandFocusRing, IslandFocusTable,
     IslandHeader, IslandHost, IslandMessage, IslandMsg, IslandPanel, IslandPlaceholder,
-    IslandSessionPhase, IslandView, activate_focus_handle, focus_order, route_focus_message,
+    IslandSessionPhase, IslandView, activate_focus_handle, route_focus_message,
     schedule_island_message,
 };
 #[allow(unused_imports)] // public override API for islands

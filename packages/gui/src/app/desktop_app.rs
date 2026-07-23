@@ -14,14 +14,14 @@ use crate::features::{
 use crate::features::{CommandPalette, InteractionForm, SettingsSection};
 use crate::shell::{
     ALL_ISLAND_IDS, FocusCycleDir, IslandFocusRing, IslandFocusTable, IslandId, OverlayHost,
-    focus_order, mount_settings_frame, mount_workbench_frame,
+    mount_settings_frame, mount_workbench_frame,
 };
 use crate::theme::tokens;
 use gpui_component::Root;
 use piko_client_core::{ClientIntent, ClientState};
 use piko_protocol::SessionListScope;
 
-use super::archipelago::{AppArchipelago, ArchipelagoId};
+use super::archipelago::{AppArchipelago, ArchipelagoFocusTarget, ArchipelagoId};
 use super::layout_state::LayoutState;
 use super::submit_recovery::{FirstSubmitRecovery, SubmitRecovery};
 use super::timeline_follow::TimelineContentFp;
@@ -70,6 +70,7 @@ pub struct DesktopApp {
     pub(crate) pending_first_submit: FirstSubmitRecovery,
     pub(crate) clear_composer_on_render: bool,
     pub(crate) overlay: OverlayHost,
+    pub(crate) overlay_focus_restore: Option<ArchipelagoFocusTarget>,
     pub(crate) interaction_form: Option<Entity<InteractionForm>>,
     pub(crate) command_palette: Option<Entity<CommandPalette>>,
     pub(crate) layout: LayoutState,
@@ -150,9 +151,11 @@ impl DesktopApp {
         // Fail fast if a focusable island is missing from the chrome table.
         island_focus_table.assert_covers(&ALL_ISLAND_IDS);
         debug_assert_eq!(
-            focus_order(|_| true).as_slice(),
+            crate::app::archipelago::workbench_workspace()
+                .focus_order
+                .as_slice(),
             ALL_ISLAND_IDS.as_slice(),
-            "focus_order must list every IslandId in stable Tab sequence"
+            "workspace focus_order must list every IslandId in stable Tab sequence"
         );
 
         let section0 = SettingsSection::default();
@@ -233,6 +236,7 @@ impl DesktopApp {
             pending_first_submit: FirstSubmitRecovery::default(),
             clear_composer_on_render: false,
             overlay: OverlayHost::default(),
+            overlay_focus_restore: None,
             interaction_form: None,
             command_palette: None,
             layout: LayoutState::default(),
@@ -402,9 +406,13 @@ impl Render for DesktopApp {
             ArchipelagoId::Workbench => mount_workbench_frame(root, self, window, cx),
             ArchipelagoId::Settings => {
                 let entity = cx.entity().downgrade();
+                let workspace = super::archipelago::settings_workspace();
                 mount_settings_frame(
                     root,
                     entity,
+                    &workspace.island_tree,
+                    SettingsIslandId::Nav,
+                    SettingsIslandId::Panel,
                     self.settings_nav.clone(),
                     self.settings_panel.clone(),
                 )

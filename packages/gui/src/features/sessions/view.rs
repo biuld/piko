@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
+use piko_chrome::{ListKeyEffect, ListKeyIntent, ListKeyboard};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
@@ -12,11 +13,21 @@ use crate::projections::{SidebarViewModel, apply_sidebar_search};
 use crate::shell::{IslandId, IslandMsg, IslandView, activate_focus_handle};
 
 use super::sidebar::{
-    ClickHandler, IdClickFactory, SearchFocusHandler, SessionMenuFactory, SidebarPanelHandlers,
-    build_session_context_menu, render_sidebar_panel,
+    ClickHandler, IdClickFactory, SearchFocusHandler, SessionListTarget, SessionMenuFactory,
+    SidebarPanelHandlers, build_session_context_menu, render_sidebar_panel,
+    visible_session_targets,
 };
 
-actions!(sessions, [ClearSessionSearch]);
+actions!(
+    sessions,
+    [
+        ClearSessionSearch,
+        SessionsSelectPrev,
+        SessionsSelectNext,
+        SessionsConfirm,
+        SessionsToggleFocused
+    ]
+);
 
 pub struct SessionsIsland {
     focus_handle: FocusHandle,
@@ -26,6 +37,7 @@ pub struct SessionsIsland {
     search_input: Entity<InputState>,
     list_scroll: ScrollHandle,
     collapsed_dirs: HashSet<String>,
+    list_kb: ListKeyboard,
 }
 
 impl SessionsIsland {
@@ -44,6 +56,7 @@ impl SessionsIsland {
             search_input,
             list_scroll: ScrollHandle::new(),
             collapsed_dirs: HashSet::new(),
+            list_kb: ListKeyboard::new(),
         }
     }
 
@@ -60,6 +73,9 @@ impl SessionsIsland {
 
     pub fn apply(&mut self, vm: SidebarViewModel, cx: &mut Context<Self>) {
         self.vm = vm;
+        let filtered = self.filtered_vm(cx);
+        self.list_kb
+            .sync_len(visible_session_targets(&filtered, &self.collapsed_dirs).len());
         cx.notify();
     }
 
@@ -81,6 +97,68 @@ impl SessionsIsland {
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
+    }
+
+    fn filtered_vm(&self, cx: &App) -> SidebarViewModel {
+        let query = self.search_input.read(cx).value().to_string();
+        apply_sidebar_search(&self.vm, &query)
+    }
+
+    fn select_prev(&mut self, _: &SessionsSelectPrev, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Prev, window, cx);
+    }
+
+    fn select_next(&mut self, _: &SessionsSelectNext, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Next, window, cx);
+    }
+
+    fn confirm(&mut self, _: &SessionsConfirm, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_list_key(ListKeyIntent::Activate, window, cx);
+    }
+
+    fn toggle_focused(
+        &mut self,
+        _: &SessionsToggleFocused,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.apply_list_key(ListKeyIntent::ToggleExpand, window, cx);
+    }
+
+    fn apply_list_key(
+        &mut self,
+        intent: ListKeyIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let filtered = self.filtered_vm(cx);
+        let targets = visible_session_targets(&filtered, &self.collapsed_dirs);
+        match self.list_kb.apply(targets.len(), intent) {
+            ListKeyEffect::None => {}
+            ListKeyEffect::CursorMoved { .. } => cx.notify(),
+            ListKeyEffect::Activate { index } => {
+                if let Some(target) = targets.get(index) {
+                    match target {
+                        SessionListTarget::Directory(key) => self.toggle_dir(key.clone(), cx),
+                        SessionListTarget::Session(session_id) => self.emit(
+                            IslandMsg::OpenSession {
+                                session_id: session_id.clone(),
+                            },
+                            window,
+                            cx,
+                        ),
+                    }
+                }
+                cx.notify();
+            }
+            ListKeyEffect::ToggleExpand { index } => {
+                if let Some(SessionListTarget::Directory(key)) = targets.get(index) {
+                    self.toggle_dir(key.clone(), cx);
+                } else {
+                    cx.notify();
+                }
+            }
+        }
     }
 
     /// Focus the filter field and claim Sessions chrome ownership.
@@ -117,6 +195,11 @@ impl IslandView for SessionsIsland {
     fn set_chrome_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
         if self.chrome_focused != focused {
             self.chrome_focused = focused;
+            if focused {
+                let filtered = self.filtered_vm(cx);
+                let targets = visible_session_targets(&filtered, &self.collapsed_dirs);
+                self.list_kb.ensure_cursor(targets.len(), None);
+            }
             cx.notify();
         }
     }
@@ -140,8 +223,7 @@ impl Focusable for SessionsIsland {
 impl Render for SessionsIsland {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity().downgrade();
-        let query = self.search_input.read(cx).value().to_string();
-        let vm = apply_sidebar_search(&self.vm, &query);
+        let vm = self.filtered_vm(cx);
         let has_sessions =
             !self.vm.pinned.is_empty() || self.vm.groups.iter().any(|group| !group.rows.is_empty());
 
@@ -301,6 +383,7 @@ impl Render for SessionsIsland {
             on_open_directory,
             handlers,
             self.chrome_focused,
+            self.list_kb.cursor().filter(|_| self.chrome_focused),
         );
 
         div()
@@ -308,6 +391,10 @@ impl Render for SessionsIsland {
             .track_focus(&self.focus_handle)
             .key_context("IslandSessions")
             .on_action(cx.listener(Self::clear_search))
+            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::confirm))
+            .on_action(cx.listener(Self::toggle_focused))
             .size_full()
             .on_mouse_down(MouseButton::Left, cx.listener(Self::claim_focus))
             .child(panel)

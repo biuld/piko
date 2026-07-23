@@ -110,28 +110,34 @@ pub fn render_list_row(spec: ListRowSpec, on_click: ListClickHandler) -> AnyElem
     });
     let row_id = spec.id.clone();
 
-    div()
+    let enabled = spec.enabled;
+    let row = div()
         .id(row_id)
         .h(px(32.))
         .w_full()
         .px(m.tool_row_inset)
         .rounded_sm()
-        .cursor_pointer()
         .flex()
         .items_center()
-        .hover(|style| style.bg(t.elevated_rgba()))
         .when(chrome.elevated_bg, |d| d.bg(t.elevated_rgba()))
         .when(chrome.focus_ring, |d| {
             d.border_1().border_color(t.ring_rgba())
         })
         .when(chrome.muted, |d| d.opacity(0.45))
-        .on_click(move |ev, window, cx| on_click(ev, window, cx))
         .child(
             crate::theme::label_text(spec.selected)
                 .text_color(label_color)
                 .child(spec.label),
-        )
-        .into_any_element()
+        );
+
+    if enabled {
+        row.cursor_pointer()
+            .hover(|style| style.bg(t.elevated_rgba()))
+            .on_click(move |ev, window, cx| on_click(ev, window, cx))
+            .into_any_element()
+    } else {
+        row.into_any_element()
+    }
 }
 
 #[cfg(test)]

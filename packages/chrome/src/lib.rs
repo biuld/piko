@@ -82,8 +82,8 @@ pub use theme::{
     tokens_from,
 };
 pub use widgets::{
-    ListClickHandler, ListKeyEffect, ListKeyIntent, ListKeyboard, ListRowChrome, ListRowSpec,
-    TreeClickHandler, TreeContextMenuBuilder, TreeRowAccessory, TreeRowChrome, TreeRowSpec,
-    list_row_chrome, render_list, render_list_row, render_tree_list, render_tree_row,
-    step_list_index, tree_guides, tree_row_chrome,
+    ChromeContextMenu, ChromeContextMenuExt, ListClickHandler, ListKeyEffect, ListKeyIntent,
+    ListKeyboard, ListRowChrome, ListRowSpec, TreeClickHandler, TreeContextMenuBuilder,
+    TreeRowAccessory, TreeRowChrome, TreeRowSpec, list_row_chrome, render_list, render_list_row,
+    render_tree_list, render_tree_row, step_list_index, tree_guides, tree_row_chrome,
 };

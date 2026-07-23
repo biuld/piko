@@ -13,8 +13,10 @@ one-off density or type sizes for chrome chrome.
 - Named text roles applied through helpers (not ad-hoc font sizes at call sites).
 - Icon sizes aligned to type roles; vendored SVG paths served by the kit assets.
 - **Palette variants:** dark and light via `ChromePalette` + `ThemeSnapshot`.
+- Light appearance follows Fleet Light semantics for window chrome, island and
+  elevated surfaces, text hierarchy, focus, accents, and status colors.
 - Active snapshot installed with `apply_chrome_theme(cx, palette)` (or
-  `set_chrome_palette` for process-only tests).
+  `set_chrome_palette` for snapshot-only tests).
 - Helpers (`tokens`, surfaces, list/tree paint, markdown) read the active
   snapshot handle — not a silent dark-only constant.
 

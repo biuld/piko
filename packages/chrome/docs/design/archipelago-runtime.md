@@ -29,11 +29,12 @@ Frame chrome (TitleBar / StatusBar) remains app-composed slots around the body.
 ### A2 — Workspace is source of truth (done)
 
 - App declares `ArchipelagoWorkspace { id, island_tree, focus_order }`.
-- Assemble/layout and Tab order read from that declaration (or a single derived
-  view of it).
-- No parallel hard-coded column trees that drift from the workspace.
-- Primary consumer path: workspace tree for assemble prune; workspace
-  `focus_order` for Settings Tab cycle.
+- Assemble/layout membership and Tab order read from that declaration.
+- Split direction/order is realized from the tree; product shell adapters may
+  still own resizable widths, minimums, and dock-fit policy.
+- Primary consumer path: the pruned Workbench tree drives visible layout
+  membership; the Settings tree drives its recursive slots; both Tab cycles
+  use workspace `focus_order`.
 
 ### A3 — Chrome route path (done)
 

@@ -23,6 +23,25 @@ pub enum ArchipelagoId {
 /// Router + helpers used by `DesktopApp`.
 pub type AppArchipelago = ArchipelagoRouter<ArchipelagoId>;
 
+/// Keyboard focus target captured when the first overlay layer opens.
+///
+/// Keeping the archipelago in the snapshot prevents an overlay opened from
+/// Settings from restoring focus into a hidden Workbench island.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchipelagoFocusTarget {
+    Workbench(IslandId),
+    Settings(SettingsIslandId),
+}
+
+impl ArchipelagoFocusTarget {
+    pub fn capture(active: ArchipelagoId, workbench: IslandId, settings: SettingsIslandId) -> Self {
+        match active {
+            ArchipelagoId::Workbench => Self::Workbench(workbench),
+            ArchipelagoId::Settings => Self::Settings(settings),
+        }
+    }
+}
+
 #[cfg(test)]
 pub fn is_workbench(router: &AppArchipelago) -> bool {
     router.is_active(ArchipelagoId::Workbench)
@@ -123,6 +142,26 @@ mod tests {
         assert_eq!(
             ws.focus_order.as_slice(),
             crate::shell::workbench::ALL_ISLAND_IDS.as_slice()
+        );
+    }
+
+    #[test]
+    fn overlay_focus_target_tracks_opening_archipelago() {
+        assert_eq!(
+            ArchipelagoFocusTarget::capture(
+                ArchipelagoId::Workbench,
+                IslandId::Composer,
+                SettingsIslandId::Panel,
+            ),
+            ArchipelagoFocusTarget::Workbench(IslandId::Composer)
+        );
+        assert_eq!(
+            ArchipelagoFocusTarget::capture(
+                ArchipelagoId::Settings,
+                IslandId::Composer,
+                SettingsIslandId::Panel,
+            ),
+            ArchipelagoFocusTarget::Settings(SettingsIslandId::Panel)
         );
     }
 }

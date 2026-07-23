@@ -31,6 +31,14 @@ impl<Id: Copy + Eq> IslandNode<Id> {
             children: children.into_iter().collect(),
         }
     }
+
+    /// Whether this topology contains a leaf id.
+    pub fn contains(&self, needle: Id) -> bool {
+        match self {
+            Self::Island(id) => *id == needle,
+            Self::Split { children, .. } => children.iter().any(|child| child.contains(needle)),
+        }
+    }
 }
 
 /// Drop closed islands and empty splits. Adjacent gutters disappear with slots.
@@ -97,5 +105,7 @@ mod tests {
 
         let only_b = prune_island_tree(&tree, &|id| id == Id::B);
         assert_eq!(only_b, Some(IslandNode::island(Id::B)));
+        assert!(tree.contains(Id::A));
+        assert!(tree.contains(Id::C));
     }
 }

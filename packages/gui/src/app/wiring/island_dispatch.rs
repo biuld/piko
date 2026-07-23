@@ -49,14 +49,18 @@ impl DesktopApp {
     ) {
         // Chrome focus layer — must not fall through to product refresh.
         if let Some(focus) = msg.as_focus_msg() {
-            let _ = route_focus_message(
+            if route_focus_message(
                 &self.island_focus_table,
                 &mut *self.island_focus,
                 id,
                 focus,
                 window,
                 cx,
-            );
+            )
+            .is_err()
+            {
+                log::warn!("ignored focus message for unregistered island {id:?}");
+            }
             return;
         }
 

@@ -44,25 +44,3 @@ impl DerefMut for IslandFocusRing {
         &mut self.0
     }
 }
-
-/// Stable Tab order for visible piko Workbench docks.
-///
-/// Order matches [`crate::shell::workbench::ALL_ISLAND_IDS`].
-pub fn focus_order(visible: impl Fn(IslandId) -> bool) -> Vec<IslandId> {
-    crate::shell::workbench::ALL_ISLAND_IDS
-        .into_iter()
-        .filter(|id| visible(*id))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::shell::workbench::ALL_ISLAND_IDS;
-
-    #[test]
-    fn focus_order_covers_all_island_ids() {
-        let all = focus_order(|_| true);
-        assert_eq!(all.as_slice(), ALL_ISLAND_IDS.as_slice());
-    }
-}

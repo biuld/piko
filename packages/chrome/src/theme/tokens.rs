@@ -4,7 +4,7 @@
 //! Product domain role colors (chat authors, tool classes) live in the consuming
 //! app — not on [`ChromeTokens`].
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::cell::Cell;
 
 use gpui::{Hsla, Rgba, rgb};
 
@@ -106,22 +106,27 @@ impl ChromeTokens {
         }
     }
 
-    /// Usable light contrast (structural correctness first; design polish later).
+    /// Fleet Light semantic mapping.
+    ///
+    /// The source theme has alpha-bearing border and selection tokens. Chrome's
+    /// compact token table stores opaque RGB, so `border` is the source border
+    /// composited over the white island surface. Interactive hover surfaces use
+    /// Fleet's elevated surface color.
     pub const fn light() -> Self {
         Self {
-            canvas: 0xf4f5f6,
+            canvas: 0xeeeff0,
             surface: 0xffffff,
-            elevated: 0xeceef1,
-            chrome: 0xf0f1f3,
-            fg: 0x1a1b1e,
-            muted_fg: 0x6b7078,
-            border: 0xd0d3d8,
+            elevated: 0xf8f8f9,
+            chrome: 0xeeeff0,
+            fg: 0x090909,
+            muted_fg: 0x6e747b,
+            border: 0xd1d1d2,
             ring: 0x2a7deb,
-            accent: 0x3b7dd8,
-            success: 0x0d7a5a,
-            warning: 0x9a5f00,
-            danger: 0xc43d52,
-            info: 0x3b7dd8,
+            accent: 0x1d61ba,
+            success: 0x169068,
+            warning: 0xb07203,
+            danger: 0xe1465e,
+            info: 0x4b8dec,
         }
     }
 
@@ -200,20 +205,25 @@ pub enum RoleAccent {
     Accent,
 }
 
-/// Process-wide active palette (set via [`set_chrome_palette`] / theme apply).
-///
-/// Paint helpers without `App` resolve colors through this snapshot handle so
-/// they are not hard-coded to dark-only tables.
-static CURRENT_PALETTE: AtomicU8 = AtomicU8::new(0);
+// Application UI-thread palette mirror (set via `set_chrome_palette` / theme apply).
+//
+// GPUI Component 0.5 exposes one application-global Theme, so every window in
+// an application intentionally shares this palette. GPUI applications render
+// on their UI thread; a thread-local mirror lets context-free paint helpers
+// follow that Theme without leaking palette state across application threads
+// or parallel tests. Per-window themes are not represented by this API.
+thread_local! {
+    static CURRENT_PALETTE: Cell<u8> = const { Cell::new(0) };
+}
 
 /// Active palette identity.
 pub fn chrome_palette() -> ChromePalette {
-    ChromePalette::from_u8(CURRENT_PALETTE.load(Ordering::Relaxed))
+    CURRENT_PALETTE.with(|palette| ChromePalette::from_u8(palette.get()))
 }
 
-/// Install the process-wide palette used by [`tokens`] / [`theme_snapshot`].
+/// Install the application-global palette used by [`tokens`] / [`theme_snapshot`].
 pub fn set_chrome_palette(palette: ChromePalette) {
-    CURRENT_PALETTE.store(palette.as_u8(), Ordering::Relaxed);
+    CURRENT_PALETTE.with(|current| current.set(palette.as_u8()));
 }
 
 /// Immutable snapshot of the active chrome theme.
@@ -221,7 +231,7 @@ pub fn theme_snapshot() -> ThemeSnapshot {
     ThemeSnapshot::for_palette(chrome_palette())
 }
 
-/// Token table for the active process-wide snapshot.
+/// Token table for the active application-global snapshot.
 pub fn tokens() -> ChromeTokens {
     theme_snapshot().tokens
 }
@@ -260,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn tokens_from_explicit_snapshot_ignores_process_palette() {
+    fn tokens_from_explicit_snapshot_ignores_thread_palette() {
         let prev = chrome_palette();
         set_chrome_palette(ChromePalette::Dark);
         let light = ThemeSnapshot::light();
@@ -270,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn set_palette_updates_process_snapshot() {
+    fn set_palette_updates_thread_snapshot() {
         let prev = chrome_palette();
         set_chrome_palette(ChromePalette::Light);
         assert_eq!(chrome_palette(), ChromePalette::Light);

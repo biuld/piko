@@ -139,9 +139,13 @@ impl DesktopApp {
 
     pub(crate) fn visible_focus_islands(&self) -> Vec<IslandId> {
         let live = self.bridge_state().is_live();
-        crate::shell::focus_order(|id| match id {
-            IslandId::Timeline | IslandId::Composer => true,
-            other => self.layout.is_docked_visible(other, live),
-        })
+        crate::app::archipelago::workbench_workspace()
+            .focus_order
+            .into_iter()
+            .filter(|id| match id {
+                IslandId::Timeline | IslandId::Composer => true,
+                other => self.layout.is_docked_visible(*other, live),
+            })
+            .collect()
     }
 }

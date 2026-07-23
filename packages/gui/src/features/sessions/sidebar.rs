@@ -25,6 +25,12 @@ pub(crate) type SessionMenuAction = Rc<dyn Fn(&mut Window, &mut App)>;
 pub(crate) type SessionMenuFactory = Box<dyn Fn(&SessionRow) -> Option<TreeContextMenuBuilder>>;
 pub(crate) type SearchFocusHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SessionListTarget {
+    Directory(String),
+    Session(String),
+}
+
 pub(crate) struct SidebarPanelHandlers<'a> {
     pub on_open_session: &'a IdClickFactory,
     pub on_new_session: &'a IdClickFactory,
@@ -44,6 +50,7 @@ pub(crate) fn render_sidebar_panel(
     on_open_directory: ClickHandler,
     handlers: SidebarPanelHandlers<'_>,
     focused: bool,
+    keyboard_index: Option<usize>,
 ) -> IslandPanel {
     let open_directory = Button::new("open-directory")
         .icon(icon(
@@ -73,7 +80,7 @@ pub(crate) fn render_sidebar_panel(
         .focused(focused);
     }
 
-    let tree_rows = flatten_session_rows(
+    let mut tree_rows = flatten_session_rows(
         vm,
         collapsed,
         handlers.on_open_session,
@@ -81,6 +88,9 @@ pub(crate) fn render_sidebar_panel(
         handlers.on_toggle_dir,
         handlers.session_menu,
     );
+    for (index, (spec, _, _)) in tree_rows.iter_mut().enumerate() {
+        spec.keyboard_focused = keyboard_index == Some(index);
+    }
 
     let m = metrics();
     let on_search_focus = handlers.on_search_focus.clone();
@@ -137,6 +147,35 @@ pub(crate) fn render_sidebar_panel(
         .scroll(false)
         .header(header)
         .focused(focused)
+}
+
+/// Visible keyboard target order, kept identical to [`flatten_session_rows`].
+pub(crate) fn visible_session_targets(
+    vm: &SidebarViewModel,
+    collapsed: &HashSet<String>,
+) -> Vec<SessionListTarget> {
+    let mut out = Vec::new();
+    out.extend(
+        vm.pinned
+            .iter()
+            .map(|row| SessionListTarget::Session(row.session_id.clone())),
+    );
+    for group in &vm.groups {
+        if group.rows.is_empty() {
+            continue;
+        }
+        let key = group_key(group);
+        out.push(SessionListTarget::Directory(key.clone()));
+        if !collapsed.contains(&key) {
+            out.extend(
+                group
+                    .rows
+                    .iter()
+                    .map(|row| SessionListTarget::Session(row.session_id.clone())),
+            );
+        }
+    }
+    out
 }
 
 fn group_key(group: &SidebarGroup) -> String {

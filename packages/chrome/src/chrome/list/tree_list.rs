@@ -16,10 +16,10 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::menu::ContextMenuExt;
 use gpui_component::menu::PopupMenu;
 use std::rc::Rc;
 
+use super::ChromeContextMenuExt;
 use crate::theme::{metrics, tokens};
 
 pub type TreeClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -187,7 +187,7 @@ pub fn render_tree_row(
         .on_click(move |ev, window, cx| on_activate(ev, window, cx));
 
     if let Some(build_menu) = spec.context_menu {
-        row.context_menu(move |menu, window, cx| build_menu(menu, window, cx))
+        row.chrome_context_menu(move |menu, window, cx| build_menu(menu, window, cx))
             .into_any_element()
     } else {
         row.into_any_element()

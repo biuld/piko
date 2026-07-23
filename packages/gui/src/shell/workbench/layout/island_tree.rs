@@ -13,8 +13,8 @@ pub enum IslandId {
     Tree,
 }
 
-/// Every focusable Workbench island (must match [`crate::shell::focus_order`]
-/// membership and `IslandFocusTable` registration).
+/// Every focusable Workbench island. The workspace declaration consumes this
+/// as its stable focus order; `IslandFocusTable` registration must cover it.
 pub const ALL_ISLAND_IDS: [IslandId; 5] = [
     IslandId::Sessions,
     IslandId::Timeline,

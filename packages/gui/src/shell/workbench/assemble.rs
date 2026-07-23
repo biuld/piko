@@ -36,17 +36,16 @@ impl DesktopApp {
         let m = metrics();
         let gutter = m.island_gutter;
 
-        let show_session = self.layout.is_docked_visible(IslandId::Sessions, live);
-        let show_agents = self.layout.is_docked_visible(IslandId::Agents, live);
-        let show_tree = self.layout.is_docked_visible(IslandId::Tree, live);
-        let show_right = show_agents || show_tree;
-
-        // Layout membership comes from the Workbench workspace declaration
-        // (roadmap A2). Column resize/dock-fit remains shell policy; the tree is
-        // the source of truth for which islands exist.
-        let _pruned = prune_island_tree(&workbench_workspace().island_tree, &|id| {
+        // Workspace topology is pruned by product dock-fit policy, then drives
+        // every membership branch below. Resizable widths remain shell policy.
+        let pruned = prune_island_tree(&workbench_workspace().island_tree, &|id| {
             self.layout.is_docked_visible(id, live)
         });
+        let contains = |id| pruned.as_ref().is_some_and(|tree| tree.contains(id));
+        let show_session = contains(IslandId::Sessions);
+        let show_agents = contains(IslandId::Agents);
+        let show_tree = contains(IslandId::Tree);
+        let show_right = show_agents || show_tree;
 
         let center = div()
             .size_full()

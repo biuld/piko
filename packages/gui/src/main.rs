@@ -29,7 +29,8 @@ use crate::bridge::spawn_bridge;
 use crate::features::{
     AgentsConfirm, AgentsSelectNext, AgentsSelectPrev, AgentsToggleExpand, ClearSessionSearch,
     ConfirmSection, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev, SelectNextSection,
-    SelectPrevSection,
+    SelectPrevSection, SessionsConfirm, SessionsSelectNext, SessionsSelectPrev,
+    SessionsToggleFocused, TreeConfirm, TreeSelectNext, TreeSelectPrev, TreeToggleFocused,
 };
 use piko_chrome::{ChromeAssets, ChromePalette, apply_chrome_theme};
 
@@ -83,8 +84,21 @@ fn main() {
             KeyBinding::new("up", AgentsSelectPrev, Some("IslandAgents")),
             KeyBinding::new("down", AgentsSelectNext, Some("IslandAgents")),
             KeyBinding::new("enter", AgentsConfirm, Some("IslandAgents")),
+            KeyBinding::new("space", AgentsConfirm, Some("IslandAgents")),
             KeyBinding::new("right", AgentsToggleExpand, Some("IslandAgents")),
             KeyBinding::new("left", AgentsToggleExpand, Some("IslandAgents")),
+            KeyBinding::new("up", SessionsSelectPrev, Some("IslandSessions")),
+            KeyBinding::new("down", SessionsSelectNext, Some("IslandSessions")),
+            KeyBinding::new("enter", SessionsConfirm, Some("IslandSessions")),
+            KeyBinding::new("space", SessionsConfirm, Some("IslandSessions")),
+            KeyBinding::new("right", SessionsToggleFocused, Some("IslandSessions")),
+            KeyBinding::new("left", SessionsToggleFocused, Some("IslandSessions")),
+            KeyBinding::new("up", TreeSelectPrev, Some("IslandTree")),
+            KeyBinding::new("down", TreeSelectNext, Some("IslandTree")),
+            KeyBinding::new("enter", TreeConfirm, Some("IslandTree")),
+            KeyBinding::new("space", TreeConfirm, Some("IslandTree")),
+            KeyBinding::new("right", TreeToggleFocused, Some("IslandTree")),
+            KeyBinding::new("left", TreeToggleFocused, Some("IslandTree")),
         ]);
 
         cx.set_menus(vec![Menu {
