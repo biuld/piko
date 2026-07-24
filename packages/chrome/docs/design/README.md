@@ -11,6 +11,7 @@
 | [island-focus.md](island-focus.md) | FocusTable `try_focus` / assert design |
 | [list-keyboard.md](list-keyboard.md) | `ListKeyboard` controller design |
 | [overlay-composite.md](overlay-composite.md) | Envelope + focus session design |
+| [markdown-renderer.md](markdown-renderer.md) | Semantic parser adapter and GPUI block renderer |
 | [theme-system.md](theme-system.md) | Context theme / palette split design |
 
 Feature contracts (what apps integrate): [`../features/`](../features/).  

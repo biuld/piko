@@ -256,7 +256,7 @@ impl<Id: Copy + Eq + Hash> IslandFocusTable<Id> {
         Ok(transition)
     }
 
-    /// Like [`try_focus`], but `debug_assert`s on unknown ids (no ring mutation).
+    /// Like [`Self::try_focus`], but `debug_assert`s on unknown ids (no ring mutation).
     pub fn focus(
         &self,
         ring: &mut FocusRing<Id>,

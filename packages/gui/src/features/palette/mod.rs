@@ -17,7 +17,7 @@ mod tests;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
-use piko_chrome::{ListKeyIntent, ListKeyboard};
+use piko_chrome::components::list::{ListKeyIntent, ListKeyboard};
 use piko_protocol::{HostCommandDescriptor, HostCommandGroup, HostCommandInvoke, ThinkingLevel};
 
 actions!(

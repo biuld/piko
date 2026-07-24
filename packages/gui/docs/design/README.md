@@ -12,3 +12,4 @@ Subsystem designs for `piko-gui` (boundaries, data flow, config/protocol). See
 | [overlay-stack.md](overlay-stack.md) | Overlay priority / Escape |
 | [chrome-presentation.md](chrome-presentation.md) | i18n / chrome marks |
 | [sessions-island-management.md](sessions-island-management.md) | Sessions pin/search/rename/delete |
+| [native-streaming-markdown.md](native-streaming-markdown.md) | Native streaming Markdown parser and GPUI renderer |

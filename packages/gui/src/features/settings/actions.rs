@@ -51,7 +51,7 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use piko_chrome::{ChromePalette, apply_chrome_theme};
+        use piko_chrome::theme::{ChromePalette, apply_chrome_theme};
         let palette = if light {
             ChromePalette::Light
         } else {

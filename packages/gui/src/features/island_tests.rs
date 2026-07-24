@@ -157,7 +157,7 @@ fn timeline_includes_realtime_draft() {
         .iter()
         .find(|r| r.streaming && r.body.contains("stream"))
         .unwrap();
-    assert!(!draft.render_markdown);
+    assert!(draft.render_markdown);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn streaming_thinking_shows_text_with_live_flag() {
     assert_eq!(draft.thinking.as_deref(), Some("working through it"));
     assert!(draft.thinking_live);
     assert!(draft.streaming);
-    assert!(!draft.render_markdown);
+    assert!(draft.render_markdown);
 }
 
 #[test]

@@ -6,10 +6,10 @@
 //! |---|---|
 //! | [`metrics`] | Density + type-scale numbers (spacing, sizes, layout constants) |
 //! | [`tokens`] | Semantic color palettes + `ThemeSnapshot` handle |
-//! | [`typography`] | Applying the type scale (`TextRole`, markdown Body) |
-//! | [`icons`] | Vendored icon set sized against the type scale |
-//! | [`surfaces`] | Island surface helpers |
-//! | [`apply`] | Mapping tokens onto GPUI Component `Theme` |
+//! | `typography` | Applying the type scale (`TextRole`, Markdown Body) |
+//! | `icons` | Vendored icon set sized against the type scale |
+//! | `surfaces` | Island surface helpers |
+//! | `apply` | Mapping tokens onto GPUI Component `Theme` |
 //!
 //! Active palette follows GPUI Component's application-global Theme
 //! (`set_chrome_palette` / `apply_chrome_theme`). Domain role colors stay in
@@ -18,7 +18,7 @@
 //! theme API.
 //!
 //! Icon SVG bytes live in `packages/chrome/assets/icons/` and are served by
-//! [`crate::ChromeAssets`] (`icons/*.svg` paths match [`ChromeIcon`]).
+//! [`crate::assets::ChromeAssets`] (`icons/*.svg` paths match [`ChromeIcon`]).
 
 mod apply;
 mod icons;
@@ -38,4 +38,4 @@ pub use tokens::{
     ChromePalette, ChromeTokens, RoleAccent, ThemeSnapshot, chrome_palette, set_chrome_palette,
     theme_snapshot, tokens, tokens_from,
 };
-pub use typography::{TextRole, body_markdown, label_text, text};
+pub use typography::{TextRole, label_text, text};

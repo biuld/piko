@@ -4,7 +4,7 @@
 //! depends on `piko-chrome` need not link this module.
 
 use gpui::{Hsla, Rgba};
-use piko_chrome::{ChromePalette, ChromeTokens, chrome_palette};
+use piko_chrome::theme::{ChromePalette, ChromeTokens, chrome_palette};
 
 /// Domain-specific accent roles used by timeline / tree / conversation chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub fn domain_role_hsla(role: DomainRole) -> Hsla {
 
 #[cfg(test)]
 mod tests {
-    use piko_chrome::ChromePalette;
+    use piko_chrome::theme::ChromePalette;
 
     use super::{DomainRole, domain_role_hex_for, domain_role_rgba};
 

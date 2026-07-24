@@ -11,10 +11,12 @@ use gpui::*;
 use gpui_component::scroll::ScrollableElement;
 
 use crate::theme::{
-    ChromeIcon, ChromeTokens, DomainRole, IconSize, RoleAccent, TextRole, body_markdown,
-    domain_role_hsla, domain_role_rgba, icon, metrics, rotating_gear, row_leading, text, tokens,
+    ChromeIcon, ChromeTokens, DomainRole, IconSize, RoleAccent, TextRole, domain_role_hsla,
+    domain_role_rgba, icon, metrics, rotating_gear, row_leading, text, tokens,
 };
+use piko_chrome::components::markdown::render_markdown;
 
+use super::markdown_cache::TimelineMarkdownCache;
 use super::vm::{
     TimelineRow, TimelineRowKind, TimelineViewModel, ToolCardStatus, VisualSender,
     group_timeline_rows,
@@ -25,11 +27,10 @@ type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 /// Reading-width conversation document (no scrollbar — IslandPanel owns that).
 pub fn render_timeline_body(
     vm: &TimelineViewModel,
+    markdown: &TimelineMarkdownCache,
     expanded: &HashSet<String>,
     allow_motion: bool,
     on_toggle: impl Fn(String) -> ClickHandler,
-    window: &mut Window,
-    cx: &mut App,
 ) -> impl IntoElement {
     let m = metrics();
     let groups = group_timeline_rows(&vm.rows);
@@ -38,7 +39,7 @@ pub fn render_timeline_body(
         let sender = group[0].kind.visual_sender();
         let el = match sender {
             VisualSender::Assistant => {
-                render_assistant_group(group, expanded, allow_motion, &on_toggle, window, cx)
+                render_assistant_group(group, markdown, expanded, allow_motion, &on_toggle)
             }
             VisualSender::You | VisualSender::System => {
                 let mut items = Vec::with_capacity(group.len());
@@ -50,8 +51,7 @@ pub fn render_timeline_body(
                         expanded.contains(&row.id),
                         allow_motion,
                         on_toggle(row.id.clone()),
-                        window,
-                        cx,
+                        markdown,
                     ));
                 }
                 div()
@@ -102,11 +102,10 @@ pub fn render_timeline_body(
 /// Render assistant-side rows in timeline order (tools and messages as given).
 fn render_assistant_group(
     group: &[TimelineRow],
+    markdown: &TimelineMarkdownCache,
     expanded: &HashSet<String>,
     allow_motion: bool,
     on_toggle: &impl Fn(String) -> ClickHandler,
-    window: &mut Window,
-    cx: &mut App,
 ) -> AnyElement {
     let m = metrics();
     let mut children: Vec<AnyElement> = Vec::new();
@@ -128,8 +127,7 @@ fn render_assistant_group(
                     row,
                     show_header,
                     allow_motion,
-                    window,
-                    cx,
+                    markdown,
                 ));
             }
             TimelineRowKind::User | TimelineRowKind::System => {}
@@ -148,8 +146,7 @@ fn render_assistant_row(
     row: &TimelineRow,
     show_header: bool,
     allow_motion: bool,
-    window: &mut Window,
-    cx: &mut App,
+    markdown: &TimelineMarkdownCache,
 ) -> AnyElement {
     let m = metrics();
     let mut root = div()
@@ -166,7 +163,7 @@ fn render_assistant_row(
     } else if row.thinking_live {
         root = root.child(render_thinking_block("", true));
     }
-    if let Some(body) = render_message_body(row, window, cx) {
+    if let Some(body) = render_message_body(row, markdown) {
         root = root.child(body);
     }
     root.into_any_element()
@@ -239,12 +236,11 @@ fn render_timeline_row(
     _expanded: bool,
     _allow_motion: bool,
     _on_toggle: ClickHandler,
-    window: &mut Window,
-    cx: &mut App,
+    markdown: &TimelineMarkdownCache,
 ) -> AnyElement {
     match row.kind {
         TimelineRowKind::System => render_system_row(row),
-        TimelineRowKind::User => render_user_row(row, show_header, window, cx),
+        TimelineRowKind::User => render_user_row(row, show_header, markdown),
         TimelineRowKind::Tool | TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
             div().into_any_element()
         }
@@ -275,8 +271,7 @@ fn render_system_row(row: &TimelineRow) -> AnyElement {
 fn render_user_row(
     row: &TimelineRow,
     show_header: bool,
-    window: &mut Window,
-    cx: &mut App,
+    markdown: &TimelineMarkdownCache,
 ) -> AnyElement {
     let m = metrics();
     let t = tokens();
@@ -305,7 +300,7 @@ fn render_user_row(
         );
     }
 
-    if let Some(body) = render_message_body(row, window, cx) {
+    if let Some(body) = render_message_body(row, markdown) {
         root = root.child(
             div()
                 .p(m.space_sm)
@@ -318,27 +313,21 @@ fn render_user_row(
     root.into_any_element()
 }
 
-fn render_message_body(row: &TimelineRow, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+fn render_message_body(row: &TimelineRow, markdown: &TimelineMarkdownCache) -> Option<AnyElement> {
     if row.body.trim().is_empty() {
         return None;
     }
     let t = tokens();
     if row.render_markdown {
-        Some(
-            div()
-                .w_full()
-                .min_w_0()
-                .child(
-                    body_markdown(
-                        SharedString::from(format!("md-{}", row.id)),
-                        row.body.clone(),
-                        window,
-                        cx,
-                    )
-                    .selectable(true),
-                )
-                .into_any_element(),
-        )
+        markdown.document(&row.id).map(render_markdown).or_else(|| {
+            Some(
+                text(TextRole::Body)
+                    .w_full()
+                    .text_color(t.fg_rgba())
+                    .child(row.body.clone())
+                    .into_any_element(),
+            )
+        })
     } else {
         Some(
             text(TextRole::Body)

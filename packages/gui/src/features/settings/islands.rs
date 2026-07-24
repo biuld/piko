@@ -4,7 +4,7 @@
 //! Nav list cursor: [`ListKeyboard`] only (roadmap D5).
 
 use gpui::*;
-use piko_chrome::{ListKeyEffect, ListKeyIntent, ListKeyboard};
+use piko_chrome::components::list::{ListKeyEffect, ListKeyIntent, ListKeyboard};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::shell::{IslandHeader, IslandPanel, IslandView, activate_focus_handle};

@@ -94,7 +94,7 @@ pub struct DesktopApp {
     pub(crate) settings_focus: SettingsFocusRing,
     pub(crate) settings_focus_table: IslandFocusTable<SettingsIslandId>,
     pub(crate) fp_sessions: Option<String>,
-    pub(crate) fp_timeline: Option<String>,
+    pub(crate) fp_timeline: Option<u64>,
     pub(crate) fp_composer: Option<String>,
     pub(crate) fp_agents: Option<String>,
     pub(crate) fp_tree: Option<String>,
@@ -322,7 +322,7 @@ impl DesktopApp {
                 let palette = super::ux_prefs::parse_chrome_palette(&settings.chrome_palette);
                 if self.ux_prefs.chrome_palette != palette {
                     self.ux_prefs.chrome_palette = palette;
-                    piko_chrome::apply_chrome_theme(cx, palette);
+                    piko_chrome::theme::apply_chrome_theme(cx, palette);
                 }
                 self.sync_session_prefs_from_gui(&settings);
                 self.gui_config_fingerprint = Some(fingerprint);

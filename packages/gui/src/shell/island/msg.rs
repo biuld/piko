@@ -8,7 +8,7 @@
 //! Focus variants map to chrome [`FocusMsg`] via [`IslandMessage`].
 #![allow(dead_code)]
 
-use piko_chrome::{FocusMsg, IslandMessage};
+use piko_chrome::runtime::island::{FocusMsg, IslandMessage};
 
 use crate::shell::workbench::IslandId;
 

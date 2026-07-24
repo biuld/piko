@@ -11,7 +11,7 @@ use piko_client_core::{
 };
 use piko_protocol::messages::{ContentBlock, Message, MessageContent};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TimelineRowKind {
     User,
     Assistant,
@@ -55,14 +55,14 @@ pub fn group_timeline_rows(rows: &[TimelineRow]) -> Vec<&[TimelineRow]> {
     groups
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolCardStatus {
     Running,
     Completed,
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TimelineRow {
     pub id: String,
     pub kind: TimelineRowKind,
@@ -80,7 +80,7 @@ pub struct TimelineRow {
     pub thinking_live: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct TimelineViewModel {
     pub rows: Vec<TimelineRow>,
     pub selected_agent_id: Option<String>,
@@ -312,7 +312,7 @@ fn row_from_draft(draft: &RealtimeDraft) -> TimelineRow {
         label: crate::t!("island.timeline.sender.assistant"),
         body,
         streaming: true,
-        render_markdown: false,
+        render_markdown: true,
         tool_status: None,
         detail: None,
         thinking,

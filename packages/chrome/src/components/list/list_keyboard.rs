@@ -116,7 +116,7 @@ impl ListKeyboard {
         self.cursor
     }
 
-    /// Apply a key intent. Always call [`sync_len`] (or pass current `len`) first
+    /// Apply a key intent. Always call [`Self::sync_len`] (or pass current `len`) first
     /// if data may have changed since last use.
     pub fn apply(&mut self, len: usize, intent: ListKeyIntent) -> ListKeyEffect {
         self.sync_len(len);

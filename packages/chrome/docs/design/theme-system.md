@@ -48,7 +48,7 @@ core.
 
 ### F4 — Render helpers use theme handle (done)
 
-- Surfaces, list/tree paint, markdown style, and text helpers resolve colors
+- Surfaces, list/tree paint, native Markdown, and text helpers resolve colors
   through `tokens()` / `theme_snapshot()` (active handle), not a hard-coded
   dark-only table.
 - Explicit snapshot path: `tokens_from(&ThemeSnapshot)`.

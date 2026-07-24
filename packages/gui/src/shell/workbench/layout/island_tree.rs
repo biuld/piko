@@ -1,6 +1,6 @@
 //! Piko Workbench island ids and the default split tree.
 //!
-//! Generic tree/prune live in [`piko_chrome::layout`]. Product leaf ids and the
+//! Generic tree/prune live in [`piko_chrome::runtime::layout`]. Product leaf ids and the
 //! fixed five-island preset stay here.
 
 /// First-class Workbench islands (layout atoms).
@@ -23,7 +23,7 @@ pub const ALL_ISLAND_IDS: [IslandId; 5] = [
     IslandId::Tree,
 ];
 
-pub use piko_chrome::layout::{IslandAxis, IslandNode, prune_island_tree};
+pub use piko_chrome::runtime::layout::{IslandAxis, IslandNode, prune_island_tree};
 
 /// Default docked Workbench tree (before visibility pruning).
 ///

@@ -79,10 +79,11 @@ Implementation under `src/theme/`:
 |---|---|
 | Spacing, type-scale numbers, layout constants | `metrics.rs` |
 | Semantic colors | `tokens.rs` |
-| Applying type roles | `typography.rs` (`TextRole`, `body_markdown`) |
+| Applying type roles | `typography.rs` (`TextRole`, `text`, `label_text`) |
 | Icon box sizes | `icons.rs` (`IconSize`) |
 
-Call sites use `theme::text` / `label_text` / `body_markdown` / `row_leading`.
+Call sites use `theme::text` / `label_text` / `row_leading`; semantic Markdown
+uses the native chrome renderer.
 Do not read `metrics().*_size` to set fonts directly. Do not call `text_size`
 with metrics outside `typography.rs` and `icons.rs`.
 
@@ -104,9 +105,10 @@ with metrics outside `typography.rs` and `icons.rs`.
 - Prefer weight and muted color over larger sizes for hierarchy.
 - Truncate Sessions / Agents / Tree labels to one line. Conversation prose may
   wrap.
-- Timeline body: plain text → `TextRole::Body`; markdown → `body_markdown`
-  (Body 14/21, heading base = body, ~12 px paragraph gap, dark highlight).
-  Place markdown in a `w_full` container so list items are not clipped.
+- Timeline body: plain text → `TextRole::Body`; Markdown → the native semantic
+  renderer (Body 14/21, heading base = body, 12 px block gap). Every nested
+  horizontal Markdown body must use `w_full` / `min_w_0` so lists and tables do
+  not clip or widen the island.
 
 ## 5. Chrome marks
 

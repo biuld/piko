@@ -1,6 +1,6 @@
 //! Window-local UX preferences (not persisted this wave).
 
-use piko_chrome::ChromePalette;
+use piko_chrome::theme::ChromePalette;
 
 #[derive(Debug, Clone)]
 pub struct GuiUxPrefs {

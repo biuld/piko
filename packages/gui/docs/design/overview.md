@@ -190,7 +190,7 @@ product behavior.
 | Agent/tool state | `Badge`, `Spinner`, `Collapsible` | Compose into piko-specific rows/cards |
 | Errors | `Notification` | Recoverable transport/command feedback |
 | Shortcuts/help | `Kbd`, `Tooltip`, `Menu` | Display bound actions rather than hardcoded labels where possible |
-| Assistant content | Markdown/text primitives | Committed Markdown; lightweight realtime rendering while streaming |
+| Assistant content | Native semantic Markdown blocks | Same progressive presentation while streaming and committed |
 
 Product center modals use the chrome `OverlayHost` absolute layer, not GPUI
 Component `open_dialog`. Sheet and notification Root layers remain for dock
@@ -408,10 +408,11 @@ in-panel Jump button. Virtualization is an optimization gate, not a first-slice
 requirement. Adopt `VirtualList` only after tests prove correct variable-size
 measurement, message expansion, Agent switching, and live-delta anchoring.
 
-Committed assistant content may use GPUI Component Markdown. Realtime output is
-rendered with a lightweight text path and re-rendered as committed Markdown
-when the authoritative message arrives, avoiding a full Markdown parse on every
-small delta.
+Assistant prose uses the native streaming Markdown pipeline described in
+[Native Streaming Markdown](native-streaming-markdown.md). Client Core first
+accumulates ordered deltas, the existing GUI poll coalesces updates, and changed
+message snapshots are parsed into semantic blocks before GPUI rendering.
+Realtime and committed forms therefore use the same presentation.
 
 ## 9. Composer and Actions
 

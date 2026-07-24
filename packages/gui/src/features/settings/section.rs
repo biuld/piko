@@ -37,7 +37,7 @@ impl SettingsSection {
     }
 
     /// Move selection by `delta` positions (wraps). Test/helper only —
-    /// production nav cursor uses `piko_chrome::ListKeyboard`.
+    /// production nav cursor uses `piko_chrome::components::list::ListKeyboard`.
     #[cfg(test)]
     pub fn offset(self, delta: isize) -> Self {
         let all = Self::ALL;

@@ -1,13 +1,14 @@
 //! Product archipelago ids and workspace declarations for piko-gui.
 //!
-//! Navigation: [`piko_chrome::ArchipelagoRouter`] via
+//! Navigation: [`piko_chrome::runtime::archipelago::ArchipelagoRouter`] via
 //! [`crate::app::wiring::archipelago_nav`] (`route_archipelago_nav`).
 //! Settings *section* is app state beside the router.
 //!
 //! Body workspaces are the source of truth for island trees and Tab focus
 //! order (roadmap A2). Shell assemble and focus cycle read these declarations.
 
-use piko_chrome::{ArchipelagoRouter, ArchipelagoWorkspace, IslandAxis, IslandNode};
+use piko_chrome::runtime::archipelago::{ArchipelagoRouter, ArchipelagoWorkspace};
+use piko_chrome::runtime::layout::{IslandAxis, IslandNode};
 
 use crate::features::{SETTINGS_FOCUS_ORDER, SettingsIslandId};
 use crate::shell::workbench::{IslandId, workbench_island_tree};
@@ -75,7 +76,7 @@ pub fn settings_workspace() -> ArchipelagoWorkspace<ArchipelagoId, SettingsIslan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use piko_chrome::IslandNode;
+    use piko_chrome::runtime::layout::IslandNode;
 
     #[test]
     fn default_router_is_workbench() {
@@ -94,7 +95,7 @@ mod tests {
 
     #[test]
     fn route_archipelago_nav_toggle_pair() {
-        use piko_chrome::{ArchipelagoNav, route_archipelago_nav};
+        use piko_chrome::runtime::archipelago::{ArchipelagoNav, route_archipelago_nav};
 
         let mut r = AppArchipelago::new(ArchipelagoId::Workbench);
         let t = route_archipelago_nav(

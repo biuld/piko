@@ -130,8 +130,10 @@ second transcript.
 - The Timeline shows the selected Agent's active branch in chronological order.
 - User, assistant, tool, thinking, system, and error content have distinct but
   visually related presentation.
-- Assistant Markdown and code blocks are readable at desktop widths. Rendered
-  transcript selection/export is deferred; Composer selection remains native.
+- Assistant Markdown and code blocks are readable at desktop widths while
+  streaming and after commitment, without switching presentation at the
+  commit boundary. Rendered transcript selection/export is deferred; Composer
+  selection remains native. See [Native Streaming Markdown](native-streaming-markdown.md).
 - Tool calls are compact by default and can be expanded to inspect arguments,
   results, and failure details.
 - Realtime assistant output appears as an in-progress entry and becomes the

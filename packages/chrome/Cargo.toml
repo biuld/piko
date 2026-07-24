@@ -9,6 +9,7 @@ description = "GPUI Islands chrome infrastructure: archipelago, island contracts
 anyhow = "1"
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
 gpui-component = { version = "=0.5.1" }
+pulldown-cmark = "0.11"
 
 [lib]
 name = "piko_chrome"

@@ -1,7 +1,7 @@
 //! Appearance settings — `[gui]` presentation prefs.
 
 use gpui::*;
-use piko_chrome::ChromePalette;
+use piko_chrome::theme::ChromePalette;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::theme::metrics;

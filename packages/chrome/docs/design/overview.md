@@ -32,10 +32,10 @@ references to any particular product monorepo layout.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ L4  Presentational kit     src/theme · src/assets             │
-│     tokens · icons · metrics · typography                    │
+│ L4  Presentational kit     src/components/markdown           │
+│     Markdown · src/theme · src/assets                        │
 ├─────────────────────────────────────────────────────────────┤
-│ L3  Composite chrome       src/chrome/{panel,overlay,list}   │
+│ L3  Composite components   src/components/{panel,overlay,list}│
 │     IslandPanel · Overlay · ListKeyboard · tree paint        │
 ├─────────────────────────────────────────────────────────────┤
 │ L2  Island runtime         src/runtime/island                │
@@ -46,8 +46,8 @@ references to any particular product monorepo layout.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Crate-root module names (`island`, `layout`, `widgets`, …) are **stable facades**
-over this tree — see `src/lib.rs`.
+The public API mirrors this tree through `runtime`, `components`, `theme`, and
+`assets`. There are no crate-root type re-exports or compatibility facades.
 
 ### L1 — Archipelago runtime
 
@@ -88,6 +88,7 @@ over this tree — see `src/lib.rs`.
 |---|---|---|
 | Semantic tokens / density | `tokens`, `metrics`, `TextRole`, `ThemeSnapshot` | **shipped** (dark + light palettes) |
 | Icons | icon enum + `ChromeAssets` | **shipped** |
+| Native Markdown | opaque document + parse/render functions | **shipped** |
 | Domain role colors (chat authors, …) | app extension (not chrome core) | **shipped** boundary — apps own domain roles |
 
 ## 3. What this kit deliberately does **not** provide

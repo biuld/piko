@@ -4754,6 +4754,7 @@ dependencies = [
  "anyhow",
  "gpui",
  "gpui-component",
+ "pulldown-cmark",
 ]
 
 [[package]]

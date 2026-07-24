@@ -115,7 +115,7 @@ impl<ArchipelagoId: Copy + Eq> ArchipelagoRouter<ArchipelagoId> {
         ArchipelagoTransition::Changed { from, to: id }
     }
 
-    /// Switch to `id`, remembering the current archipelago for [`leave`].
+    /// Switch to `id`, remembering the current archipelago for [`Self::leave`].
     pub fn enter(&mut self, id: ArchipelagoId) -> ArchipelagoTransition<ArchipelagoId> {
         if self.active == id {
             return ArchipelagoTransition::Unchanged { active: id };
@@ -128,7 +128,7 @@ impl<ArchipelagoId: Copy + Eq> ArchipelagoRouter<ArchipelagoId> {
         ArchipelagoTransition::Changed { from, to: id }
     }
 
-    /// Restore the archipelago saved by [`enter`].
+    /// Restore the archipelago saved by [`Self::enter`].
     pub fn leave(&mut self) -> ArchipelagoTransition<ArchipelagoId> {
         match self.saved.take() {
             Some(prev) => {

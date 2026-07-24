@@ -10,6 +10,7 @@ use crate::shell::{
     IslandId, IslandMsg, IslandPanel, IslandPlaceholder, IslandView, activate_focus_handle,
 };
 
+use super::markdown_cache::TimelineMarkdownCache;
 use super::render::render_timeline_body;
 use super::vm::TimelineViewModel;
 
@@ -22,6 +23,7 @@ pub struct TimelineIsland {
     vm: TimelineViewModel,
     follow: bool,
     expanded_tools: HashSet<String>,
+    markdown: TimelineMarkdownCache,
     scroll: ScrollHandle,
 }
 
@@ -34,11 +36,13 @@ impl TimelineIsland {
             vm: TimelineViewModel::default(),
             follow: false,
             expanded_tools: HashSet::new(),
+            markdown: TimelineMarkdownCache::default(),
             scroll: ScrollHandle::new(),
         }
     }
 
     pub fn apply_timeline(&mut self, vm: TimelineViewModel, cx: &mut Context<Self>) {
+        self.markdown.sync(&vm.rows);
         self.vm = vm;
         cx.notify();
     }
@@ -114,7 +118,7 @@ impl Focusable for TimelineIsland {
 }
 
 impl Render for TimelineIsland {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity().downgrade();
 
         let on_toggle_tool = move |row_id: String| -> ClickHandler {
@@ -155,11 +159,10 @@ impl Render for TimelineIsland {
                 "timeline-island",
                 render_timeline_body(
                     &self.vm,
+                    &self.markdown,
                     &self.expanded_tools,
                     allow_motion,
                     on_toggle_tool,
-                    window,
-                    cx,
                 ),
             )
             .scroll_handle(self.scroll.clone())

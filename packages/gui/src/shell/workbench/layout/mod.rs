@@ -1,6 +1,6 @@
 //! Island-centric Workbench layout: fixed tree, visibility, sizes.
 //!
-//! Generic split/prune: [`piko_chrome::layout`]. Product ids, default tree, and
+//! Generic split/prune: [`piko_chrome::runtime::layout`]. Product ids, default tree, and
 //! dock-fit constants live here.
 
 mod island_tree;

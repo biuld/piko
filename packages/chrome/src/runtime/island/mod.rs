@@ -1,6 +1,6 @@
 //! Island runtime contracts: focus ownership, host messaging, focus table.
 //!
-//! Panel *paint* lives under [`crate::chrome::panel`]. Product island ids and
+//! Panel *paint* lives under [`crate::components::panel`]. Product island ids and
 //! domain messages live in the consuming app.
 
 mod contract;

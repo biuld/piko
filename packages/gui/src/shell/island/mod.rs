@@ -10,10 +10,12 @@ use std::ops::{Deref, DerefMut};
 
 pub use msg::IslandMsg;
 pub use phase::IslandSessionPhase;
-pub use piko_chrome::island::{
-    FocusCycleDir, FocusReason, FocusRing, IslandBody, IslandContentViewport, IslandFocusTable,
-    IslandHeader, IslandHost, IslandMedia, IslandMessage, IslandPanel, IslandPlaceholder,
-    IslandView, activate_focus_handle, route_focus_message, schedule_island_message,
+pub use piko_chrome::components::panel::{
+    IslandBody, IslandContentViewport, IslandHeader, IslandMedia, IslandPanel, IslandPlaceholder,
+};
+pub use piko_chrome::runtime::island::{
+    FocusCycleDir, FocusReason, FocusRing, IslandFocusTable, IslandHost, IslandMessage, IslandView,
+    activate_focus_handle, route_focus_message, schedule_island_message,
 };
 
 use crate::shell::workbench::IslandId;

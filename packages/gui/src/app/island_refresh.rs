@@ -1,5 +1,7 @@
 //! Directed dirty-push of projections into island Entities.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use gpui::*;
 
 use crate::features::{
@@ -38,12 +40,9 @@ impl DesktopApp {
         }
 
         let timeline_vm = derive_timeline(self.bridge_state());
-        let timeline_fp = format!(
-            "{}:{}:{}",
-            timeline_vm.rows.len(),
-            timeline_vm.rows.last().map(|r| r.body.len()).unwrap_or(0),
-            timeline_vm.rows.last().map(|r| r.id.as_str()).unwrap_or("")
-        );
+        let mut timeline_hasher = DefaultHasher::new();
+        timeline_vm.hash(&mut timeline_hasher);
+        let timeline_fp = timeline_hasher.finish();
         if self.fp_timeline.as_ref() != Some(&timeline_fp) {
             self.fp_timeline = Some(timeline_fp);
             let follow = self.follow_for_selected();

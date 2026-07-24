@@ -6,7 +6,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 use crate::theme::metrics;
-use piko_chrome::{IslandAxis, IslandNode};
+use piko_chrome::runtime::layout::{IslandAxis, IslandNode};
 
 /// Realize the declared Settings workspace tree. Product widths stay here;
 /// membership, order, and split direction come from [`IslandNode`].

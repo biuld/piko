@@ -32,7 +32,8 @@ use crate::features::{
     SelectPrevSection, SessionsConfirm, SessionsSelectNext, SessionsSelectPrev,
     SessionsToggleFocused, TreeConfirm, TreeSelectNext, TreeSelectPrev, TreeToggleFocused,
 };
-use piko_chrome::{ChromeAssets, ChromePalette, apply_chrome_theme};
+use piko_chrome::assets::ChromeAssets;
+use piko_chrome::theme::{ChromePalette, apply_chrome_theme};
 
 rust_i18n::i18n!("locales", fallback = "en");
 

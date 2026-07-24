@@ -1,5 +1,5 @@
-//! Shared presentational widgets — re-exported from [`piko_chrome::widgets`].
+//! Shared presentational widgets — re-exported from [`piko_chrome::components::list`].
 
-pub use piko_chrome::widgets::{
+pub use piko_chrome::components::list::{
     TreeClickHandler, TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
 };

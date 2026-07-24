@@ -1,7 +1,7 @@
 # Design: List / tree keyboard controller
 
 > Parent: [roadmap](../roadmap/README.md) · [list-keyboard feature](../features/list-keyboard.md)  
-> Implementation: `src/chrome/list/list_keyboard.rs`
+> Implementation: `src/components/list/list_keyboard.rs`
 
 ## Architecture
 

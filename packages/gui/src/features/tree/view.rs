@@ -1,7 +1,7 @@
 //! Tree island: Entity-owned conversation tree (display / navigation preview).
 //!
 use gpui::*;
-use piko_chrome::{ListKeyEffect, ListKeyIntent, ListKeyboard};
+use piko_chrome::components::list::{ListKeyEffect, ListKeyIntent, ListKeyboard};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;

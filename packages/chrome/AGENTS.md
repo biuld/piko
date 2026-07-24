@@ -27,7 +27,7 @@ Entry: [`docs/README.md`](docs/README.md).
 
 ## Allowed dependencies
 
-- `gpui`, `gpui-component`, `anyhow` (for `ChromeAssets`)
+- `gpui`, `gpui-component`, `pulldown-cmark`, `anyhow` (for `ChromeAssets`)
 
 **Forbidden** (do not add):
 
@@ -44,35 +44,39 @@ src/
 │   ├── archipelago/   # router, workspace, ChromeRoute
 │   ├── island/        # IslandView, FocusTable, FocusMsg, host, schedule
 │   └── layout/        # IslandNode, prune
-├── chrome/            # L3: GPUI composite paint
+├── components/        # L3–L4: reusable GPUI components
 │   ├── panel/         # IslandPanel, body states, viewport
 │   ├── overlay/       # envelope, surface, focus session
-│   └── list/          # ListKeyboard, tree_list, list_nav
+│   ├── list/          # ListKeyboard, tree_list, list_nav
+│   └── markdown/      # opaque document, parse adapter, GPUI renderer
+│       ├── parse/     # pulldown-cmark adapter and parser frames
+│       └── render/    # block, inline, and table layout
 ├── theme/             # L4: tokens, metrics, typography, icons API
 ├── assets/            # L4: ChromeAssets (include_bytes → assets/icons)
-└── lib.rs             # stable root re-exports (`island`, `layout`, …)
+└── lib.rs             # four explicit public namespaces
 ```
 
-**Consumer paths stay stable:** `crate::island`, `crate::layout`, `crate::overlay`,
-`crate::widgets`, `crate::archipelago`, `crate::theme`, `crate::assets` — these
-are facades over `runtime/*` and `chrome/*`. Prefer them in app code.
+The public API mirrors ownership rather than flattening it:
 
-| Facade | Internal home |
+| Namespace | Responsibility |
 |---|---|
-| `archipelago` | `runtime::archipelago` |
-| `layout` | `runtime::layout` |
-| `island` | `runtime::island` + `chrome::panel` |
-| `overlay` | `chrome::overlay` |
-| `widgets` | `chrome::list` |
-| `theme` / `assets` | same names |
+| `runtime::{archipelago,island,layout}` | State, routing, focus, and layout contracts |
+| `components::{panel,overlay,list,markdown}` | GPUI elements and interaction components |
+| `theme` | Tokens, metrics, typography, and icon helpers |
+| `assets` | Embedded asset source |
+
+Do not add crate-root facade modules or flat re-exports. A call site should make
+the runtime-versus-presentation dependency visible. Markdown exposes only
+`MarkdownDocument`, `parse_markdown`, and `render_markdown`; its semantic tree
+is private implementation detail.
 
 ## Infra layers
 
 ```text
 L1 Archipelago runtime   →  runtime/archipelago, runtime/layout
 L2 Island runtime        →  runtime/island
-L3 Composite chrome      →  chrome/panel, chrome/overlay, chrome/list
-L4 Presentational kit    →  theme, assets
+L3 Composite components  →  components/panel, components/overlay, components/list
+L4 Presentational kit    →  components/markdown, theme, assets
 ```
 
 ## Boundary rules

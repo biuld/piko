@@ -1,13 +1,15 @@
 //! Archipelago open/close and Settings section selection.
 //!
-//! All router mutations go through [`piko_chrome::route_archipelago_nav`] so the
+//! All router mutations go through
+//! [`piko_chrome::runtime::archipelago::route_archipelago_nav`] so the
 //! product path is not a parallel hand-roll of enter/leave/go (roadmap A3).
 //! Focus remount / restore runs only on [`ArchipelagoTransition::Changed`].
 
 use gpui::*;
-use piko_chrome::{
-    ArchipelagoNav, ArchipelagoTransition, FocusReason, FocusRing, route_archipelago_nav,
+use piko_chrome::runtime::archipelago::{
+    ArchipelagoNav, ArchipelagoTransition, route_archipelago_nav,
 };
+use piko_chrome::runtime::island::{FocusReason, FocusRing};
 
 use crate::app::archipelago::{ArchipelagoId, settings_workspace, workbench_workspace};
 use crate::app::desktop_app::{DesktopApp, OpenSettings};

@@ -1,13 +1,13 @@
 //! Settings left nav — section list inside the nav island.
 //!
 //! Keyboard (when the nav island owns focus) is driven by
-//! [`piko_chrome::ListKeyboard`] on [`super::SettingsNavIsland`]: ↑/↓ move
+//! [`piko_chrome::components::list::ListKeyboard`] on [`super::SettingsNavIsland`]: ↑/↓ move
 //! selection, Enter/Space confirm (selects current and focuses the Panel).
 //!
-//! Row chrome uses chrome [`ListRowSpec`] / [`render_list`] (roadmap D3).
+//! Row chrome uses [`ListRowSpec`] / [`render_list`] (roadmap D3).
 
 use gpui::*;
-use piko_chrome::{ListClickHandler, ListRowSpec, render_list};
+use piko_chrome::components::list::{ListClickHandler, ListRowSpec, render_list};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::theme::{RoleAccent, tokens};

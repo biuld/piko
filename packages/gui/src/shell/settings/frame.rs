@@ -8,7 +8,7 @@ use crate::shell::settings::{body_slots, render_title_bar};
 pub fn mount_frame<Id>(
     root: Stateful<Div>,
     entity: WeakEntity<DesktopApp>,
-    tree: &piko_chrome::IslandNode<Id>,
+    tree: &piko_chrome::runtime::layout::IslandNode<Id>,
     nav_id: Id,
     panel_id: Id,
     nav: impl IntoElement,
