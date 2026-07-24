@@ -4,10 +4,14 @@ use gpui::*;
 use gpui_component::TitleBar;
 
 use crate::app::desktop_app::DesktopApp;
-use crate::shell::workbench::title_bar::settings_gear;
+use crate::shell::workbench::title_bar::{notification_bell, settings_gear};
 use crate::theme::{label_text, metrics, tokens};
 
-pub fn render_title_bar(entity: WeakEntity<DesktopApp>) -> impl IntoElement {
+pub fn render_title_bar(
+    notifications_open: bool,
+    notifications_unread: bool,
+    entity: WeakEntity<DesktopApp>,
+) -> impl IntoElement {
     let m = metrics();
     let t = tokens();
 
@@ -23,6 +27,12 @@ pub fn render_title_bar(entity: WeakEntity<DesktopApp>) -> impl IntoElement {
                     .bottom_0()
                     .flex()
                     .items_center()
+                    .gap(m.space_xs)
+                    .child(notification_bell(
+                        notifications_open,
+                        notifications_unread,
+                        entity.clone(),
+                    ))
                     .child(settings_gear(true, entity)),
             )
             .child(

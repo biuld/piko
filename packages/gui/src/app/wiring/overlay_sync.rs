@@ -39,6 +39,7 @@ impl DesktopApp {
         }
         self.interaction_form = None;
         if let Some(front) = front {
+            self.close_notification_center(cx);
             self.ensure_host_prompt_body(window, cx, &front);
             self.save_overlay_focus_if_needed(IslandId::Composer);
         } else {
@@ -86,6 +87,7 @@ impl DesktopApp {
         cx: &mut Context<Self>,
     ) {
         if self.overlay.try_open_quit_confirm() {
+            self.close_notification_center(cx);
             self.save_overlay_focus_if_needed(self.island_focus.focused());
             cx.notify();
         }
@@ -100,6 +102,7 @@ impl DesktopApp {
         if !self.overlay.try_open_command_palette() {
             return;
         }
+        self.close_notification_center(cx);
         self.save_overlay_focus_if_needed(self.island_focus.focused());
         self.ensure_command_palette(window, cx);
         self.bridge.request_command_catalog();
@@ -120,6 +123,10 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.close_notification_center(cx) {
+            return;
+        }
+
         // Palette submenu: Escape pops one level before closing the Transient.
         if self.overlay.is_command_palette_open()
             && let Some(palette) = self.command_palette.clone()

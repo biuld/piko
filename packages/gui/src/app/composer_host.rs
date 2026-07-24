@@ -3,12 +3,10 @@
 use std::collections::HashSet;
 
 use gpui::*;
-use gpui_component::WindowExt;
-use gpui_component::notification::{Notification, NotificationType};
 use piko_client_core::state::PendingOp;
 use piko_client_core::{ClientIntent, SessionPhase};
 
-use crate::features::derive_composer;
+use crate::features::{NotificationSeverity, derive_composer};
 use crate::projections::normalize_cwd_key;
 use crate::shell::IslandId;
 
@@ -92,15 +90,14 @@ impl DesktopApp {
     ) {
         if self.session_list_has_cwd(&cwd) {
             let path = cwd.clone();
-            window.push_notification(
-                Notification::new()
-                    .title(crate::t!("island.sessions.notice.directory_exists.title"))
-                    .message(crate::t!(
-                        "island.sessions.notice.directory_exists.message",
-                        path = path
-                    ))
-                    .with_type(NotificationType::Info)
-                    .autohide(true),
+            self.push_app_notification(
+                NotificationSeverity::Info,
+                crate::t!("island.sessions.notice.directory_exists.title"),
+                crate::t!(
+                    "island.sessions.notice.directory_exists.message",
+                    path = path
+                ),
+                window,
                 cx,
             );
             return;

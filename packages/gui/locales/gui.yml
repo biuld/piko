@@ -135,6 +135,33 @@ chrome.action.settings:
   en: "Settings (⌘,)"
 chrome.action.settings.close:
   en: "Close Settings (⌘,)"
+chrome.action.notifications:
+  en: Open notifications
+chrome.action.notifications.close:
+  en: Close notifications
+
+notifications.title:
+  en: Notifications
+notifications.empty:
+  en: No notifications
+notifications.action.clear_all:
+  en: Clear All
+notifications.action.remove:
+  en: Remove
+notifications.time.now:
+  en: now
+notifications.time.minutes:
+  en: "%{count}m"
+notifications.time.hours:
+  en: "%{count}h"
+notifications.time.days:
+  en: "%{count}d"
+notifications.toast.error.title:
+  en: Error
+notifications.toast.disconnected.title:
+  en: Disconnected
+notifications.toast.disconnected.message:
+  en: Lost connection to hostd.
 
 settings.title:
   en: Settings

@@ -3,7 +3,7 @@
 //! ```text
 //! src/
 //!   runtime/      archipelago · island contracts · layout trees
-//!   components/   panel · overlay · list/tree · Markdown
+//!   components/   panel · overlay · notification · list/tree · Markdown
 //!   theme/        tokens · metrics · typography · icons
 //!   assets/       embedded SVG AssetSource
 //! ```

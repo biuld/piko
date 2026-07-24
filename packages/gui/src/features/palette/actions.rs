@@ -6,7 +6,6 @@
 //!   (focus/dock a panel, open Settings, quit, clear notifications)
 
 use gpui::*;
-use gpui_component::WindowExt;
 use piko_client_core::ClientIntent;
 
 use crate::app::desktop_app::{DesktopApp, OpenSettings};
@@ -105,7 +104,7 @@ impl DesktopApp {
                     self.action_open_settings(&OpenSettings, window, cx);
                 }
             }
-            LocalCommandId::ClearNotifications => window.clear_notifications(cx),
+            LocalCommandId::ClearNotifications => self.clear_notification_center(window, cx),
             LocalCommandId::Quit => self.request_quit_from_palette(window, cx),
         }
         cx.notify();

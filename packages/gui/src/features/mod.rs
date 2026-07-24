@@ -4,6 +4,7 @@
 
 pub mod agents;
 pub mod composer;
+pub mod notifications;
 pub mod palette;
 pub mod prompts;
 pub mod sessions;
@@ -19,6 +20,9 @@ pub use agents::derive_agent_tree;
 pub use agents::{AgentsConfirm, AgentsSelectNext, AgentsSelectPrev, AgentsToggleExpand};
 pub use composer::ComposerIsland;
 pub use composer::{derive_activity, derive_composer};
+pub use notifications::{
+    NotificationCenterState, NotificationId, NotificationSeverity, render_notification_center,
+};
 pub use palette::{CommandPalette, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
 pub use prompts::{
     InteractionForm, PromptFront, PromptKind, approval_title, derive_prompt_front,

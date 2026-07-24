@@ -23,14 +23,21 @@ pub fn mount_frame(
     let entity = cx.entity().downgrade();
     let m = metrics();
 
-    root.child(render_title_bar(show_session, show_right, false, entity))
-        .child(
-            div()
-                .flex_1()
-                .min_h(px(0.))
-                .overflow_hidden()
-                .p(m.island_gutter)
-                .child(app.render_workbench_row(window, cx)),
-        )
-        .child(render_status_bar(&status_vm, allow_motion))
+    root.child(render_title_bar(
+        show_session,
+        show_right,
+        false,
+        app.notifications.is_open(),
+        app.notifications.has_unread(),
+        entity,
+    ))
+    .child(
+        div()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_hidden()
+            .p(m.island_gutter)
+            .child(app.render_workbench_row(window, cx)),
+    )
+    .child(render_status_bar(&status_vm, allow_motion))
 }

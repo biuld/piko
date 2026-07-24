@@ -11,10 +11,10 @@ use crate::features::{
     AgentsIsland, ComposerIsland, SETTINGS_FOCUS_ORDER, SessionsIsland, SettingsIslandId,
     SettingsNavIsland, SettingsPanelIsland, TimelineIsland, TreeIsland,
 };
-use crate::features::{CommandPalette, InteractionForm, SettingsSection};
+use crate::features::{CommandPalette, InteractionForm, NotificationCenterState, SettingsSection};
 use crate::shell::{
     ALL_ISLAND_IDS, FocusCycleDir, IslandFocusRing, IslandFocusTable, IslandId, OverlayHost,
-    mount_settings_frame, mount_workbench_frame,
+    SettingsFrameChrome, mount_settings_frame, mount_workbench_frame,
 };
 use crate::theme::tokens;
 use gpui_component::Root;
@@ -44,6 +44,7 @@ actions!(
         OpenCommandPalette,
         CloseTransientOverlay,
         OpenSettings,
+        ToggleNotificationCenter,
     ]
 );
 
@@ -80,6 +81,7 @@ pub struct DesktopApp {
     pub(crate) ux_prefs: GuiUxPrefs,
     pub(crate) last_notified_error: Option<String>,
     pub(crate) last_connection_connected: bool,
+    pub(crate) notifications: NotificationCenterState,
     pub(crate) last_live_session_for_draft: Option<String>,
     gui_config_fingerprint: Option<String>,
     pub(crate) host_config_fingerprint: Option<String>,
@@ -183,11 +185,12 @@ impl DesktopApp {
         );
 
         let entity = cx.entity().downgrade();
+        let poll_entity = entity.clone();
         cx.spawn_in(window, async move |_window, cx| {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let Ok(()) = cx.update(|_, cx| {
-                    if let Some(view) = entity.upgrade() {
+                    if let Some(view) = poll_entity.upgrade() {
                         view.update(cx, |this, cx| {
                             let before_err = this.bridge.state().last_error.clone();
                             if this.bridge.poll() {
@@ -207,6 +210,25 @@ impl DesktopApp {
                                 }
                             }
                         });
+                    }
+                }) else {
+                    break;
+                };
+            }
+        })
+        .detach();
+
+        cx.spawn_in(window, async move |_window, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(60))
+                    .await;
+                let Ok(()) = cx.update(|_, cx| {
+                    let Some(view) = entity.upgrade() else {
+                        return;
+                    };
+                    if view.read(cx).notifications.records().next().is_some() {
+                        view.update(cx, |_, cx| cx.notify());
                     }
                 }) else {
                     break;
@@ -246,6 +268,7 @@ impl DesktopApp {
             ux_prefs: GuiUxPrefs::default(),
             last_notified_error: None,
             last_connection_connected: true,
+            notifications: NotificationCenterState::default(),
             last_live_session_for_draft: None,
             gui_config_fingerprint: None,
             host_config_fingerprint: None,
@@ -378,7 +401,10 @@ impl Render for DesktopApp {
         let on_palette = cx.listener(Self::action_open_command_palette);
         let on_close_overlay = cx.listener(Self::action_close_transient_overlay);
         let on_open_settings = cx.listener(Self::action_open_settings);
+        let on_toggle_notifications = cx.listener(Self::action_toggle_notification_center);
         let overlay = self.render_active_overlay(window, cx);
+        let notification_center = self.render_notification_center_layer(window, cx);
+        let toast_layer = self.render_toast_layer(window, cx);
 
         let mut root = div()
             .id("desktop-app")
@@ -395,6 +421,7 @@ impl Render for DesktopApp {
             .on_action(on_palette)
             .on_action(on_close_overlay)
             .on_action(on_open_settings)
+            .on_action(on_toggle_notifications)
             .key_context("DesktopApp")
             .size_full()
             .flex()
@@ -409,7 +436,11 @@ impl Render for DesktopApp {
                 let workspace = super::archipelago::settings_workspace();
                 mount_settings_frame(
                     root,
-                    entity,
+                    SettingsFrameChrome {
+                        entity,
+                        notifications_open: self.notifications.is_open(),
+                        notifications_unread: self.notifications.has_unread(),
+                    },
                     &workspace.island_tree,
                     SettingsIslandId::Nav,
                     SettingsIslandId::Panel,
@@ -421,7 +452,8 @@ impl Render for DesktopApp {
 
         root.children(overlay)
             .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+            .children(notification_center)
+            .children(toast_layer)
     }
 }
 

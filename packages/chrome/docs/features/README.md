@@ -15,6 +15,7 @@ Implementation detail, module paths, and backlog status live in
 | [List keyboard](list-keyboard.md) | In-island list/tree cursor; pointer ≡ keyboard intents |
 | [Context menu](context-menu.md) | Compact pointer-anchored flat action menu |
 | [Overlay](overlay.md) | Elevated panel chrome, responsive fit, focus open/close |
+| [Notification Surfaces](notification-surfaces.md) | Compact floating notification history panel and rows |
 | [Native Markdown](markdown.md) | Semantic Markdown parsing and theme-aware GPUI document elements |
 | [Theme](theme.md) | Shared density, type roles, surfaces, icons |
 

@@ -31,6 +31,7 @@ pub use overlay::{
     EscapeOutcome, LocalConfirmKind, OverlayHost, OverlayLayer, OverlayPanelSpec,
     OverlayPanelStyle, TransientKind, render_overlay_layer,
 };
+pub use settings::SettingsFrameChrome;
 pub use settings::mount_frame as mount_settings_frame;
 pub use widgets::{
     TreeClickHandler, TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,

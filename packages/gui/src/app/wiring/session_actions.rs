@@ -44,6 +44,7 @@ impl DesktopApp {
         {
             return;
         }
+        self.close_notification_center(cx);
         self.save_overlay_focus_if_needed(IslandId::Sessions);
         if self.session_rename_input.is_none() {
             self.session_rename_input = Some(cx.new(|cx| {
@@ -70,6 +71,7 @@ impl DesktopApp {
             .overlay
             .try_open_session_delete_confirm(session_id, display_name)
         {
+            self.close_notification_center(cx);
             self.save_overlay_focus_if_needed(IslandId::Sessions);
             cx.notify();
         }

@@ -30,6 +30,7 @@ into any of these docs.
 | [list-keyboard](features/list-keyboard.md) | In-island list/tree keyboard |
 | [context-menu](features/context-menu.md) | Compact pointer-anchored flat action menu |
 | [overlay](features/overlay.md) | Modal/transient panel chrome |
+| [notification-surfaces](features/notification-surfaces.md) | Floating notification history presentation |
 | [native-markdown](features/markdown.md) | Semantic Markdown to GPUI documents |
 | [theme](features/theme.md) | Density, type, color, icons |
 
@@ -45,6 +46,7 @@ into any of these docs.
 | [list-keyboard](design/list-keyboard.md) | `ListKeyboard` controller design |
 | [context-menu](design/context-menu.md) | Native flat menu state, geometry, focus, and paint |
 | [overlay-composite](design/overlay-composite.md) | Envelope + focus session design |
+| [notification-surfaces](design/notification-surfaces.md) | Panel and row presentation boundary |
 | [markdown-renderer](design/markdown-renderer.md) | Parser adapter, semantic model, GPUI layout |
 | [theme-system](design/theme-system.md) | Context theme / palette split design |
 

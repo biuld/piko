@@ -4,8 +4,11 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::TitleBar;
 use gpui_component::button::{Button, ButtonVariants};
+use piko_chrome::components::notification::{NotificationBellSpec, render_notification_bell};
 
-use crate::app::desktop_app::{DesktopApp, OpenSettings, ToggleRightColumn, ToggleSessions};
+use crate::app::desktop_app::{
+    DesktopApp, OpenSettings, ToggleNotificationCenter, ToggleRightColumn, ToggleSessions,
+};
 use crate::theme::{
     ChromeIcon, ChromeTokens, IconSize, PanelSide, icon, label_text, metrics, panel_toggle_icon,
     tokens,
@@ -15,6 +18,8 @@ pub fn render_title_bar(
     sessions_docked: bool,
     right_docked: bool,
     settings_active: bool,
+    notifications_open: bool,
+    notifications_unread: bool,
     entity: WeakEntity<DesktopApp>,
 ) -> impl IntoElement {
     let m = metrics();
@@ -78,6 +83,12 @@ pub fn render_title_bar(
                     .bottom_0()
                     .flex()
                     .items_center()
+                    .gap(m.space_xs)
+                    .child(notification_bell(
+                        notifications_open,
+                        notifications_unread,
+                        entity.clone(),
+                    ))
                     .child(settings_gear(settings_active, entity)),
             )
             .child(
@@ -90,6 +101,29 @@ pub fn render_title_bar(
                     .text_color(t.fg_rgba())
                     .child("piko"),
             ),
+    )
+}
+
+pub(crate) fn notification_bell(
+    active: bool,
+    unread: bool,
+    entity: WeakEntity<DesktopApp>,
+) -> AnyElement {
+    render_notification_bell(
+        NotificationBellSpec::new(
+            "title-toggle-notifications",
+            active,
+            unread,
+            crate::t!("chrome.action.notifications"),
+            crate::t!("chrome.action.notifications.close"),
+        ),
+        move |_, window, cx| {
+            if let Some(view) = entity.upgrade() {
+                view.update(cx, |this, cx| {
+                    this.action_toggle_notification_center(&ToggleNotificationCenter, window, cx);
+                });
+            }
+        },
     )
 }
 
