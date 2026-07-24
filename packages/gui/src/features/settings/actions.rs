@@ -45,23 +45,23 @@ impl DesktopApp {
         cx.notify();
     }
 
-    pub(crate) fn settings_set_chrome_palette(
+    pub(crate) fn settings_set_island_palette(
         &mut self,
         light: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use piko_chrome::theme::{ChromePalette, apply_chrome_theme};
+        use island::theme::{IslandPalette, apply_island_theme};
         let palette = if light {
-            ChromePalette::Light
+            IslandPalette::Light
         } else {
-            ChromePalette::Dark
+            IslandPalette::Dark
         };
-        if self.ux_prefs.chrome_palette == palette {
+        if self.ux_prefs.island_palette == palette {
             return;
         }
-        self.ux_prefs.chrome_palette = palette;
-        apply_chrome_theme(cx, palette);
+        self.ux_prefs.island_palette = palette;
+        apply_island_theme(cx, palette);
         self.persist_gui_config();
         // Re-paint frame so surfaces/tokens pick up the new snapshot.
         let _ = window;

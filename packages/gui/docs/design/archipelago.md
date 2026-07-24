@@ -1,7 +1,7 @@
 # GUI Archipelago Design (product)
 
 > Status: Phase 2 implemented (Archipelago switch + Settings frame); chrome
-> mechanism lives in **`piko-chrome`**
+> mechanism lives in **`island`**
 > **Chrome feature:** [archipelago](../../../chrome/docs/features/archipelago.md) ·
 > **Chrome design:** [archipelago](../../../chrome/docs/design/archipelago.md)
 > Parent: [GPUI Desktop Client Design](overview.md)
@@ -14,7 +14,7 @@
 
 Product-facing Archipelago behavior for piko-gui (Workbench ↔ Settings,
 gear / `Cmd+,`, section IA). **Mechanism** (surface = island workspace, surface
-router, chrome route order) is owned by `piko-chrome` — see the chrome doc above.
+router, chrome route order) is owned by `island` — see the chrome doc above.
 
 Historical purpose: host whole-product experiences that are peers of the Session
 Workbench — starting with Settings — without overloading Overlay or inventing a
@@ -175,7 +175,7 @@ Trailing gear:
 
 - Ghost icon, same size language as dock toggles.
 - Present on **both** surfaces; tooltip Settings / Close Settings.
-- Icon: `ChromeIcon::Settings` (stronger fg when Settings is active).
+- Icon: `IslandIcon::Settings` (stronger fg when Settings is active).
 
 ## 6. Settings body layout (v1)
 

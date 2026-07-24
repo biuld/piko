@@ -28,7 +28,7 @@ interaction layer. Parsing and layout semantics remain unchanged.
 
 ## 2. Decisions
 
-1. `piko-chrome` owns generic selectable-document state, text hit testing,
+1. `island` owns generic selectable-document state, text hit testing,
    selection paint, and clipboard projection.
 2. The GUI Timeline owns which rows and fields are selectable and gives each
    selectable row a stable document identity.
@@ -212,7 +212,7 @@ Command-C works without removing the island from the shell's logical focus
 ring. Closing the context menu restores that same handle and leaves the range
 highlighted.
 
-`piko_chrome::components::init(cx)` registers the private Copy action and
+`island::components::init(cx)` registers the private Copy action and
 Command-C binding under a `PikoTextSelection` key context, alongside the native
 context-menu bindings. The GUI calls this component initializer once at startup
 after its existing GPUI Component initialization.

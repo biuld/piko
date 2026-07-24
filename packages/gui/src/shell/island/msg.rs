@@ -4,11 +4,11 @@
 //! `DesktopApp::dispatch_island_msg`. Payloads stay shell-facing primitives so
 //! shell never depends on feature VM types.
 //!
-//! **Product surface** — lives in `piko-gui`, not `piko-chrome`.
+//! **Product surface** — lives in `piko-gui`, not `island`.
 //! Focus variants map to chrome [`FocusMsg`] via [`IslandMessage`].
 #![allow(dead_code)]
 
-use piko_chrome::runtime::island::{FocusMsg, IslandMessage};
+use island::runtime::island::{FocusMsg, IslandMessage};
 
 use crate::shell::workbench::IslandId;
 

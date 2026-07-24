@@ -1,15 +1,13 @@
 //! Archipelago open/close and Settings section selection.
 //!
 //! All router mutations go through
-//! [`piko_chrome::runtime::archipelago::route_archipelago_nav`] so the
+//! [`island::runtime::archipelago::route_archipelago_nav`] so the
 //! product path is not a parallel hand-roll of enter/leave/go (roadmap A3).
 //! Focus remount / restore runs only on [`ArchipelagoTransition::Changed`].
 
 use gpui::*;
-use piko_chrome::runtime::archipelago::{
-    ArchipelagoNav, ArchipelagoTransition, route_archipelago_nav,
-};
-use piko_chrome::runtime::island::{FocusReason, FocusRing};
+use island::runtime::archipelago::{ArchipelagoNav, ArchipelagoTransition, route_archipelago_nav};
+use island::runtime::island::{FocusReason, FocusRing};
 
 use crate::app::archipelago::{ArchipelagoId, settings_workspace, workbench_workspace};
 use crate::app::desktop_app::{DesktopApp, OpenSettings};
@@ -125,7 +123,7 @@ impl DesktopApp {
     #[allow(dead_code)] // used when re-syncing rings without keyboard handoff
     pub(crate) fn apply_settings_focus_chrome(&mut self, cx: &mut Context<Self>) {
         let focused = self.settings_focus.focused();
-        self.settings_focus_table.apply_chrome_rings(focused, cx);
+        self.settings_focus_table.apply_island_rings(focused, cx);
     }
 
     /// Escape with no overlay: leave Settings before sheet dismissal.

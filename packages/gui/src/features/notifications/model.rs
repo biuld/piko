@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-pub use piko_chrome::components::notification::NotificationSeverity;
+pub use island::components::notification::NotificationSeverity;
 
 const HISTORY_LIMIT: usize = 100;
 

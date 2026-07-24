@@ -32,8 +32,8 @@ use crate::features::{
     SelectPrevSection, SessionsConfirm, SessionsSelectNext, SessionsSelectPrev,
     SessionsToggleFocused, TreeConfirm, TreeSelectNext, TreeSelectPrev, TreeToggleFocused,
 };
-use piko_chrome::assets::ChromeAssets;
-use piko_chrome::theme::{ChromePalette, apply_chrome_theme};
+use island::assets::IslandAssets;
+use island::theme::{IslandPalette, apply_island_theme};
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -53,19 +53,19 @@ fn main() {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".into());
 
-    let app = Application::new().with_assets(ChromeAssets);
+    let app = Application::new().with_assets(IslandAssets);
 
     app.run(move |cx| {
         gpui_component::init(cx);
-        piko_chrome::components::init(cx);
+        island::components::init(cx);
         i18n::init();
-        // Default dark; hostd [gui].chrome-palette may re-apply after hydrate.
-        apply_chrome_theme(cx, ChromePalette::Dark);
+        // Default dark; hostd [gui].island-palette may re-apply after hydrate.
+        apply_island_theme(cx, IslandPalette::Dark);
 
         cx.bind_keys([
             KeyBinding::new(
                 "cmd-c",
-                piko_chrome::components::selection::CopySelection,
+                island::components::selection::CopySelection,
                 Some("IslandTimeline"),
             ),
             KeyBinding::new("cmd-n", NewSession, Some("DesktopApp")),

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use gpui::*;
-use piko_chrome::components::selection::CopySelection;
+use island::components::selection::CopySelection;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
@@ -156,7 +156,7 @@ impl Render for TimelineIsland {
             IslandPanel::empty(
                 "timeline-island",
                 IslandPlaceholder::new(crate::t!("island.timeline.empty.title"))
-                    .chrome_icon(crate::theme::ChromeIcon::MessageSquare)
+                    .chrome_icon(crate::theme::IslandIcon::MessageSquare)
                     .subtitle(crate::t!("island.timeline.empty.subtitle")),
             )
             .focused(self.chrome_focused)

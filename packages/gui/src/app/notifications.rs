@@ -1,7 +1,7 @@
 //! Notification history, floating panel, and the unified toast entry point.
 
 use gpui::*;
-use piko_chrome::components::notification::{
+use island::components::notification::{
     NotificationToastSpec, clear_notification_toasts, push_notification_toast,
     render_notification_center_layer as render_chrome_notification_center_layer,
     render_notification_toasts,

@@ -4,13 +4,13 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::TitleBar;
 use gpui_component::button::{Button, ButtonVariants};
-use piko_chrome::components::notification::{NotificationBellSpec, render_notification_bell};
+use island::components::notification::{NotificationBellSpec, render_notification_bell};
 
 use crate::app::desktop_app::{
     DesktopApp, OpenSettings, ToggleNotificationCenter, ToggleRightColumn, ToggleSessions,
 };
 use crate::theme::{
-    ChromeIcon, ChromeTokens, IconSize, PanelSide, icon, label_text, metrics, panel_toggle_icon,
+    IconSize, IslandIcon, IslandTokens, PanelSide, icon, label_text, metrics, panel_toggle_icon,
     tokens,
 };
 
@@ -130,9 +130,9 @@ pub(crate) fn notification_bell(
 pub(crate) fn settings_gear(active: bool, entity: WeakEntity<DesktopApp>) -> Button {
     let t = tokens();
     let color = if active {
-        ChromeTokens::hsla(t.fg)
+        IslandTokens::hsla(t.fg)
     } else {
-        ChromeTokens::hsla(t.muted_fg)
+        IslandTokens::hsla(t.muted_fg)
     };
     let tooltip = if active {
         crate::t!("chrome.action.settings.close")
@@ -140,7 +140,7 @@ pub(crate) fn settings_gear(active: bool, entity: WeakEntity<DesktopApp>) -> But
         crate::t!("chrome.action.settings")
     };
     Button::new("title-toggle-settings")
-        .icon(icon(ChromeIcon::Settings, IconSize::Label, color))
+        .icon(icon(IslandIcon::Settings, IconSize::Label, color))
         .tooltip(tooltip)
         .ghost()
         .small()
@@ -162,7 +162,7 @@ fn panel_toggle(
     tooltip: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Button {
-    let color = ChromeTokens::hsla(tokens().muted_fg);
+    let color = IslandTokens::hsla(tokens().muted_fg);
     Button::new(id)
         .icon(panel_toggle_icon(side, docked, color))
         .tooltip(tooltip)

@@ -76,7 +76,7 @@ Archipelago and Overlay stack concepts are fine; **folder ownership** drifted.
 │   workbench assembly, product OverlayHost, IslandMsg/Id,     │
 │   settings frame slots                                       │
 ├─────────────────────────────────────────────────────────────┤
-│ piko-chrome (crate)  Islands chrome kit (no product domain)  │
+│ island (crate)  Islands chrome kit (no product domain)  │
 │   theme, IslandPanel, FocusRing<Id>, IslandNode<Id>,         │
 │   overlay surface geometry, tree widgets                     │
 ├─────────────────────────────────────────────────────────────┤
@@ -88,8 +88,8 @@ Archipelago and Overlay stack concepts are fine; **folder ownership** drifted.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`piko-chrome` must not depend on `piko-gui`, client-core, or protocol. See
-`packages/chrome/AGENTS.md`.
+`island` must not depend on `piko-gui`, client-core, or protocol. See
+the sibling `island-rs/AGENTS.md`.
 
 ### 4.1 Dependency direction (must hold)
 

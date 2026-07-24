@@ -3,8 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use gpui::{App, AppContext, Entity};
-use piko_chrome::components::markdown::{MarkdownDocument, parse_markdown};
-use piko_chrome::components::selection::{SelectionGroup, SelectionState};
+use island::components::markdown::{MarkdownDocument, parse_markdown};
+use island::components::selection::{SelectionGroup, SelectionState};
 
 use super::vm::TimelineRow;
 

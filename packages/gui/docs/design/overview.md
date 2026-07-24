@@ -65,7 +65,7 @@ packages/gui
 ├── config           `[gui]` schema and defaults
 ├── theme            tokens, typography, icons mapped onto GPUI Component
 ├── i18n / locales   English chrome catalog (`rust_i18n`)
-├── assets           app branding only (window icon); chrome SVGs in piko-chrome
+├── assets           app branding only (window icon); chrome SVGs in island
 └── cli              cwd/session/hostd launch options
 ```
 
@@ -78,7 +78,7 @@ directed `IslandMsg` routing through `DesktopApp`, not a full Workbench rebuild.
 
 **Normative island relationship model** (contracts, messaging, focus):
 [Island Interaction Design](../../../chrome/docs/design/island-interaction.md)
-in `piko-chrome`. Product graphs and `IslandMsg` stay in `piko-gui`.
+in `island`. Product graphs and `IslandMsg` stay in `piko-gui`.
 
 ### Island focus handoff
 

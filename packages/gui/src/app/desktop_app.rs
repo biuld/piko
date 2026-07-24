@@ -342,10 +342,10 @@ impl DesktopApp {
                 self.layout.tree_open = settings.right_column_open;
                 self.ux_prefs.prefer_reduced_motion = settings.reduced_motion;
                 self.ux_prefs.hide_thinking_block = settings.hide_thinking_block;
-                let palette = super::ux_prefs::parse_chrome_palette(&settings.chrome_palette);
-                if self.ux_prefs.chrome_palette != palette {
-                    self.ux_prefs.chrome_palette = palette;
-                    piko_chrome::theme::apply_chrome_theme(cx, palette);
+                let palette = super::ux_prefs::parse_island_palette(&settings.island_palette);
+                if self.ux_prefs.island_palette != palette {
+                    self.ux_prefs.island_palette = palette;
+                    island::theme::apply_island_theme(cx, palette);
                 }
                 self.sync_session_prefs_from_gui(&settings);
                 self.gui_config_fingerprint = Some(fingerprint);
@@ -363,7 +363,7 @@ impl DesktopApp {
             session_open: self.layout.sessions_open,
             right_column_open: self.layout.right_column_pref_open(),
             reduced_motion: self.ux_prefs.prefer_reduced_motion,
-            chrome_palette: super::ux_prefs::chrome_palette_key(self.ux_prefs.chrome_palette)
+            island_palette: super::ux_prefs::island_palette_key(self.ux_prefs.island_palette)
                 .to_string(),
             hide_thinking_block: self.ux_prefs.hide_thinking_block,
             pinned_session_ids: Vec::new(),

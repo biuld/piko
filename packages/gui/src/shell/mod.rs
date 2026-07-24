@@ -1,7 +1,7 @@
 //! Window shell: Archipelago frames, product overlay host, Workbench assembly.
 //!
 //! Shared Islands chrome (panel, theme surfaces, generic layout tree, overlay
-//! panel geometry, tree widgets) lives in **`piko-chrome`**. This module owns
+//! panel geometry, tree widgets) lives in **`island`**. This module owns
 //! piko product wiring on top of that kit:
 //!
 //! - [`workbench`] — Workbench archipelago (TitleBar, body, StatusBar)

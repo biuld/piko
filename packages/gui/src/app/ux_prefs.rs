@@ -1,6 +1,6 @@
 //! Window-local UX preferences (not persisted this wave).
 
-use piko_chrome::theme::ChromePalette;
+use island::theme::IslandPalette;
 
 #[derive(Debug, Clone)]
 pub struct GuiUxPrefs {
@@ -10,7 +10,7 @@ pub struct GuiUxPrefs {
     /// GUI-only; independent of the TUI's own `[tui].hide_thinking_block`.
     pub hide_thinking_block: bool,
     /// Active chrome palette (dark / light).
-    pub chrome_palette: ChromePalette,
+    pub island_palette: IslandPalette,
 }
 
 impl Default for GuiUxPrefs {
@@ -18,7 +18,7 @@ impl Default for GuiUxPrefs {
         Self {
             prefer_reduced_motion: false,
             hide_thinking_block: false,
-            chrome_palette: ChromePalette::Dark,
+            island_palette: IslandPalette::Dark,
         }
     }
 }
@@ -30,18 +30,18 @@ impl GuiUxPrefs {
     }
 }
 
-/// Parse a persisted `[gui].chrome-palette` string.
-pub fn parse_chrome_palette(raw: &str) -> ChromePalette {
+/// Parse a persisted `[gui].island-palette` string.
+pub fn parse_island_palette(raw: &str) -> IslandPalette {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "light" => ChromePalette::Light,
-        _ => ChromePalette::Dark,
+        "light" => IslandPalette::Light,
+        _ => IslandPalette::Dark,
     }
 }
 
-pub fn chrome_palette_key(palette: ChromePalette) -> &'static str {
+pub fn island_palette_key(palette: IslandPalette) -> &'static str {
     match palette {
-        ChromePalette::Dark => "dark",
-        ChromePalette::Light => "light",
+        IslandPalette::Dark => "dark",
+        IslandPalette::Light => "light",
     }
 }
 
@@ -58,10 +58,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_chrome_palette_accepts_light_and_defaults_dark() {
-        assert_eq!(parse_chrome_palette("light"), ChromePalette::Light);
-        assert_eq!(parse_chrome_palette("LIGHT"), ChromePalette::Light);
-        assert_eq!(parse_chrome_palette("dark"), ChromePalette::Dark);
-        assert_eq!(parse_chrome_palette("unknown"), ChromePalette::Dark);
+    fn parse_island_palette_accepts_light_and_defaults_dark() {
+        assert_eq!(parse_island_palette("light"), IslandPalette::Light);
+        assert_eq!(parse_island_palette("LIGHT"), IslandPalette::Light);
+        assert_eq!(parse_island_palette("dark"), IslandPalette::Dark);
+        assert_eq!(parse_island_palette("unknown"), IslandPalette::Dark);
     }
 }

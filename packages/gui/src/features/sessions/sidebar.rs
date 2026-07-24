@@ -8,7 +8,7 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
-use piko_chrome::components::menu::{ContextMenuItem, ContextMenuItemTone, ContextMenuSpec};
+use island::components::menu::{ContextMenuItem, ContextMenuItemTone, ContextMenuSpec};
 
 use crate::projections::{SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel};
 use crate::shell::{
@@ -16,7 +16,7 @@ use crate::shell::{
     TreeContextMenuBuilder, TreeRowAccessory, TreeRowSpec, render_tree_list,
 };
 use crate::theme::{
-    ChromeIcon, ChromeTokens, IconSize, TextRole, icon, metrics, row_leading, text, tokens,
+    IconSize, IslandIcon, IslandTokens, TextRole, icon, metrics, row_leading, text, tokens,
 };
 
 pub(crate) type ClickHandler = TreeClickHandler;
@@ -54,9 +54,9 @@ pub(crate) fn render_sidebar_panel(
 ) -> IslandPanel {
     let open_directory = Button::new("open-directory")
         .icon(icon(
-            ChromeIcon::FolderOpen,
+            IslandIcon::FolderOpen,
             IconSize::Label,
-            ChromeTokens::hsla(tokens().muted_fg),
+            IslandTokens::hsla(tokens().muted_fg),
         ))
         .tooltip(crate::t!("island.sessions.action.open_directory"))
         .ghost()
@@ -73,7 +73,7 @@ pub(crate) fn render_sidebar_panel(
         return IslandPanel::empty(
             "sessions-island",
             IslandPlaceholder::new(crate::t!("island.sessions.empty.title"))
-                .chrome_icon(ChromeIcon::Circle)
+                .chrome_icon(IslandIcon::Circle)
                 .subtitle(crate::t!("island.sessions.empty.subtitle")),
         )
         .header(header)
@@ -221,11 +221,11 @@ fn flatten_session_rows(
             Some(dir_new_session_button(&key, on_new))
         };
 
-        let mute = ChromeTokens::hsla(t.muted_fg);
+        let mute = IslandTokens::hsla(t.muted_fg);
         let dir_icon = if expanded {
-            ChromeIcon::FolderOpen
+            IslandIcon::FolderOpen
         } else {
-            ChromeIcon::Folder
+            IslandIcon::Folder
         };
 
         out.push((
@@ -265,9 +265,9 @@ fn dir_new_session_button(cwd: &str, on_new: &IdClickFactory) -> AnyElement {
     let handler = on_new(cwd.to_string());
     Button::new(SharedString::from(format!("new-session-{cwd}")))
         .icon(icon(
-            ChromeIcon::Plus,
+            IslandIcon::Plus,
             IconSize::Meta,
-            ChromeTokens::hsla(tokens().muted_fg),
+            IslandTokens::hsla(tokens().muted_fg),
         ))
         .tooltip(crate::t!("island.sessions.action.new"))
         .ghost()
@@ -300,19 +300,19 @@ fn session_tree_row(
     };
 
     let leading_icon = if row.is_pinned || in_pinned_band {
-        ChromeIcon::Pin
+        IslandIcon::Pin
     } else {
-        ChromeIcon::MessageSquare
+        IslandIcon::MessageSquare
     };
 
     let leading_color = if is_pending {
-        ChromeTokens::hsla(t.muted_fg)
+        IslandTokens::hsla(t.muted_fg)
     } else if is_live {
-        ChromeTokens::hsla(t.accent)
+        IslandTokens::hsla(t.accent)
     } else if row.is_pinned || in_pinned_band {
-        ChromeTokens::hsla(t.muted_fg)
+        IslandTokens::hsla(t.muted_fg)
     } else {
-        ChromeTokens::hsla(t.fg)
+        IslandTokens::hsla(t.fg)
     };
 
     let detail = if in_pinned_band && !row.cwd_hint.is_empty() {

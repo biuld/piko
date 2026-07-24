@@ -8,7 +8,7 @@ use crate::shell::{
     IslandHeader, IslandPanel, IslandPlaceholder, IslandSessionPhase, TreeClickHandler,
     TreeRowSpec, render_tree_list,
 };
-use crate::theme::{ChromeIcon, ChromeTokens, row_leading, tokens};
+use crate::theme::{IslandIcon, IslandTokens, row_leading, tokens};
 
 use super::vm::{AgentTreeNode, AgentTreeViewModel, agent_node_visible};
 
@@ -29,7 +29,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Idle => IslandPanel::empty(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.empty_no_session.title"))
-                .chrome_icon(ChromeIcon::Bot)
+                .chrome_icon(IslandIcon::Bot)
                 .subtitle(crate::t!("island.agents.empty_no_session.subtitle")),
         )
         .header(header)
@@ -38,7 +38,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Loading => IslandPanel::loading(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.loading"))
-                .chrome_icon(ChromeIcon::CircleDashed),
+                .chrome_icon(IslandIcon::CircleDashed),
         )
         .header(header)
         .focused(focused)
@@ -46,7 +46,7 @@ pub fn render_agent_tree_panel(
         IslandSessionPhase::Ready if vm.nodes.is_empty() => IslandPanel::empty(
             "agent-tree",
             IslandPlaceholder::new(crate::t!("island.agents.empty.title"))
-                .chrome_icon(ChromeIcon::Bot)
+                .chrome_icon(IslandIcon::Bot)
                 .subtitle(crate::t!("island.agents.empty.subtitle")),
         )
         .header(header)
@@ -107,9 +107,9 @@ fn agent_row_spec(
 ) -> TreeRowSpec {
     let t = tokens();
     let leading_color = if node.selected {
-        ChromeTokens::hsla(t.accent)
+        IslandTokens::hsla(t.accent)
     } else {
-        ChromeTokens::hsla(t.muted_fg)
+        IslandTokens::hsla(t.muted_fg)
     };
     let trailing = div()
         .flex_shrink_0()
@@ -131,7 +131,7 @@ fn agent_row_spec(
         show_guides: true,
         label: SharedString::from(node.name.clone()),
         label_color: None,
-        leading: Some(row_leading(ChromeIcon::Bot, leading_color)),
+        leading: Some(row_leading(IslandIcon::Bot, leading_color)),
         detail: Some(trailing),
         accessory: None,
         context_menu: None,

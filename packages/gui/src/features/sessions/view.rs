@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
-use piko_chrome::components::list::{ListKeyEffect, ListKeyIntent, ListKeyboard};
+use island::components::list::{ListKeyEffect, ListKeyIntent, ListKeyboard};
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;

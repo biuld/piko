@@ -1,10 +1,10 @@
 //! Product domain role colors (chat authors, tool classes, …).
 //!
 //! These are **not** part of chrome-core tokens. A multi-pane client that only
-//! depends on `piko-chrome` need not link this module.
+//! depends on `island` need not link this module.
 
 use gpui::{Hsla, Rgba};
-use piko_chrome::theme::{ChromePalette, ChromeTokens, chrome_palette};
+use island::theme::{IslandPalette, IslandTokens, island_palette};
 
 /// Domain-specific accent roles used by timeline / tree / conversation chrome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,36 +16,36 @@ pub enum DomainRole {
     System,
 }
 
-fn domain_role_hex_for(palette: ChromePalette, role: DomainRole) -> u32 {
+fn domain_role_hex_for(palette: IslandPalette, role: DomainRole) -> u32 {
     match (palette, role) {
-        (ChromePalette::Dark, DomainRole::User) => 0x87c3ff,
-        (ChromePalette::Dark, DomainRole::Assistant) => 0x82d2ce,
-        (ChromePalette::Dark, DomainRole::Thinking) => 0x909194,
-        (ChromePalette::Dark, DomainRole::Tool) => 0xebc88d,
-        (ChromePalette::Dark, DomainRole::System) => 0x6e747b,
-        (ChromePalette::Light, DomainRole::User) => 0x1749bd,
-        (ChromePalette::Light, DomainRole::Assistant) => 0x14646e,
-        (ChromePalette::Light, DomainRole::Thinking) => 0x747576,
-        (ChromePalette::Light, DomainRole::Tool) => 0x5511bf,
-        (ChromePalette::Light, DomainRole::System) => 0x6e747b,
+        (IslandPalette::Dark, DomainRole::User) => 0x87c3ff,
+        (IslandPalette::Dark, DomainRole::Assistant) => 0x82d2ce,
+        (IslandPalette::Dark, DomainRole::Thinking) => 0x909194,
+        (IslandPalette::Dark, DomainRole::Tool) => 0xebc88d,
+        (IslandPalette::Dark, DomainRole::System) => 0x6e747b,
+        (IslandPalette::Light, DomainRole::User) => 0x1749bd,
+        (IslandPalette::Light, DomainRole::Assistant) => 0x14646e,
+        (IslandPalette::Light, DomainRole::Thinking) => 0x747576,
+        (IslandPalette::Light, DomainRole::Tool) => 0x5511bf,
+        (IslandPalette::Light, DomainRole::System) => 0x6e747b,
     }
 }
 
 fn domain_role_hex(role: DomainRole) -> u32 {
-    domain_role_hex_for(chrome_palette(), role)
+    domain_role_hex_for(island_palette(), role)
 }
 
 pub fn domain_role_rgba(role: DomainRole) -> Rgba {
-    ChromeTokens::rgba(domain_role_hex(role))
+    IslandTokens::rgba(domain_role_hex(role))
 }
 
 pub fn domain_role_hsla(role: DomainRole) -> Hsla {
-    ChromeTokens::hsla(domain_role_hex(role))
+    IslandTokens::hsla(domain_role_hex(role))
 }
 
 #[cfg(test)]
 mod tests {
-    use piko_chrome::theme::ChromePalette;
+    use island::theme::IslandPalette;
 
     use super::{DomainRole, domain_role_hex_for, domain_role_rgba};
 
@@ -58,7 +58,7 @@ mod tests {
             DomainRole::Tool,
             DomainRole::System,
         ];
-        for palette in [ChromePalette::Dark, ChromePalette::Light] {
+        for palette in [IslandPalette::Dark, IslandPalette::Light] {
             for (i, a) in roles.iter().enumerate() {
                 for b in roles.iter().skip(i + 1) {
                     assert_ne!(
@@ -75,19 +75,19 @@ mod tests {
     #[test]
     fn fleet_light_roles_are_stable() {
         assert_eq!(
-            domain_role_hex_for(ChromePalette::Light, DomainRole::User),
+            domain_role_hex_for(IslandPalette::Light, DomainRole::User),
             0x1749bd
         );
         assert_eq!(
-            domain_role_hex_for(ChromePalette::Light, DomainRole::Assistant),
+            domain_role_hex_for(IslandPalette::Light, DomainRole::Assistant),
             0x14646e
         );
         assert_eq!(
-            domain_role_hex_for(ChromePalette::Light, DomainRole::Thinking),
+            domain_role_hex_for(IslandPalette::Light, DomainRole::Thinking),
             0x747576
         );
         assert_eq!(
-            domain_role_hex_for(ChromePalette::Light, DomainRole::Tool),
+            domain_role_hex_for(IslandPalette::Light, DomainRole::Tool),
             0x5511bf
         );
     }

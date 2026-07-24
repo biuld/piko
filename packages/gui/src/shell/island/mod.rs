@@ -1,22 +1,22 @@
 //! Island shell for the piko Workbench.
 //!
-//! Panel / focus primitives come from [`piko_chrome`]. Product messages and
-//! session-phase mapping stay here so `piko-chrome` never depends on Client Core.
+//! Panel / focus primitives come from [`island`]. Product messages and
+//! session-phase mapping stay here so `island` never depends on Client Core.
 
 mod msg;
 mod phase;
 
 use std::ops::{Deref, DerefMut};
 
-pub use msg::IslandMsg;
-pub use phase::IslandSessionPhase;
-pub use piko_chrome::components::panel::{
+pub use island::components::panel::{
     IslandBody, IslandContentViewport, IslandHeader, IslandMedia, IslandPanel, IslandPlaceholder,
 };
-pub use piko_chrome::runtime::island::{
+pub use island::runtime::island::{
     FocusCycleDir, FocusReason, FocusRing, IslandFocusTable, IslandHost, IslandMessage, IslandView,
     activate_focus_handle, route_focus_message, schedule_island_message,
 };
+pub use msg::IslandMsg;
+pub use phase::IslandSessionPhase;
 
 use crate::shell::workbench::IslandId;
 

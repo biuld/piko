@@ -14,7 +14,7 @@ pub struct SettingsFrameChrome {
 pub fn mount_frame<Id>(
     root: Stateful<Div>,
     chrome: SettingsFrameChrome,
-    tree: &piko_chrome::runtime::layout::IslandNode<Id>,
+    tree: &island::runtime::layout::IslandNode<Id>,
     nav_id: Id,
     panel_id: Id,
     nav: impl IntoElement,

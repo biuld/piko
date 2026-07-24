@@ -1,7 +1,7 @@
 //! Appearance settings — `[gui]` presentation prefs.
 
 use gpui::*;
-use piko_chrome::theme::ChromePalette;
+use island::theme::IslandPalette;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::theme::metrics;
@@ -28,7 +28,7 @@ pub fn render_appearance(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> im
                     crate::t!("settings.appearance.light_theme.label"),
                     Some(crate::t!("settings.appearance.light_theme.detail").into()),
                     {
-                        let checked = app.ux_prefs.chrome_palette == ChromePalette::Light;
+                        let checked = app.ux_prefs.island_palette == IslandPalette::Light;
                         let entity = entity.clone();
                         bool_switch(
                             "settings-appearance-light-theme-switch",
@@ -36,7 +36,7 @@ pub fn render_appearance(app: &DesktopApp, entity: WeakEntity<DesktopApp>) -> im
                             move |checked, window, cx| {
                                 if let Some(view) = entity.upgrade() {
                                     view.update(cx, |this, cx| {
-                                        this.settings_set_chrome_palette(checked, window, cx);
+                                        this.settings_set_island_palette(checked, window, cx);
                                     });
                                 }
                             },

@@ -15,7 +15,7 @@ identifier = "dev.piko.gui"
 icon = ["assets/app/AppIcon.png"]
 
 [dependencies]
-piko-chrome = { path = "../chrome" }
+island = { path = "../../../island-rs" }
 piko-client-core = { path = "../client-core" }
 piko-comms = { path = "../comms" }
 piko-protocol = { path = "../protocol" }

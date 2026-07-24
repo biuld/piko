@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use gpui::*;
-use piko_chrome::components::notification::{
+use island::components::notification::{
     NotificationPanelSpec, NotificationRowSpec, render_notification_panel, render_notification_row,
 };
 

@@ -8,7 +8,7 @@
 
 | Owner | Owns | Does not own |
 |---|---|---|
-| `piko-chrome` | reusable notification severity, compact floating-panel/row presentation, responsive panel geometry, and stable toast-stack placement | notification records, unread policy, product copy, commands |
+| `island` | reusable notification severity, compact floating-panel/row presentation, responsive panel geometry, and stable toast-stack placement | notification records, unread policy, product copy, commands |
 | `features/notifications` | bounded in-memory records, unread state, panel body, remove/clear behavior | window title-bar placement, host runtime state |
 | GUI shell | bell placement in each TitleBar | notification data or mutations |
 | `DesktopApp` wiring | one notification emission path, history policy, Escape routing | reusable notification visuals and GPUI toast plumbing |

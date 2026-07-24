@@ -116,7 +116,7 @@ impl DesktopApp {
     /// Sync keyboard-focus ring borders onto island Entities via the chrome table.
     pub(crate) fn apply_island_focus_chrome(&mut self, cx: &mut Context<Self>) {
         let focused = self.island_focus.focused();
-        self.island_focus_table.apply_chrome_rings(focused, cx);
+        self.island_focus_table.apply_island_rings(focused, cx);
     }
 
     pub(crate) fn focus_island(

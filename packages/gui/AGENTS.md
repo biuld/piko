@@ -3,7 +3,7 @@
 ## Architecture overview
 
 The GUI is a macOS-first GPUI desktop client. It talks to hostd over JSONL
-stdio via `piko-client-core`. Shared Islands chrome lives in **`piko-chrome`**
+stdio via `piko-client-core`. Shared Islands chrome lives in **`island`**
 (theme, island panel, generic layout tree, overlay surface, widgets). Module
 boundaries follow [GUI Code Organization Design](docs/design/code-organization.md).
 
@@ -11,13 +11,13 @@ boundaries follow [GUI Code Organization Design](docs/design/code-organization.m
 app        →  composition root (DesktopApp, wiring, ArchipelagoRouter state)
 features   →  product vertical slices (UI + local VM + feature actions)
 shell      →  piko product shell (Workbench assembly, product OverlayHost, IslandMsg)
-piko-chrome→  reusable chrome kit (no product ids / domain messages)
+island     →  reusable island kit (no product ids / domain messages)
 platform   →  edges: bridge, transport, config, theme re-export, i18n, assets
 ```
 
 ```text
-piko-gui ──► piko-chrome
-piko-chrome ✗ piko-gui | client-core | protocol | hostd
+piko-gui ──► island
+island ✗ piko-gui | client-core | protocol | hostd
 ```
 
 TUI vocabulary maps roughly as:
@@ -44,14 +44,14 @@ direct `use` of another feature’s private modules.
 
 | Concern | Home | Not home |
 |---|---|---|
-| IslandPanel / FocusRing / body states | **`piko-chrome`** (`crate::theme` / shell re-export) | features |
-| Generic split tree / prune | **`piko-chrome::layout`** | product ids |
-| Overlay panel geometry | **`piko-chrome::overlay`** | stack kinds |
-| Theme tokens / metrics / typography | **`piko-chrome::theme`** (`crate::theme` re-export) | hard-coded sizes in features |
-| Tree list row chrome | **`piko-chrome::widgets`** | feature VMs |
+| IslandPanel / FocusRing / body states | **`island`** (`crate::theme` / shell re-export) | features |
+| Generic split tree / prune | **`island::runtime::layout`** | product ids |
+| Overlay panel geometry | **`island::components::overlay`** | stack kinds |
+| Theme tokens / metrics / typography | **`island::theme`** (`crate::theme` re-export) | hard-coded sizes in features |
+| Tree list row chrome | **`island::components::list`** | feature VMs |
 | Workbench column layout / resize / dock-fit | `shell/workbench` | features |
-| Product `IslandId` / default tree / `IslandMsg` | `shell/island` + `shell/workbench` | **piko-chrome** |
-| Overlay stack kinds / Escape / HostPrompt | `shell/overlay` | **piko-chrome** |
+| Product `IslandId` / default tree / `IslandMsg` | `shell/island` + `shell/workbench` | **island** |
+| Overlay stack kinds / Escape / HostPrompt | `shell/overlay` | **island** |
 | Settings Archipelago frame | `shell/settings` | features |
 | Sessions / Timeline / Composer / … | `features/<name>` | shell / chrome |
 | Settings section forms / IA | `features/settings` | shell |
@@ -60,8 +60,8 @@ direct `use` of another feature’s private modules.
 | `[gui]` schema | `config/` | feature UI |
 
 **CR rule:** no new product forms under `shell/`.  
-**Chrome rule:** no product island ids, domain messages, or host types in `piko-chrome`
-(see `packages/chrome/AGENTS.md`).
+**Island rule:** no product island ids, domain messages, or host types in `island`
+(see the sibling `island-rs/AGENTS.md`).
 
 ### App composition root
 
@@ -93,12 +93,12 @@ Island → host messaging uses `shell::IslandMsg` with **shell-owned primitive
 payloads** (no feature VM types in the enum). Features project VM rows into
 those fields at emit time.
 
-**Chrome contracts (required):** each island Entity implements
-`piko_chrome::IslandView`; product msgs implement `IslandMessage`; `DesktopApp`
+**Island contracts (required):** each island Entity implements
+`island::runtime::island::IslandView`; product msgs implement `IslandMessage`; `DesktopApp`
 implements `IslandHost`, holds `IslandFocusTable` (`assert_covers` on startup),
 and islands emit only via `schedule_island_message` (see
-`packages/chrome/src/island/contract.rs`). Interaction model:
-[chrome island design](../chrome/docs/design/island-interaction.md).
+`island::runtime::island`). Interaction details live in the sibling
+`island-rs/docs/design/island-interaction.md` design.
 
 ## Design rules
 

@@ -19,7 +19,7 @@ window repaints do not parse them again.
 
 ## 2. Decisions
 
-1. `piko-chrome` owns the generic Markdown document model, parser adapter,
+1. `island` owns the generic Markdown document model, parser adapter,
    style contract, and GPUI renderer.
 2. `piko-gui` owns the product decision to render assistant Timeline content as
    Markdown and supplies stable message identity plus streaming state.
@@ -65,7 +65,7 @@ contract, or island message changes. Timeline keeps this cache in a dedicated
 
 ## 5. Chrome module boundary
 
-The reusable API lives at `piko_chrome::components::markdown`, matching its
+The reusable API lives at `island::components::markdown`, matching its
 source ownership directly:
 
 ```text
@@ -83,7 +83,7 @@ components/markdown/
     table.rs      table measurement and row layout
 ```
 
-`piko-chrome` adds `pulldown-cmark` as an allowed dependency. The module remains
+`island` adds `pulldown-cmark` as an allowed dependency. The module remains
 independent of message roles, session ids, realtime protocol events, and piko
 Timeline types.
 

@@ -10,11 +10,11 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 use crate::theme::{
-    ChromeIcon, ChromeTokens, DomainRole, TextRole, domain_role_hsla, domain_role_rgba, metrics,
+    DomainRole, IslandIcon, IslandTokens, TextRole, domain_role_hsla, domain_role_rgba, metrics,
     rotating_gear, row_leading, text, tokens,
 };
-use piko_chrome::components::markdown::render_selectable_markdown;
-use piko_chrome::components::selection::{SelectableText, SelectionState, selectable_region};
+use island::components::markdown::render_selectable_markdown;
+use island::components::selection::{SelectableText, SelectionState, selectable_region};
 
 use super::markdown_cache::TimelineMarkdownCache;
 use super::tool::render_tool_chip;
@@ -223,7 +223,7 @@ fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement 
         .flex()
         .gap(m.space_sm)
         .items_center()
-        .child(row_leading(ChromeIcon::Bot, accent_hsla))
+        .child(row_leading(IslandIcon::Bot, accent_hsla))
         .child(
             text(TextRole::Meta)
                 .font_weight(FontWeight::SEMIBOLD)
@@ -231,7 +231,7 @@ fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement 
                 .child(row.label.clone()),
         )
         .when(row.streaming, |d| {
-            d.child(rotating_gear(ChromeTokens::hsla(t.muted_fg), allow_motion))
+            d.child(rotating_gear(IslandTokens::hsla(t.muted_fg), allow_motion))
         })
         .into_any_element()
 }
@@ -351,7 +351,7 @@ fn render_user_row(
                 .flex()
                 .gap(m.space_sm)
                 .items_center()
-                .child(row_leading(ChromeIcon::User, accent_hsla))
+                .child(row_leading(IslandIcon::User, accent_hsla))
                 .child(
                     text(TextRole::Meta)
                         .font_weight(FontWeight::SEMIBOLD)

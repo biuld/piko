@@ -7,7 +7,7 @@ use crate::shell::{
     TreeRowSpec, render_tree_list,
 };
 use crate::theme::{
-    ChromeIcon, ChromeTokens, DomainRole, RoleAccent, domain_role_hsla, row_leading, tokens,
+    DomainRole, IslandIcon, IslandTokens, RoleAccent, domain_role_hsla, row_leading, tokens,
 };
 
 use super::vm::{ConversationTreeViewModel, TreeEntryKind, TreeNode};
@@ -27,7 +27,7 @@ pub fn render_tree_panel(
         IslandSessionPhase::Idle => IslandPanel::empty(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.empty_no_session.title"))
-                .chrome_icon(ChromeIcon::Network)
+                .chrome_icon(IslandIcon::Network)
                 .subtitle(crate::t!("island.tree.empty_no_session.subtitle")),
         )
         .header(header)
@@ -35,14 +35,14 @@ pub fn render_tree_panel(
         IslandSessionPhase::Loading => IslandPanel::loading(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.loading"))
-                .chrome_icon(ChromeIcon::CircleDashed),
+                .chrome_icon(IslandIcon::CircleDashed),
         )
         .header(header)
         .focused(focused),
         IslandSessionPhase::Ready if tree.nodes.is_empty() => IslandPanel::empty(
             "conversation-tree",
             IslandPlaceholder::new(crate::t!("island.tree.empty.title"))
-                .chrome_icon(ChromeIcon::Network)
+                .chrome_icon(IslandIcon::Network)
                 .subtitle(crate::t!("island.tree.empty.subtitle")),
         )
         .header(header)
@@ -119,16 +119,16 @@ fn conversation_row_spec(node: &TreeNode, previewed: bool, keyboard_focused: boo
     }
 }
 
-fn tree_kind_icon(kind: TreeEntryKind) -> ChromeIcon {
+fn tree_kind_icon(kind: TreeEntryKind) -> IslandIcon {
     match kind {
-        TreeEntryKind::User => ChromeIcon::User,
-        TreeEntryKind::Assistant => ChromeIcon::Bot,
-        TreeEntryKind::Tool => ChromeIcon::Wrench,
-        TreeEntryKind::Model => ChromeIcon::Cpu,
-        TreeEntryKind::Thinking => ChromeIcon::Brain,
-        TreeEntryKind::Branch => ChromeIcon::GitBranch,
-        TreeEntryKind::Compaction => ChromeIcon::Layers,
-        TreeEntryKind::Other => ChromeIcon::Circle,
+        TreeEntryKind::User => IslandIcon::User,
+        TreeEntryKind::Assistant => IslandIcon::Bot,
+        TreeEntryKind::Tool => IslandIcon::Wrench,
+        TreeEntryKind::Model => IslandIcon::Cpu,
+        TreeEntryKind::Thinking => IslandIcon::Brain,
+        TreeEntryKind::Branch => IslandIcon::GitBranch,
+        TreeEntryKind::Compaction => IslandIcon::Layers,
+        TreeEntryKind::Other => IslandIcon::Circle,
     }
 }
 
@@ -142,6 +142,6 @@ fn tree_kind_color(kind: TreeEntryKind) -> gpui::Hsla {
         TreeEntryKind::Model | TreeEntryKind::Branch | TreeEntryKind::Compaction => {
             domain_role_hsla(DomainRole::System)
         }
-        TreeEntryKind::Other => ChromeTokens::hsla(t.muted_fg),
+        TreeEntryKind::Other => IslandTokens::hsla(t.muted_fg),
     }
 }

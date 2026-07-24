@@ -3,10 +3,10 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement;
-use piko_chrome::components::selection::selectable_region;
+use island::components::selection::selectable_region;
 
 use crate::theme::{
-    ChromeIcon, DomainRole, IconSize, RoleAccent, TextRole, domain_role_hsla, icon, metrics, text,
+    DomainRole, IconSize, IslandIcon, RoleAccent, TextRole, domain_role_hsla, icon, metrics, text,
     tokens,
 };
 
@@ -62,7 +62,7 @@ pub(super) fn render_tool_chip(
                         .on_click(move |ev, window, cx| on_toggle(ev, window, cx))
                 })
                 .child(icon(
-                    ChromeIcon::Wrench,
+                    IslandIcon::Wrench,
                     IconSize::Meta,
                     domain_role_hsla(DomainRole::Tool),
                 ))
