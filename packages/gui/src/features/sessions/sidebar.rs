@@ -8,7 +8,7 @@ use gpui::*;
 use gpui_component::Sizable;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::PopupMenuItem;
+use piko_chrome::components::menu::{ContextMenuItem, ContextMenuItemTone, ContextMenuSpec};
 
 use crate::projections::{SessionRow, SessionRowKind, SidebarGroup, SidebarViewModel};
 use crate::shell::{
@@ -371,29 +371,27 @@ pub(crate) fn build_session_context_menu(
     let rename = rename.clone();
     let toggle_pin = toggle_pin.clone();
     let delete = delete.clone();
-    Some(Rc::new(move |menu, _window, _cx| {
-        menu.item(
-            PopupMenuItem::new(crate::t!("island.sessions.menu.open")).on_click({
+    Some(Rc::new(move |_request, _window, _cx| {
+        ContextMenuSpec::new([
+            ContextMenuItem::action(crate::t!("island.sessions.menu.open"), {
                 let open = open.clone();
-                move |_, window, cx| open(window, cx)
+                move |window, cx| open(window, cx)
             }),
-        )
-        .item(
-            PopupMenuItem::new(crate::t!("island.sessions.menu.rename")).on_click({
+            ContextMenuItem::action(crate::t!("island.sessions.menu.rename"), {
                 let rename = rename.clone();
-                move |_, window, cx| rename(window, cx)
+                move |window, cx| rename(window, cx)
             }),
-        )
-        .item(PopupMenuItem::new(pin_label.clone()).on_click({
-            let toggle_pin = toggle_pin.clone();
-            move |_, window, cx| toggle_pin(window, cx)
-        }))
-        .item(
-            PopupMenuItem::new(crate::t!("island.sessions.menu.delete")).on_click({
+            ContextMenuItem::action(pin_label.clone(), {
+                let toggle_pin = toggle_pin.clone();
+                move |window, cx| toggle_pin(window, cx)
+            }),
+            ContextMenuItem::separator(),
+            ContextMenuItem::action(crate::t!("island.sessions.menu.delete"), {
                 let delete = delete.clone();
-                move |_, window, cx| delete(window, cx)
-            }),
-        )
+                move |window, cx| delete(window, cx)
+            })
+            .tone(ContextMenuItemTone::Destructive),
+        ])
     }))
 }
 

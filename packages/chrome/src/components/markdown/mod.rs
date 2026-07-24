@@ -6,7 +6,7 @@ mod render;
 
 pub use model::MarkdownDocument;
 pub use parse::parse_markdown;
-pub use render::render_markdown;
+pub use render::{render_markdown, render_selectable_markdown};
 
 #[cfg(test)]
 mod tests;

@@ -2,6 +2,7 @@
 
 mod markdown_cache;
 mod render;
+mod tool;
 mod view;
 mod vm;
 

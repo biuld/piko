@@ -13,6 +13,7 @@ Implementation detail, module paths, and backlog status live in
 | [Archipelago](archipelago.md) | Exclusive full-frame place; body is an island workspace |
 | [Island runtime](island-runtime.md) | Isolated islands, focus ownership, directed host messaging |
 | [List keyboard](list-keyboard.md) | In-island list/tree cursor; pointer ≡ keyboard intents |
+| [Context menu](context-menu.md) | Compact pointer-anchored flat action menu |
 | [Overlay](overlay.md) | Elevated panel chrome, responsive fit, focus open/close |
 | [Native Markdown](markdown.md) | Semantic Markdown parsing and theme-aware GPUI document elements |
 | [Theme](theme.md) | Shared density, type roles, surfaces, icons |

@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use gpui::*;
+use piko_chrome::components::selection::CopySelection;
 
 use crate::app::desktop_app::DesktopApp;
 use crate::app::island_dispatch::schedule_island_msg;
@@ -36,13 +37,13 @@ impl TimelineIsland {
             vm: TimelineViewModel::default(),
             follow: false,
             expanded_tools: HashSet::new(),
-            markdown: TimelineMarkdownCache::default(),
+            markdown: TimelineMarkdownCache::new(cx.entity_id()),
             scroll: ScrollHandle::new(),
         }
     }
 
     pub fn apply_timeline(&mut self, vm: TimelineViewModel, cx: &mut Context<Self>) {
-        self.markdown.sync(&vm.rows);
+        self.markdown.sync(&vm.rows, cx);
         self.vm = vm;
         cx.notify();
     }
@@ -88,6 +89,12 @@ impl TimelineIsland {
     fn claim_focus(&mut self, _: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         self.emit(IslandMsg::ClaimFocus, window, cx);
+    }
+
+    fn copy_selection(&mut self, _: &CopySelection, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.markdown.selected_text(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
     }
 }
 
@@ -163,6 +170,7 @@ impl Render for TimelineIsland {
                     &self.expanded_tools,
                     allow_motion,
                     on_toggle_tool,
+                    cx,
                 ),
             )
             .scroll_handle(self.scroll.clone())
@@ -176,6 +184,7 @@ impl Render for TimelineIsland {
             .key_context("IslandTimeline")
             .size_full()
             .on_mouse_down(MouseButton::Left, cx.listener(Self::claim_focus))
+            .on_action(cx.listener(Self::copy_selection))
             .child(panel)
     }
 }

@@ -16,6 +16,8 @@ real consumer use (no speculative public surface).
 3. List/tree **composite** contracts  
 4. Overlay **focus pipeline** in app host lifecycle  
 5. Application-global **theme** + domain palette split
+6. Native flat **context menu** with chrome-owned paint and focus
+7. Selectable Timeline **document text** and plain-text Copy
 
 ## Epic status
 
@@ -75,6 +77,24 @@ real consumer use (no speculative public surface).
 | F3 | Chrome vs domain role colors | done |
 | F4 | Helpers read theme handle only | done |
 
+### G — Native context menu
+
+| ID | Item | Status |
+|---|---|---|
+| G1 | Flat item model + chrome-owned rendering | done |
+| G2 | Pointer anchor, viewport fit, and tonal elevation | done |
+| G3 | Keyboard navigation, dismissal, and focus restore | done |
+| G4 | Sessions consumer migration | done |
+
+### H — Selectable document text
+
+| ID | Item | Status |
+|---|---|---|
+| H1 | Row-scoped selection group and selectable text element | done |
+| H2 | Markdown visible-text projection and cross-block ranges | done |
+| H3 | Context-menu and Command-C clipboard paths | done |
+| H4 | Timeline prose/code consumer migration | done |
+
 ## Suggested PR slices
 
 | PR | Features | Goal |
@@ -84,11 +104,13 @@ real consumer use (no speculative public surface).
 | PR-3 | D3, D4 | Composite list/tree contracts |
 | PR-4 | E4 | Overlay focus pipeline |
 | PR-5 | F1–F4, B3, A1/A4/E5 | Theme + remaining partials |
+| PR-6 | G1–G4 | Replace the PopupMenu workaround with a native flat menu |
+| PR-7 | H1–H4 | Add row-scoped Timeline text selection and Copy |
 
 ## Snapshot
 
 | Status | IDs |
 |---|---|
-| done | A1 A2 A3 A4 B1 B2 B3 C1 C2 D1 D2 D3 D4 D5 E1 E2 E3 E4 E5 F1 F2 F3 F4 |
+| done | A1 A2 A3 A4 B1 B2 B3 C1 C2 D1 D2 D3 D4 D5 E1 E2 E3 E4 E5 F1 F2 F3 F4 G1 G2 G3 G4 H1 H2 H3 H4 |
 | todo (optional) | C3 E6 |
 | upstream-limited | D6 |

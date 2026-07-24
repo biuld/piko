@@ -32,6 +32,8 @@ island.sessions.menu.unpin:
   en: Unpin
 island.sessions.menu.delete:
   en: Delete…
+island.timeline.menu.copy:
+  en: Copy
 island.sessions.rename.title:
   en: Rename session
 island.sessions.rename.placeholder:

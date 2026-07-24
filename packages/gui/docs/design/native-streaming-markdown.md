@@ -186,6 +186,11 @@ The first release does not make links interactive. Link destination ranges are
 retained in the semantic model so a later safe-navigation feature can wrap
 them in `InteractiveText` without changing parsing.
 
+Selectable document interaction is a separate extension described by
+[Timeline Text Selection](timeline-text-selection.md). It keeps this semantic
+parser and block layout, replacing only leaf text elements with selectable
+wrappers and adding a stateful document view for Timeline consumers.
+
 The first release renders fenced code as plain monospace text and retains an
 optional language label. Syntax highlighting is a later renderer enhancement;
 it must be keyed by language and code hash and must never be required for

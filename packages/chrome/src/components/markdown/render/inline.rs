@@ -19,6 +19,13 @@ pub(crate) struct InlineMarks {
 }
 
 pub(crate) fn styled_inline(content: &[MarkdownInline], base_strong: bool) -> StyledText {
+    styled_inline_with_text(content, base_strong).1
+}
+
+pub(crate) fn styled_inline_with_text(
+    content: &[MarkdownInline],
+    base_strong: bool,
+) -> (SharedString, StyledText) {
     let mut flattened = Flattened::default();
     flattened.push_all(
         content,
@@ -27,7 +34,8 @@ pub(crate) fn styled_inline(content: &[MarkdownInline], base_strong: bool) -> St
             ..InlineMarks::default()
         },
     );
-    flattened.into_styled_text(tokens())
+    let text = SharedString::from(flattened.text.clone());
+    (text, flattened.into_styled_text(tokens()))
 }
 
 #[derive(Default)]

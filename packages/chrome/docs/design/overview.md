@@ -32,11 +32,11 @@ references to any particular product monorepo layout.
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ L4  Presentational kit     src/components/markdown           │
-│     Markdown · src/theme · src/assets                        │
+│ L4  Presentational kit     src/components/{markdown,selection}│
+│     Markdown · selection · src/theme · src/assets            │
 ├─────────────────────────────────────────────────────────────┤
-│ L3  Composite components   src/components/{panel,overlay,list}│
-│     IslandPanel · Overlay · ListKeyboard · tree paint        │
+│ L3  Composite components src/components/{panel,overlay,list,menu}│
+│     IslandPanel · Overlay · ListKeyboard · menu · tree paint │
 ├─────────────────────────────────────────────────────────────┤
 │ L2  Island runtime         src/runtime/island                │
 │     IslandView · FocusRing · FocusTable · FocusMsg · defer   │
@@ -79,6 +79,7 @@ The public API mirrors this tree through `runtime`, `components`, `theme`, and
 | Tree expand keyboard | effect `ToggleExpand` on `ListKeyboard` | **shipped** (pure; app maps to domain) |
 | Selectable nav list paint | `ListRowSpec` / `render_list` / `list_row_chrome` | **shipped** |
 | TreeList composite flags | `tree_row_chrome` | **shipped** |
+| Native flat context menu | pointer anchor, keyboard, focus restore, tonal elevation | **shipped** |
 | Overlay focus session | `OverlayFocusSession` + host begin/end | **shipped** (app wires open/close) |
 | Modal focus trap (Tab cycle) | full containment | **gap** (platform-dependent) |
 
@@ -89,6 +90,7 @@ The public API mirrors this tree through `runtime`, `components`, `theme`, and
 | Semantic tokens / density | `tokens`, `metrics`, `TextRole`, `ThemeSnapshot` | **shipped** (dark + light palettes) |
 | Icons | icon enum + `ChromeAssets` | **shipped** |
 | Native Markdown | opaque document + parse/render functions | **shipped** |
+| Selectable rich text | row-scoped group, glyph hit testing, plain-text Copy | **shipped** |
 | Domain role colors (chat authors, …) | app extension (not chrome core) | **shipped** boundary — apps own domain roles |
 
 ## 3. What this kit deliberately does **not** provide

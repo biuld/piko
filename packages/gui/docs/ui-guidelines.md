@@ -165,8 +165,8 @@ Shared island chrome in `src/shell/island/`:
 - Directory groups expose New Session in the shared accessory rail.
 - Every Session shows its message count, including zero, in that same rail.
 - Rows use shared list-item states; metadata is muted.
-- Context menus use a compact, nearly centered shadow. Avoid large downward
-  offsets that form a dark tail against the island canvas.
+- Context menus use tonal elevation: an `elevated` surface and restrained
+  border without a drop shadow.
 
 ### Timeline
 

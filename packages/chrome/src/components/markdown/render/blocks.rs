@@ -1,18 +1,80 @@
 //! GPUI rendering for Markdown block semantics.
 
+use std::{cell::Cell, rc::Rc};
+
 use gpui::*;
 
+use crate::components::selection::{SelectableText, SelectionState};
 use crate::theme::{ChromeTokens, TextRole, metrics, text, tokens};
 
 use super::super::model::{MarkdownBlock, MarkdownList, MarkdownNode};
-use super::inline::styled_inline;
+use super::inline::{styled_inline, styled_inline_with_text};
 use super::table::render_table;
 
-pub(crate) fn render_blocks(blocks: &[MarkdownNode<MarkdownBlock>]) -> Vec<AnyElement> {
-    blocks.iter().map(render_block).collect()
+#[derive(Clone)]
+pub(crate) struct SelectionRenderContext {
+    prefix: SharedString,
+    selection: Entity<SelectionState>,
+    next: Rc<Cell<usize>>,
 }
 
-fn render_block(node: &MarkdownNode<MarkdownBlock>) -> AnyElement {
+impl SelectionRenderContext {
+    pub(crate) fn new(prefix: SharedString, selection: Entity<SelectionState>) -> Self {
+        Self {
+            prefix,
+            selection,
+            next: Rc::new(Cell::new(0)),
+        }
+    }
+
+    pub(crate) fn leaf(&self, value: SharedString, styled: StyledText) -> AnyElement {
+        let index = self.next.get();
+        self.next.set(index + 1);
+        let id = SharedString::from(format!("{}-selection-{index}", self.prefix));
+        SelectableText::new(id.clone(), id, value, styled, self.selection.clone())
+            .into_any_element()
+    }
+}
+
+pub(crate) fn render_blocks(
+    blocks: &[MarkdownNode<MarkdownBlock>],
+    selection: Option<&SelectionRenderContext>,
+) -> Vec<AnyElement> {
+    blocks
+        .iter()
+        .map(|block| render_block(block, selection))
+        .collect()
+}
+
+fn inline_leaf(
+    content: &[super::super::model::MarkdownInline],
+    strong: bool,
+    selection: Option<&SelectionRenderContext>,
+) -> AnyElement {
+    if let Some(selection) = selection {
+        let (value, styled) = styled_inline_with_text(content, strong);
+        selection.leaf(value, styled)
+    } else {
+        styled_inline(content, strong).into_any_element()
+    }
+}
+
+fn plain_leaf(
+    value: impl Into<SharedString>,
+    selection: Option<&SelectionRenderContext>,
+) -> AnyElement {
+    let value = value.into();
+    if let Some(selection) = selection {
+        selection.leaf(value.clone(), StyledText::new(value))
+    } else {
+        value.into_any_element()
+    }
+}
+
+fn render_block(
+    node: &MarkdownNode<MarkdownBlock>,
+    selection: Option<&SelectionRenderContext>,
+) -> AnyElement {
     let m = metrics();
     let t = tokens();
     match &node.value {
@@ -20,7 +82,7 @@ fn render_block(node: &MarkdownNode<MarkdownBlock>) -> AnyElement {
             .w_full()
             .min_w_0()
             .text_color(t.fg_rgba())
-            .child(styled_inline(content, false))
+            .child(inline_leaf(content, false, selection))
             .into_any_element(),
         MarkdownBlock::Heading { level, content } => {
             let scale = match level {
@@ -36,7 +98,7 @@ fn render_block(node: &MarkdownNode<MarkdownBlock>) -> AnyElement {
                 .line_height(m.body_line_height * scale)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.fg_rgba())
-                .child(styled_inline(content, true))
+                .child(inline_leaf(content, true, selection))
                 .into_any_element()
         }
         MarkdownBlock::BlockQuote(blocks) => div()
@@ -54,12 +116,14 @@ fn render_block(node: &MarkdownNode<MarkdownBlock>) -> AnyElement {
                     .flex()
                     .flex_col()
                     .gap(m.space_sm)
-                    .children(render_blocks(blocks)),
+                    .children(render_blocks(blocks, selection)),
             )
             .into_any_element(),
-        MarkdownBlock::List(list) => render_list(list),
-        MarkdownBlock::CodeBlock { language, code } => render_code(language.as_deref(), code),
-        MarkdownBlock::Table(table) => render_table(table),
+        MarkdownBlock::List(list) => render_list(list, selection),
+        MarkdownBlock::CodeBlock { language, code } => {
+            render_code(language.as_deref(), code, selection)
+        }
+        MarkdownBlock::Table(table) => render_table(table, selection),
         MarkdownBlock::ThematicBreak => div()
             .w_full()
             .h(px(1.))
@@ -69,7 +133,7 @@ fn render_block(node: &MarkdownNode<MarkdownBlock>) -> AnyElement {
     }
 }
 
-fn render_list(list: &MarkdownList) -> AnyElement {
+fn render_list(list: &MarkdownList, selection: Option<&SelectionRenderContext>) -> AnyElement {
     let m = metrics();
     let t = tokens();
     let marker_width = if list.start.is_some() {
@@ -102,7 +166,7 @@ fn render_list(list: &MarkdownList) -> AnyElement {
                         .flex_shrink_0()
                         .text_right()
                         .text_color(t.muted_fg_rgba())
-                        .child(marker),
+                        .child(plain_leaf(marker, selection)),
                 )
                 .child(
                     div()
@@ -111,14 +175,18 @@ fn render_list(list: &MarkdownList) -> AnyElement {
                         .flex()
                         .flex_col()
                         .gap(m.space_sm)
-                        .children(render_blocks(&item.blocks)),
+                        .children(render_blocks(&item.blocks, selection)),
                 ),
         );
     }
     root.into_any_element()
 }
 
-fn render_code(language: Option<&str>, code: &str) -> AnyElement {
+fn render_code(
+    language: Option<&str>,
+    code: &str,
+    selection: Option<&SelectionRenderContext>,
+) -> AnyElement {
     let m = metrics();
     let t = tokens();
     let mut root = div()
@@ -146,7 +214,7 @@ fn render_code(language: Option<&str>, code: &str) -> AnyElement {
             .min_w_0()
             .p(m.space_sm)
             .text_color(t.fg_rgba())
-            .child(code.to_owned()),
+            .child(plain_leaf(code.to_owned(), selection)),
     )
     .into_any_element()
 }

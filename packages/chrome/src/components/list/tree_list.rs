@@ -16,16 +16,15 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::menu::PopupMenu;
 use std::rc::Rc;
 
-use super::ChromeContextMenuExt;
+use crate::components::menu::{ContextMenuExt, ContextMenuRequest, ContextMenuSpec};
 use crate::theme::{metrics, tokens};
 
 pub type TreeClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 pub type TreeContextMenuBuilder =
-    Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+    Rc<dyn Fn(ContextMenuRequest, &mut Window, &mut App) -> ContextMenuSpec>;
 
 /// Mutually exclusive content for the fixed trailing accessory rail.
 pub enum TreeRowAccessory {
@@ -187,7 +186,7 @@ pub fn render_tree_row(
         .on_click(move |ev, window, cx| on_activate(ev, window, cx));
 
     if let Some(build_menu) = spec.context_menu {
-        row.chrome_context_menu(move |menu, window, cx| build_menu(menu, window, cx))
+        row.context_menu(move |request, window, cx| build_menu(request, window, cx))
             .into_any_element()
     } else {
         row.into_any_element()

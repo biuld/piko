@@ -57,5 +57,7 @@ default, and the active light or dark theme determines all colors.
 - Markdown interpretation for user messages, tool output, logs, or system rows.
 - Executing raw HTML, scripts, embedded widgets, Mermaid, or math expressions.
 - Downloading remote images or other content referenced by a response.
-- Transcript selection or rich-text export; those remain separate features.
+- Transcript text selection; it is specified separately by
+  [Timeline Text Selection](timeline-text-selection.md).
+- Rich-text export.
 - A fully incremental CommonMark parser in the first release.

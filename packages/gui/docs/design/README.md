@@ -13,3 +13,4 @@ Subsystem designs for `piko-gui` (boundaries, data flow, config/protocol). See
 | [chrome-presentation.md](chrome-presentation.md) | i18n / chrome marks |
 | [sessions-island-management.md](sessions-island-management.md) | Sessions pin/search/rename/delete |
 | [native-streaming-markdown.md](native-streaming-markdown.md) | Native streaming Markdown parser and GPUI renderer |
+| [timeline-text-selection.md](timeline-text-selection.md) | Row-scoped selection, hit testing, context-menu Copy, and clipboard projection |

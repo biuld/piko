@@ -8,21 +8,21 @@ use std::collections::HashSet;
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::scroll::ScrollableElement;
 
 use crate::theme::{
-    ChromeIcon, ChromeTokens, DomainRole, IconSize, RoleAccent, TextRole, domain_role_hsla,
-    domain_role_rgba, icon, metrics, rotating_gear, row_leading, text, tokens,
+    ChromeIcon, ChromeTokens, DomainRole, TextRole, domain_role_hsla, domain_role_rgba, metrics,
+    rotating_gear, row_leading, text, tokens,
 };
-use piko_chrome::components::markdown::render_markdown;
+use piko_chrome::components::markdown::render_selectable_markdown;
+use piko_chrome::components::selection::{SelectableText, SelectionState, selectable_region};
 
 use super::markdown_cache::TimelineMarkdownCache;
+use super::tool::render_tool_chip;
 use super::vm::{
-    TimelineRow, TimelineRowKind, TimelineViewModel, ToolCardStatus, VisualSender,
-    group_timeline_rows,
+    TimelineRow, TimelineRowKind, TimelineViewModel, VisualSender, group_timeline_rows,
 };
 
-type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// Reading-width conversation document (no scrollbar — IslandPanel owns that).
 pub fn render_timeline_body(
@@ -31,6 +31,7 @@ pub fn render_timeline_body(
     expanded: &HashSet<String>,
     allow_motion: bool,
     on_toggle: impl Fn(String) -> ClickHandler,
+    cx: &mut App,
 ) -> impl IntoElement {
     let m = metrics();
     let groups = group_timeline_rows(&vm.rows);
@@ -39,7 +40,7 @@ pub fn render_timeline_body(
         let sender = group[0].kind.visual_sender();
         let el = match sender {
             VisualSender::Assistant => {
-                render_assistant_group(group, markdown, expanded, allow_motion, &on_toggle)
+                render_assistant_group(group, markdown, expanded, allow_motion, &on_toggle, cx)
             }
             VisualSender::You | VisualSender::System => {
                 let mut items = Vec::with_capacity(group.len());
@@ -52,6 +53,7 @@ pub fn render_timeline_body(
                         allow_motion,
                         on_toggle(row.id.clone()),
                         markdown,
+                        cx,
                     ));
                 }
                 div()
@@ -106,6 +108,7 @@ fn render_assistant_group(
     expanded: &HashSet<String>,
     allow_motion: bool,
     on_toggle: &impl Fn(String) -> ClickHandler,
+    cx: &mut App,
 ) -> AnyElement {
     let m = metrics();
     let mut children: Vec<AnyElement> = Vec::new();
@@ -118,6 +121,8 @@ fn render_assistant_group(
                     row,
                     expanded.contains(&row.id),
                     on_toggle(row.id.clone()),
+                    markdown,
+                    cx,
                 ));
             }
             TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
@@ -128,6 +133,7 @@ fn render_assistant_group(
                     show_header,
                     allow_motion,
                     markdown,
+                    cx,
                 ));
             }
             TimelineRowKind::User | TimelineRowKind::System => {}
@@ -147,8 +153,12 @@ fn render_assistant_row(
     show_header: bool,
     allow_motion: bool,
     markdown: &TimelineMarkdownCache,
+    cx: &mut App,
 ) -> AnyElement {
     let m = metrics();
+    let selection = markdown
+        .selection(&row.id)
+        .expect("timeline selection state");
     let mut root = div()
         .id(SharedString::from(row.id.clone()))
         .flex()
@@ -159,22 +169,39 @@ fn render_assistant_row(
         root = root.child(render_assistant_header(row, allow_motion));
     }
     if let Some(thinking) = row.thinking.as_ref().filter(|s| !s.trim().is_empty()) {
-        root = root.child(render_thinking_block(thinking, row.thinking_live));
+        root = root.child(render_thinking_block(
+            &row.id,
+            thinking,
+            row.thinking_live,
+            &selection,
+        ));
     } else if row.thinking_live {
-        root = root.child(render_thinking_block("", true));
+        root = root.child(render_thinking_block(&row.id, "", true, &selection));
     }
-    if let Some(body) = render_message_body(row, markdown) {
+    if let Some(body) = render_message_body(row, markdown, &selection) {
         root = root.child(body);
     }
-    root.into_any_element()
+    selectable_region(
+        SharedString::from(format!("{}-selection-region", row.id)),
+        selection,
+        crate::t!("island.timeline.menu.copy"),
+        root,
+        markdown.owner(),
+        cx,
+    )
 }
 
-fn render_thinking_block(thinking: &str, live: bool) -> AnyElement {
+fn render_thinking_block(
+    row_id: &str,
+    thinking: &str,
+    live: bool,
+    selection: &Entity<SelectionState>,
+) -> AnyElement {
     let m = metrics();
     let inner = if thinking.trim().is_empty() && live {
         render_thinking_live_mark()
     } else {
-        render_thinking_segment(thinking, live)
+        render_thinking_segment(row_id, thinking, live, selection)
     };
     div()
         .w_full()
@@ -209,7 +236,12 @@ fn render_assistant_header(row: &TimelineRow, allow_motion: bool) -> AnyElement 
         .into_any_element()
 }
 
-fn render_thinking_segment(thinking: &str, live: bool) -> AnyElement {
+fn render_thinking_segment(
+    row_id: &str,
+    thinking: &str,
+    live: bool,
+    selection: &Entity<SelectionState>,
+) -> AnyElement {
     let t = tokens();
     let color = if live {
         domain_role_rgba(DomainRole::Thinking)
@@ -219,7 +251,11 @@ fn render_thinking_segment(thinking: &str, live: bool) -> AnyElement {
     text(TextRole::Body)
         .w_full()
         .text_color(color)
-        .child(thinking.to_string())
+        .child(selectable_plain(
+            format!("{row_id}-thinking"),
+            thinking.to_owned(),
+            selection,
+        ))
         .into_any_element()
 }
 
@@ -237,20 +273,33 @@ fn render_timeline_row(
     _allow_motion: bool,
     _on_toggle: ClickHandler,
     markdown: &TimelineMarkdownCache,
+    cx: &mut App,
 ) -> AnyElement {
     match row.kind {
-        TimelineRowKind::System => render_system_row(row),
-        TimelineRowKind::User => render_user_row(row, show_header, markdown),
+        TimelineRowKind::System => render_system_row(row, markdown, cx),
+        TimelineRowKind::User => render_user_row(row, show_header, markdown, cx),
         TimelineRowKind::Tool | TimelineRowKind::Assistant | TimelineRowKind::Streaming => {
             div().into_any_element()
         }
     }
 }
 
-fn render_system_row(row: &TimelineRow) -> AnyElement {
+fn render_system_row(
+    row: &TimelineRow,
+    markdown: &TimelineMarkdownCache,
+    cx: &mut App,
+) -> AnyElement {
     let m = metrics();
     let t = tokens();
-    div()
+    let selection = markdown
+        .selection(&row.id)
+        .expect("timeline selection state");
+    let value = if row.label.is_empty() {
+        row.body.clone()
+    } else {
+        format!("{} · {}", row.label, row.body)
+    };
+    let root = div()
         .id(SharedString::from(row.id.clone()))
         .w_full()
         .flex()
@@ -259,25 +308,37 @@ fn render_system_row(row: &TimelineRow) -> AnyElement {
         .child(
             text(TextRole::Meta)
                 .text_color(t.muted_fg_rgba())
-                .child(if row.label.is_empty() {
-                    row.body.clone()
-                } else {
-                    format!("{} · {}", row.label, row.body)
-                }),
+                .child(selectable_plain(
+                    format!("{}-system", row.id),
+                    value,
+                    &selection,
+                )),
         )
-        .into_any_element()
+        .into_any_element();
+    selectable_region(
+        SharedString::from(format!("{}-selection-region", row.id)),
+        selection,
+        crate::t!("island.timeline.menu.copy"),
+        root,
+        markdown.owner(),
+        cx,
+    )
 }
 
 fn render_user_row(
     row: &TimelineRow,
     show_header: bool,
     markdown: &TimelineMarkdownCache,
+    cx: &mut App,
 ) -> AnyElement {
     let m = metrics();
     let t = tokens();
     let accent = domain_role_rgba(DomainRole::User);
     let accent_hsla = domain_role_hsla(DomainRole::User);
 
+    let selection = markdown
+        .selection(&row.id)
+        .expect("timeline selection state");
     let mut root = div()
         .id(SharedString::from(row.id.clone()))
         .flex()
@@ -300,7 +361,7 @@ fn render_user_row(
         );
     }
 
-    if let Some(body) = render_message_body(row, markdown) {
+    if let Some(body) = render_message_body(row, markdown, &selection) {
         root = root.child(
             div()
                 .p(m.space_sm)
@@ -310,116 +371,76 @@ fn render_user_row(
         );
     }
 
-    root.into_any_element()
+    selectable_region(
+        SharedString::from(format!("{}-selection-region", row.id)),
+        selection,
+        crate::t!("island.timeline.menu.copy"),
+        root,
+        markdown.owner(),
+        cx,
+    )
 }
 
-fn render_message_body(row: &TimelineRow, markdown: &TimelineMarkdownCache) -> Option<AnyElement> {
+fn render_message_body(
+    row: &TimelineRow,
+    markdown: &TimelineMarkdownCache,
+    selection: &Entity<SelectionState>,
+) -> Option<AnyElement> {
     if row.body.trim().is_empty() {
         return None;
     }
     let t = tokens();
     if row.render_markdown {
-        markdown.document(&row.id).map(render_markdown).or_else(|| {
-            Some(
-                text(TextRole::Body)
-                    .w_full()
-                    .text_color(t.fg_rgba())
-                    .child(row.body.clone())
-                    .into_any_element(),
-            )
-        })
+        markdown
+            .document(&row.id)
+            .map(|document| {
+                render_selectable_markdown(
+                    SharedString::from(format!("{}-body", row.id)),
+                    document,
+                    selection.clone(),
+                )
+            })
+            .or_else(|| {
+                Some(
+                    text(TextRole::Body)
+                        .w_full()
+                        .text_color(t.fg_rgba())
+                        .child(selectable_plain(
+                            format!("{}-body", row.id),
+                            row.body.clone(),
+                            selection,
+                        ))
+                        .into_any_element(),
+                )
+            })
     } else {
         Some(
             text(TextRole::Body)
                 .w_full()
                 .text_color(t.fg_rgba())
-                .child(row.body.clone())
+                .child(selectable_plain(
+                    format!("{}-body", row.id),
+                    row.body.clone(),
+                    selection,
+                ))
                 .into_any_element(),
         )
     }
 }
 
-/// Left-aligned tool chip; click expands detail downward and grows content.
-fn render_tool_chip(row: &TimelineRow, expanded: bool, on_toggle: ClickHandler) -> AnyElement {
-    let m = metrics();
-    let t = tokens();
-    let status = row.tool_status.unwrap_or(ToolCardStatus::Completed);
-    let status_color = match status {
-        ToolCardStatus::Running => t.role_accent(RoleAccent::Info),
-        ToolCardStatus::Completed => t.role_accent(RoleAccent::Success),
-        ToolCardStatus::Failed => t.role_accent(RoleAccent::Danger),
-    };
-    let status_label = match status {
-        ToolCardStatus::Running => crate::t!("island.timeline.tool.running"),
-        ToolCardStatus::Completed => crate::t!("island.timeline.tool.done"),
-        ToolCardStatus::Failed => crate::t!("island.timeline.tool.failed"),
-    };
-    let can_expand = row.detail.is_some();
-
-    div()
-        .id(SharedString::from(row.id.clone()))
-        .flex()
-        .flex_col()
-        .gap(m.space_xs)
-        .items_start()
-        .child(
-            div()
-                .id(SharedString::from(format!("tool-chip-{}", row.id)))
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(m.space_sm)
-                .pr(m.space_sm)
-                .py(m.space_xs)
-                .rounded_md()
-                .when(can_expand, |d| {
-                    d.cursor_pointer()
-                        .hover(|s| s.bg(t.elevated_rgba()))
-                        .on_click(move |ev, window, cx| on_toggle(ev, window, cx))
-                })
-                .child(icon(
-                    ChromeIcon::Wrench,
-                    IconSize::Meta,
-                    domain_role_hsla(DomainRole::Tool),
-                ))
-                .child(
-                    text(TextRole::Meta)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.muted_fg_rgba())
-                        .child(row.label.clone()),
-                )
-                .child(
-                    text(TextRole::Meta)
-                        .text_color(status_color)
-                        .child(format!("· {status_label}")),
-                )
-                .when(!row.body.is_empty() && !expanded, |d| {
-                    d.child(
-                        text(TextRole::Meta)
-                            .text_color(t.muted_fg_rgba())
-                            .child(format!("— {}", row.body)),
-                    )
-                }),
-        )
-        .when(expanded, |d| {
-            if let Some(detail) = &row.detail {
-                d.child(
-                    div()
-                        .w_full()
-                        .p(m.space_sm)
-                        .rounded_md()
-                        .bg(t.elevated_rgba())
-                        .max_h(px(160.))
-                        .overflow_y_scrollbar()
-                        .child(
-                            text(TextRole::BodyMono)
-                                .text_color(t.muted_fg_rgba())
-                                .child(detail.clone()),
-                        ),
-                )
-            } else {
-                d
-            }
-        })
-        .into_any_element()
+pub(super) fn selectable_plain(
+    id: impl Into<SharedString>,
+    value: impl Into<SharedString>,
+    selection: &Entity<SelectionState>,
+) -> AnyElement {
+    let id = id.into();
+    let value = value.into();
+    SelectableText::new(
+        id.clone(),
+        id,
+        value.clone(),
+        StyledText::new(value),
+        selection.clone(),
+    )
+    .into_any_element()
 }

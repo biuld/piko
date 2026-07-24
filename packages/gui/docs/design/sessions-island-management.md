@@ -159,17 +159,19 @@ User right-clicks session row
 Primary click behavior stays unchanged. Context menu must call
 `cx.stop_propagation()` so activate handlers do not fire.
 
-### 4.1 Context menu (new GUI pattern)
+### 4.1 Context menu
 
-There is no shared context-menu helper yet. Introduce a minimal feature-local
-builder (or `shell/widgets/context_menu.rs` if a second consumer appears within
-the same PR). Requirements:
+Use the chrome [Context Menu feature](../../../chrome/docs/features/context-menu.md)
+and its [native flat-menu design](../../../chrome/docs/design/context-menu.md).
+The Sessions feature supplies localized labels and product callbacks; chrome
+owns anchoring, focus, keyboard behavior, dismissal, and paint. Requirements:
 
 - Trigger: `MouseButton::Right` and macOS Control+left (standard GPUI
   secondary-click if available; otherwise document right-click only for v1).
 - Dismiss on outside click, Escape (only when no higher overlay is open), and
   after choosing an item.
 - Menu width intrinsic; labels from `crate::t!(…)`.
+- Delete uses the destructive item tone.
 
 Keep directory rows free of this menu.
 

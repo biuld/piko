@@ -7,3 +7,4 @@ only (no code paths or internal structs). See `packages/gui/AGENTS.md`.
 |---|---|
 | Workbench | [workbench.md](workbench.md) |
 | Native Streaming Markdown | [native-streaming-markdown.md](native-streaming-markdown.md) |
+| Timeline Text Selection | [timeline-text-selection.md](timeline-text-selection.md) |

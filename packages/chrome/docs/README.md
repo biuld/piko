@@ -28,6 +28,7 @@ into any of these docs.
 | [archipelago](features/archipelago.md) | Exclusive full-frame places (body = islands) |
 | [island-runtime](features/island-runtime.md) | Island isolation, focus, directed messaging |
 | [list-keyboard](features/list-keyboard.md) | In-island list/tree keyboard |
+| [context-menu](features/context-menu.md) | Compact pointer-anchored flat action menu |
 | [overlay](features/overlay.md) | Modal/transient panel chrome |
 | [native-markdown](features/markdown.md) | Semantic Markdown to GPUI documents |
 | [theme](features/theme.md) | Density, type, color, icons |
@@ -42,6 +43,7 @@ into any of these docs.
 | [island-interaction](design/island-interaction.md) | Message flow, focus Activate/Claimed |
 | [island-focus](design/island-focus.md) | FocusTable safety (`try_focus`, assert) |
 | [list-keyboard](design/list-keyboard.md) | `ListKeyboard` controller design |
+| [context-menu](design/context-menu.md) | Native flat menu state, geometry, focus, and paint |
 | [overlay-composite](design/overlay-composite.md) | Envelope + focus session design |
 | [markdown-renderer](design/markdown-renderer.md) | Parser adapter, semantic model, GPUI layout |
 | [theme-system](design/theme-system.md) | Context theme / palette split design |

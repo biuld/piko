@@ -10,6 +10,7 @@
 | [island-interaction.md](island-interaction.md) | Messaging, Activate/Claimed, isolation |
 | [island-focus.md](island-focus.md) | FocusTable `try_focus` / assert design |
 | [list-keyboard.md](list-keyboard.md) | `ListKeyboard` controller design |
+| [context-menu.md](context-menu.md) | Native flat context-menu state, geometry, focus, and paint |
 | [overlay-composite.md](overlay-composite.md) | Envelope + focus session design |
 | [markdown-renderer.md](markdown-renderer.md) | Semantic parser adapter and GPUI block renderer |
 | [theme-system.md](theme-system.md) | Context theme / palette split design |

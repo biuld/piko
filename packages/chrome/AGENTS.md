@@ -27,7 +27,8 @@ Entry: [`docs/README.md`](docs/README.md).
 
 ## Allowed dependencies
 
-- `gpui`, `gpui-component`, `pulldown-cmark`, `anyhow` (for `ChromeAssets`)
+- `gpui`, `gpui-component`, `pulldown-cmark`, `unicode-segmentation`, `anyhow`
+  (the latter is for `ChromeAssets`)
 
 **Forbidden** (do not add):
 
@@ -48,6 +49,8 @@ src/
 │   ├── panel/         # IslandPanel, body states, viewport
 │   ├── overlay/       # envelope, surface, focus session
 │   ├── list/          # ListKeyboard, tree_list, list_nav
+│   ├── menu/          # native flat context menu and window registry
+│   ├── selection/     # row-scoped rich-text selection and copy
 │   └── markdown/      # opaque document, parse adapter, GPUI renderer
 │       ├── parse/     # pulldown-cmark adapter and parser frames
 │       └── render/    # block, inline, and table layout
@@ -61,14 +64,14 @@ The public API mirrors ownership rather than flattening it:
 | Namespace | Responsibility |
 |---|---|
 | `runtime::{archipelago,island,layout}` | State, routing, focus, and layout contracts |
-| `components::{panel,overlay,list,markdown}` | GPUI elements and interaction components |
+| `components::{panel,overlay,list,menu,selection,markdown}` | GPUI elements and interaction components |
 | `theme` | Tokens, metrics, typography, and icon helpers |
 | `assets` | Embedded asset source |
 
 Do not add crate-root facade modules or flat re-exports. A call site should make
-the runtime-versus-presentation dependency visible. Markdown exposes only
-`MarkdownDocument`, `parse_markdown`, and `render_markdown`; its semantic tree
-is private implementation detail.
+the runtime-versus-presentation dependency visible. Markdown exposes opaque
+document parsing plus selectable and nonselectable rendering; its semantic
+tree is private implementation detail.
 
 ## Infra layers
 

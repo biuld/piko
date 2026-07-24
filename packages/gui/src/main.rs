@@ -57,11 +57,17 @@ fn main() {
 
     app.run(move |cx| {
         gpui_component::init(cx);
+        piko_chrome::components::init(cx);
         i18n::init();
         // Default dark; hostd [gui].chrome-palette may re-apply after hydrate.
         apply_chrome_theme(cx, ChromePalette::Dark);
 
         cx.bind_keys([
+            KeyBinding::new(
+                "cmd-c",
+                piko_chrome::components::selection::CopySelection,
+                Some("IslandTimeline"),
+            ),
             KeyBinding::new("cmd-n", NewSession, Some("DesktopApp")),
             KeyBinding::new("cmd-.", CancelTurn, Some("DesktopApp")),
             KeyBinding::new("cmd-l", FocusComposer, Some("DesktopApp")),
