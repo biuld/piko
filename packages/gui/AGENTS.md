@@ -154,9 +154,7 @@ Normative architecture entry points:
 
 - [design/overview.md](docs/design/overview.md) — overall GUI design
 - [design/code-organization.md](docs/design/code-organization.md) — module boundaries
-- [chrome docs](../chrome/docs/README.md) — features / design / roadmap
-- [chrome archipelago feature](../chrome/docs/features/archipelago.md)
-- [chrome island design](../chrome/docs/design/island-interaction.md)
+- Island infrastructure docs live in the sibling `island-rs` repo (`docs/features/` · `docs/design/` · `docs/roadmap/`)
 - [design/archipelago.md](docs/design/archipelago.md) — piko product Workbench ↔ Settings
 - [design/overlay-stack.md](docs/design/overlay-stack.md) — overlay priority / Escape
 - [features/workbench.md](docs/features/workbench.md) — Workbench product contract
@@ -220,3 +218,35 @@ cargo clippy -p piko-gui --all-targets -- -D warnings
 
 Use workspace clippy/tests when touching `protocol`, `client-core`, or hostd
 settings schemas.
+
+## Feature discovery
+
+Reduce a request to one concrete user-visible feature before designing or
+implementing. Ask only for missing decisions that materially affect the product
+contract:
+
+- what the user should see
+- what action opens, closes, or changes the feature
+- where it lives (Workbench island, Settings section, Overlay layer, TitleBar/StatusBar)
+- which keyboard shortcuts or commands are expected
+- whether `[gui]` prefs or host runtime settings are required
+- what is explicitly out of scope
+
+Write the result as a Feature Doc (draft is fine) before starting design.
+
+## Design gate
+
+Write a design doc before implementation when the feature affects any of:
+more than one crate; protocol DTOs or hostd-to-GUI commands/events; `[gui]` or
+host runtime settings schemas; Archipelago switching (Workbench ↔ Settings);
+overlay stack / Escape / focus restore; island focus or `IslandMsg` shapes; a
+new shared shell primitive; multiple features or a new feature module boundary.
+
+Skip the design doc for small single-feature rendering changes that do not
+alter contracts; state the reason briefly before coding.
+
+## Before finishing
+
+Summarize: the selected feature; Feature Doc / Feature Brief status; design doc
+path if created; implementation files changed; feature doc path if created;
+validation commands run and their results.

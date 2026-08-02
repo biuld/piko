@@ -2,6 +2,9 @@
 
 > Status: normative source of truth; implementation migration is tracked in
 > Section 15
+> Port note: prompt-assembly behavior will be re-specified by the codex-derived PRD
+> [docs/features/prompt-assembly.md](features/prompt-assembly.md); this document is
+> marked superseded when that PRD lands.
 > Design version: 2
 > Runtime model: [Multi-Agent Runtime Model](multi-agent-execution-model.md)
 > Turn boundary: [Turn–Agent Run Boundary Design](turn-agent-run-boundary-design.md)

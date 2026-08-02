@@ -13,3 +13,11 @@ documentation lives at the repo root:
 | [Tool Sets Design](../../../docs/tool-sets-design.md) | ToolSet grouping, ownership, agent defaults, and LLM catalog rules |
 
 Crate overview: [../README.md](../README.md).
+
+## Feature work
+
+Runtime features owned by orchd are specified at the repo root:
+
+- `docs/features/` — feature PRDs (behavior contracts)
+- `docs/design/` — implementation designs
+- `docs/decisions/` — architecture decision records

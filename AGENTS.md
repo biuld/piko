@@ -38,13 +38,32 @@ sandbox (leaf)
 - All docs and code comments must be in English
 - File size: prefer ~300–400 lines per `.rs` file; hard ceiling **500**. Split into a directory with `mod.rs` re-exports when over; do not over-split cohesive units under the ceiling
 
+## Documentation workflow
+
+All documentation is written in English and follows a PRD-first lifecycle:
+
+1. Write the feature PRD (behavior contract, technology-agnostic) in `docs/features/`.
+2. Write the implementation design in `docs/design/`.
+3. Implement, recording technical decisions as ADRs in `docs/decisions/`.
+4. Verify and update the PRD so it reflects implemented behavior.
+
+Cross-package and system-level features live under the root `docs/` tree.
+Package-local UI features use the same PRD-first lifecycle in their package
+docs (`packages/tui/docs/`, `packages/gui/docs/`). Feature PRDs derived from
+another codebase (e.g. codex-rs core) carry a `Source` header for differential
+validation.
+
+codex-rs is evidence, not specification: its behavior is distilled into PRDs; its architecture and coupling are not translated. A behavior enters piko only when the Feature PRD intentionally keeps it.
+
+Legacy documents are kept, not deleted. Every legacy document carries a `Status` header. When a codex-derived PRD lands, conflicting behavior documents are marked `Status: superseded by docs/features/<feature>`; architecture documents remain normative until superseded by a design or ADR.
+
 ## Where to change
 
 1. TUI ↔ hostd wire types → `packages/protocol`
 2. Sessions, settings, auth, models, prompts, skills, compaction, queue, approvals, command routing → `hostd`
 3. Agent loops, tool execution, multi-agent supervision → `orchd`
-4. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md` and `.agents/skills/tui-feature-workflow/`)
-5. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md` and `.agents/skills/gui-feature-workflow/`)
+4. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md`)
+5. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md`)
 5b. Reusable Islands infrastructure (panel, theme, generic layout, overlay surface) → sibling `island-rs` repository (`island` crate); product ids/messages stay in `gui`
 5c. Island infrastructure docs → sibling `island-rs/docs/` (`features/` · `design/` · `roadmap/`)
 6. Provider abstraction, OAuth, token tracking → `llmd`
@@ -74,6 +93,10 @@ JSONL. No migration from older layouts.
 ## Docs
 
 Normative runtime docs live under `docs/`:
+
+- `docs/features/` — feature PRDs (behavior contracts)
+- `docs/design/` — implementation designs
+- `docs/decisions/` — architecture decision records
 
 - `docs/single-agent-runtime-model.md`
 - `docs/single-agent-actor-runtime-design.md`

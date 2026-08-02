@@ -1,6 +1,9 @@
 # Tool Sets Design
 
 > Status: implemented
+> Port note: tool-set behavior will be re-specified by the codex-derived PRD
+> [docs/features/tool-system.md](features/tool-system.md); this document is marked
+> superseded when that PRD lands.
 > Related: [Multi-Agent Runtime Model](multi-agent-execution-model.md) §7 LLM Tool Boundary
 > Protocol types: `piko_protocol::tools::{ToolDef, ToolSet, ToolSetToolRef}`
 > Pending amendment: the AgentSpec/AgentRunPrompt recovery rules in §6 and

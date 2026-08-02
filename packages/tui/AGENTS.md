@@ -130,8 +130,8 @@ blocks, no file paths, no internal data structures.
 A feature doc is considered **reviewed** once it accurately reflects the
 implemented behavior. Before that, it may live as a draft.
 
-**When to write a feature doc:** after the feature is implemented and
-behavior is stable. Write it to capture the contract, not to plan the build.
+**When to write a feature doc:** before implementing the feature, as a PRD.
+Update it whenever implemented behavior changes.
 
 **Feature doc template:**
 
@@ -167,10 +167,38 @@ crates need to agree on a contract.
 ### Flow
 
 ```
-1. Design doc (if subsystem-level) → agree on contracts
-2. Implement → prototype + iterate
-3. Feature doc → capture the stable user-facing behavior as spec
+1. Feature doc (PRD) → agree on behavior
+2. Design doc (if subsystem-level) → agree on contracts
+3. Implement → prototype + iterate
+4. Verify/update the feature doc → reviewed
 ```
 
 Feature docs are the source of truth for what the TUI does. Design docs are
 the rationale for how it does it.
+
+## Feature discovery
+
+Reduce a request to one concrete user-visible feature before designing or
+implementing. Ask only for missing decisions that materially affect the product
+contract:
+
+- what the user should see
+- what action opens, closes, or changes the feature
+- where it lives in the slot layout
+- which keyboard shortcuts or commands are expected
+- whether settings or persisted state are required
+- what is explicitly out of scope
+
+Write the result as a Feature Doc (draft is fine) before starting design.
+
+## Design gate
+
+Skip the design doc for small single-panel rendering changes that do not alter
+contracts; state the reason briefly before coding. Otherwise follow the
+PRD-first workflow in the root AGENTS.md.
+
+## Before finishing
+
+Summarize: the selected feature; Feature Doc / Feature Brief status; design doc
+path if created; implementation files changed; validation commands run and
+their results.
