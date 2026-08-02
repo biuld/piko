@@ -43,8 +43,8 @@ baseline). Remaining slices:
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-06 tool-system | parallel batch dispatch + sequential exclusivity | in progress (D-01) |
-| F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | planned |
+| F-06 tool-system | parallel batch dispatch + sequential exclusivity | implemented (D-06, V-06) |
+| F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | implemented (D-01, V-01) |
 | F-02 model-gateway | retry/backoff budget; streaming fallback | planned |
 | F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | planned |
 | F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | planned |

@@ -53,10 +53,12 @@ is exceeded.
   loop with tool dispatch, input queueing/admission, turn abort handling,
   typed background tasks with cancellation, durable turn state transitions,
   attachment/detachment of sessions.
-- piko status: **mostly landed** — `F-01 turn-runtime` (ExecutionActor,
-  Turn–Agent Run boundary, agent-run atomicity, follow-up queues). Gaps:
-  input admission rules, typed task taxonomy (review/user-shell tasks),
-  turn-abort reconstruction details.
+- piko status: **implemented** — `F-01 turn-runtime` (PRD in
+  `docs/features/F-01-turn-runtime.md`, design `docs/design/D-01-turn-runtime.md`,
+  evidence `docs/verification/V-01-turn-runtime-slices.md`): fixed-cap
+  follow-up queue with overload, durable model-visible turn-abort markers
+  (live cancel + crash recovery), and typed background task infrastructure
+  with session-scoped cancellation.
 
 ### B. Model Gateway & Provider Abstraction
 
@@ -243,7 +245,7 @@ is exceeded.
 
 | Block | F-ID | piko status | First concrete slice |
 |---|---|---|---|
-| A Turn & Agent Runtime | F-01 | mostly landed | follow-up/interrupt semantics, input admission |
+| A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
 | B Model Gateway | F-02 | partial | retry/backoff budget, streaming fallback |
 | C Prompt Assembly | F-03 | partial | fragment catalog breadth, world state |
 | D Context & Compaction | F-04, F-05 | partial | truncation + auto-compact trigger |

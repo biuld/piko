@@ -3,6 +3,7 @@ pub mod events;
 pub mod execution;
 pub(crate) mod reliability;
 pub mod step;
+pub mod tasks;
 pub mod tools;
 pub mod utils;
 

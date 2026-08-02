@@ -126,6 +126,7 @@ impl AgentActor {
             return self
                 .finish_cancelled_started_run(
                     execution_id,
+                    request.source_turn_id.clone(),
                     committed_input,
                     input_message_id,
                     receipt,
@@ -201,6 +202,7 @@ impl AgentActor {
     async fn finish_cancelled_started_run(
         &mut self,
         execution_id: String,
+        source_turn_id: Option<String>,
         committed_input: piko_protocol::Message,
         input_message_id: String,
         receipt: AgentInputReceipt,
@@ -210,12 +212,42 @@ impl AgentActor {
         };
         let mut transcript = self.transcript.clone();
         transcript.push(committed_input);
+        // An interrupted startup commits the same durable, model-visible
+        // abort marker as a live cancel, so recovery reconstructs the run
+        // with the marker in place (F-01 / D-01).
+        let marker = piko_protocol::turn_abort_marker(&execution_id);
+        let marker_id = piko_protocol::turn_abort_marker_message_id(&execution_id);
+        let marker_commit = piko_protocol::execution::MessageCommit {
+            session_id: self.identity.session_id.clone(),
+            source_turn_id,
+            execution_id: execution_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            message_id: marker_id.clone(),
+            parent_message_id: Some(input_message_id.clone()),
+            message: marker.clone(),
+            committed_at: chrono::Utc::now().timestamp_millis(),
+        };
+        let mut head_message_id = input_message_id.clone();
+        let outcome = match self
+            .execution
+            .commit_execution_message(&self.identity.session_id, marker_commit)
+            .await
+        {
+            Ok(()) => {
+                transcript.push(marker);
+                head_message_id = marker_id;
+                piko_protocol::ExecutionOutcome::Cancelled {
+                    reason: Some("cancelled during startup".into()),
+                }
+            }
+            Err(error) => piko_protocol::ExecutionOutcome::failed(format!(
+                "abort marker commit failed: {error}"
+            )),
+        };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
-            outcome: piko_protocol::ExecutionOutcome::Cancelled {
-                reason: Some("cancelled during startup".into()),
-            },
+            outcome,
             transcript,
-            head_message_id: Some(input_message_id),
+            head_message_id: Some(head_message_id),
         });
         Box::pin(self.handle_execution_finished(execution_id, terminal)).await;
         Ok(receipt)

@@ -97,11 +97,30 @@ impl ExecutionActor {
             },
             Err(error) => ExecutionOutcome::failed(error.to_string()),
         };
+        // Interrupted turns append a durable, model-visible abort marker
+        // before the terminal, so the next run can see that work may have
+        // partially executed (F-01 / D-01). A marker commit failure fails
+        // closed rather than silently dropping the abort.
+        let outcome = match outcome {
+            ExecutionOutcome::Cancelled { .. } => match self.commit_abort_marker().await {
+                Ok(()) => outcome,
+                Err(error) => {
+                    ExecutionOutcome::failed(format!("abort marker commit failed: {error}"))
+                }
+            },
+            other => other,
+        };
         ExecutionRunResult {
             outcome,
             transcript: self.state.transcript.to_vec(),
             head_message_id: self.state.head_message_id.clone(),
         }
+    }
+
+    async fn commit_abort_marker(&mut self) -> Result<(), AgentApiError> {
+        let message = piko_protocol::turn_abort_marker(&self.identity.execution_id);
+        let message_id = piko_protocol::turn_abort_marker_message_id(&self.identity.execution_id);
+        self.commit_message(message, message_id).await
     }
 
     async fn run_loop(&mut self) -> Result<ExecutionOutcome, AgentApiError> {
@@ -335,7 +354,7 @@ impl ExecutionActor {
         parent_message_id: &str,
     ) -> Result<(), AgentApiError> {
         // Batch dispatch groups consecutive calls by their effective execution
-        // mode (F-06 / D-01): parallel calls in a group overlap under a shared
+        // mode (F-06 / D-06): parallel calls in a group overlap under a shared
         // cap, sequential calls run exclusively, and results commit in
         // tool_call_index order so the append-only transcript stays
         // deterministic per run.

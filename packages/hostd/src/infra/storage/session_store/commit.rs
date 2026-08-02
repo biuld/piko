@@ -11,6 +11,9 @@ use super::io::storage_commit_error;
 use super::types::*;
 
 impl SessionStore {
+    /// Open-time sweep: every Agent execution that never reached a terminal
+    /// is marked cancelled with an interrupted report, so no phantom
+    /// "running" execution survives a crash.
     pub fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
         self.with_io(|| self.interrupt_incomplete_agent_executions_unlocked())
     }
@@ -24,6 +27,37 @@ impl SessionStore {
                 piko_protocol::ExecutionStatus::Accepted | piko_protocol::ExecutionStatus::Running
             ) {
                 continue;
+            }
+            // Interrupted runs append the durable model-visible abort marker
+            // (stable id, F-01 / D-01) so the next run sees that work may
+            // have partially executed.
+            let marker_id = piko_protocol::turn_abort_marker_message_id(&execution.execution_id);
+            let recovered = self.load_agent(&manifest.session_id, &execution.agent_instance_id)?;
+            if !recovered
+                .transcript
+                .iter()
+                .any(|message| message.id == marker_id)
+            {
+                let entry = CommittedMessage {
+                    id: marker_id.clone(),
+                    parent_id: recovered.head_message_id.clone(),
+                    agent_instance_id: execution.agent_instance_id.clone(),
+                    agent_spec_id: recovered.agent_spec_id,
+                    execution_id: Some(execution.execution_id.clone()),
+                    source_turn_id: execution.source_turn_id.clone(),
+                    transcript_seq: recovered.last_transcript_seq + 1,
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                    message: piko_protocol::turn_abort_marker(&execution.execution_id),
+                };
+                self.append_record(
+                    &execution.agent_instance_id,
+                    &AgentShardRecord::Message(entry),
+                )?;
+                self.advance_root_leaf_under_lock(
+                    &execution.agent_instance_id,
+                    &marker_id,
+                    chrono::Utc::now().timestamp_millis(),
+                )?;
             }
             let report = AgentRunReport {
                 agent_instance_id: execution.agent_instance_id.clone(),

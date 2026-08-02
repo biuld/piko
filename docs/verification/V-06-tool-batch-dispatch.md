@@ -1,4 +1,4 @@
-# V-01: F-06 tool batch dispatch acceptance evidence
+# V-06: F-06 tool batch dispatch acceptance evidence
 
 > Date: 2026-08-02
 > Fixture: `piko-orchd` unit/integration tests in

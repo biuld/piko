@@ -10,3 +10,4 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | ID | Decision | Status |
 |---|---|---|
 | [ADR-001](ADR-001-codex-evidence-prd-first.md) | codex-rs is behavior evidence; PRD-first documentation workflow | accepted |
+| [ADR-002](ADR-002-codex-modeling-reference.md) | codex-rs is a modeling reference, not a parity target; conflicts resolve by discussion + industry best practice | accepted |

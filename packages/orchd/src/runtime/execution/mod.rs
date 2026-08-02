@@ -108,6 +108,24 @@ impl AgentExecutionRuntime {
             .cloned()
             .ok_or(AgentApiError::SessionNotAttached)
     }
+
+    /// Commit an execution message for a session that is already attached.
+    /// Used by the agent actor to make the startup-cancel abort marker
+    /// durable before the run terminal (F-01 / D-01).
+    pub(crate) async fn commit_execution_message(
+        &self,
+        session_id: &str,
+        commit: piko_protocol::execution::MessageCommit,
+    ) -> Result<(), AgentApiError> {
+        let scope = self.scope(session_id).await?;
+        scope
+            .ports()
+            .commit
+            .commit_message(commit)
+            .await
+            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        Ok(())
+    }
 }
 
 impl AgentExecutionRuntime {

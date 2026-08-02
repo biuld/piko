@@ -6,6 +6,8 @@ decisions. Write a design doc after the feature PRD is agreed, before
 implementing.
 
 Create new documents from [`_TEMPLATE.md`](_TEMPLATE.md). Use stable
-identifiers such as `D-01`. Feature-local choices belong in the design;
+identifiers. A design's number matches the feature it implements: the F-06
+tool-system design is `D-06-tool-dispatch.md`, and the F-01 turn-runtime
+design is `D-01-turn-runtime.md`. Feature-local choices belong in the design;
 decisions that affect multiple features or package boundaries belong in
 [`../decisions/`](../decisions/).

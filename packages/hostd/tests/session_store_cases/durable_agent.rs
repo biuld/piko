@@ -21,6 +21,24 @@ async fn recovery_marks_accepted_execution_interrupted() {
         )
         .await
         .unwrap();
+    store
+        .commit_message(
+            piko_protocol::execution::MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: None,
+                execution_id: "exec-interrupted".into(),
+                agent_instance_id: root.agent_instance_id.clone(),
+                message_id: "input-interrupted".into(),
+                parent_message_id: None,
+                message: piko_protocol::Message::User {
+                    content: piko_protocol::MessageContent::String("interrupted input".into()),
+                    timestamp: Some(1),
+                },
+                committed_at: 1,
+            },
+            "main",
+        )
+        .unwrap();
 
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 0);
@@ -30,6 +48,28 @@ async fn recovery_marks_accepted_execution_interrupted() {
     assert!(matches!(
         execution.report.as_ref().map(|report| &report.outcome),
         Some(piko_protocol::ExecutionOutcome::Cancelled { .. })
+    ));
+
+    // Recovery also appends the durable, model-visible abort marker after the
+    // last committed message, with a stable id so re-recovery is idempotent.
+    let recovered = store
+        .load_agent("session-1", &root.agent_instance_id)
+        .unwrap();
+    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-interrupted");
+    assert_eq!(recovered.transcript.len(), 2);
+    assert_eq!(recovered.transcript[0].id, "input-interrupted");
+    assert_eq!(recovered.transcript[1].id, marker_id);
+    assert_eq!(
+        recovered.transcript[1].parent_id.as_deref(),
+        Some("input-interrupted")
+    );
+    assert_eq!(recovered.head_message_id.as_deref(), Some(marker_id.as_str()));
+    assert!(matches!(
+        &recovered.transcript[1].message,
+        piko_protocol::Message::Context {
+            trust: piko_protocol::ContentTrust::Trusted,
+            ..
+        }
     ));
 }
 

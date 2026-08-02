@@ -7,9 +7,10 @@ piko is a coding agent harness with a decoupled **hostd + orchd** architecture. 
 Guiding principle: keep the host+orchestrator split clean, and keep `hostd`
 authoritative for user-visible state.
 
-Current direction: reimplement agent-runtime capabilities distilled from the
-codex-rs core, PRD-first (see Documentation workflow). codex-rs is evidence,
-not specification.
+Goal: a general-purpose agent, not a codex replica. PRD-first (see
+Documentation workflow). codex-rs is a modeling reference: reference its core
+design and build piko's own modeling; details do not need 1:1 parity, and
+codex-rs architecture or coupling is never translated.
 
 ## Architecture
 
@@ -58,7 +59,16 @@ docs (`packages/tui/docs/`, `packages/gui/docs/`). Feature PRDs derived from
 another codebase (e.g. codex-rs core) carry a `Source` header for differential
 validation.
 
-codex-rs is evidence, not specification: its behavior is distilled into PRDs; its architecture and coupling are not translated. A behavior enters piko only when the Feature PRD intentionally keeps it.
+codex-rs is a modeling reference, not a specification (ADR-002): distill its
+core design into piko's modeling; do not chase 1:1 detail parity, and do not
+translate its architecture or coupling. A behavior enters piko only when the
+Feature PRD intentionally keeps it. At implementation time, design from
+piko's architecture first: `hostd` stays authoritative for durable
+user-visible state, `orchd` owns the agent runtime, `protocol` carries shared
+wire types, and each feature persists results through channels it already
+owns. When codex-rs modeling conflicts with piko, or a design point is
+unclear, stop and discuss it with the user, defaulting to industry best
+practice — keep the design that is best for piko.
 
 Legacy pre-PRD-first design documents are removed as PRDs and designs land;
 behavior is re-specified by Feature PRDs (`docs/features/F-NN`) and

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use tokio::sync::Mutex;
 
 use super::mailbox::{AgentCommand, AgentHandle};
+use crate::runtime::tasks::TaskRegistry;
 use piko_protocol::{CreateAgentReceipt, CreateAgentRequest};
 
 pub struct SessionAgentScope {
@@ -15,6 +17,7 @@ pub struct SessionAgentScope {
     create_requests: Mutex<HashMap<String, (CreateAgentRequest, CreateAgentReceipt)>>,
     create_lock: Mutex<()>,
     generation: AtomicU64,
+    tasks: Arc<TaskRegistry>,
 }
 
 impl SessionAgentScope {
@@ -24,6 +27,7 @@ impl SessionAgentScope {
         commit: std::sync::Arc<dyn AgentCommitPort>,
     ) -> Self {
         Self {
+            tasks: TaskRegistry::new(),
             session_id,
             root_agent_instance_id,
             commit,
@@ -44,6 +48,11 @@ impl SessionAgentScope {
 
     pub fn commit(&self) -> &std::sync::Arc<dyn AgentCommitPort> {
         &self.commit
+    }
+
+    /// Session-scoped typed background tasks (F-01 / D-01).
+    pub fn tasks(&self) -> &Arc<TaskRegistry> {
+        &self.tasks
     }
 
     pub fn next_generation(&self) -> u64 {
@@ -172,6 +181,7 @@ impl SessionAgentScope {
     }
 
     pub async fn shutdown(&self) {
+        self.tasks.cancel_all().await;
         let handles = self
             .agents
             .lock()

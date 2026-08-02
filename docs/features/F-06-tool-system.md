@@ -141,7 +141,7 @@ for differential replay against codex-rs.
 
 ## Verification
 
-- [V-01: F-06 tool batch dispatch acceptance evidence](../verification/V-01-tool-batch-dispatch.md)
+- [V-06: F-06 tool batch dispatch acceptance evidence](../verification/V-06-tool-batch-dispatch.md)
 
 ## Reference evidence
 

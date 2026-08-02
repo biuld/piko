@@ -41,6 +41,18 @@ apply.
 |---|---|---|
 | | | |
 
+## Fusion decisions (codex-rs)
+
+Required for PRDs derived from another codebase (ADR-002). For each referenced
+behavior, record whether it is **kept**, **kept (adapted)**, or **rejected**,
+the piko-native landing point, and why. Reject codex-shaped mechanisms that
+have no piko consumer; conflicts resolve by discussion with the user and
+industry best practice.
+
+| codex-rs behavior | Decision | piko landing / rationale |
+|---|---|---|
+| | | |
+
 ## Open questions
 
 1. Unresolved product question.

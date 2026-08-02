@@ -165,6 +165,33 @@ impl Usage {
     }
 }
 
+/// Durable, model-visible marker appended when a turn is interrupted (F-01).
+///
+/// Context keeps `authority=None` so the marker is data, not instruction or
+/// fabricated model output; the gateway renders it to the next run's prompt.
+pub fn turn_abort_marker(execution_id: &str) -> Message {
+    Message::Context {
+        content: MessageContent::String(
+            "The previous turn was interrupted on purpose. Any tools or commands that were aborted may have partially executed."
+                .into(),
+        ),
+        trust: crate::ContentTrust::Trusted,
+        source: crate::PromptSource::new("turn_aborted", execution_id),
+        timestamp: Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        ),
+    }
+}
+
+/// Stable message id for a turn's abort marker. Live cancellation and crash
+/// recovery share it so re-applying the marker is idempotent.
+pub fn turn_abort_marker_message_id(execution_id: &str) -> String {
+    format!("{execution_id}/abort_marker")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

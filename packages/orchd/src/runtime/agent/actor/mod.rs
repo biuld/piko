@@ -27,6 +27,10 @@ use crate::runtime::reliability::{
 };
 use crate::runtime::utils::now_ms;
 
+/// Fixed cap on the durable follow-up queue (F-01 / D-01). Exceeding it
+/// returns overload; cancelling a queued input frees its slot.
+const MAX_QUEUED_FOLLOW_UPS: usize = 64;
+
 /// Long-lived serialization boundary for one AgentInstance.
 pub struct AgentActor {
     identity: AgentInstanceIdentity,
@@ -387,6 +391,9 @@ impl AgentActor {
         request: SendAgentInputRequest,
         completion: Option<QueuedCompletion>,
     ) -> Result<AgentInputReceipt, (AgentApiError, Option<QueuedCompletion>)> {
+        if self.follow_ups.len() >= MAX_QUEUED_FOLLOW_UPS {
+            return Err((AgentApiError::Overload, completion));
+        }
         let detached_recipient_agent_instance_id = match &completion {
             Some(QueuedCompletion::Detached(target)) => Some(target.agent_instance_id.clone()),
             _ => None,

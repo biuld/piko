@@ -1,4 +1,4 @@
-# D-01: Parallel tool batch dispatch
+# D-06: Parallel tool batch dispatch
 
 > Status: implemented
 > Implements: [F-06](../features/F-06-tool-system.md)
