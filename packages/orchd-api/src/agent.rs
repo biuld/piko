@@ -175,4 +175,11 @@ pub trait AgentRuntimeApi: Send + Sync {
         &self,
         request: piko_protocol::ConsumeAgentInboxRequest,
     ) -> Result<piko_protocol::ConsumeAgentInboxReceipt, AgentApiError>;
+
+    /// Wait (bounded by `timeout_ms`) for the next mailbox notification in the
+    /// session. Observational: never writes or consumes durable state.
+    async fn wait_agent_mailbox(
+        &self,
+        request: piko_protocol::MailboxWaitRequest,
+    ) -> Result<piko_protocol::MailboxWaitSummary, AgentApiError>;
 }

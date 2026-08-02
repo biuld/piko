@@ -108,6 +108,24 @@ pub mod contracts {
         }
     );
     contract!(
+        AgentMailboxEvent,
+        BroadcastContract,
+        AGENT_MAILBOX_EVENT,
+        CommunicationSpec {
+            id: "orchd.agent.mailbox_event",
+            kind: CommunicationKind::Observation,
+            owner: "AgentActor",
+            producers: &["AgentActor"],
+            consumer: "AgentRuntime::wait_agent_mailbox",
+            scope: CommunicationScope::Session,
+            delivery: DeliveryGuarantee::BestEffort,
+            capacity: CapacityPolicy::Bounded(64),
+            overflow: OverflowPolicy::DropNewest,
+            closure: ClosureMeaning::RuntimeUnavailable,
+            cancellation: CancellationMeaning::ScopeShutdown,
+        }
+    );
+    contract!(
         ExecutionCommands,
         MailboxContract,
         EXECUTION_COMMANDS,
@@ -316,6 +334,7 @@ pub mod contracts {
         AGENT_RUN_STARTED,
         AGENT_RUN_REPORT,
         AGENT_SNAPSHOT,
+        AGENT_MAILBOX_EVENT,
         EXECUTION_COMMANDS,
         EXECUTION_COMMAND_REPLY,
         EXECUTION_TERMINAL,

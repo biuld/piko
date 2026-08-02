@@ -14,8 +14,9 @@ use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot,
     AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
-    AgentLifecycleReceipt, AgentRunReport, AgentSnapshot, ConversationContext, ExecutionConfig,
-    InputDisposition, SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
+    AgentLifecycleReceipt, AgentMailboxEvent, AgentRunReport, AgentSnapshot, ConversationContext,
+    ExecutionConfig, InputDisposition, SendAgentInputRequest, StartExecutionRequest,
+    SteerExecutionRequest,
 };
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
@@ -355,8 +356,15 @@ impl AgentActor {
                         .iter()
                         .any(|existing| existing.report_id == item.report_id)
                     {
+                        let report_id = item.report_id.clone();
+                        let source_agent_instance_id = item.source_agent_instance_id.clone();
                         self.inbox.push(item);
                         self.publish_snapshot();
+                        self.publish_mailbox_event(AgentMailboxEvent::InboxReport {
+                            agent_instance_id: self.identity.agent_instance_id.clone(),
+                            report_id,
+                            source_agent_instance_id,
+                        });
                     }
                 }
                 AgentCommand::SetLifecycle {
@@ -451,12 +459,25 @@ impl AgentActor {
             completion,
             parent,
         });
+        self.publish_mailbox_event(AgentMailboxEvent::InputQueued {
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            request_id: request.request_id.clone(),
+        });
         Ok(AgentInputReceipt {
             request_id: request.request_id,
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             disposition: InputDisposition::Queued,
         })
+    }
+
+    /// Publish a best-effort mailbox notification after the underlying state
+    /// change is durable. The session scope is only weakly held: a torn-down
+    /// session simply drops the event.
+    fn publish_mailbox_event(&self, event: AgentMailboxEvent) {
+        if let Some(scope) = self.scope.upgrade() {
+            let _ = scope.mailbox_events().send(event);
+        }
     }
 
     async fn register_detached_report(

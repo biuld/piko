@@ -87,6 +87,24 @@
     "cancellation": "scope_shutdown"
   },
   {
+    "id": "orchd.agent.mailbox_event",
+    "kind": "observation",
+    "owner": "AgentActor",
+    "producers": [
+      "AgentActor"
+    ],
+    "consumer": "AgentRuntime::wait_agent_mailbox",
+    "scope": "session",
+    "delivery": "best_effort",
+    "capacity": {
+      "type": "bounded",
+      "value": 64
+    },
+    "overflow": "drop_newest",
+    "closure": "runtime_unavailable",
+    "cancellation": "scope_shutdown"
+  },
+  {
     "id": "orchd.execution.commands",
     "kind": "mailbox",
     "owner": "ExecutionActor",

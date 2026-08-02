@@ -19,8 +19,8 @@ use piko_orchd_api::{
 use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
     AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
-    SteerAgentRequest,
+    AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, MailboxWaitRequest, MailboxWaitSummary,
+    SendAgentInputRequest, SteerAgentRequest,
 };
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
@@ -733,6 +733,51 @@ impl AgentRuntimeApi for AgentRuntime {
         received
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
+    }
+
+    async fn wait_agent_mailbox(
+        &self,
+        request: MailboxWaitRequest,
+    ) -> Result<MailboxWaitSummary, AgentApiError> {
+        let scope = self.scope(&request.session_id).await?;
+        if let Some(caller) = &request.caller_agent_instance_id {
+            scope
+                .agent(caller)
+                .await
+                .ok_or(AgentApiError::AgentNotFound)?;
+        }
+        let mut receiver = scope.mailbox_events().subscribe();
+        let timeout = tokio::time::Duration::from_millis(request.timeout_ms);
+        let event = tokio::time::timeout(timeout, async {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        if request
+                            .agent_instance_id
+                            .as_deref()
+                            .is_some_and(|filter| event.agent_instance_id() != filter)
+                        {
+                            continue;
+                        }
+                        return Some(event);
+                    }
+                    // Lagged events are skipped: waiting continues on the next
+                    // update rather than failing or replaying.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        })
+        .await
+        .unwrap_or(None);
+
+        let timed_out = event.is_none();
+        let agents = self.list_agents(request.session_id).await?;
+        Ok(MailboxWaitSummary {
+            timed_out,
+            event,
+            agents,
+        })
     }
 }
 

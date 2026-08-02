@@ -333,6 +333,10 @@ impl AgentActor {
                 self.run_state = AgentRunState::Idle;
                 self.finish_run_cancellation();
                 self.publish_snapshot();
+                self.publish_mailbox_event(AgentMailboxEvent::RunFinished {
+                    agent_instance_id: self.identity.agent_instance_id.clone(),
+                    report_id: committed.report.report_id.clone(),
+                });
 
                 if let Some(waiters) = self.execution_waiters.remove(&committed.execution_id) {
                     for waiter in waiters {

@@ -177,9 +177,9 @@ is exceeded.
   modes, follow-up tasks, interrupts, wait with timeout, completion
   notification fragments, inter-agent telemetry.
 - piko status: **partial** — `F-10 multi-agent` (AgentInstance tree,
-  AgentRuntime, attached/detached spawn, inbox, close/reopen). Gaps vs v2:
-  followup_task, interrupt_agent, list_agents, wait_agent tools; agent roles;
-  inter-agent notification fragments.
+  AgentRuntime, attached/detached spawn, inbox, close/reopen, and v2
+  followup/interrupt/list/wait tools landed in F-10/D-10/V-10). Gaps:
+  agent roles; inter-agent notification fragments.
 
 ### J. Skills, Plugins, Hooks & MCP
 
@@ -255,7 +255,7 @@ is exceeded.
 | F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop, elicitation |
 | G Exec & Sandbox | F-08 | partial | PTY/process lifecycle, unified exec |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
-| I Multi-Agent | F-10 | partial | v2 tools (followup/interrupt/list/wait) |
+| I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | MCP resources, hooks |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
 | L Observability | F-15 | partial | turn timing, rollout recorder |

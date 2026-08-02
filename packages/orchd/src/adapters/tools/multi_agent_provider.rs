@@ -13,8 +13,8 @@ use piko_protocol::tools::{
     ToolProviderSource,
 };
 use piko_protocol::{
-    AgentInputDelivery, AgentLifecycleRequest, CreateAgentRequest, MessageContent,
-    SendAgentInputRequest,
+    AgentActivity, AgentInputDelivery, AgentLifecycleRequest, CreateAgentRequest,
+    MailboxWaitRequest, MessageContent, SendAgentInputRequest,
 };
 
 #[derive(Clone)]
@@ -55,30 +55,14 @@ impl MultiAgentToolProvider {
             ),
             tool(
                 "send_agent_message",
-                "Send input to an existing AgentInstance, reusing its private transcript.",
+                "Send input to an existing AgentInstance, reusing its private transcript; starts a new turn when idle and steers the active turn while running.",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
                         "agent_instance_id": { "type": "string" },
-                        "message": { "type": "string" },
-                        "delivery": {
-                            "type": "string",
-                            "enum": ["auto", "steer", "follow_up"],
-                            "default": "auto"
-                        }
+                        "message": { "type": "string" }
                     },
                     "required": ["agent_instance_id", "message"]
-                }),
-            ),
-            tool(
-                "get_agent_status",
-                "Read the lifecycle and current activity of an AgentInstance.",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "agent_instance_id": { "type": "string" }
-                    },
-                    "required": ["agent_instance_id"]
                 }),
             ),
             tool(
@@ -95,6 +79,40 @@ impl MultiAgentToolProvider {
                 "reopen_agent",
                 "Reopen an existing direct child AgentInstance.",
                 agent_target_schema(),
+            ),
+            tool(
+                "followup_task",
+                "Send a follow-up task to an existing agent; starts a new turn when idle and durably queues it while running.",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "agent_instance_id": { "type": "string" },
+                        "message": { "type": "string" }
+                    },
+                    "required": ["agent_instance_id", "message"]
+                }),
+            ),
+            tool(
+                "interrupt_agent",
+                "Interrupt an agent's current turn and report its previous activity; the agent stays available for follow-up.",
+                agent_target_schema(),
+            ),
+            tool(
+                "list_agents",
+                "List live agents in the session, parents before children.",
+                serde_json::json!({ "type": "object", "properties": {} }),
+            ),
+            tool(
+                "wait_agent",
+                "Wait (bounded by timeout_ms) for the next mailbox update from any live agent, optionally filtered to one agent.",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "timeout_ms": { "type": "integer", "minimum": 1 },
+                        "agent_instance_id": { "type": "string" }
+                    },
+                    "required": ["timeout_ms"]
+                }),
             ),
         ]
     }
@@ -174,6 +192,73 @@ impl MultiAgentToolProvider {
             Ok(report_value(&report))
         }
     }
+
+    async fn interrupt_agent(
+        &self,
+        call: &ToolCall,
+        context: &ToolExecutionContext,
+    ) -> Result<serde_json::Value, AgentApiError> {
+        let target = required_string(&call.arguments, "agent_instance_id")?;
+        let snapshot = self
+            .runtime
+            .agent_snapshot(context.session_id.clone(), target.clone())
+            .await
+            .and_then(|snapshot| snapshot.ok_or(AgentApiError::AgentNotFound))?;
+        let previous_activity = activity_str(&snapshot.activity);
+        match self
+            .runtime
+            .cancel_agent_run(context.session_id.clone(), target.clone())
+            .await
+        {
+            Ok(receipt) => Ok(serde_json::json!({
+                "agent_instance_id": receipt.agent_instance_id,
+                "previous_activity": previous_activity,
+                "accepted": receipt.accepted,
+            })),
+            // An idle target has no run to cancel; that is a benign no-op,
+            // not an LLM-visible failure.
+            Err(AgentApiError::InvalidState) => Ok(serde_json::json!({
+                "agent_instance_id": target,
+                "previous_activity": previous_activity,
+                "accepted": false,
+            })),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn wait_agent(
+        &self,
+        call: &ToolCall,
+        context: &ToolExecutionContext,
+    ) -> Result<serde_json::Value, AgentApiError> {
+        let timeout_ms = call
+            .arguments
+            .get("timeout_ms")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|value| *value > 0)
+            .ok_or(AgentApiError::InputRejected)?;
+        let agent_instance_id = call
+            .arguments
+            .get("agent_instance_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let wait = self.runtime.wait_agent_mailbox(MailboxWaitRequest {
+            session_id: context.session_id.clone(),
+            caller_agent_instance_id: Some(context.agent_instance_id.clone()),
+            timeout_ms,
+            agent_instance_id,
+        });
+        let summary = if let Some(cancellation) = &context.cancellation {
+            tokio::select! {
+                summary = wait => summary?,
+                _ = cancellation.cancelled() => return Err(AgentApiError::Cancelled),
+            }
+        } else {
+            wait.await?
+        };
+        serde_json::to_value(summary)
+            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))
+    }
 }
 
 #[async_trait]
@@ -199,61 +284,85 @@ impl ToolProvider for MultiAgentToolProvider {
                 let message = required_string(&call.arguments, "message");
                 match (target, message) {
                     (Ok(target), Ok(message)) => {
-                        let delivery = match call
-                            .arguments
-                            .get("delivery")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("auto")
-                        {
-                            "steer" => AgentInputDelivery::SteerActive,
-                            "follow_up" => AgentInputDelivery::FollowUp,
-                            _ => AgentInputDelivery::Auto,
-                        };
                         self.runtime
                             .send_agent_input(SendAgentInputRequest {
                                 request_id: format!("message:{}:{}", context.execution_id, call.id),
                                 session_id: context.session_id.clone(),
                                 agent_instance_id: target,
                                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-                                // Steered/follow-up input to an existing agent has no
-                                // Interaction Turn binding of its own.
+                                // Message input to an existing agent has no
+                                // Interaction Turn binding of its own; follow-up
+                                // semantics live on `followup_task`.
                                 source_turn_id: None,
                                 message_id: format!("message:{}:{}", context.execution_id, call.id),
                                 content: MessageContent::String(message),
-                                delivery,
+                                delivery: AgentInputDelivery::Auto,
                                 prompt_resources: None,
                                 active_tool_names: None,
                             })
                             .await
-                            .map(|receipt| serde_json::json!({
-                                "agent_instance_id": receipt.agent_instance_id,
-                                "disposition": receipt.disposition,
-                            }))
+                            .map(|receipt| {
+                                serde_json::json!({
+                                    "agent_instance_id": receipt.agent_instance_id,
+                                    "disposition": receipt.disposition,
+                                })
+                            })
                     }
                     (Err(error), _) | (_, Err(error)) => Err(error),
                 }
             }
-            "get_agent_status" => match required_string(&call.arguments, "agent_instance_id") {
-                Ok(target) => self
-                    .runtime
-                    .agent_snapshot(context.session_id.clone(), target)
-                    .await
-                    .and_then(|snapshot| snapshot.ok_or(AgentApiError::AgentNotFound))
-                    .map(|snapshot| serde_json::json!({
-                        "agent_instance_id": snapshot.identity.agent_instance_id,
-                        "agent_spec_id": snapshot.identity.agent_spec_id,
-                        "parent_agent_instance_id": snapshot.identity.parent_agent_instance_id,
-                        "lifecycle": snapshot.lifecycle,
-                        "activity": match snapshot.activity {
-                            piko_protocol::AgentActivity::Idle => "idle",
-                            piko_protocol::AgentActivity::Running => "running",
-                            piko_protocol::AgentActivity::WaitingForApproval => "waiting_for_approval",
-                            piko_protocol::AgentActivity::Cancelling => "cancelling",
-                        },
-                        "unread_report_count": snapshot.unread_report_count,
-                    })),
-                Err(error) => Err(error),
-            },
+            "followup_task" => {
+                let target = required_string(&call.arguments, "agent_instance_id");
+                let message = required_string(&call.arguments, "message");
+                match (target, message) {
+                    (Ok(target), Ok(message)) => self
+                        .runtime
+                        .send_agent_input(SendAgentInputRequest {
+                            request_id: format!("followup:{}:{}", context.execution_id, call.id),
+                            session_id: context.session_id.clone(),
+                            agent_instance_id: target,
+                            caller_agent_instance_id: Some(context.agent_instance_id.clone()),
+                            // A follow-up task is not an Interaction Turn of its
+                            // own; it starts a run when idle and queues while busy.
+                            source_turn_id: None,
+                            message_id: format!("followup:{}:{}", context.execution_id, call.id),
+                            content: MessageContent::String(message),
+                            delivery: AgentInputDelivery::FollowUp,
+                            prompt_resources: None,
+                            active_tool_names: None,
+                        })
+                        .await
+                        .map(|receipt| {
+                            serde_json::json!({
+                                "agent_instance_id": receipt.agent_instance_id,
+                                "disposition": receipt.disposition,
+                            })
+                        }),
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                }
+            }
+            "interrupt_agent" => self.interrupt_agent(&call, &context).await,
+            "list_agents" => self
+                .runtime
+                .list_agents(context.session_id.clone())
+                .await
+                .map(|snapshots| {
+                    serde_json::json!({
+                        "agents": snapshots.iter().map(|snapshot| serde_json::json!({
+                            "agent_instance_id": snapshot.identity.agent_instance_id,
+                            "agent_spec_id": snapshot.identity.agent_spec_id,
+                            "parent_agent_instance_id": snapshot.identity.parent_agent_instance_id,
+                            "lifecycle": snapshot.lifecycle,
+                            "activity": activity_str(&snapshot.activity),
+                            "unread_report_count": snapshot.unread_report_count,
+                            "latest_report_summary": snapshot
+                                .latest_report
+                                .as_ref()
+                                .map(|report| report.summary.clone()),
+                        })).collect::<Vec<_>>()
+                    })
+                }),
+            "wait_agent" => self.wait_agent(&call, &context).await,
             "collect_agent_reports" => {
                 match self
                     .runtime
@@ -407,4 +516,13 @@ fn report_value(report: &piko_protocol::AgentRunReport) -> serde_json::Value {
         "usage": report.usage,
         "artifacts": report.artifacts,
     })
+}
+
+fn activity_str(activity: &AgentActivity) -> &'static str {
+    match activity {
+        AgentActivity::Idle => "idle",
+        AgentActivity::Running => "running",
+        AgentActivity::WaitingForApproval => "waiting_for_approval",
+        AgentActivity::Cancelling => "cancelling",
+    }
 }

@@ -106,7 +106,6 @@ async fn declared_tool_sets_expand_into_model_catalog() {
         "spawn_agent",
         "spawn_agent_detached",
         "send_agent_message",
-        "get_agent_status",
         "collect_agent_reports",
         "close_agent",
         "reopen_agent",

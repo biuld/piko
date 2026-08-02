@@ -47,7 +47,7 @@ F-10 core, F-03 baseline). Remaining slices:
 | F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | implemented (D-01, V-01) |
 | F-02 model-gateway | retry/backoff budget; streaming fallback | implemented (F-02/D-02/V-02) |
 | F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | planned |
-| F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | planned |
+| F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | implemented (F-10/D-10/V-10) |
 | F-07 tool-approvals | approval timeout/deny semantics polish | planned |
 
 Exit criteria: every M0 feature has a reviewed PRD; tool batches are parallel;
@@ -104,7 +104,7 @@ Goal: parent agents can supervise and steer children (codex-rs v2 surface).
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-10 multi-agent | `followup_task`, `interrupt_agent`, `list_agents`, `wait_agent` | planned |
+| F-10 multi-agent | `followup_task`, `interrupt_agent`, `list_agents`, `wait_agent` | implemented (F-10/D-10/V-10) |
 | F-10 multi-agent | agent roles (role config layers) | planned |
 | F-03 prompt-assembly | inter-agent notification / completion fragments | planned |
 
@@ -157,5 +157,6 @@ behavior contract with its own acceptance criteria).
 
 Pick the first block and decompose it into its concrete Feature PRDs (status
 `draft` → `reviewed`), then implement the highest-value slice. Suggested
-start: finish **M0** — land F-06 batch dispatch (in progress), then F-01
-turn-abort/input-admission, then F-10 v2 tools.
+next: finish **M0** — F-10 v2 tools are landed; pick the remaining M0 slices
+(F-03 prompt-assembly fragment catalog breadth, or F-07 approval
+timeout/deny semantics) and PRD-first them.

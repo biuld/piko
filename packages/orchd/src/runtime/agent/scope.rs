@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use piko_comms::BroadcastSender;
+use piko_comms::contracts::AgentMailboxEvent as AgentMailboxEventContract;
 use piko_orchd_api::{AgentApiError, AgentCommitPort};
+use piko_protocol::AgentMailboxEvent;
 use tokio::sync::Mutex;
 
 use super::mailbox::{AgentCommand, AgentHandle};
@@ -18,6 +21,7 @@ pub struct SessionAgentScope {
     create_lock: Mutex<()>,
     generation: AtomicU64,
     tasks: Arc<TaskRegistry>,
+    mailbox_events: BroadcastSender<AgentMailboxEventContract, AgentMailboxEvent>,
 }
 
 impl SessionAgentScope {
@@ -35,6 +39,7 @@ impl SessionAgentScope {
             create_requests: Mutex::new(HashMap::new()),
             create_lock: Mutex::new(()),
             generation: AtomicU64::new(0),
+            mailbox_events: piko_comms::broadcast::<AgentMailboxEventContract, _>().0,
         }
     }
 
@@ -53,6 +58,11 @@ impl SessionAgentScope {
     /// Session-scoped typed background tasks (F-01 / D-01).
     pub fn tasks(&self) -> &Arc<TaskRegistry> {
         &self.tasks
+    }
+
+    /// Best-effort session notification lane for mailbox updates (F-10).
+    pub fn mailbox_events(&self) -> &BroadcastSender<AgentMailboxEventContract, AgentMailboxEvent> {
+        &self.mailbox_events
     }
 
     pub fn next_generation(&self) -> u64 {
