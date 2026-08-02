@@ -7,6 +7,10 @@ piko is a coding agent harness with a decoupled **hostd + orchd** architecture. 
 Guiding principle: keep the host+orchestrator split clean, and keep `hostd`
 authoritative for user-visible state.
 
+Current direction: reimplement agent-runtime capabilities distilled from the
+codex-rs core, PRD-first (see Documentation workflow). codex-rs is evidence,
+not specification.
+
 ## Architecture
 
 ```
@@ -20,14 +24,14 @@ sandbox (leaf)
 
 | Crate | Type | Description |
 |---|---|---|
-| `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
-| `piko-gui` | binary | GPUI desktop client (app / features / shell). Talks to hostd over stdio via client-core. See `packages/gui/AGENTS.md`. |
-| `island` | external lib | GPUI Islands infrastructure (theme, island panel, layout tree, overlay surface, widgets). No product ids/messages. Developed in the sibling `island-rs` repository. |
 | `piko-hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
 | `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
 | `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
-| `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
 | `piko-sandbox` | lib | Fail-closed filesystem and process sandbox. |
+| `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
+| `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
+| `piko-gui` | binary | GPUI desktop client (app / features / shell). Talks to hostd over stdio via client-core. See `packages/gui/AGENTS.md`. |
+| `island` | external lib | GPUI Islands infrastructure (theme, island panel, layout tree, overlay surface, widgets). No product ids/messages. Developed in the sibling `island-rs` repository. |
 
 ## Coding conventions
 
@@ -59,15 +63,16 @@ Legacy documents are kept, not deleted. Every legacy document carries a `Status`
 
 ## Where to change
 
-1. TUI ↔ hostd wire types → `packages/protocol`
-2. Sessions, settings, auth, models, prompts, skills, compaction, queue, approvals, command routing → `hostd`
-3. Agent loops, tool execution, multi-agent supervision → `orchd`
-4. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md`)
-5. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md`)
-5b. Reusable Islands infrastructure (panel, theme, generic layout, overlay surface) → sibling `island-rs` repository (`island` crate); product ids/messages stay in `gui`
-5c. Island infrastructure docs → sibling `island-rs/docs/` (`features/` · `design/` · `roadmap/`)
-6. Provider abstraction, OAuth, token tracking → `llmd`
-7. Sandboxed file/process access → `sandbox`
+1. New behavior starts as a Feature PRD in `docs/features/`, then a design in `docs/design/` (see Documentation workflow).
+2. Agent loops, tool execution, multi-agent supervision → `orchd`
+3. Sessions, settings, auth, models, prompts, skills, compaction, queue, approvals, command routing → `hostd`
+4. Provider abstraction, OAuth, token tracking → `llmd`
+5. Sandboxed file/process access → `sandbox`
+6. Wire types shared across packages → `packages/protocol`
+7. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md`)
+8. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md`)
+9. Reusable Islands infrastructure (panel, theme, generic layout, overlay surface) → sibling `island-rs` repository (`island` crate); product ids/messages stay in `gui`
+10. Island infrastructure docs → sibling `island-rs/docs/` (`features/` · `design/` · `roadmap/`)
 
 ## Session storage
 
@@ -92,33 +97,28 @@ JSONL. No migration from older layouts.
 
 ## Docs
 
-Normative runtime docs live under `docs/`:
+Normative docs live under `docs/`:
 
-- `docs/features/` — feature PRDs (behavior contracts)
-- `docs/design/` — implementation designs
-- `docs/decisions/` — architecture decision records
+- `docs/features/` — feature PRDs (numbered `F-NN`; create from `_TEMPLATE.md`)
+- `docs/design/` — implementation designs (numbered `D-NN`)
+- `docs/decisions/` — architecture decision records (numbered `ADR-NNN`)
+- `docs/verification/` — acceptance and differential validation evidence
+
+Normative runtime models:
 
 - `docs/single-agent-runtime-model.md`
 - `docs/single-agent-actor-runtime-design.md`
 - `docs/agent-run-atomicity-design.md`
-- `docs/turn-agent-run-boundary-design.md`
 - `docs/multi-agent-execution-model.md`
 - `docs/tool-sets-design.md`
 - `docs/agent-prompt-assembly-design.md`
 
-Proposed GUI / config / catalog designs:
+UI and settings docs live in their package docs:
 
-- `packages/gui/docs/features/` — GUI feature contracts
-- `packages/gui/docs/design/` — GUI implementation designs
-- `packages/gui/docs/ui-guidelines.md` — visual system
+- `packages/tui/docs/` — TUI features/design
+- `packages/gui/docs/` — GUI features/design/ui-guidelines
 - `docs/settings-ownership-design.md`
 - `docs/host-command-catalog-design.md`
-
-Key GUI designs:
-
-- `packages/gui/docs/design/overview.md`
-- `packages/gui/docs/design/archipelago.md`
-- `packages/gui/docs/design/code-organization.md`
 
 Crate-local context: `packages/tui/AGENTS.md`, `packages/gui/AGENTS.md`, `packages/protocol/AGENTS.md`.
 

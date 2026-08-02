@@ -1,6 +1,8 @@
 # piko
 
-piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** architecture. It separates state management (sessions, prompts, settings, and compaction) in the Host daemon from transient agent execution in the stream-driven Orchestrator, using a Ratatui-based terminal UI client connected over JSON-lines stdio.
+piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** architecture. It separates state management (sessions, settings, auth, prompts, skills, compaction, queues, and turn orchestration) in the Host daemon from transient agent execution in the stream-driven Orchestrator. Terminal (Ratatui) and desktop (GPUI) clients connect to hostd over JSON-lines stdio.
+
+Agent-runtime capabilities are being reimplemented from the codex-rs core, distilled PRD-first into piko architecture (see [Documentation & Feature Workflow](#documentation--feature-workflow)).
 
 ---
 
@@ -10,6 +12,7 @@ piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** arc
 graph TD
     subgraph Client Layer
         TUI["piko-tui (Ratatui Terminal UI)"]
+        GUI["piko-gui (GPUI Desktop Client)"]
     end
 
     subgraph Host Layer
@@ -33,6 +36,7 @@ graph TD
 
     %% Flow of control
     TUI <-->|JSON-lines over stdio| Hostd
+    GUI <-->|JSON-lines over stdio| Hostd
     Hostd -.->|implements ports| OrchdApi
     Orchd -.->|implements traits| OrchdApi
     Hostd -->|drives API| Orchd
@@ -46,6 +50,7 @@ graph TD
     Orchd -.-> Comms
 
     TUI -.-> Protocol
+    GUI -.-> Protocol
     Hostd -.-> Protocol
     Orchd -.-> Protocol
     LLMd -.-> Protocol
@@ -55,14 +60,16 @@ graph TD
 
 | Crate | Directory | Type | Description |
 |---|---|---|---|
-| `piko-tui` | `packages/tui` | binary (`piko-tui`) | Terminal UI built with Ratatui (Timeline, Session view, Command dispatch, Keymap) |
-| `piko-hostd` | `packages/hostd` | bin + lib (`piko-hostd`) | State authority: manages sessions, configuration, credentials, prompt assembly, and turn compaction |
-| `piko-orchd-api` | `packages/orchd-api` | library | Public traits, interfaces, and ports defining the Orchestrator contract |
+| `piko-hostd` | `packages/hostd` | bin + lib (`piko-hostd`) | State authority: sessions, settings, auth, prompts, skills, compaction, queues, turn orchestration, MCP |
 | `piko-orchd` | `packages/orchd` | library | Transient agent execution runtime (AgentActor & ExecutionActor scheduling) |
+| `piko-orchd-api` | `packages/orchd-api` | library | Public traits, interfaces, and ports defining the Orchestrator contract |
 | `piko-llmd` | `packages/llmd` | library | LLM provider registry, token/cost middleware, and OAuth provider gateway |
-| `piko-comms` | `packages/comms` | bin + lib | Bounded, contract-enforced async channel topology ensuring design-compliant backpressure |
-| `piko-protocol` | `packages/protocol` | library | Shared ubiquitous DTOs, wire formats, commands, and events |
 | `piko-sandbox` | `packages/sandbox` | library | Fail-closed process and filesystem sandbox for sandboxed CLI execution |
+| `piko-protocol` | `packages/protocol` | library | Shared ubiquitous DTOs, wire formats, commands, and events |
+| `piko-comms` | `packages/comms` | bin + lib | Bounded, contract-enforced async channel topology ensuring design-compliant backpressure |
+| `piko-tui` | `packages/tui` | binary (`piko-tui`) | Terminal UI built with Ratatui (Timeline, Session view, Command dispatch, Keymap) |
+| `piko-gui` | `packages/gui` | binary | GPUI desktop client (Workbench, Settings, overlays); talks to hostd over stdio via client-core |
+| `island` | sibling `island-rs` | external library | Reusable GPUI infrastructure (theme, island panel, layout tree, overlays, widgets); no product ids/messages |
 
 ---
 
@@ -72,6 +79,22 @@ graph TD
 - **Clean Interface Boundary (Ports & Adapters):** `hostd` and `orchd` communicate strictly through `orchd-api`. `orchd` defines interfaces (ports) for storage, LLM, and tool approvals, allowing developers to mock components cleanly.
 - **Contract-Enforced Channels:** `piko-comms` replaces ad-hoc Tokio channels. All asynchronous channels conform to predefined contracts (e.g. Mailbox, Reply, LatestState, Broadcast, ThreadBridge).
 - **Stream-Driven Execution:** Step mutations, tool outputs, and LLM completions are compiled into a unified reactive stream (`Stream<Item = OrchEvent>`), avoiding raw spawns and lock contention.
+- **PRD-First Development:** every behavior starts as a Feature PRD in `docs/features/` before design or implementation; the codex-rs core is evidence for differential validation, not a specification to translate.
+
+---
+
+## Documentation & Feature Workflow
+
+piko follows a PRD-first documentation workflow (see [docs/README.md](docs/README.md)):
+
+1. Every feature starts as a technology-independent PRD in `docs/features/` (numbered `F-NN`).
+2. A targeted implementation design follows in `docs/design/` (`D-NN`).
+3. Cross-feature decisions are recorded as ADRs in `docs/decisions/` (`ADR-NNN`).
+4. Acceptance and differential validation evidence lives in `docs/verification/`.
+
+Agent-runtime capabilities are distilled from the codex-rs core. codex-rs is
+**evidence, not specification**: a behavior enters piko only when a Feature
+PRD intentionally keeps it.
 
 ---
 
