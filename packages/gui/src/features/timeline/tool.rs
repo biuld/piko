@@ -14,7 +14,8 @@ use super::markdown_cache::TimelineMarkdownCache;
 use super::render::{ClickHandler, selectable_plain};
 use super::vm::{TimelineRow, ToolCardStatus};
 
-/// Left-aligned tool chip; click expands detail downward and grows content.
+/// Full-width terminal-style tool block; click expands detail downward and
+/// grows content. Prototype variant of the compact tool chip.
 pub(super) fn render_tool_chip(
     row: &TimelineRow,
     expanded: bool,
@@ -40,51 +41,67 @@ pub(super) fn render_tool_chip(
         .selection(&row.id)
         .expect("timeline selection state");
 
+    let tool_accent = domain_role_hsla(DomainRole::Tool);
+    let chevron = if expanded {
+        IslandIcon::ChevronDown
+    } else {
+        IslandIcon::ChevronRight
+    };
+
+    let block = div()
+        .id(SharedString::from(format!("tool-block-{}", row.id)))
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(m.space_sm)
+        .py(m.space_xs)
+        .pl(m.space_sm)
+        .pr(m.space_sm)
+        .rounded_md()
+        .bg(t.elevated_rgba())
+        .border_l_2()
+        .border_color(tool_accent)
+        .child(icon(
+            IslandIcon::Wrench,
+            IconSize::Meta,
+            domain_role_hsla(DomainRole::Tool),
+        ))
+        .child(
+            text(TextRole::Meta)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.fg_rgba())
+                .child(row.label.clone()),
+        )
+        .child(
+            text(TextRole::Meta)
+                .text_color(status_color)
+                .child(format!("· {status_label}")),
+        )
+        .when(!row.body.is_empty() && !expanded, |d| {
+            d.child(
+                text(TextRole::Meta)
+                    .text_color(t.muted_fg_rgba())
+                    .child(format!("— {}", row.body)),
+            )
+        })
+        .when(can_expand, |d| {
+            d.child(div().flex_grow())
+                .child(icon(chevron, IconSize::Meta, t.muted_fg_rgba()))
+        })
+        .when(can_expand, |d| {
+            d.cursor_pointer()
+                .hover(|s| s.bg(t.border_rgba()))
+                .on_click(move |ev, window, cx| on_toggle(ev, window, cx))
+        });
+
     let root = div()
         .id(SharedString::from(row.id.clone()))
+        .w_full()
         .flex()
         .flex_col()
         .gap(m.space_xs)
-        .items_start()
-        .child(
-            div()
-                .id(SharedString::from(format!("tool-chip-{}", row.id)))
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(m.space_sm)
-                .pr(m.space_sm)
-                .py(m.space_xs)
-                .rounded_md()
-                .when(can_expand, |d| {
-                    d.cursor_pointer()
-                        .hover(|s| s.bg(t.elevated_rgba()))
-                        .on_click(move |ev, window, cx| on_toggle(ev, window, cx))
-                })
-                .child(icon(
-                    IslandIcon::Wrench,
-                    IconSize::Meta,
-                    domain_role_hsla(DomainRole::Tool),
-                ))
-                .child(
-                    text(TextRole::Meta)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.muted_fg_rgba())
-                        .child(row.label.clone()),
-                )
-                .child(
-                    text(TextRole::Meta)
-                        .text_color(status_color)
-                        .child(format!("· {status_label}")),
-                )
-                .when(!row.body.is_empty() && !expanded, |d| {
-                    d.child(
-                        text(TextRole::Meta)
-                            .text_color(t.muted_fg_rgba())
-                            .child(format!("— {}", row.body)),
-                    )
-                }),
-        )
+        .child(block)
         .when(expanded, |d| {
             if let Some(detail) = &row.detail {
                 d.child(
@@ -92,7 +109,7 @@ pub(super) fn render_tool_chip(
                         .w_full()
                         .p(m.space_sm)
                         .rounded_md()
-                        .bg(t.elevated_rgba())
+                        .bg(t.surface_rgba())
                         .max_h(px(160.))
                         .overflow_y_scrollbar()
                         .child(

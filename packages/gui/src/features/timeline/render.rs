@@ -2,7 +2,8 @@
 //!
 //! Chat-primary presentation: You / Assistant headers, grouped speakers.
 //! Rows render in timeline order from Client Core / hostd — no CoT bucketing
-//! or cross-row reordering of thinking / tools / body.
+//! or cross-row reordering of thinking / tools / body. Prototype: operational
+//! rows (user, tool, system) render as terminal-style blocks; prose stays open.
 
 use std::collections::HashSet;
 
@@ -299,22 +300,24 @@ fn render_system_row(
     } else {
         format!("{} · {}", row.label, row.body)
     };
-    let root = div()
-        .id(SharedString::from(row.id.clone()))
-        .w_full()
-        .flex()
-        .justify_center()
-        .py(m.space_xs)
-        .child(
-            text(TextRole::Meta)
-                .text_color(t.muted_fg_rgba())
-                .child(selectable_plain(
-                    format!("{}-system", row.id),
-                    value,
-                    &selection,
-                )),
-        )
-        .into_any_element();
+    let root =
+        div()
+            .id(SharedString::from(row.id.clone()))
+            .w_full()
+            .flex()
+            .justify_center()
+            .py(m.space_xs)
+            .child(
+                div()
+                    .px(m.space_md)
+                    .py(m.space_xs)
+                    .rounded_full()
+                    .bg(t.elevated_rgba())
+                    .child(text(TextRole::Meta).text_color(t.muted_fg_rgba()).child(
+                        selectable_plain(format!("{}-system", row.id), value, &selection),
+                    )),
+            )
+            .into_any_element();
     selectable_region(
         SharedString::from(format!("{}-selection-region", row.id)),
         selection,
@@ -367,6 +370,8 @@ fn render_user_row(
                 .p(m.space_sm)
                 .rounded_md()
                 .bg(t.elevated_rgba())
+                .border_l_2()
+                .border_color(accent_hsla)
                 .child(body),
         );
     }
