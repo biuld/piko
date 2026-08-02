@@ -23,3 +23,4 @@ include!("compaction_reconcile_cases/harness.rs");
 include!("compaction_reconcile_cases/summarize.rs");
 include!("compaction_reconcile_cases/new_window.rs");
 include!("compaction_reconcile_cases/concurrency.rs");
+include!("compaction_reconcile_cases/world_state.rs");

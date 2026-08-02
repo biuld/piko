@@ -85,6 +85,14 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         JsonlSessionRepository::set_last_model(self, session_dir, model)
     }
 
+    fn set_world_state_baseline(
+        &self,
+        session_dir: &Path,
+        facts: Option<&crate::domain::prompts::WorldStateFacts>,
+    ) -> Result<(), SessionStorageError> {
+        JsonlSessionRepository::set_world_state_baseline(self, session_dir, facts)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn append_compaction(
         &self,

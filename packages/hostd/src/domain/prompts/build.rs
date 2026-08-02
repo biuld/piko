@@ -10,7 +10,6 @@ pub fn snapshot_prompt_resources(
 ) -> piko_protocol::PromptResourceSnapshot {
     let cwd = options.cwd.to_string_lossy().replace('\\', "/");
     let date = current_date_string();
-    let world_state = world_state_content(&options);
     let environment_host = environment_host_content(&options.environment);
     let model_switch = model_switch_content(&options);
     let mut blocks = vec![block(
@@ -83,17 +82,6 @@ pub fn snapshot_prompt_resources(
             piko_protocol::CacheScope::ResourceSnapshot,
         ));
     }
-    if let Some(content) = world_state {
-        blocks.push(block(
-            "state.run",
-            piko_protocol::PromptBlockKind::Context,
-            piko_protocol::InstructionAuthority::None,
-            piko_protocol::ContentTrust::Trusted,
-            piko_protocol::PromptSource::new("run-state", "hostd/session"),
-            content,
-            piko_protocol::CacheScope::RunDynamic,
-        ));
-    }
     if let Some(content) = environment_host {
         blocks.push(block(
             "environment.host",
@@ -126,29 +114,10 @@ pub fn snapshot_prompt_resources(
         piko_protocol::CacheScope::RunDynamic,
     ));
 
-    piko_protocol::PromptResourceSnapshot { blocks }
-}
-
-fn world_state_content(options: &PromptSnapshotOptions) -> Option<String> {
-    let mut lines = Vec::new();
-    if let Some(session_id) = options.session_id.as_deref() {
-        lines.push(format!("session_id: {session_id}"));
+    piko_protocol::PromptResourceSnapshot {
+        blocks,
+        world_state: None,
     }
-    if let Some(agent_instance_id) = options.agent_instance_id.as_deref() {
-        lines.push(format!("agent_instance_id: {agent_instance_id}"));
-    }
-    if let Some(operation_id) = options.operation_id.as_deref() {
-        lines.push(format!("operation_id: {operation_id}"));
-    }
-    if options.continuation {
-        lines.push("run_kind: continuation".to_string());
-    } else if !lines.is_empty() {
-        lines.push("run_kind: initial".to_string());
-    }
-    if let Some(model) = options.model.as_deref() {
-        lines.push(format!("model: {model}"));
-    }
-    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn environment_host_content(

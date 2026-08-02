@@ -106,6 +106,10 @@ pub struct StartExecutionRequest {
     pub agent_spec: crate::AgentSpec,
     pub run_prompt: crate::SemanticRunPrompt,
     pub tool_catalog: crate::ResolvedToolCatalog,
+    /// Retained world-state Context message injected before the run input
+    /// (F-04 slice 2). `None` for child agent runs without host resources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_state: Option<Message>,
     pub input_message_id: MessageId,
     pub input: MessageContent,
     pub context: ConversationContext,
@@ -276,6 +280,7 @@ mod tests {
                 ..Default::default()
             },
             tool_catalog: crate::ResolvedToolCatalog::default(),
+            world_state: None,
             input_message_id: "msg-1".into(),
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),

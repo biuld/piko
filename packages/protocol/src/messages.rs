@@ -192,6 +192,13 @@ pub fn turn_abort_marker_message_id(execution_id: &str) -> String {
     format!("{execution_id}/abort_marker")
 }
 
+/// Stable message id for a run's world-state Context message (F-04 slice 2).
+/// Committed before the run input so the durable transcript chain stays
+/// linear: head → world-state → input.
+pub fn world_state_message_id(execution_id: &str) -> String {
+    format!("{execution_id}/world_state")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

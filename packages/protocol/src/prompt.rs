@@ -2,9 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AgentInstanceId, AgentSpec, ToolDef};
+use crate::{AgentInstanceId, AgentSpec, Message, ToolDef};
 
-pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 3;
+pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 4;
 
 /// Instruction authority is independent from rendered message order.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,11 +115,16 @@ pub struct PromptCachePlan {
 }
 
 /// Host-owned immutable resources captured for one accepted Agent run.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptResourceSnapshot {
     #[serde(default)]
     pub blocks: Vec<PromptBlock>,
+    /// Retained, data-only world-state Context message for this run
+    /// (F-04 slice 2). It is injected into the transcript at run start and
+    /// is never rendered as a frozen prompt block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_state: Option<Message>,
 }
 
 /// The canonical prompt value frozen and reused by every Model Step in a run.

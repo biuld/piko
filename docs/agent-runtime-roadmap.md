@@ -60,7 +60,7 @@ Goal: long sessions stay correct and within budget without manual intervention.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting | implemented (F-04/D-04/V-04) |
+| F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting; world-state diffing (full → diff, hostd durable baseline, cleared on compaction) | implemented (F-04/D-04/V-04; slice 2 D-17/V-17) |
 | F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | implemented (F-05/D-05/V-05; piko-native summarizer-model override replaces provider-side remote compaction) |
 | F-15 observability | usage accounting per turn (baseline for budget decisions) | partial |
 
@@ -156,18 +156,21 @@ behavior contract with its own acceptance criteria).
 
 ## 5. Next step
 
-**M0 is complete** and **F-05 compaction** (the M1 entry slice) landed:
-budget-window auto-compact with hysteresis and a pending guard, inline
-compact (`session.compact { mode: new-context-window }` without
-summarization), model-visible `get_context_remaining` / `new_context_window`
-tools, a `[transcript] max-tool-output-tokens` setting wired into the F-04
-model view, and a piko-native summarizer-model override with default-model
-fallback (provider-side remote compaction rejected per ADR-002).
-`F-05/D-05/V-05` complete. Next sequencing:
+**M0 is complete** and the M1 entry slices landed. **F-05 compaction**
+`F-05/D-05/V-05` complete: budget-window auto-compact with hysteresis and a
+pending guard, inline compact (`session.compact { mode: new-context-window }`
+without summarization), model-visible `get_context_remaining` /
+`new_context_window` tools, a `[transcript] max-tool-output-tokens` setting
+wired into the F-04 model view, and a piko-native summarizer-model override
+with default-model fallback (provider-side remote compaction rejected per
+ADR-002). **F-04 world-state diffing** `D-17/V-17` complete: the `state.run`
+facts moved to a retained transcript Context message — full on the first
+run, diff across runs — with a hostd-owned durable baseline cleared on
+compaction. Next sequencing:
 
-1. **M1 follow-ons**: F-04 world-state diffing (builds on the frozen
-   `state.run` baseline) and any remaining budget-window polish (e.g.
-   per-model compaction defaults for `min_growth_tokens`).
+1. **M1 remainder**: token-budget context fragments and any remaining
+   budget-window polish (e.g. per-model compaction defaults for
+   `min_growth_tokens`).
 2. **M2 — F-08 exec-sandboxing**: PTY/process-group lifecycle, shell
    snapshots, and network sandbox — the next milestone entry slice.
 3. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and

@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    PromptSnapshotOptions, expand_prompt_template, snapshot_prompt_resources,
+    PromptSnapshotOptions, RunKind, WorldStateFacts, expand_prompt_template,
+    snapshot_prompt_resources, world_state_context_message, world_state_diff_content,
+    world_state_full_content,
 };
 use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
@@ -118,20 +120,49 @@ impl HostApp {
             (previous_model, continuation)
         };
         let model = active_model.as_ref().map(|model| model.model_id.clone());
-        let prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
+        // World-state injection (F-04 slice 2) covers the session root agent:
+        // the durable baseline is per-session, so comparing across agent
+        // instances would mix identities. Child runs (direct chat or
+        // multi-agent) keep the agent-spec prompt without a world-state
+        // message.
+        let is_root = agent_instance_id == root_agent_instance_id;
+        let world_state_facts = WorldStateFacts {
+            session_id: Some(session_id.clone()),
+            agent_instance_id: Some(agent_instance_id.clone()),
+            operation_id: Some(turn_id.clone()),
+            run_kind: if continuation {
+                RunKind::Continuation
+            } else {
+                RunKind::Initial
+            },
+            model,
+        };
+        let previous_world_state = if is_root {
+            let mut state = self.state.lock().await;
+            state.record_world_state(&session_id, &world_state_facts)?
+        } else {
+            None
+        };
+        let world_state_message = if is_root {
+            match previous_world_state.as_ref() {
+                Some(previous) => world_state_diff_content(previous, &world_state_facts),
+                None => world_state_full_content(&world_state_facts),
+            }
+            .map(world_state_context_message)
+        } else {
+            None
+        };
+        let mut prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
             skills,
             prompt_templates: templates,
-            session_id: Some(session_id.clone()),
-            agent_instance_id: Some(agent_instance_id.clone()),
-            operation_id: Some(turn_id.clone()),
-            model,
+            model: world_state_facts.model.clone(),
             previous_model: previous_model.as_ref().map(|model| model.model_id.clone()),
-            continuation,
             environment: crate::domain::prompts::EnvironmentSnapshot::capture(),
             ..PromptSnapshotOptions::default()
         });
+        prompt_resources.world_state = world_state_message;
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
         let cwd = {
@@ -139,6 +170,11 @@ impl HostApp {
             state.session_cwd(&session_id).unwrap_or_default()
         };
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
+        // The world-state baseline is durable regardless of model
+        // configuration: `model` is one optional fact, not a precondition.
+        if is_root && let Some(storage) = &self.storage {
+            let _ = storage.set_world_state_baseline(&session_dir, Some(&world_state_facts));
+        }
         if let (Some(storage), Some(current)) = (&self.storage, active_model.as_ref()) {
             let changed = previous_model
                 .as_ref()

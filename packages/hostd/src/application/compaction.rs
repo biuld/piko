@@ -359,12 +359,17 @@ impl HostApp {
             {
                 let _ = state.append_entry(session_id, entry);
                 compacted = true;
+                // A rewritten transcript no longer guarantees the retained
+                // world-state snapshot (F-04 slice 2): clear the durable
+                // baseline so the next run re-injects full.
+                let _ = storage.set_world_state_baseline(&path, None);
             }
         }
         if let Ok(session) = state.session_mut(session_id) {
             session.compaction.pending = false;
             session.compaction.window_number = window_number_before + 1;
             session.compaction.rearm_tokens = Some(tokens_after);
+            session.world_state_baseline = None;
         }
         drop(state);
 

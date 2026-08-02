@@ -197,13 +197,32 @@ impl AgentExecutionRuntime {
             agent_id: request.config.agent_id.clone(),
         };
 
+        let world_state_commit =
+            request
+                .world_state
+                .as_ref()
+                .map(|message| piko_protocol::execution::MessageCommit {
+                    session_id: request.session_id.clone(),
+                    source_turn_id: request.source_turn_id.clone(),
+                    execution_id: request.execution_id.clone(),
+                    agent_instance_id: request.agent_instance_id.clone(),
+                    message_id: piko_protocol::world_state_message_id(&request.execution_id),
+                    parent_message_id: request.context.head_message_id.clone(),
+                    message: message.clone(),
+                    committed_at: chrono::Utc::now().timestamp_millis(),
+                });
+        // The durable chain must stay linear (hostd enforces parent == head):
+        // world-state first, then the input anchored on the world-state id.
         let input_commit = piko_protocol::execution::MessageCommit {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             message_id: request.input_message_id.clone(),
-            parent_message_id: request.context.head_message_id.clone(),
+            parent_message_id: world_state_commit
+                .as_ref()
+                .map(|commit| commit.message_id.clone())
+                .or_else(|| request.context.head_message_id.clone()),
             message: piko_protocol::Message::User {
                 content: request.input.clone(),
                 timestamp: Some(chrono::Utc::now().timestamp_millis()),
@@ -248,6 +267,7 @@ impl AgentExecutionRuntime {
             generation,
             terminal_tx: Some(terminal_tx),
             receipt,
+            world_state_commit,
             input_commit,
             trace_span,
         })
@@ -363,6 +383,7 @@ pub(crate) struct PreparedExecution {
     generation: u64,
     terminal_tx: Option<piko_comms::ReplySender<ExecutionTerminalContract, ExecutionTerminal>>,
     receipt: ExecutionReceipt,
+    world_state_commit: Option<piko_protocol::execution::MessageCommit>,
     input_commit: piko_protocol::execution::MessageCommit,
     trace_span: tracing::Span,
 }
@@ -407,6 +428,14 @@ impl PreparedExecution {
     }
 
     pub async fn commit_input(&self) -> Result<(), AgentApiError> {
+        if let Some(commit) = &self.world_state_commit {
+            self.scope
+                .ports()
+                .commit
+                .commit_message(commit.clone())
+                .await
+                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        }
         self.scope
             .ports()
             .commit

@@ -15,6 +15,7 @@ use piko_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::domain::prompts::WorldStateFacts;
 use crate::domain::sessions::{SessionModelRef, SessionState};
 
 pub const SESSION_SCHEMA_VERSION: u32 = 3;
@@ -48,6 +49,10 @@ pub struct SessionManifest {
     /// marker and the prompt model-switch fragment.
     #[serde(default)]
     pub last_model: Option<SessionModelRef>,
+    /// World-state diff baseline for the next root turn (F-04 slice 2).
+    /// Cleared by compaction so the next run re-injects the full snapshot.
+    #[serde(default)]
+    pub world_state_baseline: Option<WorldStateFacts>,
     /// Session-scoped metadata only; transcript messages never live here.
     pub entries: Vec<SessionTreeEntry>,
 }

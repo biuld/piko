@@ -53,7 +53,7 @@ PromptSnapshotOptions {
 }
   ▼
 snapshot_prompt_resources ──► PromptResourceSnapshot
-  • state.run            (when any durable fact present)
+  • state.run            (superseded by D-17: retained transcript message)
   • environment.host     (when any captured fact present)
   • context.model-switch (when previous_model != model, both known)
   ▼
@@ -115,19 +115,19 @@ pub struct PromptSnapshotOptions {
 Block emission in `snapshot_prompt_resources` (order after the catalogs,
 before `environment.run`):
 
-1. `state.run` — `PromptBlockKind::Context`, authority `None`, trust
-   `Trusted`, source `run-state` / `hostd/session`, scope `RunDynamic`.
-   Content lines in fixed order: `session_id`, `agent_instance_id`,
-   `operation_id`, `run_kind` (only when `continuation`), `model`. Emitted
-   when at least one fact is present.
-2. `environment.host` — `PromptBlockKind::Environment`, authority `None`,
+1. `environment.host` — `PromptBlockKind::Environment`, authority `None`,
    trust `Trusted`, source `environment` / `host`, scope `RunDynamic`.
    Content lines in the `EnvironmentSnapshot` field order, omitting `None`.
    Emitted when at least one fact is present.
-3. `context.model-switch` — `PromptBlockKind::Context`, authority `None`,
+2. `context.model-switch` — `PromptBlockKind::Context`, authority `None`,
    trust `Trusted`, source `environment` / `model-switch`, scope `RunDynamic`.
    Emitted only when `previous_model` and `model` are both `Some` and differ.
    Content is a fixed `<model_switch>` wrapper naming both models.
+
+> **Superseded**: the `state.run` block from this slice was removed by
+> F-04 slice 2 (D-17). The run facts are now a retained transcript Context
+> message injected full on the first run and diffed across runs; the fact
+> set and line order below still define the full-snapshot content.
 
 The existing `block()` helper already trims content and computes stable
 content digests, so the new fragments get digests for free. `cache_segments`
@@ -191,7 +191,8 @@ they were assembled under the new catalog.
 ## Verification
 
 - Unit/integration tests in `packages/hostd/tests/resources.rs`:
-  - `state.run` emission with all facts and fixed order.
+  - World-state facts are no longer prompt blocks (F-04 slice 2); the fact
+    rendering is unit-tested in `domain/prompts/world_state.rs` (V-17).
   - `environment.host` emission with partial capture (omits `None`).
   - Model-switch emitted on change, absent on first run and on no change.
   - RunDynamic scope regression: new blocks never change

@@ -258,7 +258,7 @@ already non-streaming.
 | Exponential backoff with jitter | **kept (adapted)** | Adds a configured per-attempt cap and total budget (codex caps implicitly via stream retry count); jitter range matches codex `[0.9, 1.1]` |
 | Server-provided retry delay (`Retry-After`) | **rejected for now** | genai does not expose response headers on errors; backoff is config-derived. Revisit if a consumer needs it |
 | Prewarm and sticky session transport state | **rejected for this slice** | No WebSocket session to warm in piko; tracked as a later F-02 slice if a consumer appears |
-| `<model_switch>` fragment injected on model change | **kept (adapted)** | piko derives it from the durable session model record (`state.run`/`context.model-switch`, F-03); codex injects the fragment from session settings |
+| `<model_switch>` fragment injected on model change | **kept (adapted)** | piko derives it from the durable session model record (`context.model-switch`, F-03); the world-state message is a separate retained transcript Context (F-04 slice 2); codex injects the fragment from session settings |
 | Per-thread previous-model bookkeeping | **kept (adapted)** | piko records provider+model per session in `session.json` and detects continuity at turn submission instead of diffing settings at write time |
 
 ## Open questions

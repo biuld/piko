@@ -172,6 +172,20 @@ impl JsonlSessionRepository {
         Ok(())
     }
 
+    /// Persist the session's world-state baseline (F-04 slice 2). `None`
+    /// clears it so the next run re-injects the full snapshot.
+    pub fn set_world_state_baseline(
+        &self,
+        session_dir: &Path,
+        facts: Option<&crate::domain::prompts::WorldStateFacts>,
+    ) -> Result<(), SessionStorageError> {
+        let store = SessionStore::new(session_dir);
+        store.update_manifest(|manifest| {
+            manifest.world_state_baseline = facts.cloned();
+        })?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn append_compaction(
         &self,

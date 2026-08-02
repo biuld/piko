@@ -89,11 +89,14 @@ is exceeded.
   environment-context fragments; per-run digest/versioning.
 - piko status: **partial** — `F-03 prompt-assembly` (hostd `domain/prompts`
   structured blocks + orchd frozen `AgentRunPrompt`; skills loader exists).
-  Fragment-catalog breadth slice landed (world-state `state.run`,
+  Fragment-catalog breadth slice landed (world-state facts — originally a
+  `state.run` block, since moved to a retained transcript message —
   environment-context `environment.host`, model-switch
-  `context.model-switch`; F-03/D-03/V-03). Gaps: inter-agent message
-  fragments, mention-syntax parsing, cache-planning polish, world-state
-  diffing (F-04).
+  `context.model-switch`; F-03/D-03/V-03). World-state diffing landed in
+  F-04 slice 2 (D-17/V-17): the run facts became a retained transcript
+  Context message (full first, diff afterwards) with a hostd-owned durable
+  baseline cleared on compaction. Gaps: inter-agent message fragments,
+  mention-syntax parsing, cache-planning polish.
 
 ### D. Context Management & Compaction
 
@@ -114,7 +117,8 @@ is exceeded.
   `get_context_remaining` / `new_context_window` tools, and a
   piko-native summarizer-model override with default-model fallback
   (provider-side remote compaction rejected). Remaining gaps:
-  token-budget context fragments and world-state diffing (F-04 follow-ons).
+  token-budget context fragments (F-04 follow-on); world-state diffing
+  landed (F-04 slice 2 / D-17 / V-17).
 
 ### E. Tool System
 
@@ -261,8 +265,8 @@ is exceeded.
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
 | B Model Gateway | F-02 | partial (retry/backoff + streaming fallback landed) | prewarm, sticky routing |
-| C Prompt Assembly | F-03 | partial | fragment catalog breadth, world state |
-| D Context & Compaction | F-04, F-05 | partial (F-04 slice landed) | model-view truncation + snapshots landed; budget windows next |
+| C Prompt Assembly | F-03 | partial (world-state diffing landed in F-04 slice 2) | inter-agent fragments, mention-syntax parsing |
+| D Context & Compaction | F-04, F-05 | partial (F-04 slices + F-05 landed) | world-state diffing landed; token-budget context fragments next |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
 | F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop, elicitation |
 | G Exec & Sandbox | F-08 | partial | PTY/process lifecycle, unified exec |

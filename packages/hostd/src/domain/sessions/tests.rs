@@ -108,6 +108,41 @@ fn record_turn_model_reports_previous_model_and_tracks_continuity() {
 }
 
 #[test]
+fn record_world_state_returns_previous_facts_and_tracks_baseline() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp") {
+        crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session created"),
+    };
+    let facts = |operation_id: &str, run_kind: crate::domain::prompts::RunKind| {
+        crate::domain::prompts::WorldStateFacts {
+            session_id: Some(session_id.clone()),
+            agent_instance_id: Some("agent_root".into()),
+            operation_id: Some(operation_id.into()),
+            run_kind,
+            model: Some("model-a".into()),
+        }
+    };
+
+    // First turn: no baseline → full injection is triggered upstream.
+    let first = facts("turn_1", crate::domain::prompts::RunKind::Initial);
+    assert_eq!(state.record_world_state(&session_id, &first).unwrap(), None);
+
+    // Second turn: previous facts become the diff baseline.
+    let second = facts("turn_2", crate::domain::prompts::RunKind::Continuation);
+    let previous = state.record_world_state(&session_id, &second).unwrap();
+    assert_eq!(previous, Some(first));
+    assert_eq!(
+        state
+            .session(&session_id)
+            .unwrap()
+            .world_state_baseline
+            .as_ref(),
+        Some(&second)
+    );
+}
+
+#[test]
 fn agent_list_orders_parent_before_child_tasks() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp") {

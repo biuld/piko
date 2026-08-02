@@ -50,6 +50,10 @@ pub struct SessionState {
     /// `SessionManifest.last_model`; drives the prompt model-switch fragment
     /// and the durable JSONL `ModelChange` marker.
     pub last_model: Option<SessionModelRef>,
+    /// Last world-state facts recorded for a turn in this session (F-04
+    /// slice 2). Durable via `SessionManifest.world_state_baseline`; drives
+    /// the full-vs-diff world-state injection decision.
+    pub world_state_baseline: Option<crate::domain::prompts::WorldStateFacts>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
     /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
@@ -126,6 +130,7 @@ impl SessionState {
             task_heads: HashMap::new(),
             steer_queue: Vec::new(),
             last_model: None,
+            world_state_baseline: None,
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
             active_agent_instance_id: None,

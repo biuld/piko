@@ -61,6 +61,10 @@ impl AgentActor {
                     agent_spec: self.spec.clone(),
                     run_prompt: run_context.prompt,
                     tool_catalog: run_context.tool_catalog,
+                    world_state: request
+                        .prompt_resources
+                        .as_ref()
+                        .and_then(|resources| resources.world_state.clone()),
                     input_message_id: request.message_id,
                     input: request.content,
                     context: ConversationContext {

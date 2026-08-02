@@ -21,21 +21,24 @@ drives hostd-authoritative model continuity directly.
 
 All F-03 acceptance criteria for this slice pass:
 
-- **World-state fragment**: a snapshot with run facts emits exactly one
-  `state.run` block (kind `Context`, trust `Trusted`, source
-  `run-state`/`hostd/session`) with `session_id`, `agent_instance_id`,
-  `operation_id`, `run_kind`, and `model` lines in the fixed order; a
-  session with committed entries is marked `run_kind: continuation`.
+- **World-state fragment (superseded by F-04 slice 2)**: the run facts were
+  originally emitted as a frozen `state.run` block; F-04 slice 2 (D-17)
+  moved them to a retained transcript Context message (full on the first
+  run, diff afterwards). The fact set and fixed line order are unchanged
+  and now unit-tested in `domain/prompts/world_state.rs` (V-17).
 - **Environment-context fragment**: a snapshot with host facts emits exactly
   one `environment.host` block (kind `Environment`) with the captured facts
   in fixed key order; unavailable facts are omitted.
-- **Empty state**: a default snapshot omits all three new blocks.
+- **Empty state**: a default snapshot omits the environment and model-switch
+  blocks; world-state is injected by the turn submit path, not the prompt
+  snapshot.
 - **Model-switch fragment**: `context.model-switch` is emitted exactly when
   the previous and current models are both known and differ, naming both
   models inside a `<model_switch>` wrapper; first runs and unchanged-model
   runs emit none.
-- **Cache safety**: all three new blocks carry `RunDynamic` scope — changing
-  session identity, model, or host facts changes `source_digest` but never
+- **Cache safety**: the RunDynamic blocks (`environment.host`,
+  `context.model-switch`) — changing model or host facts changes
+  `source_digest` but never
   `semantic_prefix_digest`; changing project context still invalidates the
   prefix (regression guard).
 - **Determinism**: identical inputs produce byte-identical block content and
@@ -43,8 +46,10 @@ All F-03 acceptance criteria for this slice pass:
 - **Model continuity**: `record_turn_model` returns the previous session
   model and records the current one; a `None` model never erases history
   (unit test).
-- **Assembly version**: `AGENT_RUN_PROMPT_ASSEMBLY_VERSION` is `3`, so old
-  frozen prompts are not replayed under the new block catalog.
+- **Assembly version**: `AGENT_RUN_PROMPT_ASSEMBLY_VERSION` is `4` (was `3`
+  at F-03 landing; bumped when `state.run` left the block catalog in
+  F-04 slice 2), so old frozen prompts are not replayed under the new block
+  catalog.
 
 ## Differential validation
 

@@ -1,10 +1,10 @@
-# F-04: Context management — transcript accounting, snapshots, and output truncation
+# F-04: Context management — transcript accounting, snapshots, truncation, and world-state diffing
 
-> Status: implemented
+> Status: implemented (slice 1); implemented (slice 2, world-state diffing)
 > Priority: P0
 > Source evidence: codex-rs `core/src/context_manager/{history,normalize,updates}.rs`,
 > `core/src/context_manager/token_budget.rs`, `core/src/tools/context.rs`
-> (tool-result truncation)
+> (tool-result truncation); `core/src/context/world_state/*` (slice 2)
 
 ## Summary
 
@@ -198,3 +198,178 @@ rollback(checkpoint) → messages/tokens truncated, generation += 1
   `packages/orchd/src/runtime/execution/budget.rs` (pre-slice preflight),
   `packages/orchd/src/runtime/execution/actor.rs` (model-step dispatch),
   `packages/hostd/src/domain/compaction/mod.rs` (hostd-side estimation).
+
+## Slice 2: World-state diffing across turns
+
+### Summary
+
+Run identity facts (`state.run` from F-03) stop being rebuilt into the frozen
+per-run prompt. They become a retained, data-only **world-state Context
+message** injected into the model-visible transcript at run start: the first
+run of a session injects the full snapshot, and each continuation run injects
+only the facts that changed since the previous run's frozen baseline. hostd
+owns the durable baseline and the full-vs-diff decision; orchd commits and
+retains the message before the turn's user message. Transcript rewrites
+(compaction) clear the baseline so the next run falls back to a full
+re-injection. Implementation: [D-17](../design/D-17-world-state-diffing.md).
+
+### Problem
+
+F-03 freezes a full `state.run` snapshot into every run's prompt. Because the
+frozen prompt is rebuilt per run and its dynamic-context blocks are not
+retained in the transcript, the model re-reads the same identity facts every
+turn. That defeats the codex-rs "freeze once, diff later" model: as
+world-state grows (permissions, environments, agent roles in later
+milestones), re-stating the full snapshot every run wastes context and makes
+the prompt noisier, while nothing tells the model what actually changed.
+
+### User journeys
+
+1. An agent starts a fresh session. The model sees one full world-state
+   message (session, agent, operation, run kind, model) before the first
+   user message.
+2. The session continues for a second turn. The model sees the same full
+   snapshot retained from turn 1, plus a short update naming the new
+   operation id (and any other changed facts) right before turn 2's user
+   message — not a repeated five-line block.
+3. A user compacts a long session. The next run re-injects the full snapshot
+   so the model is never left with a diff and no baseline.
+
+### In scope
+
+- hostd-owned world-state fact set and durable per-session baseline
+  (session manifest, mirroring `last_model`).
+- Full-vs-diff content computation against the previous run's frozen facts;
+  fixed key order; `<unset>` for removed facts; no message when nothing
+  changed.
+- orchd run-start injection: the world-state Context message is committed
+  before the input message (linear parent chain) and pushed into the
+  execution transcript, so it is retained in the session transcript.
+- Baseline clearing on successful compaction (auto `Summarize`, manual
+  `session.compact`, and `new_context_window` fresh window).
+- Removal of the `state.run` block from the frozen prompt catalog and the
+  assembly-version bump (`3 → 4`).
+
+### Out of scope
+
+- Diffing for `environment.host` / `environment.run` (they stay RunDynamic
+  prompt blocks; host facts are small and per-run).
+- `context.model-switch` behavior (unchanged; it already reports model
+  changes separately).
+- Subagent (F-10) world-state injection for child agent runs; this slice
+  covers hostd root turns only.
+- Token-budget context fragments (separate M1 follow-on).
+- Rollout/world-state patch records (codex-rs `WorldStateItem::patch`); the
+  durable transcript message is the record.
+
+### Behavior and states
+
+#### Facts and baseline
+
+- Fact set and fixed order: `session_id`, `agent_instance_id`,
+  `operation_id`, `run_kind` (`initial` | `continuation`), `model`. All
+  facts are optional except `run_kind`, which is always known.
+- hostd records the current facts as the new baseline immediately when a
+  turn is accepted (in-memory `SessionState` + durable manifest), returning
+  the previous baseline for the full/diff decision — the same pattern as
+  `record_turn_model` / `last_model`.
+
+#### Full vs diff emission
+
+- **Full** (no baseline): one line per available fact in fixed order,
+  byte-identical to the F-03 `state.run` block content.
+- **Diff** (baseline exists): a header line
+  `world-state changed since the previous run:` followed by one line per
+  changed fact in fixed order (`fact: value`); a fact that became
+  unavailable renders `fact: <unset>`; unchanged facts render nothing.
+- The diff message is emitted only when at least one fact changed.
+
+#### Model-visible shape and retention
+
+- The world-state message is `Message::Context` (data-only; authority=None,
+  trust=Trusted, source `run-state` / `hostd/session`), pushed into the
+  execution transcript before the turn's user message and committed to the
+  durable AgentInstance shard before the input commit.
+- Because the message is committed to the session transcript, it survives
+  into later runs: a continuation sees the retained full snapshot (from the
+  first run) followed by each run's diff lines.
+- The frozen run prompt no longer contains a `state.run` block;
+  `AGENT_RUN_PROMPT_ASSEMBLY_VERSION` bumps `3 → 4`.
+
+#### Baseline invalidation
+
+- Every successful compaction rewrite (auto Summarize, manual compact, and
+  `new_context_window`) clears the durable + in-memory baseline, so the next
+  run re-injects the full snapshot (mirrors codex-rs clearing
+  `world_state_baseline` when history is rewritten).
+- After a hostd restart, continuation runs keep diffing against the
+  restored manifest baseline.
+
+### Acceptance criteria
+
+- [ ] A fresh session run injects one full world-state Context message
+      before the user message, with all available facts in fixed order
+      (unit evidence).
+- [ ] A continuation run injects only the changed facts before its user
+      message; unchanged facts are absent from the diff and remain visible
+      through the retained full snapshot from the first run (unit +
+      end-to-end evidence).
+- [ ] An unchanged fact set emits no world-state message (unit evidence).
+- [ ] A fact that becomes unavailable renders `<unset>` (unit evidence).
+- [ ] The durable baseline survives a hostd restart: the next continuation
+      diffs against the restored baseline instead of re-emitting full
+      (storage evidence).
+- [ ] A successful compaction (auto/manual/new-context-window) clears the
+      baseline; the next run re-injects full (integration evidence).
+- [ ] The frozen prompt contains no `state.run` block; the assembly version
+      is 4; environment blocks remain RunDynamic and never change the
+      stable prefix digest (regression guard).
+- [ ] The durable transcript chain is linear: head → world-state → input;
+      the world-state commit precedes the input commit (integration
+      evidence).
+- [ ] Differential validation: a two-run session shows full → diff emission
+      mirroring codex-rs `update_world_state` full-then-patch behavior at
+      the message level.
+
+### Product decisions
+
+| Question | Decision | Rationale |
+|---|---|---|
+| Who owns the baseline and diff decision? | hostd (durable manifest + in-memory `SessionState`) | hostd is authoritative for user-visible state; orchd stays a transient executor (ADR-002) |
+| Where does the model see world-state? | A retained transcript Context message, not the frozen prompt | Retention across runs is impossible from the per-run frozen prompt; transcript Context messages are already model-visible and durable |
+| When is full vs diff emitted? | Baseline absent → full; baseline present → diff | Mirrors codex-rs `update_world_state`; stale baselines after history rewrites are prevented by clearing on compaction |
+| What does a diff look like? | `fact: value` lines with a header; `<unset>` for removals | Line format stays consistent with F-03 content; the header marks the message as an update |
+| What happens on compaction? | Clear the baseline; next run re-injects full | Matches codex-rs clearing `world_state_baseline` on history rewrite so diffs never reference a lost snapshot |
+
+### Fusion decisions (codex-rs)
+
+| codex-rs behavior | Decision | piko landing / rationale |
+|---|---|---|
+| `update_world_state`: snapshot, render diff fragments, persist baseline | **kept (adapted)** | piko diffs the F-03 fact set in hostd and injects one transcript Context message per run; no per-section fragment rendering (piko has a single flat fact set today) |
+| `world_state_baseline` cleared on history rewrite | **kept** | piko clears the hostd manifest baseline on every successful compaction |
+| `WorldStateItem::full/patch` rollout records | **rejected (this slice)** | piko has no rollout record for world-state; the durable transcript message is the model-visible and durable record |
+| JSON merge-patch diff (RFC 7386) | **rejected (adapted)** | piko's fact set is flat and line-rendered; a line diff is smaller and matches the existing block format |
+
+### Open questions
+
+1. Fork/branch: the manifest baseline is copied to a forked session while
+   the copied transcript may not contain the matching full snapshot.
+   Deferred; low risk (a diff against an absent snapshot is data-only), but
+   a future slice may clear the baseline on fork.
+2. Subagent runs (F-10): world-state injection is root-turn-only today;
+   per-agent baselines would be needed if child agents get run identity.
+
+### Reference evidence
+
+- codex-rs `core/src/context_manager/history.rs` (`update_world_state`,
+  baseline clearing on history rewrite)
+- codex-rs `core/src/context/world_state/mod.rs` (snapshot, merge-patch,
+  diff rendering)
+- piko `packages/hostd/src/application/turns/submit.rs` (run assembly),
+  `packages/hostd/src/application/compaction.rs` (baseline clearing),
+  `packages/hostd/src/infra/storage/session_store/` (durable manifest +
+  message commits)
+- piko `packages/orchd/src/runtime/execution/{mod,actor}.rs` (run-start
+  commit ordering)
+- piko `packages/llmd/src/executor/prompt_mapping.rs` (Context → user-role
+  model message)

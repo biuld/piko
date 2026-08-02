@@ -57,6 +57,7 @@ impl SessionStore {
                 agent_executions: BTreeMap::new(),
                 agent_input_queue: Vec::new(),
                 last_model: None,
+                world_state_baseline: None,
                 entries: Vec::new(),
             })?;
             Ok(store.clone())

@@ -45,12 +45,110 @@ fn created_session_id(events: &[Event]) -> String {
 }
 
 fn world_state(snapshot: &PromptResourceSnapshot) -> String {
-    snapshot
-        .blocks
+    let Some(message) = &snapshot.world_state else {
+        return String::new();
+    };
+    match message {
+        piko_protocol::messages::Message::Context {
+            content: piko_protocol::messages::MessageContent::String(text),
+            ..
+        } => text.clone(),
+        _ => String::new(),
+    }
+}
+
+#[tokio::test]
+async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let server = HostServer::with_storage_and_runner(
+        JsonlSessionRepository::new(root),
+        Arc::new(CapturingRunner(captured.clone())),
+    );
+
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = created_session_id(&created);
+    let root_agent = format!("agent_{session_id}_root");
+
+    server
+        .set_active_model(Some(SessionModelRef::new("openai", "model-a")))
+        .await;
+    server
+        .handle_command(Command::ChatSubmit {
+            command_id: "s1".into(),
+            session_id: session_id.clone(),
+            target_agent_instance_id: root_agent.clone(),
+            text: "hello".into(),
+        })
+        .await;
+    server
+        .handle_command(Command::ChatSubmit {
+            command_id: "s2".into(),
+            session_id: session_id.clone(),
+            target_agent_instance_id: root_agent,
+            text: "again".into(),
+        })
+        .await;
+
+    let snapshots = captured.lock().unwrap().clone();
+    assert_eq!(snapshots.len(), 2);
+
+    // First run: full snapshot with identity facts and run_kind: initial.
+    let first = world_state(&snapshots[0]);
+    assert!(first.contains("session_id:"));
+    assert!(first.contains("agent_instance_id:"));
+    assert!(first.contains("operation_id: turn_"));
+    assert!(first.contains("run_kind: initial"));
+    assert!(first.contains("model: model-a"));
+    assert!(!first.contains("world-state changed"));
+
+    // Second run: diff only — changed operation id and run_kind, no repeated
+    // identity facts, no model line (unchanged).
+    let second = world_state(&snapshots[1]);
+    assert!(second.starts_with("world-state changed since the previous run:"));
+    assert!(second.contains("operation_id: turn_"));
+    assert!(second.contains("run_kind: continuation"));
+    assert!(!second.contains("session_id:"));
+    assert!(!second.contains("agent_instance_id:"));
+    assert!(!second.contains("model:"));
+
+    // Durable baseline: the manifest keeps the last recorded facts, and a
+    // fresh host reloading the same directory restores them.
+    let repo = JsonlSessionRepository::new(root);
+    let loaded = repo.list(None).expect("list sessions");
+    let persisted = loaded
         .iter()
-        .find(|block| block.id == "state.run")
-        .map(|block| block.content.clone())
-        .unwrap_or_default()
+        .find(|session| session.state.session_id == session_id)
+        .expect("persisted session");
+    let baseline = persisted
+        .state
+        .world_state_baseline
+        .as_ref()
+        .expect("world-state baseline persisted");
+    assert_eq!(
+        baseline.run_kind,
+        piko_hostd::domain::prompts::RunKind::Continuation
+    );
+    assert!(
+        baseline
+            .operation_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("turn_"))
+    );
+
+    let reopened = repo
+        .load_by_path(&persisted.path)
+        .expect("reload session from disk");
+    assert_eq!(
+        reopened.state.world_state_baseline,
+        persisted.state.world_state_baseline
+    );
 }
 
 #[tokio::test]

@@ -111,6 +111,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
                 delivery: AgentInputDelivery::Auto,
                 prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
                     blocks: vec![test_prompt_block(context)],
+                    world_state: None,
                 }),
                 active_tool_names: None,
             })

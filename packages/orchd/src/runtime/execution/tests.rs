@@ -163,6 +163,7 @@ fn request() -> StartExecutionRequest {
             ..Default::default()
         },
         tool_catalog: piko_protocol::ResolvedToolCatalog::default(),
+        world_state: None,
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
         context: piko_protocol::ConversationContext::empty(),
@@ -205,6 +206,69 @@ async fn dropping_prepared_execution_releases_its_reservation() {
         tokio::task::yield_now().await;
     }
     panic!("dropping PreparedExecution leaked its reservation");
+}
+
+#[tokio::test]
+async fn world_state_is_committed_before_input_and_pushed_into_transcript() {
+    let runtime = AgentExecutionRuntime::new(Arc::new(NoopGateway));
+    runtime
+        .attach_session(
+            "session".into(),
+            SessionExecutionPorts::new(Arc::new(NoopCommit)),
+        )
+        .await
+        .unwrap();
+
+    let mut plain = request();
+    plain.context.head_message_id = Some("head-1".into());
+    let prepared = runtime
+        .prepare_execution(plain, HashMap::new(), tracing::Span::none())
+        .await
+        .unwrap();
+    assert_eq!(
+        prepared.input_commit.parent_message_id.as_deref(),
+        Some("head-1"),
+        "without world-state the input anchors on the pre-run head"
+    );
+    drop(prepared);
+
+    let mut with_world_state = request_with("execution-2", "message-2");
+    with_world_state.agent_instance_id = "agent-2".into();
+    with_world_state.context.head_message_id = Some("head-1".into());
+    with_world_state.world_state = Some(piko_protocol::Message::Context {
+        content: piko_protocol::messages::MessageContent::String(
+            "world-state changed since the previous run:\noperation_id: turn_2".into(),
+        ),
+        trust: piko_protocol::ContentTrust::Trusted,
+        source: piko_protocol::PromptSource::new("run-state", "hostd/session"),
+        timestamp: None,
+    });
+    let prepared = runtime
+        .prepare_execution(with_world_state, HashMap::new(), tracing::Span::none())
+        .await
+        .unwrap();
+
+    let world_state_id = piko_protocol::world_state_message_id("execution-2");
+    let world = prepared
+        .world_state_commit
+        .as_ref()
+        .expect("world-state commit");
+    assert_eq!(world.message_id, world_state_id);
+    assert_eq!(world.parent_message_id.as_deref(), Some("head-1"));
+    assert_eq!(
+        prepared.input_commit.parent_message_id.as_deref(),
+        Some(world_state_id.as_str()),
+        "the durable chain stays linear: head → world-state → input"
+    );
+
+    let actor = prepared.actor.as_ref().expect("actor");
+    let messages = actor.transcript_messages();
+    assert_eq!(messages.len(), 2, "world-state then input");
+    assert!(matches!(
+        messages[0],
+        piko_protocol::Message::Context { .. }
+    ));
+    assert!(matches!(messages[1], piko_protocol::Message::User { .. }));
 }
 
 #[tokio::test]

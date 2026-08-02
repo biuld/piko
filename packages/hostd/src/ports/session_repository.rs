@@ -10,6 +10,7 @@ use std::path::Path;
 
 use super::storage_types::{PersistedSession, SessionStorageError};
 use crate::api::{SessionSummary, SessionTreeEntry};
+use crate::domain::prompts::WorldStateFacts;
 use crate::domain::sessions::SessionModelRef;
 
 pub trait SessionRepositoryPort: Send + Sync {
@@ -60,6 +61,14 @@ pub trait SessionRepositoryPort: Send + Sync {
         &self,
         session_dir: &Path,
         model: Option<&SessionModelRef>,
+    ) -> Result<(), SessionStorageError>;
+
+    /// Persist the session's world-state baseline (F-04 slice 2). `None`
+    /// clears it, forcing full re-injection on the next run.
+    fn set_world_state_baseline(
+        &self,
+        session_dir: &Path,
+        facts: Option<&WorldStateFacts>,
     ) -> Result<(), SessionStorageError>;
 
     #[allow(clippy::too_many_arguments)]

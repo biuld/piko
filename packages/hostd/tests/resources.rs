@@ -193,12 +193,8 @@ fn snapshots_semantic_context_skills_and_templates() {
 
 fn run_facts_options() -> PromptSnapshotOptions {
     PromptSnapshotOptions {
-        session_id: Some("session-1".into()),
-        agent_instance_id: Some("agent_1".into()),
-        operation_id: Some("turn_1".into()),
         model: Some("model-b".into()),
         previous_model: Some("model-a".into()),
-        continuation: true,
         environment: EnvironmentSnapshot {
             os: Some("macos".into()),
             arch: Some("aarch64".into()),
@@ -212,7 +208,7 @@ fn run_facts_options() -> PromptSnapshotOptions {
 }
 
 #[test]
-fn snapshots_emit_world_state_environment_host_and_model_switch_blocks() {
+fn snapshots_emit_environment_host_and_model_switch_blocks_without_world_state() {
     let snapshot = snapshot_prompt_resources(run_facts_options());
     let by_id = snapshot
         .blocks
@@ -220,22 +216,11 @@ fn snapshots_emit_world_state_environment_host_and_model_switch_blocks() {
         .map(|block| (block.id.as_str(), block))
         .collect::<std::collections::HashMap<_, _>>();
 
-    let world_state = by_id.get("state.run").expect("world-state block");
-    assert_eq!(world_state.kind, piko_protocol::PromptBlockKind::Context);
-    assert_eq!(
-        world_state.cache_scope,
-        piko_protocol::CacheScope::RunDynamic
-    );
-    assert_eq!(
-        world_state.content,
-        concat!(
-            "session_id: session-1\n",
-            "agent_instance_id: agent_1\n",
-            "operation_id: turn_1\n",
-            "run_kind: continuation\n",
-            "model: model-b",
-        )
-    );
+    // World-state moved to a retained transcript Context message (F-04
+    // slice 2): the frozen prompt must not carry it as a block, and the
+    // snapshot's message slot is populated by the turn submit path instead.
+    assert!(snapshot.world_state.is_none());
+    assert!(!snapshot.blocks.iter().any(|block| block.id == "state.run"));
 
     let host = by_id.get("environment.host").expect("environment block");
     assert_eq!(host.kind, piko_protocol::PromptBlockKind::Environment);
@@ -268,14 +253,13 @@ fn snapshots_omit_new_fragments_when_facts_are_absent() {
     let snapshot = snapshot_prompt_resources(PromptSnapshotOptions::default());
     assert!(!snapshot.blocks.iter().any(|block| matches!(
         block.id.as_str(),
-        "state.run" | "environment.host" | "context.model-switch"
+        "environment.host" | "context.model-switch"
     )));
 }
 
 #[test]
 fn model_switch_block_is_absent_on_first_run_and_unchanged_model() {
     let first_run = snapshot_prompt_resources(PromptSnapshotOptions {
-        session_id: Some("session-1".into()),
         model: Some("model-a".into()),
         previous_model: None,
         ..Default::default()
@@ -288,7 +272,6 @@ fn model_switch_block_is_absent_on_first_run_and_unchanged_model() {
     );
 
     let unchanged = snapshot_prompt_resources(PromptSnapshotOptions {
-        session_id: Some("session-1".into()),
         model: Some("model-a".into()),
         previous_model: Some("model-a".into()),
         ..Default::default()
@@ -316,9 +299,6 @@ fn run_dynamic_fragments_are_deterministic_and_cache_safe() {
     first.resources = with_project(run_facts_options());
     let mut second = first.clone();
     second.resources = with_project(PromptSnapshotOptions {
-        session_id: Some("session-2".into()),
-        agent_instance_id: Some("agent_2".into()),
-        operation_id: Some("turn_2".into()),
         model: Some("model-c".into()),
         previous_model: Some("model-a".into()),
         environment: EnvironmentSnapshot {

@@ -35,9 +35,11 @@ All F-02 model-continuity acceptance criteria pass:
   (they are execution facts).
 - **Fail closed**: with no active model, a turn records nothing, and the
   frozen prompt carries no `model:` line and no model-switch fragment.
-- **Prompt integration (F-03 regression)**: first run's `state.run` shows the
-  resolved model and no switch block; second run's snapshot carries the
-  switch block (cache-scope and determinism guarantees from V-03 hold).
+- **Prompt integration (F-03/F-04 regression)**: first run's world-state
+  message shows the resolved model and no switch block; second run's
+  snapshot carries the switch block (cache-scope and determinism guarantees
+  from V-03 hold; world-state is a retained transcript Context message per
+  F-04 slice 2).
 
 ## Invariants
 

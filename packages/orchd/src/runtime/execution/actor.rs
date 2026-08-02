@@ -62,6 +62,12 @@ impl ExecutionActor {
         services: ExecutionServices,
     ) -> Self {
         let mut transcript = TranscriptManager::new(Some(request.context.messages.clone()));
+        if let Some(world_state) = &request.world_state {
+            // Retained world-state (F-04 slice 2): committed by the startup
+            // scope before the input commit, so the in-memory order matches
+            // the durable linear chain head → world-state → input.
+            transcript.push_message(world_state.clone());
+        }
         transcript.push_user_content(request.input.clone(), None);
         let state = ExecutionState {
             status: ExecutionStatus::Accepted,
@@ -571,6 +577,11 @@ impl ExecutionActor {
                 .clone()
                 .unwrap_or_else(|| "default".into()),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn transcript_messages(&self) -> Vec<Message> {
+        self.state.transcript.to_vec()
     }
 
     async fn commit_message(

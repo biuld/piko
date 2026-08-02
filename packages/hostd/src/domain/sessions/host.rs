@@ -185,6 +185,21 @@ impl HostState {
         Ok(previous)
     }
 
+    /// Return the previously recorded world-state facts for the session (if
+    /// any) and record the facts of the turn about to run. The previous
+    /// value is the diff baseline; a `None` baseline triggers full
+    /// re-injection (F-04 slice 2).
+    pub fn record_world_state(
+        &mut self,
+        session_id: &str,
+        facts: &crate::domain::prompts::WorldStateFacts,
+    ) -> Result<Option<crate::domain::prompts::WorldStateFacts>, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        let previous = state.world_state_baseline.clone();
+        state.world_state_baseline = Some(facts.clone());
+        Ok(previous)
+    }
+
     pub fn apply_turn_input_disposition(
         &mut self,
         session_id: &str,
