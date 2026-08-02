@@ -1,15 +1,19 @@
 use piko_orchd_api::AgentApiError;
-use piko_protocol::messages::{ContentBlock, Message, MessageContent};
+use piko_protocol::{SemanticRunPrompt, ToolDef};
 
-/// Fail-closed provider preflight using a documented conservative estimator.
+use crate::domain::transcript::{TranscriptSnapshot, serialized_tokens};
+
+/// Fail-closed provider preflight (F-04 / D-04). `transcript` must be the
+/// exact normalized model view that will be dispatched, so the estimate and
+/// the request can never diverge.
 pub(super) fn enforce_context_budget(
-    prompt: &piko_protocol::SemanticRunPrompt,
-    transcript: &[Message],
-    tools: &[piko_protocol::ToolDef],
+    prompt: &SemanticRunPrompt,
+    transcript: &TranscriptSnapshot,
+    tools: &[ToolDef],
     context_window: u64,
     output_reserve: u64,
     reasoning_enabled: bool,
-) -> Result<(), AgentApiError> {
+) -> Result<BudgetEstimate, AgentApiError> {
     let prompt_tokens = serialized_tokens(prompt);
     let tool_tokens = serialized_tokens(tools).saturating_add(tools.len() as u64 * 32);
     let reasoning_reserve = if reasoning_enabled { output_reserve } else { 0 };
@@ -25,64 +29,26 @@ pub(super) fn enforce_context_budget(
         )));
     }
 
-    let transcript_tokens = transcript.iter().map(message_tokens).sum::<u64>();
+    let transcript_tokens = transcript.total_tokens();
     let total = fixed_tokens.saturating_add(transcript_tokens);
     if total > context_window {
         return Err(AgentApiError::ContextBudgetExceeded(format!(
-            "estimated request={total}, fixed={fixed_tokens}, transcript={transcript_tokens}, window={context_window}; compaction required"
+            "estimated request={total}, fixed={fixed_tokens}, transcript={transcript_tokens}, context_remaining={}, window={context_window}; compaction required",
+            context_window.saturating_sub(total)
         )));
     }
-    Ok(())
+    Ok(BudgetEstimate {
+        fixed_tokens,
+        transcript_tokens,
+        total,
+        context_remaining: context_window.saturating_sub(total),
+    })
 }
 
-fn serialized_tokens<T: serde::Serialize + ?Sized>(value: &T) -> u64 {
-    serde_json::to_vec(value)
-        .map(|bytes| (bytes.len() as u64).div_ceil(3))
-        .unwrap_or(u64::MAX)
-}
-
-fn message_tokens(message: &Message) -> u64 {
-    let content = match message {
-        Message::Context { content, .. } | Message::User { content, .. } => {
-            message_content_tokens(content)
-        }
-        Message::Assistant { content, .. } | Message::ToolResult { content, .. } => {
-            blocks_tokens(content)
-        }
-        Message::ToolCall {
-            name, arguments, ..
-        } => text_tokens(name).saturating_add(serialized_tokens(arguments)),
-    };
-    content.saturating_add(16)
-}
-
-fn message_content_tokens(content: &MessageContent) -> u64 {
-    match content {
-        MessageContent::String(text) => text_tokens(text),
-        MessageContent::Blocks(blocks) => blocks_tokens(blocks),
-    }
-}
-
-fn blocks_tokens(blocks: &[ContentBlock]) -> u64 {
-    blocks
-        .iter()
-        .map(|block| match block {
-            ContentBlock::Text { text } => text_tokens(text),
-            ContentBlock::Thinking {
-                thinking,
-                thinking_signature,
-            } => text_tokens(thinking)
-                .saturating_add(thinking_signature.as_deref().map(text_tokens).unwrap_or(0)),
-            // Base64 tokenization varies. One token per encoded byte plus
-            // framing is deliberately conservative across providers.
-            ContentBlock::Image { data, mime_type } => data
-                .len()
-                .saturating_add(mime_type.len())
-                .saturating_add(512) as u64,
-        })
-        .sum()
-}
-
-fn text_tokens(text: &str) -> u64 {
-    (text.len() as u64).div_ceil(3)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct BudgetEstimate {
+    pub fixed_tokens: u64,
+    pub transcript_tokens: u64,
+    pub total: u64,
+    pub context_remaining: u64,
 }

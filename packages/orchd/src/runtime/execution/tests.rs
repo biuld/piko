@@ -8,6 +8,7 @@ use piko_llmd::gateway::{GatewayEvent, GatewayRequest};
 use piko_protocol::execution::{CommitAck, CommitError, StartExecutionRequest};
 
 use super::*;
+use crate::domain::transcript::TranscriptSnapshot;
 
 #[test]
 fn context_budget_rejects_fixed_prompt_overhead_before_dispatch() {
@@ -24,22 +25,71 @@ fn context_budget_rejects_fixed_prompt_overhead_before_dispatch() {
         }],
         ..Default::default()
     };
-    let error = super::budget::enforce_context_budget(&prompt, &[], &[], 100, 50, false)
+    let transcript = TranscriptSnapshot::new(vec![], vec![]);
+    let error = super::budget::enforce_context_budget(&prompt, &transcript, &[], 100, 50, false)
         .expect_err("fixed overhead must fail closed");
     assert!(matches!(error, AgentApiError::ContextBudgetExceeded(_)));
 }
 
 #[test]
 fn context_budget_accepts_request_below_window() {
+    let transcript = TranscriptSnapshot::new(vec![], vec![]);
     let result = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
-        &[],
+        &transcript,
         &[],
         10_000,
         100,
         false,
     );
     assert!(result.is_ok());
+}
+
+#[test]
+fn context_budget_accounts_snapshot_and_reports_context_remaining() {
+    let messages = vec![
+        piko_protocol::Message::User {
+            content: piko_protocol::messages::MessageContent::String("y".repeat(18_000)),
+            timestamp: None,
+        },
+        piko_protocol::Message::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: Some("bash".into()),
+            content: vec![piko_protocol::messages::ContentBlock::Text {
+                text: "z".repeat(6_000),
+            }],
+            details: None,
+            is_error: Some(false),
+            timestamp: None,
+        },
+    ];
+    let tokens = crate::domain::transcript::tokens::estimate_messages(&messages);
+    let transcript = TranscriptSnapshot::new(messages, tokens);
+
+    let estimate = super::budget::enforce_context_budget(
+        &piko_protocol::SemanticRunPrompt::default(),
+        &transcript,
+        &[],
+        20_000,
+        100,
+        false,
+    )
+    .expect("below window");
+    assert_eq!(estimate.transcript_tokens, transcript.total_tokens());
+    assert_eq!(estimate.context_remaining, 20_000 - estimate.total);
+
+    let error = super::budget::enforce_context_budget(
+        &piko_protocol::SemanticRunPrompt::default(),
+        &transcript,
+        &[],
+        5_000,
+        100,
+        false,
+    )
+    .expect_err("over budget must fail closed");
+    let message = error.to_string();
+    assert!(message.contains("context_remaining=0"), "{message}");
+    assert!(message.contains("compaction required"), "{message}");
 }
 
 struct NoopGateway;

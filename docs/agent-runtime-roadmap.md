@@ -60,7 +60,7 @@ Goal: long sessions stay correct and within budget without manual intervention.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting | planned |
+| F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting | implemented (F-04/D-04/V-04) |
 | F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | partial (hostd summarizer) |
 | F-15 observability | usage accounting per turn (baseline for budget decisions) | partial |
 
@@ -157,11 +157,17 @@ behavior contract with its own acceptance criteria).
 ## 5. Next step
 
 **M0 is complete** — F-07 tool-approvals (approval timeout + deny semantics)
-landed with PRD/design/verification. Next sequencing:
+landed with PRD/design/verification. **F-04 context-management** (the M1
+entry slice: per-message token accounting, copy-on-write snapshots, and
+model-view tool-output truncation) landed with F-04/D-04/V-04; the orchd
+budget preflight now accounts the exact normalized view dispatched to the
+model. Next sequencing:
 
-1. **M1 context & memory**: F-04 context-management + F-05 compaction
-   (auto-compact trigger polish, budget windows, remote compaction), with
-   F-15 usage accounting as the baseline for budget decisions. World-state
-   diffing builds on the frozen `state.run` baseline.
+1. **M1 context & memory — F-05 compaction**: auto-compact trigger polish
+   (hysteresis/budget windows), inline compact, and remote compaction, with
+   F-15 usage accounting as the budget baseline. F-04 follow-ons worth
+   sequencing with it: model-visible `get_context_remaining` /
+   `new_context_window` tools and settings wiring for the truncation cap.
+   World-state diffing builds on the frozen `state.run` baseline.
 2. Follow-on M0 gaps worth sequencing first: F-03 mention-syntax parsing and
    cache-planning polish.

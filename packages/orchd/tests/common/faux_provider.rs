@@ -13,7 +13,7 @@ use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
 use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
-use piko_protocol::messages::{Message, Model, Usage};
+use piko_protocol::messages::{Message, Model, ToolCall, Usage};
 use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
 
 /// A canned response that the FauxProvider will emit.
@@ -21,6 +21,8 @@ use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
 pub struct CannedResponse {
     /// Text content for the assistant message.
     pub text: String,
+    /// Tool calls emitted after `text` (each as one complete chunk).
+    pub tool_calls: Vec<ToolCall>,
     /// Stop reason. Default: "stop".
     pub stop_reason: Option<String>,
     pub wait_for_cancel: bool,
@@ -31,6 +33,18 @@ impl CannedResponse {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            tool_calls: Vec::new(),
+            ..Default::default()
+        }
+    }
+
+    /// Quick constructor: one or more complete tool calls, stop reason
+    /// "tool_use".
+    pub fn tool_calls(calls: Vec<ToolCall>) -> Self {
+        Self {
+            text: String::new(),
+            tool_calls: calls,
+            stop_reason: Some("tool_use".into()),
             ..Default::default()
         }
     }
@@ -132,6 +146,13 @@ impl LlmGateway for FauxProvider {
             // Content delta for text
             if !canned.text.is_empty() {
                 evs.push(GatewayEvent::ContentDelta(canned.text.clone()));
+            }
+            for call in &canned.tool_calls {
+                evs.push(GatewayEvent::ToolCallChunk {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    args_delta: serde_json::to_string(&call.arguments).unwrap_or_default(),
+                });
             }
 
             // Usage (empty for faux)

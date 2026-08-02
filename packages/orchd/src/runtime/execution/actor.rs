@@ -23,7 +23,7 @@ use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
 use crate::domain::tools::definition::ToolExecutionMode;
-use crate::domain::transcript::TranscriptManager;
+use crate::domain::transcript::{TranscriptManager, TranscriptPolicy};
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
@@ -148,7 +148,10 @@ impl ExecutionActor {
                 thinking = tracing::field::Empty,
                 tools = tracing::field::Empty,
                 transcript_messages = tracing::field::Empty,
+                transcript_tokens = tracing::field::Empty,
+                truncated_outputs = tracing::field::Empty,
                 context_window = tracing::field::Empty,
+                context_remaining = tracing::field::Empty,
             );
             let step_started = std::time::Instant::now();
             let iteration = async {
@@ -284,7 +287,12 @@ impl ExecutionActor {
         } else {
             (Vec::new(), HashMap::new())
         };
-        let transcript = self.state.transcript.to_vec();
+        let model_view = self
+            .state
+            .transcript
+            .model_view(&TranscriptPolicy::default());
+        let snapshot = &model_view.snapshot;
+        let transcript = snapshot.messages().to_vec();
         let span = tracing::Span::current();
         span.record("step_id", format!("step_{step_count}"));
         span.record("model", &model.id);
@@ -292,16 +300,19 @@ impl ExecutionActor {
         span.record("thinking", thinking.as_deref().unwrap_or("none"));
         span.record("tools", tools.len());
         span.record("transcript_messages", transcript.len());
+        span.record("transcript_tokens", snapshot.total_tokens());
+        span.record("truncated_outputs", model_view.truncated_outputs);
         if let Some(config) = model_config.as_ref() {
             span.record("context_window", config.context_window);
-            super::budget::enforce_context_budget(
+            let estimate = super::budget::enforce_context_budget(
                 &self.request.run_prompt,
-                &transcript,
+                snapshot,
                 &tools,
                 config.context_window,
                 config.max_output_tokens,
                 thinking.is_some(),
             )?;
+            span.record("context_remaining", estimate.context_remaining);
         }
 
         let request = GatewayRequest {

@@ -106,10 +106,11 @@ is exceeded.
   accounting; function-output truncation; pre-sampling auto-compact, inline
   previous-model compact, remote/cloud compaction v2 with budget windows;
   token-budget context injection; model-visible "context remaining" tools.
-- piko status: **partial** — `F-04 context-management` (orchd fail-closed
-  budget preflight only) and `F-05 compaction` (hostd summarizer). Gaps:
-  transcript normalization/truncation, snapshot sharing, auto-compact
-  triggering, remote compaction.
+- piko status: **partial** — `F-04 context-management` (orchd per-message
+  token accounting, copy-on-write snapshots, model-view tool-output
+  truncation; F-04/D-04/V-04) and `F-05 compaction` (hostd summarizer).
+  Gaps: model-visible context tools, auto-compact budget windows, remote
+  compaction.
 
 ### E. Tool System
 
@@ -257,7 +258,7 @@ is exceeded.
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
 | B Model Gateway | F-02 | partial (retry/backoff + streaming fallback landed) | prewarm, sticky routing |
 | C Prompt Assembly | F-03 | partial | fragment catalog breadth, world state |
-| D Context & Compaction | F-04, F-05 | partial | truncation + auto-compact trigger |
+| D Context & Compaction | F-04, F-05 | partial (F-04 slice landed) | model-view truncation + snapshots landed; budget windows next |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
 | F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop, elicitation |
 | G Exec & Sandbox | F-08 | partial | PTY/process lifecycle, unified exec |

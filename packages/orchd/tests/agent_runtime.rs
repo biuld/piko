@@ -23,7 +23,7 @@ use piko_protocol::{
 use tokio::sync::Mutex;
 use tokio::sync::Semaphore;
 
-use faux_provider::FauxProvider;
+use faux_provider::{CannedResponse, FauxProvider};
 
 #[derive(Default)]
 struct CollectingAgentCommitPort {
@@ -371,6 +371,7 @@ async fn attached_runtime() -> (
 
 include!("agent_runtime_cases/atomicity.rs");
 include!("agent_runtime_cases/behavior.rs");
+include!("agent_runtime_cases/context.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");
 include!("agent_runtime_cases/shutdown.rs");
