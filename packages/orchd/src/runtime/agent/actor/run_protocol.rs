@@ -15,6 +15,20 @@ impl AgentActor {
         detached_recipient_agent_instance_id: Option<String>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
+        let run_span = tracing::info_span!(
+            parent: self.pending_run_parent.take().unwrap_or_else(tracing::Span::none),
+            "agent.run",
+            session_id = %self.identity.session_id,
+            run_id = %execution_id,
+            agent_instance_id = %self.identity.agent_instance_id,
+            parent_agent_instance_id = tracing::field::Empty,
+            agent_id = %self.identity.agent_spec_id,
+            agent_spec_id = %self.spec.id,
+            detached = detached_recipient_agent_instance_id.is_some(),
+        );
+        if let Some(parent_agent_instance_id) = request.caller_agent_instance_id.as_deref() {
+            run_span.record("parent_agent_instance_id", parent_agent_instance_id);
+        }
         self.run_state = AgentRunState::Starting {
             execution_id: execution_id.clone(),
         };
@@ -59,6 +73,7 @@ impl AgentActor {
                     },
                 },
                 run_context.routes,
+                run_span,
             )
             .await
         {

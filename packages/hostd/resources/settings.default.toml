@@ -50,3 +50,11 @@ base-delay-ms = 2000
 # policy-path = "sandbox-policy.json"
 # Shell path to use for executing terminal commands
 # shell-path = "bash"
+
+[observability]
+# End-to-end tracing + metrics export over OTLP HTTP (Jaeger/OTel collector).
+enabled = false
+# OTLP HTTP endpoint; /v1/traces and /v1/metrics are appended automatically
+otel-endpoint = "http://127.0.0.1:4318"
+# service.name used in the exported resource
+# service-name = "piko-hostd"

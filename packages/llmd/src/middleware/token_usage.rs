@@ -32,15 +32,20 @@ impl LlmdMiddleware for TokenUsageMiddleware {
 
             // Emit a dedicated telemetry log for token usage
             info!(
+                target: "llm.usage",
                 run_id = %ctx.run_id,
                 step_id = %ctx.step_id,
+                model = %ctx.model_id,
+                provider = %ctx.provider,
                 input_tokens = usage.input,
                 output_tokens = usage.output,
                 cache_read_tokens = usage.cache_read,
                 gateway_total_input = current_in + usage.input,
                 gateway_total_output = current_out + usage.output,
-                "Token usage tracked"
+                "llm.usage"
             );
+            ctx.telemetry()
+                .record_usage(&ctx.model_id, &ctx.provider, usage, usage.cost.total);
 
             // Expose the raw counts via the context metadata for other middlewares
             ctx.metadata

@@ -6,6 +6,18 @@ pub(crate) fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+/// Bound a JSON argument body recorded in spans to a sane size.
+pub fn truncate_json(value: &serde_json::Value, max: usize) -> String {
+    let text = serde_json::to_string(value).unwrap_or_default();
+    if text.len() <= max {
+        text.to_string()
+    } else {
+        let mut result = text.chars().take(max).collect::<String>();
+        result.push_str("...");
+        result
+    }
+}
+
 /// Produce a stable runtime assistant message ID.
 pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
     format!("{run_id}:{step_id}:assistant")

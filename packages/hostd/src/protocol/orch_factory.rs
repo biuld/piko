@@ -66,7 +66,11 @@ pub(crate) async fn build_orch_turn_runner(
             .and_then(|r| r.budget_ms)
             .unwrap_or(60_000),
     };
-    let executor = piko_llmd::build_gateway(providers, retry_config);
+    let executor = piko_llmd::build_gateway_with_telemetry(
+        providers,
+        retry_config,
+        crate::telemetry::handle(),
+    );
     let thinking = settings.default_thinking_level.clone();
     let thinking_map = resolved.model.thinking_level_map.clone();
     let runner = Arc::new(
@@ -81,6 +85,7 @@ pub(crate) async fn build_orch_turn_runner(
             resolved.model.max_tokens,
             &settings.mcp_servers,
             settings.sandbox.as_ref(),
+            crate::telemetry::handle(),
         )
         .await,
     );

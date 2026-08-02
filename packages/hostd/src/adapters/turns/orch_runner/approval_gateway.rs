@@ -17,6 +17,15 @@ impl ApprovalGateway for OrchAgentRunRunner {
         if !cwd.is_empty() {
             let store = self.get_approval_store(&cwd);
             if let Some(scope) = store.is_approved(&request.tool_name, &request.tool_args) {
+                tracing::event!(
+                    target: "tool.approval",
+                    tracing::Level::INFO,
+                    tool = %request.tool_name,
+                    tool_call_id = %request.tool_entity_id,
+                    agent_instance_id = %request.agent_instance_id,
+                    decision = ?scope,
+                    "Tool approval auto-accepted from prior grant"
+                );
                 tracing::info!(
                     "Auto-accepting pre-approved tool: {} at scope {:?}",
                     request.tool_name,
@@ -74,6 +83,15 @@ impl ApprovalGateway for OrchAgentRunRunner {
             Ok(d) => d,
             Err(_) => piko_protocol::ApprovalDecision::Decline,
         };
+        tracing::event!(
+            target: "tool.approval",
+            tracing::Level::INFO,
+            tool = %request.tool_name,
+            tool_call_id = %request.tool_entity_id,
+            agent_instance_id = %request.agent_instance_id,
+            decision = ?decision,
+            "Tool approval decision recorded"
+        );
 
         {
             let mut pending = self.pending_approvals.lock().unwrap();

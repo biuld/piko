@@ -262,6 +262,96 @@ fn text_events(events: &[GatewayEvent]) -> Vec<String> {
 // ---- Tests ----
 
 #[tokio::test]
+async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
+    use opentelemetry_sdk::testing::trace::new_tokio_test_exporter;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let (span_exporter, mut span_rx, _shutdown_rx) = new_tokio_test_exporter();
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_simple_exporter(span_exporter)
+        .build();
+    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+    let otel_layer = tracing_opentelemetry::layer()
+        .with_tracer(opentelemetry::global::tracer("gateway_retry_otel_test"));
+    let subscriber = tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(tracing_subscriber::fmt::layer().with_ansi(false));
+    static INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INIT.get_or_init(|| {
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+    });
+
+    let stub = Stub::start(Script {
+        steps: vec![Step::Status(503), Step::StreamSuccess],
+    })
+    .await;
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai".to_string(),
+        ProviderConfig {
+            kind: "openai".to_string(),
+            api_key: "test".to_string(),
+            base_url: Some(format!("http://{}", stub.addr)),
+            headers: None,
+            streaming_fallback: None,
+        },
+    );
+    let exec = piko_llmd::build_gateway(providers, retry_config());
+    let mut req = request();
+    req.run_id = "run-otel".to_string();
+    let stream = exec
+        .chat_stream(req, None)
+        .await
+        .expect("chat_stream should return a stream");
+    let events = stream.collect::<Vec<_>>().await;
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, GatewayEvent::Done(r) if r == "stop"))
+    );
+
+    tracer_provider.force_flush().unwrap();
+    let mut spans = Vec::new();
+    while let Ok(span) = span_rx.try_recv() {
+        spans.push(span);
+    }
+
+    let llm_request = spans
+        .iter()
+        .find(|span| {
+            span.name.as_ref() == "llm.request"
+                && span
+                    .attributes
+                    .iter()
+                    .any(|kv| kv.key.as_str() == "run_id" && kv.value.to_string() == "run-otel")
+        })
+        .unwrap_or_else(|| panic!("no llm.request span exported: {spans:?}"));
+
+    let event_names: Vec<&str> = llm_request.events.iter().map(|e| e.name.as_ref()).collect();
+    for expected in ["llm.retry", "llm.ttft", "llm.usage", "llm.stream_done"] {
+        assert!(
+            event_names.contains(&expected),
+            "expected {expected:?} event on llm.request, got {event_names:?}"
+        );
+    }
+
+    let attrs = |key: &str| {
+        llm_request
+            .attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == key)
+            .map(|kv| kv.value.to_string())
+    };
+    let model = attrs("model");
+    assert_eq!(model.as_deref(), Some("gpt-test"));
+    let provider = attrs("provider");
+    assert_eq!(provider.as_deref(), Some("openai"));
+    let run_id = attrs("run_id");
+    assert_eq!(run_id.as_deref(), Some("run-otel"));
+}
+
+#[tokio::test]
 async fn retries_transient_503_then_streams() {
     let stub = Stub::start(Script {
         steps: vec![Step::Status(503), Step::Status(503), Step::StreamSuccess],

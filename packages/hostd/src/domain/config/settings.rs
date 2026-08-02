@@ -32,6 +32,9 @@ pub struct HostSettings {
     pub retry: Option<RetrySettings>,
     pub sandbox: Option<SandboxSettings>,
 
+    // ---- Observability ----
+    pub observability: Option<ObservabilitySettings>,
+
     // ---- Paths ----
     pub session_dir: Option<String>,
 
@@ -74,6 +77,7 @@ impl HostSettings {
             "compaction": self.compaction,
             "retry": self.retry,
             "sandbox": self.sandbox,
+            "observability": self.observability,
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
             "mcp-servers": self.mcp_servers,
@@ -106,6 +110,18 @@ pub struct SandboxSettings {
     pub policy_path: Option<String>,
     /// Path to the shell binary for command execution (default: "bash").
     pub shell_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ObservabilitySettings {
+    /// Master switch for OTLP export (traces + metrics). Default: off.
+    pub enabled: Option<bool>,
+    /// OTLP HTTP endpoint (base URL; `/v1/traces` and `/v1/metrics` are
+    /// appended automatically). Default: `http://127.0.0.1:4318`.
+    pub otel_endpoint: Option<String>,
+    /// OTel `service.name` resource attribute. Default: `piko-hostd`.
+    pub service_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -309,6 +325,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         compaction: merge_compaction(base.compaction, overrides.compaction),
         retry: merge_retry(base.retry, overrides.retry),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
+        observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
         active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
         mcp_servers: if overrides.mcp_servers.is_empty() {
@@ -360,6 +377,20 @@ fn merge_sandbox(
             enabled: overrides.enabled.or(base.enabled),
             policy_path: overrides.policy_path.or(base.policy_path),
             shell_path: overrides.shell_path.or(base.shell_path),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_observability(
+    base: Option<ObservabilitySettings>,
+    overrides: Option<ObservabilitySettings>,
+) -> Option<ObservabilitySettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(ObservabilitySettings {
+            enabled: overrides.enabled.or(base.enabled),
+            otel_endpoint: overrides.otel_endpoint.or(base.otel_endpoint),
+            service_name: overrides.service_name.or(base.service_name),
         }),
         (base, overrides) => overrides.or(base),
     }

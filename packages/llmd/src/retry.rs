@@ -128,6 +128,121 @@ pub(crate) fn jitter() -> f64 {
     rand::thread_rng().gen_range(0.9..=1.1)
 }
 
+/// Stable error classification shared by spans, metrics, and logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    Auth,
+    BadRequest,
+    RateLimit,
+    Timeout,
+    Transport,
+    ServerError,
+    StreamParse,
+    Cancelled,
+    Unknown,
+}
+
+impl ErrorClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auth => "auth",
+            Self::BadRequest => "bad_request",
+            Self::RateLimit => "rate_limit",
+            Self::Timeout => "timeout",
+            Self::Transport => "transport",
+            Self::ServerError => "server_error",
+            Self::StreamParse => "stream_parse",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Classify a genai error for observability. Structural signals are
+/// authoritative; the retryable fallback is preserved for classification of
+/// wording-only errors.
+pub fn classify(error: &genai::Error) -> ErrorClass {
+    let structural = match error {
+        genai::Error::HttpError { status, .. } => classify_status(*status),
+        genai::Error::WebModelCall { webc_error, .. }
+        | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
+            genai::webc::Error::ResponseFailedStatus { status, .. } => classify_status(*status),
+            genai::webc::Error::Reqwest(err) => {
+                if err.is_connect() || err.is_timeout() {
+                    ErrorClass::Timeout
+                } else {
+                    ErrorClass::Transport
+                }
+            }
+            _ => ErrorClass::Unknown,
+        },
+        genai::Error::WebStream { error, .. } => {
+            if let Some(inner) = error.downcast_ref::<genai::Error>() {
+                classify(inner)
+            } else if let Some(reqwest_err) = error.downcast_ref::<reqwest::Error>() {
+                if reqwest_err.is_connect() || reqwest_err.is_timeout() {
+                    ErrorClass::Timeout
+                } else {
+                    ErrorClass::Transport
+                }
+            } else {
+                ErrorClass::Transport
+            }
+        }
+        genai::Error::StreamParse { .. } => ErrorClass::StreamParse,
+        _ => ErrorClass::Unknown,
+    };
+
+    if structural == ErrorClass::Unknown {
+        legacy_string_class(&error.to_string())
+    } else {
+        structural
+    }
+}
+
+fn classify_status(status: reqwest::StatusCode) -> ErrorClass {
+    match status.as_u16() {
+        401 | 403 => ErrorClass::Auth,
+        400 | 422 => ErrorClass::BadRequest,
+        408 | 425 => ErrorClass::Timeout,
+        429 => ErrorClass::RateLimit,
+        500..=599 => ErrorClass::ServerError,
+        _ => ErrorClass::Unknown,
+    }
+}
+
+/// Wording-only fallback, mirroring `legacy_string_retryable`.
+fn legacy_string_class(error: &str) -> ErrorClass {
+    let lower = error.to_lowercase();
+    if lower.contains("rate limit") || lower.contains("rate_limit") || lower.contains("429") {
+        ErrorClass::RateLimit
+    } else if lower.contains("timeout") {
+        ErrorClass::Timeout
+    } else if lower.contains("unauthorized")
+        || lower.contains("auth")
+        || lower.contains("api key")
+        || lower.contains("permission")
+    {
+        ErrorClass::Auth
+    } else if lower.contains("stream") || lower.contains("parse") {
+        ErrorClass::StreamParse
+    } else if lower.contains("connection")
+        || lower.contains("503")
+        || lower.contains("502")
+        || lower.contains("504")
+        || lower.contains("server error")
+        || lower.contains("internal server error")
+        || lower.contains("overloaded")
+        || lower.contains("capacity")
+        || lower.contains("transient")
+        || lower.contains("temporarily")
+    {
+        ErrorClass::ServerError
+    } else {
+        ErrorClass::Unknown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -29,5 +29,5 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-12 | safety | Safety rules, elicitation, attestation | planned | core/src/safety.rs, elicitation.rs |
 | F-13 | mcp-integration | MCP client/server, resource and tool exposure | planned | core/src/mcp*.rs |
 | F-14 | skills-plugins | Skills engine, plugin install/list | planned | core/src/skills.rs, plugins/ |
-| F-15 | observability | Telemetry, rollout, turn timing, usage statistics | planned | core/src/rollout*.rs, turn_timing.rs |
+| F-15 | observability | End-to-end tracing (turn → agent → model step → tool → child agent), OTLP HTTP export + metrics, rollout, turn timing, usage statistics | implemented (F-15/D-15/V-15; tracing + metrics slice) | core/src/otel_init.rs, rollout*.rs, turn_timing.rs |
 | F-16 | realtime (extension) | Realtime audio/text sessions, multimodal preparation | planned (deferred) | core/src/realtime_*, audio_preparation.rs, image_preparation.rs |

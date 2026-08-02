@@ -5,6 +5,7 @@ pub mod middleware;
 pub mod providers;
 pub mod retry;
 pub mod stream;
+pub mod telemetry;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,8 +18,18 @@ pub fn build_gateway(
     providers: HashMap<String, piko_protocol::config::ProviderConfig>,
     retry: RetryConfig,
 ) -> Arc<dyn crate::gateway::LlmGateway> {
+    build_gateway_with_telemetry(providers, retry, Arc::new(telemetry::NoopGatewayTelemetry))
+}
+
+/// Like [`build_gateway`], with a hostd-provided telemetry sink for metrics.
+pub fn build_gateway_with_telemetry(
+    providers: HashMap<String, piko_protocol::config::ProviderConfig>,
+    retry: RetryConfig,
+    telemetry: Arc<dyn telemetry::GatewayTelemetry>,
+) -> Arc<dyn crate::gateway::LlmGateway> {
     let exec = executor::LlmdExecutor::from_providers(providers)
         .with_retry(retry)
+        .with_telemetry(telemetry)
         .add_middleware(Arc::new(
             middleware::token_usage::TokenUsageMiddleware::new(),
         ))

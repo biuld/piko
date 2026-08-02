@@ -15,13 +15,28 @@ use crate::adapters::tools::workspace_provider::WorkspaceToolProvider;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
 use crate::runtime::utils::load_sandbox_policy;
+use piko_orchd_api::telemetry::RuntimeTelemetry;
 
 use super::AgentExecutionRuntime;
 
 impl AgentExecutionRuntime {
     /// Build an Execution runtime with workspace/todo tools and configured agents.
     pub async fn bootstrap(model_executor: Arc<dyn LlmGateway>, config: OrchdConfig) -> Arc<Self> {
-        let runtime = Arc::new(Self::new(model_executor));
+        Self::bootstrap_with_telemetry(
+            model_executor,
+            config,
+            Arc::new(piko_orchd_api::telemetry::NoopRuntimeTelemetry),
+        )
+        .await
+    }
+
+    /// Like [`bootstrap`], with a hostd-provided telemetry sink for metrics.
+    pub async fn bootstrap_with_telemetry(
+        model_executor: Arc<dyn LlmGateway>,
+        config: OrchdConfig,
+        telemetry: Arc<dyn RuntimeTelemetry>,
+    ) -> Arc<Self> {
+        let runtime = Arc::new(Self::with_telemetry(model_executor, telemetry));
         runtime.install_config(config).await;
         runtime
     }

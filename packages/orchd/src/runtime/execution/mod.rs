@@ -30,6 +30,7 @@ use piko_protocol::execution::{
 };
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::ports::model_gateway::LlmGateway;
@@ -52,8 +53,18 @@ pub struct AgentExecutionRuntime {
 
 impl AgentExecutionRuntime {
     pub fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
+        Self::with_telemetry(
+            model_executor,
+            Arc::new(piko_orchd_api::telemetry::NoopRuntimeTelemetry),
+        )
+    }
+
+    pub fn with_telemetry(
+        model_executor: Arc<dyn LlmGateway>,
+        telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
+    ) -> Self {
         Self {
-            services: ExecutionServices::new(model_executor),
+            services: ExecutionServices::with_telemetry(model_executor, telemetry),
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
         }
@@ -167,6 +178,7 @@ impl AgentExecutionRuntime {
         &self,
         request: StartExecutionRequest,
         routes: HashMap<String, CatalogRoute>,
+        trace_span: tracing::Span,
     ) -> Result<PreparedExecution, AgentApiError> {
         if !self.accepting.load(Ordering::SeqCst) {
             return Err(AgentApiError::RuntimeUnavailable);
@@ -237,6 +249,7 @@ impl AgentExecutionRuntime {
             terminal_tx: Some(terminal_tx),
             receipt,
             input_commit,
+            trace_span,
         })
     }
 
@@ -351,6 +364,7 @@ pub(crate) struct PreparedExecution {
     terminal_tx: Option<piko_comms::ReplySender<ExecutionTerminalContract, ExecutionTerminal>>,
     receipt: ExecutionReceipt,
     input_commit: piko_protocol::execution::MessageCommit,
+    trace_span: tracing::Span,
 }
 
 impl PreparedExecution {
@@ -372,8 +386,11 @@ impl PreparedExecution {
             .expect("prepared Execution owns its terminal channel until activation");
         let scope = Arc::clone(&self.scope);
         let generation = self.generation;
+        let trace_span = self.trace_span.clone();
         tokio::spawn(async move {
-            let _exit = supervise_execution(scope, actor, generation, terminal_tx).await;
+            let _exit = supervise_execution(scope, actor, generation, terminal_tx)
+                .instrument(trace_span)
+                .await;
         });
         self.receipt.clone()
     }
@@ -461,6 +478,39 @@ async fn supervise_execution(
             None,
         ),
     };
+    match &outcome {
+        piko_protocol::execution::ExecutionOutcome::Succeeded { .. } => {
+            tracing::info!(
+                target: "agent.run_completed",
+                session_id = %identity.session_id,
+                run_id = %identity.execution_id,
+                agent_instance_id = %identity.agent_instance_id,
+                "Agent run completed"
+            );
+        }
+        piko_protocol::execution::ExecutionOutcome::Cancelled { reason } => {
+            tracing::Span::current().record("otel.status_code", "ERROR");
+            tracing::info!(
+                target: "agent.run_cancelled",
+                session_id = %identity.session_id,
+                run_id = %identity.execution_id,
+                agent_instance_id = %identity.agent_instance_id,
+                reason = ?reason,
+                "Agent run cancelled"
+            );
+        }
+        piko_protocol::execution::ExecutionOutcome::Failed { error } => {
+            tracing::Span::current().record("otel.status_code", "ERROR");
+            tracing::error!(
+                target: "agent.run_failed",
+                session_id = %identity.session_id,
+                run_id = %identity.execution_id,
+                agent_instance_id = %identity.agent_instance_id,
+                error = %truncate(error, 512),
+                "Agent run failed"
+            );
+        }
+    }
     let candidate = ExecutionTerminal {
         outcome: outcome.clone(),
         transcript,
@@ -481,6 +531,16 @@ async fn supervise_execution(
     ExecutionExit {
         identity,
         terminal: outcome,
+    }
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        text.to_string()
+    } else {
+        let mut result = text.chars().take(max).collect::<String>();
+        result.push_str("...");
+        result
     }
 }
 

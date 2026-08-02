@@ -127,8 +127,7 @@ fn main() {
 
         let cwd_clone = cwd.clone();
         cx.spawn(async move |cx| {
-            let bridge =
-                spawn_bridge(&[], &[("PIKO_LOG_DISABLE", "1")]).expect("failed to spawn hostd");
+            let bridge = spawn_bridge(&[], &[]).expect("failed to spawn hostd");
 
             cx.open_window(
                 WindowOptions {

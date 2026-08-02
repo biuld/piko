@@ -82,6 +82,7 @@ impl OrchAgentRunRunner {
             4_096,
             &[],
             None,
+            crate::telemetry::handle(),
         )
         .await
     }
@@ -98,6 +99,7 @@ impl OrchAgentRunRunner {
         max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
+        runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
         use piko_protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
         use piko_protocol::model::ModelRunSettings;
@@ -145,7 +147,8 @@ impl OrchAgentRunRunner {
             thinking_level_map,
             sandbox,
         };
-        let agent_runtime = AgentRuntime::bootstrap(model_executor, config).await;
+        let agent_runtime =
+            AgentRuntime::bootstrap_with_telemetry(model_executor, config, runtime_telemetry).await;
 
         let registered =
             crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;

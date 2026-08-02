@@ -4,5 +4,7 @@ pub mod config;
 pub mod prompts;
 pub mod sessions;
 
-pub use config::{HostSettings, ModelRegistry, SandboxSettings, SettingsManager};
+pub use config::{
+    HostSettings, ModelRegistry, ObservabilitySettings, SandboxSettings, SettingsManager,
+};
 pub use sessions::{HostState, SessionState};

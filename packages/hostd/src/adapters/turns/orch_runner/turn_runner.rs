@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
+use tracing::Instrument;
 
 use crate::api::{ProtocolError, UserInteractionResponse};
 use crate::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
@@ -27,7 +28,31 @@ impl AgentRunRunner for OrchAgentRunRunner {
             agent_instance_id = %input.agent_instance_id,
             "Agent run subscription starting"
         );
-        self.run_agent_subscription(input).await
+        let source = if input.source_turn_id.is_some() {
+            "turn"
+        } else {
+            "background"
+        };
+        let turn_span = tracing::info_span!(
+            "turn.run",
+            session_id = %input.session_id,
+            run_id = %input.operation_id,
+            agent_instance_id = %input.agent_instance_id,
+            source,
+            cwd = %input.cwd,
+        );
+        let started = std::time::Instant::now();
+        let result = self
+            .run_agent_subscription(input)
+            .instrument(turn_span)
+            .await;
+        let status = if result.is_ok() { "ok" } else { "error" };
+        crate::telemetry::handle().record_turn(
+            started.elapsed().as_millis() as u64,
+            status,
+            source,
+        );
+        result
     }
 
     async fn finish_agent_run(

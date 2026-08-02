@@ -6,6 +6,7 @@ pub mod infra;
 pub mod logging;
 pub mod ports;
 pub mod protocol;
+pub mod telemetry;
 pub mod util;
 
 // Re-export public API for external consumers (tests, main.rs)

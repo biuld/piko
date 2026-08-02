@@ -377,7 +377,11 @@ pub(super) async fn run_batch(
     routes: HashMap<String, CatalogRoute>,
 ) -> ExecutionTerminal {
     let prepared = runtime
-        .prepare_execution(batch_request(execution_id, tools), routes)
+        .prepare_execution(
+            batch_request(execution_id, tools),
+            routes,
+            tracing::Span::none(),
+        )
         .await
         .unwrap();
     prepared.activate().await;

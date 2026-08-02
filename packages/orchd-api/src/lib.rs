@@ -15,6 +15,7 @@ pub mod request;
 pub mod response;
 pub mod runtime_identity;
 pub mod stream;
+pub mod telemetry;
 pub mod tools;
 
 pub use agent::{

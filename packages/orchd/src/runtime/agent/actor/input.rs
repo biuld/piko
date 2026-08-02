@@ -108,7 +108,7 @@ impl AgentActor {
             }
             (Some(_), AgentInputDelivery::FollowUp) => {
                 let execution_id = internal_execution_id(&self.identity, &request.request_id);
-                self.enqueue_follow_up(request, None)
+                self.enqueue_follow_up(request, None, tracing::Span::current())
                     .await
                     .map_err(|(error, _)| error)
                     .map(|receipt| AcceptedAgentInput {

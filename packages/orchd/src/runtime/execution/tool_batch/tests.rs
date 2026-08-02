@@ -187,7 +187,11 @@ async fn cancellation_mid_batch_commits_aborted_results_for_every_call() {
     let (tools, routes) = discover_batch_routes(&harness.runtime).await;
     let prepared = harness
         .runtime
-        .prepare_execution(batch_request("exec-cancel", tools), routes)
+        .prepare_execution(
+            batch_request("exec-cancel", tools),
+            routes,
+            tracing::Span::none(),
+        )
         .await
         .unwrap();
     prepared.activate().await;
@@ -263,7 +267,11 @@ async fn cancel_during_sequential_call_does_not_start_pending_parallel_calls() {
     let (tools, routes) = discover_batch_routes(&harness.runtime).await;
     let prepared = harness
         .runtime
-        .prepare_execution(batch_request("exec-cancel-seq", tools), routes)
+        .prepare_execution(
+            batch_request("exec-cancel-seq", tools),
+            routes,
+            tracing::Span::none(),
+        )
         .await
         .unwrap();
     prepared.activate().await;

@@ -67,6 +67,7 @@ impl AgentActor {
         }
         if let Some(follow_up) = self.follow_ups.pop_front() {
             let queued_id = follow_up.durable.queued_input_id.clone();
+            self.pending_run_parent = Some(follow_up.parent.clone());
             match self
                 .start_execution_from(
                     follow_up.durable.request.clone(),

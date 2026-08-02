@@ -3,9 +3,12 @@ pub mod token_usage;
 
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::telemetry::{GatewayTelemetry, NoopGatewayTelemetry};
 
 /// Request-level context passed through the middleware chain
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct GatewayContext {
     pub run_id: String,
     pub step_id: String,
@@ -13,6 +16,28 @@ pub struct GatewayContext {
     pub provider: String,
     /// Mutable metadata store for middlewares to share data (e.g., costs, trace IDs)
     pub metadata: HashMap<String, String>,
+    /// Metrics sink; `None` records nothing (used by tests and no-telemetry
+    /// deployments).
+    pub telemetry: Option<Arc<dyn GatewayTelemetry>>,
+}
+
+impl std::fmt::Debug for GatewayContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GatewayContext")
+            .field("run_id", &self.run_id)
+            .field("step_id", &self.step_id)
+            .field("model_id", &self.model_id)
+            .field("provider", &self.provider)
+            .finish_non_exhaustive()
+    }
+}
+
+impl GatewayContext {
+    pub fn telemetry(&self) -> Arc<dyn GatewayTelemetry> {
+        self.telemetry
+            .clone()
+            .unwrap_or_else(|| Arc::new(NoopGatewayTelemetry))
+    }
 }
 
 use crate::gateway::GatewayEvent;

@@ -9,10 +9,12 @@ use async_stream::stream;
 use futures::StreamExt;
 use futures_core::Stream;
 use tokio_util::sync::CancellationToken;
+use tracing::{Level, event};
 
 use crate::gateway::GatewayEvent;
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 use crate::retry::{RetryPolicy, RetryState};
+use crate::telemetry::GatewayTelemetry;
 
 type ChatChunk = Result<genai::chat::ChatStreamEvent, genai::Error>;
 
@@ -22,6 +24,9 @@ pub struct OpenRetryContext<'a> {
     pub state: &'a mut RetryState,
     pub cancel: Option<&'a CancellationToken>,
     pub run_id: &'a str,
+    pub model: &'a str,
+    pub provider: &'a str,
+    pub telemetry: Arc<dyn GatewayTelemetry>,
 }
 
 /// Why the eager open phase failed.
@@ -113,6 +118,8 @@ async fn handle_open_failure(
     retry: &mut OpenRetryContext<'_>,
 ) -> Result<(), OpenError> {
     let error_msg = error.to_string();
+    let error_class = crate::retry::classify(&error).as_str();
+    let error_truncated = truncate(&error_msg, 512);
     if !crate::retry::is_retryable(&error) {
         return Err(OpenError::NonRetryable(error_msg));
     }
@@ -122,19 +129,33 @@ async fn handle_open_failure(
         crate::retry::jitter(),
     ) else {
         tracing::error!(
+            target: "llm.retry_budget_exhausted",
             run_id = %retry.run_id,
+            model = %retry.model,
+            provider = %retry.provider,
             attempts = retry.state.retries_used + 1,
-            error = %error_msg,
-            "LLM stream open retry budget exhausted"
+            error_class = error_class,
+            error = %error_truncated,
+            "llm.retry_budget_exhausted"
         );
         return Err(OpenError::BudgetExhausted(error_msg));
     };
     tracing::warn!(
+        target: "llm.retry",
         run_id = %retry.run_id,
+        model = %retry.model,
+        provider = %retry.provider,
         attempt = retry.state.retries_used + 1,
         delay_ms = delay,
-        error = %error_msg,
-        "Retrying LLM stream open after transient error"
+        error_class = error_class,
+        error = %error_truncated,
+        "llm.retry"
+    );
+    retry.telemetry.record_retry(
+        retry.model,
+        retry.provider,
+        error_class,
+        retry.state.retries_used + 1,
     );
     if let Some(cancel) = retry.cancel {
         tokio::select! {
@@ -160,9 +181,20 @@ pub fn resilient_stream(
 ) -> Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>> {
     Box::pin(stream! {
         let mut ctx = ctx;
+        let started = std::time::Instant::now();
+        let mut first_content_received = false;
         let mut stream = match initial {
             OpenOutcome::Stream(stream) => stream,
             OpenOutcome::FallbackEvents(events) => {
+                event!(
+                    target: "llm.fallback",
+                    Level::INFO,
+                    run_id = %ctx.run_id,
+                    step_id = %ctx.step_id,
+                    model = %ctx.model_id,
+                    provider = %ctx.provider,
+                    "llm.fallback"
+                );
                 for mut event in events {
                     if let Err(e) = run_middleware(&middlewares, &mut ctx, &mut event).await {
                         yield GatewayEvent::Error(e);
@@ -183,6 +215,21 @@ pub fn resilient_stream(
             let mut event = match chunk_res {
                 Ok(genai::chat::ChatStreamEvent::Start) => continue,
                 Ok(genai::chat::ChatStreamEvent::Chunk(chunk)) => {
+                    if !first_content_received {
+                        first_content_received = true;
+                        let ttft_ms = started.elapsed().as_millis() as u64;
+                        event!(
+                            target: "llm.ttft",
+                            Level::INFO,
+                            run_id = %ctx.run_id,
+                            step_id = %ctx.step_id,
+                            model = %ctx.model_id,
+                            provider = %ctx.provider,
+                            ttft_ms,
+                            "llm.ttft"
+                        );
+                        ctx.telemetry().record_ttft(&ctx.model_id, &ctx.provider, ttft_ms);
+                    }
                     GatewayEvent::ContentDelta(chunk.content)
                 }
                 Ok(genai::chat::ChatStreamEvent::ReasoningChunk(chunk)) => {
@@ -220,12 +267,36 @@ pub fn resilient_stream(
                     )
                 }
                 Err(e) => {
+                    let error_class = crate::retry::classify(&e).as_str();
+                    event!(
+                        target: "llm.stream_error",
+                        Level::ERROR,
+                        run_id = %ctx.run_id,
+                        step_id = %ctx.step_id,
+                        model = %ctx.model_id,
+                        provider = %ctx.provider,
+                        error_class,
+                        error = %truncate(&e.to_string(), 512),
+                        "llm.stream_error"
+                    );
                     yield GatewayEvent::Error(e.to_string());
                     return;
                 }
             };
 
             let is_done = matches!(event, GatewayEvent::Done(_));
+            if let GatewayEvent::Done(reason) = &event {
+                event!(
+                    target: "llm.stream_done",
+                    Level::INFO,
+                    run_id = %ctx.run_id,
+                    step_id = %ctx.step_id,
+                    model = %ctx.model_id,
+                    provider = %ctx.provider,
+                    reason = %reason,
+                    "llm.stream_done"
+                );
+            }
             if let Err(e) = run_middleware(&middlewares, &mut ctx, &mut event).await {
                 yield GatewayEvent::Error(e);
                 return;
@@ -238,8 +309,64 @@ pub fn resilient_stream(
         }
 
         // The stream ended without a terminal event: surface it as an error.
+        event!(
+            target: "llm.stream_error",
+            Level::ERROR,
+            run_id = %ctx.run_id,
+            step_id = %ctx.step_id,
+            model = %ctx.model_id,
+            provider = %ctx.provider,
+            error_class = "stream_parse",
+            error = "stream ended before a terminal event",
+            "llm.stream_error"
+        );
         yield GatewayEvent::Error("stream ended before a terminal event".into());
     })
+}
+
+/// Bound error bodies recorded in span events/metrics to a sane size.
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        text.to_string()
+    } else {
+        let mut result = text.chars().take(max).collect::<String>();
+        result.push_str("...");
+        result
+    }
+}
+
+/// Wrap a stream so every poll runs inside `span`, attaching the events and
+/// child spans emitted while consuming the model stream to it.
+pub struct InstrumentedStream<S> {
+    inner: S,
+    span: tracing::Span,
+}
+
+impl<S> InstrumentedStream<S> {
+    pub fn new(inner: S, span: tracing::Span) -> Self {
+        Self { inner, span }
+    }
+}
+
+impl<S> Stream for InstrumentedStream<S>
+where
+    S: Stream + Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        let span = &this.span;
+        let inner = Pin::new(&mut this.inner);
+        span.in_scope(|| inner.poll_next(cx))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 async fn run_middleware(

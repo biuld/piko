@@ -59,11 +59,16 @@ pub struct AgentActor {
     snapshot_tx: LatestSender<AgentSnapshotContract, AgentSnapshot>,
     run_cancellation: Arc<RunCancellation>,
     current_run_cancellation_generation: Option<u64>,
+    /// Parent span for the next agent run, captured from the turn/tool
+    /// context and consumed by `start_execution_from`.
+    pending_run_parent: Option<tracing::Span>,
 }
 
 struct QueuedRuntimeInput {
     durable: piko_protocol::DurableAgentInput,
     completion: Option<QueuedCompletion>,
+    /// Parent span captured when the follow-up was queued.
+    parent: tracing::Span,
 }
 
 enum QueuedCompletion {
@@ -153,6 +158,7 @@ impl AgentActor {
                     QueuedRuntimeInput {
                         durable,
                         completion,
+                        parent: tracing::Span::none(),
                     }
                 })
                 .collect(),
@@ -175,6 +181,7 @@ impl AgentActor {
             snapshot_tx,
             run_cancellation,
             current_run_cancellation_generation: None,
+            pending_run_parent: None,
         }
     }
 
@@ -198,7 +205,12 @@ impl AgentActor {
                         .map(|accepted| accepted.receipt);
                     command.complete(result);
                 }
-                AgentCommand::Run { request, reply } if self.should_queue_follow_up(&request) => {
+                AgentCommand::Run {
+                    request,
+                    reply,
+                    parent,
+                } if self.should_queue_follow_up(&request) => {
+                    self.pending_run_parent = Some(parent.clone());
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let (started_tx, started_rx) = piko_comms::reply::<AgentRunStarted, _>();
@@ -210,6 +222,7 @@ impl AgentActor {
                                 started: started_tx,
                                 report: report_tx,
                             }),
+                            parent,
                         )
                         .await
                     {
@@ -221,7 +234,12 @@ impl AgentActor {
                         Err((error, _)) => command.complete(Err(error)),
                     }
                 }
-                AgentCommand::Run { request, reply } => {
+                AgentCommand::Run {
+                    request,
+                    reply,
+                    parent,
+                } => {
+                    self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     match self.handle_input(request).await {
@@ -247,11 +265,17 @@ impl AgentActor {
                     request,
                     recipient,
                     reply,
+                    parent,
                 } if self.should_queue_follow_up(&request) => {
+                    self.pending_run_parent = Some(parent.clone());
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self
-                        .enqueue_follow_up(request, Some(QueuedCompletion::Detached(recipient)))
+                        .enqueue_follow_up(
+                            request,
+                            Some(QueuedCompletion::Detached(recipient)),
+                            parent,
+                        )
                         .await
                         .map_err(|(error, _)| error);
                     command.complete(result);
@@ -260,7 +284,9 @@ impl AgentActor {
                     request,
                     recipient,
                     reply,
+                    parent,
                 } => {
+                    self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let request_execution_id =
@@ -390,6 +416,7 @@ impl AgentActor {
         &mut self,
         request: SendAgentInputRequest,
         completion: Option<QueuedCompletion>,
+        parent: tracing::Span,
     ) -> Result<AgentInputReceipt, (AgentApiError, Option<QueuedCompletion>)> {
         if self.follow_ups.len() >= MAX_QUEUED_FOLLOW_UPS {
             return Err((AgentApiError::Overload, completion));
@@ -422,6 +449,7 @@ impl AgentActor {
         self.follow_ups.push_back(QueuedRuntimeInput {
             durable,
             completion,
+            parent,
         });
         Ok(AgentInputReceipt {
             request_id: request.request_id,

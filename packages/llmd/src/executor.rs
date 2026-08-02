@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use piko_protocol::config::{ProviderConfig, RetryConfig};
 use piko_protocol::model::ModelCapabilities;
@@ -116,6 +117,7 @@ pub struct LlmdExecutor {
     state: Arc<ExecState>,
     middlewares: Vec<Arc<dyn crate::middleware::LlmdMiddleware>>,
     retry: RetryConfig,
+    telemetry: Arc<dyn crate::telemetry::GatewayTelemetry>,
 }
 
 impl Default for LlmdExecutor {
@@ -134,6 +136,7 @@ impl LlmdExecutor {
             }),
             middlewares: vec![],
             retry: RetryConfig::default(),
+            telemetry: Arc::new(crate::telemetry::NoopGatewayTelemetry),
         }
     }
 
@@ -150,7 +153,16 @@ impl LlmdExecutor {
             }),
             middlewares: vec![],
             retry: RetryConfig::default(),
+            telemetry: Arc::new(crate::telemetry::NoopGatewayTelemetry),
         }
+    }
+
+    pub fn with_telemetry(
+        mut self,
+        telemetry: Arc<dyn crate::telemetry::GatewayTelemetry>,
+    ) -> Self {
+        self.telemetry = telemetry;
+        self
     }
 
     pub fn with_retry(mut self, retry: RetryConfig) -> Self {
@@ -175,129 +187,176 @@ impl LlmGateway for LlmdExecutor {
             return Err("cancelled".into());
         }
 
-        let kind = adapter_kind(&req.provider);
-        let model_iden = genai::ModelIden::new(kind, &req.model);
-        let llm_messages = build_genai_messages(&req.run_prompt, &req.transcript);
-
-        let mut request = genai::chat::ChatRequest::new(llm_messages);
-        if !req.tools.is_empty() {
-            let tools: Vec<genai::chat::Tool> = req.tools.iter().map(orch_tool_to_genai).collect();
-            request = request.with_tools(tools);
-        }
-
-        let mut ctx = crate::middleware::GatewayContext {
-            run_id: req.run_id.clone(),
-            step_id: req.step_id.clone(),
-            model_id: req.model.clone(),
-            provider: req.provider.clone(),
-            metadata: HashMap::new(),
-        };
-
-        // Pre-chat hooks
-        for mw in self.middlewares.iter() {
-            mw.pre_chat(&mut ctx, &mut request).await?;
-        }
-
-        // Apply resolved thinking level
-        let mut chat_options = genai::chat::ChatOptions::default().with_capture_usage(true);
-        if let Some(ref thinking) = req.thinking {
-            let effort = match thinking.as_str() {
-                "none" => genai::chat::ReasoningEffort::None,
-                "minimal" => genai::chat::ReasoningEffort::Minimal,
-                "low" => genai::chat::ReasoningEffort::Low,
-                "medium" => genai::chat::ReasoningEffort::Medium,
-                "high" => genai::chat::ReasoningEffort::High,
-                "xhigh" => genai::chat::ReasoningEffort::XHigh,
-                "max" => genai::chat::ReasoningEffort::Max,
-                other => {
-                    // Try to parse as budget tokens
-                    if let Ok(budget) = other.parse::<u32>() {
-                        genai::chat::ReasoningEffort::Budget(budget)
-                    } else {
-                        genai::chat::ReasoningEffort::Medium
-                    }
-                }
-            };
-            chat_options = chat_options.with_reasoning_effort(effort);
-        }
-        use piko_protocol::PromptCachePolicy;
-        match req.run_prompt.cache_plan.policy {
-            PromptCachePolicy::Disabled => {}
-            PromptCachePolicy::ProviderDefault => {
-                chat_options = chat_options.with_prompt_cache_key(provider_cache_key(&req));
-            }
-            PromptCachePolicy::Ephemeral => {
-                chat_options = chat_options
-                    .with_prompt_cache_key(provider_cache_key(&req))
-                    .with_cache_control(genai::chat::CacheControl::Ephemeral);
-            }
-            PromptCachePolicy::Extended => {
-                chat_options = chat_options
-                    .with_prompt_cache_key(provider_cache_key(&req))
-                    .with_cache_control(genai::chat::CacheControl::Ephemeral24h);
-            }
-        }
-        let chat_options = Some(chat_options);
-
-        // Eager open phase: retry with the shared budget, then fall back to a
-        // non-streaming completion before returning the stream.
-        let policy = RetryPolicy::from_config(&self.retry);
         let fallback_enabled = self
             .state
             .streaming_fallback
             .get(&req.provider)
             .copied()
             .unwrap_or(true);
-        let client = self.state.client.clone();
-        let mut retry_state = RetryState::default();
+        let span = tracing::info_span!(
+            "llm.request",
+            run_id = %req.run_id,
+            step_id = %req.step_id,
+            model = %req.model,
+            provider = %req.provider,
+            streaming = true,
+            thinking = ?req.thinking,
+            retry_enabled = self.retry.enabled,
+            retry_max_attempts = self.retry.max_retries,
+            retry_base_ms = self.retry.base_delay_ms,
+            retry_max_delay_ms = self.retry.max_delay_ms,
+            retry_budget_ms = self.retry.budget_ms,
+            fallback_enabled = tracing::field::Empty,
+        );
+        span.record("fallback_enabled", fallback_enabled);
+        let telemetry = Arc::clone(&self.telemetry);
 
-        let retry_ctx = OpenRetryContext {
-            policy: &policy,
-            state: &mut retry_state,
-            cancel: cancel.as_ref(),
-            run_id: &req.run_id,
-        };
-        let initial = match open_stream_with_retry(
-            &client,
-            &model_iden,
-            &request,
-            chat_options.as_ref(),
-            retry_ctx,
-        )
-        .await
-        {
-            Ok(resp) => OpenOutcome::Stream(resp),
-            Err(open_err) => match open_err {
-                OpenError::NonRetryable(msg) => return Err(msg),
-                OpenError::BudgetExhausted(msg) => {
-                    if fallback_enabled {
-                        match client
-                            .exec_chat(model_iden.clone(), request.clone(), chat_options.as_ref())
-                            .await
-                        {
-                            Ok(resp) => {
-                                OpenOutcome::FallbackEvents(crate::stream::fallback_events(resp))
-                            }
-                            Err(fb_err) => {
-                                return Err(format!(
-                                    "streaming request failed after retries: {msg}; \
-                                     non-streaming fallback failed: {fb_err}"
-                                ));
-                            }
+        let result = async move {
+            let kind = adapter_kind(&req.provider);
+            let model_iden = genai::ModelIden::new(kind, &req.model);
+            let llm_messages = build_genai_messages(&req.run_prompt, &req.transcript);
+
+            let mut request = genai::chat::ChatRequest::new(llm_messages);
+            if !req.tools.is_empty() {
+                let tools: Vec<genai::chat::Tool> =
+                    req.tools.iter().map(orch_tool_to_genai).collect();
+                request = request.with_tools(tools);
+            }
+
+            let mut ctx = crate::middleware::GatewayContext {
+                run_id: req.run_id.clone(),
+                step_id: req.step_id.clone(),
+                model_id: req.model.clone(),
+                provider: req.provider.clone(),
+                metadata: HashMap::new(),
+                telemetry: Some(Arc::clone(&telemetry)),
+            };
+
+            // Pre-chat hooks
+            for mw in self.middlewares.iter() {
+                mw.pre_chat(&mut ctx, &mut request).await?;
+            }
+
+            // Apply resolved thinking level
+            let mut chat_options = genai::chat::ChatOptions::default().with_capture_usage(true);
+            if let Some(ref thinking) = req.thinking {
+                let effort = match thinking.as_str() {
+                    "none" => genai::chat::ReasoningEffort::None,
+                    "minimal" => genai::chat::ReasoningEffort::Minimal,
+                    "low" => genai::chat::ReasoningEffort::Low,
+                    "medium" => genai::chat::ReasoningEffort::Medium,
+                    "high" => genai::chat::ReasoningEffort::High,
+                    "xhigh" => genai::chat::ReasoningEffort::XHigh,
+                    "max" => genai::chat::ReasoningEffort::Max,
+                    other => {
+                        // Try to parse as budget tokens
+                        if let Ok(budget) = other.parse::<u32>() {
+                            genai::chat::ReasoningEffort::Budget(budget)
+                        } else {
+                            genai::chat::ReasoningEffort::Medium
                         }
-                    } else {
-                        return Err(msg);
                     }
+                };
+                chat_options = chat_options.with_reasoning_effort(effort);
+            }
+            use piko_protocol::PromptCachePolicy;
+            match req.run_prompt.cache_plan.policy {
+                PromptCachePolicy::Disabled => {}
+                PromptCachePolicy::ProviderDefault => {
+                    chat_options = chat_options.with_prompt_cache_key(provider_cache_key(&req));
                 }
-            },
-        };
+                PromptCachePolicy::Ephemeral => {
+                    chat_options = chat_options
+                        .with_prompt_cache_key(provider_cache_key(&req))
+                        .with_cache_control(genai::chat::CacheControl::Ephemeral);
+                }
+                PromptCachePolicy::Extended => {
+                    chat_options = chat_options
+                        .with_prompt_cache_key(provider_cache_key(&req))
+                        .with_cache_control(genai::chat::CacheControl::Ephemeral24h);
+                }
+            }
+            let chat_options = Some(chat_options);
 
-        Ok(resilient_stream(
-            initial,
-            cancel,
-            self.middlewares.clone(),
-            ctx,
-        ))
+            // Eager open phase: retry with the shared budget, then fall back
+            // to a non-streaming completion before returning the stream.
+            let policy = RetryPolicy::from_config(&self.retry);
+            let client = self.state.client.clone();
+            let mut retry_state = RetryState::default();
+
+            let retry_ctx = OpenRetryContext {
+                policy: &policy,
+                state: &mut retry_state,
+                cancel: cancel.as_ref(),
+                run_id: &req.run_id,
+                model: &req.model,
+                provider: &req.provider,
+                telemetry: Arc::clone(&telemetry),
+            };
+            let initial = match open_stream_with_retry(
+                &client,
+                &model_iden,
+                &request,
+                chat_options.as_ref(),
+                retry_ctx,
+            )
+            .await
+            {
+                Ok(resp) => OpenOutcome::Stream(resp),
+                Err(open_err) => match open_err {
+                    OpenError::NonRetryable(msg) => return Err(msg),
+                    OpenError::BudgetExhausted(msg) => {
+                        if fallback_enabled {
+                            tracing::info!(
+                                target: "llm.fallback",
+                                run_id = %ctx.run_id,
+                                step_id = %ctx.step_id,
+                                model = %req.model,
+                                provider = %req.provider,
+                                "llm.fallback"
+                            );
+                            ctx.telemetry().record_fallback(&req.model, &req.provider);
+                            match client
+                                .exec_chat(
+                                    model_iden.clone(),
+                                    request.clone(),
+                                    chat_options.as_ref(),
+                                )
+                                .await
+                            {
+                                Ok(resp) => OpenOutcome::FallbackEvents(
+                                    crate::stream::fallback_events(resp),
+                                ),
+                                Err(fb_err) => {
+                                    return Err(format!(
+                                        "streaming request failed after retries: {msg}; \
+                                         non-streaming fallback failed: {fb_err}"
+                                    ));
+                                }
+                            }
+                        } else {
+                            return Err(msg);
+                        }
+                    }
+                },
+            };
+
+            Ok(resilient_stream(
+                initial,
+                cancel,
+                self.middlewares.clone(),
+                ctx,
+            ))
+        }
+        .instrument(span.clone())
+        .await;
+
+        match result {
+            Ok(stream) => Ok(Box::pin(crate::stream::InstrumentedStream::new(
+                stream, span,
+            ))),
+            Err(error) => Err(error),
+        }
     }
 
     fn capabilities(&self) -> ModelCapabilities {

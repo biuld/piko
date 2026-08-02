@@ -14,6 +14,8 @@ use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::utils::runtime_tool_entity_id;
+use piko_orchd_api::telemetry::{RuntimeTelemetry, ToolCallTelemetry};
+use tracing::Instrument;
 
 use super::ExecutionIdentity;
 
@@ -21,6 +23,13 @@ use super::ExecutionIdentity;
 mod fixtures;
 #[cfg(test)]
 mod tests;
+
+pub(super) fn mode_str(mode: &ToolExecutionMode) -> &'static str {
+    match mode {
+        ToolExecutionMode::Sequential => "sequential",
+        ToolExecutionMode::Parallel => "parallel",
+    }
+}
 
 /// A run of consecutive tool calls sharing the same effective execution mode.
 #[derive(Debug, Clone)]
@@ -130,7 +139,16 @@ pub(super) async fn execute_sequential_call(
     tc: &ToolCallItem,
     route: &CatalogRoute,
     parent_message_id: &str,
+    telemetry: Arc<dyn RuntimeTelemetry>,
 ) -> ToolExecResult {
+    let span = tool_call_span(
+        identity,
+        model_step_index,
+        tc,
+        &route.tool_def.name,
+        "sequential",
+    );
+    let started = std::time::Instant::now();
     let call = ToolCall {
         id: tc.id.clone(),
         name: tc.name.clone(),
@@ -150,12 +168,15 @@ pub(super) async fn execute_sequential_call(
             .execute_tool(&call, &exec_ctx, route, Some(cancel_for_exec))
             .await
             .result
-    };
-    tokio::select! {
+    }
+    .instrument(span.clone());
+    let record = tokio::select! {
         biased;
         _ = cancel.cancelled() => aborted_tool_exec_result(),
         record = execute => record,
-    }
+    };
+    record_tool_outcome(&span, &started, &record, telemetry, &tc.name, "sequential");
+    record
 }
 
 /// Execute a parallel group: run all calls concurrently under a semaphore
@@ -168,6 +189,7 @@ pub(super) async fn execute_parallel_group(
     calls: &[&ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     parent_message_id: &str,
+    telemetry: Arc<dyn RuntimeTelemetry>,
 ) -> Vec<ToolExecResult> {
     // Concurrency cap: min of the declared set-level caps (0 treated as 1),
     // bounded by the group size; unset means the whole group may overlap.
@@ -200,7 +222,14 @@ pub(super) async fn execute_parallel_group(
             let semaphore = Arc::clone(&semaphore);
             let cancel = cancel.clone();
             let registry = Arc::clone(&registry);
+            let telemetry = Arc::clone(&telemetry);
             let route = routes.get(&tc.name).cloned();
+            let route_name = route
+                .as_ref()
+                .map(|r| r.tool_def.name.clone())
+                .unwrap_or_default();
+            let span = tool_call_span(identity, model_step_index, tc, &route_name, "parallel");
+            let tool_name = tc.name.clone();
             let call = ToolCall {
                 id: tc.id.clone(),
                 name: tc.name.clone(),
@@ -209,7 +238,7 @@ pub(super) async fn execute_parallel_group(
             };
             async move {
                 let Some(route) = route else {
-                    return ToolExecResult {
+                    let record = ToolExecResult {
                         ok: false,
                         value: None,
                         error: Some(ToolExecError {
@@ -218,7 +247,17 @@ pub(super) async fn execute_parallel_group(
                             retryable: Some(false),
                         }),
                     };
+                    record_tool_outcome(
+                        &span,
+                        &std::time::Instant::now(),
+                        &record,
+                        telemetry,
+                        &tool_name,
+                        "parallel",
+                    );
+                    return record;
                 };
+                let started = std::time::Instant::now();
                 let cancel_for_exec = cancel.clone();
                 let execute = async move {
                     let _permit = semaphore
@@ -229,15 +268,98 @@ pub(super) async fn execute_parallel_group(
                         .execute_tool(&call, &exec_ctx, &route, Some(cancel_for_exec))
                         .await
                         .result
-                };
-                tokio::select! {
+                }
+                .instrument(span.clone());
+                let record = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => aborted_tool_exec_result(),
                     record = execute => record,
-                }
+                };
+                record_tool_outcome(&span, &started, &record, telemetry, &tool_name, "parallel");
+                record
             }
         })
         .collect();
 
     join_all(futures).await
+}
+
+fn tool_call_span(
+    identity: &ExecutionIdentity,
+    model_step_index: u32,
+    tc: &ToolCallItem,
+    route_name: &str,
+    mode: &'static str,
+) -> tracing::Span {
+    tracing::info_span!(
+        "tool.call",
+        session_id = %identity.session_id,
+        run_id = %identity.execution_id,
+        agent_instance_id = %identity.agent_instance_id,
+        step_id = format!("step_{model_step_index}"),
+        tool = %tc.name,
+        tool_call_id = %tc.id,
+        tool_call_index = tc.tool_call_index,
+        mode,
+        args_json = crate::runtime::utils::truncate_json(&tc.arguments, 4096),
+        route = %route_name,
+    )
+}
+
+fn record_tool_outcome(
+    span: &tracing::Span,
+    started: &std::time::Instant,
+    record: &ToolExecResult,
+    telemetry: Arc<dyn RuntimeTelemetry>,
+    tool: &str,
+    mode: &'static str,
+) {
+    let duration_ms = started.elapsed().as_millis() as u64;
+    span.in_scope(|| {
+        if let Some(error) = &record.error {
+            tracing::event!(
+                target: "tool.result",
+                tracing::Level::ERROR,
+                error_code = %error.code,
+                retryable = ?error.retryable,
+                error = %truncate(&error.message, 1024),
+                "Tool call failed"
+            );
+        } else {
+            let output_size = record
+                .value
+                .as_ref()
+                .map(|v| v.to_string().len())
+                .unwrap_or(0);
+            tracing::event!(
+                target: "tool.result",
+                tracing::Level::INFO,
+                output_size,
+                "Tool call succeeded"
+            );
+        }
+    });
+    let status = if record.error.as_ref().is_some_and(|e| e.code == "aborted") {
+        "aborted"
+    } else if record.ok {
+        "ok"
+    } else {
+        "error"
+    };
+    telemetry.tool_call_completed(ToolCallTelemetry {
+        tool: tool.to_string(),
+        duration_ms,
+        status,
+        mode,
+    });
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        text.to_string()
+    } else {
+        let mut result = text.chars().take(max).collect::<String>();
+        result.push_str("...");
+        result
+    }
 }

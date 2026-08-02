@@ -59,7 +59,23 @@ impl AgentRuntime {
         model_executor: Arc<dyn LlmGateway>,
         config: piko_protocol::config::OrchdConfig,
     ) -> Arc<Self> {
-        let execution = AgentExecutionRuntime::bootstrap(model_executor, config).await;
+        Self::bootstrap_with_telemetry(
+            model_executor,
+            config,
+            Arc::new(piko_orchd_api::telemetry::NoopRuntimeTelemetry),
+        )
+        .await
+    }
+
+    /// Like [`bootstrap`], with a hostd-provided telemetry sink for metrics.
+    pub async fn bootstrap_with_telemetry(
+        model_executor: Arc<dyn LlmGateway>,
+        config: piko_protocol::config::OrchdConfig,
+        telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
+    ) -> Arc<Self> {
+        let execution =
+            AgentExecutionRuntime::bootstrap_with_telemetry(model_executor, config, telemetry)
+                .await;
         let runtime = Arc::new(Self::from_execution_runtime(Arc::clone(&execution)));
         execution
             .register_tool_provider(Box::new(
@@ -481,6 +497,7 @@ impl AgentRuntimeApi for AgentRuntime {
         &self,
         request: SendAgentInputRequest,
     ) -> Result<piko_orchd_api::AgentRunAcceptance, AgentApiError> {
+        let parent = tracing::Span::current();
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(
@@ -495,7 +512,11 @@ impl AgentRuntimeApi for AgentRuntime {
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
-            .try_send(AgentCommand::Run { request, reply })
+            .try_send(AgentCommand::Run {
+                request,
+                reply,
+                parent,
+            })
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
                 mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
@@ -510,6 +531,7 @@ impl AgentRuntimeApi for AgentRuntime {
         request: SendAgentInputRequest,
         recipient_agent_instance_id: String,
     ) -> Result<AgentInputReceipt, AgentApiError> {
+        let parent = tracing::Span::current();
         let scope = self.scope(&request.session_id).await?;
         scope
             .authorize_input(
@@ -534,6 +556,7 @@ impl AgentRuntimeApi for AgentRuntime {
                     agent_instance_id: recipient_agent_instance_id,
                 },
                 reply,
+                parent,
             })
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,

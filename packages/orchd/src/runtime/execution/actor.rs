@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use piko_comms::MailboxReceiver;
 use piko_comms::contracts::ExecutionCommands;
+use piko_orchd_api::telemetry::ModelStepTelemetry;
 use piko_orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
 use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
@@ -10,6 +11,7 @@ use piko_protocol::execution::{
 };
 use piko_protocol::{Message, Usage};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use super::ExecutionIdentity;
 use super::mailbox::ExecutionCommand;
@@ -135,27 +137,59 @@ impl ExecutionActor {
 
             self.drain_controls_nonblocking()?;
 
-            let step = self.run_model_step().await?;
-            self.commit_message(step.assistant_message, step.message_id.clone())
-                .await?;
-
-            if !step.tool_calls.is_empty() {
-                if !self.request.config.allow_tool_calls {
-                    return Err(AgentApiError::InputRejected);
-                }
-                self.execute_and_commit_tools(&step.tool_calls, &step.routes, &step.message_id)
+            let step_span = tracing::info_span!(
+                "model.step",
+                session_id = %self.identity.session_id,
+                run_id = %self.identity.execution_id,
+                agent_instance_id = %self.identity.agent_instance_id,
+                step_id = tracing::field::Empty,
+                model = tracing::field::Empty,
+                provider = tracing::field::Empty,
+                thinking = tracing::field::Empty,
+                tools = tracing::field::Empty,
+                transcript_messages = tracing::field::Empty,
+                context_window = tracing::field::Empty,
+            );
+            let step_started = std::time::Instant::now();
+            let iteration = async {
+                let step = self.run_model_step().await?;
+                self.commit_message(step.assistant_message, step.message_id.clone())
                     .await?;
+
+                if !step.tool_calls.is_empty() {
+                    if !self.request.config.allow_tool_calls {
+                        return Err(AgentApiError::InputRejected);
+                    }
+                    self.execute_and_commit_tools(&step.tool_calls, &step.routes, &step.message_id)
+                        .await?;
+                    self.drain_controls_at_step_boundary().await?;
+                    if let Some(steering) = self.state.steering.pop_front() {
+                        self.commit_steering(&steering).await?;
+                    }
+                    return Ok((true, step.model));
+                }
+
                 self.drain_controls_at_step_boundary().await?;
                 if let Some(steering) = self.state.steering.pop_front() {
                     self.commit_steering(&steering).await?;
+                    return Ok((true, step.model));
                 }
-                continue;
+
+                Ok((false, step.model))
             }
+            .instrument(step_span)
+            .await?;
 
-            self.drain_controls_at_step_boundary().await?;
-
-            if let Some(steering) = self.state.steering.pop_front() {
-                self.commit_steering(&steering).await?;
+            let (more, model) = iteration;
+            self.services
+                .telemetry()
+                .model_step_completed(ModelStepTelemetry {
+                    model: model.id,
+                    provider: model.provider,
+                    duration_ms: step_started.elapsed().as_millis() as u64,
+                    status: "ok",
+                });
+            if more {
                 continue;
             }
 
@@ -251,7 +285,15 @@ impl ExecutionActor {
             (Vec::new(), HashMap::new())
         };
         let transcript = self.state.transcript.to_vec();
+        let span = tracing::Span::current();
+        span.record("step_id", format!("step_{step_count}"));
+        span.record("model", &model.id);
+        span.record("provider", &model.provider);
+        span.record("thinking", thinking.as_deref().unwrap_or("none"));
+        span.record("tools", tools.len());
+        span.record("transcript_messages", transcript.len());
         if let Some(config) = model_config.as_ref() {
+            span.record("context_window", config.context_window);
             super::budget::enforce_context_budget(
                 &self.request.run_prompt,
                 &transcript,
@@ -304,7 +346,7 @@ impl ExecutionActor {
                     identity,
                     message_id.clone(),
                     source_turn_id.clone(),
-                    model,
+                    model.clone(),
                     llm,
                 );
                 Ok(dispatch
@@ -319,7 +361,7 @@ impl ExecutionActor {
                     identity,
                     message_id.clone(),
                     source_turn_id,
-                    model,
+                    model.clone(),
                     error.to_string(),
                 );
                 let result = dispatch
@@ -335,6 +377,7 @@ impl ExecutionActor {
                 tool_calls: step.step.tool_calls,
                 routes,
                 message_id,
+                model,
             }),
             Err((error, step)) => {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
@@ -361,80 +404,112 @@ impl ExecutionActor {
         let registry = self.services.tool_registry().clone();
         let model_step_index = self.state.model_step_index;
         for group in tool_batch::group_tool_calls(tool_calls, routes) {
-            match group.mode {
-                ToolExecutionMode::Sequential => {
-                    for tc in group.calls {
-                        self.commit_message(
-                            tool_batch::tool_call_message(tc),
-                            tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
-                        )
-                        .await?;
-
-                        let record = if self.cancel.is_cancelled() {
-                            Some(tool_batch::aborted_tool_exec_result())
-                        } else {
-                            match routes.get(&tc.name) {
-                                Some(route) => Some(
-                                    tool_batch::execute_sequential_call(
-                                        registry.clone(),
-                                        self.cancel.clone(),
-                                        model_step_index,
-                                        &self.identity,
-                                        tc,
-                                        route,
-                                        parent_message_id,
-                                    )
-                                    .await,
+            let batch_span = tracing::info_span!(
+                "tool.batch",
+                session_id = %self.identity.session_id,
+                run_id = %self.identity.execution_id,
+                agent_instance_id = %self.identity.agent_instance_id,
+                step_id = format!("step_{model_step_index}"),
+                mode = tool_batch::mode_str(&group.mode),
+                call_count = group.calls.len(),
+                concurrency_cap = tracing::field::Empty,
+                tool_names = group
+                    .calls
+                    .iter()
+                    .map(|tc| tc.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            let telemetry = self.services.telemetry();
+            let batch_result: Result<(), AgentApiError> = async {
+                match group.mode {
+                    ToolExecutionMode::Sequential => {
+                        for tc in group.calls {
+                            self.commit_message(
+                                tool_batch::tool_call_message(tc),
+                                tool_batch::tool_call_message_id(
+                                    parent_message_id,
+                                    tc.tool_call_index,
                                 ),
-                                None => None,
-                            }
-                        };
-                        let result_message = match record {
-                            Some(record) => build_tool_result(tc, &record),
-                            None => {
-                                build_tool_error(tc, &format!("No route for tool \"{}\"", tc.name))
-                            }
-                        };
-                        self.commit_message(
-                            result_message,
-                            tool_batch::tool_result_message_id(
-                                parent_message_id,
-                                tc.tool_call_index,
-                            ),
+                            )
+                            .await?;
+
+                            let record = if self.cancel.is_cancelled() {
+                                Some(tool_batch::aborted_tool_exec_result())
+                            } else {
+                                match routes.get(&tc.name) {
+                                    Some(route) => Some(
+                                        tool_batch::execute_sequential_call(
+                                            registry.clone(),
+                                            self.cancel.clone(),
+                                            model_step_index,
+                                            &self.identity,
+                                            tc,
+                                            route,
+                                            parent_message_id,
+                                            Arc::clone(&telemetry),
+                                        )
+                                        .await,
+                                    ),
+                                    None => None,
+                                }
+                            };
+                            let result_message = match record {
+                                Some(record) => build_tool_result(tc, &record),
+                                None => build_tool_error(
+                                    tc,
+                                    &format!("No route for tool \"{}\"", tc.name),
+                                ),
+                            };
+                            self.commit_message(
+                                result_message,
+                                tool_batch::tool_result_message_id(
+                                    parent_message_id,
+                                    tc.tool_call_index,
+                                ),
+                            )
+                            .await?;
+                        }
+                    }
+                    ToolExecutionMode::Parallel => {
+                        for tc in &group.calls {
+                            self.commit_message(
+                                tool_batch::tool_call_message(tc),
+                                tool_batch::tool_call_message_id(
+                                    parent_message_id,
+                                    tc.tool_call_index,
+                                ),
+                            )
+                            .await?;
+                        }
+                        let results = tool_batch::execute_parallel_group(
+                            registry.clone(),
+                            self.cancel.clone(),
+                            model_step_index,
+                            &self.identity,
+                            &group.calls,
+                            routes,
+                            parent_message_id,
+                            Arc::clone(&telemetry),
                         )
-                        .await?;
+                        .await;
+                        for (tc, result) in group.calls.iter().zip(results) {
+                            self.commit_message(
+                                build_tool_result(tc, &result),
+                                tool_batch::tool_result_message_id(
+                                    parent_message_id,
+                                    tc.tool_call_index,
+                                ),
+                            )
+                            .await?;
+                        }
                     }
                 }
-                ToolExecutionMode::Parallel => {
-                    for tc in &group.calls {
-                        self.commit_message(
-                            tool_batch::tool_call_message(tc),
-                            tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
-                        )
-                        .await?;
-                    }
-                    let results = tool_batch::execute_parallel_group(
-                        registry.clone(),
-                        self.cancel.clone(),
-                        model_step_index,
-                        &self.identity,
-                        &group.calls,
-                        routes,
-                        parent_message_id,
-                    )
-                    .await;
-                    for (tc, result) in group.calls.iter().zip(results) {
-                        self.commit_message(
-                            build_tool_result(tc, &result),
-                            tool_batch::tool_result_message_id(
-                                parent_message_id,
-                                tc.tool_call_index,
-                            ),
-                        )
-                        .await?;
-                    }
-                }
+                Ok(())
             }
+            .instrument(batch_span)
+            .await;
+            let _ = batch_result;
         }
         Ok(())
     }
@@ -494,4 +569,5 @@ struct CompletedModelStep {
     tool_calls: Vec<ToolCallItem>,
     routes: HashMap<String, CatalogRoute>,
     message_id: String,
+    model: ModelSpec,
 }

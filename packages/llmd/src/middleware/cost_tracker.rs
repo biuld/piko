@@ -69,11 +69,13 @@ impl LlmdMiddleware for CostTrackerMiddleware {
             );
 
             info!(
+                target: "llm.cost",
                 run_id = %ctx.run_id,
+                step_id = %ctx.step_id,
                 model = %ctx.model_id,
                 provider = %ctx.provider,
                 cost_usd = usage.cost.total,
-                "Cost tracking completed"
+                "llm.cost"
             );
         }
         Ok(())

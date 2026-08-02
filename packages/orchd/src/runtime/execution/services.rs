@@ -7,6 +7,7 @@ use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
 use piko_orchd_api::ToolProvider;
+use piko_orchd_api::telemetry::{NoopRuntimeTelemetry, RuntimeTelemetry};
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::ToolSet;
 
@@ -16,15 +17,24 @@ pub struct ExecutionServices {
     agent_specs: Arc<RwLock<HashMap<String, AgentSpec>>>,
     model_config: Arc<RwLock<Option<ModelConfig>>>,
     tool_registry: Arc<ToolRegistryImpl>,
+    telemetry: Arc<dyn RuntimeTelemetry>,
 }
 
 impl ExecutionServices {
     pub fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
+        Self::with_telemetry(model_executor, Arc::new(NoopRuntimeTelemetry))
+    }
+
+    pub fn with_telemetry(
+        model_executor: Arc<dyn LlmGateway>,
+        telemetry: Arc<dyn RuntimeTelemetry>,
+    ) -> Self {
         Self {
             model_executor,
             agent_specs: Arc::new(RwLock::new(HashMap::new())),
             model_config: Arc::new(RwLock::new(None)),
             tool_registry: Arc::new(ToolRegistryImpl::new()),
+            telemetry,
         }
     }
 
@@ -50,6 +60,10 @@ impl ExecutionServices {
 
     pub fn tool_registry(&self) -> Arc<ToolRegistryImpl> {
         Arc::clone(&self.tool_registry)
+    }
+
+    pub fn telemetry(&self) -> Arc<dyn RuntimeTelemetry> {
+        Arc::clone(&self.telemetry)
     }
 
     pub async fn register_tool_provider(&self, provider: Box<dyn ToolProvider>) {

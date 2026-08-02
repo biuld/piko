@@ -52,8 +52,9 @@ pub struct HostTransport {
 impl HostTransport {
     /// Spawn hostd using the resolved command and given extra arguments.
     ///
-    /// Environment variables forwarded:
-    /// - `PIKO_LOG_DISABLE`, `PIKO_LOG_FILE`, `PIKO_LOG_LEVEL` (when provided).
+    /// Environment variables forwarded: the caller-provided `env_overrides`
+    /// (hostd no longer reads `PIKO_LOG_DISABLE` / `PIKO_LOG_FILE`; logging is
+    /// unified on OTel — only `PIKO_LOG_LEVEL` is meaningful from the CLI).
     pub fn spawn(args: &[String], env_overrides: &[(&str, &str)]) -> Result<Self> {
         let command = discovery::resolve_hostd_command();
         Self::spawn_command(&command, args, env_overrides)

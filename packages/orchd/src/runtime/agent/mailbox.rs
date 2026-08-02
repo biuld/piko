@@ -24,11 +24,15 @@ pub enum AgentCommand {
     Run {
         request: SendAgentInputRequest,
         reply: ReplySender<AgentCommandReply, Result<AgentRunAcceptance, AgentApiError>>,
+        /// Parent span captured at the send site so the `agent.run` span
+        /// nests under the turn/tool context even across the actor task.
+        parent: tracing::Span,
     },
     InputDetached {
         request: SendAgentInputRequest,
         recipient: DetachedReportTarget,
         reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
+        parent: tracing::Span,
     },
     ExecutionFinished {
         execution_id: String,

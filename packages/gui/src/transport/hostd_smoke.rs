@@ -60,14 +60,8 @@ fn hostd_smoke_discover_create_reconcile_list_models() {
         .join(format!("piko-gui-smoke-sessions-{}", std::process::id()))
         .to_string_lossy()
         .into_owned();
-    let mut bridge = spawn_bridge(
-        &[],
-        &[
-            ("PIKO_LOG_DISABLE", "1"),
-            ("PIKO_SESSION_DIR", session_root.as_str()),
-        ],
-    )
-    .expect("spawn hostd");
+    let mut bridge =
+        spawn_bridge(&[], &[("PIKO_SESSION_DIR", session_root.as_str())]).expect("spawn hostd");
 
     bridge.intent(ClientIntent::DiscoverSessions {
         scope: SessionListScope::All,

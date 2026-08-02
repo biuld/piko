@@ -184,8 +184,7 @@ fn hostd_shutdown_reaps_child_process() {
         return;
     }
 
-    let mut transport =
-        HostTransport::spawn(&[], &[("PIKO_LOG_DISABLE", "1")]).expect("spawn hostd");
+    let mut transport = HostTransport::spawn(&[], &[]).expect("spawn hostd");
     let status = transport
         .shutdown()
         .expect("child should be reaped on shutdown");

@@ -31,8 +31,12 @@ toml = "0.8"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 tracing = "0.1"
-tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+tracing-opentelemetry = "0.32"
+opentelemetry-appender-tracing = "0.31"
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["logs"] }
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"] }
 reqwest = { version = "0.13", features = ["json"] }
 chrono = "0.4"
 dirs = "6"
@@ -41,3 +45,4 @@ piko-protocol = { version = "0.1.0", path = "../protocol" }
 [dev-dependencies]
 tempfile = "3"
 tokio-util = "0.7"
+opentelemetry_sdk = { version = "0.31", features = ["testing", "trace", "metrics", "logs", "rt-tokio"] }

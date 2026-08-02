@@ -112,7 +112,7 @@ Goal: parent agents can supervise and steer children (codex-rs v2 surface).
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-15 observability | turn TTFT/TTFM metrics; rollout recorder; turn-diff tracking; prompt debugging | planned |
+| F-15 observability | end-to-end tracing (OTel spans turn → agent → model → tool; OTLP HTTP + JSON fallback) + TTFT/TTFM metrics; rollout recorder; turn-diff tracking; prompt debugging | implemented (F-15/D-15/V-15; tracing + metrics slice) |
 
 ### M7 — Extension (optional)
 
