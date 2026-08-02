@@ -1,6 +1,6 @@
 # D-01: Parallel tool batch dispatch
 
-> Status: accepted
+> Status: implemented
 > Implements: [F-06](../features/F-06-tool-system.md)
 
 ## Goal

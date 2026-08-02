@@ -1,6 +1,6 @@
 # F-06: Tool execution contract
 
-> Status: reviewed
+> Status: implemented
 > Priority: P0
 > Source evidence: codex-rs `core/src/tools/parallel.rs`, `core/src/tools/registry.rs`,
 > `core/src/tools/router.rs`, `core/src/tools/handlers/{view_image,tool_search,shell_command}.rs`
@@ -138,6 +138,10 @@ for differential replay against codex-rs.
 
 1. Should `bash`/shell tools opt into parallel execution later? codex-rs
    allows it; piko defers until shell sessions are first-class.
+
+## Verification
+
+- [V-01: F-06 tool batch dispatch acceptance evidence](../verification/V-01-tool-batch-dispatch.md)
 
 ## Reference evidence
 

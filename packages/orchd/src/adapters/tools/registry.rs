@@ -18,13 +18,14 @@ use tokio_util::sync::CancellationToken;
 use crate::domain::tools::approval::{ToolApprovalDecision, ToolApprovalRequest};
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
-    ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolPolicy, ToolSensitivity, ToolSet,
-    ToolSetPolicy, ToolSetToolRef,
+    ToolApprovalRequirement, ToolDef, ToolExecutionMode, ToolSet, ToolSetToolRef,
 };
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use crate::runtime::utils::runtime_tool_entity_id;
+
+use super::catalog::{CatalogEntry, add_entry, merge_policy, tool_ref_policy};
 
 // ---- CatalogRoute ----
 
@@ -34,6 +35,12 @@ pub struct CatalogRoute {
     pub provider_id: String,
     pub provider_tool_name: String,
     pub tool_def: ToolDef,
+    /// Effective execution mode resolved at catalog build time (per-tool
+    /// override, then set-level `allowParallel`, then fail-closed sequential).
+    pub execution_mode: ToolExecutionMode,
+    /// Concurrency cap inherited from the owning tool set policy; the runtime
+    /// enforces it per batch without re-reading tool sets.
+    pub max_concurrent_calls: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +201,7 @@ impl ToolRegistryImpl {
                                 tool_name,
                                 td,
                                 policy.as_ref(),
+                                tool_set.policy.as_ref(),
                             );
                         }
                     }
@@ -211,6 +219,7 @@ impl ToolRegistryImpl {
                                 action,
                                 td,
                                 policy.as_ref(),
+                                tool_set.policy.as_ref(),
                             );
                         }
                     }
@@ -240,6 +249,7 @@ impl ToolRegistryImpl {
                                     &td.name,
                                     td,
                                     policy.as_ref(),
+                                    tool_set.policy.as_ref(),
                                 );
                             }
                         }
@@ -296,6 +306,8 @@ impl ToolRegistry for ToolRegistryImpl {
                     provider_id: entry.provider_id.clone(),
                     provider_tool_name: entry.provider_tool_name.clone(),
                     tool_def: entry.tool_def.clone(),
+                    execution_mode: entry.execution_mode.clone(),
+                    max_concurrent_calls: entry.max_concurrent_calls,
                 },
             );
         }
@@ -481,190 +493,5 @@ impl ToolRegistry for ToolRegistryImpl {
         ToolExecutionRecord {
             result: exec_result,
         }
-    }
-}
-
-// ---- Free functions ----
-
-#[derive(Debug, Clone)]
-struct CatalogEntry {
-    public_name: String,
-    provider_id: String,
-    provider_tool_name: String,
-    tool_def: ToolDef,
-}
-
-fn add_entry(
-    entries: &mut Vec<CatalogEntry>,
-    seen: &mut HashSet<String>,
-    duplicates: &mut HashSet<String>,
-    public_name: &str,
-    provider_id: &str,
-    provider_tool_name: &str,
-    tool_def: &ToolDef,
-    policy: Option<&ToolPolicy>,
-) {
-    if seen.contains(public_name) {
-        duplicates.insert(public_name.to_string());
-    }
-    seen.insert(public_name.to_string());
-    entries.push(CatalogEntry {
-        public_name: public_name.to_string(),
-        provider_id: provider_id.to_string(),
-        provider_tool_name: provider_tool_name.to_string(),
-        tool_def: project_tool_def(tool_def, public_name, policy),
-    });
-}
-
-/// Apply policy overrides to a tool definition.
-fn project_tool_def(tool_def: &ToolDef, public_name: &str, policy: Option<&ToolPolicy>) -> ToolDef {
-    let mut projected = tool_def.clone();
-    projected.name = public_name.to_string();
-
-    let Some(p) = policy else {
-        return projected;
-    };
-
-    // Apply approval policy
-    if let Some(ref approval_policy) = p.approval {
-        projected.approval = match approval_policy {
-            ToolApprovalPolicy::Never => Some(ToolApprovalRequirement::Never),
-            ToolApprovalPolicy::OnSensitive => {
-                // Keep existing if set, otherwise on_request
-                if projected.approval.is_none() {
-                    Some(ToolApprovalRequirement::OnRequest)
-                } else {
-                    projected.approval
-                }
-            }
-            ToolApprovalPolicy::Always => Some(ToolApprovalRequirement::Always),
-        };
-    } else if let Some(ref sensitivity) = p.sensitivity {
-        projected.approval = match sensitivity {
-            ToolSensitivity::Safe => projected.approval,
-            ToolSensitivity::Sensitive
-                if projected
-                    .approval
-                    .as_ref()
-                    .is_some_and(|a| *a == ToolApprovalRequirement::Never) =>
-            {
-                Some(ToolApprovalRequirement::OnRequest)
-            }
-            ToolSensitivity::Dangerous => Some(ToolApprovalRequirement::Always),
-            ToolSensitivity::Dynamic => projected.approval,
-            _ => projected.approval,
-        };
-    }
-
-    // Apply execution mode
-    if let Some(ref mode) = p.execution_mode {
-        projected.execution_mode = Some(mode.clone());
-    }
-
-    projected
-}
-
-/// Extract policy from a tool set reference.
-fn tool_ref_policy(tool_ref: &ToolSetToolRef) -> Option<&ToolPolicy> {
-    match tool_ref {
-        ToolSetToolRef::ProviderTool { policy, .. }
-        | ToolSetToolRef::ProviderNamespace { policy, .. }
-        | ToolSetToolRef::OrchestratorControl { policy, .. } => policy.as_ref(),
-    }
-}
-
-/// Merge tool set defaults with per-tool policy.
-fn merge_policy(
-    tool_set_policy: Option<&ToolSetPolicy>,
-    tool_policy: Option<&ToolPolicy>,
-) -> Option<ToolPolicy> {
-    match (tool_set_policy, tool_policy) {
-        (None, None) => None,
-        (Some(tsp), None) => tsp.defaults.clone(),
-        (None, Some(tp)) => Some(tp.clone()),
-        (Some(tsp), Some(tp)) => {
-            let mut merged = tsp.defaults.clone().unwrap_or_default();
-            if tp.sensitivity.is_some() {
-                merged.sensitivity = tp.sensitivity.clone();
-            }
-            if tp.approval.is_some() {
-                merged.approval = tp.approval.clone();
-            }
-            if tp.timeout_ms.is_some() {
-                merged.timeout_ms = tp.timeout_ms;
-            }
-            if tp.execution_mode.is_some() {
-                merged.execution_mode = tp.execution_mode.clone();
-            }
-            if tp.failure_mode.is_some() {
-                merged.failure_mode = tp.failure_mode.clone();
-            }
-            Some(merged)
-        }
-    }
-}
-
-// ---- Tests ----
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_project_tool_def_never_approval() {
-        let tool = ToolDef {
-            name: "test_tool".into(),
-            version: "1".into(),
-            provenance: piko_protocol::PromptSource::new("test-tool", "test_tool"),
-            description: "".into(),
-            input_schema: serde_json::json!({}),
-            executor: crate::domain::tools::definition::ToolExecutorRef {
-                kind: "native".into(),
-                target: "test".into(),
-                extra: None,
-            },
-            execution_mode: None,
-            exposure: None,
-            capabilities: None,
-            approval: None,
-            metadata: None,
-        };
-
-        let policy = ToolPolicy {
-            approval: Some(ToolApprovalPolicy::Never),
-            ..Default::default()
-        };
-
-        let projected = project_tool_def(&tool, "test_tool", Some(&policy));
-        assert_eq!(projected.approval, Some(ToolApprovalRequirement::Never));
-    }
-
-    #[tokio::test]
-    async fn test_project_tool_def_dangerous_sensitivity() {
-        let tool = ToolDef {
-            name: "dangerous_tool".into(),
-            version: "1".into(),
-            provenance: piko_protocol::PromptSource::new("test-tool", "dangerous_tool"),
-            description: "".into(),
-            input_schema: serde_json::json!({}),
-            executor: crate::domain::tools::definition::ToolExecutorRef {
-                kind: "native".into(),
-                target: "test".into(),
-                extra: None,
-            },
-            execution_mode: None,
-            exposure: None,
-            capabilities: None,
-            approval: None,
-            metadata: None,
-        };
-
-        let policy = ToolPolicy {
-            sensitivity: Some(ToolSensitivity::Dangerous),
-            ..Default::default()
-        };
-
-        let projected = project_tool_def(&tool, "dangerous_tool", Some(&policy));
-        assert_eq!(projected.approval, Some(ToolApprovalRequirement::Always));
     }
 }

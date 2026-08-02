@@ -8,6 +8,7 @@ mod prompt;
 mod scope;
 mod services;
 pub(crate) mod state;
+mod tool_batch;
 
 pub use actor::ExecutionActor;
 pub use mailbox::{ExecutionCommand, ExecutionHandle};

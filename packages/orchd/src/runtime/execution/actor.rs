@@ -16,17 +16,17 @@ use super::mailbox::ExecutionCommand;
 use super::scope::SessionExecutionScope;
 use super::services::ExecutionServices;
 use super::state::ExecutionState;
-use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
+use super::tool_batch;
+use crate::adapters::tools::registry::CatalogRoute;
 use crate::domain::model::step::ModelSpec;
-use crate::domain::tools::call::{ToolCall, ToolCallItem};
+use crate::domain::tools::call::ToolCallItem;
+use crate::domain::tools::definition::ToolExecutionMode;
 use crate::domain::transcript::TranscriptManager;
-use crate::ports::tool_provider::ToolExecutionContext;
 use crate::runtime::events::identity::DispatchIdentity;
 use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
 use crate::runtime::tools::{build_tool_error, build_tool_result};
-use crate::runtime::utils::runtime_tool_entity_id;
 use piko_llmd::gateway::GatewayRequest;
 
 #[derive(Debug, Clone)]
@@ -334,66 +334,88 @@ impl ExecutionActor {
         routes: &HashMap<String, CatalogRoute>,
         parent_message_id: &str,
     ) -> Result<(), AgentApiError> {
-        for tc in tool_calls {
-            if self.cancel.is_cancelled() {
-                return Ok(());
-            }
+        // Batch dispatch groups consecutive calls by their effective execution
+        // mode (F-06 / D-01): parallel calls in a group overlap under a shared
+        // cap, sequential calls run exclusively, and results commit in
+        // tool_call_index order so the append-only transcript stays
+        // deterministic per run.
+        let registry = self.services.tool_registry().clone();
+        let model_step_index = self.state.model_step_index;
+        for group in tool_batch::group_tool_calls(tool_calls, routes) {
+            match group.mode {
+                ToolExecutionMode::Sequential => {
+                    for tc in group.calls {
+                        self.commit_message(
+                            tool_batch::tool_call_message(tc),
+                            tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
+                        )
+                        .await?;
 
-            let tool_call_message = Message::ToolCall {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                arguments: tc.arguments.clone(),
-                model: None,
-                provider: None,
-                timestamp: Some(chrono::Utc::now().timestamp_millis()),
-            };
-            let tool_call_message_id =
-                format!("{}:tool_call:{}", parent_message_id, tc.tool_call_index);
-            self.commit_message(tool_call_message, tool_call_message_id)
-                .await?;
-
-            let result_message = match routes.get(&tc.name) {
-                Some(route) => {
-                    let call = ToolCall {
-                        id: tc.id.clone(),
-                        name: tc.name.clone(),
-                        arguments: tc.arguments.clone(),
-                        partial_json: None,
-                    };
-                    let exec_ctx = ToolExecutionContext {
-                        session_id: self.identity.session_id.clone(),
-                        agent_instance_id: self.identity.agent_instance_id.clone(),
-                        execution_id: self.identity.execution_id.clone(),
-                        cancellation: Some(self.cancel.clone()),
-                        agent_id: self.identity.agent_id.clone(),
-                        tool_set_ids: vec![],
-                        turn_index: Some(self.state.model_step_index),
-                        event_seq: Some(0),
-                        next_event_seq: None,
-                        parent_message_id: Some(parent_message_id.to_string()),
-                        content_index: Some(tc.content_index),
-                        tool_call_index: Some(tc.tool_call_index),
-                        tool_entity_id: Some(runtime_tool_entity_id(
-                            parent_message_id,
-                            tc.tool_call_index,
-                        )),
-                        host_context: Some(piko_protocol::agents::HostSessionContext::new(
-                            self.identity.session_id.clone(),
-                        )),
-                        source_turn_id: self.identity.source_turn_id.clone(),
-                    };
-                    let record = (*self.services.tool_registry())
-                        .execute_tool(&call, &exec_ctx, route, Some(self.cancel.clone()))
-                        .await;
-                    build_tool_result(tc, &record.result)
+                        let record = if self.cancel.is_cancelled() {
+                            Some(tool_batch::aborted_tool_exec_result())
+                        } else {
+                            match routes.get(&tc.name) {
+                                Some(route) => Some(
+                                    tool_batch::execute_sequential_call(
+                                        registry.clone(),
+                                        self.cancel.clone(),
+                                        model_step_index,
+                                        &self.identity,
+                                        tc,
+                                        route,
+                                        parent_message_id,
+                                    )
+                                    .await,
+                                ),
+                                None => None,
+                            }
+                        };
+                        let result_message = match record {
+                            Some(record) => build_tool_result(tc, &record),
+                            None => {
+                                build_tool_error(tc, &format!("No route for tool \"{}\"", tc.name))
+                            }
+                        };
+                        self.commit_message(
+                            result_message,
+                            tool_batch::tool_result_message_id(
+                                parent_message_id,
+                                tc.tool_call_index,
+                            ),
+                        )
+                        .await?;
+                    }
                 }
-                None => build_tool_error(tc, &format!("No route for tool \"{}\"", tc.name)),
-            };
-
-            let result_message_id =
-                format!("{}:tool_result:{}", parent_message_id, tc.tool_call_index);
-            self.commit_message(result_message, result_message_id)
-                .await?;
+                ToolExecutionMode::Parallel => {
+                    for tc in &group.calls {
+                        self.commit_message(
+                            tool_batch::tool_call_message(tc),
+                            tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
+                        )
+                        .await?;
+                    }
+                    let results = tool_batch::execute_parallel_group(
+                        registry.clone(),
+                        self.cancel.clone(),
+                        model_step_index,
+                        &self.identity,
+                        &group.calls,
+                        routes,
+                        parent_message_id,
+                    )
+                    .await;
+                    for (tc, result) in group.calls.iter().zip(results) {
+                        self.commit_message(
+                            build_tool_result(tc, &result),
+                            tool_batch::tool_result_message_id(
+                                parent_message_id,
+                                tc.tool_call_index,
+                            ),
+                        )
+                        .await?;
+                    }
+                }
+            }
         }
         Ok(())
     }
