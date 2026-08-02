@@ -15,8 +15,9 @@
 
 # Presentation preferences (theme, hide-thinking-block, etc.) are NOT host
 # fields. They belong to the frontend-owned [tui] / [gui] tables below — see
-# docs/settings-ownership-design.md. hostd persists these tables opaquely and
-# does not validate their contents. Unknown top-level keys are ignored.
+# `packages/hostd/src/domain/config/settings.rs`. hostd persists these tables
+# opaquely and does not validate their contents. Unknown top-level keys are
+# ignored.
 #
 # [tui]
 # [tui.theme]

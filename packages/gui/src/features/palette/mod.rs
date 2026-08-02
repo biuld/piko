@@ -1,6 +1,6 @@
 //! Command Palette Transient body with a root → submenu navigation stack.
 //!
-//! The palette root merges two sources (see `docs/host-command-catalog-design.md`):
+//! The palette root merges two sources (see `piko_protocol::command_catalog`):
 //! - the neutral `HostCommandDescriptor` catalog fetched from hostd
 //! - a small GUI-local command list for presentation actions hostd does not
 //!   own (open Settings, focus/dock Sessions/Agents/Tree, quit, clear

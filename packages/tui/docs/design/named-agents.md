@@ -3,8 +3,9 @@
 ## Overview
 
 Piko models named agents as static `AgentSpec` templates. The future multi-agent
-identity boundary is defined by the
-[Single-Agent Runtime Model](../../../../docs/single-agent-runtime-model.md#15-multi-agent-extension-boundary).
+identity boundary follows the PRD-first runtime model (see the
+[feature index](../../../../docs/features/README.md) and the
+[codex-rs Agent Core Digest](../../../../docs/codex-agent-core-digest.md)).
 
 This TUI design document only covers how template discovery is exposed to users.
 

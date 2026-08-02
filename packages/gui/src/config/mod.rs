@@ -40,8 +40,7 @@ pub struct GuiSettings {
     )]
     pub island_palette: String,
     /// GUI-only: hide thinking/reasoning blocks in the timeline. Independent
-    /// of the TUI's `[tui].hide_thinking_block` — see
-    /// docs/settings-ownership-design.md.
+    /// of the TUI's `[tui].hide_thinking_block`.
     #[serde(default)]
     pub hide_thinking_block: bool,
     #[serde(default)]

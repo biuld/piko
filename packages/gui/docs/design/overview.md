@@ -2,8 +2,6 @@
 
 > Status: implemented through M3; M4 automated gates pass and native manual gates remain open
 > Feature contract: [GUI Workbench](../features/workbench.md)
-> Runtime dependency: [Client Core Design](../../../../docs/client-core-design.md)
-> Phase 0 baseline: [Client Core Contract Baseline](../../../../docs/client-core-contract-baseline.md)
 > External references: [GPUI](https://gpui.rs/),
 > [GPUI Component](https://longbridge.github.io/gpui-component/docs/components/)
 > Visual system: [Piko GUI UI Guidelines](../ui-guidelines.md)
@@ -14,8 +12,6 @@
 > [Design](overlay-stack.md) ·
 > [Command Palette](../features/command-palette.md)
 > Archipelago: [Design](archipelago.md)
-> Settings ownership: [Design](../../../../docs/settings-ownership-design.md)
-> Host command catalog / palette: [Design](../../../../docs/host-command-catalog-design.md)
 > Code organization (target): [Design](code-organization.md)
 
 ## 1. Purpose

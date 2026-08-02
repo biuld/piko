@@ -3,8 +3,6 @@
 > Status: normative / migrated (M1–M7 landed; physical `platform/` grouping deferred)
 > Parent: [GPUI Desktop Client Design](overview.md)
 > Related: [GUI Archipelago Design](archipelago.md),
-> [Settings Ownership Design](../../../../docs/settings-ownership-design.md),
-> [Host Command Catalog Design](../../../../docs/host-command-catalog-design.md),
 > [GUI Overlay Stack Design](overlay-stack.md)
 > Inspiration (not copy): VS Code workbench vs contributions, JetBrains tool windows,
 > feature-sliced frontends, TUI Slot/Panel/Component (`packages/tui/AGENTS.md`)

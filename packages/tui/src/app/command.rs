@@ -221,7 +221,7 @@ impl From<SlashAction> for Action {
 //
 // hostd's catalog (`HostCommandDescriptor`) is frontend-neutral: id + title +
 // detail + invoke kind only, no slash names (see
-// `docs/host-command-catalog-design.md`). The TUI keeps slash commands as a
+// `packages/protocol/src/command_catalog.rs`). The TUI keeps slash commands as a
 // *local* mapping layer on top of that neutral catalog plus its own
 // presentation-only commands. Slash strings never leave this module.
 

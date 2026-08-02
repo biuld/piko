@@ -1,4 +1,4 @@
-//! Neutral host command catalog (see `docs/host-command-catalog-design.md`).
+//! Neutral host command catalog.
 //!
 //! This module emits only frontend-neutral product commands: session
 //! lifecycle, auth, runtime/agent, and model/thinking "set" intents. It must

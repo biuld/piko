@@ -96,6 +96,10 @@ Agent-runtime capabilities are distilled from the codex-rs core. codex-rs is
 **evidence, not specification**: a behavior enters piko only when a Feature
 PRD intentionally keeps it.
 
+The global view of the codex-rs agent core and the sequencing plan live in
+[docs/codex-agent-core-digest.md](docs/codex-agent-core-digest.md) and
+[docs/agent-runtime-roadmap.md](docs/agent-runtime-roadmap.md).
+
 ---
 
 ## Quick Start

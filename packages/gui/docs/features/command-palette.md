@@ -44,8 +44,7 @@ chosen explicitly instead of cycling from the Composer.
   - a model or thinking level → apply via host config and close the palette
   - other runnable commands → run and close the palette
 - Escape pops one submenu level; at the root it closes the palette.
-- Root rows merge two sources (see
-  [Host Command Catalog Design](../../../../docs/host-command-catalog-design.md)): the neutral
+- Root rows merge two sources: the neutral
   `HostCommandDescriptor` list fetched from hostd, and a small GUI-local list
   (Sessions, Agents, session tree, Settings, Clear notifications, Quit).
   hostd no longer sends slash names, palette-visibility flags, or UI-opener

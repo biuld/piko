@@ -198,8 +198,8 @@ is exceeded.
   `original_image_detail.rs`
 - Distilled behavior: WebSocket realtime sessions (audio/text), realtime
   delegation fragments, image/audio preparation with token estimation.
-- piko status: **not started** — not in the F-index; treated as an extension,
-  not part of the core runtime roadmap.
+- piko status: **not started** — `F-16 realtime (extension)` is planned and
+  deferred; not part of the core runtime roadmap.
 
 ### L. Observability & Telemetry
 
@@ -253,7 +253,7 @@ is exceeded.
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
 | I Multi-Agent | F-10 | partial | v2 tools (followup/interrupt/list/wait) |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | MCP resources, hooks |
-| K Realtime/Multimodal | — | not started | extension, out of core scope |
+| K Realtime/Multimodal | F-16 | not started | deferred extension |
 | L Observability | F-15 | partial | turn timing, rollout recorder |
 | M Config & Permissions | F-12 part | partial | permission profiles, roles |
 

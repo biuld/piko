@@ -3,8 +3,7 @@
 //! The host catalog advertises *what* neutral product commands exist. It
 //! carries no frontend wording, no slash aliases, and no UI-opener actions
 //! (Settings/Quit/Help/Tree/Models/Thinking openers, etc.) — those are
-//! frontend-owned presentation concerns. See
-//! `docs/host-command-catalog-design.md` for the full rationale.
+//! frontend-owned presentation concerns.
 //!
 //! Each descriptor exposes a stable dotted `id` only (decision: style A,
 //! id-only). Clients maintain their own `id -> Command` / `id -> ClientIntent`

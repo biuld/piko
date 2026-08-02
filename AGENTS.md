@@ -26,7 +26,7 @@ sandbox (leaf)
 | Crate | Type | Description |
 |---|---|---|
 | `piko-hostd` | lib + bin | Host daemon: sessions, settings, auth/models, prompts, compaction, queues, turn orchestration, MCP. Layering: `protocol` → `application`/`ports` ← `adapters` → `infra`; pure model in `domain`. |
-| `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/multi-agent-execution-model.md`. |
+| `piko-orchd` | lib | Agent runtime, tool registry, model steps, multi-agent AgentInstance tree. See `docs/codex-agent-core-digest.md`. |
 | `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
 | `piko-sandbox` | lib | Fail-closed filesystem and process sandbox. |
 | `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
@@ -60,7 +60,10 @@ validation.
 
 codex-rs is evidence, not specification: its behavior is distilled into PRDs; its architecture and coupling are not translated. A behavior enters piko only when the Feature PRD intentionally keeps it.
 
-Legacy documents are kept, not deleted. Every legacy document carries a `Status` header. When a codex-derived PRD lands, conflicting behavior documents are marked `Status: superseded by docs/features/<feature>`; architecture documents remain normative until superseded by a design or ADR.
+Legacy pre-PRD-first design documents are removed as PRDs and designs land;
+behavior is re-specified by Feature PRDs (`docs/features/F-NN`) and
+implementation designs (`docs/design/D-NN`). Kept documents carry a `Status`
+header; a landed PRD supersedes earlier conflicting documents.
 
 ## Where to change
 
@@ -105,24 +108,17 @@ Normative docs live under `docs/`:
 - `docs/decisions/` — architecture decision records (numbered `ADR-NNN`)
 - `docs/verification/` — acceptance and differential validation evidence
 
-Normative runtime models:
+Global view and sequencing:
 
-- `docs/single-agent-runtime-model.md`
-- `docs/single-agent-actor-runtime-design.md`
-- `docs/agent-run-atomicity-design.md`
-- `docs/multi-agent-execution-model.md`
-
-Legacy behavior documents (to be superseded by codex-derived PRDs):
-
-- `docs/tool-sets-design.md`
-- `docs/agent-prompt-assembly-design.md`
+- `docs/codex-agent-core-digest.md` — codex-rs agent core split into functional
+  blocks with piko coverage
+- `docs/agent-runtime-roadmap.md` — milestone plan and per-block feature
+  decomposition
 
 UI and settings docs live in their package docs:
 
 - `packages/tui/docs/` — TUI features/design
 - `packages/gui/docs/` — GUI features/design/ui-guidelines
-- `docs/settings-ownership-design.md`
-- `docs/host-command-catalog-design.md`
 
 Crate-local context: `packages/tui/AGENTS.md`, `packages/gui/AGENTS.md`, `packages/protocol/AGENTS.md`.
 

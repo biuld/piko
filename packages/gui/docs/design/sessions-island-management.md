@@ -250,7 +250,7 @@ On `CommandResponse::Ok(Empty)` for rename:
 On `SessionReconciled` for that id (hostd always emits one today), merge name
 into live snapshot if applicable — same pattern as open refresh.
 
-Document in `docs/client-core-contract-baseline.md` when implemented.
+Record in the corresponding Feature PRD when implemented.
 
 ### 6.2 Delete intent (existing)
 

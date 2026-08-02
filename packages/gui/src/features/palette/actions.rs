@@ -1,6 +1,6 @@
 //! Map Command Palette selections → DesktopApp behavior.
 //!
-//! Two id spaces meet here (see `docs/host-command-catalog-design.md`):
+//! Two id spaces meet here:
 //! - host catalog ids (`RunHost`) map to a real `Command` / `ClientIntent`
 //! - GUI-local ids (`RunLocal`) map to frontend-only presentation behavior
 //!   (focus/dock a panel, open Settings, quit, clear notifications)

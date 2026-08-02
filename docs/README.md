@@ -10,6 +10,14 @@ docs/
 └── verification # EVIDENCE: acceptance and differential validation results
 ```
 
+## Global view
+
+- [codex-rs Agent Core Digest](codex-agent-core-digest.md) — the codex-rs
+  agent core split into functional blocks (A–M), with evidence paths and piko
+  coverage.
+- [Agent Runtime Roadmap](agent-runtime-roadmap.md) — milestone plan (M0–M7)
+  and the per-block feature decomposition strategy.
+
 ## Feature lifecycle
 
 ```text

@@ -5,9 +5,7 @@
 > **Chrome feature:** [archipelago](../../../chrome/docs/features/archipelago.md) ·
 > **Chrome design:** [archipelago](../../../chrome/docs/design/archipelago.md)
 > Parent: [GPUI Desktop Client Design](overview.md)
-> Related: [GUI Overlay Stack Design](overlay-stack.md),
-> [Settings Ownership Design](../../../../docs/settings-ownership-design.md),
-> [Host Command Catalog Design](../../../../docs/host-command-catalog-design.md)
+> Related: [GUI Overlay Stack Design](overlay-stack.md)
 > Feature follow-up: GUI Settings surface (separate feature doc when scoped)
 
 ## 1. Purpose
@@ -194,8 +192,7 @@ Trailing gear:
 - Body uses the same `island_gutter` / `island()` surface language as Workbench.
 - Left: section list (fixed width island). Right: header + scrollable form.
 - Form content caps at `reading_width`. Typography via `TextRole` / `label_text`.
-- Body edits Host + `[gui]` only; see
-  [Settings Ownership Design](../../../../docs/settings-ownership-design.md).
+- Body edits Host + `[gui]` only.
 
 ## 7. Motion policy
 

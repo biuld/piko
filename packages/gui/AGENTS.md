@@ -129,8 +129,7 @@ and islands emit only via `schedule_island_message` (see
 ## GUI config
 
 GUI prefs live under the `[gui]` section (hostd-stored blob). Schema and
-defaults are owned by `packages/gui/src/config/`. See
-[Settings Ownership Design](../../docs/settings-ownership-design.md).
+defaults are owned by `packages/gui/src/config/`.
 
 ## Docs structure
 
