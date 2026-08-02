@@ -10,7 +10,9 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::adapters::turns::approval::ApprovalStore;
 use crate::api::UserInteractionResponse;
-use crate::domain::config::{ApprovalSettings, McpServerConfig, SandboxSettings};
+use crate::domain::config::{
+    ApprovalSettings, McpServerConfig, SandboxSettings, TranscriptSettings,
+};
 
 mod agent_commit;
 mod agent_input;
@@ -45,6 +47,7 @@ pub struct OrchAgentRunRunner {
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     observation_router: Arc<observation_router::SessionObservationRouter>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
+    context_tools: Arc<piko_orchd::tools::ContextToolsProvider>,
 }
 
 struct ActiveAgentRunRuntime {
@@ -84,6 +87,7 @@ impl OrchAgentRunRunner {
             &[],
             None,
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -102,6 +106,7 @@ impl OrchAgentRunRunner {
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
         approval_settings: Option<&ApprovalSettings>,
+        transcript: Option<&TranscriptSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
         use piko_protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
@@ -149,9 +154,13 @@ impl OrchAgentRunRunner {
             runtime: Default::default(),
             thinking_level_map,
             sandbox,
+            transcript_max_tool_output_tokens: transcript
+                .and_then(|settings| settings.max_tool_output_tokens)
+                .unwrap_or(24_000),
         };
         let agent_runtime =
             AgentRuntime::bootstrap_with_telemetry(model_executor, config, runtime_telemetry).await;
+        let context_tools = agent_runtime.context_tools();
 
         let registered =
             crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;
@@ -178,7 +187,24 @@ impl OrchAgentRunRunner {
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
+            context_tools,
         }
+    }
+
+    /// Wire the `new_context_window` tool callback (F-05). Hostd invokes the
+    /// token-budget compact so the rewrite stays host-owned.
+    pub fn set_context_window_callback(
+        &self,
+        callback: piko_orchd::tools::NewContextWindowCallback,
+    ) {
+        let provider = Arc::clone(&self.context_tools);
+        tokio::spawn(async move {
+            provider
+                .set_callbacks(piko_orchd::tools::ContextToolsCallbacks {
+                    new_context_window: Some(callback),
+                })
+                .await;
+        });
     }
 
     fn register_session_context(&self, session_id: String, cwd: String) {

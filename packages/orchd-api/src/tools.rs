@@ -70,6 +70,11 @@ pub struct ToolExecutionContext {
     pub host_context: Option<HostSessionContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<String>,
+    /// Estimated tokens remaining in the context window for the current
+    /// model step (F-04 budget basis). Populated by the runtime before a
+    /// tool executes; `None` when the window is not resolvable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_remaining: Option<u64>,
 }
 
 /// Interface for tool providers that can discover and execute tools.

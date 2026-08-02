@@ -160,6 +160,7 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
             Some(&ApprovalSettings {
                 timeout_secs: Some(1),
             }),
+            None,
             piko_hostd::telemetry::handle(),
         )
         .await,

@@ -172,6 +172,7 @@ impl JsonlSessionRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn append_compaction(
         &self,
         session_dir: &Path,
@@ -179,6 +180,8 @@ impl JsonlSessionRepository {
         summary: &str,
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
+        tokens_before: u64,
+        details: Option<serde_json::Value>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
         let entry = SessionTreeEntry::Compaction(crate::api::CompactionEntry {
             id: Uuid::new_v4().to_string()[..8].to_string(),
@@ -186,8 +189,8 @@ impl JsonlSessionRepository {
             timestamp: timestamp(),
             summary: summary.to_string(),
             first_kept_entry_id: first_kept_entry_id.to_string(),
-            tokens_before: 0,
-            details: None,
+            tokens_before,
+            details,
             from_hook: None,
         });
         self.append_entry(session_dir, &entry, agent_id)?;

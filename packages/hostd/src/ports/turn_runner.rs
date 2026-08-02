@@ -144,6 +144,10 @@ pub trait AgentRunRunner: Send + Sync {
         None
     }
 
+    /// Wire the `new_context_window` tool callback (F-05). Default no-op;
+    /// the orchd runner forwards to its context-tools provider.
+    fn set_context_window_callback(&self, _: piko_orchd::tools::NewContextWindowCallback) {}
+
     /// In-process pending approvals/interactions for recoverable session projection.
     async fn pending_prompts_for_session(
         &self,

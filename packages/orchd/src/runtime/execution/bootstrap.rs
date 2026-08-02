@@ -83,6 +83,7 @@ impl AgentExecutionRuntime {
                     thinking_level_map: c.thinking_level_map,
                     context_window: config.default_model.context_window,
                     max_output_tokens: config.default_model.max_output_tokens,
+                    max_tool_output_tokens: config.transcript_max_tool_output_tokens,
                 })
                 .await;
         }

@@ -36,6 +36,7 @@ pub struct AgentRuntime {
     execution: Arc<AgentExecutionRuntime>,
     sessions: RwLock<HashMap<String, Arc<SessionAgentScope>>>,
     accepting: AtomicBool,
+    context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
 }
 
 impl AgentRuntime {
@@ -44,14 +45,19 @@ impl AgentRuntime {
             execution: Arc::new(AgentExecutionRuntime::new(model_executor)),
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
+            context_tools: Arc::new(crate::adapters::tools::ContextToolsProvider::new()),
         }
     }
 
-    fn from_execution_runtime(execution: Arc<AgentExecutionRuntime>) -> Self {
+    fn from_execution_runtime(
+        execution: Arc<AgentExecutionRuntime>,
+        context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
+    ) -> Self {
         Self {
             execution,
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
+            context_tools,
         }
     }
 
@@ -76,7 +82,11 @@ impl AgentRuntime {
         let execution =
             AgentExecutionRuntime::bootstrap_with_telemetry(model_executor, config, telemetry)
                 .await;
-        let runtime = Arc::new(Self::from_execution_runtime(Arc::clone(&execution)));
+        let context_tools_provider = crate::adapters::tools::ContextToolsProvider::new();
+        let runtime = Arc::new(Self::from_execution_runtime(
+            Arc::clone(&execution),
+            Arc::new(context_tools_provider.clone()),
+        ));
         execution
             .register_tool_provider(Box::new(
                 crate::adapters::tools::MultiAgentToolProvider::new(
@@ -99,6 +109,24 @@ impl AgentRuntime {
                 }],
             })
             .await;
+        execution
+            .register_tool_provider(Box::new(context_tools_provider))
+            .await;
+        execution
+            .register_tool_set(piko_protocol::tools::ToolSet {
+                id: "context".into(),
+                name: "Context Budget Tools".into(),
+                description: Some("Model-visible context budget and fresh-window tools".into()),
+                metadata: None,
+                policy: None,
+                tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
+                    provider_id: "context".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            })
+            .await;
         runtime
     }
 
@@ -108,6 +136,12 @@ impl AgentRuntime {
 
     pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.execution.register_tool_provider(provider).await;
+    }
+
+    /// The context-budget tool provider (F-05). Hosts wire the
+    /// `new_context_window` callback here.
+    pub fn context_tools(&self) -> Arc<crate::adapters::tools::ContextToolsProvider> {
+        Arc::clone(&self.context_tools)
     }
 
     pub async fn register_tool_set(&self, tool_set: piko_protocol::tools::ToolSet) {

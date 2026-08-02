@@ -104,6 +104,7 @@ fn tool_exec_context(
     model_step_index: u32,
     tc: &ToolCallItem,
     parent_message_id: &str,
+    context_remaining: Option<u64>,
 ) -> ToolExecutionContext {
     ToolExecutionContext {
         session_id: identity.session_id.clone(),
@@ -126,6 +127,7 @@ fn tool_exec_context(
             identity.session_id.clone(),
         )),
         source_turn_id: identity.source_turn_id.clone(),
+        context_remaining,
     }
 }
 
@@ -139,6 +141,7 @@ pub(super) async fn execute_sequential_call(
     tc: &ToolCallItem,
     route: &CatalogRoute,
     parent_message_id: &str,
+    context_remaining: Option<u64>,
     telemetry: Arc<dyn RuntimeTelemetry>,
 ) -> ToolExecResult {
     let span = tool_call_span(
@@ -161,6 +164,7 @@ pub(super) async fn execute_sequential_call(
         model_step_index,
         tc,
         parent_message_id,
+        context_remaining,
     );
     let cancel_for_exec = cancel.clone();
     let execute = async move {
@@ -189,6 +193,7 @@ pub(super) async fn execute_parallel_group(
     calls: &[&ToolCallItem],
     routes: &HashMap<String, CatalogRoute>,
     parent_message_id: &str,
+    context_remaining: Option<u64>,
     telemetry: Arc<dyn RuntimeTelemetry>,
 ) -> Vec<ToolExecResult> {
     // Concurrency cap: min of the declared set-level caps (0 treated as 1),
@@ -211,6 +216,7 @@ pub(super) async fn execute_parallel_group(
                 model_step_index,
                 tc,
                 parent_message_id,
+                context_remaining,
             )
         })
         .collect();

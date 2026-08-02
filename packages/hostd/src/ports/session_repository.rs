@@ -62,6 +62,7 @@ pub trait SessionRepositoryPort: Send + Sync {
         model: Option<&SessionModelRef>,
     ) -> Result<(), SessionStorageError>;
 
+    #[allow(clippy::too_many_arguments)]
     fn append_compaction(
         &self,
         session_dir: &Path,
@@ -69,6 +70,8 @@ pub trait SessionRepositoryPort: Send + Sync {
         summary: &str,
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
+        tokens_before: u64,
+        details: Option<serde_json::Value>,
     ) -> Result<SessionTreeEntry, SessionStorageError>;
 
     fn navigate(

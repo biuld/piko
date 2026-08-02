@@ -29,6 +29,7 @@ impl HostServer {
             Command::SessionCompact {
                 session_id,
                 agent_instance_id,
+                mode,
                 ..
             } => {
                 // Manual compaction — bypass threshold, always compact.
@@ -40,9 +41,24 @@ impl HostServer {
                     },
                 )
                 .await;
-                self.0
-                    .compact_session_if_needed(&command_id, &session_id, &agent_instance_id, 0, tx)
-                    .await;
+                if let Err(error) = self
+                    .0
+                    .compact_session_if_needed(
+                        &session_id,
+                        &agent_instance_id,
+                        0,
+                        mode,
+                        true,
+                        Some(tx),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        session_id,
+                        error = %error,
+                        "session.compact failed"
+                    );
+                }
                 Ok(())
             }
             command => {

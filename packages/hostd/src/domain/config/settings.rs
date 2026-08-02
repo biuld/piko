@@ -29,6 +29,7 @@ pub struct HostSettings {
 
     // ---- Execution ----
     pub compaction: Option<CompactionSettings>,
+    pub transcript: Option<TranscriptSettings>,
     pub retry: Option<RetrySettings>,
     pub approvals: Option<ApprovalSettings>,
     pub sandbox: Option<SandboxSettings>,
@@ -76,6 +77,7 @@ impl HostSettings {
             "default-model": self.default_model,
             "default-thinking-level": self.default_thinking_level,
             "compaction": self.compaction,
+            "transcript": self.transcript,
             "retry": self.retry,
             "approvals": self.approvals,
             "sandbox": self.sandbox,
@@ -93,6 +95,20 @@ pub struct CompactionSettings {
     pub enabled: Option<bool>,
     pub reserve_tokens: Option<u64>,
     pub keep_recent_tokens: Option<u64>,
+    /// Hysteresis guard: minimum estimated-token growth since the last
+    /// compaction before the next auto-compact may trigger.
+    pub min_growth_tokens: Option<u64>,
+    /// Optional model used for summarization (piko's adaptation of remote
+    /// compaction). Falls back to the default model on failure.
+    pub summarizer_model: Option<String>,
+    pub summarizer_provider: Option<String>,
+}
+
+/// Model-view settings wired into the orchd transcript policy (F-04/F-05).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct TranscriptSettings {
+    pub max_tool_output_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -269,7 +285,7 @@ impl SettingsManager {
         &self.project_path
     }
 
-    pub fn get_compaction_settings(&self) -> (bool, u64, u64) {
+    pub fn get_compaction_settings(&self) -> (bool, u64, u64, u64) {
         let compaction = self.merged.compaction.as_ref();
         (
             compaction
@@ -281,6 +297,9 @@ impl SettingsManager {
             compaction
                 .and_then(|settings| settings.keep_recent_tokens)
                 .unwrap_or(20000),
+            compaction
+                .and_then(|settings| settings.min_growth_tokens)
+                .unwrap_or(16384),
         )
     }
 
@@ -313,6 +332,12 @@ fn default_settings() -> HostSettings {
             enabled: Some(true),
             reserve_tokens: Some(16384),
             keep_recent_tokens: Some(20000),
+            min_growth_tokens: Some(16384),
+            summarizer_model: None,
+            summarizer_provider: None,
+        }),
+        transcript: Some(TranscriptSettings {
+            max_tool_output_tokens: Some(24000),
         }),
         retry: Some(RetrySettings {
             enabled: Some(true),
@@ -337,6 +362,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
             .or(base.default_thinking_level),
         transport: overrides.transport.or(base.transport),
         compaction: merge_compaction(base.compaction, overrides.compaction),
+        transcript: merge_transcript(base.transcript, overrides.transcript),
         retry: merge_retry(base.retry, overrides.retry),
         approvals: merge_approvals(base.approvals, overrides.approvals),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
@@ -362,6 +388,23 @@ fn merge_compaction(
             enabled: overrides.enabled.or(base.enabled),
             reserve_tokens: overrides.reserve_tokens.or(base.reserve_tokens),
             keep_recent_tokens: overrides.keep_recent_tokens.or(base.keep_recent_tokens),
+            min_growth_tokens: overrides.min_growth_tokens.or(base.min_growth_tokens),
+            summarizer_model: overrides.summarizer_model.or(base.summarizer_model),
+            summarizer_provider: overrides.summarizer_provider.or(base.summarizer_provider),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_transcript(
+    base: Option<TranscriptSettings>,
+    overrides: Option<TranscriptSettings>,
+) -> Option<TranscriptSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(TranscriptSettings {
+            max_tool_output_tokens: overrides
+                .max_tool_output_tokens
+                .or(base.max_tool_output_tokens),
         }),
         (base, overrides) => overrides.or(base),
     }

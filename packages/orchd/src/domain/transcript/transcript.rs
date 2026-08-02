@@ -91,6 +91,20 @@ impl TranscriptManager {
         self.invalidate_snapshot();
     }
 
+    /// Drop everything before the most recent user message (F-05
+    /// `new_context_window` fresh-window semantics for the running
+    /// execution). With no user message the transcript clears.
+    pub fn reset_to_recent_user(&mut self) {
+        let start = self
+            .messages
+            .iter()
+            .rposition(|message| matches!(message, Message::User { .. }))
+            .unwrap_or(self.messages.len());
+        self.messages.drain(..start);
+        self.tokens.drain(..start);
+        self.invalidate_snapshot();
+    }
+
     fn invalidate_snapshot(&mut self) {
         self.generation += 1;
         self.raw_snapshot = None;
@@ -104,6 +118,19 @@ mod tests {
     fn text_message(text: &str) -> Message {
         Message::User {
             content: MessageContent::String(text.into()),
+            timestamp: None,
+        }
+    }
+
+    fn assistant_message(text: &str) -> Message {
+        Message::Assistant {
+            content: vec![ContentBlock::Text { text: text.into() }],
+            api: "test".into(),
+            provider: "test".into(),
+            model: "test".into(),
+            usage: None,
+            stop_reason: None,
+            error_message: None,
             timestamp: None,
         }
     }
@@ -154,6 +181,38 @@ mod tests {
         let after = manager.snapshot();
         assert!(!before.shares_storage_with(&after));
         assert_eq!(after.messages().len(), 1);
+    }
+
+    #[test]
+    fn reset_to_recent_user_keeps_latest_user_and_later_messages() {
+        let mut manager = TranscriptManager::new(None);
+        manager.push_user_content(MessageContent::String("first".into()), None);
+        manager.push_assistant(assistant_message("old assistant"));
+        manager.push_user_content(MessageContent::String("second".into()), None);
+        manager.push_assistant(assistant_message("new assistant"));
+
+        manager.reset_to_recent_user();
+
+        let messages = manager.to_vec();
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(
+            &messages[0],
+            Message::User {
+                content: MessageContent::String(text),
+                ..
+            } if text == "second"
+        ));
+        assert_eq!(manager.tokens().len(), 2);
+        assert_eq!(manager.total_tokens(), manager.tokens().iter().sum::<u64>());
+    }
+
+    #[test]
+    fn reset_to_recent_user_clears_without_user_message() {
+        let mut manager = TranscriptManager::new(None);
+        manager.push_assistant(assistant_message("assistant only"));
+        manager.reset_to_recent_user();
+        assert!(manager.to_vec().is_empty());
+        assert_eq!(manager.total_tokens(), 0);
     }
 
     #[test]

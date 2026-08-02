@@ -1,3 +1,5 @@
+// ---- F-04/F-05 context-management: model-view truncation + budget tools ----
+
 // ---- F-04 context-management: model-view truncation acceptance ----
 
 use piko_orchd_api::{ToolDiscoveryContext, ToolExecError, ToolExecResult};
@@ -199,3 +201,6 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
         "committed transcript must retain the full tool output"
     );
 }
+
+include!("budget_tools.rs");
+include!("truncation_cap.rs");

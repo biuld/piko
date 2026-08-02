@@ -1,0 +1,53 @@
+// ---- Domain: compaction file operations — read/write/edit lists for summaries ----
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FileOperations {
+    pub read: std::collections::BTreeSet<String>,
+    pub written: std::collections::BTreeSet<String>,
+    pub edited: std::collections::BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileOperationLists {
+    pub read_files: Vec<String>,
+    pub modified_files: Vec<String>,
+}
+
+pub fn compute_file_lists(file_ops: &FileOperations) -> FileOperationLists {
+    let modified = file_ops
+        .edited
+        .union(&file_ops.written)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let read_files = file_ops
+        .read
+        .difference(&modified)
+        .cloned()
+        .collect::<Vec<_>>();
+    let modified_files = modified.into_iter().collect::<Vec<_>>();
+    FileOperationLists {
+        read_files,
+        modified_files,
+    }
+}
+
+pub fn format_file_operations(read_files: &[String], modified_files: &[String]) -> String {
+    let mut sections = Vec::new();
+    if !read_files.is_empty() {
+        sections.push(format!(
+            "<read-files>\n{}\n</read-files>",
+            read_files.join("\n")
+        ));
+    }
+    if !modified_files.is_empty() {
+        sections.push(format!(
+            "<modified-files>\n{}\n</modified-files>",
+            modified_files.join("\n")
+        ));
+    }
+    if sections.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", sections.join("\n\n"))
+    }
+}

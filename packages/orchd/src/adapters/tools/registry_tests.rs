@@ -62,6 +62,7 @@ fn context() -> ToolExecutionContext {
         tool_entity_id: Some("entity-1".into()),
         host_context: None,
         source_turn_id: None,
+        context_remaining: None,
     }
 }
 

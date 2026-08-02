@@ -108,9 +108,13 @@ is exceeded.
   token-budget context injection; model-visible "context remaining" tools.
 - piko status: **partial** — `F-04 context-management` (orchd per-message
   token accounting, copy-on-write snapshots, model-view tool-output
-  truncation; F-04/D-04/V-04) and `F-05 compaction` (hostd summarizer).
-  Gaps: model-visible context tools, auto-compact budget windows, remote
-  compaction.
+  truncation; F-04/D-04/V-04) and `F-05 compaction`
+  (F-05/D-05/V-05): budget-window auto-compact with hysteresis and pending
+  guard, inline new-context-window compact, model-visible
+  `get_context_remaining` / `new_context_window` tools, and a
+  piko-native summarizer-model override with default-model fallback
+  (provider-side remote compaction rejected). Remaining gaps:
+  token-budget context fragments and world-state diffing (F-04 follow-ons).
 
 ### E. Tool System
 

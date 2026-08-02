@@ -179,6 +179,18 @@ pub struct OrchdConfig {
     /// Sandbox policy configuration.
     #[serde(default)]
     pub sandbox: SandboxConfig,
+
+    /// Max estimated tokens for a single tool result in the model view
+    /// (F-04 truncation cap, wired from `[transcript]` settings in F-05).
+    #[serde(
+        default = "default_max_tool_output_tokens",
+        rename = "transcriptMaxToolOutputTokens"
+    )]
+    pub transcript_max_tool_output_tokens: u64,
+}
+
+fn default_max_tool_output_tokens() -> u64 {
+    24_000
 }
 
 impl Default for OrchdConfig {
@@ -196,6 +208,7 @@ impl Default for OrchdConfig {
             runtime: OrchestratorRuntimeConfig::default(),
             thinking_level_map: None,
             sandbox: SandboxConfig::default(),
+            transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
         }
     }
 }
@@ -253,6 +266,7 @@ impl OrchdConfig {
             runtime: OrchestratorRuntimeConfig::default(),
             thinking_level_map: None,
             sandbox: SandboxConfig::default(),
+            transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
         }
     }
 }

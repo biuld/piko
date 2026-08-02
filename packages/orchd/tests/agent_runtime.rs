@@ -371,7 +371,7 @@ async fn attached_runtime() -> (
 
 include!("agent_runtime_cases/atomicity.rs");
 include!("agent_runtime_cases/behavior.rs");
-include!("agent_runtime_cases/context.rs");
+include!("agent_runtime_cases/context/mod.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");
 include!("agent_runtime_cases/shutdown.rs");

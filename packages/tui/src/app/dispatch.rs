@@ -376,6 +376,7 @@ impl AppState {
                     command_id: command_id(),
                     session_id,
                     agent_instance_id,
+                    mode: piko_protocol::command::CompactMode::Summarize,
                 }));
                 self.clear_focus();
                 self.status = "compaction requested".to_string();

@@ -83,14 +83,16 @@ impl HostApp {
         let root_agent_instance_id = format!("agent_{session_id}_root");
         if agent_instance_id == root_agent_instance_id {
             let context_window = self.resolved_model_context_window().await;
-            self.compact_session_if_needed(
-                &turn_id,
-                &session_id,
-                &agent_instance_id,
-                context_window,
-                tx,
-            )
-            .await;
+            let _ = self
+                .compact_session_if_needed(
+                    &session_id,
+                    &agent_instance_id,
+                    context_window,
+                    piko_protocol::command::CompactMode::Summarize,
+                    false,
+                    Some(tx),
+                )
+                .await;
         }
         let templates = self.prompt_materials.load_prompt_templates(&cwd);
         let expanded_text = expand_prompt_template(&text, &templates);
@@ -269,14 +271,16 @@ impl HostApp {
 
         if turn_succeeded && agent_instance_id == root_agent_instance_id {
             let context_window = self.resolved_model_context_window().await;
-            self.compact_session_if_needed(
-                &turn_id,
-                &session_id,
-                &agent_instance_id,
-                context_window,
-                tx,
-            )
-            .await;
+            let _ = self
+                .compact_session_if_needed(
+                    &session_id,
+                    &agent_instance_id,
+                    context_window,
+                    piko_protocol::command::CompactMode::Summarize,
+                    false,
+                    Some(tx),
+                )
+                .await;
         }
         Ok(())
     }

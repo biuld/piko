@@ -29,6 +29,18 @@ pub enum SessionListScope {
     All,
 }
 
+/// How a `session.compact` invocation rewrites history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CompactMode {
+    /// Summarize the dropped prefix with the model and keep the recent tail.
+    #[default]
+    Summarize,
+    /// Start a fresh window without calling the model; keep the latest user
+    /// message. hostd stays authoritative for the rewrite.
+    NewContextWindow,
+}
+
 // ============================================================================
 // Commands (TUI → hostd)
 // ============================================================================
@@ -159,6 +171,9 @@ pub enum Command {
         command_id: CommandId,
         session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
+        /// How to rewrite history. Omitted by older clients → `Summarize`.
+        #[serde(default)]
+        mode: CompactMode,
     },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
@@ -222,6 +237,46 @@ impl Command {
             | Self::AgentSubscribe { command_id, .. }
             | Self::AgentUnsubscribe { command_id, .. } => command_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_compact_without_mode_defaults_to_summarize() {
+        // Older clients omit `mode`; the wire must stay compatible.
+        let parsed: Command = serde_json::from_value(serde_json::json!({
+            "type": "session_compact",
+            "command_id": "c1",
+            "session_id": "s1",
+            "agent_instance_id": "agent_s1_root",
+        }))
+        .unwrap();
+        assert!(matches!(
+            parsed,
+            Command::SessionCompact {
+                mode: CompactMode::Summarize,
+                ..
+            }
+        ));
+
+        let with_mode: Command = serde_json::from_value(serde_json::json!({
+            "type": "session_compact",
+            "command_id": "c2",
+            "session_id": "s1",
+            "agent_instance_id": "agent_s1_root",
+            "mode": "new-context-window",
+        }))
+        .unwrap();
+        assert!(matches!(
+            with_mode,
+            Command::SessionCompact {
+                mode: CompactMode::NewContextWindow,
+                ..
+            }
+        ));
     }
 }
 

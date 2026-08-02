@@ -59,6 +59,9 @@ pub struct SessionState {
     /// Per-agent-instance live view replay state.
     pub agent_views: HashMap<String, AgentViewState>,
     pub next_agent_view_seq: u64,
+    /// Budget-window compaction state (F-05): pending guard, window counter,
+    /// and rearm baseline. Derived on resume from the last checkpoint entry.
+    pub compaction: crate::domain::compaction::CompactionState,
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +131,7 @@ impl SessionState {
             active_agent_instance_id: None,
             agent_views: HashMap::new(),
             next_agent_view_seq: 1,
+            compaction: Default::default(),
         }
     }
 

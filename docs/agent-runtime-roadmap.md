@@ -61,7 +61,7 @@ Goal: long sessions stay correct and within budget without manual intervention.
 | Feature | Slice | Status |
 |---|---|---|
 | F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting | implemented (F-04/D-04/V-04) |
-| F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | partial (hostd summarizer) |
+| F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | implemented (F-05/D-05/V-05; piko-native summarizer-model override replaces provider-side remote compaction) |
 | F-15 observability | usage accounting per turn (baseline for budget decisions) | partial |
 
 Dependency: M1 needs M0 F-01 (durable transcripts) to be solid before
@@ -156,18 +156,19 @@ behavior contract with its own acceptance criteria).
 
 ## 5. Next step
 
-**M0 is complete** — F-07 tool-approvals (approval timeout + deny semantics)
-landed with PRD/design/verification. **F-04 context-management** (the M1
-entry slice: per-message token accounting, copy-on-write snapshots, and
-model-view tool-output truncation) landed with F-04/D-04/V-04; the orchd
-budget preflight now accounts the exact normalized view dispatched to the
-model. Next sequencing:
+**M0 is complete** and **F-05 compaction** (the M1 entry slice) landed:
+budget-window auto-compact with hysteresis and a pending guard, inline
+compact (`session.compact { mode: new-context-window }` without
+summarization), model-visible `get_context_remaining` / `new_context_window`
+tools, a `[transcript] max-tool-output-tokens` setting wired into the F-04
+model view, and a piko-native summarizer-model override with default-model
+fallback (provider-side remote compaction rejected per ADR-002).
+`F-05/D-05/V-05` complete. Next sequencing:
 
-1. **M1 context & memory — F-05 compaction**: auto-compact trigger polish
-   (hysteresis/budget windows), inline compact, and remote compaction, with
-   F-15 usage accounting as the budget baseline. F-04 follow-ons worth
-   sequencing with it: model-visible `get_context_remaining` /
-   `new_context_window` tools and settings wiring for the truncation cap.
-   World-state diffing builds on the frozen `state.run` baseline.
-2. Follow-on M0 gaps worth sequencing first: F-03 mention-syntax parsing and
+1. **M1 follow-ons**: F-04 world-state diffing (builds on the frozen
+   `state.run` baseline) and any remaining budget-window polish (e.g.
+   per-model compaction defaults for `min_growth_tokens`).
+2. **M2 — F-08 exec-sandboxing**: PTY/process-group lifecycle, shell
+   snapshots, and network sandbox — the next milestone entry slice.
+3. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
    cache-planning polish.

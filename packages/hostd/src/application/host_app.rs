@@ -163,6 +163,32 @@ impl HostApp {
         *self.model_executor.lock().await = Some(executor);
     }
 
+    /// Wire the `new_context_window` tool callback (F-05): a model-visible
+    /// fresh-window request runs the host-owned token-budget compact. The
+    /// rewrite has no per-command event sender, so the client refreshes on
+    /// the next snapshot; the durable tree and the running execution are
+    /// both trimmed immediately.
+    pub(crate) async fn wire_context_window_callback(&self) {
+        let host = self.clone();
+        let runner = self.turn_runner.lock().await.clone();
+        let callback: piko_orchd::tools::NewContextWindowCallback =
+            Arc::new(move |session_id, agent_instance_id| {
+                let host = host.clone();
+                Box::pin(async move {
+                    host.compact_session_if_needed(
+                        &session_id,
+                        &agent_instance_id,
+                        0,
+                        piko_protocol::command::CompactMode::NewContextWindow,
+                        true,
+                        None,
+                    )
+                    .await
+                })
+            });
+        runner.set_context_window_callback(callback);
+    }
+
     /// Record the resolved provider+model the current turn runner executes
     /// with. This is the single source of truth for session model continuity:
     /// turn submission records it per session and drives the prompt

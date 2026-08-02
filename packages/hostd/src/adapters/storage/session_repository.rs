@@ -85,6 +85,7 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         JsonlSessionRepository::set_last_model(self, session_dir, model)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn append_compaction(
         &self,
         session_dir: &Path,
@@ -92,6 +93,8 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         summary: &str,
         first_kept_entry_id: &str,
         agent_id: Option<&str>,
+        tokens_before: u64,
+        details: Option<serde_json::Value>,
     ) -> Result<SessionTreeEntry, SessionStorageError> {
         JsonlSessionRepository::append_compaction(
             self,
@@ -100,6 +103,8 @@ impl SessionRepositoryPort for JsonlSessionRepository {
             summary,
             first_kept_entry_id,
             agent_id,
+            tokens_before,
+            details,
         )
     }
 

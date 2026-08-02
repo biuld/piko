@@ -24,6 +24,9 @@ pub struct ModelConfig {
     pub thinking_level_map: ThinkingLevelMap,
     pub context_window: u64,
     pub max_output_tokens: u64,
+    /// Per-run transcript policy: max estimated tokens for a single tool
+    /// result in the model view (F-05 settings wiring for F-04 truncation).
+    pub max_tool_output_tokens: u64,
 }
 
 impl ModelConfig {

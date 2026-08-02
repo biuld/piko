@@ -23,6 +23,7 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
         tool_entity_id: None,
         host_context: None,
         source_turn_id: None,
+        context_remaining: None,
     };
     let spawned = tokio::spawn(async move {
         provider

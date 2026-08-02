@@ -488,6 +488,7 @@ fn compaction_estimates_threshold_and_formats_file_ops() {
             enabled: true,
             reserve_tokens: 10,
             keep_recent_tokens: 10,
+            min_growth_tokens: 10,
         }
     ));
 

@@ -13,7 +13,10 @@ fn in_memory_settings_apply_defaults_and_overrides() {
 
     assert_eq!(manager.get_default_model(), Some("gpt-test"));
     assert_eq!(manager.get_transport(), "auto");
-    assert_eq!(manager.get_compaction_settings(), (true, 16384, 20000));
+    assert_eq!(
+        manager.get_compaction_settings(),
+        (true, 16384, 20000, 16384)
+    );
 }
 
 #[test]
@@ -54,7 +57,7 @@ keep-recent-tokens = 222
     .unwrap();
 
     assert_eq!(manager.get_default_model(), Some("project-model"));
-    assert_eq!(manager.get_compaction_settings(), (true, 111, 222));
+    assert_eq!(manager.get_compaction_settings(), (true, 111, 222, 16384));
 }
 
 #[test]
@@ -64,6 +67,9 @@ fn apply_overrides_merges_nested_settings() {
             enabled: Some(false),
             reserve_tokens: Some(100),
             keep_recent_tokens: None,
+            min_growth_tokens: None,
+            summarizer_model: None,
+            summarizer_provider: None,
         }),
         ..HostSettings::default()
     });
@@ -73,11 +79,14 @@ fn apply_overrides_merges_nested_settings() {
             enabled: None,
             reserve_tokens: None,
             keep_recent_tokens: Some(300),
+            min_growth_tokens: None,
+            summarizer_model: None,
+            summarizer_provider: None,
         }),
         ..HostSettings::default()
     });
 
-    assert_eq!(manager.get_compaction_settings(), (false, 100, 300));
+    assert_eq!(manager.get_compaction_settings(), (false, 100, 300, 16384));
 }
 
 #[test]
@@ -125,6 +134,9 @@ fn host_namespace_excludes_frontend_blobs() {
             enabled: Some(false),
             reserve_tokens: None,
             keep_recent_tokens: None,
+            min_growth_tokens: None,
+            summarizer_model: None,
+            summarizer_provider: None,
         }),
         tui: Some(serde_json::json!({ "theme": { "name": "dark" } })),
         gui: Some(serde_json::json!({ "reduced-motion": true })),

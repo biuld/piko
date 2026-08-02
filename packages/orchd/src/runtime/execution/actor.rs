@@ -163,8 +163,13 @@ impl ExecutionActor {
                     if !self.request.config.allow_tool_calls {
                         return Err(AgentApiError::InputRejected);
                     }
-                    self.execute_and_commit_tools(&step.tool_calls, &step.routes, &step.message_id)
-                        .await?;
+                    self.execute_and_commit_tools(
+                        &step.tool_calls,
+                        &step.routes,
+                        &step.message_id,
+                        step.context_remaining,
+                    )
+                    .await?;
                     self.drain_controls_at_step_boundary().await?;
                     if let Some(steering) = self.state.steering.pop_front() {
                         self.commit_steering(&steering).await?;
@@ -287,12 +292,16 @@ impl ExecutionActor {
         } else {
             (Vec::new(), HashMap::new())
         };
-        let model_view = self
-            .state
-            .transcript
-            .model_view(&TranscriptPolicy::default());
+        let max_tool_output_tokens = model_config
+            .as_ref()
+            .map(|config| config.max_tool_output_tokens)
+            .unwrap_or(TranscriptPolicy::default().max_tool_output_tokens);
+        let model_view = self.state.transcript.model_view(&TranscriptPolicy {
+            max_tool_output_tokens,
+        });
         let snapshot = &model_view.snapshot;
         let transcript = snapshot.messages().to_vec();
+        let mut context_remaining = None;
         let span = tracing::Span::current();
         span.record("step_id", format!("step_{step_count}"));
         span.record("model", &model.id);
@@ -313,6 +322,7 @@ impl ExecutionActor {
                 thinking.is_some(),
             )?;
             span.record("context_remaining", estimate.context_remaining);
+            context_remaining = Some(estimate.context_remaining);
         }
 
         let request = GatewayRequest {
@@ -389,6 +399,7 @@ impl ExecutionActor {
                 routes,
                 message_id,
                 model,
+                context_remaining,
             }),
             Err((error, step)) => {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
@@ -406,6 +417,7 @@ impl ExecutionActor {
         tool_calls: &[ToolCallItem],
         routes: &HashMap<String, CatalogRoute>,
         parent_message_id: &str,
+        context_remaining: Option<u64>,
     ) -> Result<(), AgentApiError> {
         // Batch dispatch groups consecutive calls by their effective execution
         // mode (F-06 / D-06): parallel calls in a group overlap under a shared
@@ -414,6 +426,7 @@ impl ExecutionActor {
         // deterministic per run.
         let registry = self.services.tool_registry().clone();
         let model_step_index = self.state.model_step_index;
+        let mut fresh_window_requested = false;
         for group in tool_batch::group_tool_calls(tool_calls, routes) {
             let batch_span = tracing::info_span!(
                 "tool.batch",
@@ -458,6 +471,7 @@ impl ExecutionActor {
                                             tc,
                                             route,
                                             parent_message_id,
+                                            context_remaining,
                                             Arc::clone(&telemetry),
                                         )
                                         .await,
@@ -466,12 +480,17 @@ impl ExecutionActor {
                                 }
                             };
                             let result_message = match record {
-                                Some(record) => build_tool_result(tc, &record),
+                                Some(ref record) => build_tool_result(tc, record),
                                 None => build_tool_error(
                                     tc,
                                     &format!("No route for tool \"{}\"", tc.name),
                                 ),
                             };
+                            if tc.name == "new_context_window"
+                                && record.as_ref().is_some_and(|result| result.ok)
+                            {
+                                fresh_window_requested = true;
+                            }
                             self.commit_message(
                                 result_message,
                                 tool_batch::tool_result_message_id(
@@ -501,10 +520,14 @@ impl ExecutionActor {
                             &group.calls,
                             routes,
                             parent_message_id,
+                            context_remaining,
                             Arc::clone(&telemetry),
                         )
                         .await;
                         for (tc, result) in group.calls.iter().zip(results) {
+                            if tc.name == "new_context_window" && result.ok {
+                                fresh_window_requested = true;
+                            }
                             self.commit_message(
                                 build_tool_result(tc, &result),
                                 tool_batch::tool_result_message_id(
@@ -521,6 +544,12 @@ impl ExecutionActor {
             .instrument(batch_span)
             .await;
             let _ = batch_result;
+        }
+        if fresh_window_requested {
+            // The model asked for a fresh window: the durable hostd tree was
+            // rewritten through the callback; keep the running execution
+            // aligned by dropping everything before the latest user message.
+            self.state.transcript.reset_to_recent_user();
         }
         Ok(())
     }
@@ -581,4 +610,5 @@ struct CompletedModelStep {
     routes: HashMap<String, CatalogRoute>,
     message_id: String,
     model: ModelSpec,
+    context_remaining: Option<u64>,
 }
