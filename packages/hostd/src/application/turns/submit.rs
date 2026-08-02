@@ -105,11 +105,28 @@ impl HostApp {
             );
         }
         let skills = loaded_skills.skills;
+        let model = self.settings.lock().await.default_model.clone();
+        let (previous_model, continuation) = {
+            let mut state = self.state.lock().await;
+            let previous_model = state.record_turn_model(&session_id, model.as_deref())?;
+            let continuation = state
+                .session(&session_id)
+                .map(|session| !session.entries.is_empty())
+                .unwrap_or(false);
+            (previous_model, continuation)
+        };
         let prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
             skills,
             prompt_templates: templates,
+            session_id: Some(session_id.clone()),
+            agent_instance_id: Some(agent_instance_id.clone()),
+            operation_id: Some(turn_id.clone()),
+            model,
+            previous_model,
+            continuation,
+            environment: crate::domain::prompts::EnvironmentSnapshot::capture(),
             ..PromptSnapshotOptions::default()
         });
 

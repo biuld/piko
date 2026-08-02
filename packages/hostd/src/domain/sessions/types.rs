@@ -26,6 +26,9 @@ pub struct SessionState {
     pub task_heads: HashMap<String, String>,
     /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
+    /// Last model id recorded for a turn in this session, used to detect
+    /// model switches for the prompt model-switch fragment.
+    pub last_model: Option<String>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
     /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
@@ -98,6 +101,7 @@ impl SessionState {
             current_leaf_id: None,
             task_heads: HashMap::new(),
             steer_queue: Vec::new(),
+            last_model: None,
             cumulative_usage: Usage::empty(),
             active_agents: HashMap::new(),
             active_agent_instance_id: None,

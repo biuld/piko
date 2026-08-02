@@ -165,6 +165,25 @@ impl HostState {
         Ok((turn_id, status))
     }
 
+    /// Return the previously recorded model for the session (if any) and
+    /// record the model used by the current turn. A `None` model does not
+    /// overwrite recorded history, so unconfigured hosts stay switch-free.
+    pub fn record_turn_model(
+        &mut self,
+        session_id: &str,
+        model: Option<&str>,
+    ) -> Result<Option<String>, ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        let previous = state.last_model.clone();
+        if let Some(model) = model {
+            let model = model.trim();
+            if !model.is_empty() {
+                state.last_model = Some(model.to_string());
+            }
+        }
+        Ok(previous)
+    }
+
     pub fn apply_turn_input_disposition(
         &mut self,
         session_id: &str,

@@ -46,7 +46,7 @@ F-10 core, F-03 baseline). Remaining slices:
 | F-06 tool-system | parallel batch dispatch + sequential exclusivity | implemented (D-06, V-06) |
 | F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | implemented (D-01, V-01) |
 | F-02 model-gateway | retry/backoff budget; streaming fallback | implemented (F-02/D-02/V-02) |
-| F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | planned |
+| F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | implemented (F-03/D-03/V-03) |
 | F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | implemented (F-10/D-10/V-10) |
 | F-07 tool-approvals | approval timeout/deny semantics polish | planned |
 
@@ -155,8 +155,9 @@ behavior contract with its own acceptance criteria).
 
 ## 5. Next step
 
-Pick the first block and decompose it into its concrete Feature PRDs (status
-`draft` → `reviewed`), then implement the highest-value slice. Suggested
-next: finish **M0** — F-10 v2 tools are landed; pick the remaining M0 slices
-(F-03 prompt-assembly fragment catalog breadth, or F-07 approval
-timeout/deny semantics) and PRD-first them.
+**M0** now has one remaining slice: **F-07 tool-approvals** (approval
+timeout/deny semantics polish). PRD-first it next — draft the F-07 PRD in
+`docs/features/`, design in `docs/design/`, then implement. Follow-on M0 gaps
+worth sequencing: F-03 mention-syntax parsing and cache-planning polish,
+then F-04/F-05 (M1) with world-state diffing building on the frozen
+`state.run` baseline.

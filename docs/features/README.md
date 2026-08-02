@@ -17,7 +17,7 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 |---|---|---|---|---|
 | F-01 | turn-runtime | Turn → execution → model step → tool execution lifecycle, input admission, cancellation, turn-abort markers, typed background tasks, durable commit points | implemented (F-01/D-01/V-01) | core/src/session |
 | F-02 | model-gateway | Provider registry, streaming events, usage, retry/backoff, responses + chat-completions wire formats | implemented (F-02/D-02/V-02) | core/src/client.rs, responses_retry.rs |
-| F-03 | prompt-assembly | Frozen per-run prompt: system prompt, AGENTS.md, skills, context items | planned | prompts/, agents_md.rs |
+| F-03 | prompt-assembly | Frozen per-run prompt: system prompt, AGENTS.md, skills, world-state/environment/model-switch fragments | implemented (F-03/D-03/V-03; fragment-catalog slice) | prompts/, context/world_state.rs |
 | F-04 | context-management | Transcript handling, context items, token budget, truncation | planned | core/src/context_manager/ |
 | F-05 | compaction | Summarize/compact conversation when over budget | planned | core/src/compact*.rs |
 | F-06 | tool-system | Tool registry, schemas, routing, parallel batches, output handling | implemented (D-06, V-06) | core/src/tools/ |

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use super::environment::EnvironmentSnapshot;
 use crate::domain::prompts::skills::Skill;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,19 @@ pub struct PromptSnapshotOptions {
     pub context_files: Vec<ContextFile>,
     pub skills: Vec<Skill>,
     pub prompt_templates: Vec<PromptTemplate>,
+    /// Durable run facts for the world-state fragment (`state.run`).
+    pub session_id: Option<String>,
+    pub agent_instance_id: Option<String>,
+    pub operation_id: Option<String>,
+    /// Model id executing this run; used by the world-state and model-switch
+    /// fragments.
+    pub model: Option<String>,
+    /// Model id used by the previous turn of this session, when known.
+    pub previous_model: Option<String>,
+    /// True when this run continues a session with committed prior work.
+    pub continuation: bool,
+    /// Host facts for the environment-context fragment (`environment.host`).
+    pub environment: EnvironmentSnapshot,
 }
 
 #[derive(Debug, thiserror::Error)]

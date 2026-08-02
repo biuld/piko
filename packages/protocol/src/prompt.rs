@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentInstanceId, AgentSpec, ToolDef};
 
-pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 2;
+pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 3;
 
 /// Instruction authority is independent from rendered message order.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

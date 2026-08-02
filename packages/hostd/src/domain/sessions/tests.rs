@@ -68,6 +68,37 @@ fn agent_view_store_records_task_views_and_replays_by_task() {
 }
 
 #[test]
+fn record_turn_model_reports_previous_model_and_tracks_continuity() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp") {
+        crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session created"),
+    };
+
+    // First turn: no previous model; current model is recorded.
+    let previous = state
+        .record_turn_model(&session_id, Some("model-a"))
+        .unwrap();
+    assert_eq!(previous, None);
+
+    // Second turn on the same model: no switch.
+    let previous = state
+        .record_turn_model(&session_id, Some("model-a"))
+        .unwrap();
+    assert_eq!(previous.as_deref(), Some("model-a"));
+
+    // Model change is observable by the next caller.
+    let previous = state
+        .record_turn_model(&session_id, Some("model-b"))
+        .unwrap();
+    assert_eq!(previous.as_deref(), Some("model-a"));
+
+    // An unconfigured model does not erase recorded history.
+    let previous = state.record_turn_model(&session_id, None).unwrap();
+    assert_eq!(previous.as_deref(), Some("model-b"));
+}
+
+#[test]
 fn agent_list_orders_parent_before_child_tasks() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp") {

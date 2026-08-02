@@ -87,8 +87,11 @@ is exceeded.
   environment-context fragments; per-run digest/versioning.
 - piko status: **partial** — `F-03 prompt-assembly` (hostd `domain/prompts`
   structured blocks + orchd frozen `AgentRunPrompt`; skills loader exists).
-  Gaps: fragment catalog breadth (world state, environments, model-switch,
-  inter-agent messages), mention-syntax parsing, cache planning.
+  Fragment-catalog breadth slice landed (world-state `state.run`,
+  environment-context `environment.host`, model-switch
+  `context.model-switch`; F-03/D-03/V-03). Gaps: inter-agent message
+  fragments, mention-syntax parsing, cache-planning polish, world-state
+  diffing (F-04).
 
 ### D. Context Management & Compaction
 
