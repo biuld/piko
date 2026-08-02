@@ -133,26 +133,7 @@ implemented behavior. Before that, it may live as a draft.
 **When to write a feature doc:** before implementing the feature, as a PRD.
 Update it whenever implemented behavior changes.
 
-**Feature doc template:**
-
-```markdown
-# Feature Name
-
-## Overview
-(one paragraph — what it is, where it lives, what it does)
-
-## Layout
-(ascii diagram, size, borders, colors)
-
-## Behavior / interactions
-(keyboard shortcuts, state transitions, edge cases)
-
-## Configuration
-(settings keys, keybinding IDs, defaults)
-
-## Non-goals
-(what it deliberately does NOT do)
-```
+Create new feature docs from [`docs/features/_TEMPLATE.md`](docs/features/_TEMPLATE.md).
 
 ### design/ — implementation design
 
@@ -164,14 +145,8 @@ pseudocode and protocol DTO sketches are appropriate here.
 (slash commands, input routing, layout engine) where multiple modules or
 crates need to agree on a contract.
 
-### Flow
-
-```
-1. Feature doc (PRD) → agree on behavior
-2. Design doc (if subsystem-level) → agree on contracts
-3. Implement → prototype + iterate
-4. Verify/update the feature doc → reviewed
-```
+Follow the PRD-first lifecycle in the root `AGENTS.md` (Documentation
+workflow): PRD → design → implement → verify/update PRD.
 
 Feature docs are the source of truth for what the TUI does. Design docs are
 the rationale for how it does it.

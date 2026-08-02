@@ -164,26 +164,7 @@ Normative architecture entry points:
 Describe one feature from the user’s perspective: behavior, layout, shortcuts,
 configuration, non-goals. **No** code blocks, file paths, or internal structs.
 
-**Feature doc template:**
-
-```markdown
-# Feature Name
-
-## Overview
-(one paragraph — what it is, where it lives, what it does)
-
-## Layout
-(ascii diagram, placement in Workbench / Settings / Overlay)
-
-## Behavior / interactions
-(keyboard shortcuts, open/close, edge cases)
-
-## Configuration
-(`[gui]` keys, commands, defaults)
-
-## Non-goals
-(what it deliberately does NOT do)
-```
+Create new feature docs from [`docs/features/_TEMPLATE.md`](docs/features/_TEMPLATE.md).
 
 ### design/ — implementation design
 
@@ -195,29 +176,22 @@ of: more than one crate; protocol / hostd commands; `[gui]` schema; Primary
 Surface or overlay lifecycle; island focus/messaging; a new shared shell
 primitive; multiple features.
 
-### Flow (same idea as TUI)
-
-```
-1. Feature Doc / Feature Brief  → product contract ("what")
-2. Design doc (if needed)       → contracts / boundaries ("how")
-3. Implement                    → follow shell/features/app rules
-4. Validate
-5. Update Feature Doc           → match stable behavior
-```
+Follow the PRD-first lifecycle in the root `AGENTS.md` (Documentation
+workflow): Feature Doc (PRD) → design → implement → verify/update PRD.
 
 Feature docs are the source of truth for what the GUI does. Design docs are
 the rationale for how it does it. Visual rules stay in `ui-guidelines.md`.
 
 ## Validation
 
+Run the workspace checks from the root `AGENTS.md` (fmt, clippy, tests), plus:
+
 ```bash
-cargo fmt --all
 cargo test -p piko-gui
-cargo clippy -p piko-gui --all-targets -- -D warnings
 ```
 
-Use workspace clippy/tests when touching `protocol`, `client-core`, or hostd
-settings schemas.
+Use workspace tests when touching `protocol`, `client-core`, or hostd settings
+schemas.
 
 ## Feature discovery
 

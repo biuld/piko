@@ -2,7 +2,7 @@
 
 ## Project overview
 
-piko is a coding agent harness with a decoupled **hostd + orchd** architecture. It splits the runtime into a stateful Rust **Host daemon** (sessions, TUI protocol, settings, auth, skills, prompts, compaction) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, multi-agent supervision). A **ratatui-based TUI** connects to hostd over JSON-lines stdio.
+piko is a coding agent harness with a decoupled **hostd + orchd** architecture. It splits the runtime into a stateful Rust **Host daemon** (sessions, settings, auth, prompts, skills, compaction, queues, turn orchestration) and a stream-driven Rust **Orchestrator** (agent runtime, tool routing, multi-agent supervision). Terminal (Ratatui) and desktop (GPUI) clients connect to hostd over JSON-lines stdio.
 
 Guiding principle: keep the host+orchestrator split clean, and keep `hostd`
 authoritative for user-visible state.
@@ -15,6 +15,7 @@ not specification.
 
 ```
 tui ──────────────→ protocol
+gui ──────────────→ protocol
 hostd ──→ llmd ──→ protocol
 hostd ──→ orchd ──→ protocol
                   orchd ──→ llmd
@@ -38,7 +39,7 @@ sandbox (leaf)
 - Rust 2024 edition; workspace via root `Cargo.toml`
 - No circular crate deps (`protocol` is the shared leaf)
 - Domain-driven layout: `domain/` / `ports/` / `adapters/`
-- `hostd` is the binary that depends on everything; `tui` is standalone and talks to hostd over stdio
+- `hostd` is the binary that depends on everything; `tui` and `gui` are standalone clients over JSON-lines stdio
 - All docs and code comments must be in English
 - File size: prefer ~300–400 lines per `.rs` file; hard ceiling **500**. Split into a directory with `mod.rs` re-exports when over; do not over-split cohesive units under the ceiling
 
@@ -110,6 +111,9 @@ Normative runtime models:
 - `docs/single-agent-actor-runtime-design.md`
 - `docs/agent-run-atomicity-design.md`
 - `docs/multi-agent-execution-model.md`
+
+Legacy behavior documents (to be superseded by codex-derived PRDs):
+
 - `docs/tool-sets-design.md`
 - `docs/agent-prompt-assembly-design.md`
 
