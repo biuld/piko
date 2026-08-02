@@ -48,10 +48,11 @@ F-10 core, F-03 baseline). Remaining slices:
 | F-02 model-gateway | retry/backoff budget; streaming fallback; model continuity (resolved session record + prompt fragment + JSONL marker) | implemented (F-02/D-02/D-16, V-02/V-16) |
 | F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | implemented (F-03/D-03/V-03) |
 | F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | implemented (F-10/D-10/V-10) |
-| F-07 tool-approvals | approval timeout/deny semantics polish | planned |
+| F-07 tool-approvals | approval timeout/deny semantics polish | implemented (F-07/D-07/V-07) |
 
 Exit criteria: every M0 feature has a reviewed PRD; tool batches are parallel;
 turn aborts reconstruct durable history; approvals are exercised end-to-end.
+All M0 exit criteria are now met.
 
 ### M1 — Context & memory
 
@@ -155,9 +156,12 @@ behavior contract with its own acceptance criteria).
 
 ## 5. Next step
 
-**M0** now has one remaining slice: **F-07 tool-approvals** (approval
-timeout/deny semantics polish). PRD-first it next — draft the F-07 PRD in
-`docs/features/`, design in `docs/design/`, then implement. Follow-on M0 gaps
-worth sequencing: F-03 mention-syntax parsing and cache-planning polish,
-then F-04/F-05 (M1) with world-state diffing building on the frozen
-`state.run` baseline.
+**M0 is complete** — F-07 tool-approvals (approval timeout + deny semantics)
+landed with PRD/design/verification. Next sequencing:
+
+1. **M1 context & memory**: F-04 context-management + F-05 compaction
+   (auto-compact trigger polish, budget windows, remote compaction), with
+   F-15 usage accounting as the baseline for budget decisions. World-state
+   diffing builds on the frozen `state.run` baseline.
+2. Follow-on M0 gaps worth sequencing first: F-03 mention-syntax parsing and
+   cache-planning polish.

@@ -428,6 +428,9 @@ pub enum MessageRole {
 pub enum ApprovalDecision {
     Accept,
     Decline,
+    /// No decision arrived before the approval deadline; the request expired
+    /// and the tool call fails closed.
+    Expired,
     AcceptSession,
     AcceptWorkspace,
     AcceptPermanent,
@@ -597,6 +600,8 @@ pub enum ApprovalStatus {
     Pending,
     Approved,
     Rejected,
+    /// The request expired before a user decision arrived.
+    Expired,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

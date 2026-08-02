@@ -79,9 +79,39 @@ impl ApprovalGateway for OrchAgentRunRunner {
             )
             .await;
 
-        let decision = match rx.await {
-            Ok(d) => d,
-            Err(_) => piko_protocol::ApprovalDecision::Decline,
+        let decision = match tokio::time::timeout(self.approval_timeout, rx).await {
+            Ok(Ok(d)) => d,
+            Ok(Err(_)) => piko_protocol::ApprovalDecision::Decline,
+            Err(_elapsed) => {
+                // Fail closed: the deadline passed with no user decision.
+                // Remove the pending entry first so exactly one resolution
+                // path owns the outcome; late user responses become no-ops.
+                {
+                    let mut pending = self.pending_approvals.lock().unwrap();
+                    pending.remove(&approval_id);
+                }
+                self.observation_router
+                    .publish(
+                        &session_id,
+                        &request.agent_instance_id,
+                        &request.agent_id,
+                        piko_protocol::agent_runtime::SessionEvent::ApprovalResolved {
+                            approval_id: approval_id.clone(),
+                            status: piko_protocol::ApprovalStatus::Expired,
+                        },
+                    )
+                    .await;
+                tracing::event!(
+                    target: "tool.approval",
+                    tracing::Level::WARN,
+                    tool = %request.tool_name,
+                    tool_call_id = %request.tool_entity_id,
+                    agent_instance_id = %request.agent_instance_id,
+                    timeout_ms = self.approval_timeout.as_millis(),
+                    "Tool approval expired: no decision before deadline"
+                );
+                return ToolApprovalDecision::Expired;
+            }
         };
         tracing::event!(
             target: "tool.approval",
@@ -129,6 +159,7 @@ impl ApprovalGateway for OrchAgentRunRunner {
         match decision {
             piko_protocol::ApprovalDecision::Accept => ToolApprovalDecision::Accept,
             piko_protocol::ApprovalDecision::Decline => ToolApprovalDecision::Decline,
+            piko_protocol::ApprovalDecision::Expired => ToolApprovalDecision::Expired,
             piko_protocol::ApprovalDecision::AcceptSession => ToolApprovalDecision::AcceptSession,
             piko_protocol::ApprovalDecision::AcceptWorkspace => {
                 ToolApprovalDecision::AcceptWorkspace

@@ -29,6 +29,9 @@ pub struct ToolApprovalRequest {
 pub enum ToolApprovalDecision {
     Accept,
     Decline,
+    /// The approval request expired before a user decision arrived; the tool
+    /// call fails closed with a distinct, non-retryable error.
+    Expired,
     AcceptSession,
     AcceptWorkspace,
     AcceptPermanent,
@@ -36,7 +39,10 @@ pub enum ToolApprovalDecision {
 
 /// Check whether an approval decision is accepting (not Decline).
 pub fn is_approval_accepted(decision: &ToolApprovalDecision) -> bool {
-    !matches!(decision, ToolApprovalDecision::Decline)
+    !matches!(
+        decision,
+        ToolApprovalDecision::Decline | ToolApprovalDecision::Expired
+    )
 }
 
 /// Gateway for requesting tool execution approval from the integrator.

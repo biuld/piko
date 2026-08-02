@@ -93,6 +93,7 @@ pub(crate) async fn build_orch_turn_runner(
             resolved.model.max_tokens,
             &settings.mcp_servers,
             settings.sandbox.as_ref(),
+            settings.approvals.as_ref(),
             crate::telemetry::handle(),
         )
         .await,

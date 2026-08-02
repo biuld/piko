@@ -172,7 +172,8 @@ impl HostApp {
                                 crate::api::ApprovalDecision::Accept
                             }
                             crate::api::ApprovalStatus::Pending
-                            | crate::api::ApprovalStatus::Rejected => {
+                            | crate::api::ApprovalStatus::Rejected
+                            | crate::api::ApprovalStatus::Expired => {
                                 crate::api::ApprovalDecision::Decline
                             }
                         };

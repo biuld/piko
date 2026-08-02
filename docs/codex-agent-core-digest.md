@@ -139,9 +139,11 @@ is exceeded.
   patch-safety assessment, OpenAI-Form elicitation pause, attestation, and the
   guardian auto-review loop that converts on-request approvals into
   auto-approvals with a fail-closed review transcript.
-- piko status: **partial** — `F-07 tool-approvals` (approval gateway + hostd
-  pending approvals) landed. `F-11 guardian` and `F-12 safety` planned: no
-  guardian loop, no elicitation/attestation, no patch-safety assessment.
+- piko status: **partial** — `F-07 tool-approvals` slice 1 landed (approval
+  gateway + hostd pending approvals + bounded deadlines with fail-closed
+  expiry and distinct deny/expire semantics, F-07/D-07/V-07). `F-11 guardian`
+  and `F-12 safety` planned: no guardian loop, no elicitation/attestation, no
+  patch-safety assessment.
 
 ### G. Command Execution & Sandboxing
 

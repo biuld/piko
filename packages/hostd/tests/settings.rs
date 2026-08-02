@@ -1,6 +1,8 @@
 use std::fs;
 
-use piko_hostd::domain::config::{CompactionSettings, HostSettings, SettingsManager};
+use piko_hostd::domain::config::{
+    ApprovalSettings, CompactionSettings, HostSettings, SettingsManager,
+};
 
 #[test]
 fn in_memory_settings_apply_defaults_and_overrides() {
@@ -162,4 +164,77 @@ hide-thinking-block = true
     assert_eq!(manager.get_default_model(), Some("kept"));
     assert!(manager.settings().tui.is_none());
     assert!(manager.settings().gui.is_none());
+}
+
+#[test]
+fn approval_timeout_defaults_and_overrides() {
+    let default_manager = SettingsManager::in_memory(HostSettings::default());
+    assert_eq!(
+        default_manager.settings().approvals.unwrap().timeout_secs,
+        Some(120)
+    );
+
+    let override_manager = SettingsManager::in_memory(HostSettings {
+        approvals: Some(ApprovalSettings {
+            timeout_secs: Some(30),
+        }),
+        ..HostSettings::default()
+    });
+    assert_eq!(
+        override_manager.settings().approvals.unwrap().timeout_secs,
+        Some(30)
+    );
+}
+
+#[test]
+fn approval_timeout_merges_across_global_and_project_settings() {
+    let temp_global = tempfile::tempdir().unwrap();
+    let temp_project = tempfile::tempdir().unwrap();
+
+    let global_dir = temp_global.path();
+    fs::write(
+        global_dir.join("settings.toml"),
+        "[approvals]\ntimeout-secs = 45\n",
+    )
+    .unwrap();
+
+    let project_dir = temp_project.path().join(".piko");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(
+        project_dir.join("settings.toml"),
+        "[approvals]\ntimeout-secs = 30\n",
+    )
+    .unwrap();
+
+    let manager = SettingsManager::from_paths(
+        global_dir.join("settings.toml"),
+        project_dir.join("settings.toml"),
+        HostSettings::default(),
+    )
+    .unwrap();
+    assert_eq!(manager.settings().approvals.unwrap().timeout_secs, Some(30));
+
+    // A project without the key preserves the global (default) value.
+    fs::write(project_dir.join("settings.toml"), "[sandbox]\n").unwrap();
+    let manager = SettingsManager::from_paths(
+        global_dir.join("settings.toml"),
+        project_dir.join("settings.toml"),
+        HostSettings::default(),
+    )
+    .unwrap();
+    assert_eq!(manager.settings().approvals.unwrap().timeout_secs, Some(45));
+}
+
+#[test]
+fn host_namespace_exposes_approvals_section() {
+    let settings = HostSettings {
+        approvals: Some(ApprovalSettings {
+            timeout_secs: Some(90),
+        }),
+        ..HostSettings::default()
+    };
+    assert_eq!(
+        settings.namespace_value("host")["approvals"]["timeout-secs"],
+        90
+    );
 }

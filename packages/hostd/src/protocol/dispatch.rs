@@ -254,23 +254,31 @@ impl HostServer {
                 decision,
                 ..
             } => {
-                self.turn_runner
+                let handled = self
+                    .turn_runner
                     .lock()
                     .await
                     .clone()
                     .respond_approval(&approval_id, decision.clone())
                     .await?;
-                Ok(vec![
-                    ServerMessage::CommandResponse {
-                        command_id,
-                        result: Ok(crate::api::CommandResult::Empty),
-                    },
-                    ServerMessage::Approval(crate::api::ApprovalEvent::Resolved {
-                        session_id,
-                        approval_id,
-                        decision,
-                    }),
-                ])
+                // Only an actually-resolved approval publishes a resolution
+                // event. Late or duplicate responses after a deadline expiry
+                // (or after the entry was removed) are ignored: no second
+                // resolution event, no grant, no effect on the turn.
+                let mut events = vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::Empty),
+                }];
+                if handled {
+                    events.push(ServerMessage::Approval(
+                        crate::api::ApprovalEvent::Resolved {
+                            session_id,
+                            approval_id,
+                            decision,
+                        },
+                    ));
+                }
+                Ok(events)
             }
             Command::UserInteractionRespond {
                 command_id,

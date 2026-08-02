@@ -30,6 +30,7 @@ pub struct HostSettings {
     // ---- Execution ----
     pub compaction: Option<CompactionSettings>,
     pub retry: Option<RetrySettings>,
+    pub approvals: Option<ApprovalSettings>,
     pub sandbox: Option<SandboxSettings>,
 
     // ---- Observability ----
@@ -76,6 +77,7 @@ impl HostSettings {
             "default-thinking-level": self.default_thinking_level,
             "compaction": self.compaction,
             "retry": self.retry,
+            "approvals": self.approvals,
             "sandbox": self.sandbox,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
@@ -101,6 +103,15 @@ pub struct RetrySettings {
     pub base_delay_ms: Option<u64>,
     pub max_delay_ms: Option<u64>,
     pub budget_ms: Option<u64>,
+}
+
+/// Tool-approval request behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ApprovalSettings {
+    /// How long a pending approval waits for a user decision before it
+    /// expires and the tool call fails closed. Default: 120 seconds.
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -310,6 +321,9 @@ fn default_settings() -> HostSettings {
             max_delay_ms: Some(30_000),
             budget_ms: Some(60_000),
         }),
+        approvals: Some(ApprovalSettings {
+            timeout_secs: Some(120),
+        }),
         ..HostSettings::default()
     }
 }
@@ -324,6 +338,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         transport: overrides.transport.or(base.transport),
         compaction: merge_compaction(base.compaction, overrides.compaction),
         retry: merge_retry(base.retry, overrides.retry),
+        approvals: merge_approvals(base.approvals, overrides.approvals),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -363,6 +378,18 @@ fn merge_retry(
             base_delay_ms: overrides.base_delay_ms.or(base.base_delay_ms),
             max_delay_ms: overrides.max_delay_ms.or(base.max_delay_ms),
             budget_ms: overrides.budget_ms.or(base.budget_ms),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_approvals(
+    base: Option<ApprovalSettings>,
+    overrides: Option<ApprovalSettings>,
+) -> Option<ApprovalSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(ApprovalSettings {
+            timeout_secs: overrides.timeout_secs.or(base.timeout_secs),
         }),
         (base, overrides) => overrides.or(base),
     }

@@ -426,14 +426,21 @@ impl ToolRegistry for ToolRegistryImpl {
                         gw.request_tool_approval(approval_request).await
                     };
 
-                    if matches!(decision, ToolApprovalDecision::Decline) {
+                    if !piko_orchd_api::is_approval_accepted(&decision) {
+                        let (code, message) = match decision {
+                            ToolApprovalDecision::Expired => (
+                                "approval_expired",
+                                "Approval request expired before a decision arrived",
+                            ),
+                            _ => ("declined", "User declined approval"),
+                        };
                         return ToolExecutionRecord {
                             result: ToolExecResult {
                                 ok: false,
                                 value: None,
                                 error: Some(ToolExecError {
-                                    code: "declined".into(),
-                                    message: "User declined approval".into(),
+                                    code: code.into(),
+                                    message: message.into(),
                                     retryable: Some(false),
                                 }),
                             },

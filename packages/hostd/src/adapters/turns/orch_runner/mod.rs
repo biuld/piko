@@ -10,7 +10,7 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
 use crate::adapters::turns::approval::ApprovalStore;
 use crate::api::UserInteractionResponse;
-use crate::domain::config::{McpServerConfig, SandboxSettings};
+use crate::domain::config::{ApprovalSettings, McpServerConfig, SandboxSettings};
 
 mod agent_commit;
 mod agent_input;
@@ -40,6 +40,7 @@ pub struct OrchAgentRunRunner {
     pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
     pending_interactions: Arc<std::sync::Mutex<HashMap<String, PendingInteractionEntry>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
+    approval_timeout: std::time::Duration,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     observation_router: Arc<observation_router::SessionObservationRouter>,
@@ -82,6 +83,7 @@ impl OrchAgentRunRunner {
             4_096,
             &[],
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -99,6 +101,7 @@ impl OrchAgentRunRunner {
         max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
+        approval_settings: Option<&ApprovalSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
         use piko_protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
@@ -165,6 +168,12 @@ impl OrchAgentRunRunner {
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_interactions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             approval_stores: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            approval_timeout: std::time::Duration::from_secs(
+                approval_settings
+                    .and_then(|settings| settings.timeout_secs)
+                    .unwrap_or(120)
+                    .max(1),
+            ),
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),

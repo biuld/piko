@@ -21,7 +21,7 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-04 | context-management | Transcript handling, context items, token budget, truncation | planned | core/src/context_manager/ |
 | F-05 | compaction | Summarize/compact conversation when over budget | planned | core/src/compact*.rs |
 | F-06 | tool-system | Tool registry, schemas, routing, parallel batches, output handling | implemented (D-06, V-06) | core/src/tools/ |
-| F-07 | tool-approvals | Human approval flows, network approval, permission requests | planned | core/src/tools/approvals.rs |
+| F-07 | tool-approvals | Human approval flows with bounded deadlines, fail-closed expiry, distinct deny/expire semantics | implemented (F-07/D-07/V-07) | core/src/tools/approvals.rs |
 | F-08 | exec-sandboxing | Fail-closed filesystem/process/network policy, per-OS sandbox, shell snapshots | planned | core/src/exec*.rs, sandboxing/ |
 | F-09 | session-persistence | Thread store, resume, branch, message durability | planned | core/src/thread_manager.rs |
 | F-10 | multi-agent | Subagent spawn, supervision, result collection | planned | core/src/agent/, tools/handlers/multi_agents* |

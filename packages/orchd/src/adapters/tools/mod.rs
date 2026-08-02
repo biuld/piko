@@ -8,3 +8,6 @@ pub mod user_interaction_provider;
 mod workspace_handlers;
 pub mod workspace_provider;
 pub use multi_agent_provider::MultiAgentToolProvider;
+
+#[cfg(test)]
+mod registry_tests;

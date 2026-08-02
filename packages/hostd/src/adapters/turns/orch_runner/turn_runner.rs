@@ -241,10 +241,10 @@ impl AgentRunRunner for OrchAgentRunRunner {
         let entry = self.pending_approvals.lock().unwrap().remove(approval_id);
         if let Some(entry) = entry {
             if let Some(session_id) = &entry.session_id {
-                let status = if decision == crate::api::ApprovalDecision::Decline {
-                    crate::api::ApprovalStatus::Rejected
-                } else {
-                    crate::api::ApprovalStatus::Approved
+                let status = match &decision {
+                    crate::api::ApprovalDecision::Decline => crate::api::ApprovalStatus::Rejected,
+                    crate::api::ApprovalDecision::Expired => crate::api::ApprovalStatus::Expired,
+                    _ => crate::api::ApprovalStatus::Approved,
                 };
                 self.observation_router
                     .publish(
