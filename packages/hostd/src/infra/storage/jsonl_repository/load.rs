@@ -23,6 +23,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.name = manifest.name.clone();
     state.current_leaf_id = manifest.current_leaf_id.clone();
     state.entries = manifest.entries.clone();
+    state.last_model = manifest.last_model.clone();
     let mut recovered_root_leaf = None;
     for agent_instance_id in store.list_agents(&manifest.session_id)? {
         let recovered = store.load_agent(&manifest.session_id, &agent_instance_id)?;

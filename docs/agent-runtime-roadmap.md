@@ -45,7 +45,7 @@ F-10 core, F-03 baseline). Remaining slices:
 |---|---|---|
 | F-06 tool-system | parallel batch dispatch + sequential exclusivity | implemented (D-06, V-06) |
 | F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | implemented (D-01, V-01) |
-| F-02 model-gateway | retry/backoff budget; streaming fallback | implemented (F-02/D-02/V-02) |
+| F-02 model-gateway | retry/backoff budget; streaming fallback; model continuity (resolved session record + prompt fragment + JSONL marker) | implemented (F-02/D-02/D-16, V-02/V-16) |
 | F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | implemented (F-03/D-03/V-03) |
 | F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | implemented (F-10/D-10/V-10) |
 | F-07 tool-approvals | approval timeout/deny semantics polish | planned |
@@ -129,7 +129,7 @@ behavior contract with its own acceptance criteria).
 | Block | F-ID | Decomposed features (PRDs) |
 |---|---|---|
 | A Turn & Agent Runtime | F-01 | turn lifecycle; input admission/queueing; background tasks; turn-abort reconstruction |
-| B Model Gateway | F-02 | provider registry; streaming + retry; usage/token metadata |
+| B Model Gateway | F-02 | provider registry; streaming + retry; usage/token metadata; model continuity |
 | C Prompt Assembly | F-03 | fragment system; AGENTS.md; skills/plugins injection; world-state/env fragments |
 | D Context & Compaction | F-04 / F-05 | transcript manager; truncation; auto-compact; remote compact |
 | E Tool System | F-06 | registry/routing; batch dispatch (parallel); approvals hook; dynamic tools; tool search |

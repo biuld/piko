@@ -6,6 +6,26 @@ use crate::api::{
 };
 use piko_protocol::SequencedServerMessage;
 use piko_protocol::messages::Usage;
+use serde::{Deserialize, Serialize};
+
+/// The provider + model id that executed the most recent turn of a session.
+/// Hostd owns this record: it is the single source of truth for session
+/// model continuity (prompt model-switch fragment, durable JSONL marker).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModelRef {
+    pub provider: String,
+    pub model_id: String,
+}
+
+impl SessionModelRef {
+    pub fn new(provider: impl Into<String>, model_id: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model_id: model_id.into(),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct HostState {
@@ -26,9 +46,10 @@ pub struct SessionState {
     pub task_heads: HashMap<String, String>,
     /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
-    /// Last model id recorded for a turn in this session, used to detect
-    /// model switches for the prompt model-switch fragment.
-    pub last_model: Option<String>,
+    /// Last provider+model recorded for a turn in this session. Durable via
+    /// `SessionManifest.last_model`; drives the prompt model-switch fragment
+    /// and the durable JSONL `ModelChange` marker.
+    pub last_model: Option<SessionModelRef>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
     /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.

@@ -10,6 +10,7 @@ use std::path::Path;
 
 use super::storage_types::{PersistedSession, SessionStorageError};
 use crate::api::{SessionSummary, SessionTreeEntry};
+use crate::domain::sessions::SessionModelRef;
 
 pub trait SessionRepositoryPort: Send + Sync {
     fn create(&self, cwd: &str) -> Result<PersistedSession, SessionStorageError>;
@@ -53,6 +54,13 @@ pub trait SessionRepositoryPort: Send + Sync {
         thinking_level: Option<&str>,
         agent_id: Option<&str>,
     ) -> Result<Vec<SessionTreeEntry>, SessionStorageError>;
+
+    /// Persist the session's last executed model record.
+    fn set_last_model(
+        &self,
+        session_dir: &Path,
+        model: Option<&SessionModelRef>,
+    ) -> Result<(), SessionStorageError>;
 
     fn append_compaction(
         &self,

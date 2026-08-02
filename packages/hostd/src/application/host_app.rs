@@ -7,7 +7,7 @@ use piko_llmd::gateway::LlmGateway;
 use tokio::sync::Mutex;
 
 use crate::domain::config::{HostSettings, ModelRegistry};
-use crate::domain::sessions::HostState;
+use crate::domain::sessions::{HostState, SessionModelRef};
 use crate::ports::prompt_materials::PromptMaterialLoader;
 use crate::ports::session_repository::SessionRepositoryPort;
 use crate::ports::session_store::SessionStoreFactory;
@@ -38,6 +38,12 @@ pub struct HostApp {
     pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
     pub(crate) settings: Arc<Mutex<HostSettings>>,
     pub(crate) model_registry: Arc<Mutex<ModelRegistry>>,
+    /// The resolved provider+model the current turn runner executes with.
+    /// This is the single source of truth for session model continuity:
+    /// turn submission records it per session (durable), and the prompt
+    /// model-switch fragment and JSONL `ModelChange` marker derive from the
+    /// session record.
+    pub(crate) active_model: Arc<Mutex<Option<SessionModelRef>>>,
     pub(crate) project_settings_path: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) session_store_factory: Arc<dyn SessionStoreFactory>,
     pub(crate) prompt_materials: Arc<dyn PromptMaterialLoader>,
@@ -78,6 +84,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
@@ -100,6 +107,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
@@ -121,6 +129,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
@@ -142,6 +151,7 @@ impl HostApp {
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
+            active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
@@ -151,5 +161,13 @@ impl HostApp {
     /// Set the model executor (used for compaction and other host-level LLM calls).
     pub async fn set_model_executor(&self, executor: Arc<dyn LlmGateway>) {
         *self.model_executor.lock().await = Some(executor);
+    }
+
+    /// Record the resolved provider+model the current turn runner executes
+    /// with. This is the single source of truth for session model continuity:
+    /// turn submission records it per session and drives the prompt
+    /// model-switch fragment and the durable JSONL `ModelChange` marker.
+    pub async fn set_active_model(&self, model: Option<SessionModelRef>) {
+        *self.active_model.lock().await = model;
     }
 }

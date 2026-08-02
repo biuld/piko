@@ -10,4 +10,4 @@ mod tests;
 
 pub use queues::QueueUpdateEvent;
 pub use transcript::transcript_messages_from_session_entries;
-pub use types::{AgentViewState, HostState, SessionState};
+pub use types::{AgentViewState, HostState, SessionModelRef, SessionState};

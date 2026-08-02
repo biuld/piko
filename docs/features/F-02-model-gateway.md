@@ -4,7 +4,8 @@
 > Priority: P0
 > Source evidence: codex-rs `core/src/client.rs`, `core/src/client_common.rs`,
 > `core/src/responses_retry.rs`, `core/src/util.rs`,
-> `core/src/session_startup_prewarm.rs`
+> `core/src/session_startup_prewarm.rs`, `core/src/context/model_switch.rs`
+> (model-continuity slice)
 
 ## Summary
 
@@ -58,6 +59,10 @@ errors, but three behaviors are underspecified:
 6. A provider drops a streaming connection mid-response. The gateway surfaces
    the failure as a stream error; consumers own commit boundaries and never
    receive silently restarted content.
+7. A user switches the default model and submits another message. The session
+   records the newly executed model durably; the next run's frozen prompt
+   carries a model-switch fragment, the session timeline gains one durable
+   `ModelChange` marker, and a host restart preserves the record.
 
 ## In scope
 
@@ -195,6 +200,40 @@ already non-streaming.
 - [ ] `RetryConfig` budget and cap settings flow from `settings.toml`
       (`[retry]`) through hostd to the gateway.
 
+### Model continuity (slice)
+
+- [ ] The session record stores the resolved provider + model id the runner
+      executes with, and survives a host restart (round-trips through
+      `session.json`).
+- [ ] Two turns with the same model produce no `ModelChange` marker and no
+      model-switch fragment; a provider or model change produces exactly one
+      of each.
+- [ ] A config change emits `ModelEvent::ConfigChanged` and rebuilds the
+      runner (unchanged) but does not append a session timeline marker by
+      itself.
+- [ ] With no active model, a turn records nothing and emits no model
+      fragments.
+
+### Model-continuity behavior
+
+- `hostd` keeps an `active_model` (provider + model id): the exact model the
+  current turn runner was built with. It is refreshed wherever the runner is
+  rebuilt (startup and config change), so the recorded model is the executed
+  model, not the raw settings string.
+- Every accepted turn records the active model in the session. The record is
+  durable (`session.json` `lastModel`, schema v3, serde-defaulted for old
+  files) and restored on host restart.
+- A model change is one predicate: previous recorded model != current
+  recorded model (provider or id differs). It drives both the
+  `context.model-switch` prompt fragment (F-03) and one durable `ModelChange`
+  timeline entry appended at turn submission — not at config-write time.
+- The config-change path still rebuilds the runner and emits the live
+  `ModelEvent::ConfigChanged` client event; it no longer writes a session
+  timeline `ModelChange` marker (that is an execution fact, not a settings
+  fact).
+- Unconfigured models fail closed: no active model → no record write, no
+  model-switch fragment, no `ModelChange` marker.
+
 ## Product decisions
 
 | Question | Decision | Rationale |
@@ -206,6 +245,9 @@ already non-streaming.
 | Is fallback per-provider? | Yes, `streamingFallback` opt-out on `ProviderConfig`, default enabled | Providers differ in streaming reliability (digest: "per-provider streaming fallback") |
 | How are mid-stream breaks handled? | Surfaced as a stream error; no gateway-side restart after content delivery | Callers consume deltas incrementally and commit at step boundaries, so a silent restart would corrupt transcripts; step-level retry is the recovery path |
 | Are streaming responses asked to report usage? | Yes (genai `capture_usage`) | Completed turns need token/cost accounting; providers that do not report usage simply omit the event |
+| Where is the executed model recorded? | Hostd `active_model` (resolved provider+id from runner build), recorded per session and durable in `session.json` | The record must match what actually executes, survive restarts, and stay hostd-authoritative |
+| When is a model change observable? | At turn submission, from the session record (previous != current) | One predicate drives the prompt fragment and the durable `ModelChange` marker; config writes only emit the live `ConfigChanged` event |
+| Is the timeline `ModelChange` written at config time? | No — it is appended when a turn actually executes with a different model | A settings change without an executing turn is not a session execution fact |
 
 ## Fusion decisions (codex-rs)
 
@@ -216,6 +258,8 @@ already non-streaming.
 | Exponential backoff with jitter | **kept (adapted)** | Adds a configured per-attempt cap and total budget (codex caps implicitly via stream retry count); jitter range matches codex `[0.9, 1.1]` |
 | Server-provided retry delay (`Retry-After`) | **rejected for now** | genai does not expose response headers on errors; backoff is config-derived. Revisit if a consumer needs it |
 | Prewarm and sticky session transport state | **rejected for this slice** | No WebSocket session to warm in piko; tracked as a later F-02 slice if a consumer appears |
+| `<model_switch>` fragment injected on model change | **kept (adapted)** | piko derives it from the durable session model record (`state.run`/`context.model-switch`, F-03); codex injects the fragment from session settings |
+| Per-thread previous-model bookkeeping | **kept (adapted)** | piko records provider+model per session in `session.json` and detects continuity at turn submission instead of diffing settings at write time |
 
 ## Open questions
 
@@ -228,6 +272,9 @@ already non-streaming.
 - codex-rs `core/src/responses_retry.rs` (+ `responses_retry_tests.rs`) —
   retry/fallback loop semantics.
 - codex-rs `core/src/util.rs` — `backoff()` jitter range and factor.
+- codex-rs `core/src/context/model_switch.rs`,
+  `core/tests/suite/model_switching.rs` — model-continuity fragment and
+  fixture (model-continuity slice).
 - codex-rs `core/src/client.rs` — transport fallback activation after retry
   budget exhaustion.
 - piko `packages/llmd/src/executor.rs` and `packages/llmd/src/stream.rs` —

@@ -70,8 +70,10 @@ is exceeded.
 - piko status: **partial** — `F-02 model-gateway` (`piko-llmd`: providers,
   gateway, executor, retry/backoff budget with capped jittered backoff,
   status-error peeking, per-provider stream → non-streaming fallback,
-  cost/token middleware; streaming requests capture usage). Gaps: prewarm and
-  sticky routing.
+  cost/token middleware; streaming requests capture usage). Model continuity
+  landed (hostd `active_model` + durable per-session record driving the
+  prompt model-switch fragment and JSONL `ModelChange` marker; F-02/D-16/
+  V-16). Gaps: prewarm and sticky routing.
 
 ### C. Prompt Assembly & Context Injection
 

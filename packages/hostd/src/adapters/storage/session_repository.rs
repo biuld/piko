@@ -77,6 +77,14 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         )
     }
 
+    fn set_last_model(
+        &self,
+        session_dir: &Path,
+        model: Option<&crate::domain::sessions::SessionModelRef>,
+    ) -> Result<(), SessionStorageError> {
+        JsonlSessionRepository::set_last_model(self, session_dir, model)
+    }
+
     fn append_compaction(
         &self,
         session_dir: &Path,

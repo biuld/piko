@@ -105,16 +105,17 @@ impl HostApp {
             );
         }
         let skills = loaded_skills.skills;
-        let model = self.settings.lock().await.default_model.clone();
+        let active_model = self.active_model.lock().await.clone();
         let (previous_model, continuation) = {
             let mut state = self.state.lock().await;
-            let previous_model = state.record_turn_model(&session_id, model.as_deref())?;
+            let previous_model = state.record_turn_model(&session_id, active_model.as_ref())?;
             let continuation = state
                 .session(&session_id)
                 .map(|session| !session.entries.is_empty())
                 .unwrap_or(false);
             (previous_model, continuation)
         };
+        let model = active_model.as_ref().map(|model| model.model_id.clone());
         let prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
@@ -124,7 +125,7 @@ impl HostApp {
             agent_instance_id: Some(agent_instance_id.clone()),
             operation_id: Some(turn_id.clone()),
             model,
-            previous_model,
+            previous_model: previous_model.as_ref().map(|model| model.model_id.clone()),
             continuation,
             environment: crate::domain::prompts::EnvironmentSnapshot::capture(),
             ..PromptSnapshotOptions::default()
@@ -136,6 +137,36 @@ impl HostApp {
             state.session_cwd(&session_id).unwrap_or_default()
         };
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
+        if let (Some(storage), Some(current)) = (&self.storage, active_model.as_ref()) {
+            let changed = previous_model
+                .as_ref()
+                .is_some_and(|previous| previous != current);
+            if changed || previous_model.is_none() {
+                let _ = storage.set_last_model(&session_dir, Some(current));
+            }
+            if changed {
+                let parent_id = {
+                    let state = self.state.lock().await;
+                    state
+                        .session(&session_id)
+                        .ok()
+                        .and_then(|session| session.current_leaf_id.clone())
+                };
+                if let Ok(entries) = storage.append_config_metadata(
+                    &session_dir,
+                    parent_id.as_deref(),
+                    Some(current.model_id.as_str()),
+                    Some(current.provider.as_str()),
+                    None,
+                    None,
+                ) {
+                    let mut state = self.state.lock().await;
+                    for entry in entries {
+                        let _ = state.append_entry(&session_id, entry);
+                    }
+                }
+            }
+        }
         let resume_agent = if agent_instance_id == root_agent_instance_id {
             self.resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
                 .await

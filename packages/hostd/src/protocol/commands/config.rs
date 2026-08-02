@@ -42,16 +42,19 @@ impl ConfigObserver for ModelRunnerObserver {
             || new.default_thinking_level != old.default_thinking_level;
 
         if changed {
-            let (runner, executor) = build_orch_turn_runner(new).await.unwrap_or_else(|e| {
-                (
-                    Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
-                    None,
-                )
-            });
+            let (runner, executor, active_model) =
+                build_orch_turn_runner(new).await.unwrap_or_else(|e| {
+                    (
+                        Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
+                        None,
+                        None,
+                    )
+                });
             *server.turn_runner.lock().await = runner;
             if let Some(exec) = executor {
                 server.set_model_executor(exec).await;
             }
+            *server.active_model.lock().await = active_model;
         }
 
         let model_id = new.default_model.clone().unwrap_or_default();
@@ -85,12 +88,8 @@ impl ConfigObserver for SessionStorageObserver {
             || new.default_thinking_level != old.default_thinking_level;
 
         if changed {
-            let model_changed = new.default_model != old.default_model
-                || new.default_provider != old.default_provider;
             let thinking_changed = new.default_thinking_level != old.default_thinking_level;
 
-            let model_id = new.default_model.clone().unwrap_or_default();
-            let provider = new.default_provider.clone().unwrap_or_default();
             let thinking_level = new.default_thinking_level.clone();
 
             if let Some(storage) = &server.storage {
@@ -109,21 +108,16 @@ impl ConfigObserver for SessionStorageObserver {
                             .ok()
                             .and_then(|s| s.current_leaf_id.clone())
                     };
-                    // Only persist the fields that actually changed — otherwise every
-                    // thinking tweak also appends a redundant ModelChange.
+                    // Model continuity is recorded at turn submission from the
+                    // durable session record (single source of truth). Config
+                    // writes only persist the thinking-level marker; a model
+                    // setting change without an executing turn is a live
+                    // `ModelEvent::ConfigChanged`, not a session timeline fact.
                     match storage.append_config_metadata(
                         &path,
                         parent_id.as_deref(),
-                        if model_changed && !model_id.is_empty() {
-                            Some(model_id.as_str())
-                        } else {
-                            None
-                        },
-                        if model_changed && !provider.is_empty() {
-                            Some(provider.as_str())
-                        } else {
-                            None
-                        },
+                        None,
+                        None,
                         if thinking_changed {
                             thinking_level.as_ref().map(|t| t.as_str())
                         } else {

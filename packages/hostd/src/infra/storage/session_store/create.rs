@@ -56,6 +56,7 @@ impl SessionStore {
                 agent_inbox: Vec::new(),
                 agent_executions: BTreeMap::new(),
                 agent_input_queue: Vec::new(),
+                last_model: None,
                 entries: Vec::new(),
             })?;
             Ok(store.clone())

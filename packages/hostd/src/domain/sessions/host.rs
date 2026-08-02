@@ -3,7 +3,7 @@ use crate::api::{
 };
 use uuid::Uuid;
 
-use super::types::{HostState, SessionState, TurnRecord, now_ms};
+use super::types::{HostState, SessionModelRef, SessionState, TurnRecord, now_ms};
 
 impl HostState {
     pub fn new() -> Self {
@@ -166,20 +166,21 @@ impl HostState {
     }
 
     /// Return the previously recorded model for the session (if any) and
-    /// record the model used by the current turn. A `None` model does not
-    /// overwrite recorded history, so unconfigured hosts stay switch-free.
+    /// record the model that will execute the current turn. A `None` model
+    /// does not overwrite recorded history, so unconfigured hosts stay
+    /// switch-free.
     pub fn record_turn_model(
         &mut self,
         session_id: &str,
-        model: Option<&str>,
-    ) -> Result<Option<String>, ProtocolError> {
+        model: Option<&SessionModelRef>,
+    ) -> Result<Option<SessionModelRef>, ProtocolError> {
         let state = self.session_mut(session_id)?;
         let previous = state.last_model.clone();
-        if let Some(model) = model {
-            let model = model.trim();
-            if !model.is_empty() {
-                state.last_model = Some(model.to_string());
-            }
+        if let Some(model) = model
+            && !model.provider.is_empty()
+            && !model.model_id.is_empty()
+        {
+            state.last_model = Some(model.clone());
         }
         Ok(previous)
     }

@@ -160,6 +160,18 @@ impl JsonlSessionRepository {
         Ok(entries)
     }
 
+    pub fn set_last_model(
+        &self,
+        session_dir: &Path,
+        model: Option<&crate::domain::sessions::SessionModelRef>,
+    ) -> Result<(), SessionStorageError> {
+        let store = SessionStore::new(session_dir);
+        store.update_manifest(|manifest| {
+            manifest.last_model = model.cloned();
+        })?;
+        Ok(())
+    }
+
     pub fn append_compaction(
         &self,
         session_dir: &Path,

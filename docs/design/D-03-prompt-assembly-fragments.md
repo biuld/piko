@@ -211,9 +211,10 @@ they were assembled under the new catalog.
   rule. The snapshot is already the hostd-owned per-run freeze point.
 - **Dump process env into the environment fragment.** Rejected: leaks
   secrets and breaks determinism; the whitelisted capture is fail-closed.
-- **Persist `last_model` in `session.json` now.** Deferred: schema v3 has no
-  migration path and this slice only needs within-process continuity; durable
-  model tracking lands with F-01/F-04 persistence work.
+- **Persist `last_model` in `session.json` now.** Deferred within this slice
+  (serde-defaulted fields keep v3 files loadable); landed with the F-02
+  model-continuity slice ([D-16](D-16-model-continuity.md)), which makes the
+  record durable and hostd-authoritative.
 
 ## Rollout
 

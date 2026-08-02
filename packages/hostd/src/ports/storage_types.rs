@@ -15,7 +15,7 @@ use piko_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::domain::sessions::SessionState;
+use crate::domain::sessions::{SessionModelRef, SessionState};
 
 pub const SESSION_SCHEMA_VERSION: u32 = 3;
 
@@ -43,6 +43,11 @@ pub struct SessionManifest {
     pub agent_executions: BTreeMap<String, AgentExecutionManifestEntry>,
     #[serde(default)]
     pub agent_input_queue: Vec<piko_protocol::DurableAgentInput>,
+    /// Session-scoped model continuity record: the provider+model that
+    /// executed the most recent turn. Derives the durable `ModelChange`
+    /// marker and the prompt model-switch fragment.
+    #[serde(default)]
+    pub last_model: Option<SessionModelRef>,
     /// Session-scoped metadata only; transcript messages never live here.
     pub entries: Vec<SessionTreeEntry>,
 }

@@ -74,28 +74,37 @@ fn record_turn_model_reports_previous_model_and_tracks_continuity() {
         crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session created"),
     };
+    let model_a = super::types::SessionModelRef::new("openai", "model-a");
+    let model_b = super::types::SessionModelRef::new("openai", "model-b");
+    let model_b2 = super::types::SessionModelRef::new("anthropic", "model-b");
 
     // First turn: no previous model; current model is recorded.
     let previous = state
-        .record_turn_model(&session_id, Some("model-a"))
+        .record_turn_model(&session_id, Some(&model_a))
         .unwrap();
     assert_eq!(previous, None);
 
     // Second turn on the same model: no switch.
     let previous = state
-        .record_turn_model(&session_id, Some("model-a"))
+        .record_turn_model(&session_id, Some(&model_a))
         .unwrap();
-    assert_eq!(previous.as_deref(), Some("model-a"));
+    assert_eq!(previous.as_ref(), Some(&model_a));
 
     // Model change is observable by the next caller.
     let previous = state
-        .record_turn_model(&session_id, Some("model-b"))
+        .record_turn_model(&session_id, Some(&model_b))
         .unwrap();
-    assert_eq!(previous.as_deref(), Some("model-a"));
+    assert_eq!(previous.as_ref(), Some(&model_a));
+
+    // A provider change is also a model change even with the same model id.
+    let previous = state
+        .record_turn_model(&session_id, Some(&model_b2))
+        .unwrap();
+    assert_eq!(previous.as_ref(), Some(&model_b));
 
     // An unconfigured model does not erase recorded history.
     let previous = state.record_turn_model(&session_id, None).unwrap();
-    assert_eq!(previous.as_deref(), Some("model-b"));
+    assert_eq!(previous.as_ref(), Some(&model_b2));
 }
 
 #[test]

@@ -22,11 +22,12 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .or_else(|| settings.settings().session_dir.clone().map(PathBuf::from))
         .unwrap_or_else(JsonlSessionRepository::default_root);
-    let (turn_runner, model_executor) = build_orch_turn_runner(&settings.settings())
+    let (turn_runner, model_executor, active_model) = build_orch_turn_runner(&settings.settings())
         .await
         .unwrap_or_else(|e| {
             (
                 Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
+                None,
                 None,
             )
         });
@@ -35,6 +36,9 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         turn_runner,
         settings.settings(),
     );
+    if let Some(model) = active_model {
+        server.active_model.lock().await.replace(model);
+    }
     let target_settings_path = if settings.project_path().exists() {
         settings.project_path().to_path_buf()
     } else {

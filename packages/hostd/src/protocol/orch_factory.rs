@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::adapters::OrchAgentRunRunner;
 use crate::domain::config::{HostSettings, ModelRegistry};
+use crate::domain::sessions::SessionModelRef;
 use crate::ports::AgentRunRunner;
 use piko_llmd::auth::AuthStorage;
 use piko_llmd::gateway::LlmGateway;
@@ -9,7 +10,14 @@ use piko_llmd::gateway::LlmGateway;
 /// Build an OrchAgentRunRunner and return both the runner and the model executor (if available).
 pub(crate) async fn build_orch_turn_runner(
     settings: &HostSettings,
-) -> Result<(Arc<dyn AgentRunRunner>, Option<Arc<dyn LlmGateway>>), String> {
+) -> Result<
+    (
+        Arc<dyn AgentRunRunner>,
+        Option<Arc<dyn LlmGateway>>,
+        Option<SessionModelRef>,
+    ),
+    String,
+> {
     let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(auth.clone(), vec![]);
     let resolved = registry
@@ -89,5 +97,9 @@ pub(crate) async fn build_orch_turn_runner(
         )
         .await,
     );
-    Ok((runner, Some(executor)))
+    let active_model = Some(SessionModelRef::new(
+        resolved.provider.clone(),
+        resolved.model.id.clone(),
+    ));
+    Ok((runner, Some(executor), active_model))
 }
