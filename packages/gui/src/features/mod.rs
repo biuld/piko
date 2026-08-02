@@ -21,7 +21,8 @@ pub use agents::{AgentsConfirm, AgentsSelectNext, AgentsSelectPrev, AgentsToggle
 pub use composer::ComposerIsland;
 pub use composer::{derive_activity, derive_composer};
 pub use notifications::{
-    NotificationCenterState, NotificationId, NotificationSeverity, render_notification_center,
+    AppNotification, AppNotificationCenter, NotificationSeverity, notice_id, push_bounded,
+    render_notification_center,
 };
 pub use palette::{CommandPalette, PaletteConfirm, PaletteSelectNext, PaletteSelectPrev};
 pub use prompts::{

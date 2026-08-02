@@ -2,13 +2,15 @@
 
 use gpui::*;
 use island::components::notification::{
-    NotificationToastSpec, clear_notification_toasts, push_notification_toast,
+    clear_notification_toasts,
     render_notification_center_layer as render_chrome_notification_center_layer,
     render_notification_toasts,
 };
 use piko_client_core::state::ConnectionState;
 
-use crate::features::{NotificationId, NotificationSeverity, render_notification_center};
+use crate::features::{
+    AppNotification, NotificationSeverity, notice_id, push_bounded, render_notification_center,
+};
 
 use super::desktop_app::{DesktopApp, ToggleNotificationCenter};
 
@@ -23,14 +25,23 @@ impl DesktopApp {
     ) {
         let title = title.into();
         let message = message.into();
-        self.notifications
-            .push(severity, title.clone(), message.clone());
-        if !self.notifications.is_open() {
-            push_notification_toast(
-                window,
-                NotificationToastSpec::new(severity, title, message),
-                cx,
-            );
+        let changed = push_bounded(
+            &mut self.notifications,
+            AppNotification::new(
+                notice_id(severity, &title, &message),
+                severity,
+                title,
+                message,
+            ),
+        );
+        if changed {
+            if self.notifications.open() {
+                // History is the surface while the center is open; drop the
+                // queued fallback toast instead of stacking it behind the panel.
+                self.notifications.take_pending_toasts();
+            } else {
+                self.notifications.flush_toasts(window, cx);
+            }
         }
         cx.notify();
     }
@@ -74,15 +85,16 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.notifications.toggle();
-        if self.notifications.is_open() {
+        self.notifications.toggle_open();
+        if self.notifications.open() {
             clear_notification_toasts(window, cx);
         }
         cx.notify();
     }
 
     pub(crate) fn close_notification_center(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.notifications.close() {
+        if self.notifications.open() {
+            self.notifications.close();
             cx.notify();
             true
         } else {
@@ -100,10 +112,9 @@ impl DesktopApp {
         cx.notify();
     }
 
-    fn remove_notification_record(&mut self, id: NotificationId, cx: &mut Context<Self>) {
-        if self.notifications.remove(id) {
-            cx.notify();
-        }
+    fn remove_notification_record(&mut self, row_id: u64, cx: &mut Context<Self>) {
+        self.notifications.remove(row_id);
+        cx.notify();
     }
 
     pub(crate) fn render_notification_center_layer(
@@ -111,7 +122,7 @@ impl DesktopApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.notifications.is_open() {
+        if !self.notifications.open() {
             return None;
         }
 
@@ -122,9 +133,11 @@ impl DesktopApp {
         let panel = render_notification_center(
             &self.notifications,
             viewport,
-            move |id, _, _, cx| {
+            move |row_id, _, _, cx| {
                 if let Some(view) = remove_entity.upgrade() {
-                    view.update(cx, |this, cx| this.remove_notification_record(id, cx));
+                    view.update(cx, |this, cx| {
+                        this.remove_notification_record(row_id, cx);
+                    });
                 }
             },
             move |_, window, cx| {
@@ -151,7 +164,7 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.notifications.is_open() {
+        if self.notifications.open() {
             return None;
         }
         render_notification_toasts(window, cx)

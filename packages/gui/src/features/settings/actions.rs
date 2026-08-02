@@ -51,7 +51,7 @@ impl DesktopApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use island::theme::{IslandPalette, apply_island_theme};
+        use island::theme::{IslandPalette, apply};
         let palette = if light {
             IslandPalette::Light
         } else {
@@ -61,7 +61,7 @@ impl DesktopApp {
             return;
         }
         self.ux_prefs.island_palette = palette;
-        apply_island_theme(cx, palette);
+        apply(cx, palette);
         self.persist_gui_config();
         // Re-paint frame so surfaces/tokens pick up the new snapshot.
         let _ = window;

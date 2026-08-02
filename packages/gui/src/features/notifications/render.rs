@@ -5,37 +5,36 @@ use island::components::notification::{
     NotificationPanelSpec, NotificationRowSpec, render_notification_panel, render_notification_row,
 };
 
-use super::model::{NotificationCenterState, NotificationId, relative_time};
+use super::model::{AppNotificationCenter, relative_time};
 
 pub fn render_notification_center<Remove, Clear>(
-    state: &NotificationCenterState,
+    center: &AppNotificationCenter,
     viewport: Size<Pixels>,
     on_remove: Remove,
     on_clear: Clear,
 ) -> AnyElement
 where
-    Remove: Fn(NotificationId, &ClickEvent, &mut Window, &mut App) + Clone + 'static,
+    Remove: Fn(u64, &ClickEvent, &mut Window, &mut App) + Clone + 'static,
     Clear: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 {
     let now = Instant::now();
-    let rows = state
+    let rows = center
         .records()
+        .iter()
         .map(|record| {
-            let id = record.id;
+            let row_id = record.row_id;
             let on_remove = on_remove.clone();
             render_notification_row(
                 NotificationRowSpec {
-                    id: ElementId::Name(format!("notification-{}", id.value()).into()),
-                    remove_id: ElementId::Name(
-                        format!("notification-remove-{}", id.value()).into(),
-                    ),
-                    severity: record.severity,
-                    title: record.title.clone().into(),
-                    message: record.message.clone().into(),
-                    time: relative_time(record.created_at, now).into(),
+                    id: ElementId::Name(format!("notification-{row_id}").into()),
+                    remove_id: ElementId::Name(format!("notification-remove-{row_id}").into()),
+                    severity: record.message.severity,
+                    title: record.message.title.clone().into(),
+                    message: record.message.message.clone().into(),
+                    time: relative_time(record.message.created_at, now).into(),
                     remove_label: crate::t!("notifications.action.remove").into(),
                 },
-                move |event, window, cx| on_remove(id, event, window, cx),
+                move |event, window, cx| on_remove(row_id, event, window, cx),
             )
         })
         .collect();

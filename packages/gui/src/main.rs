@@ -33,7 +33,7 @@ use crate::features::{
     SessionsToggleFocused, TreeConfirm, TreeSelectNext, TreeSelectPrev, TreeToggleFocused,
 };
 use island::assets::IslandAssets;
-use island::theme::{IslandPalette, apply_island_theme};
+use island::theme::{IslandPalette, apply};
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -60,7 +60,7 @@ fn main() {
         island::components::init(cx);
         i18n::init();
         // Default dark; hostd [gui].island-palette may re-apply after hydrate.
-        apply_island_theme(cx, IslandPalette::Dark);
+        apply(cx, IslandPalette::Dark);
 
         cx.bind_keys([
             KeyBinding::new(

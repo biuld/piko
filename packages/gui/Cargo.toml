@@ -15,7 +15,7 @@ identifier = "dev.piko.gui"
 icon = ["assets/app/AppIcon.png"]
 
 [dependencies]
-island = { path = "../../../island-rs" }
+island = { path = "../../../island-rs/crates/island", features = ["os-notifications"] }
 piko-client-core = { path = "../client-core" }
 piko-comms = { path = "../comms" }
 piko-protocol = { path = "../protocol" }

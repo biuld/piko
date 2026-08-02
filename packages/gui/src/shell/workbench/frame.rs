@@ -27,8 +27,8 @@ pub fn mount_frame(
         show_session,
         show_right,
         false,
-        app.notifications.is_open(),
-        app.notifications.has_unread(),
+        app.notifications.open(),
+        app.notifications.unread(),
         entity,
     ))
     .child(

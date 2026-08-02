@@ -11,7 +11,7 @@ use crate::features::{
     AgentsIsland, ComposerIsland, SETTINGS_FOCUS_ORDER, SessionsIsland, SettingsIslandId,
     SettingsNavIsland, SettingsPanelIsland, TimelineIsland, TreeIsland,
 };
-use crate::features::{CommandPalette, InteractionForm, NotificationCenterState, SettingsSection};
+use crate::features::{AppNotificationCenter, CommandPalette, InteractionForm, SettingsSection};
 use crate::shell::{
     ALL_ISLAND_IDS, FocusCycleDir, IslandFocusRing, IslandFocusTable, IslandId, OverlayHost,
     SettingsFrameChrome, mount_settings_frame, mount_workbench_frame,
@@ -81,7 +81,7 @@ pub struct DesktopApp {
     pub(crate) ux_prefs: GuiUxPrefs,
     pub(crate) last_notified_error: Option<String>,
     pub(crate) last_connection_connected: bool,
-    pub(crate) notifications: NotificationCenterState,
+    pub(crate) notifications: AppNotificationCenter,
     pub(crate) last_live_session_for_draft: Option<String>,
     gui_config_fingerprint: Option<String>,
     pub(crate) host_config_fingerprint: Option<String>,
@@ -227,7 +227,7 @@ impl DesktopApp {
                     let Some(view) = entity.upgrade() else {
                         return;
                     };
-                    if view.read(cx).notifications.records().next().is_some() {
+                    if !view.read(cx).notifications.records().is_empty() {
                         view.update(cx, |_, cx| cx.notify());
                     }
                 }) else {
@@ -268,7 +268,7 @@ impl DesktopApp {
             ux_prefs: GuiUxPrefs::default(),
             last_notified_error: None,
             last_connection_connected: true,
-            notifications: NotificationCenterState::default(),
+            notifications: AppNotificationCenter::default(),
             last_live_session_for_draft: None,
             gui_config_fingerprint: None,
             host_config_fingerprint: None,
@@ -345,7 +345,7 @@ impl DesktopApp {
                 let palette = super::ux_prefs::parse_island_palette(&settings.island_palette);
                 if self.ux_prefs.island_palette != palette {
                     self.ux_prefs.island_palette = palette;
-                    island::theme::apply_island_theme(cx, palette);
+                    island::theme::apply(cx, palette);
                 }
                 self.sync_session_prefs_from_gui(&settings);
                 self.gui_config_fingerprint = Some(fingerprint);
@@ -438,8 +438,8 @@ impl Render for DesktopApp {
                     root,
                     SettingsFrameChrome {
                         entity,
-                        notifications_open: self.notifications.is_open(),
-                        notifications_unread: self.notifications.has_unread(),
+                        notifications_open: self.notifications.open(),
+                        notifications_unread: self.notifications.unread(),
                     },
                     &workspace.island_tree,
                     SettingsIslandId::Nav,
