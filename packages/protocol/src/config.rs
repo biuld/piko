@@ -39,6 +39,12 @@ pub struct ProviderConfig {
     /// Extra HTTP headers (e.g. OpenRouter HTTP-Referer).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
+
+    /// Whether the gateway may fall back to a non-streaming completion when
+    /// streaming cannot be established within the retry budget.
+    /// `None` means fallback is enabled (default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming_fallback: Option<bool>,
 }
 
 // ---- Model reference ----
@@ -100,6 +106,13 @@ pub struct RetryConfig {
     /// Base delay between retries in milliseconds.
     #[serde(default = "default_base_delay_ms")]
     pub base_delay_ms: u64,
+    /// Cap on a single retry delay in milliseconds.
+    #[serde(default = "default_max_delay_ms")]
+    pub max_delay_ms: u64,
+    /// Total retry-time budget in milliseconds shared across all retries of
+    /// one request (open-phase retries and mid-stream restarts combined).
+    #[serde(default = "default_budget_ms")]
+    pub budget_ms: u64,
 }
 
 fn default_true() -> bool {
@@ -111,6 +124,12 @@ fn default_max_retries() -> u32 {
 fn default_base_delay_ms() -> u64 {
     2000
 }
+fn default_max_delay_ms() -> u64 {
+    30_000
+}
+fn default_budget_ms() -> u64 {
+    60_000
+}
 
 impl Default for RetryConfig {
     fn default() -> Self {
@@ -118,6 +137,8 @@ impl Default for RetryConfig {
             enabled: true,
             max_retries: 3,
             base_delay_ms: 2000,
+            max_delay_ms: default_max_delay_ms(),
+            budget_ms: default_budget_ms(),
         }
     }
 }
@@ -193,6 +214,7 @@ impl OrchdConfig {
             api_key: api_key.into(),
             base_url: None,
             headers: None,
+            streaming_fallback: None,
         };
         let mut providers = HashMap::new();
         providers.insert(kind_str.clone(), provider_config);
@@ -342,6 +364,7 @@ mod tests {
             api_key: "sk-123".into(),
             base_url: Some("https://custom.api/v1".into()),
             headers: None,
+            streaming_fallback: None,
         };
         let json = serde_json::to_string(&pc).unwrap();
         let back: ProviderConfig = serde_json::from_str(&json).unwrap();

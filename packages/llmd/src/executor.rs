@@ -3,14 +3,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use piko_protocol::config::{ProviderConfig, RetryConfig};
-use piko_protocol::messages::Usage;
 use piko_protocol::model::ModelCapabilities;
 
 use crate::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use crate::retry::{RetryPolicy, RetryState};
+use crate::stream::{
+    OpenError, OpenOutcome, OpenRetryContext, open_stream_with_retry, resilient_stream,
+};
 
 mod prompt_mapping;
 use prompt_mapping::{build_genai_messages, stateless_system_block};
@@ -106,6 +108,8 @@ fn provider_for_adapter(kind: genai::adapter::AdapterKind) -> String {
 struct ExecState {
     client: genai::Client,
     tool_defs: Vec<piko_protocol::tools::ToolDef>,
+    /// Per-provider streaming-fallback opt-out (default enabled).
+    streaming_fallback: HashMap<String, bool>,
 }
 
 pub struct LlmdExecutor {
@@ -126,6 +130,7 @@ impl LlmdExecutor {
             state: Arc::new(ExecState {
                 client: genai::Client::default(),
                 tool_defs: vec![],
+                streaming_fallback: HashMap::new(),
             }),
             middlewares: vec![],
             retry: RetryConfig::default(),
@@ -133,10 +138,15 @@ impl LlmdExecutor {
     }
 
     pub fn from_providers(providers: HashMap<String, ProviderConfig>) -> Self {
+        let streaming_fallback = providers
+            .iter()
+            .map(|(id, cfg)| (id.clone(), cfg.streaming_fallback.unwrap_or(true)))
+            .collect();
         Self {
             state: Arc::new(ExecState {
                 client: build_genai_client(&providers),
                 tool_defs: vec![],
+                streaming_fallback,
             }),
             middlewares: vec![],
             retry: RetryConfig::default(),
@@ -189,7 +199,7 @@ impl LlmGateway for LlmdExecutor {
         }
 
         // Apply resolved thinking level
-        let mut chat_options = genai::chat::ChatOptions::default();
+        let mut chat_options = genai::chat::ChatOptions::default().with_capture_usage(true);
         if let Some(ref thinking) = req.thinking {
             let effort = match thinking.as_str() {
                 "none" => genai::chat::ReasoningEffort::None,
@@ -229,157 +239,65 @@ impl LlmGateway for LlmdExecutor {
         }
         let chat_options = Some(chat_options);
 
-        // Open stream from genai, with retry on transient errors.
-        let max_retries = if self.retry.enabled {
-            self.retry.max_retries
-        } else {
-            0
+        // Eager open phase: retry with the shared budget, then fall back to a
+        // non-streaming completion before returning the stream.
+        let policy = RetryPolicy::from_config(&self.retry);
+        let fallback_enabled = self
+            .state
+            .streaming_fallback
+            .get(&req.provider)
+            .copied()
+            .unwrap_or(true);
+        let client = self.state.client.clone();
+        let mut retry_state = RetryState::default();
+
+        let retry_ctx = OpenRetryContext {
+            policy: &policy,
+            state: &mut retry_state,
+            cancel: cancel.as_ref(),
+            run_id: &req.run_id,
         };
-        let base_delay = std::time::Duration::from_millis(self.retry.base_delay_ms);
-        let mut last_error = None;
-        let mut chat_response = None;
-
-        for attempt in 0..=max_retries {
-            if attempt > 0 {
-                let delay = base_delay * 2u32.pow(attempt.saturating_sub(1));
-                tracing::warn!(
-                    run_id = %req.run_id,
-                    attempt = %attempt,
-                    delay_ms = %delay.as_millis(),
-                    "Retrying LLM call after transient error"
-                );
-                tokio::time::sleep(delay).await;
-            }
-
-            match self
-                .state
-                .client
-                .exec_chat_stream(model_iden.clone(), request.clone(), chat_options.as_ref())
-                .await
-            {
-                Ok(resp) => {
-                    chat_response = Some(resp);
-                    break;
-                }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    let retryable = is_retryable_error(&error_msg);
-
-                    if !retryable || attempt >= max_retries {
-                        if attempt >= max_retries && max_retries > 0 {
-                            tracing::error!(
-                                run_id = %req.run_id,
-                                attempts = %attempt + 1,
-                                error = %error_msg,
-                                "All LLM retry attempts exhausted"
-                            );
-                        }
-                        return Err(error_msg);
-                    }
-                    tracing::warn!(
-                        run_id = %req.run_id,
-                        error = %error_msg,
-                        "Transient LLM error, will retry"
-                    );
-                    last_error = Some(error_msg);
-                }
-            }
-        }
-
-        let chat_response = chat_response
-            .ok_or_else(|| last_error.unwrap_or_else(|| "no response after retries".into()))?;
-
-        let mut llm_stream = chat_response.stream;
-        let middlewares = self.middlewares.clone();
-
-        let stream = async_stream::stream! {
-            while let Some(chunk_res) = llm_stream.next().await {
-                if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
-                    yield GatewayEvent::Done("abort".into());
-                    return;
-                }
-
-                let mut gw_event = match chunk_res {
-                    Ok(event) => match event {
-                        genai::chat::ChatStreamEvent::Start => continue,
-                        genai::chat::ChatStreamEvent::Chunk(chunk) => {
-                            GatewayEvent::ContentDelta(chunk.content)
-                        }
-                        genai::chat::ChatStreamEvent::ReasoningChunk(chunk) => {
-                            GatewayEvent::ReasoningDelta(chunk.content)
-                        }
-                        genai::chat::ChatStreamEvent::ToolCallChunk(chunk) => {
-                            let tc = chunk.tool_call;
-                            let args_delta = if let serde_json::Value::String(s) = tc.fn_arguments {
-                                s
-                            } else {
-                                serde_json::to_string(&tc.fn_arguments).unwrap_or_default()
-                            };
-
-                            GatewayEvent::ToolCallChunk {
-                                id: tc.call_id,
-                                name: tc.fn_name,
-                                args_delta,
+        let initial = match open_stream_with_retry(
+            &client,
+            &model_iden,
+            &request,
+            chat_options.as_ref(),
+            retry_ctx,
+        )
+        .await
+        {
+            Ok(resp) => OpenOutcome::Stream(resp),
+            Err(open_err) => match open_err {
+                OpenError::NonRetryable(msg) => return Err(msg),
+                OpenError::BudgetExhausted(msg) => {
+                    if fallback_enabled {
+                        match client
+                            .exec_chat(model_iden.clone(), request.clone(), chat_options.as_ref())
+                            .await
+                        {
+                            Ok(resp) => {
+                                OpenOutcome::FallbackEvents(crate::stream::fallback_events(resp))
+                            }
+                            Err(fb_err) => {
+                                return Err(format!(
+                                    "streaming request failed after retries: {msg}; \
+                                     non-streaming fallback failed: {fb_err}"
+                                ));
                             }
                         }
-                        genai::chat::ChatStreamEvent::ThoughtSignatureChunk(_) => continue,
-                        genai::chat::ChatStreamEvent::End(end) => {
-                            if let Some(u) = end.captured_usage {
-                                let mut usage = Usage::empty();
-                                usage.input = u.prompt_tokens.unwrap_or(0) as u64;
-                                usage.output = u.completion_tokens.unwrap_or(0) as u64;
-                                // Cache tokens may be in prompt_tokens_details
-                                usage.cache_read = u
-                                    .prompt_tokens_details
-                                    .as_ref()
-                                    .and_then(|d| d.cached_tokens)
-                                    .unwrap_or(0) as u64;
-                                usage.cache_write = u
-                                    .prompt_tokens_details
-                                    .as_ref()
-                                    .and_then(|d| d.cache_creation_tokens)
-                                    .unwrap_or(0) as u64;
-                                usage.total_tokens = usage.input + usage.output;
-                                yield GatewayEvent::Usage(usage);
-                            }
-                            GatewayEvent::Done(
-                                end.captured_stop_reason
-                                    .map(|r| match r {
-                                        genai::chat::StopReason::Completed(_) => "stop".to_string(),
-                                        genai::chat::StopReason::StopSequence(_) => "stop".to_string(),
-                                        genai::chat::StopReason::ToolCall(_) => "tool_use".to_string(),
-                                        genai::chat::StopReason::MaxTokens(_) => "length".to_string(),
-                                        genai::chat::StopReason::ContentFilter(s) => s,
-                                        genai::chat::StopReason::Other(s) => s,
-                                    })
-                                    .unwrap_or_else(|| "stop".to_string()),
-                            )
-                        }
-                    },
-                    Err(e) => {
-                        yield GatewayEvent::Error(e.to_string());
-                        return;
-                    }
-                };
-
-                let is_done = matches!(gw_event, GatewayEvent::Done(_));
-
-                for mw in middlewares.iter().rev() {
-                    if let Err(e) = mw.on_stream_event(&mut ctx, &mut gw_event).await {
-                        yield GatewayEvent::Error(e);
-                        return;
+                    } else {
+                        return Err(msg);
                     }
                 }
-
-                yield gw_event;
-
-                if is_done {
-                    return;
-                }
-            }
+            },
         };
 
-        Ok(Box::pin(stream))
+        Ok(resilient_stream(
+            initial,
+            cancel,
+            self.middlewares.clone(),
+            ctx,
+        ))
     }
 
     fn capabilities(&self) -> ModelCapabilities {
@@ -421,36 +339,35 @@ impl LlmGateway for LlmdExecutor {
         let genai_messages = build_genai_messages(&prompt, &messages);
         let request = genai::chat::ChatRequest::new(genai_messages);
 
-        let resp = self
-            .state
-            .client
-            .exec_chat(model_iden, request, None)
-            .await
-            .map_err(|e| e.to_string())?;
+        let policy = RetryPolicy::from_config(&self.retry);
+        let mut state = RetryState::default();
+        let resp = loop {
+            match self
+                .state
+                .client
+                .exec_chat(model_iden.clone(), request.clone(), None)
+                .await
+            {
+                Ok(resp) => break resp,
+                Err(e) => {
+                    if !crate::retry::is_retryable(&e) {
+                        return Err(e.to_string());
+                    }
+                    let Some(delay) = policy.delay_for_retry(
+                        state.retries_used,
+                        state.elapsed_ms,
+                        crate::retry::jitter(),
+                    ) else {
+                        return Err(e.to_string());
+                    };
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    state.record(delay);
+                }
+            }
+        };
 
         Ok(resp.content.into_texts().join("\n"))
     }
-}
-
-// ---- Helpers ----
-
-/// Determine if an LLM error is transient and worth retrying.
-fn is_retryable_error(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    lower.contains("timeout")
-        || lower.contains("connection")
-        || lower.contains("rate limit")
-        || lower.contains("rate_limit")
-        || lower.contains("429")
-        || lower.contains("503")
-        || lower.contains("502")
-        || lower.contains("504")
-        || lower.contains("temporarily")
-        || lower.contains("transient")
-        || lower.contains("server error")
-        || lower.contains("internal server error")
-        || lower.contains("overloaded")
-        || lower.contains("capacity")
 }
 
 // ---- Tool conversion ----

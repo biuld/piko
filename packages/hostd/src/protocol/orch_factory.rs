@@ -36,6 +36,7 @@ pub(crate) async fn build_orch_turn_runner(
             api_key,
             base_url: resolved.provider_config.base_url.clone(),
             headers: resolved.provider_config.headers.clone(),
+            streaming_fallback: None,
         },
     );
     let retry_config = piko_protocol::config::RetryConfig {
@@ -54,6 +55,16 @@ pub(crate) async fn build_orch_turn_runner(
             .as_ref()
             .and_then(|r| r.base_delay_ms)
             .unwrap_or(2000),
+        max_delay_ms: settings
+            .retry
+            .as_ref()
+            .and_then(|r| r.max_delay_ms)
+            .unwrap_or(30_000),
+        budget_ms: settings
+            .retry
+            .as_ref()
+            .and_then(|r| r.budget_ms)
+            .unwrap_or(60_000),
     };
     let executor = piko_llmd::build_gateway(providers, retry_config);
     let thinking = settings.default_thinking_level.clone();

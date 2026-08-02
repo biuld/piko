@@ -3,6 +3,8 @@ pub mod executor;
 pub mod gateway;
 pub mod middleware;
 pub mod providers;
+pub mod retry;
+pub mod stream;
 
 use std::collections::HashMap;
 use std::sync::Arc;

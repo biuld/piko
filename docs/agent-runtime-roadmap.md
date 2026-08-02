@@ -38,14 +38,14 @@ M7 Extension                 (optional, not core)
 ### M0 — Core loop & foundations
 
 Goal: a turn is durable, resumable, deterministic, and can execute any tool.
-Status: the largest part is landed (F-01, F-06, F-07, F-09, F-10 core, F-02/03
-baseline). Remaining slices:
+Status: the largest part is landed (F-01, F-02 slice, F-06, F-07, F-09,
+F-10 core, F-03 baseline). Remaining slices:
 
 | Feature | Slice | Status |
 |---|---|---|
 | F-06 tool-system | parallel batch dispatch + sequential exclusivity | implemented (D-06, V-06) |
 | F-01 turn-runtime | input admission; typed background tasks; turn-abort markers | implemented (D-01, V-01) |
-| F-02 model-gateway | retry/backoff budget; streaming fallback | planned |
+| F-02 model-gateway | retry/backoff budget; streaming fallback | implemented (F-02/D-02/V-02) |
 | F-03 prompt-assembly | fragment catalog breadth (world state, environments, model-switch) | planned |
 | F-10 multi-agent | v2 collaboration tools (followup/interrupt/list/wait) | planned |
 | F-07 tool-approvals | approval timeout/deny semantics polish | planned |

@@ -110,6 +110,7 @@ impl OrchAgentRunRunner {
                 api_key: api_key.to_string(),
                 base_url: None,
                 headers: None,
+                streaming_fallback: None,
             },
         );
 

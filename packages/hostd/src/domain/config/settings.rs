@@ -95,6 +95,8 @@ pub struct RetrySettings {
     pub enabled: Option<bool>,
     pub max_retries: Option<u32>,
     pub base_delay_ms: Option<u64>,
+    pub max_delay_ms: Option<u64>,
+    pub budget_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -289,6 +291,8 @@ fn default_settings() -> HostSettings {
             enabled: Some(true),
             max_retries: Some(3),
             base_delay_ms: Some(2000),
+            max_delay_ms: Some(30_000),
+            budget_ms: Some(60_000),
         }),
         ..HostSettings::default()
     }
@@ -340,6 +344,8 @@ fn merge_retry(
             enabled: overrides.enabled.or(base.enabled),
             max_retries: overrides.max_retries.or(base.max_retries),
             base_delay_ms: overrides.base_delay_ms.or(base.base_delay_ms),
+            max_delay_ms: overrides.max_delay_ms.or(base.max_delay_ms),
+            budget_ms: overrides.budget_ms.or(base.budget_ms),
         }),
         (base, overrides) => overrides.or(base),
     }

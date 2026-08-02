@@ -68,8 +68,10 @@ is exceeded.
   retry/fallback with budgets, sticky routing, prewarm, token/usage metadata,
   auth plumbing, model catalog and thinking-level mapping.
 - piko status: **partial** — `F-02 model-gateway` (`piko-llmd`: providers,
-  gateway, executor, cost/token middleware). Gaps: retry/backoff budget,
-  prewarm/sticky routing, per-provider streaming fallback.
+  gateway, executor, retry/backoff budget with capped jittered backoff,
+  status-error peeking, per-provider stream → non-streaming fallback,
+  cost/token middleware; streaming requests capture usage). Gaps: prewarm and
+  sticky routing.
 
 ### C. Prompt Assembly & Context Injection
 
@@ -246,7 +248,7 @@ is exceeded.
 | Block | F-ID | piko status | First concrete slice |
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
-| B Model Gateway | F-02 | partial | retry/backoff budget, streaming fallback |
+| B Model Gateway | F-02 | partial (retry/backoff + streaming fallback landed) | prewarm, sticky routing |
 | C Prompt Assembly | F-03 | partial | fragment catalog breadth, world state |
 | D Context & Compaction | F-04, F-05 | partial | truncation + auto-compact trigger |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
