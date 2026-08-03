@@ -1,13 +1,15 @@
 // ---- WorkspaceToolProvider — filesystem and process tools ----
 //
 // Integrates piko-sandbox library for policy-based filesystem access control.
-// File operations and process execution commands are checked against the sandbox policy.
+// File operations are checked against the sandbox policy; process execution
+// (the `bash` tool) runs through the piko-sandbox PTY runner, wrapped in the
+// platform OS sandbox when `os_sandbox` is set (F-08).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use piko_sandbox::exec::ShellSnapshot;
 use piko_sandbox::policy::Policy;
 
 use crate::domain::tools::definition::{ToolDef, ToolProviderSource};
@@ -20,67 +22,30 @@ use super::workspace_handlers::{execute_workspace_tool, workspace_tools};
 
 pub struct WorkspaceToolProvider {
     policy: Arc<Policy>,
-    shell_path: String,
+    shell: ShellSnapshot,
+    os_sandbox: bool,
 }
 
 impl WorkspaceToolProvider {
-    pub fn new(policy: Policy) -> Self {
+    /// `os_sandbox` decides whether `bash` calls run inside the platform OS
+    /// sandbox (seatbelt/bwrap, F-08 slice 1); the shell snapshot is
+    /// resolved once here and reused for every call.
+    pub fn new(policy: Policy, os_sandbox: bool) -> Self {
         Self {
             policy: Arc::new(policy),
-            shell_path: "bash".into(),
+            shell: ShellSnapshot::capture(None),
+            os_sandbox,
         }
     }
 
-    pub fn with_shell(policy: Policy, shell_path: impl Into<String>) -> Self {
+    /// Create a provider with an explicit shell path.
+    pub fn with_shell(policy: Policy, shell_path: impl Into<String>, os_sandbox: bool) -> Self {
+        let shell_path = shell_path.into();
         Self {
             policy: Arc::new(policy),
-            shell_path: shell_path.into(),
+            shell: ShellSnapshot::capture(Some(&shell_path)),
+            os_sandbox,
         }
-    }
-
-    /// Create a provider with a permissive policy (read/write current dir).
-    pub fn permissive() -> Self {
-        Self::new(Policy {
-            version: 1,
-            read: vec![PathBuf::from(".")],
-            write: vec![PathBuf::from(".")],
-            deny: vec![PathBuf::from(".git")],
-            allowed_commands: vec![
-                "ls".into(),
-                "cat".into(),
-                "head".into(),
-                "tail".into(),
-                "find".into(),
-                "grep".into(),
-                "rg".into(),
-                "git".into(),
-                "echo".into(),
-                "mkdir".into(),
-                "cp".into(),
-                "mv".into(),
-                "rm".into(),
-                "wc".into(),
-                "sort".into(),
-                "uniq".into(),
-                "sed".into(),
-                "awk".into(),
-                "diff".into(),
-                "npm".into(),
-                "npx".into(),
-                "node".into(),
-                "bun".into(),
-                "cargo".into(),
-                "python3".into(),
-                "python".into(),
-                "go".into(),
-                "make".into(),
-                "rustc".into(),
-                "tsc".into(),
-                "biome".into(),
-                "prettier".into(),
-            ],
-            allow_network: false,
-        })
     }
 }
 
@@ -103,6 +68,6 @@ impl ToolProvider for WorkspaceToolProvider {
         call: crate::domain::tools::call::ToolCall,
         context: ToolExecutionContext,
     ) -> ToolExecResult {
-        execute_workspace_tool(&self.policy, &self.shell_path, &call, &context).await
+        execute_workspace_tool(&self.policy, &self.shell, self.os_sandbox, &call, &context).await
     }
 }

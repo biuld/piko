@@ -75,7 +75,8 @@ fail-closed sandboxing.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-08 exec-sandboxing | PTY/process-group lifecycle; shell snapshots; unified long-lived processes; network sandbox; environment selection | partial (file policy + runner) |
+| F-08 exec-sandboxing | PTY/process-group lifecycle; shell snapshots; network sandbox; `bash` tool wired through the runner | implemented (slice 1, D-08/V-08) |
+| F-08 exec-sandboxing | unified long-lived processes; environment selection | planned |
 
 Dependency: M2 builds on F-06 tool routes (shell tool) and M0 F-01
 cancellation.
@@ -172,11 +173,20 @@ hysteresis guard derives from the resolved model's context window as a
 fraction (`[compaction] min-growth-fraction`, default `0.125`) when
 `min_growth_tokens` is unset, with the explicit setting and the constant
 windowless fallback preserved. Token-budget prompt fragments stay rejected
-(F-05 Fusion decisions: the model-visible tools cover the need). Next
+(F-05 Fusion decisions: the model-visible tools cover the need). **M2 entry
+slice landed** (`F-08` slice 1, `D-08/V-08`): the `bash` tool now runs
+through a PTY-backed `piko-sandbox` runner — the shell is the
+session/process-group leader, combined output is bounded, timeout and
+cancellation escalate SIGTERM → SIGKILL to the whole group, the shell
+snapshot resolves once (`shell_path` → `$SHELL` → default), and network
+allow/deny is explicit on macOS seatbelt and Linux bwrap (including
+`--share-net`). The blocking `runner::exec` path was refactored onto the
+same wrapper builder so the two execution paths cannot drift. Remaining
 sequencing:
 
-1. **M2 — F-08 exec-sandboxing**: PTY/process-group lifecycle, shell
-   snapshots, and network sandbox — the next milestone entry slice.
+1. **M2 — F-08 slice 2**: unified long-lived processes (background
+   processes, `write_stdin` interactivity) and environment capability
+   selection — the next execution-depth slice.
 2. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
    cache-planning polish.
 3. M1 residue worth tracking under M6: F-15 per-turn usage accounting

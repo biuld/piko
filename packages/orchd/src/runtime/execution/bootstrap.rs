@@ -101,9 +101,9 @@ impl AgentExecutionRuntime {
 
         let policy = load_sandbox_policy(sandbox);
         let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
-            WorkspaceToolProvider::with_shell(policy, shell.as_str())
+            WorkspaceToolProvider::with_shell(policy, shell.as_str(), sandbox.enabled)
         } else {
-            WorkspaceToolProvider::new(policy)
+            WorkspaceToolProvider::new(policy, sandbox.enabled)
         };
         self.register_tool_provider(Box::new(workspace_provider))
             .await;

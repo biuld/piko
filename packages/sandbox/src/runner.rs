@@ -1,13 +1,11 @@
+#[cfg(target_os = "macos")]
+use crate::platform::SandboxCommand;
+use crate::platform::build_sandbox_command;
 use crate::policy::Policy;
 use std::{
     path::Path,
     process::{Command, Stdio},
 };
-
-#[cfg(target_os = "macos")]
-const SEATBELT_BASE_POLICY: &str = include_str!("../resources/macos/seatbelt_base_policy.sbpl");
-#[cfg(target_os = "macos")]
-const PLATFORM_DEFAULTS_POLICY: &str = include_str!("../resources/macos/platform_defaults.sbpl");
 
 pub fn exec(
     policy: &Policy,
@@ -24,16 +22,6 @@ pub fn exec(
     Err("piko-sandbox has no backend for this platform".into())
 }
 
-/// Returns true when the current process is already running inside an Apple App
-/// Sandbox (e.g. launched from an Xcode task runner or a sandboxed IDE helper).
-/// In that case /usr/bin/sandbox-exec cannot re-initialise the kernel sandbox
-/// and will SIGABRT. We detect this early so callers can skip the seatbelt
-/// wrapper and fall back to the plain-exec path.
-#[cfg(target_os = "macos")]
-fn is_app_sandboxed() -> bool {
-    std::env::var("APP_SANDBOX_CONTAINER_ID").is_ok()
-}
-
 #[cfg(target_os = "macos")]
 fn exec_macos(
     policy: &Policy,
@@ -42,113 +30,51 @@ fn exec_macos(
     shell: &str,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let cwd = cwd.canonicalize()?;
+    let shell_path = resolve_shell_path(shell);
 
-    // ------------------------------------------------------------------
-    // Nested-sandbox detection: when we are already inside an App Sandbox
-    // (e.g. Xcode task runner, sandboxed IDE helper), sandbox-exec cannot
-    // re-initialise the seatbelt kernel extension and will SIGABRT with
-    // signal 6.  Fall back to direct execution — the filesystem ACL checks
-    // in policy.rs still apply via the Check/CheckPath subcommands, so the
-    // security boundary is not completely removed.
-    // ------------------------------------------------------------------
-    if is_app_sandboxed() {
-        return exec_direct(&cwd, command, shell);
+    match build_sandbox_command(policy, &cwd)? {
+        Some(wrapper) => run_wrapped(&cwd, &wrapper, &shell_path, command),
+        // Nested-sandbox fallback: direct execution with the filesystem ACL
+        // checks in policy.rs still applied at the tool layer.
+        None => exec_direct(&cwd, command, &shell_path),
     }
+}
 
-    // ------------------------------------------------------------------
-    // Build the seatbelt policy.
-    //
-    // Paths are passed as -Dkey=path parameters and referenced in the
-    // policy via (param "key"), which avoids embedding raw paths in the
-    // policy string and is the same approach used by Codex.
-    // ------------------------------------------------------------------
-    let mut policy_parts = vec![
-        SEATBELT_BASE_POLICY.to_string(),
-        PLATFORM_DEFAULTS_POLICY.to_string(),
-    ];
-
-    let mut dir_params: Vec<(String, String)> = Vec::new();
-
-    // Readable roots
-    for (index, root) in policy.read.iter().enumerate() {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        let p = p.canonicalize().unwrap_or(p);
-        let key = format!("READABLE_ROOT_{index}");
-        dir_params.push((key.clone(), p.display().to_string()));
-        policy_parts.push(format!(
-            "; allow read-only file operations\n(allow file-read* (subpath (param \"{key}\")))\n(allow file-map-executable (subpath (param \"{key}\")))\n",
-        ));
-    }
-
-    // Writable roots
-    for (index, root) in policy.write.iter().enumerate() {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        let p = p.canonicalize().unwrap_or(p);
-        let key = format!("WRITABLE_ROOT_{index}");
-        dir_params.push((key.clone(), p.display().to_string()));
-        policy_parts.push(format!("(allow file-write* (subpath (param \"{key}\")))\n",));
-    }
-
-    // Deny rules (override above allowances)
-    for (index, root) in policy.deny.iter().enumerate() {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        let p = p.canonicalize().unwrap_or(p);
-        let key = format!("DENY_ROOT_{index}");
-        dir_params.push((key.clone(), p.display().to_string()));
-        policy_parts.push(format!("(deny file* (subpath (param \"{key}\")))\n",));
-    }
-
-    if policy.allow_network {
-        policy_parts.push("(allow network-outbound)\n(allow network-inbound)\n".to_string());
-    }
-
-    let full_policy = policy_parts.join("\n");
-
-    // ------------------------------------------------------------------
-    // Assemble the sandbox-exec command.
-    // Only use /usr/bin/sandbox-exec (absolute path) to guard against
-    // PATH injection of a malicious sandbox-exec.
-    // ------------------------------------------------------------------
-    let mut cmd = Command::new("/usr/bin/sandbox-exec");
-    cmd.arg("-p").arg(&full_policy);
-
-    for (key, value) in &dir_params {
-        cmd.arg(format!("-D{key}={value}"));
-    }
-
-    // Resolve shell path: if shell is just a name (e.g. "bash"), look it up;
-    // if it's an absolute path already, use it directly.
-    let shell_path = if shell.starts_with('/') {
+/// Resolve shell path: if shell is just a name (e.g. "bash"), look it up;
+/// if it's an absolute path already, use it directly.
+fn resolve_shell_path(shell: &str) -> String {
+    if shell.starts_with('/') {
         shell.to_string()
     } else {
         format!("/bin/{shell}")
-    };
-    cmd.arg("--")
-        .arg(&shell_path)
+    }
+}
+
+/// Run `<shell> -c <command>` inside the OS-sandbox wrapper.
+#[cfg(target_os = "macos")]
+fn run_wrapped(
+    cwd: &Path,
+    wrapper: &SandboxCommand,
+    shell_path: &str,
+    command: &str,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let mut cmd = Command::new(&wrapper.program);
+    cmd.args(&wrapper.args)
+        .arg(shell_path)
         .arg("-c")
         .arg(command)
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
-    // Remove DYLD_* variables: they are stripped by sandbox-exec anyway
-    // but removing them up-front avoids any cross-contamination.
-    for (key, _) in std::env::vars() {
-        if key.starts_with("DYLD_") {
-            cmd.env_remove(&key);
+    // Remove DYLD_* variables: they are stripped by sandbox-exec anyway but
+    // removing them up-front avoids any cross-contamination.
+    if wrapper.strip_loader_vars {
+        for (key, _) in std::env::vars() {
+            if key.starts_with("DYLD_") {
+                cmd.env_remove(&key);
+            }
         }
     }
 
@@ -164,7 +90,7 @@ fn exec_macos(
                 "piko-sandbox: sandbox-exec SIGABRT detected (likely nested sandbox). \
                  Falling back to direct execution."
             );
-            return exec_direct(&cwd, command, shell);
+            return exec_direct(cwd, command, shell_path);
         }
         if let Some(code) = status.code() {
             return Err(format!("sandbox-exec command failed with exit code {code}").into());
@@ -214,66 +140,15 @@ fn exec_linux(
     shell: &str,
 ) -> Result<i32, Box<dyn std::error::Error>> {
     let cwd = cwd.canonicalize()?;
-    if policy.allow_network {
-        return Err("Linux bwrap backend does not permit network in v1".into());
-    }
-    let mut child = Command::new("bwrap");
-    child.args([
-        "--die-with-parent",
-        "--unshare-all",
-        "--new-session",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-        "--tmpfs",
-        "/tmp",
-        "--ro-bind",
-        "/usr",
-        "/usr",
-        "--ro-bind",
-        "/bin",
-        "/bin",
-    ]);
-    for root in &policy.read {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        child.arg("--ro-bind").arg(&p).arg(&p);
-    }
-    for root in &policy.write {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        child.arg("--bind").arg(&p).arg(&p);
-    }
-    for root in &policy.deny {
-        let p = if root.is_absolute() {
-            root.clone()
-        } else {
-            cwd.join(root)
-        };
-        if p.is_dir() {
-            child.arg("--tmpfs").arg(&p);
-        } else if p.exists() {
-            child.arg("--ro-bind").arg("/dev/null").arg(&p);
-        }
-    }
-    let shell_path = if shell.starts_with('/') {
-        shell.to_string()
-    } else {
-        format!("/bin/{shell}")
-    };
-    let status = child
-        .arg("--chdir")
-        .arg(&cwd)
+    let shell_path = resolve_shell_path(shell);
+    let wrapper = build_sandbox_command(policy, &cwd)?
+        .ok_or("piko-sandbox: no Linux sandbox wrapper available")?;
+    let status = Command::new(&wrapper.program)
+        .args(&wrapper.args)
         .arg(&shell_path)
         .arg("-c")
         .arg(command)
+        .current_dir(&cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

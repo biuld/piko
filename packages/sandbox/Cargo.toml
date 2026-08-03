@@ -15,4 +15,8 @@ serde_json = "1"
 shell-words = "1.1"
 tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros", "rt", "fs", "net"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

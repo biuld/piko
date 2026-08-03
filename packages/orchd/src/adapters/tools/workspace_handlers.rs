@@ -3,7 +3,9 @@
 // Built-in workspace tools and their sandbox-policy-checked implementations.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use piko_sandbox::exec::{ShellSnapshot, SpawnConfig};
 use piko_sandbox::policy::{Access, Policy};
 
 use crate::domain::tools::call::ToolCall;
@@ -129,9 +131,10 @@ pub(super) fn workspace_tools() -> Vec<ToolDef> {
 
 pub(super) async fn execute_workspace_tool(
     policy: &Policy,
-    shell_path: &str,
+    shell: &ShellSnapshot,
+    os_sandbox: bool,
     call: &ToolCall,
-    _ctx: &ToolExecutionContext,
+    ctx: &ToolExecutionContext,
 ) -> ToolExecResult {
     let tool_name = call.name.as_str();
     let arguments = &call.arguments;
@@ -200,7 +203,7 @@ pub(super) async fn execute_workspace_tool(
                 .unwrap_or(0);
 
             // Validate command against policy
-            if let Err(e) = policy.validate_command(command, &cwd) {
+            if let Err(e) = policy.validate_command(command, &shell.cwd) {
                 return ToolExecResult {
                     ok: false,
                     value: None,
@@ -212,30 +215,21 @@ pub(super) async fn execute_workspace_tool(
                 };
             }
 
-            // Execute via shell (async)
-            let output = if timeout_secs > 0 {
-                tokio::process::Command::new("timeout")
-                    .arg(format!("{timeout_secs}s"))
-                    .arg(shell_path)
-                    .arg("-c")
-                    .arg(command)
-                    .current_dir(&cwd)
-                    .output()
-                    .await
-            } else {
-                tokio::process::Command::new(shell_path)
-                    .arg("-c")
-                    .arg(command)
-                    .current_dir(&cwd)
-                    .output()
-                    .await
+            // Execute through the piko-sandbox PTY runner: process-group
+            // lifecycle, timeout, cancellation grace, and the platform OS
+            // sandbox when enabled (F-08).
+            let spawn = SpawnConfig {
+                command: command.to_string(),
+                shell: shell.clone(),
+                policy: os_sandbox.then(|| policy.clone()),
+                timeout: (timeout_secs > 0).then(|| Duration::from_secs(timeout_secs)),
+                cancel: ctx.cancellation.clone(),
+                kill_grace: Duration::from_secs(2),
+                max_output_bytes: 65_536,
             };
-
-            match output {
-                Ok(out) => {
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    let combined = format!("{stdout}{stderr}");
+            match piko_sandbox::exec::run(spawn).await {
+                Ok(outcome) => {
+                    let combined = outcome.output;
                     // Truncate to ~50KB
                     let truncated = if combined.len() > 50_000 {
                         let mut end = 50_000;
@@ -250,18 +244,42 @@ pub(super) async fn execute_workspace_tool(
                     } else {
                         combined
                     };
+                    let exit_code = outcome.status.code.unwrap_or(-1);
+                    let success =
+                        !outcome.timed_out && !outcome.cancelled && outcome.status.code == Some(0);
                     ToolExecResult {
-                        ok: out.status.success(),
+                        ok: success,
                         value: Some(serde_json::json!({
                             "output": truncated,
-                            "exitCode": out.status.code().unwrap_or(-1),
+                            "exitCode": exit_code,
+                            "signal": outcome.status.signal,
+                            "timedOut": outcome.timed_out,
+                            "cancelled": outcome.cancelled,
                         })),
-                        error: if out.status.success() {
+                        error: if success {
                             None
+                        } else if outcome.timed_out {
+                            Some(ToolExecError {
+                                code: "timed_out".into(),
+                                message: "Command timed out and was terminated".into(),
+                                retryable: Some(false),
+                            })
+                        } else if outcome.cancelled {
+                            Some(ToolExecError {
+                                code: "cancelled".into(),
+                                message: "Command cancelled".into(),
+                                retryable: Some(false),
+                            })
+                        } else if let Some(signal) = outcome.status.signal {
+                            Some(ToolExecError {
+                                code: "command_signalled".into(),
+                                message: format!("Command terminated by signal {signal}"),
+                                retryable: Some(false),
+                            })
                         } else {
                             Some(ToolExecError {
                                 code: "command_failed".into(),
-                                message: format!("Exit code: {}", out.status.code().unwrap_or(-1)),
+                                message: format!("Exit code: {exit_code}"),
                                 retryable: Some(false),
                             })
                         },
@@ -424,5 +442,192 @@ pub(super) async fn execute_workspace_tool(
                 retryable: Some(false),
             }),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_orchd_api::tools::ToolExecutionContext;
+    use piko_protocol::messages::ToolCall;
+
+    fn test_policy() -> Policy {
+        Policy {
+            version: 1,
+            read: vec![PathBuf::from(".")],
+            write: vec![PathBuf::from(".")],
+            deny: vec![],
+            allowed_commands: vec![
+                "exit".into(),
+                "echo".into(),
+                "kill".into(),
+                "sleep".into(),
+                "pwd".into(),
+                "seq".into(),
+                "tr".into(),
+            ],
+            allow_network: false,
+        }
+    }
+
+    fn context(cancel: Option<tokio_util::sync::CancellationToken>) -> ToolExecutionContext {
+        ToolExecutionContext {
+            session_id: "session".into(),
+            agent_instance_id: "agent".into(),
+            execution_id: "exec".into(),
+            cancellation: cancel,
+            agent_id: "root".into(),
+            tool_set_ids: vec![],
+            turn_index: None,
+            event_seq: None,
+            next_event_seq: None,
+            parent_message_id: None,
+            content_index: None,
+            tool_call_index: Some(0),
+            tool_entity_id: Some("entity".into()),
+            host_context: None,
+            source_turn_id: None,
+            context_remaining: None,
+        }
+    }
+
+    fn bash_call(command: &str, timeout_secs: Option<u64>) -> ToolCall {
+        let mut arguments = serde_json::json!({ "command": command });
+        if let Some(secs) = timeout_secs {
+            arguments["timeout"] = serde_json::json!(secs);
+        }
+        ToolCall {
+            id: "call-1".into(),
+            name: "bash".into(),
+            arguments,
+            partial_json: None,
+        }
+    }
+
+    fn snapshot(cwd: std::path::PathBuf) -> ShellSnapshot {
+        ShellSnapshot {
+            shell_path: "bash".into(),
+            cwd,
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        }
+    }
+
+    #[tokio::test]
+    async fn bash_reports_exit_code_and_signal() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let policy = test_policy();
+        let shell = snapshot(cwd.clone());
+
+        let exit = execute_workspace_tool(
+            &policy,
+            &shell,
+            false,
+            &bash_call("exit 42", None),
+            &context(None),
+        )
+        .await;
+        assert!(!exit.ok);
+        assert_eq!(
+            exit.value.as_ref().and_then(|v| v["exitCode"].as_i64()),
+            Some(42)
+        );
+
+        let signalled = execute_workspace_tool(
+            &policy,
+            &shell,
+            false,
+            &bash_call("kill -KILL $$", None),
+            &context(None),
+        )
+        .await;
+        assert!(!signalled.ok);
+        assert_eq!(
+            signalled.value.as_ref().and_then(|v| v["signal"].as_i64()),
+            Some(9)
+        );
+        assert_eq!(
+            signalled.error.as_ref().map(|e| e.code.as_str()),
+            Some("command_signalled")
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_timeout_is_bounded_and_reported() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let policy = test_policy();
+        let shell = snapshot(cwd);
+        let result = execute_workspace_tool(
+            &policy,
+            &shell,
+            false,
+            &bash_call("sleep 30", Some(1)),
+            &context(None),
+        )
+        .await;
+        assert!(!result.ok);
+        assert_eq!(
+            result.value.as_ref().and_then(|v| v["timedOut"].as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result.error.as_ref().map(|e| e.code.as_str()),
+            Some("timed_out")
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_respects_runtime_cancellation() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let policy = test_policy();
+        let shell = snapshot(cwd);
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let result = execute_workspace_tool(
+            &policy,
+            &shell,
+            false,
+            &bash_call("sleep 30", None),
+            &context(Some(token)),
+        )
+        .await;
+        assert!(!result.ok);
+        assert_eq!(
+            result.value.as_ref().and_then(|v| v["cancelled"].as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            result.error.as_ref().map(|e| e.code.as_str()),
+            Some("cancelled")
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_uses_shell_snapshot_cwd_and_env() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let policy = test_policy();
+        let shell = ShellSnapshot {
+            shell_path: "bash".into(),
+            cwd: temp.path().to_path_buf(),
+            env: vec![
+                ("PATH".into(), "/usr/bin:/bin".into()),
+                ("PIKO_TOOL_VAR".into(), "tool-env-ok".into()),
+            ],
+        };
+        let result = execute_workspace_tool(
+            &policy,
+            &shell,
+            false,
+            &bash_call("pwd; echo $PIKO_TOOL_VAR", None),
+            &context(None),
+        )
+        .await;
+        assert!(result.ok, "got {result:?}");
+        let output = result
+            .value
+            .as_ref()
+            .and_then(|v| v["output"].as_str())
+            .unwrap_or_default();
+        assert!(output.contains(&temp.path().display().to_string()));
+        assert!(output.contains("tool-env-ok"));
     }
 }
