@@ -95,6 +95,16 @@ impl AppState {
                     },
                 )
             }
+            "process.stop" => {
+                let process_id = parts.next().map(|s| s.to_string());
+                match process_id {
+                    Some(id) => self.dispatch(SlashAction::KillProcess(id).into()),
+                    None => {
+                        self.status = "usage: /kill <processId>".to_string();
+                        Vec::new()
+                    }
+                }
+            }
             _ => self.dispatch_host_command(id, HostCommandArgs::default()),
         }
     }

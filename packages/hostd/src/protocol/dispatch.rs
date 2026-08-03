@@ -135,6 +135,20 @@ impl HostServer {
                     }),
                 }])
             }
+            Command::ProcessStop { process_id, .. } => {
+                let runner = self.0.turn_runner.lock().await.clone();
+                let exit = runner.terminate_process(&process_id).await;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::ProcessStopped {
+                        process_id,
+                        stopped: exit.is_some(),
+                        exit_code: exit.and_then(|e| e.exit_code),
+                        signal: exit.and_then(|e| e.signal),
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
             Command::SessionFork {
                 session_id,
                 entry_id,

@@ -58,6 +58,12 @@ All F-08 slice 2 acceptance criteria pass:
   id/pid/command/cwd/exit-state lines as a notification
   (`ps_slash_command_sends_process_list`,
   `process_listed_event_renders_notification`).
+- **Client surface (`/kill`)**: `AgentRuntime::stop_process` /
+  `AgentRunRunner::terminate_process` back `Command::ProcessStop` →
+  `CommandResult::ProcessStopped`; the TUI slash table maps `/kill <id>` →
+  `process.stop` and renders the stop result (exit/signal or a
+  no-such-process warning) (`kill_slash_command_sends_process_stop`,
+  `process_stopped_event_renders_notification`).
 - **Regression**: slice-1 bash tests (exit/signal/timeout/cancel/snapshot)
   still pass after the handler split; `cargo test --workspace` green;
   `cargo clippy --workspace --all-targets -- -D warnings` and

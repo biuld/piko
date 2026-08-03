@@ -632,6 +632,35 @@ impl AppState {
                 }
             }
             Event::CommandResponse {
+                result:
+                    Ok(piko_protocol::CommandResult::ProcessStopped {
+                        process_id,
+                        stopped,
+                        exit_code,
+                        signal,
+                        ..
+                    }),
+                ..
+            } => {
+                if stopped {
+                    let detail = exit_code
+                        .map(|code| format!(" (exit {code})"))
+                        .or_else(|| signal.map(|sig| format!(" (signal {sig})")))
+                        .unwrap_or_default();
+                    self.notify(
+                        NotificationLevel::Info,
+                        format!("stopped {process_id}{detail}"),
+                    );
+                    self.status = format!("stopped {process_id}");
+                } else {
+                    self.notify(
+                        NotificationLevel::Warning,
+                        format!("no such process: {process_id}"),
+                    );
+                    self.status = format!("no such process: {process_id}");
+                }
+            }
+            Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }),
                 ..
             } => {

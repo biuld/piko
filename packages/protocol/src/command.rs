@@ -43,6 +43,16 @@ pub struct ProcessInfo {
     pub signal: Option<i32>,
 }
 
+/// Exit status returned when a process is terminated.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessExit {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionListScope {
@@ -202,6 +212,13 @@ pub enum Command {
     ProcessList {
         command_id: CommandId,
     },
+    /// Terminate a running external process by its `process` tool id
+    /// (group SIGTERM → SIGKILL). Mirrors codex-rs
+    /// `backgroundTerminals/terminate`.
+    ProcessStop {
+        command_id: CommandId,
+        process_id: String,
+    },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
         command_id: CommandId,
@@ -259,6 +276,7 @@ impl Command {
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
             | Self::ProcessList { command_id }
+            | Self::ProcessStop { command_id, .. }
             | Self::ConfigGet { command_id, .. }
             | Self::AgentSpecList { command_id, .. }
             | Self::AgentList { command_id, .. }
@@ -330,6 +348,28 @@ mod tests {
         assert!(json.get("exitCode").is_none());
         let back: ProcessInfo = serde_json::from_value(json).unwrap();
         assert_eq!(back, info);
+    }
+
+    #[test]
+    fn process_stop_and_exit_round_trip() {
+        let command: Command = serde_json::from_value(serde_json::json!({
+            "type": "process_stop",
+            "command_id": "c1",
+            "process_id": "proc-3",
+        }))
+        .unwrap();
+        assert!(
+            matches!(command, Command::ProcessStop { process_id, .. } if process_id == "proc-3")
+        );
+
+        let exit = ProcessExit {
+            exit_code: None,
+            signal: Some(15),
+        };
+        let json = serde_json::to_value(exit).unwrap();
+        assert_eq!(json["signal"], 15);
+        assert!(json.get("exitCode").is_none());
+        assert_eq!(serde_json::from_value::<ProcessExit>(json).unwrap(), exit);
     }
 }
 

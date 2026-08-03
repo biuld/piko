@@ -56,6 +56,15 @@ impl AgentRuntime {
         self.execution.list_processes()
     }
 
+    /// Terminate one external process and report its exit (hostd `/kill`
+    /// surface; mirrors codex-rs `terminate_background_terminal`).
+    pub async fn stop_process(
+        &self,
+        process_id: &str,
+    ) -> Option<piko_protocol::command::ProcessExit> {
+        self.execution.stop_process(process_id).await
+    }
+
     fn from_execution_runtime(
         execution: Arc<AgentExecutionRuntime>,
         context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,

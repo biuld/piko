@@ -86,9 +86,10 @@ is surfaced through an `environment` tool.
 - Environment capability discovery: usable shell resolution (configured →
   `$SHELL` → candidates), PATH normalization/dedup, and probing for common
   tools, exposed to the model through an `environment` tool.
-- Client surface: a hostd `process.list` command (slash-addressable as `/ps`
-  in the TUI) returns the live process set — id, pid, command, cwd, exit
-  state — mirroring codex-rs `backgroundTerminals/list`.
+- Client surface: hostd `process.list` (`/ps`) returns the live process set —
+  id, pid, command, cwd, exit state — and `process.stop` (`/kill <id>`)
+  terminates one, mirroring codex-rs `backgroundTerminals/list` and
+  `backgroundTerminals/terminate`.
 
 ## Out of scope
 

@@ -229,6 +229,17 @@ pub enum CommandResult {
         processes: Vec<crate::command::ProcessInfo>,
         timestamp: i64,
     },
+    /// Result of terminating one process (F-08 client surface).
+    ProcessStopped {
+        process_id: String,
+        /// False when no such process was running.
+        stopped: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal: Option<i32>,
+        timestamp: i64,
+    },
     AgentSpecListed {
         agents: Vec<crate::agents::AgentSpec>,
         timestamp: i64,

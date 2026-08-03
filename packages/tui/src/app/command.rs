@@ -130,6 +130,7 @@ pub enum SlashAction {
     Logout(Option<String>),
     Compact,
     ListProcesses,
+    KillProcess(String),
 }
 
 #[derive(Debug)]
@@ -341,6 +342,7 @@ const HOST_SLASH_TABLE: &[(&str, &str)] = &[
     ("/logout", "auth.logout"),
     ("/compact", "session.compact"),
     ("/ps", "process.list"),
+    ("/kill", "process.stop"),
 ];
 
 /// Merge TUI-local presentation commands with the fetched neutral host

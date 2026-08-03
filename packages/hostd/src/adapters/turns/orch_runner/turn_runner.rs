@@ -16,6 +16,13 @@ impl AgentRunRunner for OrchAgentRunRunner {
         self.agent_runtime.list_processes()
     }
 
+    async fn terminate_process(
+        &self,
+        process_id: &str,
+    ) -> Option<piko_protocol::command::ProcessExit> {
+        self.agent_runtime.stop_process(process_id).await
+    }
+
     async fn run_agent(&self, input: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         self.agent_runtime
             .set_approval_gateway(Box::new(self.clone()))

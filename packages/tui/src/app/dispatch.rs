@@ -388,6 +388,14 @@ impl AppState {
                 self.clear_focus();
                 self.status = "listing processes".to_string();
             }
+            SlashAction::KillProcess(process_id) => {
+                effects.push(Effect::send(Command::ProcessStop {
+                    command_id: command_id(),
+                    process_id,
+                }));
+                self.clear_focus();
+                self.status = "stop requested".to_string();
+            }
         }
         effects
     }

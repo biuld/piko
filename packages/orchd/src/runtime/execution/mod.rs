@@ -100,6 +100,21 @@ impl AgentExecutionRuntime {
             .collect()
     }
 
+    /// Terminate one process (group SIGTERM → SIGKILL) and report its exit.
+    pub(crate) async fn stop_process(
+        &self,
+        process_id: &str,
+    ) -> Option<piko_protocol::command::ProcessExit> {
+        use piko_protocol::command::ProcessExit;
+        self.processes
+            .stop(process_id, std::time::Duration::from_secs(2))
+            .await
+            .map(|status| ProcessExit {
+                exit_code: status.code,
+                signal: status.signal,
+            })
+    }
+
     pub async fn register_tool_set(&self, tool_set: piko_protocol::tools::ToolSet) {
         self.services.register_tool_set(tool_set).await;
     }

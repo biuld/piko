@@ -1187,6 +1187,87 @@ fn process_listed_event_renders_notification() {
 }
 
 #[test]
+fn kill_slash_command_sends_process_stop() {
+    let mut app = live_app();
+    // `/kill` is slash-addressable once hostd advertises `process.stop`.
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
+            commands: vec![HostCommandDescriptor {
+                id: "process.stop".into(),
+                title: "Stop process".into(),
+                detail: "Terminate a running external process".into(),
+                invoke: HostCommandInvoke::Args { schema: Vec::new() },
+                group: Some(HostCommandGroup::Runtime),
+            }],
+            timestamp: 0,
+        }),
+        command_id: "catalog".into(),
+    });
+    let effects = app.try_slash_command("/kill proc-7").expect("known slash");
+    assert!(effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send(piko_protocol::Command::ProcessStop {
+                process_id,
+                ..
+            }) if process_id == "proc-7"
+        )
+    }));
+
+    // Missing id shows usage instead of sending.
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
+            commands: vec![HostCommandDescriptor {
+                id: "process.stop".into(),
+                title: "Stop process".into(),
+                detail: "Terminate a running external process".into(),
+                invoke: HostCommandInvoke::Args { schema: Vec::new() },
+                group: Some(HostCommandGroup::Runtime),
+            }],
+            timestamp: 0,
+        }),
+        command_id: "catalog".into(),
+    });
+    let effects = app.try_slash_command("/kill").expect("known slash");
+    assert!(effects.is_empty());
+    assert!(app.status.contains("usage: /kill"));
+}
+
+#[test]
+fn process_stopped_event_renders_notification() {
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::ProcessStopped {
+            process_id: "proc-1".into(),
+            stopped: true,
+            exit_code: Some(0),
+            signal: None,
+            timestamp: 0,
+        }),
+        command_id: "kill".into(),
+    });
+    let latest = app.notifications.items().back().expect("notification");
+    assert!(latest.message.contains("stopped proc-1"));
+    assert!(latest.message.contains("exit 0"));
+
+    // Unknown process renders a warning.
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::ProcessStopped {
+            process_id: "proc-99".into(),
+            stopped: false,
+            exit_code: None,
+            signal: None,
+            timestamp: 0,
+        }),
+        command_id: "kill".into(),
+    });
+    let latest = app.notifications.items().back().expect("notification");
+    assert!(latest.message.contains("no such process: proc-99"));
+    assert!(app.status.contains("no such process: proc-99"));
+}
+
+#[test]
 fn completion_acceptance_replaces_range() {
     let mut app = app();
     app.editor.restore_text("/he");

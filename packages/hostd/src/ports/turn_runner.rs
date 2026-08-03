@@ -86,6 +86,14 @@ pub trait AgentRunRunner: Send + Sync {
         Vec::new()
     }
 
+    /// Terminate one external process; `None` when it is not running.
+    async fn terminate_process(
+        &self,
+        _process_id: &str,
+    ) -> Option<piko_protocol::command::ProcessExit> {
+        None
+    }
+
     async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
             "Agent run is unavailable".into(),

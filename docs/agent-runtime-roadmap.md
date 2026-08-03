@@ -76,7 +76,7 @@ fail-closed sandboxing.
 | Feature | Slice | Status |
 |---|---|---|
 | F-08 exec-sandboxing | PTY/process-group lifecycle; shell snapshots; network sandbox; `bash` tool wired through the runner | implemented (slice 1, D-08/V-08) |
-| F-08 exec-sandboxing | unified long-lived processes (process manager + `process` tool); environment capability selection (`environment` tool); `/ps` client surface (`process.list`) | implemented (slice 2, D-19/V-19) |
+| F-08 exec-sandboxing | unified long-lived processes (process manager + `process` tool); environment capability selection (`environment` tool); `/ps` + `/kill` client surface (`process.list`/`process.stop`) | implemented (slice 2, D-19/V-19) |
 
 Dependency: M2 builds on F-06 tool routes (shell tool) and M0 F-01
 cancellation.

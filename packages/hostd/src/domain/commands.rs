@@ -104,6 +104,15 @@ pub fn command_catalog() -> Vec<HostCommandDescriptor> {
             Immediate,
             HostCommandGroup::Runtime,
         ),
+        item(
+            "process.stop",
+            "Stop process",
+            "Terminate a running external process",
+            Args {
+                schema: vec![arg("processId", HostCommandArgKind::String, true)],
+            },
+            HostCommandGroup::Runtime,
+        ),
         // ── Model / thinking (set, not browse UI) ───────────────────────
         item(
             "model.set",
@@ -213,5 +222,6 @@ mod tests {
         assert!(catalog.iter().any(|c| c.id == "model.set"));
         assert!(catalog.iter().any(|c| c.id == "thinking.set"));
         assert!(catalog.iter().any(|c| c.id == "process.list"));
+        assert!(catalog.iter().any(|c| c.id == "process.stop"));
     }
 }
