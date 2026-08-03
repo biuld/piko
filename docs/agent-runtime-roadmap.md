@@ -62,6 +62,7 @@ Goal: long sessions stay correct and within budget without manual intervention.
 |---|---|---|
 | F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting; world-state diffing (full → diff, hostd durable baseline, cleared on compaction) | implemented (F-04/D-04/V-04; slice 2 D-17/V-17) |
 | F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | implemented (F-05/D-05/V-05; piko-native summarizer-model override replaces provider-side remote compaction) |
+| F-05 compaction | per-model growth defaults: `min_growth_tokens` derives from the resolved model window via `min-growth-fraction` when unset | implemented (slice 2, D-18/V-18) |
 | F-15 observability | usage accounting per turn (baseline for budget decisions) | partial |
 
 Dependency: M1 needs M0 F-01 (durable transcripts) to be solid before
@@ -166,12 +167,17 @@ with default-model fallback (provider-side remote compaction rejected per
 ADR-002). **F-04 world-state diffing** `D-17/V-17` complete: the `state.run`
 facts moved to a retained transcript Context message — full on the first
 run, diff across runs — with a hostd-owned durable baseline cleared on
-compaction. Next sequencing:
+compaction. **M1 remainder complete** (`F-05` slice 2, `D-18/V-18`): the
+hysteresis guard derives from the resolved model's context window as a
+fraction (`[compaction] min-growth-fraction`, default `0.125`) when
+`min_growth_tokens` is unset, with the explicit setting and the constant
+windowless fallback preserved. Token-budget prompt fragments stay rejected
+(F-05 Fusion decisions: the model-visible tools cover the need). Next
+sequencing:
 
-1. **M1 remainder**: token-budget context fragments and any remaining
-   budget-window polish (e.g. per-model compaction defaults for
-   `min_growth_tokens`).
-2. **M2 — F-08 exec-sandboxing**: PTY/process-group lifecycle, shell
+1. **M2 — F-08 exec-sandboxing**: PTY/process-group lifecycle, shell
    snapshots, and network sandbox — the next milestone entry slice.
-3. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
+2. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
    cache-planning polish.
+3. M1 residue worth tracking under M6: F-15 per-turn usage accounting
+   (baseline for budget decisions) remains partial.

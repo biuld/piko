@@ -102,6 +102,7 @@ async fn summarizer_failure_falls_back_to_default_model() {
                 reserve_tokens: Some(16384),
                 keep_recent_tokens: Some(20000),
                 min_growth_tokens: Some(16384),
+                min_growth_fraction: None,
                 summarizer_model: Some("summarizer-model".into()),
                 summarizer_provider: Some("test-provider".into()),
             }),
@@ -157,4 +158,3 @@ async fn summarizer_failure_falls_back_to_default_model() {
     let calls = gateway.calls.lock().unwrap().clone();
     assert_eq!(calls, vec!["summarizer-model", "default"]);
 }
-

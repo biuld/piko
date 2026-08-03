@@ -1,6 +1,7 @@
 # F-05: Compaction — budget windows, inline compact, and model-visible context tools
 
-> Status: implemented
+> Status: implemented (slice 1); implemented (slice 2, per-model growth
+> defaults)
 > Priority: P0
 > Source evidence: codex-rs `core/src/compact.rs`,
 > `core/src/compact_token_budget.rs`, `core/src/compact_model_fallback.rs`,
@@ -22,7 +23,10 @@ with a recorded reason. It adds a token-budget inline compact
 with fallback to the default model (piko's adaptation of "remote
 compaction"), the two model-visible context tools (`get_context_remaining`
 and `new_context_window`), and a `[transcript]` setting for the F-04
-truncation cap.
+truncation cap. Slice 2 makes the hysteresis guard model-aware: when
+`min_growth_tokens` is not configured, it derives from the resolved model's
+context window as a fraction instead of a fixed default (closing the F-05
+open question).
 
 ## Problem
 
@@ -83,6 +87,9 @@ truncation cap.
   reaches the orchd model view that F-04 established.
 - Settings defaults that preserve today's behavior for unconfigured
   sessions, and wire-compatible protocol changes.
+- Slice 2: per-model growth defaults — `[compaction] min-growth-fraction`
+  derives the hysteresis guard from the resolved model's context window when
+  `min_growth_tokens` is unset; an explicit `min_growth_tokens` always wins.
 
 ## Out of scope
 
@@ -176,6 +183,33 @@ documented constant) is resolved by hostd and carried into the orchd run so
 the model view uses the configured cap. Unconfigured sessions behave exactly
 as today.
 
+### Per-model growth defaults (slice 2)
+
+The hysteresis guard prevents auto-compact from flapping around the
+waterline, but a fixed `16_384` default does not scale with the model: on an
+8k-window model the guard can never be satisfied, so after the first
+compaction the session would never re-trigger; on a 1M-window model the
+guard is a rounding error. Slice 2 makes the default model-aware:
+
+```text
+effective_min_growth(config, window):
+  config.min_growth_tokens is Some(n)  → n          (explicit override)
+  window > 0 and min_growth_fraction is Some(f) →
+      max(1, round(window × f))
+  else                                 → 16_384     (windowless fallback)
+```
+
+- `[compaction] min-growth-fraction` (default `0.125`, i.e. 12.5% ≈ the
+  documented `16_384` default at a 128k window) is the ratio of the resolved
+  context window used as the growth guard when `min_growth_tokens` is unset.
+- The window is the same `resolved_model_context_window()` used for the
+  waterline check, so the trigger and the guard always share one basis.
+- An explicitly configured `min_growth_tokens` is used verbatim (today's
+  behavior); the fraction only changes the *default*.
+- When the window cannot be resolved (model lookup fails, or a force-compact
+  callback without a window), the previous constant `16_384` fallback
+  applies, preserving behavior for unconfigured sessions.
+
 ### Error and cancellation states
 
 - Summarizer failure: compaction skipped, session unchanged, warning logged
@@ -210,6 +244,14 @@ as today.
 - [ ] End-to-end evidence: `[transcript] max-tool-output-tokens` reaches the
       orchd model view (an oversized tool result is truncated at the
       configured cap).
+- [ ] Unit evidence (slice 2): `min_growth_tokens` unset + fraction
+      configured derives `max(1, round(window × fraction))`; an explicit
+      `min_growth_tokens` beats the fraction; window 0 falls back to the
+      constant `16_384`.
+- [ ] Integration evidence (slice 2): with a default (fraction-only)
+      config, a small-window model re-triggers auto-compact after growth of
+      the window-derived amount; the trigger decision uses the resolved
+      window basis.
 - [ ] `cargo fmt --all` and `cargo clippy --workspace --all-targets --
       -D warnings` clean; `cargo test --workspace` green.
 
@@ -220,7 +262,7 @@ as today.
 | Where does the window state live? | hostd session state, derived from checkpoint entries on resume | hostd is authoritative for user-visible state; orchd stays transient |
 | What prevents thrash? | Rearm baseline + `min_growth_tokens` guard per window | A compaction is only worth a rewrite after real growth; the guard keeps decisions auditable |
 | What does `new_context_window` retain? | The most recent user message | Mirrors codex-rs `BeforeLastUserMessage` without duplicating initial-context machinery |
-| Default `min_growth_tokens` | `16_384` (= default reserve) | One documented default keeps trigger and guard on the same scale |
+| Default `min_growth_tokens` | Window-derived: `max(1, round(window × 0.125))` when unset (≈ `16_384` at 128k); explicit config wins; `16_384` fallback when the window is unknown | A fixed guard breaks small-window models (never re-triggers) and is a rounding error on huge windows; a fraction scales the guard to the resolved model (slice 2) |
 | How does the model learn about context? | Tools, not prompt fragments | piko has no token-budget fragment consumer; tools reuse the F-04 budget basis |
 | Summarizer model failure | Fall back once to the default model, then abort | Mirrors codex-rs `compact_model_fallback` without analytics coupling |
 
@@ -237,9 +279,9 @@ as today.
 
 ## Open questions
 
-1. Whether `min_growth_tokens` should later derive from the resolved model's
-   window (a fraction) instead of a fixed default — revisit with per-model
-   compaction defaults.
+None. The per-model default question was resolved in slice 2 (window
+fraction with explicit override); token-budget prompt fragments remain
+rejected per the Fusion decisions above.
 
 ## Reference evidence
 
@@ -254,3 +296,5 @@ as today.
   `packages/hostd/src/application/compaction.rs` (pre-slice summarizer),
   `packages/orchd/src/runtime/execution/budget.rs` (budget basis),
   `packages/orchd/src/domain/transcript/normalize.rs` (truncation cap).
+- Slice 2: design [D-18](../design/D-18-compaction-model-defaults.md),
+  verification [V-18](../verification/V-18-compaction-model-defaults.md).

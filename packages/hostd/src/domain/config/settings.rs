@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
+use crate::domain::compaction::{DEFAULT_MIN_GROWTH_FRACTION, DEFAULT_MIN_GROWTH_TOKENS};
+
 /// Configuration for an MCP (Model Context Protocol) server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct McpServerConfig {
@@ -96,8 +98,14 @@ pub struct CompactionSettings {
     pub reserve_tokens: Option<u64>,
     pub keep_recent_tokens: Option<u64>,
     /// Hysteresis guard: minimum estimated-token growth since the last
-    /// compaction before the next auto-compact may trigger.
+    /// compaction before the next auto-compact may trigger. When unset,
+    /// hostd derives it from the resolved model's context window using
+    /// `min_growth_fraction` (slice 2), falling back to a constant when the
+    /// window is unknown.
     pub min_growth_tokens: Option<u64>,
+    /// Ratio of the resolved context window used as the hysteresis guard
+    /// when `min_growth_tokens` is unset (F-05 slice 2). Default `0.125`.
+    pub min_growth_fraction: Option<f64>,
     /// Optional model used for summarization (piko's adaptation of remote
     /// compaction). Falls back to the default model on failure.
     pub summarizer_model: Option<String>,
@@ -299,7 +307,7 @@ impl SettingsManager {
                 .unwrap_or(20000),
             compaction
                 .and_then(|settings| settings.min_growth_tokens)
-                .unwrap_or(16384),
+                .unwrap_or(DEFAULT_MIN_GROWTH_TOKENS),
         )
     }
 
@@ -332,7 +340,8 @@ fn default_settings() -> HostSettings {
             enabled: Some(true),
             reserve_tokens: Some(16384),
             keep_recent_tokens: Some(20000),
-            min_growth_tokens: Some(16384),
+            min_growth_tokens: None,
+            min_growth_fraction: Some(DEFAULT_MIN_GROWTH_FRACTION),
             summarizer_model: None,
             summarizer_provider: None,
         }),
@@ -389,6 +398,7 @@ fn merge_compaction(
             reserve_tokens: overrides.reserve_tokens.or(base.reserve_tokens),
             keep_recent_tokens: overrides.keep_recent_tokens.or(base.keep_recent_tokens),
             min_growth_tokens: overrides.min_growth_tokens.or(base.min_growth_tokens),
+            min_growth_fraction: overrides.min_growth_fraction.or(base.min_growth_fraction),
             summarizer_model: overrides.summarizer_model.or(base.summarizer_model),
             summarizer_provider: overrides.summarizer_provider.or(base.summarizer_provider),
         }),
