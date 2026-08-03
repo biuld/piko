@@ -33,6 +33,7 @@ where
                     message: record.message.message.clone().into(),
                     time: relative_time(record.message.created_at, now).into(),
                     remove_label: crate::t!("notifications.action.remove").into(),
+                    progress: None,
                 },
                 move |event, window, cx| on_remove(row_id, event, window, cx),
             )
