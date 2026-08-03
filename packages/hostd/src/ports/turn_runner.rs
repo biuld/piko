@@ -162,6 +162,10 @@ pub trait AgentRunRunner: Send + Sync {
     /// the orchd runner forwards to its context-tools provider.
     fn set_context_window_callback(&self, _: piko_orchd::tools::NewContextWindowCallback) {}
 
+    /// Wire the F-11 guardian review callback. Default no-op; the orchd
+    /// runner forwards to its approval gateway.
+    fn set_guardian_review_callback(&self, _: crate::domain::guardian::GuardianReviewCallback) {}
+
     /// In-process pending approvals/interactions for recoverable session projection.
     async fn pending_prompts_for_session(
         &self,

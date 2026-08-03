@@ -87,7 +87,7 @@ Goal: on-request approvals scale without weakening safety.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-11 guardian | auto-review loop; compact review transcript; circuit breaker | planned |
+| F-11 guardian | auto-review loop (host-owned bounded review, strict JSON, fail-closed timeout/malformed); per-session circuit breaker with user escalation/reset | implemented (F-11/D-11/V-11) |
 | F-12 safety | patch-safety assessment; elicitation pause; attestation | planned |
 | M-config | permission-profile materialization; managed features; agent roles | planned |
 
@@ -194,3 +194,15 @@ read-only `environment` tool.
    cache-planning polish.
 2. M1 residue worth tracking under M6: F-15 per-turn usage accounting
    (baseline for budget decisions) remains partial.
+3. **M3 entry slice landed** (`F-11` slice 1, `D-11/V-11`): the guardian
+   auto-review loop turns on-request tool approvals into fail-closed model
+   decisions when `[guardian] enabled = true` — a host-owned bounded review
+   call (guardian model override with default-model fallback) over a bounded
+   slice of the durable session transcript must answer strict JSON; allow is
+   one-shot (no store grant), deny fails closed with `guardian_denied`
+   (reason surfaced), timeout/malformed/model error fails closed with
+   `guardian_unavailable`, and a per-session circuit breaker
+   (`max-consecutive-denials`, default 3) escalates to the user flow with any
+   user decision resetting the loop. Next in M3: F-12 safety (elicitation
+   pause, attestation, patch-safety assessment) and M-config permission
+   profiles.

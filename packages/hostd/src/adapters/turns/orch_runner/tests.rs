@@ -18,9 +18,59 @@ use crate::ports::{AgentOperationAddress, AgentRunInput, AgentRunRunner};
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
 use super::run::{ensure_root_tool_sets, resolve_recovered_agent_spec};
 
+use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest};
+use piko_protocol::agents::HostSessionContext;
+
+use crate::domain::config::GuardianSettings;
+use crate::domain::guardian::{GuardianDecision, GuardianReviewCallback};
+
 struct FailingAgentCommitPort;
 
 struct DirectInputGateway;
+
+async fn guardian_runner(
+    model_executor: Arc<dyn LlmGateway>,
+    review: GuardianReviewCallback,
+    max_consecutive_denials: u32,
+) -> super::OrchAgentRunRunner {
+    let runner = super::OrchAgentRunRunner::new_with_mcp(
+        model_executor,
+        "test",
+        "key",
+        "model",
+        None,
+        None,
+        128_000,
+        4_096,
+        &[],
+        None,
+        None,
+        Some(&GuardianSettings {
+            enabled: Some(true),
+            model: None,
+            provider: None,
+            timeout_secs: Some(1),
+            max_consecutive_denials: Some(max_consecutive_denials),
+        }),
+        None,
+        crate::telemetry::handle(),
+    )
+    .await;
+    runner.set_guardian_review_callback(review);
+    runner
+}
+
+fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApprovalRequest {
+    ToolApprovalRequest {
+        tool_entity_id: id.into(),
+        call_id: format!("call-{id}"),
+        agent_id: "main".into(),
+        agent_instance_id: "root".into(),
+        tool_name: tool_name.into(),
+        tool_args: serde_json::json!({ "cmd": "cargo test" }),
+        host_context: Some(HostSessionContext::new(session_id)),
+    }
+}
 
 #[async_trait]
 impl LlmGateway for DirectInputGateway {
@@ -415,4 +465,126 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         ]
     );
     assert!(!child.tool_set_ids.iter().any(|id| id == "user_interaction"));
+}
+
+#[tokio::test]
+async fn guardian_allow_executes_one_shot_without_store_grant() {
+    let review: GuardianReviewCallback = Arc::new(|_, _| {
+        Box::pin(async {
+            Ok(GuardianDecision {
+                allow: true,
+                reason: "build check".into(),
+            })
+        })
+    });
+    let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
+
+    let first = runner
+        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .await;
+    assert_eq!(first, ToolApprovalDecision::Accept);
+
+    // One-shot semantics: an identical second call is reviewed again rather
+    // than served from a session/workspace/permanent grant.
+    let second = runner
+        .request_tool_approval(approval_request("s1", "bash", "a2"))
+        .await;
+    assert_eq!(second, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn guardian_deny_fails_closed_and_breaker_escalates_to_user_then_resets() {
+    let review: GuardianReviewCallback = Arc::new(|_, _| {
+        Box::pin(async {
+            Ok(GuardianDecision {
+                allow: false,
+                reason: "outside workspace".into(),
+            })
+        })
+    });
+    let runner = guardian_runner(Arc::new(DirectInputGateway), review, 2).await;
+
+    let first = runner
+        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .await;
+    assert!(matches!(
+        first,
+        ToolApprovalDecision::GuardianDenied { reason } if reason == "outside workspace"
+    ));
+
+    let second = runner
+        .request_tool_approval(approval_request("s1", "bash", "a2"))
+        .await;
+    assert!(matches!(
+        second,
+        ToolApprovalDecision::GuardianDenied { .. }
+    ));
+
+    // Third request: breaker tripped, so the user flow owns the decision.
+    let runner_for_spawn = runner.clone();
+    let third = tokio::spawn(async move {
+        runner_for_spawn
+            .request_tool_approval(approval_request("s1", "bash", "a3"))
+            .await
+    });
+    for _ in 0..200 {
+        if runner.pending_approvals.lock().unwrap().contains_key("a3") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        runner.pending_approvals.lock().unwrap().contains_key("a3"),
+        "tripped guardian must escalate to the user flow"
+    );
+    let responded = runner
+        .respond_approval("a3", piko_protocol::ApprovalDecision::Accept)
+        .await
+        .expect("response accepted");
+    assert!(responded);
+    let decision = tokio::time::timeout(std::time::Duration::from_secs(2), third)
+        .await
+        .expect("user decision resolves the request")
+        .expect("spawned request task completed");
+    assert_eq!(decision, ToolApprovalDecision::Accept);
+
+    // A user decision reset the breaker: the loop reviews again.
+    let fourth = runner
+        .request_tool_approval(approval_request("s1", "bash", "a4"))
+        .await;
+    assert!(matches!(
+        fourth,
+        ToolApprovalDecision::GuardianDenied { .. }
+    ));
+}
+
+#[tokio::test]
+async fn guardian_failure_fails_closed_without_running() {
+    let review: GuardianReviewCallback =
+        Arc::new(|_, _| Box::pin(async { Err::<GuardianDecision, _>("model down".into()) }));
+    let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
+
+    let decision = runner
+        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .await;
+    assert_eq!(decision, ToolApprovalDecision::GuardianUnavailable);
+}
+
+#[tokio::test]
+async fn guardian_timeout_fails_closed() {
+    let review: GuardianReviewCallback = Arc::new(|_, _| {
+        Box::pin(async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            Ok(GuardianDecision {
+                allow: true,
+                reason: "late".into(),
+            })
+        })
+    });
+    let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
+
+    let decision = runner
+        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .await;
+    assert_eq!(decision, ToolApprovalDecision::GuardianUnavailable);
 }

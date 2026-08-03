@@ -19,13 +19,13 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-02 | model-gateway | Provider registry, streaming events, usage, retry/backoff, responses + chat-completions wire formats; model continuity (resolved per-session record, prompt model-switch, JSONL marker) | implemented (F-02/D-02/D-16, V-02/V-16) | core/src/client.rs, responses_retry.rs, context/model_switch.rs |
 | F-03 | prompt-assembly | Frozen per-run prompt: system prompt, AGENTS.md, skills, world-state/environment/model-switch fragments | implemented (F-03/D-03/V-03; fragment-catalog slice) | prompts/, context/world_state.rs |
 | F-04 | context-management | Transcript handling, per-message token accounting, copy-on-write snapshots, model-view truncation | implemented (F-04/D-04/V-04; accounting + snapshots + truncation slice) | core/src/context_manager/ |
-| F-05 | compaction | Summarize/compact conversation when over budget | planned | core/src/compact*.rs |
+| F-05 | compaction | Summarize/compact conversation when over budget | implemented (F-05/D-05/V-05) | core/src/compact*.rs |
 | F-06 | tool-system | Tool registry, schemas, routing, parallel batches, output handling | implemented (D-06, V-06) | core/src/tools/ |
 | F-07 | tool-approvals | Human approval flows with bounded deadlines, fail-closed expiry, distinct deny/expire semantics | implemented (F-07/D-07/V-07) | core/src/tools/approvals.rs |
 | F-08 | exec-sandboxing | Fail-closed filesystem/process/network policy, per-OS sandbox, shell snapshots | planned | core/src/exec*.rs, sandboxing/ |
 | F-09 | session-persistence | Thread store, resume, branch, message durability | planned | core/src/thread_manager.rs |
 | F-10 | multi-agent | Subagent spawn, supervision, result collection | planned | core/src/agent/, tools/handlers/multi_agents* |
-| F-11 | guardian | Automatic approval review loop | planned | core/src/guardian/ |
+| F-11 | guardian | Automatic approval review loop | implemented (F-11/D-11/V-11) | core/src/guardian/ |
 | F-12 | safety | Safety rules, elicitation, attestation | planned | core/src/safety.rs, elicitation.rs |
 | F-13 | mcp-integration | MCP client/server, resource and tool exposure | planned | core/src/mcp*.rs |
 | F-14 | skills-plugins | Skills engine, plugin install/list | planned | core/src/skills.rs, plugins/ |

@@ -34,6 +34,7 @@ pub struct HostSettings {
     pub transcript: Option<TranscriptSettings>,
     pub retry: Option<RetrySettings>,
     pub approvals: Option<ApprovalSettings>,
+    pub guardian: Option<GuardianSettings>,
     pub sandbox: Option<SandboxSettings>,
 
     // ---- Observability ----
@@ -82,6 +83,7 @@ impl HostSettings {
             "transcript": self.transcript,
             "retry": self.retry,
             "approvals": self.approvals,
+            "guardian": self.guardian,
             "sandbox": self.sandbox,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
@@ -136,6 +138,29 @@ pub struct ApprovalSettings {
     /// How long a pending approval waits for a user decision before it
     /// expires and the tool call fails closed. Default: 120 seconds.
     pub timeout_secs: Option<u64>,
+}
+
+/// Guardian auto-review behavior (F-11). When enabled, on-request tool
+/// approvals are first reviewed by a bounded model call over a bounded slice
+/// of the session transcript; allow executes the call once (no store grant),
+/// deny fails closed, and timeout/malformed output fails closed. Consecutive
+/// non-accepting outcomes trip a per-session circuit breaker that escalates
+/// to the user.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct GuardianSettings {
+    /// Master switch for guardian auto-review. Default: false.
+    pub enabled: Option<bool>,
+    /// Reviewer model id. Falls back to the session default model.
+    pub model: Option<String>,
+    /// Reviewer provider. Falls back to the session default provider.
+    pub provider: Option<String>,
+    /// Review deadline in seconds before the request fails closed.
+    /// Default: 30.
+    pub timeout_secs: Option<u64>,
+    /// Consecutive non-accepting review outcomes (denies + failures) that
+    /// trip the circuit breaker and escalate to the user. Default: 3.
+    pub max_consecutive_denials: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -358,6 +383,13 @@ fn default_settings() -> HostSettings {
         approvals: Some(ApprovalSettings {
             timeout_secs: Some(120),
         }),
+        guardian: Some(GuardianSettings {
+            enabled: Some(false),
+            model: None,
+            provider: None,
+            timeout_secs: Some(30),
+            max_consecutive_denials: Some(3),
+        }),
         ..HostSettings::default()
     }
 }
@@ -374,6 +406,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         transcript: merge_transcript(base.transcript, overrides.transcript),
         retry: merge_retry(base.retry, overrides.retry),
         approvals: merge_approvals(base.approvals, overrides.approvals),
+        guardian: merge_guardian(base.guardian, overrides.guardian),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -448,6 +481,24 @@ fn merge_approvals(
     }
 }
 
+fn merge_guardian(
+    base: Option<GuardianSettings>,
+    overrides: Option<GuardianSettings>,
+) -> Option<GuardianSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(GuardianSettings {
+            enabled: overrides.enabled.or(base.enabled),
+            model: overrides.model.or(base.model),
+            provider: overrides.provider.or(base.provider),
+            timeout_secs: overrides.timeout_secs.or(base.timeout_secs),
+            max_consecutive_denials: overrides
+                .max_consecutive_denials
+                .or(base.max_consecutive_denials),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
 fn merge_sandbox(
     base: Option<SandboxSettings>,
     overrides: Option<SandboxSettings>,
@@ -499,4 +550,70 @@ fn piko_dir() -> PathBuf {
 
 fn default_settings_template() -> &'static str {
     include_str!("../../../resources/settings.default.toml")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::guardian::GuardianConfig;
+
+    #[test]
+    fn guardian_defaults_are_documented_in_template() {
+        let template = default_settings_template();
+        assert!(template.contains("[guardian]"));
+        assert!(template.contains("enabled = false"));
+    }
+
+    #[test]
+    fn guardian_settings_merge_field_by_field() {
+        let base = HostSettings {
+            guardian: Some(GuardianSettings {
+                enabled: Some(false),
+                model: Some("base-model".into()),
+                provider: None,
+                timeout_secs: Some(30),
+                max_consecutive_denials: Some(3),
+            }),
+            ..HostSettings::default()
+        };
+        let overrides = HostSettings {
+            guardian: Some(GuardianSettings {
+                enabled: Some(true),
+                model: None,
+                provider: Some("override-provider".into()),
+                timeout_secs: None,
+                max_consecutive_denials: Some(5),
+            }),
+            ..HostSettings::default()
+        };
+        let merged = merge(base, overrides);
+        let guardian = merged.guardian.expect("guardian section present");
+        assert_eq!(guardian.enabled, Some(true));
+        assert_eq!(guardian.model.as_deref(), Some("base-model"));
+        assert_eq!(guardian.provider.as_deref(), Some("override-provider"));
+        assert_eq!(guardian.timeout_secs, Some(30));
+        assert_eq!(guardian.max_consecutive_denials, Some(5));
+    }
+
+    #[test]
+    fn guardian_config_resolves_defaults_and_disablement() {
+        let settings = GuardianSettings {
+            enabled: Some(true),
+            model: None,
+            provider: None,
+            timeout_secs: None,
+            max_consecutive_denials: None,
+        };
+        let config = GuardianConfig::from_settings(Some(&settings)).expect("enabled");
+        assert!(config.enabled);
+        assert_eq!(config.timeout.as_secs(), 30);
+        assert_eq!(config.max_consecutive_denials, 3);
+
+        let disabled = GuardianSettings {
+            enabled: Some(false),
+            ..settings
+        };
+        assert!(GuardianConfig::from_settings(Some(&disabled)).is_none());
+        assert!(GuardianConfig::from_settings(None).is_none());
+    }
 }

@@ -189,6 +189,19 @@ impl HostApp {
         runner.set_context_window_callback(callback);
     }
 
+    /// Wire the F-11 guardian review callback: the approval gateway asks the
+    /// application to run the bounded review over the durable session tree.
+    pub(crate) async fn wire_guardian_callback(&self) {
+        let host = self.clone();
+        let runner = self.turn_runner.lock().await.clone();
+        let callback: crate::domain::guardian::GuardianReviewCallback =
+            Arc::new(move |session_id, request| {
+                let host = host.clone();
+                Box::pin(async move { host.run_guardian_review(&session_id, &request).await })
+            });
+        runner.set_guardian_review_callback(callback);
+    }
+
     /// Record the resolved provider+model the current turn runner executes
     /// with. This is the single source of truth for session model continuity:
     /// turn submission records it per session and drives the prompt

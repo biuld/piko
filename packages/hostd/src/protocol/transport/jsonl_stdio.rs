@@ -53,6 +53,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         server.set_model_executor(executor).await;
     }
     server.wire_context_window_callback().await;
+    server.wire_guardian_callback().await;
     run_jsonl_server(BufReader::new(stdin), stdout, server).await
 }
 

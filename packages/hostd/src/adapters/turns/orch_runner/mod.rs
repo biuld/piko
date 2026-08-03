@@ -11,8 +11,9 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 use crate::adapters::turns::approval::ApprovalStore;
 use crate::api::UserInteractionResponse;
 use crate::domain::config::{
-    ApprovalSettings, McpServerConfig, SandboxSettings, TranscriptSettings,
+    ApprovalSettings, GuardianSettings, McpServerConfig, SandboxSettings, TranscriptSettings,
 };
+use crate::domain::guardian::{GuardianConfig, GuardianReviewCallback, GuardianState};
 
 mod agent_commit;
 mod agent_input;
@@ -43,6 +44,9 @@ pub struct OrchAgentRunRunner {
     pending_interactions: Arc<std::sync::Mutex<HashMap<String, PendingInteractionEntry>>>,
     approval_stores: Arc<std::sync::Mutex<HashMap<String, Arc<ApprovalStore>>>>,
     approval_timeout: std::time::Duration,
+    guardian_config: Option<GuardianConfig>,
+    guardian_review: Arc<std::sync::RwLock<Option<GuardianReviewCallback>>>,
+    guardian_states: Arc<std::sync::Mutex<HashMap<String, GuardianState>>>,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     observation_router: Arc<observation_router::SessionObservationRouter>,
@@ -88,6 +92,7 @@ impl OrchAgentRunRunner {
             None,
             None,
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -106,6 +111,7 @@ impl OrchAgentRunRunner {
         mcp_configs: &[McpServerConfig],
         sandbox_settings: Option<&SandboxSettings>,
         approval_settings: Option<&ApprovalSettings>,
+        guardian_settings: Option<&GuardianSettings>,
         transcript: Option<&TranscriptSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
@@ -183,6 +189,9 @@ impl OrchAgentRunRunner {
                     .unwrap_or(120)
                     .max(1),
             ),
+            guardian_config: GuardianConfig::from_settings(guardian_settings),
+            guardian_review: Arc::new(std::sync::RwLock::new(None)),
+            guardian_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),
@@ -205,6 +214,13 @@ impl OrchAgentRunRunner {
                 })
                 .await;
         });
+    }
+
+    /// Wire the guardian review callback (F-11). Hostd runs the bounded
+    /// review over the durable session tree; the gateway only consumes the
+    /// decision.
+    pub fn set_guardian_review_callback(&self, callback: GuardianReviewCallback) {
+        *self.guardian_review.write().unwrap() = Some(callback);
     }
 
     fn register_session_context(&self, session_id: String, cwd: String) {

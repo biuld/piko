@@ -55,6 +55,7 @@ impl ConfigObserver for ModelRunnerObserver {
                 server.set_model_executor(exec).await;
             }
             server.wire_context_window_callback().await;
+            server.wire_guardian_callback().await;
             *server.active_model.lock().await = active_model;
         }
 

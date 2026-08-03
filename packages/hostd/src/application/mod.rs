@@ -7,6 +7,7 @@
 
 mod chat;
 pub mod compaction;
+mod guardian;
 pub mod host_app;
 mod observation;
 pub mod sessions;

@@ -23,6 +23,17 @@ impl AgentRunRunner for OrchAgentRunRunner {
         self.agent_runtime.stop_process(process_id).await
     }
 
+    fn set_context_window_callback(&self, callback: piko_orchd::tools::NewContextWindowCallback) {
+        self.set_context_window_callback(callback);
+    }
+
+    fn set_guardian_review_callback(
+        &self,
+        callback: crate::domain::guardian::GuardianReviewCallback,
+    ) {
+        self.set_guardian_review_callback(callback);
+    }
+
     async fn run_agent(&self, input: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         self.agent_runtime
             .set_approval_gateway(Box::new(self.clone()))

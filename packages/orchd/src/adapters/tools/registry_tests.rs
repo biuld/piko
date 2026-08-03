@@ -174,10 +174,46 @@ async fn no_gateway_denies_tools_requiring_approval() {
     assert_eq!(error.retryable, Some(false));
 }
 
+#[tokio::test]
+async fn guardian_denied_decision_fails_closed_with_reason() {
+    let registry = registry_with_gateway(Some(ToolApprovalDecision::GuardianDenied {
+        reason: "outside workspace".into(),
+    }))
+    .await;
+    let record = registry
+        .execute_tool(&call(), &context(), &route(), None)
+        .await;
+
+    let error = record.result.error.expect("guardian denial must fail");
+    assert!(!record.result.ok);
+    assert_eq!(error.code, "guardian_denied");
+    assert_eq!(error.retryable, Some(false));
+    assert!(error.message.contains("outside workspace"));
+}
+
+#[tokio::test]
+async fn guardian_unavailable_decision_fails_closed() {
+    let registry = registry_with_gateway(Some(ToolApprovalDecision::GuardianUnavailable)).await;
+    let record = registry
+        .execute_tool(&call(), &context(), &route(), None)
+        .await;
+
+    let error = record.result.error.expect("guardian failure must fail");
+    assert!(!record.result.ok);
+    assert_eq!(error.code, "guardian_unavailable");
+    assert_eq!(error.retryable, Some(false));
+}
+
 #[test]
 fn expired_is_never_accepted() {
     assert!(!is_approval_accepted(&ToolApprovalDecision::Expired));
     assert!(!is_approval_accepted(&ToolApprovalDecision::Decline));
+    assert!(!is_approval_accepted(
+        &ToolApprovalDecision::GuardianDenied { reason: "x".into() }
+    ));
+    assert!(!is_approval_accepted(
+        &ToolApprovalDecision::GuardianUnavailable
+    ));
     assert!(is_approval_accepted(&ToolApprovalDecision::Accept));
     assert!(is_approval_accepted(&ToolApprovalDecision::AcceptSession));
 }

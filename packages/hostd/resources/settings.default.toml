@@ -48,6 +48,21 @@ base-delay-ms = 2000
 # expires and the tool call fails closed (seconds).
 timeout-secs = 120
 
+[guardian]
+# When enabled, on-request tool approvals are first reviewed by a bounded
+# model call over recent session context. An allow executes the call once
+# (no store grant); a deny fails the call closed; timeout or malformed
+# output also fails closed. Consecutive non-accepting outcomes trip a
+# per-session circuit breaker that escalates to the user.
+enabled = false
+# Reviewer model/provider; fall back to the session default when unset.
+# model = "claude-3-5-sonnet"
+# provider = "anthropic"
+# Review deadline in seconds before the request fails closed.
+timeout-secs = 30
+# Consecutive denies + failures that trip the circuit breaker.
+max-consecutive-denials = 3
+
 [sandbox]
 # Enable sandboxed tool execution for filesystem and process security
 # enabled = false

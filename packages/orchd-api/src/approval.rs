@@ -32,6 +32,14 @@ pub enum ToolApprovalDecision {
     /// The approval request expired before a user decision arrived; the tool
     /// call fails closed with a distinct, non-retryable error.
     Expired,
+    /// The guardian auto-review denied the request. The tool call fails
+    /// closed with a distinct, non-retryable error that carries the reason.
+    GuardianDenied {
+        reason: String,
+    },
+    /// The guardian auto-review failed (timeout, malformed output, or model
+    /// error). The tool call fails closed without running.
+    GuardianUnavailable,
     AcceptSession,
     AcceptWorkspace,
     AcceptPermanent,
@@ -41,7 +49,10 @@ pub enum ToolApprovalDecision {
 pub fn is_approval_accepted(decision: &ToolApprovalDecision) -> bool {
     !matches!(
         decision,
-        ToolApprovalDecision::Decline | ToolApprovalDecision::Expired
+        ToolApprovalDecision::Decline
+            | ToolApprovalDecision::Expired
+            | ToolApprovalDecision::GuardianDenied { .. }
+            | ToolApprovalDecision::GuardianUnavailable
     )
 }
 

@@ -151,8 +151,11 @@ is exceeded.
 - piko status: **partial** — `F-07 tool-approvals` slice 1 landed (approval
   gateway + hostd pending approvals + bounded deadlines with fail-closed
   expiry and distinct deny/expire semantics, F-07/D-07/V-07). `F-11 guardian`
-  and `F-12 safety` planned: no guardian loop, no elicitation/attestation, no
-  patch-safety assessment.
+  slice 1 landed (F-11/D-11/V-11): host-owned bounded review over a bounded
+  session-transcript slice with strict-JSON allow/deny, one-shot allows
+  (no store grants), fail-closed timeout/malformed, and a per-session circuit
+  breaker escalating to the user. `F-12 safety` still planned: no
+  elicitation/attestation, no patch-safety assessment.
 
 ### G. Command Execution & Sandboxing
 
@@ -269,7 +272,7 @@ is exceeded.
 | C Prompt Assembly | F-03 | partial (world-state diffing landed in F-04 slice 2) | inter-agent fragments, mention-syntax parsing |
 | D Context & Compaction | F-04, F-05 | partial (F-04 slices + F-05 landed) | world-state diffing landed; token-budget context fragments next |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
-| F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop, elicitation |
+| F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop slice 1 landed; elicitation next |
 | G Exec & Sandbox | F-08 | implemented | — |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
 | I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |

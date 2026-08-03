@@ -427,12 +427,20 @@ impl ToolRegistry for ToolRegistryImpl {
                     };
 
                     if !piko_orchd_api::is_approval_accepted(&decision) {
-                        let (code, message) = match decision {
+                        let (code, message): (&str, String) = match decision {
                             ToolApprovalDecision::Expired => (
                                 "approval_expired",
-                                "Approval request expired before a decision arrived",
+                                "Approval request expired before a decision arrived".into(),
                             ),
-                            _ => ("declined", "User declined approval"),
+                            ToolApprovalDecision::GuardianDenied { reason } => (
+                                "guardian_denied",
+                                format!("Guardian denied approval: {reason}"),
+                            ),
+                            ToolApprovalDecision::GuardianUnavailable => (
+                                "guardian_unavailable",
+                                "Guardian review failed; failing closed".into(),
+                            ),
+                            _ => ("declined", "User declined approval".into()),
                         };
                         return ToolExecutionRecord {
                             result: ToolExecResult {
@@ -440,7 +448,7 @@ impl ToolRegistry for ToolRegistryImpl {
                                 value: None,
                                 error: Some(ToolExecError {
                                     code: code.into(),
-                                    message: message.into(),
+                                    message,
                                     retryable: Some(false),
                                 }),
                             },

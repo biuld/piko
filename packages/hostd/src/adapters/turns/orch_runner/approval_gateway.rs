@@ -3,6 +3,7 @@ use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest}
 
 use super::OrchAgentRunRunner;
 use crate::adapters::turns::approval::ApprovalScope;
+use crate::domain::guardian::{GuardianConfig, GuardianReviewRequest, GuardianState};
 
 #[async_trait]
 impl ApprovalGateway for OrchAgentRunRunner {
@@ -36,6 +37,94 @@ impl ApprovalGateway for OrchAgentRunRunner {
                     ApprovalScope::Workspace => ToolApprovalDecision::AcceptWorkspace,
                     ApprovalScope::Permanent => ToolApprovalDecision::AcceptPermanent,
                 };
+            }
+        }
+
+        // F-11 guardian auto-review: when enabled and the session breaker is
+        // not tripped, a bounded model review decides before the user flow.
+        if let Some(guardian) = &self.guardian_config
+            && guardian.enabled
+        {
+            let session_id = request
+                .host_context
+                .as_ref()
+                .map(|context| context.session_id.clone())
+                .unwrap_or_default();
+            let state = self.guardian_state(&session_id);
+            if !state.tripped {
+                let callback = { self.guardian_review.read().unwrap().clone() };
+                if let Some(callback) = callback {
+                    let review_request = GuardianReviewRequest {
+                        agent_instance_id: request.agent_instance_id.clone(),
+                        tool_name: request.tool_name.clone(),
+                        tool_args: request.tool_args.clone(),
+                    };
+                    let outcome = tokio::time::timeout(
+                        guardian.timeout,
+                        callback(session_id.clone(), review_request),
+                    )
+                    .await;
+                    match outcome {
+                        Ok(Ok(decision)) if decision.allow => {
+                            tracing::event!(
+                                target: "tool.approval",
+                                tracing::Level::INFO,
+                                tool = %request.tool_name,
+                                tool_call_id = %request.tool_entity_id,
+                                agent_instance_id = %request.agent_instance_id,
+                                session_id = %session_id,
+                                "Guardian allowed tool approval (one-shot, no grant)"
+                            );
+                            // One-shot accept: no store grant is written,
+                            // so future calls are reviewed again.
+                            return ToolApprovalDecision::Accept;
+                        }
+                        Ok(Ok(decision)) => {
+                            self.record_guardian_non_accept(&session_id, guardian);
+                            tracing::event!(
+                                target: "tool.approval",
+                                tracing::Level::WARN,
+                                tool = %request.tool_name,
+                                tool_call_id = %request.tool_entity_id,
+                                agent_instance_id = %request.agent_instance_id,
+                                session_id = %session_id,
+                                reason = %decision.reason,
+                                "Guardian denied tool approval"
+                            );
+                            return ToolApprovalDecision::GuardianDenied {
+                                reason: decision.reason,
+                            };
+                        }
+                        Ok(Err(error)) => {
+                            self.record_guardian_non_accept(&session_id, guardian);
+                            tracing::event!(
+                                target: "tool.approval",
+                                tracing::Level::WARN,
+                                tool = %request.tool_name,
+                                tool_call_id = %request.tool_entity_id,
+                                agent_instance_id = %request.agent_instance_id,
+                                session_id = %session_id,
+                                error = %error,
+                                "Guardian review failed; failing closed"
+                            );
+                            return ToolApprovalDecision::GuardianUnavailable;
+                        }
+                        Err(_elapsed) => {
+                            self.record_guardian_non_accept(&session_id, guardian);
+                            tracing::event!(
+                                target: "tool.approval",
+                                tracing::Level::WARN,
+                                tool = %request.tool_name,
+                                tool_call_id = %request.tool_entity_id,
+                                agent_instance_id = %request.agent_instance_id,
+                                session_id = %session_id,
+                                timeout_ms = guardian.timeout.as_millis(),
+                                "Guardian review timed out; failing closed"
+                            );
+                            return ToolApprovalDecision::GuardianUnavailable;
+                        }
+                    }
+                }
             }
         }
 
@@ -110,6 +199,7 @@ impl ApprovalGateway for OrchAgentRunRunner {
                     timeout_ms = self.approval_timeout.as_millis(),
                     "Tool approval expired: no decision before deadline"
                 );
+                self.reset_guardian_state(&session_id);
                 return ToolApprovalDecision::Expired;
             }
         };
@@ -127,6 +217,7 @@ impl ApprovalGateway for OrchAgentRunRunner {
             let mut pending = self.pending_approvals.lock().unwrap();
             pending.remove(&approval_id);
         }
+        self.reset_guardian_state(&session_id);
 
         if !cwd.is_empty() {
             let store = self.get_approval_store(&cwd);
@@ -168,5 +259,26 @@ impl ApprovalGateway for OrchAgentRunRunner {
                 ToolApprovalDecision::AcceptPermanent
             }
         }
+    }
+}
+
+impl OrchAgentRunRunner {
+    fn guardian_state(&self, session_id: &str) -> GuardianState {
+        self.guardian_states
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn record_guardian_non_accept(&self, session_id: &str, guardian: &GuardianConfig) {
+        let mut states = self.guardian_states.lock().unwrap();
+        let state = states.entry(session_id.to_string()).or_default();
+        state.record_non_accept(guardian.max_consecutive_denials);
+    }
+
+    fn reset_guardian_state(&self, session_id: &str) {
+        self.guardian_states.lock().unwrap().remove(session_id);
     }
 }
