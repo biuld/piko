@@ -162,8 +162,25 @@ pub fn compute_path_fingerprint(tool_name: &str, _args: &serde_json::Value) -> S
 pub fn compute_fingerprint(tool_name: &str, tool_args: &serde_json::Value) -> String {
     match tool_name {
         "bash" => compute_bash_fingerprint(tool_args),
+        "process" => compute_process_fingerprint(tool_args),
         "edit" | "write" | "read" => compute_path_fingerprint(tool_name, tool_args),
         _ => tool_name.to_string(),
+    }
+}
+
+/// `process start` runs a shell command, so it fingerprints like `bash`
+/// (approvals granted for a `bash` command also cover the identical
+/// long-lived start). Other actions fingerprint per action so an approval
+/// for one action never leaks to another.
+pub fn compute_process_fingerprint(tool_args: &serde_json::Value) -> String {
+    let action = tool_args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if action == "start" {
+        compute_bash_fingerprint(tool_args)
+    } else {
+        format!("process:{action}")
     }
 }
 
@@ -334,6 +351,26 @@ mod tests {
 
         let args = serde_json::json!({ "command": "custom-script.sh -f" });
         assert_eq!(compute_bash_fingerprint(&args), "bash:custom-script.sh -f");
+    }
+
+    #[test]
+    fn test_compute_process_fingerprint() {
+        // `process start` reuses the bash fingerprint of its inner command.
+        let start = serde_json::json!({
+            "action": "start",
+            "command": "sudo npm install react",
+        });
+        assert_eq!(compute_process_fingerprint(&start), "bash:npm:install");
+
+        // Non-start actions fingerprint per action.
+        let write = serde_json::json!({ "action": "write", "processId": "proc-1" });
+        assert_eq!(compute_process_fingerprint(&write), "process:write");
+        let stop = serde_json::json!({ "action": "stop", "processId": "proc-1" });
+        assert_eq!(compute_process_fingerprint(&stop), "process:stop");
+
+        // Routing through the generic entry point.
+        assert_eq!(compute_fingerprint("process", &start), "bash:npm:install");
+        assert_eq!(compute_fingerprint("process", &write), "process:write");
     }
 
     #[test]

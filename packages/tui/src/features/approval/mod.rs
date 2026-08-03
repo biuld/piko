@@ -58,11 +58,7 @@ impl ApprovalPanel {
         let workflow = InteractiveWorkflow::new(
             vec![Question::new(
                 "Approval",
-                format!(
-                    "Run {} with args {}?",
-                    approval.tool_name,
-                    compact_json(&approval.args)
-                ),
+                approval_question(approval),
                 vec![
                     ChoiceOption {
                         label: "Accept once".into(),
@@ -104,5 +100,79 @@ impl ApprovalPanel {
             help,
             Rect::new(area.x.saturating_add(2), y, area.width.saturating_sub(4), 1),
         );
+    }
+}
+
+/// Build the user-facing approval question. Shell-like tools (`bash`, and
+/// `process start`, which runs a shell command under the hood — F-08) render
+/// the inner command instead of raw JSON; everything else stays generic.
+fn approval_question(approval: &PendingApproval) -> String {
+    let command = approval
+        .args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.trim().is_empty());
+    let action = approval
+        .args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let is_shell_command = matches!(approval.tool_name.as_str(), "bash" | "process")
+        && (approval.tool_name != "process" || action == "start")
+        && command.is_some();
+    if is_shell_command {
+        format!("Run shell command `{}`?", command.expect("checked above"))
+    } else {
+        format!(
+            "Run {} with args {}?",
+            approval.tool_name,
+            compact_json(&approval.args)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approval(tool_name: &str, args: serde_json::Value) -> PendingApproval {
+        PendingApproval {
+            id: "a1".into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+
+    #[test]
+    fn shell_like_tools_render_the_inner_command() {
+        let bash = approval(
+            "bash",
+            serde_json::json!({ "command": "cargo test -p tui" }),
+        );
+        assert_eq!(
+            approval_question(&bash),
+            "Run shell command `cargo test -p tui`?"
+        );
+
+        let start = approval(
+            "process",
+            serde_json::json!({ "action": "start", "command": "npm install" }),
+        );
+        assert_eq!(
+            approval_question(&start),
+            "Run shell command `npm install`?"
+        );
+    }
+
+    #[test]
+    fn non_shell_actions_stay_generic() {
+        let write = approval(
+            "process",
+            serde_json::json!({ "action": "write", "processId": "proc-1" }),
+        );
+        assert!(approval_question(&write).starts_with("Run process with args"));
+
+        let read = approval("read", serde_json::json!({ "path": "Cargo.toml" }));
+        assert!(approval_question(&read).starts_with("Run read with args"));
     }
 }
