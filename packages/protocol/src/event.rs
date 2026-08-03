@@ -224,6 +224,11 @@ pub enum CommandResult {
         commands: Vec<HostCommandDescriptor>,
         timestamp: i64,
     },
+    /// Live set of external processes spawned by the `process` tool (F-08).
+    ProcessListed {
+        processes: Vec<crate::command::ProcessInfo>,
+        timestamp: i64,
+    },
     AgentSpecListed {
         agents: Vec<crate::agents::AgentSpec>,
         timestamp: i64,

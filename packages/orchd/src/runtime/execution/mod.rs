@@ -37,6 +37,7 @@ use crate::ports::model_gateway::LlmGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::reliability::TerminalSelector;
 use piko_protocol::agents::AgentSpec;
+use piko_sandbox::exec::process::ProcessManager;
 
 pub(crate) struct PreparedRunContext {
     pub prompt: piko_protocol::SemanticRunPrompt,
@@ -47,6 +48,9 @@ pub(crate) struct PreparedRunContext {
 /// AgentRuntime-internal Execution Actor supervisor.
 pub struct AgentExecutionRuntime {
     services: ExecutionServices,
+    /// Long-lived `process` tool manager, shared with the workspace
+    /// provider and exposed for the hostd `/ps` surface (F-08).
+    processes: Arc<ProcessManager>,
     sessions: RwLock<HashMap<String, Arc<SessionExecutionScope>>>,
     accepting: AtomicBool,
 }
@@ -65,6 +69,7 @@ impl AgentExecutionRuntime {
     ) -> Self {
         Self {
             services: ExecutionServices::with_telemetry(model_executor, telemetry),
+            processes: Arc::new(ProcessManager::new()),
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
         }
@@ -76,6 +81,23 @@ impl AgentExecutionRuntime {
 
     pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.services.register_tool_provider(provider).await;
+    }
+
+    /// Snapshot of the live `process` tool set (hostd `/ps` surface).
+    pub(crate) fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
+        self.processes
+            .list_processes()
+            .into_iter()
+            .map(|info| piko_protocol::command::ProcessInfo {
+                process_id: info.process_id,
+                pid: info.pid,
+                command: info.command,
+                cwd: info.cwd.display().to_string(),
+                exited: info.exited,
+                exit_code: info.exit_code,
+                signal: info.signal,
+            })
+            .collect()
     }
 
     pub async fn register_tool_set(&self, tool_set: piko_protocol::tools::ToolSet) {

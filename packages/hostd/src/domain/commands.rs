@@ -97,6 +97,13 @@ pub fn command_catalog() -> Vec<HostCommandDescriptor> {
             Immediate,
             HostCommandGroup::Runtime,
         ),
+        item(
+            "process.list",
+            "List processes",
+            "Show currently running external processes",
+            Immediate,
+            HostCommandGroup::Runtime,
+        ),
         // ── Model / thinking (set, not browse UI) ───────────────────────
         item(
             "model.set",
@@ -205,5 +212,6 @@ mod tests {
         assert!(catalog.iter().any(|c| c.id == "session.new"));
         assert!(catalog.iter().any(|c| c.id == "model.set"));
         assert!(catalog.iter().any(|c| c.id == "thinking.set"));
+        assert!(catalog.iter().any(|c| c.id == "process.list"));
     }
 }

@@ -381,6 +381,13 @@ impl AppState {
                 self.clear_focus();
                 self.status = "compaction requested".to_string();
             }
+            SlashAction::ListProcesses => {
+                effects.push(Effect::send(Command::ProcessList {
+                    command_id: command_id(),
+                }));
+                self.clear_focus();
+                self.status = "listing processes".to_string();
+            }
         }
         effects
     }

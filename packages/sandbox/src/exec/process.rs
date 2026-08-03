@@ -7,6 +7,7 @@
 //! (SIGTERM → SIGKILL after the grace period).
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -29,10 +30,25 @@ pub struct OutputChunk {
     pub status: Option<ExitStatus>,
 }
 
+/// Read-only snapshot of a live process, mirroring codex-rs
+/// `BackgroundTerminalInfo` plus piko's exit state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessInfo {
+    pub process_id: String,
+    pub pid: u32,
+    pub command: String,
+    pub cwd: PathBuf,
+    pub exited: bool,
+    pub exit_code: Option<i32>,
+    pub signal: Option<i32>,
+}
+
 /// A running PTY process owned by a [`ProcessManager`].
 pub struct PtyProcess {
     id: String,
     pid: u32,
+    command: String,
+    cwd: PathBuf,
     master: Arc<tokio::io::unix::AsyncFd<std::fs::File>>,
     unread: Arc<Mutex<Vec<u8>>>,
     truncated: Arc<AtomicBool>,
@@ -42,7 +58,13 @@ pub struct PtyProcess {
 }
 
 impl PtyProcess {
-    fn new(id: String, spawned: SpawnedPty, max_output_bytes: usize) -> Arc<Self> {
+    fn new(
+        id: String,
+        spawned: SpawnedPty,
+        command: String,
+        cwd: PathBuf,
+        max_output_bytes: usize,
+    ) -> Arc<Self> {
         let SpawnedPty {
             mut child,
             pid,
@@ -112,6 +134,8 @@ impl PtyProcess {
         Arc::new(Self {
             id,
             pid,
+            command,
+            cwd,
             master,
             unread,
             truncated,
@@ -129,12 +153,33 @@ impl PtyProcess {
         self.pid
     }
 
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
     pub fn exited(&self) -> bool {
         self.exited.load(Ordering::Relaxed)
     }
 
     pub fn status(&self) -> Option<ExitStatus> {
         *self.status.lock().expect("status")
+    }
+
+    pub fn info(&self) -> ProcessInfo {
+        let status = self.status();
+        ProcessInfo {
+            process_id: self.id.clone(),
+            pid: self.pid,
+            command: self.command.clone(),
+            cwd: self.cwd.clone(),
+            exited: self.exited(),
+            exit_code: status.and_then(|s| s.code),
+            signal: status.and_then(|s| s.signal),
+        }
     }
 
     /// Write bytes to the process's stdin (the PTY master).
@@ -222,7 +267,13 @@ impl ProcessManager {
             };
             let spawned = super::unix::spawn_pty(&config, &cwd, wrapper.as_ref())?;
             let id = format!("proc-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
-            let process = PtyProcess::new(id, spawned, config.max_output_bytes);
+            let process = PtyProcess::new(
+                id,
+                spawned,
+                config.command.clone(),
+                config.shell.cwd.clone(),
+                config.max_output_bytes,
+            );
             self.processes
                 .lock()
                 .expect("process map")
@@ -251,6 +302,19 @@ impl ProcessManager {
             .collect();
         ids.sort();
         ids
+    }
+
+    /// Snapshots of all live processes (command, cwd, pid, exit state).
+    pub fn list_processes(&self) -> Vec<ProcessInfo> {
+        let mut processes: Vec<ProcessInfo> = self
+            .processes
+            .lock()
+            .expect("process map")
+            .values()
+            .map(|process| process.info())
+            .collect();
+        processes.sort_by(|a, b| a.process_id.cmp(&b.process_id));
+        processes
     }
 
     /// Stop and forget a process, returning its final status.
@@ -399,7 +463,17 @@ mod tests {
         assert_eq!(manager.list(), vec![process.id().to_string()]);
         assert!(manager.get(process.id()).is_some());
         assert!(manager.get("proc-999").is_none());
+
+        // The snapshot carries command/cwd/pid for the /ps surface.
+        let snapshot = manager.list_processes();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].command, "sleep 30");
+        assert_eq!(snapshot[0].cwd, temp.path());
+        assert_eq!(snapshot[0].pid, process.pid());
+        assert!(!snapshot[0].exited);
+
         let _ = manager.stop(process.id(), Duration::from_secs(1)).await;
         assert!(manager.list().is_empty());
+        assert!(manager.list_processes().is_empty());
     }
 }

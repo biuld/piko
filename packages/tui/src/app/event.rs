@@ -600,6 +600,38 @@ impl AppState {
                 self.finish_bootstrap_command(&command_id);
             }
             Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::ProcessListed { processes, .. }),
+                ..
+            } => {
+                if processes.is_empty() {
+                    self.notify(NotificationLevel::Info, "no processes running");
+                    self.status = "no processes running".to_string();
+                } else {
+                    let lines: Vec<String> = processes
+                        .iter()
+                        .map(|p| {
+                            let state = if p.exited {
+                                p.exit_code
+                                    .map(|code| format!(" exit={code}"))
+                                    .unwrap_or_else(|| {
+                                        p.signal
+                                            .map(|sig| format!(" signal={sig}"))
+                                            .unwrap_or_else(|| " exited".to_string())
+                                    })
+                            } else {
+                                String::new()
+                            };
+                            format!(
+                                "{}  pid {}  {}{}  ({})",
+                                p.process_id, p.pid, p.command, state, p.cwd
+                            )
+                        })
+                        .collect();
+                    self.notify(NotificationLevel::Info, lines.join("\n"));
+                    self.status = format!("{} process(es) running", processes.len());
+                }
+            }
+            Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }),
                 ..
             } => {

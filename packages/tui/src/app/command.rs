@@ -129,6 +129,7 @@ pub enum SlashAction {
     Login(Option<String>),
     Logout(Option<String>),
     Compact,
+    ListProcesses,
 }
 
 #[derive(Debug)]
@@ -339,6 +340,7 @@ const HOST_SLASH_TABLE: &[(&str, &str)] = &[
     ("/login", "auth.login"),
     ("/logout", "auth.logout"),
     ("/compact", "session.compact"),
+    ("/ps", "process.list"),
 ];
 
 /// Merge TUI-local presentation commands with the fetched neutral host
@@ -398,6 +400,7 @@ pub fn action_for_host_command(id: &str, args: HostCommandArgs) -> Option<Action
     Some(match id {
         "session.new" => SlashAction::New.into(),
         "session.fork" => SlashAction::Fork(args.fork_entry_id).into(),
+        "process.list" => SlashAction::ListProcesses.into(),
         "session.clone" => SlashAction::Clone.into(),
         "auth.login" => SlashAction::Login(args.provider).into(),
         "auth.logout" => SlashAction::Logout(args.provider).into(),

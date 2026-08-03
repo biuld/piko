@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use piko_protocol::{HostCommandDescriptor, Message, ServerMessage as Event};
+use piko_protocol::{
+    HostCommandDescriptor, HostCommandGroup, HostCommandInvoke, Message, ServerMessage as Event,
+};
 use serde_json::json;
 
 use crate::app::{
@@ -1123,6 +1125,65 @@ fn test_unknown_slash_command_blocks_submit() {
     // so the editor should NOT be cleared (normal submits clear the editor).
     assert_eq!(app.editor.text(), "/unknown");
     assert!(app.status.contains("Unknown slash command"));
+}
+
+#[test]
+fn ps_slash_command_sends_process_list() {
+    let mut app = live_app();
+    // `/ps` is slash-addressable once hostd advertises `process.list`.
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
+            commands: vec![HostCommandDescriptor {
+                id: "process.list".into(),
+                title: "List processes".into(),
+                detail: "Show currently running external processes".into(),
+                invoke: HostCommandInvoke::Immediate,
+                group: Some(HostCommandGroup::Runtime),
+            }],
+            timestamp: 0,
+        }),
+        command_id: "catalog".into(),
+    });
+    let effects = app.try_slash_command("/ps").expect("known slash");
+    assert!(
+        effects
+            .iter()
+            .any(|e| { matches!(e, Effect::Send(piko_protocol::Command::ProcessList { .. })) })
+    );
+}
+
+#[test]
+fn process_listed_event_renders_notification() {
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::ProcessListed {
+            processes: vec![piko_protocol::command::ProcessInfo {
+                process_id: "proc-1".into(),
+                pid: 42,
+                command: "cargo test -p tui".into(),
+                cwd: "/tmp/proj".into(),
+                exited: false,
+                exit_code: None,
+                signal: None,
+            }],
+            timestamp: 0,
+        }),
+        command_id: "ps".into(),
+    });
+    assert!(app.status.contains("process(es) running"));
+    let latest = app.notifications.items().back().expect("notification");
+    assert!(latest.message.contains("proc-1"));
+    assert!(latest.message.contains("cargo test -p tui"));
+
+    // Empty list renders a distinct info notification.
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::ProcessListed {
+            processes: Vec::new(),
+            timestamp: 0,
+        }),
+        command_id: "ps".into(),
+    });
+    assert_eq!(app.status, "no processes running");
 }
 
 #[test]

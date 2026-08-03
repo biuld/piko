@@ -49,6 +49,13 @@ impl AgentRuntime {
         }
     }
 
+    /// Live set of external processes spawned by the workspace `process`
+    /// tool, for the hostd `/ps` surface (mirrors codex-rs
+    /// `list_background_terminals`).
+    pub fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
+        self.execution.list_processes()
+    }
+
     fn from_execution_runtime(
         execution: Arc<AgentExecutionRuntime>,
         context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,

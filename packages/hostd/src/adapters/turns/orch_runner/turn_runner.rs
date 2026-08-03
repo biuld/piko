@@ -12,6 +12,10 @@ use super::run::root_agent_spec;
 
 #[async_trait]
 impl AgentRunRunner for OrchAgentRunRunner {
+    async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
+        self.agent_runtime.list_processes()
+    }
+
     async fn run_agent(&self, input: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         self.agent_runtime
             .set_approval_gateway(Box::new(self.clone()))

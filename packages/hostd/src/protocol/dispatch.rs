@@ -124,6 +124,17 @@ impl HostServer {
                     timestamp: now_ms(),
                 }),
             }]),
+            Command::ProcessList { .. } => {
+                let runner = self.0.turn_runner.lock().await.clone();
+                let processes = runner.list_processes().await;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::ProcessListed {
+                        processes,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
             Command::SessionFork {
                 session_id,
                 entry_id,

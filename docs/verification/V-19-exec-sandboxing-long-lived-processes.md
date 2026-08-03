@@ -50,6 +50,14 @@ All F-08 slice 2 acceptance criteria pass:
   `environment`/file tools to their handlers, and drops kill all live groups.
   The workspace catalog now exposes six tools (read, bash, edit, write,
   process, environment).
+- **Client surface (`/ps`)**: the runtime exposes
+  `AgentRuntime::list_processes` (mirroring codex-rs
+  `list_background_terminals`); hostd dispatches `Command::ProcessList` to
+  `CommandResult::ProcessListed` through the `AgentRunRunner` trait; the TUI
+  slash table maps `/ps` → `process.list`, and `ProcessListed` renders the
+  id/pid/command/cwd/exit-state lines as a notification
+  (`ps_slash_command_sends_process_list`,
+  `process_listed_event_renders_notification`).
 - **Regression**: slice-1 bash tests (exit/signal/timeout/cancel/snapshot)
   still pass after the handler split; `cargo test --workspace` green;
   `cargo clippy --workspace --all-targets -- -D warnings` and

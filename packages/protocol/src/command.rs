@@ -21,6 +21,28 @@ pub use crate::messages::{Usage, UsageCost};
 
 pub type CommandId = String;
 
+/// A currently running external process spawned by the workspace `process`
+/// tool (F-08). Modeled on codex-rs `BackgroundTerminalInfo`, plus piko's
+/// exit state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessInfo {
+    /// Provider-local id (`proc-N`) used by the `process` tool.
+    pub process_id: String,
+    /// OS process id of the session-leading shell.
+    pub pid: u32,
+    /// The command line the process was started with.
+    pub command: String,
+    /// Working directory the process was started in.
+    pub cwd: String,
+    /// Whether the process has exited.
+    pub exited: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal: Option<i32>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionListScope {
@@ -175,6 +197,11 @@ pub enum Command {
         #[serde(default)]
         mode: CompactMode,
     },
+    /// List currently running external processes (the `process` tool's live
+    /// set). Mirrors codex-rs `backgroundTerminals/list`.
+    ProcessList {
+        command_id: CommandId,
+    },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
         command_id: CommandId,
@@ -231,6 +258,7 @@ impl Command {
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::SessionCompact { command_id, .. }
+            | Self::ProcessList { command_id }
             | Self::ConfigGet { command_id, .. }
             | Self::AgentSpecList { command_id, .. }
             | Self::AgentList { command_id, .. }
@@ -277,6 +305,31 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn process_list_and_info_round_trip() {
+        let command: Command = serde_json::from_value(
+            serde_json::json!({ "type": "process_list", "command_id": "c1" }),
+        )
+        .unwrap();
+        assert!(matches!(command, Command::ProcessList { .. }));
+
+        let info = ProcessInfo {
+            process_id: "proc-1".into(),
+            pid: 42,
+            command: "cargo test -p tui".into(),
+            cwd: "/tmp/proj".into(),
+            exited: false,
+            exit_code: None,
+            signal: None,
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["processId"], "proc-1");
+        assert_eq!(json["pid"], 42);
+        assert!(json.get("exitCode").is_none());
+        let back: ProcessInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(back, info);
     }
 }
 

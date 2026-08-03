@@ -101,9 +101,14 @@ impl AgentExecutionRuntime {
 
         let policy = load_sandbox_policy(sandbox);
         let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
-            WorkspaceToolProvider::with_shell(policy, shell.as_str(), sandbox.enabled)
+            WorkspaceToolProvider::with_shell(
+                policy,
+                shell.as_str(),
+                sandbox.enabled,
+                Arc::clone(&self.processes),
+            )
         } else {
-            WorkspaceToolProvider::new(policy, sandbox.enabled)
+            WorkspaceToolProvider::new(policy, sandbox.enabled, Arc::clone(&self.processes))
         };
         self.register_tool_provider(Box::new(workspace_provider))
             .await;

@@ -38,24 +38,29 @@ impl WorkspaceToolProvider {
     /// `os_sandbox` decides whether process execution runs inside the
     /// platform OS sandbox (seatbelt/bwrap, F-08); the shell snapshot and
     /// environment profile are resolved once here and reused for every call.
-    pub fn new(policy: Policy, os_sandbox: bool) -> Self {
+    pub fn new(policy: Policy, os_sandbox: bool, processes: Arc<ProcessManager>) -> Self {
         Self {
             policy: Arc::new(policy),
             shell: ShellSnapshot::capture(None),
             env: EnvironmentProfile::discover(None),
-            processes: Arc::new(ProcessManager::new()),
+            processes,
             os_sandbox,
         }
     }
 
     /// Create a provider with an explicit shell path.
-    pub fn with_shell(policy: Policy, shell_path: impl Into<String>, os_sandbox: bool) -> Self {
+    pub fn with_shell(
+        policy: Policy,
+        shell_path: impl Into<String>,
+        os_sandbox: bool,
+        processes: Arc<ProcessManager>,
+    ) -> Self {
         let shell_path = shell_path.into();
         Self {
             policy: Arc::new(policy),
             shell: ShellSnapshot::capture(Some(&shell_path)),
             env: EnvironmentProfile::discover(Some(&shell_path)),
-            processes: Arc::new(ProcessManager::new()),
+            processes,
             os_sandbox,
         }
     }

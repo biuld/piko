@@ -80,6 +80,12 @@ pub struct AgentRunFailure {
 
 #[async_trait]
 pub trait AgentRunRunner: Send + Sync {
+    /// Live set of external processes spawned by the `process` tool (F-08);
+    /// empty when the runner has no process manager.
+    async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
+        Vec::new()
+    }
+
     async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
             "Agent run is unavailable".into(),
