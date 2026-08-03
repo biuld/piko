@@ -139,6 +139,7 @@ fn tool_exec_context(
         execution_id: identity.execution_id.clone(),
         cancellation: Some(cancel),
         agent_id: identity.agent_id.clone(),
+        agent_role: identity.agent_role.clone(),
         tool_set_ids: vec![],
         turn_index: Some(model_step_index),
         event_seq: Some(0),

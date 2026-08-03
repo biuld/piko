@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Returns the current Unix timestamp in milliseconds.
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -132,6 +134,58 @@ pub(crate) fn load_sandbox_policy(
     permissive_sandbox_policy()
 }
 
+/// Materialize F-19 per-role sandbox policies from `role_policies`.
+///
+/// Each role entry follows the same rules as the session profile path:
+/// empty rule lists inherit the permissive defaults per field, and the
+/// execution whitelist always comes from the permissive default. A role
+/// without an entry keeps the session policy — role layers can never widen
+/// it (hostd already validates role mappings against defined profiles).
+pub(crate) fn load_role_sandbox_policies(
+    sandbox: &piko_protocol::config::SandboxConfig,
+) -> HashMap<String, piko_sandbox::policy::Policy> {
+    let permissive = permissive_sandbox_policy();
+    sandbox
+        .role_policies
+        .iter()
+        .map(|(role, profile)| {
+            let policy = piko_sandbox::policy::Policy {
+                version: 1,
+                read: if profile.read_roots.is_empty() {
+                    permissive.read.clone()
+                } else {
+                    profile
+                        .read_roots
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect()
+                },
+                write: if profile.write_roots.is_empty() {
+                    permissive.write.clone()
+                } else {
+                    profile
+                        .write_roots
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect()
+                },
+                deny: if profile.deny_paths.is_empty() {
+                    permissive.deny.clone()
+                } else {
+                    profile
+                        .deny_paths
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect()
+                },
+                allowed_commands: permissive.allowed_commands.clone(),
+                allow_network: profile.allow_network,
+            };
+            (role.clone(), policy)
+        })
+        .collect()
+}
+
 fn permissive_sandbox_policy() -> piko_sandbox::policy::Policy {
     piko_sandbox::policy::Policy {
         version: 1,
@@ -241,6 +295,45 @@ mod tests {
         assert_eq!(policy.read, permissive().read);
         assert_eq!(policy.write, permissive().write);
         assert_eq!(policy.deny, permissive().deny);
+    }
+
+    #[test]
+    fn role_policies_materialize_with_permissive_inheritance() {
+        let mut roles = std::collections::HashMap::new();
+        roles.insert(
+            "researcher".to_string(),
+            profile(&["/docs"], &[], &["/docs/private"], false),
+        );
+        let sandbox = SandboxConfig {
+            enabled: false,
+            policy_profile: Some(profile(&["/work"], &["/work"], &[], true)),
+            role_policies: roles,
+            ..Default::default()
+        };
+        let policies = load_role_sandbox_policies(&sandbox);
+        assert_eq!(policies.len(), 1);
+        let researcher = policies.get("researcher").expect("role policy present");
+        assert_eq!(researcher.read, vec![std::path::PathBuf::from("/docs")]);
+        // Empty write roots inherit the permissive default; deny paths and
+        // network come from the role profile; the whitelist is inherited.
+        assert_eq!(researcher.write, permissive().write);
+        assert_eq!(
+            researcher.deny,
+            vec![std::path::PathBuf::from("/docs/private")]
+        );
+        assert!(!researcher.allow_network);
+        assert_eq!(researcher.allowed_commands, permissive().allowed_commands);
+    }
+
+    #[test]
+    fn roles_without_entries_keep_the_session_policy() {
+        let sandbox = SandboxConfig {
+            enabled: false,
+            policy_profile: Some(profile(&["/work"], &["/work"], &[], true)),
+            ..Default::default()
+        };
+        let policies = load_role_sandbox_policies(&sandbox);
+        assert!(policies.is_empty());
     }
 
     #[test]

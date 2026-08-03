@@ -441,7 +441,10 @@ impl ToolRegistry for ToolRegistryImpl {
                     // F-12 safety evidence: the provider projects its
                     // enforceable writable roots so hostd can assess write
                     // targets deterministically before any user/guardian flow.
-                    let writable_roots = provider.writable_roots().map(|roots| {
+                    // F-19: the provider projects the enforcing role's
+                    // writable roots so hostd's safety assessment matches
+                    // the policy the call will actually run under.
+                    let writable_roots = provider.writable_roots_for(context).map(|roots| {
                         roots
                             .iter()
                             .map(|root| root.display().to_string())
@@ -452,6 +455,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         call_id: call_id.clone(),
                         agent_id: context.agent_id.clone(),
                         agent_instance_id: context.agent_instance_id.clone(),
+                        agent_role: context.agent_role.clone(),
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
                         host_context: context.host_context.clone(),
@@ -540,6 +544,7 @@ impl ToolRegistry for ToolRegistryImpl {
             execution_id: context.execution_id.clone(),
             cancellation: context.cancellation.clone(),
             agent_id: context.agent_id.clone(),
+            agent_role: context.agent_role.clone(),
             tool_set_ids: context.tool_set_ids.clone(),
             turn_index: context.turn_index,
             event_seq: context.event_seq,

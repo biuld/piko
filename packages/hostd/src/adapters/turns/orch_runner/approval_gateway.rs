@@ -17,10 +17,17 @@ impl ApprovalGateway for OrchAgentRunRunner {
         // review, and user prompts; an allowed prefix auto-accepts one-shot
         // (no store grant), so a later non-matching command is assessed
         // again.
+        // F-19: a role-mapped agent evaluates against its role's command
+        // policy; unmapped/unknown roles use the session profile.
+        let config = request
+            .agent_role
+            .as_deref()
+            .and_then(|role| self.role_permission_configs.get(role))
+            .unwrap_or(&self.permission_config);
         match crate::domain::permissions::evaluate_command(
             &request.tool_name,
             &request.tool_args,
-            &self.permission_config,
+            config,
         ) {
             Some(CommandDecision::Deny { prefix }) => {
                 tracing::event!(

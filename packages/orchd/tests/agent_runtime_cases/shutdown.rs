@@ -13,6 +13,7 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
         execution_id: "parent-cancel".into(),
         cancellation: Some(cancellation.clone()),
         agent_id: "main".into(),
+        agent_role: None,
         tool_set_ids: Vec::new(),
         turn_index: None,
         event_seq: None,

@@ -14,7 +14,7 @@ use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::adapters::tools::workspace_provider::WorkspaceToolProvider;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::LlmGateway;
-use crate::runtime::utils::load_sandbox_policy;
+use crate::runtime::utils::{load_role_sandbox_policies, load_sandbox_policy};
 use piko_orchd_api::telemetry::RuntimeTelemetry;
 
 use super::AgentExecutionRuntime;
@@ -106,6 +106,10 @@ impl AgentExecutionRuntime {
             .await;
 
         let policy = load_sandbox_policy(sandbox);
+        // F-19: attach per-role sandbox policies so workspace tools select
+        // the executing agent's role policy (session policy is the
+        // fallback for unmapped roles).
+        let role_policies = load_role_sandbox_policies(sandbox);
         let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
             WorkspaceToolProvider::with_shell(
                 policy,
@@ -113,8 +117,10 @@ impl AgentExecutionRuntime {
                 sandbox.enabled,
                 Arc::clone(&self.processes),
             )
+            .with_role_policies(role_policies)
         } else {
             WorkspaceToolProvider::new(policy, sandbox.enabled, Arc::clone(&self.processes))
+                .with_role_policies(role_policies)
         };
         self.register_tool_provider(Box::new(workspace_provider))
             .await;

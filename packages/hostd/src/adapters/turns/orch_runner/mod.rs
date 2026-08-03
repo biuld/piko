@@ -52,6 +52,9 @@ pub struct OrchAgentRunRunner {
     guardian_states: Arc<std::sync::Mutex<HashMap<String, GuardianState>>>,
     safety_config: SafetyConfig,
     permission_config: PermissionConfig,
+    /// F-19: role → command policy for the approval gateway. Absent roles
+    /// use `permission_config` (the session profile).
+    role_permission_configs: HashMap<String, PermissionConfig>,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     observation_router: Arc<observation_router::SessionObservationRouter>,
@@ -153,6 +156,7 @@ impl OrchAgentRunRunner {
                 policy_path: s.policy_path.clone(),
                 shell_path: s.shell_path.clone(),
                 policy_profile: None,
+                role_policies: std::collections::HashMap::new(),
             })
             .unwrap_or_default();
 
@@ -163,6 +167,7 @@ impl OrchAgentRunRunner {
         let resolved_permissions: ResolvedPermissions =
             crate::domain::permissions::resolve_permissions(permissions_settings);
         let permission_config = resolved_permissions.config.clone();
+        let role_permission_configs = resolved_permissions.role_configs.clone();
         if resolved_permissions.materialize {
             let profile = &resolved_permissions.profile;
             sandbox.policy_profile = Some(piko_protocol::config::PermissionPolicy {
@@ -172,6 +177,23 @@ impl OrchAgentRunRunner {
                 allow_network: profile.allow_network,
             });
         }
+        // F-19: materialize per-role file/network policies for the sandbox.
+        // Roles without an entry keep the session policy in orchd.
+        sandbox.role_policies = resolved_permissions
+            .role_policies
+            .iter()
+            .map(|(role, policy)| {
+                (
+                    role.clone(),
+                    piko_protocol::config::PermissionPolicy {
+                        read_roots: policy.read_roots.clone(),
+                        write_roots: policy.write_roots.clone(),
+                        deny_paths: policy.deny_paths.clone(),
+                        allow_network: policy.allow_network,
+                    },
+                )
+            })
+            .collect();
 
         // F-18 managed features: resolve once at session bootstrap. The full
         // resolved map goes to orchd for catalog gating; hostd skips MCP
@@ -241,6 +263,7 @@ impl OrchAgentRunRunner {
             guardian_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             safety_config: SafetyConfig::from_settings(safety_settings),
             permission_config,
+            role_permission_configs,
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),

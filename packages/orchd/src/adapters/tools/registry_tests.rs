@@ -54,6 +54,7 @@ fn context() -> ToolExecutionContext {
         execution_id: "exec".into(),
         cancellation: None,
         agent_id: "root".into(),
+        agent_role: None,
         tool_set_ids: vec![],
         turn_index: None,
         event_seq: None,
@@ -94,12 +95,18 @@ impl ToolProvider for FakeProvider {
 }
 
 #[derive(Clone)]
-struct StubApprovalGateway(ToolApprovalDecision);
+struct StubApprovalGateway {
+    decision: ToolApprovalDecision,
+    captured: Option<std::sync::Arc<tokio::sync::Mutex<Vec<ToolApprovalRequest>>>>,
+}
 
 #[async_trait]
 impl ApprovalGateway for StubApprovalGateway {
-    async fn request_tool_approval(&self, _request: ToolApprovalRequest) -> ToolApprovalDecision {
-        self.0.clone()
+    async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
+        if let Some(captured) = &self.captured {
+            captured.lock().await.push(request);
+        }
+        self.decision.clone()
     }
 }
 
@@ -107,9 +114,12 @@ async fn registry_with_gateway(decision: Option<ToolApprovalDecision>) -> ToolRe
     let registry = ToolRegistryImpl::new();
     registry.register_provider(Box::new(FakeProvider)).await;
     registry
-        .set_approval_gateway(
-            decision.map(|d| Box::new(StubApprovalGateway(d)) as Box<dyn ApprovalGateway>),
-        )
+        .set_approval_gateway(decision.map(|d| {
+            Box::new(StubApprovalGateway {
+                decision: d,
+                captured: None,
+            }) as Box<dyn ApprovalGateway>
+        }))
         .await;
     registry
 }
@@ -316,6 +326,29 @@ async fn accepted_decision_runs_the_tool() {
         record.result.value,
         Some(serde_json::json!({ "ran": true }))
     );
+}
+
+#[tokio::test]
+async fn approval_request_carries_executing_agent_role() {
+    let registry = ToolRegistryImpl::new();
+    registry.register_provider(Box::new(FakeProvider)).await;
+    let captured = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    registry
+        .set_approval_gateway(Some(Box::new(StubApprovalGateway {
+            decision: ToolApprovalDecision::Accept,
+            captured: Some(std::sync::Arc::clone(&captured)),
+        })))
+        .await;
+
+    let mut ctx = context();
+    ctx.agent_role = Some("researcher".into());
+    let record = registry.execute_tool(&call(), &ctx, &route(), None).await;
+    assert!(record.result.ok);
+
+    let requests = captured.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].agent_role.as_deref(), Some("researcher"));
+    assert_eq!(requests[0].agent_id, "root");
 }
 
 #[tokio::test]

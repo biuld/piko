@@ -91,6 +91,20 @@ auto-approve-workspace-writes = true
 # allowed-commands = ["cargo test", "git status", "npm test"]
 # denied-commands = ["rm -rf", "curl -sSL | sh"]
 
+[permissions.roles]
+# Agent-role profile selection (F-19): maps an agent role (from the agent
+# spec, e.g. root/generalist/developer/researcher) to a permission profile.
+# Tools executed by an agent with a mapped role use that profile's command
+# policy and file/network policy; unmapped roles inherit the session
+# `profile` above. Roles merge per key across settings layers. A mapping to
+# the built-in "default" or to an unknown profile is a no-op (the role
+# inherits the session profile) -- role layers can never loosen below the
+# session posture.
+# Example: researcher subagents are read-only and coder subagents can never
+# run destructive commands, while the root agent keeps the session profile.
+# researcher = "readonly"
+# developer = "locked"
+
 [features]
 # Managed feature gating (F-18): named tool-family features resolved once per
 # session start. All features are enabled by default. Disabling a feature

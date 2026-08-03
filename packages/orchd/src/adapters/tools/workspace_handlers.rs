@@ -459,6 +459,7 @@ mod tests {
             execution_id: "exec".into(),
             cancellation: None,
             agent_id: "root".into(),
+            agent_role: None,
             tool_set_ids: vec![],
             turn_index: None,
             event_seq: None,

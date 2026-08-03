@@ -186,7 +186,10 @@ pub struct SafetySettings {
 /// command policy (materialized into the approval gateway): commands
 /// matching an `allowed-commands` prefix execute one-shot without a prompt,
 /// commands matching a `denied-commands` prefix fail closed with
-/// `permission_denied`.
+/// `permission_denied`. `roles` (F-19) attaches profiles to agent roles:
+/// every agent instance whose spec role is mapped executes under that
+/// profile's command and file/network policy; unmapped roles inherit the
+/// session `profile`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PermissionsSettings {
@@ -195,6 +198,12 @@ pub struct PermissionsSettings {
     /// Named profile definitions; merged per name across settings layers.
     #[serde(default)]
     pub profiles: HashMap<String, PermissionProfileSettings>,
+    /// F-19: role → profile-name selection; merged per key across settings
+    /// layers (override wins per key, base-only keys survive). A mapping to
+    /// the built-in "default" or to an unknown profile is a no-op: the role
+    /// inherits the session `profile`.
+    #[serde(default)]
+    pub roles: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -604,9 +613,14 @@ fn merge_permissions(
             for (name, profile) in overrides.profiles {
                 profiles.insert(name, profile);
             }
+            let mut roles = base.roles;
+            for (role, profile) in overrides.roles {
+                roles.insert(role, profile);
+            }
             Some(PermissionsSettings {
                 profile: overrides.profile.or(base.profile),
                 profiles,
+                roles,
             })
         }
         (base, overrides) => overrides.or(base),
@@ -763,6 +777,7 @@ mod tests {
         let template = default_settings_template();
         assert!(template.contains("[permissions]"));
         assert!(template.contains("profile = \"default\""));
+        assert!(template.contains("[permissions.roles]"));
     }
 
     #[test]
@@ -790,6 +805,10 @@ mod tests {
                         },
                     ),
                 ]),
+                roles: HashMap::from([
+                    ("generalist".into(), "base-profile".into()),
+                    ("researcher".into(), "shared".into()),
+                ]),
             }),
             ..HostSettings::default()
         };
@@ -803,6 +822,10 @@ mod tests {
                         ..Default::default()
                     },
                 )]),
+                roles: HashMap::from([
+                    ("researcher".into(), "locked".into()),
+                    ("developer".into(), "locked".into()),
+                ]),
             }),
             ..HostSettings::default()
         };
@@ -810,6 +833,21 @@ mod tests {
         let permissions = merged.permissions.expect("permissions section present");
         assert_eq!(permissions.profile.as_deref(), Some("locked"));
         assert_eq!(permissions.profiles.len(), 3);
+        // Roles merge per key: the override replaces "researcher", keeps
+        // base-only "generalist", and adds "developer".
+        assert_eq!(permissions.roles.len(), 3);
+        assert_eq!(
+            permissions.roles.get("researcher").map(String::as_str),
+            Some("locked")
+        );
+        assert_eq!(
+            permissions.roles.get("generalist").map(String::as_str),
+            Some("base-profile")
+        );
+        assert_eq!(
+            permissions.roles.get("developer").map(String::as_str),
+            Some("locked")
+        );
         assert!(permissions.profiles.contains_key("shared"));
         assert!(permissions.profiles.contains_key("base-profile"));
         let locked = permissions

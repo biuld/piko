@@ -96,6 +96,12 @@ pub struct SandboxConfig {
     /// inherited by the orchestrator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_profile: Option<PermissionPolicy>,
+    /// F-19: materialized per-role file/network policies keyed by agent
+    /// role. A role with an entry uses this policy for workspace tools;
+    /// absent roles use the session policy (`policy_profile` or the file/
+    /// default resolution).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub role_policies: HashMap<String, PermissionPolicy>,
 }
 
 /// Materialized file/network policy from a permission profile (F-17).

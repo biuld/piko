@@ -226,12 +226,20 @@ impl AgentExecutionRuntime {
         let (command_tx, command_rx) = piko_comms::mailbox::<ExecutionCommands, _>();
         let (terminal_tx, terminal_rx) = piko_comms::reply::<ExecutionTerminalContract, _>();
 
+        // F-19: resolve the executing agent's role from the registered spec
+        // (identity metadata; hostd maps it to a permission profile).
+        let agent_role = self
+            .services
+            .agent_spec(&request.config.agent_id)
+            .await
+            .map(|spec| spec.role);
         let identity = ExecutionIdentity {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
+            agent_role,
         };
 
         let world_state_commit =
@@ -517,6 +525,9 @@ pub struct ExecutionIdentity {
     pub execution_id: String,
     pub agent_instance_id: String,
     pub agent_id: String,
+    /// F-19: role of the executing agent from the registered `AgentSpec`.
+    /// `None` when the spec is not registered (inherits session policy).
+    pub agent_role: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -51,6 +51,11 @@ pub struct ToolExecutionContext {
     #[serde(skip, default)]
     pub cancellation: Option<tokio_util::sync::CancellationToken>,
     pub agent_id: String,
+    /// F-19: role of the executing agent from the registered `AgentSpec`.
+    /// Identity metadata used by role-aware providers (e.g. per-role
+    /// sandbox policy); absent roles use the provider's session default.
+    #[serde(rename = "agentRole", skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<String>,
     pub tool_set_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<u32>,
@@ -89,10 +94,14 @@ pub trait ToolProvider: Send + Sync + 'static {
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult;
 
     /// Absolute writable roots this provider enforces for its write tools
-    /// (F-12 safety evidence). Providers that cannot project an enforceable
-    /// boundary return `None`, and approval-time safety assessment falls
-    /// through to the normal user flow.
-    fn writable_roots(&self) -> Option<Vec<std::path::PathBuf>> {
+    /// (F-12 safety evidence), for the tool call's executing agent context
+    /// (F-19 role-aware policies). Providers that cannot project an
+    /// enforceable boundary return `None`, and approval-time safety
+    /// assessment falls through to the normal user flow.
+    fn writable_roots_for(
+        &self,
+        _context: &ToolExecutionContext,
+    ) -> Option<Vec<std::path::PathBuf>> {
         None
     }
 }

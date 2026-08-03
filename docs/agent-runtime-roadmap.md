@@ -90,7 +90,7 @@ Goal: on-request approvals scale without weakening safety.
 | F-11 guardian | auto-review loop (host-owned bounded review, strict JSON, fail-closed timeout/malformed); per-session circuit breaker with user escalation/reset | implemented (F-11/D-11/V-11) |
 | F-12 safety | patch-safety assessment; elicitation pause; attestation | implemented (slice 1: deterministic write-safety gate, F-12/D-12/V-12); elicitation pause deferred until a consumer; attestation rejected (no piko consumer) |
 | F-17 permission-profiles | named profiles (file/network policy → sandbox policy; command allow/deny prefix rules → approval gateway) | implemented (F-17/D-20/V-20) |
-| M-config | managed features (F-18/D-21/V-21); agent roles (per-role profile selection) | partial — managed features landed |
+| M-config | managed features (F-18/D-21/V-21); agent roles (per-role profile selection) | implemented (F-18/D-21/V-21; F-19/D-22/V-22) |
 
 ### M4 — Ecosystem
 
@@ -232,6 +232,12 @@ read-only `environment` tool.
    final authority over `enabled` in every layer (conflicting explicit
    values log a warning and the pin wins, fail-closed); unknown keys warn
    and are ignored; and with `mcp` disabled hostd skips MCP server
-   connections entirely. Next in M3: F-12 slice 2 (elicitation pause,
-   still deferred until a consumer exists) and M-config agent roles
-   (per-role permission-profile selection, F-19).
+   connections entirely. **F-19 agent roles landed** (`F-19/D-22/V-22`): a
+   `[permissions.roles]` map attaches F-17 profiles to agent roles — the
+   approval gateway evaluates commands with the executing role's command
+   policy (denied prefixes fail closed with `permission_denied`, allowed
+   prefixes one-shot accept) and workspace tools run under the role's
+   materialized file/network sandbox policy, with unmapped roles inheriting
+   the session profile and role layers unable to loosen below it. Next in
+   M3: F-12 slice 2 (elicitation pause, still deferred until a consumer
+   exists).

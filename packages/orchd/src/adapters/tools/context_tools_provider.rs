@@ -214,6 +214,7 @@ mod tests {
             execution_id: "exec-1".into(),
             cancellation: None,
             agent_id: "main".into(),
+            agent_role: None,
             tool_set_ids: vec![],
             turn_index: None,
             event_seq: None,
