@@ -482,7 +482,9 @@ impl ExecutionActor {
                                         )
                                         .await,
                                     ),
-                                    None => None,
+                                    None => {
+                                        Some(tool_batch::no_route_error(&registry, &tc.name).await)
+                                    }
                                 }
                             };
                             let result_message = match record {

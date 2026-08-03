@@ -2,6 +2,7 @@
 
 mod catalog;
 pub mod context_tools_provider;
+mod features;
 pub mod multi_agent_provider;
 mod process_handlers;
 pub mod registry;

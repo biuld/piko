@@ -11,8 +11,8 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 use crate::adapters::turns::approval::ApprovalStore;
 use crate::api::UserInteractionResponse;
 use crate::domain::config::{
-    ApprovalSettings, GuardianSettings, McpServerConfig, SafetySettings, SandboxSettings,
-    TranscriptSettings,
+    ApprovalSettings, FeaturesSettings, GuardianSettings, McpServerConfig, SafetySettings,
+    SandboxSettings, TranscriptSettings,
 };
 use crate::domain::guardian::{GuardianConfig, GuardianReviewCallback, GuardianState};
 use crate::domain::permissions::{PermissionConfig, ResolvedPermissions};
@@ -100,6 +100,7 @@ impl OrchAgentRunRunner {
             None,
             None,
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -121,6 +122,7 @@ impl OrchAgentRunRunner {
         guardian_settings: Option<&GuardianSettings>,
         safety_settings: Option<&SafetySettings>,
         permissions_settings: Option<&crate::domain::config::PermissionsSettings>,
+        features_settings: Option<&FeaturesSettings>,
         transcript: Option<&TranscriptSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
@@ -171,6 +173,19 @@ impl OrchAgentRunRunner {
             });
         }
 
+        // F-18 managed features: resolve once at session bootstrap. The full
+        // resolved map goes to orchd for catalog gating; hostd skips MCP
+        // server connections when the `mcp` feature is disabled.
+        let resolved_features = crate::domain::features::resolve_features(features_settings);
+        for warning in &resolved_features.warnings {
+            tracing::warn!("[features] {warning}");
+        }
+        let mcp_enabled = resolved_features
+            .enabled
+            .get("mcp")
+            .copied()
+            .unwrap_or(true);
+
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let agents = crate::adapters::prompts::agent_loader::load_agents(&cwd);
 
@@ -190,15 +205,20 @@ impl OrchAgentRunRunner {
             transcript_max_tool_output_tokens: transcript
                 .and_then(|settings| settings.max_tool_output_tokens)
                 .unwrap_or(24_000),
+            features: Some(resolved_features.enabled),
         };
         let agent_runtime =
             AgentRuntime::bootstrap_with_telemetry(model_executor, config, runtime_telemetry).await;
         let context_tools = agent_runtime.context_tools();
 
-        let registered =
-            crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;
-        if !registered.is_empty() {
-            tracing::info!("MCP tools registered: {:?}", registered);
+        if mcp_enabled {
+            let registered =
+                crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;
+            if !registered.is_empty() {
+                tracing::info!("MCP tools registered: {:?}", registered);
+            }
+        } else if !mcp_configs.is_empty() {
+            tracing::info!("Skipping MCP server connections: feature 'mcp' is disabled");
         }
 
         Self {

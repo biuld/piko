@@ -56,6 +56,7 @@ async fn guardian_runner(
         None,
         None,
         None,
+        None,
         crate::telemetry::handle(),
     )
     .await;
@@ -78,6 +79,7 @@ async fn safety_runner(safety: Option<&SafetySettings>) -> super::OrchAgentRunRu
         None,
         None,
         safety,
+        None,
         None,
         None,
         crate::telemetry::handle(),
@@ -787,6 +789,7 @@ async fn permission_runner(
         None,
         None,
         settings,
+        None,
         None,
         crate::telemetry::handle(),
     )

@@ -1,5 +1,6 @@
 //! F-06 tool batch dispatch acceptance tests.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,6 +9,7 @@ use piko_protocol::execution::{CancelExecutionRequest, CancelReason};
 use piko_protocol::tools::ToolSetPolicy;
 
 use super::fixtures::*;
+use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::domain::tools::definition::ToolExecutionMode;
 
 fn tool_kind_sequence(transcript: &[Message]) -> Vec<&'static str> {
@@ -36,6 +38,25 @@ fn tool_result_text(message: &Message) -> String {
         },
         _ => panic!("not a tool result"),
     }
+}
+
+#[tokio::test]
+async fn no_route_error_distinguishes_feature_disabled_tools() {
+    let registry = ToolRegistryImpl::new();
+    registry
+        .set_features(Some(HashMap::from([("process".to_string(), false)])))
+        .await;
+
+    let disabled = super::no_route_error(&registry, "process").await;
+    let disabled_error = disabled.error.expect("disabled tool must fail");
+    assert_eq!(disabled_error.code, "feature_disabled");
+    assert_eq!(disabled_error.retryable, Some(false));
+    assert!(disabled_error.message.contains("process"));
+
+    let unknown = super::no_route_error(&registry, "bash").await;
+    let unknown_error = unknown.error.expect("unknown tool must fail");
+    assert_eq!(unknown_error.code, "not_found");
+    assert_eq!(unknown_error.retryable, Some(false));
 }
 
 #[tokio::test]

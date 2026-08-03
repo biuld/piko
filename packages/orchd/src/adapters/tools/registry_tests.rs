@@ -1,5 +1,7 @@
 //! F-07 approval decision mapping tests (registry gate).
 
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry, ToolRegistryImpl};
@@ -11,7 +13,7 @@ use crate::ports::approval_gateway::ApprovalGateway;
 use piko_orchd_api::tools::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use piko_orchd_api::{ToolExecResult, is_approval_accepted};
 use piko_protocol::messages::ToolCall;
-use piko_protocol::tools::ToolProviderSource;
+use piko_protocol::tools::{ToolProviderSource, ToolSet, ToolSetToolRef};
 
 const TOOL_NAME: &str = "needs_approval";
 
@@ -119,6 +121,160 @@ fn call() -> ToolCall {
         arguments: serde_json::json!({}),
         partial_json: None,
     }
+}
+
+// ---- F-18 managed-feature gating tests ----
+
+fn catalog_tool(name: &str, executor_kind: &str) -> ToolDef {
+    ToolDef {
+        name: name.into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", name),
+        description: String::new(),
+        input_schema: serde_json::json!({}),
+        executor: ToolExecutorRef {
+            kind: executor_kind.into(),
+            target: name.into(),
+            extra: None,
+        },
+        execution_mode: None,
+        exposure: None,
+        capabilities: None,
+        approval: None,
+        metadata: None,
+    }
+}
+
+struct CatalogProvider;
+
+#[async_trait]
+impl ToolProvider for CatalogProvider {
+    fn id(&self) -> &str {
+        "catalog"
+    }
+
+    fn source(&self) -> ToolProviderSource {
+        ToolProviderSource::Workspace
+    }
+
+    async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
+        vec![
+            catalog_tool("read", "native"),
+            catalog_tool("bash", "native"),
+            catalog_tool("process", "native"),
+            catalog_tool("environment", "native"),
+            catalog_tool("get_context_remaining", "native"),
+            catalog_tool("todo_write", "native"),
+            catalog_tool("spawn_agent", "native"),
+            catalog_tool("ask_user", "native"),
+            // MCP tools have server-defined names and an mcp executor kind.
+            catalog_tool("server_defined_tool", "mcp"),
+        ]
+    }
+
+    async fn execute(&self, _call: ToolCall, _context: ToolExecutionContext) -> ToolExecResult {
+        ToolExecResult {
+            ok: true,
+            value: None,
+            error: None,
+        }
+    }
+}
+
+fn discovery_context(active_tool_names: Option<Vec<String>>) -> ToolDiscoveryContext {
+    ToolDiscoveryContext {
+        agent_id: "main".into(),
+        agent_instance_id: Some("agent_session_root".into()),
+        tool_set_ids: vec!["workspace".into()],
+        active_tool_names,
+    }
+}
+
+async fn catalog_registry(features: Option<HashMap<String, bool>>) -> ToolRegistryImpl {
+    let registry = ToolRegistryImpl::new();
+    registry.register_provider(Box::new(CatalogProvider)).await;
+    registry
+        .register_tool_set(ToolSet {
+            id: "workspace".into(),
+            name: "Workspace".into(),
+            description: None,
+            metadata: None,
+            policy: None,
+            tools: vec![ToolSetToolRef::ProviderNamespace {
+                provider_id: "catalog".into(),
+                namespace: String::new(),
+                alias: None,
+                policy: None,
+            }],
+        })
+        .await;
+    registry.set_features(features).await;
+    registry
+}
+
+fn feature_map(entries: &[(&str, bool)]) -> HashMap<String, bool> {
+    entries
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), *value))
+        .collect()
+}
+
+#[tokio::test]
+async fn no_feature_map_keeps_the_full_catalog() {
+    let registry = catalog_registry(None).await;
+    let (tools, routes) = registry
+        .discover_tools(&discovery_context(None))
+        .await
+        .expect("catalog builds");
+    let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"bash"));
+    assert!(names.contains(&"process"));
+    assert!(names.contains(&"server_defined_tool"));
+    assert!(routes.contains_key("process"));
+    assert!(routes.contains_key("server_defined_tool"));
+}
+
+#[tokio::test]
+async fn disabled_features_remove_tools_and_routes() {
+    let registry = catalog_registry(Some(feature_map(&[("process", false), ("mcp", false)]))).await;
+    let (tools, routes) = registry
+        .discover_tools(&discovery_context(None))
+        .await
+        .expect("catalog builds");
+    let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(!names.contains(&"process"));
+    assert!(!names.contains(&"server_defined_tool"));
+    assert!(names.contains(&"bash"));
+    assert!(names.contains(&"read"));
+    assert!(!routes.contains_key("process"));
+    assert!(!routes.contains_key("server_defined_tool"));
+    assert!(routes.contains_key("bash"));
+}
+
+#[tokio::test]
+async fn feature_gate_classifies_direct_calls() {
+    let registry = catalog_registry(Some(feature_map(&[("process", false)]))).await;
+    assert_eq!(
+        registry.feature_gate("process").await.as_deref(),
+        Some("process")
+    );
+    assert_eq!(registry.feature_gate("bash").await, None);
+    assert_eq!(registry.feature_gate("unknown_tool").await, None);
+    // Server-defined MCP tool names cannot be classified by name alone.
+    assert_eq!(registry.feature_gate("server_defined_tool").await, None);
+}
+
+#[tokio::test]
+async fn active_tool_names_still_intersect_with_features() {
+    let registry = catalog_registry(Some(feature_map(&[("bash", false)]))).await;
+    let (tools, routes) = registry
+        .discover_tools(&discovery_context(Some(vec!["read".into(), "bash".into()])))
+        .await
+        .expect("catalog builds");
+    let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, vec!["read"]);
+    assert!(routes.contains_key("read"));
+    assert!(!routes.contains_key("bash"));
 }
 
 #[tokio::test]

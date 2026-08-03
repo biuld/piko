@@ -37,6 +37,7 @@ pub struct HostSettings {
     pub guardian: Option<GuardianSettings>,
     pub safety: Option<SafetySettings>,
     pub permissions: Option<PermissionsSettings>,
+    pub features: Option<FeaturesSettings>,
     pub sandbox: Option<SandboxSettings>,
 
     // ---- Observability ----
@@ -88,6 +89,7 @@ impl HostSettings {
             "guardian": self.guardian,
             "safety": self.safety,
             "permissions": self.permissions,
+            "features": self.features,
             "sandbox": self.sandbox,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
@@ -218,6 +220,22 @@ pub struct PermissionProfileSettings {
     /// before any store grant, guardian review, or user prompt.
     #[serde(default)]
     pub denied_commands: Vec<String>,
+}
+
+/// Managed feature gating (F-18): named tool-family feature flags resolved
+/// once per session start. `enabled` sets explicit values per key (merged
+/// per key across layers, override wins per key); `managed` pins features
+/// to a fixed value that is the final authority over `enabled` in every
+/// layer (a conflicting explicit value logs a warning and the pin wins).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct FeaturesSettings {
+    /// Explicit per-key enablement.
+    #[serde(default)]
+    pub enabled: HashMap<String, bool>,
+    /// Operator pins; final authority over `enabled` in every layer.
+    #[serde(default)]
+    pub managed: HashMap<String, bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -469,6 +487,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         guardian: merge_guardian(base.guardian, overrides.guardian),
         safety: merge_safety(base.safety, overrides.safety),
         permissions: merge_permissions(base.permissions, overrides.permissions),
+        features: merge_features(base.features, overrides.features),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -589,6 +608,26 @@ fn merge_permissions(
                 profile: overrides.profile.or(base.profile),
                 profiles,
             })
+        }
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_features(
+    base: Option<FeaturesSettings>,
+    overrides: Option<FeaturesSettings>,
+) -> Option<FeaturesSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => {
+            let mut enabled = base.enabled;
+            for (key, value) in overrides.enabled {
+                enabled.insert(key, value);
+            }
+            let mut managed = base.managed;
+            for (key, value) in overrides.managed {
+                managed.insert(key, value);
+            }
+            Some(FeaturesSettings { enabled, managed })
         }
         (base, overrides) => overrides.or(base),
     }
@@ -785,6 +824,46 @@ mod tests {
             .get("base-profile")
             .expect("base profile preserved");
         assert_eq!(base_profile.allowed_commands, vec!["cargo test"]);
+    }
+
+    #[test]
+    fn features_defaults_are_documented_in_template() {
+        let template = default_settings_template();
+        assert!(template.contains("[features]"));
+        assert!(template.contains("[features.managed]"));
+        assert!(template.contains("feature_disabled"));
+    }
+
+    #[test]
+    fn features_settings_merge_per_key() {
+        let base = HostSettings {
+            features: Some(FeaturesSettings {
+                enabled: HashMap::from([("process".into(), false), ("bash".into(), true)]),
+                managed: HashMap::from([("mcp".into(), false)]),
+            }),
+            ..HostSettings::default()
+        };
+        let overrides = HostSettings {
+            features: Some(FeaturesSettings {
+                enabled: HashMap::from([
+                    // Overrides process per key and adds a new key.
+                    ("process".into(), true),
+                    ("todo".into(), false),
+                ]),
+                managed: HashMap::from([("process".into(), false)]),
+            }),
+            ..HostSettings::default()
+        };
+        let merged = merge(base, overrides);
+        let features = merged.features.expect("features section present");
+        assert_eq!(features.enabled.get("process"), Some(&true));
+        assert_eq!(features.enabled.get("bash"), Some(&true));
+        assert_eq!(features.enabled.get("todo"), Some(&false));
+        assert_eq!(features.managed.get("mcp"), Some(&false));
+        assert_eq!(features.managed.get("process"), Some(&false));
+        // Keys from the base that the override did not touch survive.
+        assert_eq!(features.enabled.len(), 3);
+        assert_eq!(features.managed.len(), 2);
     }
 
     #[test]

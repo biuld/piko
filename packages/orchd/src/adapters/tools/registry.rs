@@ -26,6 +26,7 @@ use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, To
 use crate::runtime::utils::runtime_tool_entity_id;
 
 use super::catalog::{CatalogEntry, add_entry, merge_policy, tool_ref_policy};
+use super::features::{disabled_feature_for_tool_name, feature_enabled};
 
 // ---- CatalogRoute ----
 
@@ -78,6 +79,8 @@ pub struct ToolRegistryImpl {
     providers: RwLock<HashMap<String, Box<dyn ToolProvider>>>,
     tool_sets: RwLock<HashMap<String, ToolSet>>,
     approval_gateway: RwLock<Option<Box<dyn ApprovalGateway>>>,
+    /// Resolved managed-feature set (F-18). `None` = all features enabled.
+    features: RwLock<Option<HashMap<String, bool>>>,
 }
 
 impl Default for ToolRegistryImpl {
@@ -92,6 +95,7 @@ impl ToolRegistryImpl {
             providers: RwLock::new(HashMap::new()),
             tool_sets: RwLock::new(HashMap::new()),
             approval_gateway: RwLock::new(None),
+            features: RwLock::new(None),
         }
     }
 
@@ -124,6 +128,19 @@ impl ToolRegistryImpl {
     /// Set (or clear) the approval gateway.
     pub async fn set_approval_gateway(&self, gateway: Option<Box<dyn ApprovalGateway>>) {
         *self.approval_gateway.write().await = gateway;
+    }
+
+    /// Install the resolved managed-feature set (F-18). `None` keeps every
+    /// feature enabled (today's behavior).
+    pub async fn set_features(&self, features: Option<HashMap<String, bool>>) {
+        *self.features.write().await = features;
+    }
+
+    /// Return the feature key that disables `tool_name`, if any. Used by the
+    /// direct-call error path when a tool has no route.
+    pub async fn feature_gate(&self, tool_name: &str) -> Option<String> {
+        let features = self.features.read().await;
+        disabled_feature_for_tool_name(features.as_ref(), tool_name).map(str::to_string)
     }
 
     /// List all registered tool sets.
@@ -280,15 +297,26 @@ impl ToolRegistry for ToolRegistryImpl {
     ) -> Result<(Vec<ToolDef>, HashMap<String, CatalogRoute>), String> {
         let catalog = self.build_catalog(context).await?;
 
-        // Apply active tool name restrictions
+        let features = self.features.read().await;
+
+        // Apply feature gating (F-18) then active tool name restrictions.
+        // A tool passes when its feature is enabled (or ungated) and, when a
+        // transient allow-list is present, its name is listed.
         let tools: Vec<ToolDef> = if let Some(ref active) = context.active_tool_names {
             catalog
                 .iter()
-                .filter(|e| active.contains(&e.public_name))
+                .filter(|e| {
+                    feature_enabled(features.as_ref(), &e.tool_def)
+                        && active.contains(&e.public_name)
+                })
                 .map(|e| e.tool_def.clone())
                 .collect()
         } else {
-            catalog.iter().map(|e| e.tool_def.clone()).collect()
+            catalog
+                .iter()
+                .filter(|e| feature_enabled(features.as_ref(), &e.tool_def))
+                .map(|e| e.tool_def.clone())
+                .collect()
         };
 
         // Build route map for fast lookup during execution
@@ -298,6 +326,9 @@ impl ToolRegistry for ToolRegistryImpl {
             if let Some(ref active) = context.active_tool_names
                 && !active.contains(&entry.public_name)
             {
+                continue;
+            }
+            if !feature_enabled(features.as_ref(), &entry.tool_def) {
                 continue;
             }
             routes.insert(

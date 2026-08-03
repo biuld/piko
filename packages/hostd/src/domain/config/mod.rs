@@ -3,7 +3,7 @@ pub mod settings;
 
 pub use models::ModelRegistry;
 pub use settings::{
-    ApprovalSettings, CompactionSettings, GuardianSettings, HostSettings, McpServerConfig,
-    ObservabilitySettings, PermissionProfileSettings, PermissionsSettings, SafetySettings,
-    SandboxSettings, SettingsManager, TranscriptSettings,
+    ApprovalSettings, CompactionSettings, FeaturesSettings, GuardianSettings, HostSettings,
+    McpServerConfig, ObservabilitySettings, PermissionProfileSettings, PermissionsSettings,
+    SafetySettings, SandboxSettings, SettingsManager, TranscriptSettings,
 };

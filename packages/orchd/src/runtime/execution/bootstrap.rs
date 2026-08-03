@@ -89,6 +89,12 @@ impl AgentExecutionRuntime {
         }
 
         self.register_single_agent_tools(&config.sandbox).await;
+        // F-18 managed features: install the resolved feature set once so the
+        // registry can gate the catalog and classify direct calls.
+        self.services
+            .tool_registry()
+            .set_features(config.features.clone())
+            .await;
 
         for spec in config.agents.values() {
             self.register_agent(spec.clone()).await;

@@ -97,6 +97,33 @@ pub(super) fn aborted_tool_exec_result() -> ToolExecResult {
     }
 }
 
+/// Error result for a tool call with no route (F-18): distinguishes a
+/// feature-disabled tool from a truly unknown tool so the model sees an
+/// actionable, non-retryable `feature_disabled` error.
+pub(super) async fn no_route_error(registry: &ToolRegistryImpl, tool_name: &str) -> ToolExecResult {
+    if let Some(feature) = registry.feature_gate(tool_name).await {
+        ToolExecResult {
+            ok: false,
+            value: None,
+            error: Some(ToolExecError {
+                code: "feature_disabled".into(),
+                message: format!("tool '{tool_name}' is disabled by feature '{feature}'"),
+                retryable: Some(false),
+            }),
+        }
+    } else {
+        ToolExecResult {
+            ok: false,
+            value: None,
+            error: Some(ToolExecError {
+                code: "not_found".into(),
+                message: format!("No route for tool \"{tool_name}\""),
+                retryable: Some(false),
+            }),
+        }
+    }
+}
+
 /// Build the shared execution context for a tool call in this execution.
 fn tool_exec_context(
     identity: &ExecutionIdentity,
@@ -244,15 +271,7 @@ pub(super) async fn execute_parallel_group(
             };
             async move {
                 let Some(route) = route else {
-                    let record = ToolExecResult {
-                        ok: false,
-                        value: None,
-                        error: Some(ToolExecError {
-                            code: "not_found".into(),
-                            message: format!("No route for tool \"{}\"", call.name),
-                            retryable: Some(false),
-                        }),
-                    };
+                    let record = no_route_error(&registry, &tool_name).await;
                     record_tool_outcome(
                         &span,
                         &std::time::Instant::now(),

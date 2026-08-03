@@ -91,6 +91,25 @@ auto-approve-workspace-writes = true
 # allowed-commands = ["cargo test", "git status", "npm test"]
 # denied-commands = ["rm -rf", "curl -sSL | sh"]
 
+[features]
+# Managed feature gating (F-18): named tool-family features resolved once per
+# session start. All features are enabled by default. Disabling a feature
+# removes its tools from the model-visible catalog; direct calls to a
+# disabled tool fail closed with `feature_disabled`.
+# Canonical keys: workspace (read/edit/write), bash, process, environment,
+# context (get_context_remaining / new_context_window), todo,
+# multi-agent (spawn/followup/interrupt/list/wait), user-interaction
+# (ask_user / request_user_input), mcp (MCP-server tools).
+# Example: disable long-lived processes and MCP tools project-wide.
+# process = false
+# mcp = false
+
+[features.managed]
+# Operator pins: final authority over [features] enabled in every layer.
+# A conflicting explicit value logs a warning and the pin wins (fail closed).
+# Example: pin MCP off so no global/override setting can re-enable it.
+# mcp = false
+
 [sandbox]
 # Enable sandboxed tool execution for filesystem and process security
 # enabled = false

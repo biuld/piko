@@ -208,6 +208,13 @@ pub struct OrchdConfig {
         rename = "transcriptMaxToolOutputTokens"
     )]
     pub transcript_max_tool_output_tokens: u64,
+
+    /// Resolved managed-feature map (F-18): canonical feature key → bool.
+    /// Absent keys are treated as enabled by orchd, so legacy/default
+    /// configs are unchanged. Hostd always sends the full resolved map when
+    /// a `[features]` section exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<HashMap<String, bool>>,
 }
 
 fn default_max_tool_output_tokens() -> u64 {
@@ -230,6 +237,7 @@ impl Default for OrchdConfig {
             thinking_level_map: None,
             sandbox: SandboxConfig::default(),
             transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
+            features: None,
         }
     }
 }
@@ -288,6 +296,7 @@ impl OrchdConfig {
             thinking_level_map: None,
             sandbox: SandboxConfig::default(),
             transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
+            features: None,
         }
     }
 }

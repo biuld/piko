@@ -90,7 +90,7 @@ Goal: on-request approvals scale without weakening safety.
 | F-11 guardian | auto-review loop (host-owned bounded review, strict JSON, fail-closed timeout/malformed); per-session circuit breaker with user escalation/reset | implemented (F-11/D-11/V-11) |
 | F-12 safety | patch-safety assessment; elicitation pause; attestation | implemented (slice 1: deterministic write-safety gate, F-12/D-12/V-12); elicitation pause deferred until a consumer; attestation rejected (no piko consumer) |
 | F-17 permission-profiles | named profiles (file/network policy → sandbox policy; command allow/deny prefix rules → approval gateway) | implemented (F-17/D-20/V-20) |
-| M-config | managed features; agent roles | planned |
+| M-config | managed features (F-18/D-21/V-21); agent roles (per-role profile selection) | partial — managed features landed |
 
 ### M4 — Ecosystem
 
@@ -222,5 +222,16 @@ read-only `environment` tool.
    `permission_denied` before grants/prompts, allowed prefixes accept
    one-shot without a store grant, the built-in `default` profile never
    materializes (no behavior change), and `[sandbox] policy-path` files
-   still win for the sandbox policy. Next in M3: F-12 slice 2 (elicitation
-   pause) and M-config managed features / agent roles.
+   still win for the sandbox policy. **F-18 managed features landed**
+   (`F-18/D-21/V-21`): a `[features]` settings section gates tool families
+   by stable keys (`workspace`, `bash`, `process`, `environment`,
+   `context`, `todo`, `multi-agent`, `user-interaction`, `mcp`) with all
+   features enabled by default; disabled features are removed from the
+   orchd catalog (discovery + routes) and direct calls fail closed with a
+   non-retryable `feature_disabled` error; `[features] managed` pins are the
+   final authority over `enabled` in every layer (conflicting explicit
+   values log a warning and the pin wins, fail-closed); unknown keys warn
+   and are ignored; and with `mcp` disabled hostd skips MCP server
+   connections entirely. Next in M3: F-12 slice 2 (elicitation pause,
+   still deferred until a consumer exists) and M-config agent roles
+   (per-role permission-profile selection, F-19).
