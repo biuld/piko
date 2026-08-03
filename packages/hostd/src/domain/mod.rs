@@ -3,10 +3,11 @@ pub mod compaction;
 pub mod config;
 pub mod guardian;
 pub mod prompts;
+pub mod safety;
 pub mod sessions;
 
 pub use config::{
     ApprovalSettings, GuardianSettings, HostSettings, ModelRegistry, ObservabilitySettings,
-    SandboxSettings, SettingsManager,
+    SafetySettings, SandboxSettings, SettingsManager,
 };
 pub use sessions::{HostState, SessionState};

@@ -138,6 +138,19 @@ impl Policy {
         Err(PolicyError::Denied(resolved.display().to_string()))
     }
 
+    /// Absolute writable roots resolved against `cwd`, using the same
+    /// canonicalization as [`Policy::authorize`] (F-12 safety assessment).
+    ///
+    /// The projection is the write boundary that `authorize` enforces; it
+    /// lets approval-time callers decide whether a write target is fully
+    /// constrained without touching the filesystem beyond canonicalization.
+    pub fn writable_roots(&self, cwd: &Path) -> Vec<PathBuf> {
+        self.write
+            .iter()
+            .filter_map(|root| Self::root(root, cwd).ok())
+            .collect()
+    }
+
     pub fn validate_command(
         &self,
         command: &str,

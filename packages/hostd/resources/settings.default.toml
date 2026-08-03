@@ -63,6 +63,14 @@ timeout-secs = 30
 # Consecutive denies + failures that trip the circuit breaker.
 max-consecutive-denials = 3
 
+[safety]
+# Deterministic write-safety gate for workspace writes (F-12). When true,
+# `edit`/`write` requests whose targets are fully inside the sandbox
+# writable roots are auto-approved one-shot (no prompt, no store grant);
+# targets outside the roots fail closed with `safety_rejected`. When false,
+# write approvals use the normal user/guardian flow.
+auto-approve-workspace-writes = true
+
 [sandbox]
 # Enable sandboxed tool execution for filesystem and process security
 # enabled = false

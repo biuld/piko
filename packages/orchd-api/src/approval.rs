@@ -21,6 +21,11 @@ pub struct ToolApprovalRequest {
     pub tool_args: serde_json::Value,
     #[serde(rename = "hostContext", skip_serializing_if = "Option::is_none")]
     pub host_context: Option<HostSessionContext>,
+    /// Absolute writable roots the requesting provider can enforce for this
+    /// tool call (F-12 safety evidence). Absent when the provider cannot
+    /// project them (e.g. non-workspace providers).
+    #[serde(rename = "writableRoots", skip_serializing_if = "Option::is_none")]
+    pub writable_roots: Option<Vec<String>>,
 }
 
 /// Decision on a tool approval request.
@@ -40,6 +45,13 @@ pub enum ToolApprovalDecision {
     /// The guardian auto-review failed (timeout, malformed output, or model
     /// error). The tool call fails closed without running.
     GuardianUnavailable,
+    /// The deterministic F-12 safety assessment rejected the request (e.g.
+    /// a write target outside the sandbox writable roots). The tool call
+    /// fails closed with a distinct, non-retryable error that carries the
+    /// reason.
+    SafetyRejected {
+        reason: String,
+    },
     AcceptSession,
     AcceptWorkspace,
     AcceptPermanent,
@@ -53,6 +65,7 @@ pub fn is_approval_accepted(decision: &ToolApprovalDecision) -> bool {
             | ToolApprovalDecision::Expired
             | ToolApprovalDecision::GuardianDenied { .. }
             | ToolApprovalDecision::GuardianUnavailable
+            | ToolApprovalDecision::SafetyRejected { .. }
     )
 }
 

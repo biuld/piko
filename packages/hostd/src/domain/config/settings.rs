@@ -35,6 +35,7 @@ pub struct HostSettings {
     pub retry: Option<RetrySettings>,
     pub approvals: Option<ApprovalSettings>,
     pub guardian: Option<GuardianSettings>,
+    pub safety: Option<SafetySettings>,
     pub sandbox: Option<SandboxSettings>,
 
     // ---- Observability ----
@@ -84,6 +85,7 @@ impl HostSettings {
             "retry": self.retry,
             "approvals": self.approvals,
             "guardian": self.guardian,
+            "safety": self.safety,
             "sandbox": self.sandbox,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
@@ -161,6 +163,18 @@ pub struct GuardianSettings {
     /// Consecutive non-accepting review outcomes (denies + failures) that
     /// trip the circuit breaker and escalate to the user. Default: 3.
     pub max_consecutive_denials: Option<u32>,
+}
+
+/// Deterministic write-safety behavior (F-12). When enabled, workspace
+/// write approvals (`edit` / `write`) whose targets are fully inside the
+/// sandbox writable roots are auto-approved one-shot (no prompt, no store
+/// grant); out-of-roots targets fail closed with `safety_rejected`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct SafetySettings {
+    /// Auto-approve workspace writes whose targets are fully inside the
+    /// sandbox writable roots. Default: true.
+    pub auto_approve_workspace_writes: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -390,6 +404,9 @@ fn default_settings() -> HostSettings {
             timeout_secs: Some(30),
             max_consecutive_denials: Some(3),
         }),
+        safety: Some(SafetySettings {
+            auto_approve_workspace_writes: Some(true),
+        }),
         ..HostSettings::default()
     }
 }
@@ -407,6 +424,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         retry: merge_retry(base.retry, overrides.retry),
         approvals: merge_approvals(base.approvals, overrides.approvals),
         guardian: merge_guardian(base.guardian, overrides.guardian),
+        safety: merge_safety(base.safety, overrides.safety),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -494,6 +512,20 @@ fn merge_guardian(
             max_consecutive_denials: overrides
                 .max_consecutive_denials
                 .or(base.max_consecutive_denials),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_safety(
+    base: Option<SafetySettings>,
+    overrides: Option<SafetySettings>,
+) -> Option<SafetySettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(SafetySettings {
+            auto_approve_workspace_writes: overrides
+                .auto_approve_workspace_writes
+                .or(base.auto_approve_workspace_writes),
         }),
         (base, overrides) => overrides.or(base),
     }
@@ -615,5 +647,54 @@ mod tests {
         };
         assert!(GuardianConfig::from_settings(Some(&disabled)).is_none());
         assert!(GuardianConfig::from_settings(None).is_none());
+    }
+
+    #[test]
+    fn safety_defaults_are_documented_in_template() {
+        let template = default_settings_template();
+        assert!(template.contains("[safety]"));
+        assert!(template.contains("auto-approve-workspace-writes = true"));
+    }
+
+    #[test]
+    fn safety_settings_merge_field_by_field() {
+        let base = HostSettings {
+            safety: Some(SafetySettings {
+                auto_approve_workspace_writes: Some(true),
+            }),
+            ..HostSettings::default()
+        };
+        let overrides = HostSettings {
+            safety: Some(SafetySettings {
+                auto_approve_workspace_writes: Some(false),
+            }),
+            ..HostSettings::default()
+        };
+        let merged = merge(base, overrides);
+        assert_eq!(
+            merged
+                .safety
+                .expect("safety section present")
+                .auto_approve_workspace_writes,
+            Some(false)
+        );
+
+        // Missing override inherits the base value.
+        let merged_inherit = merge(
+            HostSettings {
+                safety: Some(SafetySettings {
+                    auto_approve_workspace_writes: Some(true),
+                }),
+                ..HostSettings::default()
+            },
+            HostSettings::default(),
+        );
+        assert_eq!(
+            merged_inherit
+                .safety
+                .expect("safety section present")
+                .auto_approve_workspace_writes,
+            Some(true)
+        );
     }
 }

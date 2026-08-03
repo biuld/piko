@@ -22,6 +22,7 @@ use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest}
 use piko_protocol::agents::HostSessionContext;
 
 use crate::domain::config::GuardianSettings;
+use crate::domain::config::SafetySettings;
 use crate::domain::guardian::{GuardianDecision, GuardianReviewCallback};
 
 struct FailingAgentCommitPort;
@@ -53,11 +54,33 @@ async fn guardian_runner(
             max_consecutive_denials: Some(max_consecutive_denials),
         }),
         None,
+        None,
         crate::telemetry::handle(),
     )
     .await;
     runner.set_guardian_review_callback(review);
     runner
+}
+
+async fn safety_runner(safety: Option<&SafetySettings>) -> super::OrchAgentRunRunner {
+    super::OrchAgentRunRunner::new_with_mcp(
+        Arc::new(DirectInputGateway),
+        "test",
+        "key",
+        "model",
+        None,
+        None,
+        128_000,
+        4_096,
+        &[],
+        None,
+        None,
+        None,
+        safety,
+        None,
+        crate::telemetry::handle(),
+    )
+    .await
 }
 
 fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApprovalRequest {
@@ -69,6 +92,7 @@ fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApproval
         tool_name: tool_name.into(),
         tool_args: serde_json::json!({ "cmd": "cargo test" }),
         host_context: Some(HostSessionContext::new(session_id)),
+        writable_roots: None,
     }
 }
 
@@ -587,4 +611,158 @@ async fn guardian_timeout_fails_closed() {
         .request_tool_approval(approval_request("s1", "bash", "a1"))
         .await;
     assert_eq!(decision, ToolApprovalDecision::GuardianUnavailable);
+}
+
+fn write_request(
+    session_id: &str,
+    tool_name: &str,
+    id: &str,
+    path: &str,
+    writable_roots: Option<Vec<String>>,
+) -> ToolApprovalRequest {
+    ToolApprovalRequest {
+        tool_entity_id: id.into(),
+        call_id: format!("call-{id}"),
+        agent_id: "main".into(),
+        agent_instance_id: "root".into(),
+        tool_name: tool_name.into(),
+        tool_args: serde_json::json!({ "path": path, "content": "x" }),
+        host_context: Some(HostSessionContext::new(session_id)),
+        writable_roots,
+    }
+}
+
+async fn user_flow_resolves(
+    runner: &super::OrchAgentRunRunner,
+    request: ToolApprovalRequest,
+    expected_pending_id: &str,
+) -> ToolApprovalDecision {
+    let runner_for_spawn = runner.clone();
+    let pending =
+        tokio::spawn(async move { runner_for_spawn.request_tool_approval(request).await });
+    for _ in 0..200 {
+        if runner
+            .pending_approvals
+            .lock()
+            .unwrap()
+            .contains_key(expected_pending_id)
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(
+        runner
+            .pending_approvals
+            .lock()
+            .unwrap()
+            .contains_key(expected_pending_id),
+        "request must reach the user flow"
+    );
+    let responded = runner
+        .respond_approval(expected_pending_id, piko_protocol::ApprovalDecision::Accept)
+        .await
+        .expect("response accepted");
+    assert!(responded);
+    tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+        .await
+        .expect("user decision resolves the request")
+        .expect("spawned request task completed")
+}
+
+#[tokio::test]
+async fn safety_auto_approves_in_roots_write_one_shot_without_grant() {
+    let runner = safety_runner(None).await;
+    let roots = Some(vec!["/workspace".into()]);
+
+    let first = runner
+        .request_tool_approval(write_request(
+            "s1",
+            "edit",
+            "a1",
+            "/workspace/src/lib.rs",
+            roots.clone(),
+        ))
+        .await;
+    assert_eq!(first, ToolApprovalDecision::Accept);
+    assert!(
+        runner.pending_approvals.lock().unwrap().is_empty(),
+        "no user prompt for a constrained write"
+    );
+
+    // One-shot: an identical second call is assessed again (and accepted
+    // again) rather than served from a store grant.
+    let second = runner
+        .request_tool_approval(write_request(
+            "s1",
+            "write",
+            "a2",
+            "/workspace/notes.md",
+            roots,
+        ))
+        .await;
+    assert_eq!(second, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn safety_rejects_out_of_roots_write_with_reason() {
+    let runner = safety_runner(None).await;
+    let decision = runner
+        .request_tool_approval(write_request(
+            "s1",
+            "write",
+            "a1",
+            "/Users/me/.ssh/authorized_keys",
+            Some(vec!["/workspace".into()]),
+        ))
+        .await;
+    match decision {
+        ToolApprovalDecision::SafetyRejected { reason } => {
+            assert!(reason.contains("/Users/me/.ssh/authorized_keys"));
+        }
+        other => panic!("expected SafetyRejected, got {other:?}"),
+    }
+    assert!(runner.pending_approvals.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn safety_without_writable_roots_falls_through_to_user_flow() {
+    let runner = safety_runner(None).await;
+    let decision = user_flow_resolves(
+        &runner,
+        write_request("s1", "edit", "a1", "src/lib.rs", None),
+        "a1",
+    )
+    .await;
+    assert_eq!(decision, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn safety_opt_out_keeps_user_flow_for_in_roots_write() {
+    let runner = safety_runner(Some(&SafetySettings {
+        auto_approve_workspace_writes: Some(false),
+    }))
+    .await;
+    let decision = user_flow_resolves(
+        &runner,
+        write_request(
+            "s1",
+            "edit",
+            "a1",
+            "/workspace/src/lib.rs",
+            Some(vec!["/workspace".into()]),
+        ),
+        "a1",
+    )
+    .await;
+    assert_eq!(decision, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn safety_never_assesses_non_write_tools() {
+    let runner = safety_runner(None).await;
+    let mut request = approval_request("s1", "bash", "a1");
+    request.writable_roots = Some(vec!["/workspace".into()]);
+    let decision = user_flow_resolves(&runner, request, "a1").await;
+    assert_eq!(decision, ToolApprovalDecision::Accept);
 }

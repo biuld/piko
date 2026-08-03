@@ -4,6 +4,7 @@ use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest}
 use super::OrchAgentRunRunner;
 use crate::adapters::turns::approval::ApprovalScope;
 use crate::domain::guardian::{GuardianConfig, GuardianReviewRequest, GuardianState};
+use crate::domain::safety::WriteSafetyDecision;
 
 #[async_trait]
 impl ApprovalGateway for OrchAgentRunRunner {
@@ -37,6 +38,55 @@ impl ApprovalGateway for OrchAgentRunRunner {
                     ApprovalScope::Workspace => ToolApprovalDecision::AcceptWorkspace,
                     ApprovalScope::Permanent => ToolApprovalDecision::AcceptPermanent,
                 };
+            }
+        }
+
+        // F-12 write safety: a deterministic, host-owned gate before the
+        // guardian and user flows. A write fully inside the sandbox writable
+        // roots is auto-approved one-shot (the policy enforces the boundary
+        // at execution); a write outside the roots fails closed because
+        // execution would deny it regardless of approval.
+        if self.safety_config.auto_approve_workspace_writes {
+            match crate::domain::safety::assess_write_safety(
+                &request.tool_name,
+                &request.tool_args,
+                request.writable_roots.as_deref().unwrap_or(&[]),
+                &cwd,
+            ) {
+                WriteSafetyDecision::AutoApprove => {
+                    tracing::event!(
+                        target: "tool.approval",
+                        tracing::Level::INFO,
+                        tool = %request.tool_name,
+                        tool_call_id = %request.tool_entity_id,
+                        agent_instance_id = %request.agent_instance_id,
+                        session_id = %request
+                            .host_context
+                            .as_ref()
+                            .map(|context| context.session_id.as_str())
+                            .unwrap_or(""),
+                        "Safety assessment auto-approved workspace write (one-shot, no grant)"
+                    );
+                    return ToolApprovalDecision::Accept;
+                }
+                WriteSafetyDecision::Reject { reason } => {
+                    tracing::event!(
+                        target: "tool.approval",
+                        tracing::Level::WARN,
+                        tool = %request.tool_name,
+                        tool_call_id = %request.tool_entity_id,
+                        agent_instance_id = %request.agent_instance_id,
+                        session_id = %request
+                            .host_context
+                            .as_ref()
+                            .map(|context| context.session_id.as_str())
+                            .unwrap_or(""),
+                        reason = %reason,
+                        "Safety assessment rejected workspace write"
+                    );
+                    return ToolApprovalDecision::SafetyRejected { reason };
+                }
+                WriteSafetyDecision::AskUser => {}
             }
         }
 

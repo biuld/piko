@@ -87,4 +87,12 @@ pub trait ToolProvider: Send + Sync + 'static {
     async fn discover(&self, context: ToolDiscoveryContext) -> Vec<ToolDef>;
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult;
+
+    /// Absolute writable roots this provider enforces for its write tools
+    /// (F-12 safety evidence). Providers that cannot project an enforceable
+    /// boundary return `None`, and approval-time safety assessment falls
+    /// through to the normal user flow.
+    fn writable_roots(&self) -> Option<Vec<std::path::PathBuf>> {
+        None
+    }
 }

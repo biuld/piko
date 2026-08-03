@@ -26,7 +26,7 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-09 | session-persistence | Thread store, resume, branch, message durability | planned | core/src/thread_manager.rs |
 | F-10 | multi-agent | Subagent spawn, supervision, result collection | planned | core/src/agent/, tools/handlers/multi_agents* |
 | F-11 | guardian | Automatic approval review loop | implemented (F-11/D-11/V-11) | core/src/guardian/ |
-| F-12 | safety | Safety rules, elicitation, attestation | planned | core/src/safety.rs, elicitation.rs |
+| F-12 | safety | Deterministic write-safety gate (patch-safety assessment); elicitation pause deferred; attestation rejected | implemented (F-12/D-12/V-12; patch-safety slice 1) | core/src/safety.rs, elicitation.rs, attestation.rs |
 | F-13 | mcp-integration | MCP client/server, resource and tool exposure | planned | core/src/mcp*.rs |
 | F-14 | skills-plugins | Skills engine, plugin install/list | planned | core/src/skills.rs, plugins/ |
 | F-15 | observability | End-to-end tracing (turn → agent → model step → tool → child agent), OTLP HTTP export + metrics, rollout, turn timing, usage statistics | implemented (F-15/D-15/V-15; tracing + metrics slice) | core/src/otel_init.rs, rollout*.rs, turn_timing.rs |

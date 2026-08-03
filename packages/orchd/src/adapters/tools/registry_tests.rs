@@ -204,6 +204,23 @@ async fn guardian_unavailable_decision_fails_closed() {
     assert_eq!(error.retryable, Some(false));
 }
 
+#[tokio::test]
+async fn safety_rejected_decision_fails_closed_with_reason() {
+    let registry = registry_with_gateway(Some(ToolApprovalDecision::SafetyRejected {
+        reason: "write target `/Users/me/.ssh/config` is outside the sandbox writable roots".into(),
+    }))
+    .await;
+    let record = registry
+        .execute_tool(&call(), &context(), &route(), None)
+        .await;
+
+    let error = record.result.error.expect("safety rejection must fail");
+    assert!(!record.result.ok);
+    assert_eq!(error.code, "safety_rejected");
+    assert_eq!(error.retryable, Some(false));
+    assert!(error.message.contains("outside the sandbox writable roots"));
+}
+
 #[test]
 fn expired_is_never_accepted() {
     assert!(!is_approval_accepted(&ToolApprovalDecision::Expired));
@@ -213,6 +230,9 @@ fn expired_is_never_accepted() {
     ));
     assert!(!is_approval_accepted(
         &ToolApprovalDecision::GuardianUnavailable
+    ));
+    assert!(!is_approval_accepted(
+        &ToolApprovalDecision::SafetyRejected { reason: "x".into() }
     ));
     assert!(is_approval_accepted(&ToolApprovalDecision::Accept));
     assert!(is_approval_accepted(&ToolApprovalDecision::AcceptSession));

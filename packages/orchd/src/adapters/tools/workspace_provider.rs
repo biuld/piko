@@ -76,6 +76,11 @@ impl ToolProvider for WorkspaceToolProvider {
         ToolProviderSource::Workspace
     }
 
+    fn writable_roots(&self) -> Option<Vec<std::path::PathBuf>> {
+        let cwd = std::env::current_dir().ok()?;
+        Some(self.policy.writable_roots(&cwd))
+    }
+
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         workspace_tools()
     }

@@ -88,7 +88,7 @@ Goal: on-request approvals scale without weakening safety.
 | Feature | Slice | Status |
 |---|---|---|
 | F-11 guardian | auto-review loop (host-owned bounded review, strict JSON, fail-closed timeout/malformed); per-session circuit breaker with user escalation/reset | implemented (F-11/D-11/V-11) |
-| F-12 safety | patch-safety assessment; elicitation pause; attestation | planned |
+| F-12 safety | patch-safety assessment; elicitation pause; attestation | implemented (slice 1: deterministic write-safety gate, F-12/D-12/V-12); elicitation pause deferred until a consumer; attestation rejected (no piko consumer) |
 | M-config | permission-profile materialization; managed features; agent roles | planned |
 
 ### M4 — Ecosystem
@@ -203,6 +203,14 @@ read-only `environment` tool.
    (reason surfaced), timeout/malformed/model error fails closed with
    `guardian_unavailable`, and a per-session circuit breaker
    (`max-consecutive-denials`, default 3) escalates to the user flow with any
-   user decision resetting the loop. Next in M3: F-12 safety (elicitation
-   pause, attestation, patch-safety assessment) and M-config permission
-   profiles.
+   user decision resetting the loop. **F-12 slice 1 landed** (`F-12/D-12/V-12`):
+   a deterministic, host-owned write-safety gate runs in the approval
+   gateway before the guardian/user flows — `edit`/`write` requests whose
+   targets are fully inside the sandbox writable roots auto-approve one-shot
+   (no prompt, no store grant), out-of-roots targets fail closed with
+   `safety_rejected`, and unassessable requests keep the existing flow
+   (`[safety] auto-approve-workspace-writes`, default `true`). Elicitation
+   pause is deferred to an F-12 slice 2 until a piko consumer exists
+   (blocking process-output waits or MCP auth elicitation); attestation is
+   rejected (no piko consumer; OpenAI host-integration specific). Next in
+   M3: F-12 slice 2 (elicitation pause) and M-config permission profiles.

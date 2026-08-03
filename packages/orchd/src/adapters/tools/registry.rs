@@ -407,6 +407,15 @@ impl ToolRegistry for ToolRegistryImpl {
                 let gateway = self.approval_gateway.read().await;
                 if let Some(gw) = gateway.as_ref() {
                     // Race approval against cancellation
+                    // F-12 safety evidence: the provider projects its
+                    // enforceable writable roots so hostd can assess write
+                    // targets deterministically before any user/guardian flow.
+                    let writable_roots = provider.writable_roots().map(|roots| {
+                        roots
+                            .iter()
+                            .map(|root| root.display().to_string())
+                            .collect()
+                    });
                     let approval_request = ToolApprovalRequest {
                         tool_entity_id: tool_entity_id.clone(),
                         call_id: call_id.clone(),
@@ -415,6 +424,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
                         host_context: context.host_context.clone(),
+                        writable_roots,
                     };
 
                     let decision = if let Some(token) = cancel {
@@ -439,6 +449,10 @@ impl ToolRegistry for ToolRegistryImpl {
                             ToolApprovalDecision::GuardianUnavailable => (
                                 "guardian_unavailable",
                                 "Guardian review failed; failing closed".into(),
+                            ),
+                            ToolApprovalDecision::SafetyRejected { reason } => (
+                                "safety_rejected",
+                                format!("Write rejected by safety assessment: {reason}"),
                             ),
                             _ => ("declined", "User declined approval".into()),
                         };
