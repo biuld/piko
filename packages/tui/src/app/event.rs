@@ -496,6 +496,7 @@ impl AppState {
                 approval_id,
                 tool_name,
                 tool_args,
+                prompt,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -505,6 +506,7 @@ impl AppState {
                     id: approval_id.clone(),
                     tool_name: tool_name.clone(),
                     args: tool_args,
+                    prompt,
                 });
                 self.status = format!("approval requested for {tool_name}");
                 self.notify(
@@ -862,6 +864,7 @@ impl AppState {
                 id: approval.approval_id,
                 tool_name,
                 args: approval.request,
+                prompt: approval.prompt,
             });
         }
         self.interactions.clear();

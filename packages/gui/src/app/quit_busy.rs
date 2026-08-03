@@ -53,6 +53,7 @@ mod tests {
             agent_instance_id: "a1".into(),
             tool_name: "bash".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
             response_in_flight: false,
         }
     }

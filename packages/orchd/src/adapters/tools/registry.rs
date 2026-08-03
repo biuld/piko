@@ -456,6 +456,10 @@ impl ToolRegistry for ToolRegistryImpl {
                         agent_id: context.agent_id.clone(),
                         agent_instance_id: context.agent_instance_id.clone(),
                         agent_role: context.agent_role.clone(),
+                        // F-13: the catalog route's provider id (MCP server
+                        // name for MCP tools) so hostd can resolve
+                        // server/tool approval templates.
+                        provider_id: Some(provider.id().to_string()),
                         tool_name: call_name.clone(),
                         tool_args: call_args.clone(),
                         host_context: context.host_context.clone(),

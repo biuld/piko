@@ -349,6 +349,9 @@ async fn approval_request_carries_executing_agent_role() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].agent_role.as_deref(), Some("researcher"));
     assert_eq!(requests[0].agent_id, "root");
+    // F-13: the catalog route's provider id is stamped so hostd can resolve
+    // `server/tool` approval templates for MCP tools.
+    assert_eq!(requests[0].provider_id.as_deref(), Some("fake"));
 }
 
 #[tokio::test]

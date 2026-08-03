@@ -105,6 +105,29 @@ auto-approve-workspace-writes = true
 # researcher = "readonly"
 # developer = "locked"
 
+[mcp]
+# MCP integration (F-13): each configured MCP server is connected eagerly at
+# session start (prewarm) under this per-server timeout. A server that
+# exceeds the timeout is skipped with a warning naming it; the others
+# connect normally. Per-server `timeout-ms` overrides this value.
+# connect-timeout-ms = 10000
+
+[mcp.approval-templates]
+# Operator-authored approval prompts for MCP tools, keyed by "server/tool"
+# (exact) or bare "tool" (fallback). When an MCP tool needs approval, the
+# rendered prompt replaces the generic question in the TUI/GUI. Templates
+# are presentation text only -- they never change the approval flow.
+# Placeholders: {server}, {tool}, {args}.
+# "github/create_issue" = "This creates a GitHub issue in the configured repository."
+
+# MCP servers (stdio JSON-RPC 2.0): each entry spawns `command` and
+# discovers tools + resources at session start.
+# [[mcp-servers]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+# timeout-ms = 5000
+
 [features]
 # Managed feature gating (F-18): named tool-family features resolved once per
 # session start. All features are enabled by default. Disabling a feature

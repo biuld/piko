@@ -20,6 +20,13 @@ pub struct ToolApprovalRequest {
     /// permission profile. Absent/unknown roles use the session profile.
     #[serde(rename = "agentRole", skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
+    /// F-13: provider id of the catalog route the tool call resolves to
+    /// (for MCP tools this is the server name). Lets hostd resolve
+    /// `server/tool` approval templates precisely. Absent for callers that
+    /// do not carry route identity; template resolution falls back to bare
+    /// `tool` keys.
+    #[serde(rename = "providerId", skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     #[serde(rename = "toolName")]
     pub tool_name: String,
     #[serde(rename = "toolArgs")]

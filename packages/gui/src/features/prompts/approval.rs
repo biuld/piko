@@ -27,39 +27,43 @@ pub fn render_approval_body(approval: &PendingApproval, on_decide: DecideFn) -> 
     let args_text = serde_json::to_string_pretty(&approval.tool_args)
         .unwrap_or_else(|_| approval.tool_args.to_string());
     let in_flight = approval.response_in_flight;
+    let prompt = approval.prompt.clone();
 
-    div()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .child(
-            text(TextRole::Label)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.fg_rgba())
-                .child(format!(
-                    "{}: {tool_name}",
-                    crate::t!("overlay.approval.tool")
-                )),
-        )
-        .child(
-            text(TextRole::Meta)
-                .text_color(t.muted_fg_rgba())
-                .child(crate::t!("dialog.approval.arguments")),
-        )
-        .child(
-            div()
-                .p_2()
-                .rounded_md()
-                .bg(t.surface_rgba())
-                .max_h(px(240.))
-                .overflow_y_scrollbar()
-                .child(
-                    text(TextRole::BodyMono)
-                        .text_color(t.fg_rgba())
-                        .child(args_text),
-                ),
-        )
-        .child(decision_row(in_flight, on_decide))
+    let mut body = div().flex().flex_col().gap_3().child(
+        text(TextRole::Label)
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(t.fg_rgba())
+            .child(format!(
+                "{}: {tool_name}",
+                crate::t!("overlay.approval.tool")
+            )),
+    );
+
+    // F-13: an operator-authored approval prompt (MCP approval templates)
+    // is rendered above the raw arguments.
+    if let Some(prompt) = prompt {
+        body = body.child(text(TextRole::Body).text_color(t.fg_rgba()).child(prompt));
+    }
+
+    body.child(
+        text(TextRole::Meta)
+            .text_color(t.muted_fg_rgba())
+            .child(crate::t!("dialog.approval.arguments")),
+    )
+    .child(
+        div()
+            .p_2()
+            .rounded_md()
+            .bg(t.surface_rgba())
+            .max_h(px(240.))
+            .overflow_y_scrollbar()
+            .child(
+                text(TextRole::BodyMono)
+                    .text_color(t.fg_rgba())
+                    .child(args_text),
+            ),
+    )
+    .child(decision_row(in_flight, on_decide))
 }
 
 fn decision_row(in_flight: bool, on_decide: DecideFn) -> impl IntoElement {

@@ -138,6 +138,7 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                     .unwrap_or_else(|| format!("agent_{session_id}_root")),
                 tool_name: "bash".into(),
                 request: serde_json::json!({"cmd": "pwd"}),
+                prompt: None,
                 status: piko_hostd::api::ApprovalStatus::Pending,
             }],
             Vec::new(),

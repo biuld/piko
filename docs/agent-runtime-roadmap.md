@@ -98,7 +98,7 @@ Goal: MCP, skills, plugins, and hooks are first-class capabilities.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-13 mcp-integration | MCP resources/search; approval templates; prewarm | partial (stdio provider) |
+| F-13 mcp-integration | stdio lifecycle + tools; MCP resources/search (`mcp_resource` tool); approval templates (`[mcp.approval-templates]`); prewarm (bounded eager connect) | implemented (F-13/D-23/V-23) |
 | F-14 skills-plugins | implicit skill invocation; plugin discovery/injection | partial (loader + injection) |
 | F-14 / new | hooks (additional context, input inspection) | planned |
 
@@ -240,4 +240,18 @@ read-only `environment` tool.
    materialized file/network sandbox policy, with unmapped roles inheriting
    the session profile and role layers unable to loosen below it. Next in
    M3: F-12 slice 2 (elicitation pause, still deferred until a consumer
-   exists).
+   exists). **M4 entry slice landed** (`F-13/D-23/V-23`): MCP resources are
+   discovered at connect (`resources/list` + `resources/templates/list`) and
+   exposed through a built-in `mcp_resource` tool (list with a client-side
+   `query` search filter, read by URI, text content only, distinct
+   non-retryable errors for unknown server/missing URI/blob); `[mcp]
+   approval-templates` maps `server/tool` or bare `tool` keys to
+   operator-authored prompts that replace the generic approval question —
+   orchd stamps the route `provider_id` on `ToolApprovalRequest`, hostd
+   resolves the template (MCP servers only, `server/tool` wins) into
+   `ApprovalSnapshot.prompt`, and TUI/GUI render it when present; prewarm is
+   explicit and bounded (`[mcp] connect-timeout-ms` default 10000, per-server
+   `timeout-ms` override) so one slow/broken server is skipped with a warning
+   while siblings connect, and the F-18 `mcp` gate covers `mcp_resource` via
+   its executor kind. Next in M4: F-14 skills/plugins (implicit skill
+   invocation, plugin discovery/injection) and hooks.

@@ -12,6 +12,9 @@ pub struct PendingApproval {
     pub id: String,
     pub tool_name: String,
     pub args: serde_json::Value,
+    /// F-13: operator-authored approval prompt (MCP approval templates);
+    /// absent → the generic question is rendered.
+    pub prompt: Option<String>,
 }
 
 /// Approval state: a queue of pending requests.
@@ -107,6 +110,9 @@ impl ApprovalPanel {
 /// `process start`, which runs a shell command under the hood — F-08) render
 /// the inner command instead of raw JSON; everything else stays generic.
 fn approval_question(approval: &PendingApproval) -> String {
+    if let Some(prompt) = &approval.prompt {
+        return prompt.clone();
+    }
     let command = approval
         .args
         .get("command")
@@ -140,6 +146,7 @@ mod tests {
             id: "a1".into(),
             tool_name: tool_name.into(),
             args,
+            prompt: None,
         }
     }
 
@@ -174,5 +181,19 @@ mod tests {
 
         let read = approval("read", serde_json::json!({ "path": "Cargo.toml" }));
         assert!(approval_question(&read).starts_with("Run read with args"));
+    }
+
+    #[test]
+    fn operator_prompt_replaces_the_generic_question() {
+        let templated = PendingApproval {
+            id: "a2".into(),
+            tool_name: "create_issue".into(),
+            args: serde_json::json!({ "title": "x" }),
+            prompt: Some("This creates a GitHub issue in the configured repository.".into()),
+        };
+        assert_eq!(
+            approval_question(&templated),
+            "This creates a GitHub issue in the configured repository."
+        );
     }
 }

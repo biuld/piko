@@ -12,6 +12,12 @@ impl ApprovalGateway for OrchAgentRunRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
 
+        // F-13 approval templates: operator-authored prompt text for MCP
+        // tools. Resolution is scoped to configured MCP servers (provider_id
+        // = server name); `server/tool` wins over bare `tool`. The rendered
+        // prompt is presentational only — it never changes the flow below.
+        let approval_prompt = self.render_mcp_approval_template(&request);
+
         // F-17 permission profiles: operator command policy is the strongest
         // gate. A denied prefix fails closed before store grants, guardian
         // review, and user prompts; an allowed prefix auto-accepts one-shot
@@ -240,6 +246,7 @@ impl ApprovalGateway for OrchAgentRunRunner {
             agent_instance_id: request.agent_instance_id.clone(),
             tool_name: request.tool_name.clone(),
             request: request.tool_args.clone(),
+            prompt: approval_prompt,
             status: crate::api::ApprovalStatus::Pending,
         };
         {
@@ -360,6 +367,33 @@ impl ApprovalGateway for OrchAgentRunRunner {
 }
 
 impl OrchAgentRunRunner {
+    /// Resolve the F-13 approval template for an MCP tool request.
+    ///
+    /// Scoped to configured MCP servers: `provider_id` must name a
+    /// configured server for any template (including bare `tool` keys) to
+    /// apply, so a template can never hijack a non-MCP tool's question.
+    /// `server/tool` wins over bare `tool`; `{server}`, `{tool}`, and
+    /// `{args}` are substituted best-effort.
+    fn render_mcp_approval_template(&self, request: &ToolApprovalRequest) -> Option<String> {
+        let tool = &request.tool_name;
+        let provider = request.provider_id.as_deref()?;
+        if !self.mcp_server_names.contains(provider) {
+            return None;
+        }
+        let template = self
+            .mcp_approval_templates
+            .get(&format!("{provider}/{tool}"))
+            .or_else(|| self.mcp_approval_templates.get(tool))?;
+        let args = serde_json::to_string(&request.tool_args)
+            .unwrap_or_else(|_| request.tool_args.to_string());
+        Some(
+            template
+                .replace("{server}", provider)
+                .replace("{tool}", tool)
+                .replace("{args}", &args),
+        )
+    }
+
     fn guardian_state(&self, session_id: &str) -> GuardianState {
         self.guardian_states
             .lock()

@@ -48,6 +48,7 @@ async fn state_snapshot_includes_in_process_pending_prompts() {
         agent_instance_id: "agent-root".into(),
         tool_name: "bash".into(),
         request: serde_json::json!({ "cmd": "ls" }),
+        prompt: None,
         status: ApprovalStatus::Pending,
     });
     runner

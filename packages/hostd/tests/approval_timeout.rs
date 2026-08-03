@@ -157,6 +157,7 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
             4_096,
             &[],
             None,
+            None,
             Some(&ApprovalSettings {
                 timeout_secs: Some(1),
             }),

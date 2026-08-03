@@ -264,6 +264,7 @@ fn activity_lists_approval_as_actionable() {
             agent_instance_id: "root".into(),
             tool_name: "exec".into(),
             tool_args: serde_json::json!({"cmd": "ls"}),
+            prompt: None,
             response_in_flight: false,
         });
     let vm = derive_activity(&state);

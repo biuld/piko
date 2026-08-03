@@ -73,6 +73,9 @@ pub struct PendingApproval {
     pub agent_instance_id: AgentInstanceId,
     pub tool_name: String,
     pub tool_args: serde_json::Value,
+    /// F-13: operator-authored approval prompt (MCP approval templates);
+    /// absent → clients keep the generic question.
+    pub prompt: Option<String>,
     pub response_in_flight: bool,
 }
 
@@ -238,6 +241,7 @@ impl LiveSession {
                 agent_instance_id: a.agent_instance_id.clone(),
                 tool_name: a.tool_name.clone(),
                 tool_args: a.request.clone(),
+                prompt: a.prompt.clone(),
                 response_in_flight: false,
             })
             .collect();

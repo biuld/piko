@@ -214,9 +214,11 @@ is exceeded.
   invocation), plugin discovery/mentions/render, MCP server lifecycle with
   tool catalog caching and prewarm, MCP tool exposure/approval templates,
   hooks for additional context and input inspection.
-- piko status: **partial** — `F-13 mcp-integration` (hostd stdio MCP provider)
-  and `F-14 skills-plugins` (skills loader + prompt injection). Gaps: MCP
-  resource/search/approval templates, plugin system, hooks.
+- piko status: **partial** — `F-13 mcp-integration` landed
+  (`F-13/D-23/V-23`): stdio provider, tool discovery/execution, resources
+  (`mcp_resource` list/search/read), approval templates, and bounded
+  prewarm. `F-14 skills-plugins` remains partial (skills loader + prompt
+  injection). Gaps: plugin system, hooks.
 
 ### K. Realtime & Multimodal (extension)
 
@@ -279,7 +281,7 @@ is exceeded.
 | G Exec & Sandbox | F-08 | implemented | — |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
 | I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |
-| J Skills/Plugins/MCP | F-13, F-14 | partial | MCP resources, hooks |
+| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm); gaps: plugin system, hooks |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
 | L Observability | F-15 | partial | turn timing, rollout recorder |
 | M Config & Permissions | F-12 part | partial | permission profiles, roles |

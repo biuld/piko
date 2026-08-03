@@ -116,6 +116,7 @@ fn c9_approval_requested_then_responded() {
             approval_id: "approval-1".into(),
             tool_name: "write_file".into(),
             tool_args: serde_json::json!({"path": "/tmp/x"}),
+            prompt: None,
         }),
         &mut ids,
     );
@@ -157,6 +158,7 @@ fn c9_response_keeps_prompt_until_resolved() {
             approval_id: "approval-1".into(),
             tool_name: "exec".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
         }),
         &mut ids,
     );
@@ -223,6 +225,7 @@ fn c9_attention_queue_approvals_before_interactions() {
             approval_id: "approval-1".into(),
             tool_name: "exec".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
         }),
         &mut ids,
     );

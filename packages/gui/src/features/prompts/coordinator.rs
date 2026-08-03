@@ -44,6 +44,7 @@ mod tests {
                 agent_instance_id: "root".into(),
                 tool_name: "exec".into(),
                 tool_args: serde_json::json!({}),
+                prompt: None,
                 response_in_flight: false,
             }],
             pending_interactions: vec![PendingInteraction {

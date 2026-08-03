@@ -367,6 +367,10 @@ pub enum ApprovalEvent {
         approval_id: ApprovalId,
         tool_name: String,
         tool_args: serde_json::Value,
+        /// F-13: operator-authored approval prompt (MCP approval templates);
+        /// absent → clients keep the generic question.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
     },
     Resolved {
         session_id: SessionId,
@@ -607,6 +611,11 @@ pub struct ApprovalSnapshot {
     pub tool_name: String,
     /// Tool arguments (or structured request payload).
     pub request: serde_json::Value,
+    /// F-13: operator-authored approval prompt (MCP approval templates),
+    /// rendered with placeholders substituted. Absent → clients keep the
+    /// generic question.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     pub status: ApprovalStatus,
 }
 

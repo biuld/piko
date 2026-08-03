@@ -241,6 +241,7 @@ fn approval_requested_then_respond_keeps_until_resolved() {
             approval_id: "ap-1".into(),
             tool_name: "exec".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
         }),
     )));
 

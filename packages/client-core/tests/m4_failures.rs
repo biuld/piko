@@ -166,6 +166,7 @@ fn m4_reconcile_restores_pending_prompts() {
         agent_instance_id: "root".into(),
         tool_name: "exec".into(),
         request: serde_json::json!({"cmd": "ls"}),
+        prompt: None,
         status: ApprovalStatus::Pending,
     });
     event
@@ -281,6 +282,7 @@ fn m4_failed_tool_result_on_timeline() {
             approval_id: "foreign".into(),
             tool_name: "x".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
         }),
         &mut ids,
     );

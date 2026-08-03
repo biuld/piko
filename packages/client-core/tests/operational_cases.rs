@@ -116,6 +116,7 @@ fn rejected_approval_response_reenables_prompt() {
             approval_id: "a1".into(),
             tool_name: "exec".into(),
             tool_args: serde_json::json!({}),
+            prompt: None,
         }),
         &mut ids,
     );

@@ -16,6 +16,24 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// F-13: per-server connect timeout override (ms). Wins over
+    /// `[mcp] connect-timeout-ms`; the default is 10 s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// F-13: `[mcp]` settings section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct McpSettings {
+    /// Connect/prewarm timeout per MCP server in milliseconds (default 10000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_ms: Option<u64>,
+    /// Operator-authored approval prompts keyed by `"server/tool"` or bare
+    /// `"tool"`. Rendered into `ApprovalSnapshot.prompt` when an MCP tool
+    /// needs approval; presentation text only, never policy.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub approval_templates: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -53,6 +71,9 @@ pub struct HostSettings {
     // ---- MCP ----
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerConfig>,
+    /// F-13: `[mcp]` section (connect timeout, approval templates).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpSettings>,
 
     // ---- Frontend namespaces (opaque to hostd) ----
     /// TUI-specific settings. The TUI owns the schema; hostd stores and forwards.
@@ -506,6 +527,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         } else {
             overrides.mcp_servers
         },
+        mcp: overrides.mcp.or(base.mcp),
         tui: overrides.tui.or(base.tui),
         gui: overrides.gui.or(base.gui),
     }
@@ -944,5 +966,67 @@ mod tests {
                 .auto_approve_workspace_writes,
             Some(true)
         );
+    }
+
+    #[test]
+    fn mcp_settings_deserialize_from_toml() {
+        let settings: HostSettings = toml::from_str(
+            r#"
+[mcp]
+connect-timeout-ms = 4000
+
+[mcp.approval-templates]
+"github/create_issue" = "This creates a GitHub issue in the configured repository."
+"#,
+        )
+        .unwrap();
+        let mcp = settings.mcp.expect("mcp section present");
+        assert_eq!(mcp.connect_timeout_ms, Some(4000));
+        assert_eq!(
+            mcp.approval_templates
+                .get("github/create_issue")
+                .map(String::as_str),
+            Some("This creates a GitHub issue in the configured repository.")
+        );
+    }
+
+    #[test]
+    fn mcp_settings_merge_wholesale_across_layers() {
+        let base = HostSettings {
+            mcp: Some(McpSettings {
+                connect_timeout_ms: Some(5000),
+                approval_templates: HashMap::from([("a/b".into(), "A".into())]),
+            }),
+            ..HostSettings::default()
+        };
+        let overrides = HostSettings {
+            mcp: Some(McpSettings {
+                connect_timeout_ms: Some(3000),
+                approval_templates: HashMap::from([("c/d".into(), "C".into())]),
+            }),
+            ..HostSettings::default()
+        };
+        let merged = merge(base.clone(), overrides);
+        let mcp = merged.mcp.expect("mcp section present");
+        assert_eq!(mcp.connect_timeout_ms, Some(3000));
+        // Wholesale replacement: the override section wins entirely.
+        assert_eq!(mcp.approval_templates.len(), 1);
+        assert!(mcp.approval_templates.contains_key("c/d"));
+        assert!(!mcp.approval_templates.contains_key("a/b"));
+
+        // Override absent → base survives.
+        let merged_base = merge(base, HostSettings::default());
+        assert_eq!(
+            merged_base.mcp.expect("mcp preserved").connect_timeout_ms,
+            Some(5000)
+        );
+    }
+
+    #[test]
+    fn mcp_defaults_are_documented_in_template() {
+        let template = default_settings_template();
+        assert!(template.contains("[mcp]"));
+        assert!(template.contains("approval-templates"));
+        assert!(template.contains("timeout-ms"));
     }
 }

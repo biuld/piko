@@ -7,6 +7,7 @@
 
 mod init;
 mod provider;
+mod resource;
 mod types;
 
 #[cfg(test)]
@@ -14,3 +15,4 @@ mod tests;
 
 pub use init::initialize_mcp_tools;
 pub use provider::McpProvider;
+pub use resource::McpResourceProvider;

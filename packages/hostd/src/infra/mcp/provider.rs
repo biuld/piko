@@ -18,6 +18,25 @@ use crate::domain::config::McpServerConfig;
 
 use super::types::*;
 
+/// Typed failure for `McpProvider::read_resource` so the caller can map
+/// distinct non-retryable codes (F-13).
+#[derive(Debug)]
+pub(super) enum ResourceReadError {
+    NotFound(String),
+    BlobUnsupported(String),
+    Transport(String),
+}
+
+impl std::fmt::Display for ResourceReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResourceReadError::NotFound(message)
+            | ResourceReadError::BlobUnsupported(message)
+            | ResourceReadError::Transport(message) => write!(f, "{message}"),
+        }
+    }
+}
+
 /// A ToolProvider backed by an MCP server process connected via stdio.
 ///
 /// `Clone` shares the same child process / stdio handles so the provider can be
@@ -27,6 +46,10 @@ pub struct McpProvider {
     id: String,
     name: String,
     pub(super) tools: Vec<ToolDef>,
+    /// F-13: cached `resources/list` catalog (first page).
+    pub(super) resources: Vec<McpResource>,
+    /// F-13: cached `resources/templates/list` catalog (first page).
+    pub(super) templates: Vec<McpResourceTemplate>,
     /// Child process handle. We use Arc<Mutex<...>> to satisfy Send + Sync.
     child: Arc<Mutex<Option<Child>>>,
     /// Next JSON-RPC request ID.
@@ -48,8 +71,15 @@ impl std::fmt::Debug for McpProvider {
 }
 
 impl McpProvider {
-    /// Connect to an MCP server and discover its tools.
-    pub async fn connect(config: &McpServerConfig) -> Result<Self, String> {
+    /// Connect to an MCP server and discover its tools and resources.
+    ///
+    /// The whole handshake + discovery sequence is bounded by `timeout`
+    /// (F-13 prewarm): a server that exceeds it fails closed for that server
+    /// only — the caller logs and continues with the other servers.
+    pub async fn connect(
+        config: &McpServerConfig,
+        timeout: std::time::Duration,
+    ) -> Result<Self, String> {
         let mut cmd = Command::new(&config.command);
         cmd.args(&config.args);
         for (k, v) in &config.env {
@@ -77,41 +107,163 @@ impl McpProvider {
             id: config.name.clone(),
             name: config.name.clone(),
             tools: Vec::new(),
+            resources: Vec::new(),
+            templates: Vec::new(),
             child: Arc::new(Mutex::new(Some(child))),
             next_id: Arc::new(Mutex::new(1)),
             stdin: Arc::new(Mutex::new(Some(stdin))),
             stdout: Arc::new(Mutex::new(Some(reader))),
         };
 
-        // Initialize handshake
-        provider
-            .rpc_call(
-                "initialize",
-                Some(serde_json::json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": { "name": "piko-hostd", "version": "0.1.0" }
-                })),
-            )
-            .await?;
+        let (tools, resources, templates) = match tokio::time::timeout(timeout, async {
+            // Initialize handshake
+            provider
+                .rpc_call(
+                    "initialize",
+                    Some(serde_json::json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": { "name": "piko-hostd", "version": "0.1.0" }
+                    })),
+                )
+                .await?;
 
-        // Send initialized notification
-        provider
-            .rpc_notify("notifications/initialized", None)
-            .await?;
+            // Send initialized notification
+            provider
+                .rpc_notify("notifications/initialized", None)
+                .await?;
 
-        // Discover tools
-        let tools = provider.discover().await?;
+            // Discover tools, then resources (best-effort: a server without
+            // resource support contributes an empty catalog, not a failure).
+            let tools = provider.discover().await?;
+            let (resources, templates) = provider.discover_resources().await;
+            Ok::<_, String>((tools, resources, templates))
+        })
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => {
+                return Err(format!("MCP connect to {} failed: {error}", config.name));
+            }
+            Err(_elapsed) => {
+                return Err(format!(
+                    "MCP connect to {} timed out after {} ms",
+                    config.name,
+                    timeout.as_millis()
+                ));
+            }
+        };
 
         Ok(McpProvider {
             id: config.name.clone(),
             name: config.name.clone(),
             tools,
+            resources,
+            templates,
             child: Arc::clone(&provider.child),
             next_id: Arc::clone(&provider.next_id),
             stdin: Arc::clone(&provider.stdin),
             stdout: Arc::clone(&provider.stdout),
         })
+    }
+
+    /// Best-effort resource discovery: failures yield an empty catalog.
+    async fn discover_resources(&self) -> (Vec<McpResource>, Vec<McpResourceTemplate>) {
+        let resources = match self.rpc_call("resources/list", None).await {
+            Ok(value) => serde_json::from_value::<McpListResourcesResult>(value)
+                .map(|result| result.resources)
+                .unwrap_or_default(),
+            Err(error) => {
+                tracing::debug!(
+                    server = %self.name,
+                    error = %error,
+                    "MCP server does not support resources/list; empty resource catalog"
+                );
+                Vec::new()
+            }
+        };
+        let templates = match self.rpc_call("resources/templates/list", None).await {
+            Ok(value) => serde_json::from_value::<McpListResourceTemplatesResult>(value)
+                .map(|result| result.resource_templates)
+                .unwrap_or_default(),
+            Err(error) => {
+                tracing::debug!(
+                    server = %self.name,
+                    error = %error,
+                    "MCP server does not support resources/templates/list"
+                );
+                Vec::new()
+            }
+        };
+        (resources, templates)
+    }
+
+    /// List the server's resources and resource templates, optionally
+    /// filtered client-side over uri/name/description (F-13 "search").
+    pub async fn list_resources(&self, query: Option<&str>) -> Result<serde_json::Value, String> {
+        let filter = |value: &str| {
+            query
+                .map(|q| {
+                    !q.trim().is_empty() && value.to_lowercase().contains(&q.trim().to_lowercase())
+                })
+                .unwrap_or(true)
+        };
+        let resources: Vec<serde_json::Value> = self
+            .resources
+            .iter()
+            .filter(|r| {
+                filter(&r.uri)
+                    || filter(&r.name)
+                    || (!r.description.is_empty() && filter(&r.description))
+            })
+            .map(|r| serde_json::to_value(r).unwrap_or_default())
+            .collect();
+        let templates: Vec<serde_json::Value> = self
+            .templates
+            .iter()
+            .filter(|t| {
+                filter(&t.uri_template)
+                    || filter(&t.name)
+                    || (!t.description.is_empty() && filter(&t.description))
+            })
+            .map(|t| serde_json::to_value(t).unwrap_or_default())
+            .collect();
+        Ok(serde_json::json!({
+            "server": self.name,
+            "resources": resources,
+            "templates": templates,
+        }))
+    }
+
+    /// Read a resource by URI and return its text content.
+    pub(super) async fn read_resource(
+        &self,
+        uri: &str,
+    ) -> Result<serde_json::Value, ResourceReadError> {
+        let response = self
+            .rpc_call("resources/read", Some(serde_json::json!({ "uri": uri })))
+            .await
+            .map_err(ResourceReadError::Transport)?;
+        let result: McpReadResourceResult = serde_json::from_value(response).map_err(|e| {
+            ResourceReadError::Transport(format!("Failed to parse MCP resources/read result: {e}"))
+        })?;
+        for content in result.contents {
+            if let Some(text) = content.text {
+                return Ok(serde_json::json!({
+                    "server": self.name,
+                    "uri": content.uri,
+                    "text": text,
+                }));
+            }
+            if content.blob.is_some() {
+                return Err(ResourceReadError::BlobUnsupported(
+                    "resource content is a blob; text content only".to_string(),
+                ));
+            }
+        }
+        Err(ResourceReadError::NotFound(
+            "resource has no content".to_string(),
+        ))
     }
 
     async fn discover(&self) -> Result<Vec<ToolDef>, String> {

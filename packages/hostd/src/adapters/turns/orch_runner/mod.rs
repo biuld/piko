@@ -52,6 +52,12 @@ pub struct OrchAgentRunRunner {
     guardian_states: Arc<std::sync::Mutex<HashMap<String, GuardianState>>>,
     safety_config: SafetyConfig,
     permission_config: PermissionConfig,
+    /// F-13: `[mcp.approval-templates]` keyed by `"server/tool"` or `"tool"`.
+    /// Resolved into `ApprovalSnapshot.prompt` for MCP tool approvals.
+    mcp_approval_templates: HashMap<String, String>,
+    /// F-13: configured MCP server names, used to scope approval-template
+    /// resolution to MCP tools (bare `tool` keys never match non-MCP tools).
+    mcp_server_names: std::collections::HashSet<String>,
     /// F-19: role → command policy for the approval gateway. Absent roles
     /// use `permission_config` (the session profile).
     role_permission_configs: HashMap<String, PermissionConfig>,
@@ -104,6 +110,7 @@ impl OrchAgentRunRunner {
             None,
             None,
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -120,6 +127,7 @@ impl OrchAgentRunRunner {
         context_window: u64,
         max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
+        mcp_settings: Option<&crate::domain::config::McpSettings>,
         sandbox_settings: Option<&SandboxSettings>,
         approval_settings: Option<&ApprovalSettings>,
         guardian_settings: Option<&GuardianSettings>,
@@ -207,6 +215,14 @@ impl OrchAgentRunRunner {
             .get("mcp")
             .copied()
             .unwrap_or(true);
+        // F-13 prewarm: eager connect at session start under a bounded
+        // per-server timeout (default 10 s). A slow/broken server is skipped
+        // with a warning; the others register.
+        let mcp_connect_timeout = std::time::Duration::from_millis(
+            mcp_settings
+                .and_then(|settings| settings.connect_timeout_ms)
+                .unwrap_or(10_000),
+        );
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let agents = crate::adapters::prompts::agent_loader::load_agents(&cwd);
@@ -234,8 +250,12 @@ impl OrchAgentRunRunner {
         let context_tools = agent_runtime.context_tools();
 
         if mcp_enabled {
-            let registered =
-                crate::infra::mcp::initialize_mcp_tools(mcp_configs, agent_runtime.as_ref()).await;
+            let registered = crate::infra::mcp::initialize_mcp_tools(
+                mcp_configs,
+                mcp_connect_timeout,
+                agent_runtime.as_ref(),
+            )
+            .await;
             if !registered.is_empty() {
                 tracing::info!("MCP tools registered: {:?}", registered);
             }
@@ -263,6 +283,13 @@ impl OrchAgentRunRunner {
             guardian_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             safety_config: SafetyConfig::from_settings(safety_settings),
             permission_config,
+            mcp_approval_templates: mcp_settings
+                .map(|settings| settings.approval_templates.clone())
+                .unwrap_or_default(),
+            mcp_server_names: mcp_configs
+                .iter()
+                .map(|config| config.name.clone())
+                .collect(),
             role_permission_configs,
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),

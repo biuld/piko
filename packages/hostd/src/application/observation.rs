@@ -159,6 +159,7 @@ impl HostApp {
                                 approval_id: approval.approval_id,
                                 tool_name: approval.tool_name,
                                 tool_args: approval.request,
+                                prompt: approval.prompt,
                             }),
                         )
                         .await;

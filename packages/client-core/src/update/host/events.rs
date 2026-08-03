@@ -178,6 +178,7 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
             approval_id,
             tool_name,
             tool_args,
+            prompt,
             ..
         } => {
             if !is_live_session_event(state, &session_id) {
@@ -196,6 +197,7 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
                         agent_instance_id,
                         tool_name,
                         tool_args,
+                        prompt,
                         response_in_flight: false,
                     });
             }
