@@ -58,6 +58,9 @@ pub enum AppMode {
     Models,
     Settings,
     Status,
+    /// MCP server status surface (F-13): per-server connection state and
+    /// tool/resource/template counts from the `mcp.status` host command.
+    Mcp,
     Help,
     Approval,
     ToolInteraction,
@@ -81,6 +84,7 @@ impl AppMode {
             AppMode::AgentList => Some(Placement::Full),
             AppMode::Tree => Some(Placement::Full),
             AppMode::Status => Some(Placement::Full),
+            AppMode::Mcp => Some(Placement::Partial),
             AppMode::Models => Some(Placement::Partial),
             AppMode::Settings => Some(Placement::Partial),
             AppMode::Approval => Some(Placement::Partial),
@@ -139,6 +143,7 @@ pub struct AppState {
     pub timeline: Timeline,
     pub agent_timelines: HashMap<String, Timeline>,
     pub approvals: ApprovalPanel,
+    pub mcp: crate::features::mcp::McpPanel,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
     pub agents: crate::features::agent_list::AgentList,
@@ -226,6 +231,7 @@ impl AppState {
             timeline: Timeline::new(),
             agent_timelines: HashMap::new(),
             approvals: ApprovalPanel::new(),
+            mcp: crate::features::mcp::McpPanel::new(),
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
             agents: crate::features::agent_list::AgentList::new(),

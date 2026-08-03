@@ -58,6 +58,9 @@ pub struct OrchAgentRunRunner {
     /// F-13: configured MCP server names, used to scope approval-template
     /// resolution to MCP tools (bare `tool` keys never match non-MCP tools).
     mcp_server_names: std::collections::HashSet<String>,
+    /// F-13: per-server connection status for the `mcp.status` client
+    /// surface (connected + counts, or the connect error).
+    mcp_server_statuses: Vec<piko_protocol::command::McpServerInfo>,
     /// F-19: role → command policy for the approval gateway. Absent roles
     /// use `permission_config` (the session profile).
     role_permission_configs: HashMap<String, PermissionConfig>,
@@ -249,19 +252,40 @@ impl OrchAgentRunRunner {
             AgentRuntime::bootstrap_with_telemetry(model_executor, config, runtime_telemetry).await;
         let context_tools = agent_runtime.context_tools();
 
-        if mcp_enabled {
-            let registered = crate::infra::mcp::initialize_mcp_tools(
+        let mcp_server_statuses = if mcp_enabled {
+            let statuses = crate::infra::mcp::initialize_mcp_tools(
                 mcp_configs,
                 mcp_connect_timeout,
                 agent_runtime.as_ref(),
             )
             .await;
-            if !registered.is_empty() {
-                tracing::info!("MCP tools registered: {:?}", registered);
+            let connected: Vec<_> = statuses
+                .iter()
+                .filter(|status| status.connected)
+                .map(|status| status.name.clone())
+                .collect();
+            if !connected.is_empty() {
+                tracing::info!("MCP tools registered: {:?}", connected);
             }
-        } else if !mcp_configs.is_empty() {
-            tracing::info!("Skipping MCP server connections: feature 'mcp' is disabled");
-        }
+            statuses
+        } else {
+            if !mcp_configs.is_empty() {
+                tracing::info!("Skipping MCP server connections: feature 'mcp' is disabled");
+            }
+            // Report configured-but-disabled servers honestly on the
+            // `mcp.status` surface instead of hiding them.
+            mcp_configs
+                .iter()
+                .map(|config| piko_protocol::command::McpServerInfo {
+                    name: config.name.clone(),
+                    connected: false,
+                    tool_count: 0,
+                    resource_count: 0,
+                    template_count: 0,
+                    error: Some("feature 'mcp' is disabled".into()),
+                })
+                .collect()
+        };
 
         Self {
             agent_runtime,
@@ -290,6 +314,7 @@ impl OrchAgentRunRunner {
                 .iter()
                 .map(|config| config.name.clone())
                 .collect(),
+            mcp_server_statuses,
             role_permission_configs,
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),

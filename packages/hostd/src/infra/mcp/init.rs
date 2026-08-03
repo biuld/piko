@@ -10,12 +10,16 @@ use super::resource::{MCP_RESOURCE_PROVIDER_ID, MCP_RESOURCE_TOOL_NAME, McpResou
 /// prewarm); a failed or timed-out server is skipped with a warning and the
 /// others register normally. When at least one server connected, the
 /// built-in `mcp_resource` tool is registered too.
+///
+/// Returns one status entry per configured server (`connected` + counts for
+/// live providers, the connect error otherwise) for the `mcp.status`
+/// client surface.
 pub async fn initialize_mcp_tools(
     configs: &[McpServerConfig],
     timeout: std::time::Duration,
     runtime: &piko_orchd::AgentRuntime,
-) -> Vec<String> {
-    let mut registered = Vec::new();
+) -> Vec<piko_protocol::command::McpServerInfo> {
+    let mut statuses = Vec::new();
     let mut providers = std::collections::HashMap::new();
 
     for config in configs {
@@ -50,12 +54,25 @@ pub async fn initialize_mcp_tools(
                 runtime.register_tool_set(tool_set).await;
 
                 providers.insert(name.clone(), std::sync::Arc::new(provider));
-                registered.push(format!(
-                    "{name} ({tool_count} tools, {resource_count} resources, {template_count} templates)"
-                ));
+                statuses.push(piko_protocol::command::McpServerInfo {
+                    name,
+                    connected: true,
+                    tool_count,
+                    resource_count,
+                    template_count,
+                    error: None,
+                });
             }
             Err(e) => {
                 tracing::warn!("Failed to connect to MCP server {}: {e}", config.name);
+                statuses.push(piko_protocol::command::McpServerInfo {
+                    name: config.name.clone(),
+                    connected: false,
+                    tool_count: 0,
+                    resource_count: 0,
+                    template_count: 0,
+                    error: Some(e),
+                });
             }
         }
     }
@@ -84,5 +101,5 @@ pub async fn initialize_mcp_tools(
         runtime.register_tool_set(resource_tool_set).await;
     }
 
-    registered
+    statuses
 }

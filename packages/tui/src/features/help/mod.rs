@@ -33,6 +33,7 @@ impl HelpPanel {
             "  /thinking          list and set default thinking level",
             "  /settings          open hostd-backed runtime settings",
             "  /status            show turn, queue, approval, and tool state",
+            "  /mcp               show connected MCP servers, tools, and resources",
             "  F1 or /help        show help",
             "  ~/.piko/keybindings.json and .piko/keybindings.json override keys",
             "",

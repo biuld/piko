@@ -113,6 +113,13 @@ pub fn command_catalog() -> Vec<HostCommandDescriptor> {
             },
             HostCommandGroup::Runtime,
         ),
+        item(
+            "mcp.status",
+            "MCP servers",
+            "Show connected MCP servers, tool/resource counts, and connect errors",
+            Immediate,
+            HostCommandGroup::Runtime,
+        ),
         // ── Model / thinking (set, not browse UI) ───────────────────────
         item(
             "model.set",
@@ -221,6 +228,7 @@ mod tests {
         assert!(catalog.iter().any(|c| c.id == "session.new"));
         assert!(catalog.iter().any(|c| c.id == "model.set"));
         assert!(catalog.iter().any(|c| c.id == "thinking.set"));
+        assert!(catalog.iter().any(|c| c.id == "mcp.status"));
         assert!(catalog.iter().any(|c| c.id == "process.list"));
         assert!(catalog.iter().any(|c| c.id == "process.stop"));
     }

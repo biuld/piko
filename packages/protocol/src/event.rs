@@ -240,6 +240,11 @@ pub enum CommandResult {
         signal: Option<i32>,
         timestamp: i64,
     },
+    /// MCP server connection status (F-13): one entry per configured server.
+    McpStatusListed {
+        servers: Vec<crate::command::McpServerInfo>,
+        timestamp: i64,
+    },
     AgentSpecListed {
         agents: Vec<crate::agents::AgentSpec>,
         timestamp: i64,

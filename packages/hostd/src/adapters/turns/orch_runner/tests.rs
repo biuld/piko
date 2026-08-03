@@ -974,6 +974,18 @@ async fn mcp_approval_template_prompt_reaches_the_user_snapshot() {
     assert_eq!(decision, ToolApprovalDecision::Accept);
 }
 
+#[tokio::test]
+async fn mcp_statuses_reports_configured_servers() {
+    let runner = mcp_template_runner(std::collections::HashMap::new()).await;
+    let statuses = runner.mcp_statuses().await;
+    // The fixture `echo` server cannot speak JSON-RPC, so the entry exists
+    // but reports disconnected with the connect error.
+    assert_eq!(statuses.len(), 1);
+    assert_eq!(statuses[0].name, "github");
+    assert!(!statuses[0].connected);
+    assert!(statuses[0].error.is_some());
+}
+
 async fn permission_runner(
     settings: Option<&crate::domain::config::PermissionsSettings>,
 ) -> super::OrchAgentRunRunner {

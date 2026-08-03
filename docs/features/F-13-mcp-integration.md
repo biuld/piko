@@ -1,6 +1,6 @@
 # F-13: MCP integration (resources, approval templates, prewarm)
 
-> Status: implemented (F-13/D-23/V-23)
+> Status: implemented (F-13/D-23/V-23; TUI surface slice D-24/V-24)
 > Priority: P1
 > Source evidence: codex-rs `core/src/session/mcp*.rs` (runtime/refresh/
 > prewarm), `mcp_tool_call.rs`, `mcp_tool_exposure.rs`, `mcp_resource.rs`,
@@ -59,6 +59,11 @@ slow or broken server can never block the session or the other servers.
 4. An operator sets `[features] mcp = false` (F-18). hostd skips all MCP
    server connections and does not register `mcp_resource`; a direct call to
    an MCP tool fails closed with `feature_disabled`.
+5. In the TUI, the operator runs `/mcp`. A panel opens listing every
+   configured server: connected servers show their tool/resource/template
+   counts; servers that failed or timed out at session start show
+   `disconnected` with the connect error; servers disabled by the `mcp`
+   feature gate show `feature 'mcp' is disabled`.
 
 ## In scope
 
@@ -95,6 +100,10 @@ slow or broken server can never block the session or the other servers.
   per-server `timeout-ms` override; a timed-out server fails closed (logged,
   skipped) without affecting other servers; per-provider tool/resource
   catalog caching.
+- **TUI status surface**: a `/mcp` command and status panel backed by the
+  neutral `mcp.status` host command (`Command::McpStatus` →
+  `CommandResult::McpStatusListed`), showing per-server connection state,
+  counts, and errors (including configured-but-disabled servers).
 - **Settings/docs**: `McpSettings` (`[mcp]`) added to the settings model with
   merge semantics and documented in `resources/settings.default.toml`;
   `ToolApprovalRequest` carries the executing provider id so templates can be
@@ -233,6 +242,12 @@ generic question. No template → no `prompt` field → current generic renderin
       generic question otherwise (existing rendering unchanged when absent).
 - [ ] `[features] mcp = false` skips all connections and does not register
       `mcp_resource` (F-18 regression).
+- [ ] The TUI `/mcp` slash command sends `Command::McpStatus`; the
+      `McpStatusListed` result populates the MCP panel and opens it; the
+      panel renders connected counts and disconnected errors; configured
+      servers disabled by the `mcp` gate are shown with
+      `feature 'mcp' is disabled`; no MCP configuration renders the empty
+      state.
 
 ## Product decisions
 
@@ -244,6 +259,7 @@ generic question. No template → no `prompt` field → current generic renderin
 | Resource tool approval | Read-only, `approval: Never` by default; tighten via tool-set policy | Reads are low-risk; operators retain full control through policy |
 | Prewarm contract | Eager connect at session start under a bounded per-server timeout | Deterministic warm-up; one bad server cannot block the session or siblings |
 | `[mcp]` merge semantics | Section replaces wholesale across layers (like `mcp-servers`) | Consistent with the existing settings-layer pattern; template maps merge per key only within a single file |
+| MCP client surface | Neutral `mcp.status` command + TUI `/mcp` panel (read-only snapshot) | hostd stays authoritative for connection state; clients own presentation; management/refresh stays out of scope until a consumer asks |
 
 ## Fusion decisions (codex-rs)
 

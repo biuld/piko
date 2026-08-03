@@ -98,7 +98,7 @@ Goal: MCP, skills, plugins, and hooks are first-class capabilities.
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-13 mcp-integration | stdio lifecycle + tools; MCP resources/search (`mcp_resource` tool); approval templates (`[mcp.approval-templates]`); prewarm (bounded eager connect) | implemented (F-13/D-23/V-23) |
+| F-13 mcp-integration | stdio lifecycle + tools; MCP resources/search (`mcp_resource` tool); approval templates (`[mcp.approval-templates]`); prewarm (bounded eager connect); TUI `/mcp` status command + panel | implemented (F-13/D-23/V-23; TUI surface D-24/V-24) |
 | F-14 skills-plugins | implicit skill invocation; plugin discovery/injection | partial (loader + injection) |
 | F-14 / new | hooks (additional context, input inspection) | planned |
 
@@ -253,5 +253,10 @@ read-only `environment` tool.
    explicit and bounded (`[mcp] connect-timeout-ms` default 10000, per-server
    `timeout-ms` override) so one slow/broken server is skipped with a warning
    while siblings connect, and the F-18 `mcp` gate covers `mcp_resource` via
-   its executor kind. Next in M4: F-14 skills/plugins (implicit skill
+   its executor kind. **TUI MCP surface landed** (`D-24/V-24`): a `/mcp`
+   slash command (neutral `mcp.status` catalog id) opens a status panel
+   showing every configured server's connection state, tool/resource/
+   template counts, and connect errors — including servers disabled by the
+   `mcp` feature gate — fed by a hostd-owned snapshot from
+   `initialize_mcp_tools`. Next in M4: F-14 skills/plugins (implicit skill
    invocation, plugin discovery/injection) and hooks.

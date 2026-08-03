@@ -94,6 +94,12 @@ pub trait AgentRunRunner: Send + Sync {
         None
     }
 
+    /// MCP server connection status (F-13); empty when the runner has no
+    /// MCP configuration.
+    async fn mcp_statuses(&self) -> Vec<piko_protocol::command::McpServerInfo> {
+        Vec::new()
+    }
+
     async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
             "Agent run is unavailable".into(),

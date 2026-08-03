@@ -190,6 +190,7 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
         AppMode::Approval => app.approvals.render(frame, area, &app.theme),
         AppMode::ToolInteraction => app.interactions.render(frame, area, &app.theme),
         AppMode::AuthSelector => app.auth_selector.render(frame, area, &app.theme),
+        AppMode::Mcp => app.mcp.render(frame, area, &app.theme),
         _ => {}
     }
 }

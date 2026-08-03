@@ -663,6 +663,30 @@ impl AppState {
                 }
             }
             Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::McpStatusListed { servers, .. }),
+                ..
+            } => {
+                self.mcp.set_servers(servers);
+                self.push_focus(AppMode::Mcp);
+                let connected = self.mcp.connected_count();
+                let names: Vec<String> = self
+                    .mcp
+                    .servers()
+                    .iter()
+                    .filter(|s| s.connected)
+                    .map(|s| s.name.clone())
+                    .collect();
+                self.status = format!("{connected} MCP server(s) connected");
+                self.notify(
+                    NotificationLevel::Info,
+                    if names.is_empty() {
+                        "no MCP servers connected".to_string()
+                    } else {
+                        format!("MCP servers: {}", names.join(", "))
+                    },
+                );
+            }
+            Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }),
                 ..
             } => {

@@ -23,6 +23,10 @@ impl AgentRunRunner for OrchAgentRunRunner {
         self.agent_runtime.stop_process(process_id).await
     }
 
+    async fn mcp_statuses(&self) -> Vec<piko_protocol::command::McpServerInfo> {
+        self.mcp_server_statuses.clone()
+    }
+
     fn set_context_window_callback(&self, callback: piko_orchd::tools::NewContextWindowCallback) {
         self.set_context_window_callback(callback);
     }

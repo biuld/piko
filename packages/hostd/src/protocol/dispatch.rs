@@ -149,6 +149,17 @@ impl HostServer {
                     }),
                 }])
             }
+            Command::McpStatus { .. } => {
+                let runner = self.0.turn_runner.lock().await.clone();
+                let servers = runner.mcp_statuses().await;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::McpStatusListed {
+                        servers,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
             Command::SessionFork {
                 session_id,
                 entry_id,

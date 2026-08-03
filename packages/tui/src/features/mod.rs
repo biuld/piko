@@ -6,6 +6,7 @@ pub mod auto_completion;
 pub mod bottom_bar;
 pub mod editor;
 pub mod help;
+pub mod mcp;
 pub mod model_selector;
 pub mod notifications;
 pub mod session_list;

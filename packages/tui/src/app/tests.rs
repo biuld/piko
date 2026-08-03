@@ -6,7 +6,7 @@ use piko_protocol::{
 use serde_json::json;
 
 use crate::app::{
-    AppState, InitialOptions, ToolStatus, command::EditorAction, effect::Effect,
+    AppMode, AppState, InitialOptions, ToolStatus, command::EditorAction, effect::Effect,
     get_active_branch_entries,
 };
 use crate::features::timeline::TimelineKind;
@@ -1184,6 +1184,66 @@ fn process_listed_event_renders_notification() {
         command_id: "ps".into(),
     });
     assert_eq!(app.status, "no processes running");
+}
+
+#[test]
+fn mcp_slash_command_sends_mcp_status() {
+    let mut app = live_app();
+    // `/mcp` is slash-addressable once hostd advertises `mcp.status`.
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
+            commands: vec![HostCommandDescriptor {
+                id: "mcp.status".into(),
+                title: "MCP servers".into(),
+                detail: "Show connected MCP servers".into(),
+                invoke: HostCommandInvoke::Immediate,
+                group: Some(HostCommandGroup::Runtime),
+            }],
+            timestamp: 0,
+        }),
+        command_id: "catalog".into(),
+    });
+    let effects = app.try_slash_command("/mcp").expect("known slash");
+    assert!(
+        effects
+            .iter()
+            .any(|e| { matches!(e, Effect::Send(piko_protocol::Command::McpStatus { .. })) })
+    );
+}
+
+#[test]
+fn mcp_status_listed_event_opens_panel() {
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::McpStatusListed {
+            servers: vec![
+                piko_protocol::command::McpServerInfo {
+                    name: "filesystem".into(),
+                    connected: true,
+                    tool_count: 3,
+                    resource_count: 1,
+                    template_count: 2,
+                    error: None,
+                },
+                piko_protocol::command::McpServerInfo {
+                    name: "hang".into(),
+                    connected: false,
+                    tool_count: 0,
+                    resource_count: 0,
+                    template_count: 0,
+                    error: Some("timed out after 10000 ms".into()),
+                },
+            ],
+            timestamp: 0,
+        }),
+        command_id: "mcp".into(),
+    });
+    assert_eq!(app.mcp.connected_count(), 1);
+    assert_eq!(app.mcp.servers().len(), 2);
+    assert_eq!(app.status, "1 MCP server(s) connected");
+    assert_eq!(app.focus_manager.active_mode(), AppMode::Mcp);
+    let latest = app.notifications.items().back().expect("notification");
+    assert!(latest.message.contains("filesystem"));
 }
 
 #[test]

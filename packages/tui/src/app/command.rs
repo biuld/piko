@@ -131,6 +131,7 @@ pub enum SlashAction {
     Compact,
     ListProcesses,
     KillProcess(String),
+    ListMcpStatus,
 }
 
 #[derive(Debug)]
@@ -343,6 +344,7 @@ const HOST_SLASH_TABLE: &[(&str, &str)] = &[
     ("/compact", "session.compact"),
     ("/ps", "process.list"),
     ("/kill", "process.stop"),
+    ("/mcp", "mcp.status"),
 ];
 
 /// Merge TUI-local presentation commands with the fetched neutral host
@@ -403,6 +405,7 @@ pub fn action_for_host_command(id: &str, args: HostCommandArgs) -> Option<Action
         "session.new" => SlashAction::New.into(),
         "session.fork" => SlashAction::Fork(args.fork_entry_id).into(),
         "process.list" => SlashAction::ListProcesses.into(),
+        "mcp.status" => SlashAction::ListMcpStatus.into(),
         "session.clone" => SlashAction::Clone.into(),
         "auth.login" => SlashAction::Login(args.provider).into(),
         "auth.logout" => SlashAction::Logout(args.provider).into(),

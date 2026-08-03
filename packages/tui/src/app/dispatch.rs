@@ -388,6 +388,13 @@ impl AppState {
                 self.clear_focus();
                 self.status = "listing processes".to_string();
             }
+            SlashAction::ListMcpStatus => {
+                effects.push(Effect::send(Command::McpStatus {
+                    command_id: command_id(),
+                }));
+                self.clear_focus();
+                self.status = "listing mcp servers".to_string();
+            }
             SlashAction::KillProcess(process_id) => {
                 effects.push(Effect::send(Command::ProcessStop {
                     command_id: command_id(),
@@ -572,6 +579,7 @@ impl AppState {
             AppMode::Settings => self.apply_selected_setting(),
             AppMode::AuthSelector => self.confirm_auth_selection(),
             AppMode::Status
+            | AppMode::Mcp
             | AppMode::Help
             | AppMode::Chat
             | AppMode::Approval

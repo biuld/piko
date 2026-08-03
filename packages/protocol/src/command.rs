@@ -53,6 +53,23 @@ pub struct ProcessExit {
     pub signal: Option<i32>,
 }
 
+/// MCP server status snapshot for the `mcp.status` command (F-13 TUI
+/// surface). One entry per configured server; `connected` distinguishes live
+/// providers from failed/timed-out connects.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInfo {
+    /// Configured server name (also the provider/tool-set id).
+    pub name: String,
+    pub connected: bool,
+    pub tool_count: usize,
+    pub resource_count: usize,
+    pub template_count: usize,
+    /// Connect failure message when `connected` is false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionListScope {
@@ -219,6 +236,11 @@ pub enum Command {
         command_id: CommandId,
         process_id: String,
     },
+    /// List MCP server connection status (F-13): one entry per configured
+    /// server with tool/resource/template counts and connect errors.
+    McpStatus {
+        command_id: CommandId,
+    },
     /// Get settings under a namespace (e.g. "tui").
     ConfigGet {
         command_id: CommandId,
@@ -277,6 +299,7 @@ impl Command {
             | Self::SessionCompact { command_id, .. }
             | Self::ProcessList { command_id }
             | Self::ProcessStop { command_id, .. }
+            | Self::McpStatus { command_id }
             | Self::ConfigGet { command_id, .. }
             | Self::AgentSpecList { command_id, .. }
             | Self::AgentList { command_id, .. }
@@ -370,6 +393,41 @@ mod tests {
         assert_eq!(json["signal"], 15);
         assert!(json.get("exitCode").is_none());
         assert_eq!(serde_json::from_value::<ProcessExit>(json).unwrap(), exit);
+    }
+
+    #[test]
+    fn mcp_status_and_server_info_round_trip() {
+        let command: Command =
+            serde_json::from_value(serde_json::json!({ "type": "mcp_status", "command_id": "c1" }))
+                .unwrap();
+        assert!(matches!(command, Command::McpStatus { .. }));
+
+        let info = McpServerInfo {
+            name: "filesystem".into(),
+            connected: true,
+            tool_count: 3,
+            resource_count: 1,
+            template_count: 0,
+            error: None,
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["name"], "filesystem");
+        assert_eq!(json["toolCount"], 3);
+        assert!(json.get("error").is_none());
+        let back: McpServerInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(back, info);
+
+        let failed = McpServerInfo {
+            name: "hang".into(),
+            connected: false,
+            tool_count: 0,
+            resource_count: 0,
+            template_count: 0,
+            error: Some("timed out after 10000 ms".into()),
+        };
+        let json = serde_json::to_value(&failed).unwrap();
+        assert_eq!(json["connected"], false);
+        assert!(json["error"].is_string());
     }
 }
 

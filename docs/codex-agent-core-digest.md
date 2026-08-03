@@ -217,8 +217,9 @@ is exceeded.
 - piko status: **partial** — `F-13 mcp-integration` landed
   (`F-13/D-23/V-23`): stdio provider, tool discovery/execution, resources
   (`mcp_resource` list/search/read), approval templates, and bounded
-  prewarm. `F-14 skills-plugins` remains partial (skills loader + prompt
-  injection). Gaps: plugin system, hooks.
+  prewarm, plus a TUI `/mcp` status command + panel (`D-24/V-24`).
+  `F-14 skills-plugins` remains partial (skills loader + prompt injection).
+  Gaps: plugin system, hooks.
 
 ### K. Realtime & Multimodal (extension)
 
@@ -281,7 +282,7 @@ is exceeded.
 | G Exec & Sandbox | F-08 | implemented | — |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
 | I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |
-| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm); gaps: plugin system, hooks |
+| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm, TUI `/mcp` surface); gaps: plugin system, hooks |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
 | L Observability | F-15 | partial | turn timing, rollout recorder |
 | M Config & Permissions | F-12 part | partial | permission profiles, roles |
