@@ -86,7 +86,7 @@ fn edit_tool_def() -> ToolDef {
         }),
         executor: ToolExecutorRef {
             kind: "native".into(),
-            target: "apply_patch".into(),
+            target: "edit".into(),
             extra: None,
         },
         execution_mode: None,
