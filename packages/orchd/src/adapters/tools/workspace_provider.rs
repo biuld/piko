@@ -118,7 +118,10 @@ impl ToolProvider for WorkspaceToolProvider {
                 })),
                 error: None,
             },
-            _ => execute_workspace_tool(&self.policy, &call, &context).await,
+            _ => {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                execute_workspace_tool(&cwd, &self.policy, &call, &context).await
+            }
         }
     }
 }

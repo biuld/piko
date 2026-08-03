@@ -62,6 +62,17 @@ All F-12 slice 1 acceptance criteria pass:
   continue to pass unchanged.
 - **Decision mapping**: `expired_is_never_accepted` now asserts
   `SafetyRejected` is never an accepting decision.
+- **Hardening**: `verify_resolved_accepts_stable_paths_and_detects_swaps`
+  (piko-sandbox) accepts a stable in-roots file and rejects the same lexical
+  input after it is swapped for an out-of-roots symlink;
+  `test_compute_path_fingerprint` (piko-hostd) asserts `edit:src/lib.rs`
+  / `write:/abs/out.md` fingerprints and that one path never matches
+  another; `write_and_edit_are_denied_inside_dot_piko` (piko-orchd) proves
+  `write`/`edit` of `.piko/approvals.json` fail with `access_denied` and
+  leave the file untouched; `edit_rejects_empty_old_text`,
+  `edit_rejects_non_unique_match_with_line_numbers`, and
+  `edit_not_found_message_guides_the_model` cover the tightened edit
+  semantics.
 
 ## Invariants
 
@@ -73,3 +84,6 @@ All F-12 slice 1 acceptance criteria pass:
   non-write tools and unassessable requests are untouched.
 - The writable-root projection uses the same canonicalization as
   `Policy::authorize`, so the assessment cannot drift from the enforcement.
+- Workspace tools cannot write `.piko/` (approvals/settings) under the
+  default policy; path-level fingerprints stop cross-path grant leakage;
+  writes re-verify the authorized path immediately before writing.

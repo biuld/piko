@@ -68,6 +68,20 @@ opt-out fall through to the existing user/guardian approval flow unchanged.
 - Deterministic reason strings surfaced in the tool error (which target path
   was rejected, or why the request could not be assessed).
 
+### Security hardening (same slice)
+
+- The default permissive sandbox policy denies `.piko/` alongside `.git/`, so
+  workspace tools cannot rewrite hostd's own state — the approvals store
+  (`<cwd>/.piko/approvals.json`) and project settings can no longer be used
+  to self-grant approvals or change safety configuration.
+- `edit`/`write`/`read` approval fingerprints are path-level
+  (`edit:<path>`), so a grant for one file never leaks to other paths.
+- `edit`/`write` re-verify the authorized path immediately before the write
+  (`Policy::verify_resolved`), closing the symlink-swap TOCTOU window.
+- `edit` rejects empty `oldText` and non-unique matches with a deterministic
+  `edit_not_unique` error (with match line numbers); a not-found `oldText`
+  error now guides the model to re-read the file and add context.
+
 ## Out of scope
 
 - Per-file diff / move-destination analysis beyond the write target path
@@ -140,6 +154,18 @@ workspace write approval request (edit / write)
 - [ ] Non-write tools (`bash`, `process`, `read`) are unaffected: no safety
       assessment is applied and their approval behavior is unchanged
       (fixture: hostd gateway test + existing registry tests).
+- [ ] Default deny covers `.piko/`: `write`/`edit` targeting
+      `.piko/approvals.json` fail with `access_denied` and leave the file
+      untouched (fixture: workspace handler test).
+- [ ] `edit`/`write` fingerprints include the target path, and a grant for
+      one path does not match another (fixture: approval fingerprint unit
+      test).
+- [ ] `edit` rejects empty `oldText` (`edit_requires_old_text`), rejects
+      non-unique matches (`edit_not_unique` with line numbers), and returns
+      an actionable `edit_not_found` message (fixture: workspace handler
+      tests).
+- [ ] Write-path re-verification accepts stable paths and rejects a swapped
+      symlink target (fixture: `piko-sandbox` policy test).
 
 ## Product decisions
 
@@ -150,6 +176,7 @@ workspace write approval request (edit / write)
 | Out-of-roots writes: ask or reject? | Deterministic reject | Execution denies them regardless of approval; a prompt would be a dead decision. |
 | Assessment order vs. guardian | Safety first | Deterministic policy wins over model review; the guardian never sees a request the policy can decide. |
 | One-shot semantics | No store grant | Mirrors F-11 one-shot allows; every write is re-assessed so grants never bypass the policy gate. |
+| Default deny scope | `.git/` + `.piko/` | hostd state (approvals, project settings) must not be writable by workspace tools; a self-grant via the approvals file would bypass the human approval layer. |
 
 ## Fusion decisions (codex-rs)
 

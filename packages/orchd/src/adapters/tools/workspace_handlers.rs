@@ -6,7 +6,7 @@
 // `shell_handlers.rs` and the long-lived `process` tool in
 // `process_handlers.rs` (F-08 slice 2).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use piko_sandbox::policy::{Access, Policy};
 
@@ -153,14 +153,13 @@ fn environment_tool_def() -> ToolDef {
 /// Execute the file tools (read/edit/write). The provider routes `bash`,
 /// `process`, and `environment` to their dedicated handlers.
 pub(super) async fn execute_workspace_tool(
+    cwd: &Path,
     policy: &Policy,
     call: &ToolCall,
     _ctx: &ToolExecutionContext,
 ) -> ToolExecResult {
     let tool_name = call.name.as_str();
     let arguments = &call.arguments;
-
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     match tool_name {
         "read" => {
@@ -171,7 +170,7 @@ pub(super) async fn execute_workspace_tool(
                 .unwrap_or(1) as usize;
             let limit = arguments.get("limit").and_then(|v| v.as_u64());
 
-            match policy.authorize(&cwd, Path::new(path), Access::Read, true) {
+            match policy.authorize(cwd, Path::new(path), Access::Read, true) {
                 Ok(resolved) => match tokio::fs::read_to_string(&resolved).await {
                     Ok(content) => {
                         let lines: Vec<&str> = content.lines().collect();
@@ -217,7 +216,7 @@ pub(super) async fn execute_workspace_tool(
             let path = arguments.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let edits = arguments.get("edits").and_then(|v| v.as_array());
 
-            match policy.authorize(&cwd, Path::new(path), Access::Write, true) {
+            match policy.authorize(cwd, Path::new(path), Access::Write, true) {
                 Ok(resolved) => {
                     let content = match tokio::fs::read_to_string(&resolved).await {
                         Ok(c) => c,
@@ -239,24 +238,80 @@ pub(super) async fn execute_workspace_tool(
                         for edit in edit_list {
                             let old = edit.get("oldText").and_then(|v| v.as_str()).unwrap_or("");
                             let new = edit.get("newText").and_then(|v| v.as_str()).unwrap_or("");
-                            if let Some(pos) = modified.find(old) {
-                                let start = pos;
-                                let end = pos + old.len();
-                                modified.replace_range(start..end, new);
-                            } else {
+                            if old.is_empty() {
                                 return ToolExecResult {
                                     ok: false,
                                     value: None,
                                     error: Some(ToolExecError {
-                                        code: "edit_not_found".into(),
-                                        message: format!(
-                                            "oldText not found in file: '{}'",
-                                            &old[..old.len().min(80)]
-                                        ),
+                                        code: "edit_requires_old_text".into(),
+                                        message:
+                                            "oldText must not be empty; include the exact text to replace"
+                                                .into(),
                                         retryable: Some(false),
                                     }),
                                 };
                             }
+                            let positions: Vec<usize> =
+                                modified.match_indices(old).map(|(pos, _)| pos).collect();
+                            match positions.len() {
+                                1 => {
+                                    let start = positions[0];
+                                    modified.replace_range(start..start + old.len(), new);
+                                }
+                                0 => {
+                                    return ToolExecResult {
+                                        ok: false,
+                                        value: None,
+                                        error: Some(ToolExecError {
+                                            code: "edit_not_found".into(),
+                                            message: format!(
+                                                "oldText not found in file: '{}'. Read the file and provide the exact text with more surrounding context.",
+                                                &old[..old.len().min(80)]
+                                            ),
+                                            retryable: Some(false),
+                                        }),
+                                    };
+                                }
+                                n => {
+                                    let lines: Vec<String> = positions
+                                        .iter()
+                                        .take(3)
+                                        .map(|pos| {
+                                            (modified[..*pos].matches('\n').count() + 1).to_string()
+                                        })
+                                        .collect();
+                                    return ToolExecResult {
+                                        ok: false,
+                                        value: None,
+                                        error: Some(ToolExecError {
+                                            code: "edit_not_unique".into(),
+                                            message: format!(
+                                                "oldText matches {n} times in file (at line{} {}); add more surrounding context so the match is unique, or split it into separate edits.",
+                                                if n > 1 { "s" } else { "" },
+                                                lines.join(", ")
+                                            ),
+                                            retryable: Some(false),
+                                        }),
+                                    };
+                                }
+                            }
+                        }
+                        if let Err(e) = policy.verify_resolved(
+                            cwd,
+                            Path::new(path),
+                            Access::Write,
+                            true,
+                            &resolved,
+                        ) {
+                            return ToolExecResult {
+                                ok: false,
+                                value: None,
+                                error: Some(ToolExecError {
+                                    code: "access_denied".into(),
+                                    message: e.to_string(),
+                                    retryable: Some(false),
+                                }),
+                            };
                         }
                         match tokio::fs::write(&resolved, &modified).await {
                             Ok(_) => ToolExecResult {
@@ -307,7 +362,7 @@ pub(super) async fn execute_workspace_tool(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
-            match policy.authorize(&cwd, Path::new(path), Access::Write, false) {
+            match policy.authorize(cwd, Path::new(path), Access::Write, false) {
                 Ok(resolved) => {
                     if let Some(parent) = resolved.parent()
                         && let Err(e) = tokio::fs::create_dir_all(parent).await
@@ -317,6 +372,23 @@ pub(super) async fn execute_workspace_tool(
                             value: None,
                             error: Some(ToolExecError {
                                 code: "io_error".into(),
+                                message: e.to_string(),
+                                retryable: Some(false),
+                            }),
+                        };
+                    }
+                    if let Err(e) = policy.verify_resolved(
+                        cwd,
+                        Path::new(path),
+                        Access::Write,
+                        false,
+                        &resolved,
+                    ) {
+                        return ToolExecResult {
+                            ok: false,
+                            value: None,
+                            error: Some(ToolExecError {
+                                code: "access_denied".into(),
                                 message: e.to_string(),
                                 retryable: Some(false),
                             }),
@@ -359,5 +431,201 @@ pub(super) async fn execute_workspace_tool(
                 retryable: Some(false),
             }),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::tools::call::ToolCall;
+    use piko_orchd_api::tools::ToolExecutionContext;
+    use std::path::PathBuf;
+
+    fn policy() -> Policy {
+        Policy {
+            version: 1,
+            read: vec![PathBuf::from(".")],
+            write: vec![PathBuf::from(".")],
+            deny: vec![PathBuf::from(".git"), PathBuf::from(".piko")],
+            allowed_commands: vec![],
+            allow_network: false,
+        }
+    }
+
+    fn context() -> ToolExecutionContext {
+        ToolExecutionContext {
+            session_id: "session".into(),
+            agent_instance_id: "agent".into(),
+            execution_id: "exec".into(),
+            cancellation: None,
+            agent_id: "root".into(),
+            tool_set_ids: vec![],
+            turn_index: None,
+            event_seq: None,
+            next_event_seq: None,
+            parent_message_id: None,
+            content_index: None,
+            tool_call_index: Some(0),
+            tool_entity_id: Some("entity".into()),
+            host_context: None,
+            source_turn_id: None,
+            context_remaining: None,
+        }
+    }
+
+    fn call(name: &str, args: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: "call-1".into(),
+            name: name.into(),
+            arguments: args,
+            partial_json: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn edit_applies_unique_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("a.rs"), "fn one() {}\nfn two() {}\n").unwrap();
+
+        let result = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "edit",
+                serde_json::json!({
+                    "path": "a.rs",
+                    "edits": [{ "oldText": "fn one() {}", "newText": "fn renamed() {}" }]
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        assert!(result.ok, "{:?}", result.error);
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("a.rs")).unwrap(),
+            "fn renamed() {}\nfn two() {}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_rejects_empty_old_text() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("a.rs"), "fn one() {}\n").unwrap();
+
+        let result = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "edit",
+                serde_json::json!({
+                    "path": "a.rs",
+                    "edits": [{ "oldText": "", "newText": "x" }]
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        let error = result.error.expect("empty oldText must fail");
+        assert_eq!(error.code, "edit_requires_old_text");
+        assert!(!result.ok);
+    }
+
+    #[tokio::test]
+    async fn edit_rejects_non_unique_match_with_line_numbers() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("a.rs"),
+            "let x = 1;\nlet y = 2;\nlet x = 3;\n",
+        )
+        .unwrap();
+
+        let result = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "edit",
+                serde_json::json!({
+                    "path": "a.rs",
+                    "edits": [{ "oldText": "let x =", "newText": "let z =" }]
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        let error = result.error.expect("non-unique match must fail");
+        assert_eq!(error.code, "edit_not_unique");
+        assert!(error.message.contains("2 times"));
+        assert!(error.message.contains("at lines 1, 3"));
+        assert!(!result.ok);
+    }
+
+    #[tokio::test]
+    async fn edit_not_found_message_guides_the_model() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("a.rs"), "fn one() {}\n").unwrap();
+
+        let result = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "edit",
+                serde_json::json!({
+                    "path": "a.rs",
+                    "edits": [{ "oldText": "fn missing() {}", "newText": "fn x() {}" }]
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        let error = result.error.expect("missing oldText must fail");
+        assert_eq!(error.code, "edit_not_found");
+        assert!(error.message.contains("Read the file"));
+        assert!(!result.ok);
+    }
+
+    #[tokio::test]
+    async fn write_and_edit_are_denied_inside_dot_piko() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(".piko")).unwrap();
+        std::fs::write(temp.path().join(".piko/approvals.json"), "{}").unwrap();
+
+        let write = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "write",
+                serde_json::json!({
+                    "path": ".piko/approvals.json",
+                    "content": r#"{"fingerprints":{"bash:git":{"tool_name":"bash"}}}"#
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        let error = write.error.expect(".piko write must be denied");
+        assert_eq!(error.code, "access_denied");
+        assert!(!write.ok);
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".piko/approvals.json")).unwrap(),
+            "{}",
+            "approvals file must remain untouched"
+        );
+
+        let edit = execute_workspace_tool(
+            temp.path(),
+            &policy(),
+            &call(
+                "edit",
+                serde_json::json!({
+                    "path": ".piko/approvals.json",
+                    "edits": [{ "oldText": "{}", "newText": "{\"granted\":true}" }]
+                }),
+            ),
+            &context(),
+        )
+        .await;
+        let error = edit.error.expect(".piko edit must be denied");
+        assert_eq!(error.code, "access_denied");
+        assert!(!edit.ok);
     }
 }

@@ -88,7 +88,13 @@ fn permissive_sandbox_policy() -> piko_sandbox::policy::Policy {
         version: 1,
         read: vec![std::path::PathBuf::from(".")],
         write: vec![std::path::PathBuf::from(".")],
-        deny: vec![std::path::PathBuf::from(".git")],
+        deny: vec![
+            std::path::PathBuf::from(".git"),
+            // hostd's own workspace state (approvals, project settings):
+            // tools must never be able to self-grant approvals or rewrite
+            // their own configuration through `edit`/`write`.
+            std::path::PathBuf::from(".piko"),
+        ],
         allowed_commands: vec![
             "ls".into(),
             "cat".into(),

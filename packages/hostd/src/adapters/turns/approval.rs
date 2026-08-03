@@ -155,8 +155,12 @@ pub fn compute_bash_fingerprint(args: &serde_json::Value) -> String {
     format!("bash:{}", command)
 }
 
-pub fn compute_path_fingerprint(tool_name: &str, _args: &serde_json::Value) -> String {
-    tool_name.to_string()
+/// Path-level fingerprint for file tools. A grant covers exactly the target
+/// path (as written in the call), so approving `edit` for one file never
+/// leaks to other paths — including hostd state under `.piko/`.
+pub fn compute_path_fingerprint(tool_name: &str, args: &serde_json::Value) -> String {
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    format!("{tool_name}:{path}")
 }
 
 pub fn compute_fingerprint(tool_name: &str, tool_args: &serde_json::Value) -> String {
@@ -371,6 +375,21 @@ mod tests {
         // Routing through the generic entry point.
         assert_eq!(compute_fingerprint("process", &start), "bash:npm:install");
         assert_eq!(compute_fingerprint("process", &write), "process:write");
+    }
+
+    #[test]
+    fn test_compute_path_fingerprint() {
+        let edit = serde_json::json!({ "path": "src/lib.rs", "edits": [] });
+        assert_eq!(compute_fingerprint("edit", &edit), "edit:src/lib.rs");
+
+        let write = serde_json::json!({ "path": "/abs/out.md", "content": "x" });
+        assert_eq!(compute_fingerprint("write", &write), "write:/abs/out.md");
+
+        // A grant for one path never covers another path.
+        assert_ne!(
+            compute_fingerprint("edit", &serde_json::json!({ "path": "src/a.rs" })),
+            compute_fingerprint("edit", &serde_json::json!({ "path": "src/b.rs" }))
+        );
     }
 
     #[test]

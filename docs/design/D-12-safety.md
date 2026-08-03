@@ -154,16 +154,49 @@ The runner reads `request.writable_roots` (new field) and passes the session
 cwd (already resolved via `session_cwd`). Non-write tools return `AskUser`
 from the domain helper, so `bash`/`process`/`read` behavior is untouched.
 
+### 7. Security hardening (same slice)
+
+- **Deny hostd state**: the default permissive policy's deny list gains
+  `.piko/` (next to `.git/`), so `edit`/`write` cannot touch
+  `<cwd>/.piko/approvals.json` or project settings — the F-12 gate would
+  otherwise auto-approve those in-roots writes and let the model self-grant
+  approvals.
+- **Path-level fingerprints**: `compute_path_fingerprint` emits
+  `{tool}:{path}` instead of the bare tool name. A grant for one file no
+  longer covers all paths (and never covers `.piko/` state).
+- **TOCTOU re-verification**: `Policy::verify_resolved(cwd, input, access,
+  must_exist, expected)` re-resolves the original input right before the
+  write and rejects it if it no longer maps to the authorized path (symlink
+  swap between authorization and execution). Both `edit` and `write` call it
+  immediately before `tokio::fs::write`.
+- **Edit correctness**: `edit` rejects empty `oldText`
+  (`edit_requires_old_text`), non-unique matches (`edit_not_unique`, with up
+  to three match line numbers), and returns an actionable `edit_not_found`
+  message. `execute_workspace_tool` now takes an explicit `cwd` parameter so
+  the tool is testable against temp directories.
+
+Known residual risk (documented, not solved here): a hard link inside the
+writable roots pointing at a file outside is indistinguishable from a normal
+file by path checks, so the OS-level sandbox (when enabled) is the defense
+in depth for that case — the same limitation codex-rs accepts for its
+path-based sandboxes. The default command allowlist does not include link
+creation (`ln`), so the agent cannot manufacture this precondition through
+its own tools.
+
 ## Files touched
 
 | File | Change |
 |---|---|
 | `packages/sandbox/src/policy.rs` | `writable_roots()` public helper |
+| `packages/sandbox/src/policy.rs` | `verify_resolved()` TOCTOU guard + tests |
 | `packages/orchd-api/src/tools.rs` | `ToolProvider::writable_roots()` default method |
 | `packages/orchd-api/src/approval.rs` | `writable_roots` field; `SafetyRejected`; `is_approval_accepted` |
 | `packages/orchd/src/adapters/tools/workspace_provider.rs` | implement `writable_roots()` |
 | `packages/orchd/src/adapters/tools/registry.rs` | attach roots to approval request; map `SafetyRejected` |
 | `packages/orchd/src/adapters/tools/registry_tests.rs` | decision-mapping tests |
+| `packages/orchd/src/adapters/tools/workspace_handlers.rs` | explicit `cwd` param; edit uniqueness/not-found errors; `verify_resolved` before writes; `.piko` denial tests |
+| `packages/orchd/src/runtime/utils.rs` | default deny gains `.piko/` |
+| `packages/hostd/src/adapters/turns/approval.rs` | path-level fingerprints + tests |
 | `packages/hostd/src/domain/safety/mod.rs` | assessment, normalization, tests |
 | `packages/hostd/src/domain/mod.rs` | export `safety` |
 | `packages/hostd/src/domain/config/settings.rs` | `SafetySettings`, merge, defaults template |
@@ -182,6 +215,13 @@ from the domain helper, so `bash`/`process`/`read` behavior is untouched.
   `[safety]`; defaults template.
 - Registry tests: `SafetyRejected` maps to a distinct non-retryable
   `safety_rejected` error; `is_approval_accepted` is false.
+- Sandbox tests: `verify_resolved` accepts stable paths and rejects a
+  swapped symlink target.
+- Approval tests: path-level fingerprints (`edit:<path>`), one-path grants
+  never match another path.
+- Workspace handler tests: unique edit applies; empty `oldText` rejected;
+  non-unique edit rejected with line numbers; not-found message guides the
+  model; `write`/`edit` into `.piko/` denied and file untouched.
 - Hostd gateway tests with a real runner:
   - in-roots `edit` returns `Accept` without publishing a pending approval or
     writing a grant; an identical second request is assessed again;

@@ -151,6 +151,30 @@ impl Policy {
             .collect()
     }
 
+    /// Re-resolve `input` and verify it still maps to the previously
+    /// authorized `expected` path (TOCTOU guard for file writes).
+    ///
+    /// Between authorization and execution a concurrent process could swap a
+    /// symlink so the same lexical input resolves elsewhere; re-checking with
+    /// the caller's original input right before the write closes that window.
+    pub fn verify_resolved(
+        &self,
+        cwd: &Path,
+        input: &Path,
+        access: Access,
+        must_exist: bool,
+        expected: &Path,
+    ) -> Result<(), PolicyError> {
+        let resolved = self.authorize(cwd, input, access, must_exist)?;
+        if resolved != expected {
+            return Err(PolicyError::Denied(format!(
+                "path changed between authorization and execution: {}",
+                input.display()
+            )));
+        }
+        Ok(())
+    }
+
     pub fn validate_command(
         &self,
         command: &str,
@@ -483,6 +507,44 @@ mod tests {
             policy().authorize(dir.path(), Path::new(".git/config"), Access::Read, true),
             Err(PolicyError::Denied(_))
         ));
+    }
+
+    #[test]
+    fn verify_resolved_accepts_stable_paths_and_detects_swaps() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("target.txt"), "one").unwrap();
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("outside.txt"), "secret").unwrap();
+
+        let cwd = dir.path();
+        let policy = policy();
+        let resolved = policy
+            .authorize(cwd, Path::new("target.txt"), Access::Write, true)
+            .expect("in-roots file authorizes");
+
+        // A stable path verifies against its original resolution.
+        policy
+            .verify_resolved(cwd, Path::new("target.txt"), Access::Write, true, &resolved)
+            .expect("unchanged path verifies");
+
+        // Swap the target for a symlink pointing outside the roots: the
+        // re-resolution either maps elsewhere or fails authorization, and in
+        // both cases the write must not proceed.
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(dir.path().join("target.txt")).unwrap();
+            std::os::unix::fs::symlink(
+                outside.path().join("outside.txt"),
+                dir.path().join("target.txt"),
+            )
+            .unwrap();
+            assert!(
+                policy
+                    .verify_resolved(cwd, Path::new("target.txt"), Access::Write, true, &resolved)
+                    .is_err(),
+                "swapped path must fail verification"
+            );
+        }
     }
 
     #[cfg(unix)]
