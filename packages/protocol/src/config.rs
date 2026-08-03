@@ -91,6 +91,27 @@ pub struct SandboxConfig {
     /// Path to the shell binary for command execution (default: "bash").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_path: Option<String>,
+    /// Materialized permission-profile file/network policy (F-17). Applied
+    /// when no `policy_path` file is present; the execution whitelist is
+    /// inherited by the orchestrator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_profile: Option<PermissionPolicy>,
+}
+
+/// Materialized file/network policy from a permission profile (F-17).
+/// Empty rule lists inherit the orchestrator's permissive defaults per
+/// field, so partial profiles do not lock down access unexpectedly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionPolicy {
+    #[serde(default)]
+    pub read_roots: Vec<String>,
+    #[serde(default)]
+    pub write_roots: Vec<String>,
+    #[serde(default)]
+    pub deny_paths: Vec<String>,
+    #[serde(default)]
+    pub allow_network: bool,
 }
 
 /// Retry configuration for model calls.

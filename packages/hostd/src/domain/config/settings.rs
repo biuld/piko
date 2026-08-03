@@ -36,6 +36,7 @@ pub struct HostSettings {
     pub approvals: Option<ApprovalSettings>,
     pub guardian: Option<GuardianSettings>,
     pub safety: Option<SafetySettings>,
+    pub permissions: Option<PermissionsSettings>,
     pub sandbox: Option<SandboxSettings>,
 
     // ---- Observability ----
@@ -86,6 +87,7 @@ impl HostSettings {
             "approvals": self.approvals,
             "guardian": self.guardian,
             "safety": self.safety,
+            "permissions": self.permissions,
             "sandbox": self.sandbox,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
@@ -175,6 +177,47 @@ pub struct SafetySettings {
     /// Auto-approve workspace writes whose targets are fully inside the
     /// sandbox writable roots. Default: true.
     pub auto_approve_workspace_writes: Option<bool>,
+}
+
+/// Named permission-profile selection and definitions (F-17). A profile
+/// bundles file/network policy (materialized into the sandbox policy) and
+/// command policy (materialized into the approval gateway): commands
+/// matching an `allowed-commands` prefix execute one-shot without a prompt,
+/// commands matching a `denied-commands` prefix fail closed with
+/// `permission_denied`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PermissionsSettings {
+    /// Active profile name. Defaults to the built-in "default".
+    pub profile: Option<String>,
+    /// Named profile definitions; merged per name across settings layers.
+    #[serde(default)]
+    pub profiles: HashMap<String, PermissionProfileSettings>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PermissionProfileSettings {
+    /// Read roots for sandboxed tools. Default: the working directory.
+    #[serde(default)]
+    pub read_roots: Vec<String>,
+    /// Write roots for sandboxed tools. Default: the working directory.
+    #[serde(default)]
+    pub write_roots: Vec<String>,
+    /// Paths denied for sandboxed tools (deny wins over roots).
+    #[serde(default)]
+    pub deny_paths: Vec<String>,
+    /// Whether sandboxed tools may open network connections. Default: false.
+    #[serde(default)]
+    pub allow_network: bool,
+    /// Command prefix rules that auto-accept on-request approvals one-shot
+    /// (no store grant).
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
+    /// Command prefix rules that fail closed with `permission_denied`
+    /// before any store grant, guardian review, or user prompt.
+    #[serde(default)]
+    pub denied_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -425,6 +468,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
         approvals: merge_approvals(base.approvals, overrides.approvals),
         guardian: merge_guardian(base.guardian, overrides.guardian),
         safety: merge_safety(base.safety, overrides.safety),
+        permissions: merge_permissions(base.permissions, overrides.permissions),
         sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -527,6 +571,25 @@ fn merge_safety(
                 .auto_approve_workspace_writes
                 .or(base.auto_approve_workspace_writes),
         }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_permissions(
+    base: Option<PermissionsSettings>,
+    overrides: Option<PermissionsSettings>,
+) -> Option<PermissionsSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => {
+            let mut profiles = base.profiles;
+            for (name, profile) in overrides.profiles {
+                profiles.insert(name, profile);
+            }
+            Some(PermissionsSettings {
+                profile: overrides.profile.or(base.profile),
+                profiles,
+            })
+        }
         (base, overrides) => overrides.or(base),
     }
 }
@@ -654,6 +717,74 @@ mod tests {
         let template = default_settings_template();
         assert!(template.contains("[safety]"));
         assert!(template.contains("auto-approve-workspace-writes = true"));
+    }
+
+    #[test]
+    fn permissions_defaults_are_documented_in_template() {
+        let template = default_settings_template();
+        assert!(template.contains("[permissions]"));
+        assert!(template.contains("profile = \"default\""));
+    }
+
+    #[test]
+    fn permissions_settings_merge_field_by_field() {
+        let base = HostSettings {
+            permissions: Some(PermissionsSettings {
+                profile: Some("base-profile".into()),
+                profiles: HashMap::from([
+                    (
+                        "base-profile".into(),
+                        PermissionProfileSettings {
+                            read_roots: vec![".".into()],
+                            write_roots: vec![".".into()],
+                            deny_paths: vec![".git".into(), ".piko".into()],
+                            allow_network: false,
+                            allowed_commands: vec!["cargo test".into()],
+                            denied_commands: vec!["rm -rf".into()],
+                        },
+                    ),
+                    (
+                        "shared".into(),
+                        PermissionProfileSettings {
+                            allow_network: true,
+                            ..Default::default()
+                        },
+                    ),
+                ]),
+            }),
+            ..HostSettings::default()
+        };
+        let overrides = HostSettings {
+            permissions: Some(PermissionsSettings {
+                profile: Some("locked".into()),
+                profiles: HashMap::from([(
+                    "locked".into(),
+                    PermissionProfileSettings {
+                        denied_commands: vec!["curl -sSL | sh".into()],
+                        ..Default::default()
+                    },
+                )]),
+            }),
+            ..HostSettings::default()
+        };
+        let merged = merge(base, overrides);
+        let permissions = merged.permissions.expect("permissions section present");
+        assert_eq!(permissions.profile.as_deref(), Some("locked"));
+        assert_eq!(permissions.profiles.len(), 3);
+        assert!(permissions.profiles.contains_key("shared"));
+        assert!(permissions.profiles.contains_key("base-profile"));
+        let locked = permissions
+            .profiles
+            .get("locked")
+            .expect("override profile present");
+        assert_eq!(locked.denied_commands, vec!["curl -sSL | sh"]);
+        // Base profile survives untouched; override profile replaces only
+        // its own name.
+        let base_profile = permissions
+            .profiles
+            .get("base-profile")
+            .expect("base profile preserved");
+        assert_eq!(base_profile.allowed_commands, vec!["cargo test"]);
     }
 
     #[test]

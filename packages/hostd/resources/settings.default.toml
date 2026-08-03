@@ -71,6 +71,26 @@ max-consecutive-denials = 3
 # write approvals use the normal user/guardian flow.
 auto-approve-workspace-writes = true
 
+[permissions]
+# Permission profiles (F-17): named bundles of file/network policy
+# (materialized into the sandbox policy) and command policy (materialized
+# into the approval gateway). `profile` selects the active profile; the
+# built-in "default" mirrors the permissive sandbox defaults and has no
+# command rules. Profiles merge across global/project/override settings.
+# The built-in default is the same as configuring nothing, so the section is
+# purely opt-in:
+# profile = "default"
+
+# Example: a project profile that locks down network access and blocks
+# destructive commands before they can prompt or run.
+# [permissions.profiles.locked]
+# read-roots = ["."]
+# write-roots = ["."]
+# deny-paths = [".git", ".piko"]
+# allow-network = false
+# allowed-commands = ["cargo test", "git status", "npm test"]
+# denied-commands = ["rm -rf", "curl -sSL | sh"]
+
 [sandbox]
 # Enable sandboxed tool execution for filesystem and process security
 # enabled = false

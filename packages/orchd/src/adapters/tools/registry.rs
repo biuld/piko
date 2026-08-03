@@ -454,6 +454,10 @@ impl ToolRegistry for ToolRegistryImpl {
                                 "safety_rejected",
                                 format!("Write rejected by safety assessment: {reason}"),
                             ),
+                            ToolApprovalDecision::PermissionDenied { reason } => (
+                                "permission_denied",
+                                format!("Command denied by permission policy: {reason}"),
+                            ),
                             _ => ("declined", "User declined approval".into()),
                         };
                         return ToolExecutionRecord {

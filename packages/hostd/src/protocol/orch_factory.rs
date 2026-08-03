@@ -96,6 +96,7 @@ pub(crate) async fn build_orch_turn_runner(
             settings.approvals.as_ref(),
             settings.guardian.as_ref(),
             settings.safety.as_ref(),
+            settings.permissions.as_ref(),
             settings.transcript.as_ref(),
             crate::telemetry::handle(),
         )

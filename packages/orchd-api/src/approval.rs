@@ -52,6 +52,12 @@ pub enum ToolApprovalDecision {
     SafetyRejected {
         reason: String,
     },
+    /// The F-17 permission-profile command policy rejected the request
+    /// (the operator denied the command prefix). The tool call fails closed
+    /// with a distinct, non-retryable error that carries the reason.
+    PermissionDenied {
+        reason: String,
+    },
     AcceptSession,
     AcceptWorkspace,
     AcceptPermanent,
@@ -66,6 +72,7 @@ pub fn is_approval_accepted(decision: &ToolApprovalDecision) -> bool {
             | ToolApprovalDecision::GuardianDenied { .. }
             | ToolApprovalDecision::GuardianUnavailable
             | ToolApprovalDecision::SafetyRejected { .. }
+            | ToolApprovalDecision::PermissionDenied { .. }
     )
 }
 

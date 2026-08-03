@@ -15,6 +15,7 @@ use crate::domain::config::{
     TranscriptSettings,
 };
 use crate::domain::guardian::{GuardianConfig, GuardianReviewCallback, GuardianState};
+use crate::domain::permissions::{PermissionConfig, ResolvedPermissions};
 use crate::domain::safety::SafetyConfig;
 
 mod agent_commit;
@@ -50,6 +51,7 @@ pub struct OrchAgentRunRunner {
     guardian_review: Arc<std::sync::RwLock<Option<GuardianReviewCallback>>>,
     guardian_states: Arc<std::sync::Mutex<HashMap<String, GuardianState>>>,
     safety_config: SafetyConfig,
+    permission_config: PermissionConfig,
     session_contexts: Arc<std::sync::Mutex<HashMap<String, String>>>,
     session_attach_locks: Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     observation_router: Arc<observation_router::SessionObservationRouter>,
@@ -97,6 +99,7 @@ impl OrchAgentRunRunner {
             None,
             None,
             None,
+            None,
             crate::telemetry::handle(),
         )
         .await
@@ -117,6 +120,7 @@ impl OrchAgentRunRunner {
         approval_settings: Option<&ApprovalSettings>,
         guardian_settings: Option<&GuardianSettings>,
         safety_settings: Option<&SafetySettings>,
+        permissions_settings: Option<&crate::domain::config::PermissionsSettings>,
         transcript: Option<&TranscriptSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
@@ -141,13 +145,31 @@ impl OrchAgentRunRunner {
             ..Default::default()
         };
 
-        let sandbox = sandbox_settings
+        let mut sandbox = sandbox_settings
             .map(|s| SandboxConfig {
                 enabled: s.enabled.unwrap_or(false),
                 policy_path: s.policy_path.clone(),
                 shell_path: s.shell_path.clone(),
+                policy_profile: None,
             })
             .unwrap_or_default();
+
+        // F-17 permission profiles: materialize the resolved profile's
+        // file/network policy into the sandbox config (the orchestrator
+        // inherits the execution whitelist). Command rules go to the
+        // approval gateway via `permission_config`.
+        let resolved_permissions: ResolvedPermissions =
+            crate::domain::permissions::resolve_permissions(permissions_settings);
+        let permission_config = resolved_permissions.config.clone();
+        if resolved_permissions.materialize {
+            let profile = &resolved_permissions.profile;
+            sandbox.policy_profile = Some(piko_protocol::config::PermissionPolicy {
+                read_roots: profile.read_roots.clone(),
+                write_roots: profile.write_roots.clone(),
+                deny_paths: profile.deny_paths.clone(),
+                allow_network: profile.allow_network,
+            });
+        }
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let agents = crate::adapters::prompts::agent_loader::load_agents(&cwd);
@@ -198,6 +220,7 @@ impl OrchAgentRunRunner {
             guardian_review: Arc::new(std::sync::RwLock::new(None)),
             guardian_states: Arc::new(std::sync::Mutex::new(HashMap::new())),
             safety_config: SafetyConfig::from_settings(safety_settings),
+            permission_config,
             session_contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
             session_attach_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),

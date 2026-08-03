@@ -55,6 +55,7 @@ async fn guardian_runner(
         }),
         None,
         None,
+        None,
         crate::telemetry::handle(),
     )
     .await;
@@ -77,6 +78,7 @@ async fn safety_runner(safety: Option<&SafetySettings>) -> super::OrchAgentRunRu
         None,
         None,
         safety,
+        None,
         None,
         crate::telemetry::handle(),
     )
@@ -764,5 +766,147 @@ async fn safety_never_assesses_non_write_tools() {
     let mut request = approval_request("s1", "bash", "a1");
     request.writable_roots = Some(vec!["/workspace".into()]);
     let decision = user_flow_resolves(&runner, request, "a1").await;
+    assert_eq!(decision, ToolApprovalDecision::Accept);
+}
+
+async fn permission_runner(
+    settings: Option<&crate::domain::config::PermissionsSettings>,
+) -> super::OrchAgentRunRunner {
+    super::OrchAgentRunRunner::new_with_mcp(
+        Arc::new(DirectInputGateway),
+        "test",
+        "key",
+        "model",
+        None,
+        None,
+        128_000,
+        4_096,
+        &[],
+        None,
+        None,
+        None,
+        None,
+        settings,
+        None,
+        crate::telemetry::handle(),
+    )
+    .await
+}
+
+fn bash_command_request(session_id: &str, id: &str, command: &str) -> ToolApprovalRequest {
+    ToolApprovalRequest {
+        tool_entity_id: id.into(),
+        call_id: format!("call-{id}"),
+        agent_id: "main".into(),
+        agent_instance_id: "root".into(),
+        tool_name: "bash".into(),
+        tool_args: serde_json::json!({ "command": command }),
+        host_context: Some(HostSessionContext::new(session_id)),
+        writable_roots: None,
+    }
+}
+
+fn locked_settings() -> crate::domain::config::PermissionsSettings {
+    crate::domain::config::PermissionsSettings {
+        profile: Some("locked".into()),
+        profiles: std::collections::HashMap::from([(
+            "locked".into(),
+            crate::domain::config::PermissionProfileSettings {
+                allowed_commands: vec!["cargo test".into()],
+                denied_commands: vec!["rm -rf".into()],
+                ..Default::default()
+            },
+        )]),
+    }
+}
+
+#[tokio::test]
+async fn permission_denied_command_fails_closed_without_prompt() {
+    let runner = permission_runner(Some(&locked_settings())).await;
+
+    let decision = runner
+        .request_tool_approval(bash_command_request("s1", "a1", "rm -rf /tmp/x"))
+        .await;
+    match decision {
+        ToolApprovalDecision::PermissionDenied { reason } => {
+            assert!(reason.contains("rm -rf"));
+        }
+        other => panic!("expected PermissionDenied, got {other:?}"),
+    }
+    assert!(
+        runner.pending_approvals.lock().unwrap().is_empty(),
+        "no user prompt for a denied command"
+    );
+}
+
+#[tokio::test]
+async fn permission_allowed_command_accepts_one_shot_without_grant() {
+    let runner = permission_runner(Some(&locked_settings())).await;
+
+    let first = runner
+        .request_tool_approval(bash_command_request(
+            "s1",
+            "a1",
+            "cargo test -- --nocapture",
+        ))
+        .await;
+    assert_eq!(first, ToolApprovalDecision::Accept);
+    assert!(runner.pending_approvals.lock().unwrap().is_empty());
+
+    // One-shot: no store grant is written, so the identical call is
+    // evaluated again rather than served from a grant.
+    let second = runner
+        .request_tool_approval(bash_command_request(
+            "s1",
+            "a2",
+            "cargo test -- --nocapture",
+        ))
+        .await;
+    assert_eq!(second, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn permission_deny_wins_over_prior_session_grant() {
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path().display().to_string();
+    let runner = permission_runner(Some(&locked_settings())).await;
+    runner.register_session_context("s1".into(), cwd.clone());
+
+    // Simulate a prior user grant at session scope for the same command.
+    let store = runner.get_approval_store(&cwd);
+    store.grant(
+        "bash",
+        &serde_json::json!({ "command": "rm -rf /tmp/x" }),
+        crate::adapters::turns::approval::ApprovalScope::Session,
+    );
+
+    let decision = runner
+        .request_tool_approval(bash_command_request("s1", "a1", "rm -rf /tmp/x"))
+        .await;
+    match decision {
+        ToolApprovalDecision::PermissionDenied { reason } => {
+            assert!(reason.contains("rm -rf"));
+        }
+        other => panic!("expected PermissionDenied despite prior grant, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn permission_non_matching_command_keeps_user_flow() {
+    let runner = permission_runner(Some(&locked_settings())).await;
+    let decision =
+        user_flow_resolves(&runner, bash_command_request("s1", "a1", "ls -la"), "a1").await;
+    assert_eq!(decision, ToolApprovalDecision::Accept);
+}
+
+#[tokio::test]
+async fn permission_non_command_tools_are_unaffected() {
+    let runner = permission_runner(Some(&locked_settings())).await;
+    let decision = user_flow_resolves(
+        &runner,
+        write_request("s1", "edit", "a1", "src/lib.rs", None),
+        "a1",
+    )
+    .await;
     assert_eq!(decision, ToolApprovalDecision::Accept);
 }

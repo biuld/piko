@@ -4,12 +4,52 @@ use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest}
 use super::OrchAgentRunRunner;
 use crate::adapters::turns::approval::ApprovalScope;
 use crate::domain::guardian::{GuardianConfig, GuardianReviewRequest, GuardianState};
+use crate::domain::permissions::CommandDecision;
 use crate::domain::safety::WriteSafetyDecision;
 
 #[async_trait]
 impl ApprovalGateway for OrchAgentRunRunner {
     async fn request_tool_approval(&self, request: ToolApprovalRequest) -> ToolApprovalDecision {
         let _prompt_turn = self.prompt_gate.lock().await;
+
+        // F-17 permission profiles: operator command policy is the strongest
+        // gate. A denied prefix fails closed before store grants, guardian
+        // review, and user prompts; an allowed prefix auto-accepts one-shot
+        // (no store grant), so a later non-matching command is assessed
+        // again.
+        match crate::domain::permissions::evaluate_command(
+            &request.tool_name,
+            &request.tool_args,
+            &self.permission_config,
+        ) {
+            Some(CommandDecision::Deny { prefix }) => {
+                tracing::event!(
+                    target: "tool.approval",
+                    tracing::Level::WARN,
+                    tool = %request.tool_name,
+                    tool_call_id = %request.tool_entity_id,
+                    agent_instance_id = %request.agent_instance_id,
+                    prefix = %prefix,
+                    "Permission policy denied command (fail closed)"
+                );
+                return ToolApprovalDecision::PermissionDenied {
+                    reason: format!("command prefix '{prefix}' is denied by permission policy"),
+                };
+            }
+            Some(CommandDecision::Allow) => {
+                tracing::event!(
+                    target: "tool.approval",
+                    tracing::Level::INFO,
+                    tool = %request.tool_name,
+                    tool_call_id = %request.tool_entity_id,
+                    agent_instance_id = %request.agent_instance_id,
+                    "Permission policy allowed command (one-shot, no grant)"
+                );
+                return ToolApprovalDecision::Accept;
+            }
+            None => {}
+        }
+
         let cwd = request
             .host_context
             .as_ref()

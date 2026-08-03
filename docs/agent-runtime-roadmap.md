@@ -89,7 +89,8 @@ Goal: on-request approvals scale without weakening safety.
 |---|---|---|
 | F-11 guardian | auto-review loop (host-owned bounded review, strict JSON, fail-closed timeout/malformed); per-session circuit breaker with user escalation/reset | implemented (F-11/D-11/V-11) |
 | F-12 safety | patch-safety assessment; elicitation pause; attestation | implemented (slice 1: deterministic write-safety gate, F-12/D-12/V-12); elicitation pause deferred until a consumer; attestation rejected (no piko consumer) |
-| M-config | permission-profile materialization; managed features; agent roles | planned |
+| F-17 permission-profiles | named profiles (file/network policy → sandbox policy; command allow/deny prefix rules → approval gateway) | implemented (F-17/D-20/V-20) |
+| M-config | managed features; agent roles | planned |
 
 ### M4 — Ecosystem
 
@@ -212,5 +213,14 @@ read-only `environment` tool.
    (`[safety] auto-approve-workspace-writes`, default `true`). Elicitation
    pause is deferred to an F-12 slice 2 until a piko consumer exists
    (blocking process-output waits or MCP auth elicitation); attestation is
-   rejected (no piko consumer; OpenAI host-integration specific). Next in
-   M3: F-12 slice 2 (elicitation pause) and M-config permission profiles.
+   rejected (no piko consumer; OpenAI host-integration specific). **F-17
+   permission profiles landed** (`F-17/D-20/V-20`): `[permissions]`
+   settings carry named profiles merged across global/project/override that
+   materialize file/network policy (read/write roots, deny paths, network
+   allow) into the sandbox policy and command policy (token-boundary prefix
+   rules) into the approval gateway — denied prefixes fail closed with
+   `permission_denied` before grants/prompts, allowed prefixes accept
+   one-shot without a store grant, the built-in `default` profile never
+   materializes (no behavior change), and `[sandbox] policy-path` files
+   still win for the sandbox policy. Next in M3: F-12 slice 2 (elicitation
+   pause) and M-config managed features / agent roles.

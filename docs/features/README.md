@@ -31,3 +31,4 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-14 | skills-plugins | Skills engine, plugin install/list | planned | core/src/skills.rs, plugins/ |
 | F-15 | observability | End-to-end tracing (turn → agent → model step → tool → child agent), OTLP HTTP export + metrics, rollout, turn timing, usage statistics | implemented (F-15/D-15/V-15; tracing + metrics slice) | core/src/otel_init.rs, rollout*.rs, turn_timing.rs |
 | F-16 | realtime (extension) | Realtime audio/text sessions, multimodal preparation | planned (deferred) | core/src/realtime_*, audio_preparation.rs, image_preparation.rs |
+| F-17 | permission-profiles | Named permission profiles (file/network policy materialized into the sandbox policy; command allow/deny prefix rules materialized into the approval gateway) | implemented (F-17/D-20/V-20) | core/src/config/* (permissions, permission-profile catalog) |
