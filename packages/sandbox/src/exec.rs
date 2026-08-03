@@ -12,6 +12,9 @@ use std::time::Duration;
 
 use crate::policy::Policy;
 
+pub mod env;
+#[cfg(unix)]
+pub mod process;
 #[cfg(unix)]
 mod unix;
 
@@ -26,32 +29,30 @@ pub struct ShellSnapshot {
 
 impl ShellSnapshot {
     /// Shell resolution precedence: configured override → `$SHELL` →
-    /// platform default (`bash`).
+    /// known candidates, validated as usable (delegates to environment
+    /// discovery).
     pub fn resolve(configured: Option<&str>) -> String {
-        let non_empty = |s: &str| !s.trim().is_empty();
-        if let Some(shell) = configured.filter(|s| non_empty(s)) {
-            return shell.to_string();
-        }
-        if let Some(shell) = std::env::var("SHELL").ok().filter(|s| non_empty(s)) {
-            return shell;
-        }
-        "bash".to_string()
+        env::resolve_shell(configured)
     }
 
     /// Capture the bootstrap cwd and environment. Loader-injection
     /// variables (`DYLD_*`/`LD_*`) are dropped up-front — they are stripped
-    /// by seatbelt anyway — and `PATH` is guaranteed present.
+    /// by seatbelt anyway — and `PATH` is normalized via environment
+    /// discovery (F-08 slice 2), with `TERM` guaranteed for PTY tools.
     pub fn capture(configured: Option<&str>) -> Self {
-        let shell_path = Self::resolve(configured);
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let profile = env::EnvironmentProfile::discover(configured);
+        let shell_path = profile.shell.clone();
+        let cwd = profile.cwd.clone();
         let mut env: Vec<(String, String)> = std::env::vars()
             .filter(|(key, _)| !(key.starts_with("DYLD_") || key.starts_with("LD_")))
             .collect();
-        if !env.iter().any(|(key, _)| key == "PATH") {
-            env.push((
-                "PATH".to_string(),
-                "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
-            ));
+        let path_string = profile.path_string();
+        match env.iter_mut().find(|(key, _)| key == "PATH") {
+            Some((_, value)) => *value = path_string,
+            None => env.push(("PATH".to_string(), path_string)),
+        }
+        if !env.iter().any(|(key, _)| key == "TERM") {
+            env.push(("TERM".to_string(), "xterm-256color".to_string()));
         }
         Self {
             shell_path,
@@ -145,7 +146,7 @@ mod tests {
     use super::*;
 
     /// Tests that mutate process env vars must run one at a time.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(super) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Runner tests pin bash so they are independent of the host `$SHELL`
     /// (e.g. fish on this machine).

@@ -76,7 +76,7 @@ fail-closed sandboxing.
 | Feature | Slice | Status |
 |---|---|---|
 | F-08 exec-sandboxing | PTY/process-group lifecycle; shell snapshots; network sandbox; `bash` tool wired through the runner | implemented (slice 1, D-08/V-08) |
-| F-08 exec-sandboxing | unified long-lived processes; environment selection | planned |
+| F-08 exec-sandboxing | unified long-lived processes (process manager + `process` tool); environment capability selection (`environment` tool) | implemented (slice 2, D-19/V-19) |
 
 Dependency: M2 builds on F-06 tool routes (shell tool) and M0 F-01
 cancellation.
@@ -182,12 +182,15 @@ snapshot resolves once (`shell_path` → `$SHELL` → default), and network
 allow/deny is explicit on macOS seatbelt and Linux bwrap (including
 `--share-net`). The blocking `runner::exec` path was refactored onto the
 same wrapper builder so the two execution paths cannot drift. Remaining
-sequencing:
+sequencing: **M2 is complete** — `F-08` slice 2 landed (`D-19/V-19`): a
+`ProcessManager` in `piko-sandbox` owns PTY processes across tool calls
+(`process` tool: start with cwd/env overrides, `write_stdin`, incremental
+output reads, group stop, list), the workspace provider owns the manager and
+cleans up on drop, and environment capability discovery (usable shell
+resolution, PATH normalization, common-tool probing) is exposed through a
+read-only `environment` tool.
 
-1. **M2 — F-08 slice 2**: unified long-lived processes (background
-   processes, `write_stdin` interactivity) and environment capability
-   selection — the next execution-depth slice.
-2. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
+1. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
    cache-planning polish.
-3. M1 residue worth tracking under M6: F-15 per-turn usage accounting
+2. M1 residue worth tracking under M6: F-15 per-turn usage accounting
    (baseline for budget decisions) remains partial.

@@ -1,8 +1,8 @@
 # F-08: Command execution & sandboxing
 
-> Status: slice 1 implemented (PTY/process-group lifecycle, shell snapshots,
-> network sandbox); remaining slices planned (unified long-lived processes,
-> environment selection)
+> Status: implemented (slice 1: PTY/process-group lifecycle, shell snapshots,
+> network sandbox; slice 2: unified long-lived processes, environment
+> capability selection)
 > Priority: P1
 > Source evidence: codex-rs `core/src/exec.rs`, `core/src/spawn.rs`,
 > `core/src/shell.rs`, `core/src/shell_snapshot.rs`,
@@ -20,8 +20,11 @@ network policy of `piko-sandbox`. The entry slice replaces the current
 unsandboxed `bash` tool path (plain `tokio::process::Command` behind a static
 command-name check) with the sandbox runner and adds process-group lifecycle,
 shell-snapshot resolution, and explicit network allow/deny on both macOS and
-Linux. Follow-on slices add unified long-lived (background) processes and
-environment capability selection.
+Linux. Slice 2 completes the block: a `ProcessManager` keeps PTY processes
+alive across tool calls (`write_stdin`, incremental output reads, group
+termination) exposed through a `process` tool, and environment capability
+discovery (usable shell resolution, PATH normalization, common-tool probing)
+is surfaced through an `environment` tool.
 
 ## Problem
 
@@ -77,15 +80,19 @@ environment capability selection.
   on both macOS (seatbelt) and Linux (bwrap `--share-net` / unshared netns).
 - Wire the built-in `bash` tool through the sandbox runner with
   timeout argument and runtime cancellation token.
+- Long-lived PTY processes: a process manager owned by the workspace tool
+  provider, with `start` (optional cwd/env overrides), `write_stdin`, read of
+  accumulated output since the last read, group `stop`, and `list`.
+- Environment capability discovery: usable shell resolution (configured →
+  `$SHELL` → candidates), PATH normalization/dedup, and probing for common
+  tools, exposed to the model through an `environment` tool.
 
 ## Out of scope
 
-- Unified long-lived / background processes (`write_stdin`-style interactivity
-  with a running process across tool calls) — follow-on slice.
-- Environment capability discovery (`environment_selection`) and PATH
-  canonicalization of commands — follow-on slice.
 - Network proxy support (`network_proxy`) and per-command network decisions.
 - Windows sandbox backends.
+- Per-command PATH canonicalization against the policy allowlist (the static
+  `validate_command` fast-fail remains; the OS sandbox is the boundary).
 - Provider-level output formatting; the runner returns bounded raw output and
   the tool layer truncates.
 
@@ -156,6 +163,15 @@ environment capability selection.
       erroring out.
 - [ ] The existing file-policy tests and tool-batch tests still pass
       (differential regression).
+- [ ] A `process start` keeps the command running across tool calls: output
+      accumulates and is readable incrementally, stdin writes reach the
+      process, and `stop` terminates the whole process group.
+- [ ] Unknown process ids produce a bounded error, and a process-list call
+      reflects current live processes.
+- [ ] The environment tool reports the resolved shell, OS/arch, cwd, PATH,
+      and detected tools without exposing credentials.
+- [ ] Shell resolution falls back to a usable shell when the configured
+      shell is unavailable.
 
 ## Product decisions
 

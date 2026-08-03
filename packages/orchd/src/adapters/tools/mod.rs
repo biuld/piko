@@ -3,7 +3,9 @@
 mod catalog;
 pub mod context_tools_provider;
 pub mod multi_agent_provider;
+mod process_handlers;
 pub mod registry;
+mod shell_handlers;
 pub mod todo_provider;
 pub mod user_interaction_provider;
 mod workspace_handlers;

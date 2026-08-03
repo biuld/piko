@@ -165,9 +165,10 @@ is exceeded.
   cancellation grace; shell selection/snapshot for reuse; fail-closed
   filesystem/network/command policy; platform sandboxes; unified exec with
   long-lived processes; environment capability discovery.
-- piko status: **partial** — `F-08 exec-sandboxing` slice 1 landed
-  (PTY/process-group lifecycle, shell snapshots, network sandbox;
-  `D-08`/`V-08`). Gaps: unified long-lived processes, environment selection.
+- piko status: **implemented** — `F-08 exec-sandboxing` complete
+  (slice 1: PTY/process-group lifecycle, shell snapshots, network sandbox,
+  `D-08`/`V-08`; slice 2: unified long-lived processes + environment
+  capability selection, `D-19`/`V-19`).
 
 ### H. Session Persistence, Threads & Resume
 
@@ -269,7 +270,7 @@ is exceeded.
 | D Context & Compaction | F-04, F-05 | partial (F-04 slices + F-05 landed) | world-state diffing landed; token-budget context fragments next |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
 | F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop, elicitation |
-| G Exec & Sandbox | F-08 | partial (slice 1 landed) | unified long-lived processes, environment selection |
+| G Exec & Sandbox | F-08 | implemented | — |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
 | I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | MCP resources, hooks |

@@ -43,7 +43,7 @@ pub(super) async fn run(config: SpawnConfig) -> Result<CommandOutcome, ExecError
         None => None,
     };
 
-    let outcome = run_once(&config, &cwd, wrapper.as_ref()).await?;
+    let outcome = run_once(&config, spawn_pty(&config, &cwd, wrapper.as_ref())?).await?;
 
     // Nested-sandbox SIGABRT not covered by the APP_SANDBOX_CONTAINER_ID
     // heuristic: retry once without the OS wrapper (mirrors runner.rs).
@@ -53,21 +53,29 @@ pub(super) async fn run(config: SpawnConfig) -> Result<CommandOutcome, ExecError
             "piko-sandbox: sandbox-exec SIGABRT detected (likely nested sandbox). \
              Falling back to direct execution."
         );
-        return run_once(&config, &cwd, None).await;
+        return run_once(&config, spawn_pty(&config, &cwd, None)?).await;
     }
 
     Ok(outcome)
 }
 
-async fn run_once(
+/// A spawned PTY process: the child plus its process-group id and master fd.
+pub(super) struct SpawnedPty {
+    pub child: tokio::process::Child,
+    pub pid: u32,
+    pub master: tokio::io::unix::AsyncFd<std::fs::File>,
+}
+
+/// Allocate a PTY, spawn `<wrapper args> -- <shell> -c <command>` (or
+/// `<shell> -c <command>` without a wrapper) as a session/process-group
+/// leader, and return the child plus its non-blocking master fd.
+pub(super) fn spawn_pty(
     config: &SpawnConfig,
     cwd: &Path,
     wrapper: Option<&SandboxCommand>,
-) -> Result<CommandOutcome, ExecError> {
+) -> Result<SpawnedPty, ExecError> {
     let (master, slave) = open_pty()?;
 
-    // Build the command line: `<wrapper args> -- <shell> -c <command>` when
-    // an OS wrapper applies, otherwise `<shell> -c <command>`.
     let mut cmd = if let Some(wrapper) = wrapper {
         let mut cmd = Command::new(&wrapper.program);
         cmd.args(&wrapper.args).arg(&config.shell.shell_path);
@@ -103,7 +111,7 @@ async fn run_once(
         });
     }
 
-    let mut child = cmd.spawn()?;
+    let child = cmd.spawn()?;
     let pid = child
         .id()
         .ok_or_else(|| std::io::Error::other("spawned process has no pid"))?;
@@ -123,6 +131,16 @@ async fn run_once(
     }
     let master_file = unsafe { std::fs::File::from_raw_fd(master) };
     let master = tokio::io::unix::AsyncFd::new(master_file)?;
+
+    Ok(SpawnedPty { child, pid, master })
+}
+
+async fn run_once(config: &SpawnConfig, spawned: SpawnedPty) -> Result<CommandOutcome, ExecError> {
+    let SpawnedPty {
+        mut child,
+        pid,
+        master,
+    } = spawned;
 
     let output_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let truncated = Arc::new(AtomicBool::new(false));
@@ -183,7 +201,7 @@ async fn run_once(
         }
     } else {
         tokio::select! {
-        st = child.wait() => (false, false, map_status(st.expect("child wait"))),
+            st = child.wait() => (false, false, map_status(st.expect("child wait"))),
             _ = cancel_future => {
                 (false, true, terminate_and_wait(&mut child, pid, config.kill_grace).await)
             }
@@ -227,14 +245,14 @@ async fn terminate_and_wait(
     }
 }
 
-fn kill_group(pid: u32, signal: i32) {
+pub(super) fn kill_group(pid: u32, signal: i32) {
     // A negative pid targets the whole process group (pgid == pid).
     unsafe {
         libc::kill(-(pid as i32), signal);
     }
 }
 
-fn map_status(status: std::process::ExitStatus) -> ExitStatus {
+pub(super) fn map_status(status: std::process::ExitStatus) -> ExitStatus {
     use std::os::unix::process::ExitStatusExt;
     ExitStatus {
         code: status.code(),
