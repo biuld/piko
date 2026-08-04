@@ -28,8 +28,10 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-11 | guardian | Automatic approval review loop | implemented (F-11/D-11/V-11) | core/src/guardian/ |
 | F-12 | safety | Deterministic write-safety gate (patch-safety assessment); elicitation pause deferred; attestation rejected | implemented (F-12/D-12/V-12; patch-safety slice 1) | core/src/safety.rs, elicitation.rs, attestation.rs |
 | F-13 | mcp-integration | MCP client/server, resource and tool exposure | planned | core/src/mcp*.rs |
-| F-14 | skills-plugins | Skills engine, plugin install/list | planned | core/src/skills.rs, plugins/ |
+| F-14 | skills-plugins | Skills engine, plugin install/list | partial (loader + prompt injection); plugin system and hooks deferred (no piko consumer) | core/src/skills.rs, plugins/ |
 | F-15 | observability | End-to-end tracing (turn → agent → model step → tool → child agent), OTLP HTTP export + metrics, rollout, turn timing, usage statistics | implemented (F-15/D-15/V-15; tracing + metrics slice) | core/src/otel_init.rs, rollout*.rs, turn_timing.rs |
 | F-16 | realtime (extension) | Realtime audio/text sessions, multimodal preparation | planned (deferred) | core/src/realtime_*, audio_preparation.rs, image_preparation.rs |
 | F-17 | permission-profiles | Named permission profiles (file/network policy materialized into the sandbox policy; command allow/deny prefix rules materialized into the approval gateway) | implemented (F-17/D-20/V-20) | core/src/config/* (permissions, permission-profile catalog) |
 | F-18 | managed-features | Settings-declared tool-family feature flags with operator pins: disabled features are removed from the catalog, direct calls fail closed with `feature_disabled`, and `[features] managed` pins win over every layer | implemented (F-18/D-21/V-21) | features/src/*, core/src/config/managed_features.rs |
+| F-19 | agent-roles | Named role → F-17 permission-profile selection for multi-agent policies | implemented (F-19/D-22/V-22) | core/src/config/* (agent roles) |
+| F-20 | inter-agent-fragments | Detached child completion → parent retained Context on next run | implemented (F-20/D-25/V-25) | context/inter_agent_completion_message.rs, subagent_notification.rs |

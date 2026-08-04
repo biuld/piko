@@ -1,3 +1,4 @@
+pub mod agent_completion;
 pub mod agent_instance;
 pub mod agent_message;
 pub mod agent_runtime;
@@ -14,6 +15,7 @@ pub mod runtime;
 pub mod session;
 pub mod tools;
 
+pub use agent_completion::*;
 pub use agent_instance::*;
 pub use agent_message::*;
 pub use agents::*;

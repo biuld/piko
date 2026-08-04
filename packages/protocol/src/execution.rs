@@ -110,6 +110,10 @@ pub struct StartExecutionRequest {
     /// (F-04 slice 2). `None` for child agent runs without host resources.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_state: Option<Message>,
+    /// Unread detached inter-agent completions (F-20). Committed after
+    /// `world_state` and before the run input, in vector order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inter_agent_completions: Vec<Message>,
     pub input_message_id: MessageId,
     pub input: MessageContent,
     pub context: ConversationContext,
@@ -281,6 +285,7 @@ mod tests {
             },
             tool_catalog: crate::ResolvedToolCatalog::default(),
             world_state: None,
+            inter_agent_completions: Vec::new(),
             input_message_id: "msg-1".into(),
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),
@@ -291,6 +296,7 @@ mod tests {
         assert!(value.get("workId").is_none());
         assert_eq!(value["executionId"], "exec-1");
         assert_eq!(value["sourceTurnId"], "turn-1");
+        assert!(value.get("interAgentCompletions").is_none());
     }
 
     #[test]

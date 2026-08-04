@@ -1,6 +1,31 @@
 use super::*;
 
 impl AgentActor {
+    /// Unread detached reports that still need a model-visible completion
+    /// fragment on this run (F-20 / D-25). Consumed reports and reports already
+    /// present in the transcript are skipped.
+    fn pending_inter_agent_completions(&self) -> Vec<piko_protocol::Message> {
+        let mut items: Vec<&AgentInboxItem> = self
+            .inbox
+            .iter()
+            .filter(|item| item.consumed_at.is_none())
+            .filter(|item| {
+                !self.transcript.iter().any(|message| {
+                    piko_protocol::is_agent_completion_message(message, &item.report_id)
+                })
+            })
+            .collect();
+        items.sort_by(|left, right| {
+            left.committed_at
+                .cmp(&right.committed_at)
+                .then_with(|| left.report_id.cmp(&right.report_id))
+        });
+        items
+            .into_iter()
+            .map(|item| piko_protocol::agent_completion_context_message(&item.report))
+            .collect()
+    }
+
     pub(super) async fn start_execution(
         &mut self,
         request: SendAgentInputRequest,
@@ -65,6 +90,7 @@ impl AgentActor {
                         .prompt_resources
                         .as_ref()
                         .and_then(|resources| resources.world_state.clone()),
+                    inter_agent_completions: self.pending_inter_agent_completions(),
                     input_message_id: request.message_id,
                     input: request.content,
                     context: ConversationContext {

@@ -68,6 +68,11 @@ impl ExecutionActor {
             // the durable linear chain head → world-state → input.
             transcript.push_message(world_state.clone());
         }
+        // Inter-agent completions (F-20): same commit path as world-state,
+        // after world-state and before the run input.
+        for completion in &request.inter_agent_completions {
+            transcript.push_message(completion.clone());
+        }
         transcript.push_user_content(request.input.clone(), None);
         let state = ExecutionState {
             status: ExecutionStatus::Accepted,

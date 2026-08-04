@@ -164,6 +164,7 @@ fn request() -> StartExecutionRequest {
         },
         tool_catalog: piko_protocol::ResolvedToolCatalog::default(),
         world_state: None,
+        inter_agent_completions: Vec::new(),
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
         context: piko_protocol::ConversationContext::empty(),
@@ -269,6 +270,69 @@ async fn world_state_is_committed_before_input_and_pushed_into_transcript() {
         piko_protocol::Message::Context { .. }
     ));
     assert!(matches!(messages[1], piko_protocol::Message::User { .. }));
+}
+
+#[tokio::test]
+async fn inter_agent_completions_chain_after_world_state_before_input() {
+    let runtime = AgentExecutionRuntime::new(Arc::new(NoopGateway));
+    runtime
+        .attach_session(
+            "session".into(),
+            SessionExecutionPorts::new(Arc::new(NoopCommit)),
+        )
+        .await
+        .unwrap();
+
+    let mut request = request_with("execution-3", "message-3");
+    request.context.head_message_id = Some("head-1".into());
+    request.world_state = Some(piko_protocol::Message::Context {
+        content: piko_protocol::messages::MessageContent::String("world-state".into()),
+        trust: piko_protocol::ContentTrust::Trusted,
+        source: piko_protocol::PromptSource::new("run-state", "hostd/session"),
+        timestamp: None,
+    });
+    let report = piko_protocol::AgentRunReport {
+        agent_instance_id: "child".into(),
+        report_id: "report-7".into(),
+        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+            usage: piko_protocol::Usage::default(),
+        },
+        summary: "child done".into(),
+        usage: piko_protocol::Usage::default(),
+        artifacts: Vec::new(),
+    };
+    request.inter_agent_completions =
+        vec![piko_protocol::agent_completion_context_message(&report)];
+
+    let prepared = runtime
+        .prepare_execution(request, HashMap::new(), tracing::Span::none())
+        .await
+        .unwrap();
+    let world_state_id = piko_protocol::world_state_message_id("execution-3");
+    let completion_id = piko_protocol::agent_completion_message_id("report-7");
+    assert_eq!(prepared.completion_commits.len(), 1);
+    assert_eq!(prepared.completion_commits[0].message_id, completion_id);
+    assert_eq!(
+        prepared.completion_commits[0].parent_message_id.as_deref(),
+        Some(world_state_id.as_str())
+    );
+    assert_eq!(
+        prepared.input_commit.parent_message_id.as_deref(),
+        Some(completion_id.as_str()),
+        "chain is head → world-state → completion → input"
+    );
+
+    let messages = prepared
+        .actor
+        .as_ref()
+        .expect("actor")
+        .transcript_messages();
+    assert_eq!(messages.len(), 3, "world-state, completion, user");
+    assert!(matches!(
+        messages[1],
+        piko_protocol::Message::Context { .. }
+    ));
+    assert!(matches!(messages[2], piko_protocol::Message::User { .. }));
 }
 
 #[tokio::test]

@@ -242,6 +242,7 @@ impl AgentExecutionRuntime {
             agent_role,
         };
 
+        let now_ms = chrono::Utc::now().timestamp_millis();
         let world_state_commit =
             request
                 .world_state
@@ -254,25 +255,51 @@ impl AgentExecutionRuntime {
                     message_id: piko_protocol::world_state_message_id(&request.execution_id),
                     parent_message_id: request.context.head_message_id.clone(),
                     message: message.clone(),
-                    committed_at: chrono::Utc::now().timestamp_millis(),
+                    committed_at: now_ms,
                 });
-        // The durable chain must stay linear (hostd enforces parent == head):
-        // world-state first, then the input anchored on the world-state id.
+        // Linear durable chain (hostd enforces parent == head):
+        // head → world-state? → inter-agent completions… → input.
+        let mut chain_parent = world_state_commit
+            .as_ref()
+            .map(|commit| commit.message_id.clone())
+            .or_else(|| request.context.head_message_id.clone());
+        let mut completion_commits = Vec::with_capacity(request.inter_agent_completions.len());
+        for message in &request.inter_agent_completions {
+            let message_id = match message {
+                piko_protocol::Message::Context { source, .. }
+                    if source.kind == piko_protocol::AGENT_COMPLETION_SOURCE_KIND =>
+                {
+                    piko_protocol::agent_completion_message_id(&source.locator)
+                }
+                _ => {
+                    return Err(AgentApiError::InputRejected);
+                }
+            };
+            let commit = piko_protocol::execution::MessageCommit {
+                session_id: request.session_id.clone(),
+                source_turn_id: request.source_turn_id.clone(),
+                execution_id: request.execution_id.clone(),
+                agent_instance_id: request.agent_instance_id.clone(),
+                message_id: message_id.clone(),
+                parent_message_id: chain_parent.clone(),
+                message: message.clone(),
+                committed_at: now_ms,
+            };
+            chain_parent = Some(message_id);
+            completion_commits.push(commit);
+        }
         let input_commit = piko_protocol::execution::MessageCommit {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             message_id: request.input_message_id.clone(),
-            parent_message_id: world_state_commit
-                .as_ref()
-                .map(|commit| commit.message_id.clone())
-                .or_else(|| request.context.head_message_id.clone()),
+            parent_message_id: chain_parent,
             message: piko_protocol::Message::User {
                 content: request.input.clone(),
-                timestamp: Some(chrono::Utc::now().timestamp_millis()),
+                timestamp: Some(now_ms),
             },
-            committed_at: chrono::Utc::now().timestamp_millis(),
+            committed_at: now_ms,
         };
 
         let handle = ExecutionHandle {
@@ -313,6 +340,7 @@ impl AgentExecutionRuntime {
             terminal_tx: Some(terminal_tx),
             receipt,
             world_state_commit,
+            completion_commits,
             input_commit,
             trace_span,
         })
@@ -429,6 +457,7 @@ pub(crate) struct PreparedExecution {
     terminal_tx: Option<piko_comms::ReplySender<ExecutionTerminalContract, ExecutionTerminal>>,
     receipt: ExecutionReceipt,
     world_state_commit: Option<piko_protocol::execution::MessageCommit>,
+    completion_commits: Vec<piko_protocol::execution::MessageCommit>,
     input_commit: piko_protocol::execution::MessageCommit,
     trace_span: tracing::Span,
 }
@@ -474,6 +503,14 @@ impl PreparedExecution {
 
     pub async fn commit_input(&self) -> Result<(), AgentApiError> {
         if let Some(commit) = &self.world_state_commit {
+            self.scope
+                .ports()
+                .commit
+                .commit_message(commit.clone())
+                .await
+                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        }
+        for commit in &self.completion_commits {
             self.scope
                 .ports()
                 .commit

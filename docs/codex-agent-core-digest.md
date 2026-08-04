@@ -95,8 +95,9 @@ is exceeded.
   `context.model-switch`; F-03/D-03/V-03). World-state diffing landed in
   F-04 slice 2 (D-17/V-17): the run facts became a retained transcript
   Context message (full first, diff afterwards) with a hostd-owned durable
-  baseline cleared on compaction. Gaps: inter-agent message fragments,
-  mention-syntax parsing, cache-planning polish.
+  baseline cleared on compaction. Inter-agent completion fragments landed in
+  F-20/D-25/V-25 (unread detached reports → retained Context on the parent’s
+  next run). Gaps: mention-syntax parsing, cache-planning polish.
 
 ### D. Context Management & Compaction
 
@@ -199,10 +200,12 @@ is exceeded.
   config layers, agent status lifecycle, queue-only messaging with delivery
   modes, follow-up tasks, interrupts, wait with timeout, completion
   notification fragments, inter-agent telemetry.
-- piko status: **partial** — `F-10 multi-agent` (AgentInstance tree,
+-   piko status: **partial** — `F-10 multi-agent` (AgentInstance tree,
   AgentRuntime, attached/detached spawn, inbox, close/reopen, and v2
-  followup/interrupt/list/wait tools landed in F-10/D-10/V-10). Gaps:
-  agent roles; inter-agent notification fragments.
+  followup/interrupt/list/wait tools landed in F-10/D-10/V-10). Inter-agent
+  completion fragments landed in F-20/D-25/V-25 (unread detached reports
+  inject retained Context on the parent’s next run). Gaps: optional role
+  prompt/model layers beyond F-19 permission profiles.
 
 ### J. Skills, Plugins, Hooks & MCP
 
@@ -218,8 +221,8 @@ is exceeded.
   (`F-13/D-23/V-23`): stdio provider, tool discovery/execution, resources
   (`mcp_resource` list/search/read), approval templates, and bounded
   prewarm, plus a TUI `/mcp` status command + panel (`D-24/V-24`).
-  `F-14 skills-plugins` remains partial (skills loader + prompt injection).
-  Gaps: plugin system, hooks.
+  `F-14 skills-plugins`: skills loader + prompt injection landed; plugin
+  system and hooks deferred (no piko consumer; not scheduled).
 
 ### K. Realtime & Multimodal (extension)
 
@@ -275,14 +278,14 @@ is exceeded.
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
 | B Model Gateway | F-02 | partial (retry/backoff + streaming fallback landed) | prewarm, sticky routing |
-| C Prompt Assembly | F-03 | partial (world-state diffing landed in F-04 slice 2) | inter-agent fragments, mention-syntax parsing |
+| C Prompt Assembly | F-03 | partial (world-state diffing landed in F-04 slice 2; F-20 completions) | mention-syntax parsing, cache-planning polish |
 | D Context & Compaction | F-04, F-05 | partial (F-04 slices + F-05 landed) | world-state diffing landed; token-budget context fragments next |
 | E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
 | F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop landed; F-12 patch-safety landed; elicitation next |
 | G Exec & Sandbox | F-08 | implemented | — |
 | H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
-| I Multi-Agent | F-10 | partial (v2 tools landed) | agent roles, inter-agent fragments |
-| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm, TUI `/mcp` surface); gaps: plugin system, hooks |
+| I Multi-Agent | F-10 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
+| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm, TUI `/mcp` surface); F-14 skills loader + prompt injection landed; plugin system and hooks deferred (no piko consumer) |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
 | L Observability | F-15 | partial | turn timing, rollout recorder |
 | M Config & Permissions | F-12 part | partial | permission profiles, roles |

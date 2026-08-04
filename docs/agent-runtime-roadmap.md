@@ -99,8 +99,8 @@ Goal: MCP, skills, plugins, and hooks are first-class capabilities.
 | Feature | Slice | Status |
 |---|---|---|
 | F-13 mcp-integration | stdio lifecycle + tools; MCP resources/search (`mcp_resource` tool); approval templates (`[mcp.approval-templates]`); prewarm (bounded eager connect); TUI `/mcp` status command + panel | implemented (F-13/D-23/V-23; TUI surface D-24/V-24) |
-| F-14 skills-plugins | implicit skill invocation; plugin discovery/injection | partial (loader + injection) |
-| F-14 / new | hooks (additional context, input inspection) | planned |
+| F-14 skills-plugins | implicit skill invocation (skills loader + prompt injection) | partial — loader + injection landed; plugin system deferred (no piko consumer) |
+| F-14 / new | hooks (additional context, input inspection) | deferred — no piko consumer; not scheduled |
 
 ### M5 — Multi-agent depth
 
@@ -109,8 +109,8 @@ Goal: parent agents can supervise and steer children (codex-rs v2 surface).
 | Feature | Slice | Status |
 |---|---|---|
 | F-10 multi-agent | `followup_task`, `interrupt_agent`, `list_agents`, `wait_agent` | implemented (F-10/D-10/V-10) |
-| F-10 multi-agent | agent roles (role config layers) | planned |
-| F-03 prompt-assembly | inter-agent notification / completion fragments | planned |
+| F-10 multi-agent | agent roles (role config layers) | implemented for permission profiles (F-19/D-22/V-22); further role prompt/model layers deferred |
+| F-03 / F-20 | inter-agent notification / completion fragments | implemented (F-20/D-25/V-25) |
 
 ### M6 — Observability & ops
 
@@ -258,5 +258,18 @@ read-only `environment` tool.
    showing every configured server's connection state, tool/resource/
    template counts, and connect errors — including servers disabled by the
    `mcp` feature gate — fed by a hostd-owned snapshot from
-   `initialize_mcp_tools`. Next in M4: F-14 skills/plugins (implicit skill
-   invocation, plugin discovery/injection) and hooks.
+   `initialize_mcp_tools`. M4 status: F-13 is complete and the F-14 skills
+   slice (loader + prompt injection) is landed. The plugin system and hooks
+   (additional context, input inspection) are **deferred** — no piko
+   consumer today, so they are not scheduled. **M5 entry slice landed**
+   (`F-20/D-25/V-25`): when a detached child report is durable in a parent
+   inbox, the parent's **next** run injects a retained, data-only Context
+   completion fragment (`source.kind = agent.completion`, stable message id
+   per `report_id`) into the durable transcript chain after any F-04
+   world-state Context and before the run input — model-visible outcome and
+   bounded summary without consuming the inbox. Collect-first still skips
+   injection; mid-run parents keep using `wait_agent` /
+   `collect_agent_reports`. MESSAGE/NEW_TASK envelopes, status-only
+   notifications, and auto-triggered parent turns are rejected for this
+   slice. Next in M5: optional role prompt/model layers beyond F-19 if a
+   consumer appears; residual F-09 session fork/branch remains separate.

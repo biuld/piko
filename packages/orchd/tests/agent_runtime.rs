@@ -333,9 +333,10 @@ fn test_agent() -> AgentSpec {
     }
 }
 
-async fn attached_runtime() -> (
+async fn attached_runtime_ports() -> (
     AgentRuntime,
     Arc<CollectingAgentCommitPort>,
+    Arc<CollectingExecutionCommitPort>,
     Arc<FauxProvider>,
 ) {
     let model = Arc::new(FauxProvider::new());
@@ -360,12 +361,21 @@ async fn attached_runtime() -> (
             ports: SessionAgentPorts {
                 agents: agents.clone() as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(
-                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
+                    executions.clone() as Arc<dyn piko_orchd_api::ExecutionCommitPort>
                 ),
             },
         })
         .await
         .expect("attach agent session");
+    (runtime, agents, executions, model)
+}
+
+async fn attached_runtime() -> (
+    AgentRuntime,
+    Arc<CollectingAgentCommitPort>,
+    Arc<FauxProvider>,
+) {
+    let (runtime, agents, _executions, model) = attached_runtime_ports().await;
     (runtime, agents, model)
 }
 
