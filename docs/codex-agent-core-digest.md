@@ -250,11 +250,11 @@ is exceeded.
 - Distilled behavior: turn TTFT/TTFM metrics, usage accounting, event
   mapping/dedup, turn-diff tracking for UI deltas, rollout budget tracking,
   prompt debugging, rollout recording with cursor paging.
-- piko status: **partial** — `F-15 observability` landed for the planned
-  slice (F-15/D-15/V-15): end-to-end OTel spans (turn → agent → model →
-  tool), OTLP HTTP + JSON fallback, TTFT/TTFM metrics, rollout recorder
-  basics, turn-diff tracking, prompt debugging hooks. Residual: per-turn
-  usage accounting as a budget decision baseline (tracked under M6).
+- piko status: **implemented** for planned slices — `F-15 observability`
+  (F-15/D-15/V-15 tracing + metrics; D-29/V-29 per-turn usage accounting with
+  hostd as product ledger and OTel as write-through projection). Residual:
+  rollout recorder polish, turn-diff tracking, prompt debugging (digest
+  block L).
 
 ### M. Configuration & Permissions
 
@@ -297,7 +297,7 @@ is exceeded.
 | I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14 skills landed; plugins/hooks deferred |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
-| L Observability | F-15 | partial (F-15/D-15 tracing + metrics) | per-turn usage accounting |
+| L Observability | F-15 | implemented (F-15/D-15 + D-29 usage) | rollout/diff/prompt-debug polish |
 | M Config & Permissions | F-17, F-18, F-19 | implemented | — |
 
 ## 5. Reading codex-rs per feature

@@ -601,6 +601,12 @@ impl ExecutionActor {
         message: Message,
         message_id: String,
     ) -> Result<(), AgentApiError> {
+        if let Message::Assistant {
+            usage: Some(usage), ..
+        } = &message
+        {
+            self.state.usage.accumulate(usage);
+        }
         let committed = MessageCommitScope::new(
             &self.identity,
             self.state.head_message_id.clone(),

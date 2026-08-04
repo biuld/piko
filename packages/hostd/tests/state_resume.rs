@@ -216,3 +216,148 @@ fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
             .is_ok()
     );
 }
+
+#[test]
+fn multi_step_usages_roll_up_on_turn_completed() {
+    use piko_protocol::{
+        ContentBlock, Message, MessageEntry, SessionTreeEntry,
+        messages::{Usage, UsageCost},
+    };
+
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp/project") {
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session_created"),
+    };
+    let agent_instance_id = format!("agent_{session_id}_root");
+    let (turn_id, _) = state
+        .start_turn(&session_id, &agent_instance_id, "hello")
+        .unwrap();
+    state
+        .apply_turn_input_disposition(
+            &session_id,
+            &turn_id,
+            piko_protocol::InputDisposition::Accepted,
+        )
+        .unwrap();
+
+    let step = |input: u64, output: u64| Usage {
+        input,
+        output,
+        cache_read: 0,
+        cache_write: 0,
+        total_tokens: input + output,
+        cost: UsageCost {
+            input: input as f64 * 0.001,
+            output: output as f64 * 0.002,
+            cache_read: 0.0,
+            cache_write: 0.0,
+            total: input as f64 * 0.001 + output as f64 * 0.002,
+        },
+    };
+
+    for (i, usage) in [step(10, 5), step(20, 7)].into_iter().enumerate() {
+        let entry = SessionTreeEntry::Message(MessageEntry {
+            id: format!("asst-{i}"),
+            parent_id: None,
+            timestamp: format!("{i}"),
+            agent_id: "main".into(),
+            agent_instance_id: agent_instance_id.clone(),
+            source_turn_id: turn_id.clone(),
+            transcript_seq: (i as u64) + 1,
+            message: Message::Assistant {
+                content: vec![ContentBlock::Text {
+                    text: format!("step {i}"),
+                }],
+                api: "openai-completions".into(),
+                provider: "test".into(),
+                model: "test-model".into(),
+                usage: Some(usage.clone()),
+                stop_reason: Some("stop".into()),
+                error_message: None,
+                timestamp: Some(i as i64),
+            },
+        });
+        state
+            .session_mut(&session_id)
+            .unwrap()
+            .account_step_usage(Some(&turn_id), &usage);
+        state.session_mut(&session_id).unwrap().entries.push(entry);
+    }
+
+    let turn_usage = state.turn(&session_id, &turn_id).unwrap().usage.clone();
+    assert_eq!(turn_usage.input, 30);
+    assert_eq!(turn_usage.output, 12);
+    assert_eq!(turn_usage.total_tokens, 42);
+
+    let cumulative = state.session(&session_id).unwrap().cumulative_usage.clone();
+    assert_eq!(cumulative.input, 30);
+    assert_eq!(cumulative.output, 12);
+
+    let Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { usage, .. }) =
+        state.complete_turn(&session_id, &turn_id).unwrap()
+    else {
+        panic!("expected Completed");
+    };
+    assert_eq!(usage.input, 30);
+    assert_eq!(usage.output, 12);
+    assert_eq!(usage.total_tokens, 42);
+
+    // Rebuild from durable entries should match (ignoring turn map).
+    let session = state.session_mut(&session_id).unwrap();
+    session.cumulative_usage = Usage::empty();
+    session.rebuild_cumulative_usage_from_entries();
+    assert_eq!(session.cumulative_usage.input, 30);
+    assert_eq!(session.cumulative_usage.output, 12);
+}
+
+#[test]
+fn step_usage_accounts_into_turn_and_session() {
+    use piko_protocol::messages::{Usage, UsageCost};
+
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/tmp/project") {
+        piko_hostd::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        _ => panic!("expected session_created"),
+    };
+    let agent_instance_id = format!("agent_{session_id}_root");
+    let (turn_id, _) = state
+        .start_turn(&session_id, &agent_instance_id, "hi")
+        .unwrap();
+
+    let usage = Usage {
+        input: 11,
+        output: 3,
+        cache_read: 2,
+        cache_write: 1,
+        total_tokens: 17,
+        cost: UsageCost {
+            input: 0.01,
+            output: 0.02,
+            cache_read: 0.001,
+            cache_write: 0.002,
+            total: 0.033,
+        },
+    };
+    state
+        .session_mut(&session_id)
+        .unwrap()
+        .account_step_usage(Some(&turn_id), &usage);
+
+    assert_eq!(
+        state
+            .turn(&session_id, &turn_id)
+            .unwrap()
+            .usage
+            .total_tokens,
+        17
+    );
+    assert_eq!(
+        state
+            .session(&session_id)
+            .unwrap()
+            .cumulative_usage
+            .total_tokens,
+        17
+    );
+}

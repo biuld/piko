@@ -88,6 +88,7 @@ fn c8_turn_lifecycle_tracking() {
             session_id: "sess-1".into(),
             turn_id: "turn-1".into(),
             agent_instance_id: "root".into(),
+            usage: Default::default(),
             timestamp: 2,
         }),
         &mut ids,

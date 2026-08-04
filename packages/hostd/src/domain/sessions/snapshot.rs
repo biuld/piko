@@ -23,6 +23,7 @@ impl SessionState {
                     status: turn.status.clone(),
                     assistant_text: String::new(),
                     tool_calls: Vec::new(),
+                    usage: Some(turn.usage.clone()),
                 })
                 .collect(),
             pending_approvals: Vec::new(),

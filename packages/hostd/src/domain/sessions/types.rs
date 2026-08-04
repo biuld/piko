@@ -74,6 +74,8 @@ pub struct TurnRecord {
     pub agent_instance_id: String,
     pub message: String,
     pub status: TurnStatus,
+    /// Rolled-up model-step usage for this turn (hostd ledger; F-15/D-29).
+    pub usage: Usage,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -202,18 +204,37 @@ impl SessionState {
         }
     }
 
-    /// Accumulate usage from an assistant message event.
+    /// Accumulate usage from an assistant message (session roll-up).
     pub fn accumulate_usage(&mut self, usage: &Usage) {
-        self.cumulative_usage.input += usage.input;
-        self.cumulative_usage.output += usage.output;
-        self.cumulative_usage.cache_read += usage.cache_read;
-        self.cumulative_usage.cache_write += usage.cache_write;
-        self.cumulative_usage.total_tokens += usage.total_tokens;
-        self.cumulative_usage.cost.input += usage.cost.input;
-        self.cumulative_usage.cost.output += usage.cost.output;
-        self.cumulative_usage.cost.cache_read += usage.cost.cache_read;
-        self.cumulative_usage.cost.cache_write += usage.cost.cache_write;
-        self.cumulative_usage.cost.total += usage.cost.total;
+        self.cumulative_usage.accumulate(usage);
+    }
+
+    /// Account one model-step usage into the product ledger.
+    ///
+    /// Always updates session `cumulative_usage`. When `turn_id` matches an
+    /// open turn record, also rolls the step into that turn's usage total.
+    pub fn account_step_usage(&mut self, turn_id: Option<&str>, usage: &Usage) {
+        self.accumulate_usage(usage);
+        let Some(turn_id) = turn_id else {
+            return;
+        };
+        if let Some(turn) = self.turns.get_mut(turn_id) {
+            turn.usage.accumulate(usage);
+        }
+    }
+
+    /// Rebuild session cumulative usage from durable assistant messages.
+    pub fn rebuild_cumulative_usage_from_entries(&mut self) {
+        self.cumulative_usage = Usage::empty();
+        for entry in &self.entries {
+            if let SessionTreeEntry::Message(msg) = entry
+                && let Message::Assistant {
+                    usage: Some(usage), ..
+                } = &msg.message
+            {
+                self.cumulative_usage.accumulate(usage);
+            }
+        }
     }
 }
 

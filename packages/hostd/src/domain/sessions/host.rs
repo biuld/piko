@@ -160,6 +160,7 @@ impl HostState {
                 agent_instance_id: agent_instance_id.to_string(),
                 message: message.to_string(),
                 status: status.clone(),
+                usage: piko_protocol::messages::Usage::empty(),
             },
         );
         Ok((turn_id, status))
@@ -265,6 +266,7 @@ impl HostState {
                 agent_instance_id: agent_instance_id.to_string(),
                 message: message.to_string(),
                 status: status.clone(),
+                usage: piko_protocol::messages::Usage::empty(),
             },
         );
         if matches!(
@@ -305,8 +307,15 @@ impl HostState {
             .turns
             .get_mut(turn_id)
             .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        let already_terminal = matches!(
+            turn.status,
+            crate::api::TurnStatus::Completed
+                | crate::api::TurnStatus::Failed
+                | crate::api::TurnStatus::Cancelled
+        );
         turn.status = crate::api::TurnStatus::Completed;
         let agent_instance_id = turn.agent_instance_id.clone();
+        let usage = turn.usage.clone();
         if state
             .active_turns
             .get(&agent_instance_id)
@@ -315,11 +324,15 @@ impl HostState {
         {
             state.active_turns.remove(&agent_instance_id);
         }
+        if !already_terminal {
+            crate::telemetry::handle().record_turn_usage(&usage, "completed");
+        }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Completed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 agent_instance_id,
+                usage,
                 timestamp: now_ms(),
             },
         ))
@@ -336,8 +349,15 @@ impl HostState {
             .turns
             .get_mut(turn_id)
             .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        let already_terminal = matches!(
+            turn.status,
+            crate::api::TurnStatus::Completed
+                | crate::api::TurnStatus::Failed
+                | crate::api::TurnStatus::Cancelled
+        );
         turn.status = crate::api::TurnStatus::Failed;
         let agent_instance_id = turn.agent_instance_id.clone();
+        let usage = turn.usage.clone();
         if state
             .active_turns
             .get(&agent_instance_id)
@@ -346,12 +366,16 @@ impl HostState {
         {
             state.active_turns.remove(&agent_instance_id);
         }
+        if !already_terminal {
+            crate::telemetry::handle().record_turn_usage(&usage, "failed");
+        }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Failed {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 agent_instance_id,
                 error: error.into(),
+                usage,
                 timestamp: now_ms(),
             },
         ))
@@ -367,8 +391,15 @@ impl HostState {
             .turns
             .get_mut(turn_id)
             .ok_or_else(|| ProtocolError::InvalidCommand(format!("turn not found: {turn_id}")))?;
+        let already_terminal = matches!(
+            turn.status,
+            crate::api::TurnStatus::Completed
+                | crate::api::TurnStatus::Failed
+                | crate::api::TurnStatus::Cancelled
+        );
         let agent_instance_id = turn.agent_instance_id.clone();
         turn.status = crate::api::TurnStatus::Cancelled;
+        let usage = turn.usage.clone();
         if state
             .active_turns
             .get(&agent_instance_id)
@@ -377,11 +408,15 @@ impl HostState {
         {
             state.active_turns.remove(&agent_instance_id);
         }
+        if !already_terminal {
+            crate::telemetry::handle().record_turn_usage(&usage, "cancelled");
+        }
         Ok(ServerMessage::TurnLifecycle(
             crate::api::TurnEvent::Cancelled {
                 session_id: session_id.to_string(),
                 turn_id: turn_id.to_string(),
                 agent_instance_id,
+                usage,
                 timestamp: now_ms(),
             },
         ))

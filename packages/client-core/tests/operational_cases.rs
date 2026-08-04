@@ -94,6 +94,7 @@ fn failed_turn_remains_actionable() {
             turn_id: "t1".into(),
             agent_instance_id: "root".into(),
             error: "model failed".into(),
+            usage: Default::default(),
             timestamp: 1,
         }),
         &mut ids,

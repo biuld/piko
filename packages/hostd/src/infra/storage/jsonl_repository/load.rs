@@ -45,6 +45,7 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
+    state.rebuild_cumulative_usage_from_entries();
     restore_agent_runtime_state(&mut state, &manifest);
     Ok(PersistedSession {
         state,

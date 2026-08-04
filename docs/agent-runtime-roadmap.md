@@ -63,7 +63,7 @@ Goal: long sessions stay correct and within budget without manual intervention.
 | F-04 context-management | transcript normalization/truncation; snapshot sharing; token accounting; world-state diffing (full → diff, hostd durable baseline, cleared on compaction) | implemented (F-04/D-04/V-04; slice 2 D-17/V-17) |
 | F-05 compaction | auto-compact trigger; inline compact; budget windows; remote compaction | implemented (F-05/D-05/V-05; piko-native summarizer-model override replaces provider-side remote compaction) |
 | F-05 compaction | per-model growth defaults: `min_growth_tokens` derives from the resolved model window via `min-growth-fraction` when unset | implemented (slice 2, D-18/V-18) |
-| F-15 observability | usage accounting per turn (baseline for budget decisions) | partial |
+| F-15 observability | usage accounting per turn (baseline for budget decisions) | implemented (D-29/V-29) |
 
 Dependency: M1 needs M0 F-01 (durable transcripts) to be solid before
 rewriting history safely.
@@ -116,7 +116,7 @@ Goal: parent agents can supervise and steer children (codex-rs v2 surface).
 
 | Feature | Slice | Status |
 |---|---|---|
-| F-15 observability | end-to-end tracing (OTel spans turn → agent → model → tool; OTLP HTTP + JSON fallback) + TTFT/TTFM metrics; rollout recorder; turn-diff tracking; prompt debugging | implemented (F-15/D-15/V-15; tracing + metrics slice) |
+| F-15 observability | end-to-end tracing (OTel spans turn → agent → model → tool; OTLP HTTP + JSON fallback) + TTFT/TTFM metrics; per-turn usage accounting; rollout recorder; turn-diff tracking; prompt debugging | implemented (F-15/D-15/V-15 tracing; D-29/V-29 usage) |
 
 ### M7 — Extension (optional)
 
@@ -197,8 +197,9 @@ read-only `environment` tool.
    session list cursor paging, session prewarm (deferred).
 2. Follow-on M0 gaps: F-03 mention-syntax and cache-planning polish both
    landed (D-27/V-27, D-28/V-28).
-3. M1 residue worth tracking under M6: F-15 per-turn usage accounting
-   (baseline for budget decisions) remains partial.
+3. F-15 per-turn usage accounting landed (D-29/V-29): hostd turn + session
+   ledger from durable assistant step usages; OTel turn counters
+   write-through from the same ledger.
 3. **M3 entry slice landed** (`F-11` slice 1, `D-11/V-11`): the guardian
    auto-review loop turns on-request tool approvals into fail-closed model
    decisions when `[guardian] enabled = true` — a host-owned bounded review

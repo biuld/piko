@@ -52,6 +52,7 @@ fn m4_turn_queued_then_started_then_cancelled() {
             session_id: "sess-1".into(),
             turn_id: "turn-q".into(),
             agent_instance_id: "root".into(),
+            usage: Default::default(),
             timestamp: 3,
         }),
         &mut ids,

@@ -294,7 +294,7 @@ impl From<AuthEvent> for ServerMessage {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnEvent {
     Queued {
@@ -313,6 +313,9 @@ pub enum TurnEvent {
         session_id: SessionId,
         turn_id: TurnId,
         agent_instance_id: crate::AgentInstanceId,
+        /// Rolled-up model-step usage for this turn (hostd ledger; F-15/D-29).
+        #[serde(default)]
+        usage: crate::messages::Usage,
         timestamp: i64,
     },
     Failed {
@@ -320,12 +323,18 @@ pub enum TurnEvent {
         turn_id: TurnId,
         agent_instance_id: crate::AgentInstanceId,
         error: String,
+        /// Partial turn usage when steps completed before failure (F-15/D-29).
+        #[serde(default)]
+        usage: crate::messages::Usage,
         timestamp: i64,
     },
     Cancelled {
         session_id: SessionId,
         turn_id: TurnId,
         agent_instance_id: crate::AgentInstanceId,
+        /// Partial turn usage when steps completed before cancel (F-15/D-29).
+        #[serde(default)]
+        usage: crate::messages::Usage,
         timestamp: i64,
     },
 }
@@ -576,6 +585,9 @@ pub struct TurnSnapshot {
     pub status: TurnStatus,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCallSnapshot>,
+    /// In-flight or last known roll-up for this turn (hostd ledger; F-15/D-29).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::messages::Usage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

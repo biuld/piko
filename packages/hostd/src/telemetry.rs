@@ -53,6 +53,8 @@ pub struct Telemetry {
     tool_calls: Option<Counter<u64>>,
     turn_duration_ms: Option<Histogram<f64>>,
     turn_calls: Option<Counter<u64>>,
+    turn_tokens: Option<Counter<u64>>,
+    turn_cost_usd: Option<Counter<f64>>,
 }
 
 impl Telemetry {
@@ -69,6 +71,8 @@ impl Telemetry {
             tool_calls: None,
             turn_duration_ms: None,
             turn_calls: None,
+            turn_tokens: None,
+            turn_cost_usd: None,
         }
     }
 
@@ -87,6 +91,8 @@ impl Telemetry {
             tool_calls: Some(meter.u64_counter("piko.tool.calls").build()),
             turn_duration_ms: Some(meter.f64_histogram("piko.turn.duration_ms").build()),
             turn_calls: Some(meter.u64_counter("piko.turn.calls").build()),
+            turn_tokens: Some(meter.u64_counter("piko.turn.tokens").build()),
+            turn_cost_usd: Some(meter.f64_counter("piko.turn.cost_usd").build()),
         }
     }
 
@@ -108,6 +114,37 @@ impl Telemetry {
                     KeyValue::new("status", status.to_string()),
                     KeyValue::new("source", source.to_string()),
                 ],
+            );
+        }
+    }
+
+    /// Project turn usage from the hostd ledger into turn-level OTel counters.
+    pub fn record_turn_usage(&self, usage: &Usage, status: &str) {
+        if let Some(counter) = &self.turn_tokens {
+            for (token_type, count) in [
+                ("input", usage.input),
+                ("output", usage.output),
+                ("cache_read", usage.cache_read),
+                ("cache_write", usage.cache_write),
+            ] {
+                if count == 0 {
+                    continue;
+                }
+                counter.add(
+                    count,
+                    &[
+                        KeyValue::new("token_type", token_type),
+                        KeyValue::new("status", status.to_string()),
+                    ],
+                );
+            }
+        }
+        if usage.cost.total != 0.0
+            && let Some(counter) = &self.turn_cost_usd
+        {
+            counter.add(
+                usage.cost.total,
+                &[KeyValue::new("status", status.to_string())],
             );
         }
     }

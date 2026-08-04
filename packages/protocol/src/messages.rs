@@ -163,6 +163,63 @@ impl Usage {
     pub fn empty() -> Self {
         Self::default()
     }
+
+    /// Add another usage record into this one (token counts and cost).
+    pub fn accumulate(&mut self, other: &Usage) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.cost.input += other.cost.input;
+        self.cost.output += other.cost.output;
+        self.cost.cache_read += other.cost.cache_read;
+        self.cost.cache_write += other.cost.cache_write;
+        self.cost.total += other.cost.total;
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::{Usage, UsageCost};
+
+    #[test]
+    fn accumulate_sums_tokens_and_cost() {
+        let mut total = Usage {
+            input: 10,
+            output: 5,
+            cache_read: 1,
+            cache_write: 0,
+            total_tokens: 16,
+            cost: UsageCost {
+                input: 0.1,
+                output: 0.2,
+                cache_read: 0.0,
+                cache_write: 0.0,
+                total: 0.3,
+            },
+        };
+        total.accumulate(&Usage {
+            input: 3,
+            output: 7,
+            cache_read: 0,
+            cache_write: 2,
+            total_tokens: 12,
+            cost: UsageCost {
+                input: 0.03,
+                output: 0.07,
+                cache_read: 0.0,
+                cache_write: 0.01,
+                total: 0.11,
+            },
+        });
+        assert_eq!(total.input, 13);
+        assert_eq!(total.output, 12);
+        assert_eq!(total.cache_read, 1);
+        assert_eq!(total.cache_write, 2);
+        assert_eq!(total.total_tokens, 28);
+        assert!((total.cost.total - 0.41).abs() < f64::EPSILON);
+    }
 }
 
 /// Durable, model-visible marker appended when a turn is interrupted (F-01).

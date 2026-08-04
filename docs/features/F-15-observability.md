@@ -1,10 +1,14 @@
-# F-15: Observability (end-to-end tracing)
+# F-15: Observability (end-to-end tracing + usage accounting)
 
 > Status: implemented
 > Priority: P1
 > Source evidence: codex-rs `core/src/otel_init.rs`, `rollout.rs`,
 > `turn_timing.rs`, `turn_metadata.rs` (digest block L); no direct parity
 > required (ADR-002)
+
+Slices:
+- Tracing + metrics (D-15 / V-15)
+- Per-turn usage accounting (D-29 / V-29)
 
 ## Summary
 
@@ -72,8 +76,12 @@ causality makes regressions slow to localize.
 - Cross-process trace-context propagation: hostd, orchd, and llmd run in one
   process today; this slice does not add traceparent plumbing to the stdio
   protocol. If orchd ever runs standalone, revisit.
+- Compaction and auto-budget *policy* that *consumes* turn usage (F-05 remains
+  the policy owner; this slice only provides the durable ledger baseline).
 
 ## Behavior and states
+
+### Tracing slice (D-15)
 
 - A completed turn produces one root span whose children reflect actual
   causality: model steps are children of their agent run, tool calls are
@@ -90,7 +98,27 @@ causality makes regressions slow to localize.
   whose error event carries the failure reason; partial child spans remain
   attached.
 
+### Per-turn usage accounting (D-29)
+
+- **Atomic grain:** each completed model step's provider `Usage` is written
+  onto the durable assistant message for that step (llmd → orchd).
+- **Hostd is the product ledger:** on each new committed assistant message
+  with usage, hostd accumulates into (1) the in-flight turn's usage total
+  keyed by `source_turn_id` and (2) the session's `cumulative_usage`.
+- **Turn total = roll-up of steps** on that turn; session total = roll-up of
+  all recorded step usages. OTel metrics are a **projection of the same
+  values**, not a second source of truth.
+- Terminal turn lifecycle events (`TurnEvent::{Completed,Failed,Cancelled}`)
+  carry the turn's rolled-up `usage` so clients observe the ledger without
+  re-summing transcript.
+- On session resume, hostd rebuilds `cumulative_usage` by walking assistant
+  messages in the recovered transcript (messages remain the durable facts).
+- Partial turns (failed/cancelled mid-run) still report usage for steps that
+  committed before the terminal outcome.
+
 ## Acceptance criteria
+
+### Tracing + metrics (V-15)
 
 - [x] With OTLP export enabled, a turn with one tool call and one transient
       provider failure produces a single trace: turn root → agent run →
@@ -108,6 +136,18 @@ causality makes regressions slow to localize.
 - [x] `cargo test --workspace` passes with no span-related behavioral
       changes to existing event streams.
 
+### Per-turn usage accounting (V-29)
+
+- [x] Committing an assistant message with usage increases both the turn's
+      in-memory usage and the session `cumulative_usage` by that amount.
+- [x] Multi-step turns roll up every step's usage into the turn total.
+- [x] `TurnEvent::Completed` (and Failed/Cancelled) include the turn usage
+      roll-up matching the committed assistant messages for that turn.
+- [x] Session resume rebuilds `cumulative_usage` from durable assistant
+      messages.
+- [x] Hostd records turn-level OTel token/cost counters from the same turn
+      ledger at terminal lifecycle (does not invent a second total).
+
 ## Product decisions
 
 | Question | Decision | Rationale |
@@ -120,6 +160,9 @@ causality makes regressions slow to localize.
 | Trace correlation across layers | Spans with structured attributes (`run_id`, `step_id`, `agent_instance_id`) | Single-process runtime needs no traceparent plumbing today |
 | Retry/fallback representation | Span events on the model-step span, not separate spans | Keeps one step readable; attempt/delay/cause stay in one place |
 | Metrics in this slice? | Yes — step/TTFT histograms, token/cost counters, retry/fallback counters, tool/turn timing | Aggregate trend visibility during build-out; recorded at the same points as spans via a no-op-default telemetry port |
+| Who owns the product usage ledger? | **hostd** turn + session roll-ups; transcript assistant messages are durable step facts | Matches hostd authority for user-visible state; OTel is a projection |
+| Natural grain for usage? | Model-step (assistant message); turn = sum of steps; session = sum of all steps | Provider usage arrives per completion; multi-step turns must not discard earlier steps |
+| Client surface for turn totals? | `TurnEvent` terminals carry `usage` | Live clients get totals without replaying the whole tree |
 
 ## Fusion decisions (codex-rs)
 
@@ -129,6 +172,7 @@ causality makes regressions slow to localize.
 | Turn timing metadata (`turn_timing.rs`) | **kept (adapted)** | TTFT/TTFM become OTel histograms recorded at the same points as spans |
 | Rollout recorder / diff tracking | **deferred** | Separate later slices; digest block L lists them as gaps |
 | `installation_id.rs` anonymous telemetry | **rejected for this slice** | piko has no product-telemetry decision yet; tracing stays local |
+| Usage accounting / cost metadata | **kept (adapted)** | hostd session+turn ledger from durable assistant step usages; OTel turn counters write-through from the same ledger (not a second store) |
 
 ## Open questions
 

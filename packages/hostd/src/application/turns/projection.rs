@@ -194,7 +194,7 @@ fn append_committed_message(
         } = message
         && let Ok(session) = state.session_mut(session_id)
     {
-        session.accumulate_usage(usage);
+        session.account_step_usage(Some(source_turn_id), usage);
     }
     let parent_id = parent_id
         .map(str::to_string)
