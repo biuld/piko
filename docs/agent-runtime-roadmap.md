@@ -191,9 +191,13 @@ cleans up on drop, and environment capability discovery (usable shell
 resolution, PATH normalization, common-tool probing) is exposed through a
 read-only `environment` tool.
 
-1. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
+1. **Landed:** F-09 session-persistence branch-point fork
+   (`SessionFork` with `entry_id`; F-09/D-26/V-26). Full clone, resume, and
+   interrupted finalization remain under the F-09 baseline. Residual F-09:
+   session list cursor paging, session prewarm (deferred).
+2. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
    cache-planning polish.
-2. M1 residue worth tracking under M6: F-15 per-turn usage accounting
+3. M1 residue worth tracking under M6: F-15 per-turn usage accounting
    (baseline for budget decisions) remains partial.
 3. **M3 entry slice landed** (`F-11` slice 1, `D-11/V-11`): the guardian
    auto-review loop turns on-request tool approvals into fail-closed model

@@ -3,6 +3,8 @@ use std::path::Path;
 
 use uuid::Uuid;
 
+use crate::domain::compaction::active_branch_entries;
+
 use super::super::session_store::SessionStore;
 use super::super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use super::helpers::{copy_dir_all, timestamp};
@@ -15,27 +17,83 @@ impl JsonlSessionRepository {
         source_dir: &Path,
         entry_id: Option<&str>,
     ) -> Result<PersistedSession, SessionStorageError> {
-        if entry_id.is_some() {
-            return Err(SessionStorageError::Invalid {
-                path: source_dir.to_path_buf(),
-                message: "branch-point fork is not yet supported by schema v3".into(),
-            });
+        match entry_id {
+            None => self.fork_full(source_dir),
+            Some(entry_id) => self.fork_at_entry(source_dir, entry_id),
         }
+    }
+
+    fn allocate_fork_dir(
+        &self,
+        cwd: &str,
+        forked_id: &str,
+        created_at: &str,
+    ) -> std::path::PathBuf {
+        let cwd_dir = self.session_dir(cwd);
+        cwd_dir.join(format!(
+            "{}_{}",
+            created_at.replace([':', '.'], "-"),
+            forked_id
+        ))
+    }
+
+    fn fork_full(&self, source_dir: &Path) -> Result<PersistedSession, SessionStorageError> {
         let source = SessionStore::new(source_dir);
         let source_manifest = source.load_manifest()?;
         let forked_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
-        let cwd_dir = self.session_dir(&source_manifest.cwd);
-        let forked_dir = cwd_dir.join(format!(
-            "{}_{}",
-            created_at.replace([':', '.'], "-"),
-            forked_id
-        ));
+        let forked_dir = self.allocate_fork_dir(&source_manifest.cwd, &forked_id, &created_at);
         source.fork_to(
             &forked_dir,
             forked_id,
             created_at.parse().unwrap_or_default(),
         )?;
+        load_session_dir(&forked_dir)
+    }
+
+    fn fork_at_entry(
+        &self,
+        source_dir: &Path,
+        entry_id: &str,
+    ) -> Result<PersistedSession, SessionStorageError> {
+        // Validate against the same projected entry set clients see after open.
+        let source_projected = load_session_dir(source_dir)?;
+        let has_entry = source_projected
+            .state
+            .entries
+            .iter()
+            .any(|entry| entry.id() == entry_id);
+        if !has_entry {
+            return Err(SessionStorageError::Invalid {
+                path: source_dir.to_path_buf(),
+                message: format!("unknown tree entry: {entry_id}"),
+            });
+        }
+        let retained = active_branch_entries(&source_projected.state.entries, Some(entry_id));
+        if retained.is_empty() {
+            return Err(SessionStorageError::Invalid {
+                path: source_dir.to_path_buf(),
+                message: format!("unknown tree entry: {entry_id}"),
+            });
+        }
+
+        let source = SessionStore::new(source_dir);
+        let source_manifest = source.load_manifest()?;
+        let forked_id = Uuid::new_v4().to_string();
+        let created_at = timestamp();
+        let forked_dir = self.allocate_fork_dir(&source_manifest.cwd, &forked_id, &created_at);
+
+        let write_result = source.fork_to_at_entry(
+            &forked_dir,
+            forked_id,
+            created_at.parse().unwrap_or_default(),
+            entry_id,
+            &retained,
+        );
+        if write_result.is_err() {
+            let _ = fs::remove_dir_all(&forked_dir);
+        }
+        write_result?;
         load_session_dir(&forked_dir)
     }
 

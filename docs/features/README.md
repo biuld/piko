@@ -22,12 +22,12 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-05 | compaction | Summarize/compact conversation when over budget | implemented (F-05/D-05/V-05) | core/src/compact*.rs |
 | F-06 | tool-system | Tool registry, schemas, routing, parallel batches, output handling | implemented (D-06, V-06) | core/src/tools/ |
 | F-07 | tool-approvals | Human approval flows with bounded deadlines, fail-closed expiry, distinct deny/expire semantics | implemented (F-07/D-07/V-07) | core/src/tools/approvals.rs |
-| F-08 | exec-sandboxing | Fail-closed filesystem/process/network policy, per-OS sandbox, shell snapshots | planned | core/src/exec*.rs, sandboxing/ |
-| F-09 | session-persistence | Thread store, resume, branch, message durability | planned | core/src/thread_manager.rs |
-| F-10 | multi-agent | Subagent spawn, supervision, result collection | planned | core/src/agent/, tools/handlers/multi_agents* |
+| F-08 | exec-sandboxing | Fail-closed filesystem/process/network policy, per-OS sandbox, shell snapshots; long-lived processes + environment selection | implemented (F-08/D-08/D-19, V-08/V-19) | core/src/exec*.rs, sandboxing/, unified_exec/ |
+| F-09 | session-persistence | Thread store, resume, branch-point fork, message durability, interrupted-turn finalization | partial (F-09/D-26/V-26 branch-point fork landed; list paging / prewarm deferred) | core/src/thread_manager.rs |
+| F-10 | multi-agent | Subagent spawn, supervision, result collection; v2 collaboration tools | implemented (F-10/D-10/V-10; F-20 completion fragments) | core/src/agent/, tools/handlers/multi_agents* |
 | F-11 | guardian | Automatic approval review loop | implemented (F-11/D-11/V-11) | core/src/guardian/ |
 | F-12 | safety | Deterministic write-safety gate (patch-safety assessment); elicitation pause deferred; attestation rejected | implemented (F-12/D-12/V-12; patch-safety slice 1) | core/src/safety.rs, elicitation.rs, attestation.rs |
-| F-13 | mcp-integration | MCP client/server, resource and tool exposure | planned | core/src/mcp*.rs |
+| F-13 | mcp-integration | MCP client/server, resource and tool exposure, approval templates, prewarm, TUI `/mcp` surface | implemented (F-13/D-23/D-24, V-23/V-24) | core/src/mcp*.rs |
 | F-14 | skills-plugins | Skills engine, plugin install/list | partial (loader + prompt injection); plugin system and hooks deferred (no piko consumer) | core/src/skills.rs, plugins/ |
 | F-15 | observability | End-to-end tracing (turn → agent → model step → tool → child agent), OTLP HTTP export + metrics, rollout, turn timing, usage statistics | implemented (F-15/D-15/V-15; tracing + metrics slice) | core/src/otel_init.rs, rollout*.rs, turn_timing.rs |
 | F-16 | realtime (extension) | Realtime audio/text sessions, multimodal preparation | planned (deferred) | core/src/realtime_*, audio_preparation.rs, image_preparation.rs |

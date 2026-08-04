@@ -430,3 +430,4 @@ async fn durable_commands_serialize_across_independent_store_handles() {
 }
 
 include!("session_store_cases/durable_agent.rs");
+include!("session_store_cases/branch_point_fork.rs");

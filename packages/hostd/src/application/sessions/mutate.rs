@@ -67,6 +67,14 @@ impl HostApp {
         let Some(source_path) = source_path else {
             return Err(ProtocolError::SessionNotFound(session_id));
         };
+        {
+            // Match navigate: forking must not race a live host turn.
+            let state = self.state.lock().await;
+            let session = state.session(&session_id)?;
+            if !session.active_turns.is_empty() {
+                return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
+            }
+        }
         let persisted = storage
             .fork(&session_id, &source_path, entry_id.as_deref())
             .map_err(storage_error)?;

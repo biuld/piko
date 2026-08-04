@@ -67,13 +67,14 @@ is exceeded.
 - Distilled behavior: provider registry, streaming (SSE/WebSocket), request
   retry/fallback with budgets, sticky routing, prewarm, token/usage metadata,
   auth plumbing, model catalog and thinking-level mapping.
-- piko status: **partial** — `F-02 model-gateway` (`piko-llmd`: providers,
-  gateway, executor, retry/backoff budget with capped jittered backoff,
-  status-error peeking, per-provider stream → non-streaming fallback,
-  cost/token middleware; streaming requests capture usage). Model continuity
-  landed (hostd `active_model` + durable per-session record driving the
-  prompt model-switch fragment and JSONL `ModelChange` marker; F-02/D-16/
-  V-16). Gaps: prewarm and sticky routing.
+- piko status: **partial** — `F-02 model-gateway` complete for the planned
+  slices (`piko-llmd`: providers, gateway, executor, retry/backoff budget
+  with capped jittered backoff, status-error peeking, per-provider stream →
+  non-streaming fallback, cost/token middleware; streaming requests capture
+  usage; model continuity via hostd `active_model` + durable per-session
+  record, prompt model-switch fragment, JSONL `ModelChange` marker;
+  F-02/D-02/D-16, V-02/V-16). Residual gaps (not on the critical path):
+  prewarm and sticky routing.
 
 ### C. Prompt Assembly & Context Injection
 
@@ -112,14 +113,15 @@ is exceeded.
   token-budget context injection; model-visible "context remaining" tools.
 - piko status: **partial** — `F-04 context-management` (orchd per-message
   token accounting, copy-on-write snapshots, model-view tool-output
-  truncation; F-04/D-04/V-04) and `F-05 compaction`
-  (F-05/D-05/V-05): budget-window auto-compact with hysteresis and pending
-  guard, inline new-context-window compact, model-visible
-  `get_context_remaining` / `new_context_window` tools, and a
-  piko-native summarizer-model override with default-model fallback
-  (provider-side remote compaction rejected). Remaining gaps:
-  token-budget context fragments (F-04 follow-on); world-state diffing
-  landed (F-04 slice 2 / D-17 / V-17).
+  truncation, world-state full→diff retained Context; F-04/D-04/D-17,
+  V-04/V-17) and `F-05 compaction` (F-05/D-05/D-18, V-05/V-18):
+  budget-window auto-compact with hysteresis and pending guard, inline
+  new-context-window compact, model-visible `get_context_remaining` /
+  `new_context_window` tools, per-model `min-growth-fraction` defaults, and
+  a piko-native summarizer-model override with default-model fallback
+  (provider-side remote compaction rejected). Remaining gap: token-budget
+  context fragments are **rejected** for this roadmap (F-05 fusion;
+  model-visible tools cover the need).
 
 ### E. Tool System
 
@@ -132,9 +134,10 @@ is exceeded.
 - Distilled behavior: tool registry/specs, routing, parallel gate with
   sequential exclusivity, approval hooks, tool-result truncation, code-mode
   results, executed-tool-call metadata, dynamic/extension tools, tool search.
-- piko status: **partial** — `F-06 tool-system` (registry, providers,
-  sequential executor; parallel batch dispatch is the first landed slice).
-  Gaps: dynamic/extension tools, tool search, code-mode result shaping,
+- piko status: **partial** — `F-06 tool-system` core landed (registry,
+  providers, sequential + parallel batch dispatch with sequential
+  exclusivity; D-06/V-06). Residual gaps (not scheduled):
+  dynamic/extension tools, tool search, code-mode result shaping,
   executed-call metadata.
 
 ### F. Approvals, Safety & Guardian
@@ -186,8 +189,11 @@ is exceeded.
   thread graph + sections, initial/resumed history modes, rollout files with
   cursor paging, interrupted-turn markers.
 - piko status: **partial** — `F-09 session-persistence` (hostd schema-v3
-  `session.json` + per-agent JSONL shards). Gaps: fork/branch, thread list
-  cursor paging, interrupted-turn markers, session prewarm.
+  `session.json` + per-agent JSONL shards; open/resume; full-session clone
+  fork/import; branch-point fork `SessionFork` with `entry_id` via
+  F-09/D-26/V-26; on-open interrupted-turn finalization into failed turns /
+  F-01 abort markers for incomplete agent executions). Residual: thread list
+  cursor paging, session prewarm.
 
 ### I. Multi-Agent & Inter-Agent Communication
 
@@ -243,9 +249,11 @@ is exceeded.
 - Distilled behavior: turn TTFT/TTFM metrics, usage accounting, event
   mapping/dedup, turn-diff tracking for UI deltas, rollout budget tracking,
   prompt debugging, rollout recording with cursor paging.
-- piko status: **partial** — `F-15 observability` (llmd usage/cost middleware,
-  orchd event lanes + deltas). Gaps: turn timing metrics, rollout recorder,
-  diff tracker.
+- piko status: **partial** — `F-15 observability` landed for the planned
+  slice (F-15/D-15/V-15): end-to-end OTel spans (turn → agent → model →
+  tool), OTLP HTTP + JSON fallback, TTFT/TTFM metrics, rollout recorder
+  basics, turn-diff tracking, prompt debugging hooks. Residual: per-turn
+  usage accounting as a budget decision baseline (tracked under M6).
 
 ### M. Configuration & Permissions
 
@@ -255,9 +263,10 @@ is exceeded.
 - Distilled behavior: layered config (CLI > session > project > user > bundled),
   permission profiles with materialized file/network/command policies,
   managed-feature gating, agent-role layers, environment selection.
-- piko status: **partial** — settings ownership design exists (hostd
-  `settings.toml`). Gaps: permission-profile materialization, managed
-  features, agent roles.
+- piko status: **implemented** for the planned slices — F-17 permission
+  profiles (D-20/V-20), F-18 managed features (D-21/V-21), F-19 agent roles
+  mapped to profiles (D-22/V-22). Layered settings ownership remains in
+  hostd (`settings.toml` global/project).
 
 ## 3. Cross-cutting invariants
 
@@ -274,21 +283,21 @@ is exceeded.
 
 ## 4. piko coverage matrix
 
-| Block | F-ID | piko status | First concrete slice |
+| Block | F-ID | piko status | First concrete slice / residue |
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
-| B Model Gateway | F-02 | partial (retry/backoff + streaming fallback landed) | prewarm, sticky routing |
-| C Prompt Assembly | F-03 | partial (world-state diffing landed in F-04 slice 2; F-20 completions) | mention-syntax parsing, cache-planning polish |
-| D Context & Compaction | F-04, F-05 | partial (F-04 slices + F-05 landed) | world-state diffing landed; token-budget context fragments next |
-| E Tool System | F-06 | partial (in progress) | parallel batch dispatch |
-| F Approvals & Safety | F-07, F-11, F-12 | partial | guardian loop landed; F-12 patch-safety landed; elicitation next |
-| G Exec & Sandbox | F-08 | implemented | — |
-| H Persistence & Resume | F-09 | partial | fork/branch, interrupted markers |
-| I Multi-Agent | F-10 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
-| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 landed (resources, approval templates, prewarm, TUI `/mcp` surface); F-14 skills loader + prompt injection landed; plugin system and hooks deferred (no piko consumer) |
+| B Model Gateway | F-02 | partial (F-02/D-02/D-16 landed) | prewarm, sticky routing |
+| C Prompt Assembly | F-03 | partial (F-03/D-03 + F-20 completions) | mention-syntax parsing, cache-planning polish |
+| D Context & Compaction | F-04, F-05 | partial (F-04/D-04/D-17 + F-05/D-05/D-18) | token-budget fragments rejected |
+| E Tool System | F-06 | partial (core + parallel batch D-06) | dynamic tools / tool search (unscheduled) |
+| F Approvals & Safety | F-07, F-11, F-12 | partial (slices landed) | F-12 elicitation deferred until consumer |
+| G Exec & Sandbox | F-08 | implemented (D-08/D-19) | — |
+| H Persistence & Resume | F-09 | partial (store + clone + branch-point fork D-26) | list paging, prewarm |
+| I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
+| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14 skills landed; plugins/hooks deferred |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
-| L Observability | F-15 | partial | turn timing, rollout recorder |
-| M Config & Permissions | F-12 part | partial | permission profiles, roles |
+| L Observability | F-15 | partial (F-15/D-15 tracing + metrics) | per-turn usage accounting |
+| M Config & Permissions | F-17, F-18, F-19 | implemented | — |
 
 ## 5. Reading codex-rs per feature
 

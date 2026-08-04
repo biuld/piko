@@ -352,11 +352,7 @@ the prompt noisier, while nothing tells the model what actually changed.
 
 ### Open questions
 
-1. Fork/branch: the manifest baseline is copied to a forked session while
-   the copied transcript may not contain the matching full snapshot.
-   Deferred; low risk (a diff against an absent snapshot is data-only), but
-   a future slice may clear the baseline on fork.
-2. Subagent runs (F-10): world-state injection is root-turn-only today;
+1. Subagent runs (F-10): world-state injection is root-turn-only today;
    per-agent baselines would be needed if child agents get run identity.
 
 ### Reference evidence
