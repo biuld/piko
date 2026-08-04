@@ -288,6 +288,36 @@ impl AgentExecutionRuntime {
             chain_parent = Some(message_id);
             completion_commits.push(commit);
         }
+        let mut mention_commits = Vec::with_capacity(request.user_mentions.len());
+        for (index, message) in request.user_mentions.iter().enumerate() {
+            let message_id = match message {
+                piko_protocol::Message::Context { source, .. }
+                    if source.kind == piko_protocol::FILE_MENTION_SOURCE_KIND =>
+                {
+                    piko_protocol::file_mention_message_id(&request.execution_id, index)
+                }
+                piko_protocol::Message::Context { source, .. }
+                    if source.kind == piko_protocol::SKILL_MENTION_SOURCE_KIND =>
+                {
+                    piko_protocol::skill_mention_message_id(&request.execution_id, index)
+                }
+                _ => {
+                    return Err(AgentApiError::InputRejected);
+                }
+            };
+            let commit = piko_protocol::execution::MessageCommit {
+                session_id: request.session_id.clone(),
+                source_turn_id: request.source_turn_id.clone(),
+                execution_id: request.execution_id.clone(),
+                agent_instance_id: request.agent_instance_id.clone(),
+                message_id: message_id.clone(),
+                parent_message_id: chain_parent.clone(),
+                message: message.clone(),
+                committed_at: now_ms,
+            };
+            chain_parent = Some(message_id);
+            mention_commits.push(commit);
+        }
         let input_commit = piko_protocol::execution::MessageCommit {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
@@ -341,6 +371,7 @@ impl AgentExecutionRuntime {
             receipt,
             world_state_commit,
             completion_commits,
+            mention_commits,
             input_commit,
             trace_span,
         })
@@ -458,6 +489,7 @@ pub(crate) struct PreparedExecution {
     receipt: ExecutionReceipt,
     world_state_commit: Option<piko_protocol::execution::MessageCommit>,
     completion_commits: Vec<piko_protocol::execution::MessageCommit>,
+    mention_commits: Vec<piko_protocol::execution::MessageCommit>,
     input_commit: piko_protocol::execution::MessageCommit,
     trace_span: tracing::Span,
 }
@@ -511,6 +543,14 @@ impl PreparedExecution {
                 .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
         }
         for commit in &self.completion_commits {
+            self.scope
+                .ports()
+                .commit
+                .commit_message(commit.clone())
+                .await
+                .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        }
+        for commit in &self.mention_commits {
             self.scope
                 .ports()
                 .commit

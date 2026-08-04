@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    PromptSnapshotOptions, RunKind, WorldStateFacts, expand_prompt_template,
-    snapshot_prompt_resources, world_state_context_message, world_state_diff_content,
-    world_state_full_content,
+    PromptSnapshotOptions, RunKind, WorldStateFacts, expand_prompt_template, parse_mentions,
+    resolve_mention_messages, snapshot_prompt_resources, world_state_context_message,
+    world_state_diff_content, world_state_full_content,
 };
 use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
@@ -155,14 +155,22 @@ impl HostApp {
         let mut prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
-            skills,
+            skills: skills.clone(),
             prompt_templates: templates,
             model: world_state_facts.model.clone(),
             previous_model: previous_model.as_ref().map(|model| model.model_id.clone()),
             environment: crate::domain::prompts::EnvironmentSnapshot::capture(),
+            cache_policy: self.settings.lock().await.prompt_cache_policy(),
             ..PromptSnapshotOptions::default()
         });
         prompt_resources.world_state = world_state_message;
+        // F-03/D-27: expand @path and $skill mentions into retained Context
+        // prelude messages; user text stays unchanged for the durable User row.
+        let mention_tokens = parse_mentions(&expanded_text);
+        if !mention_tokens.is_empty() {
+            prompt_resources.user_mentions =
+                resolve_mention_messages(&mention_tokens, PathBuf::from(&cwd).as_path(), &skills);
+        }
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
         let cwd = {

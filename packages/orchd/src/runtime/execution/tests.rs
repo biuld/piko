@@ -165,6 +165,7 @@ fn request() -> StartExecutionRequest {
         tool_catalog: piko_protocol::ResolvedToolCatalog::default(),
         world_state: None,
         inter_agent_completions: Vec::new(),
+        user_mentions: Vec::new(),
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
         context: piko_protocol::ConversationContext::empty(),
@@ -303,6 +304,10 @@ async fn inter_agent_completions_chain_after_world_state_before_input() {
     };
     request.inter_agent_completions =
         vec![piko_protocol::agent_completion_context_message(&report)];
+    request.user_mentions = vec![piko_protocol::file_mention_context_message(
+        "src/a.rs",
+        piko_protocol::FileMentionBody::Ok("fn a() {}".into()),
+    )];
 
     let prepared = runtime
         .prepare_execution(request, HashMap::new(), tracing::Span::none())
@@ -310,16 +315,23 @@ async fn inter_agent_completions_chain_after_world_state_before_input() {
         .unwrap();
     let world_state_id = piko_protocol::world_state_message_id("execution-3");
     let completion_id = piko_protocol::agent_completion_message_id("report-7");
+    let mention_id = piko_protocol::file_mention_message_id("execution-3", 0);
     assert_eq!(prepared.completion_commits.len(), 1);
     assert_eq!(prepared.completion_commits[0].message_id, completion_id);
     assert_eq!(
         prepared.completion_commits[0].parent_message_id.as_deref(),
         Some(world_state_id.as_str())
     );
+    assert_eq!(prepared.mention_commits.len(), 1);
+    assert_eq!(prepared.mention_commits[0].message_id, mention_id);
+    assert_eq!(
+        prepared.mention_commits[0].parent_message_id.as_deref(),
+        Some(completion_id.as_str())
+    );
     assert_eq!(
         prepared.input_commit.parent_message_id.as_deref(),
-        Some(completion_id.as_str()),
-        "chain is head → world-state → completion → input"
+        Some(mention_id.as_str()),
+        "chain is head → world-state → completion → mention → input"
     );
 
     let messages = prepared
@@ -327,12 +339,16 @@ async fn inter_agent_completions_chain_after_world_state_before_input() {
         .as_ref()
         .expect("actor")
         .transcript_messages();
-    assert_eq!(messages.len(), 3, "world-state, completion, user");
+    assert_eq!(messages.len(), 4, "world-state, completion, mention, user");
     assert!(matches!(
         messages[1],
         piko_protocol::Message::Context { .. }
     ));
-    assert!(matches!(messages[2], piko_protocol::Message::User { .. }));
+    assert!(matches!(
+        messages[2],
+        piko_protocol::Message::Context { .. }
+    ));
+    assert!(matches!(messages[3], piko_protocol::Message::User { .. }));
 }
 
 #[tokio::test]

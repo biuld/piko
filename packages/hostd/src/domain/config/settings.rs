@@ -75,6 +75,10 @@ pub struct HostSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<McpSettings>,
 
+    /// F-03/D-28: prompt assembly / provider cache policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<PromptSettings>,
+
     // ---- Frontend namespaces (opaque to hostd) ----
     /// TUI-specific settings. The TUI owns the schema; hostd stores and forwards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,6 +86,37 @@ pub struct HostSettings {
     /// GUI-specific settings. The GUI owns the schema; hostd stores and forwards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gui: Option<serde_json::Value>,
+}
+
+/// F-03/D-28: `[prompt]` settings section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PromptSettings {
+    /// Provider prompt-cache policy for assembled agent runs.
+    /// Values: `disabled`, `provider-default`, `ephemeral`, `extended`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_policy: Option<PromptCachePolicySetting>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PromptCachePolicySetting {
+    Disabled,
+    #[default]
+    ProviderDefault,
+    Ephemeral,
+    Extended,
+}
+
+impl PromptCachePolicySetting {
+    pub fn to_protocol(self) -> piko_protocol::PromptCachePolicy {
+        match self {
+            Self::Disabled => piko_protocol::PromptCachePolicy::Disabled,
+            Self::ProviderDefault => piko_protocol::PromptCachePolicy::ProviderDefault,
+            Self::Ephemeral => piko_protocol::PromptCachePolicy::Ephemeral,
+            Self::Extended => piko_protocol::PromptCachePolicy::Extended,
+        }
+    }
 }
 
 impl HostSettings {
@@ -94,6 +129,15 @@ impl HostSettings {
             "host" => self.host_namespace_value(),
             _ => serde_json::Value::Object(Default::default()),
         }
+    }
+
+    /// Resolved prompt-cache policy for agent runs (F-03 / D-28).
+    pub fn prompt_cache_policy(&self) -> piko_protocol::PromptCachePolicy {
+        self.prompt
+            .as_ref()
+            .and_then(|prompt| prompt.cache_policy)
+            .unwrap_or_default()
+            .to_protocol()
     }
 
     /// Shared runtime fields for `ConfigGet { namespace: "host" }`.
@@ -116,6 +160,7 @@ impl HostSettings {
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
             "mcp-servers": self.mcp_servers,
+            "prompt": self.prompt,
         })
     }
 }
@@ -528,6 +573,7 @@ fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings {
             overrides.mcp_servers
         },
         mcp: overrides.mcp.or(base.mcp),
+        prompt: overrides.prompt.or(base.prompt),
         tui: overrides.tui.or(base.tui),
         gui: overrides.gui.or(base.gui),
     }

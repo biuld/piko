@@ -32,6 +32,8 @@ pub struct PromptSnapshotOptions {
     pub previous_model: Option<String>,
     /// Host facts for the environment-context fragment (`environment.host`).
     pub environment: EnvironmentSnapshot,
+    /// Provider prompt-cache policy for this run (F-03 / D-28).
+    pub cache_policy: piko_protocol::PromptCachePolicy,
 }
 
 #[derive(Debug, thiserror::Error)]

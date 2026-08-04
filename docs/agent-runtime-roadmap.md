@@ -195,8 +195,8 @@ read-only `environment` tool.
    (`SessionFork` with `entry_id`; F-09/D-26/V-26). Full clone, resume, and
    interrupted finalization remain under the F-09 baseline. Residual F-09:
    session list cursor paging, session prewarm (deferred).
-2. Follow-on M0 gaps worth sequencing: F-03 mention-syntax parsing and
-   cache-planning polish.
+2. Follow-on M0 gaps: F-03 mention-syntax and cache-planning polish both
+   landed (D-27/V-27, D-28/V-28).
 3. M1 residue worth tracking under M6: F-15 per-turn usage accounting
    (baseline for budget decisions) remains partial.
 3. **M3 entry slice landed** (`F-11` slice 1, `D-11/V-11`): the guardian

@@ -91,6 +91,11 @@ impl AgentActor {
                         .as_ref()
                         .and_then(|resources| resources.world_state.clone()),
                     inter_agent_completions: self.pending_inter_agent_completions(),
+                    user_mentions: request
+                        .prompt_resources
+                        .as_ref()
+                        .map(|resources| resources.user_mentions.clone())
+                        .unwrap_or_default(),
                     input_message_id: request.message_id,
                     input: request.content,
                     context: ConversationContext {

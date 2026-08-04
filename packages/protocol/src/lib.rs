@@ -14,6 +14,7 @@ pub mod prompt;
 pub mod runtime;
 pub mod session;
 pub mod tools;
+pub mod user_mention;
 
 pub use agent_completion::*;
 pub use agent_instance::*;
@@ -35,3 +36,4 @@ pub use prompt::*;
 pub use runtime::*;
 pub use session::*;
 pub use tools::*;
+pub use user_mention::*;

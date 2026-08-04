@@ -112,6 +112,8 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
                 prompt_resources: Some(piko_protocol::PromptResourceSnapshot {
                     blocks: vec![test_prompt_block(context)],
                     world_state: None,
+                    user_mentions: Vec::new(),
+                    cache_policy: Default::default(),
                 }),
                 active_tool_names: None,
             })

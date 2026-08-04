@@ -1,11 +1,11 @@
 # F-03: Prompt assembly & context fragments
 
-> Status: implemented
+> Status: implemented (fragment catalog F-03/D-03/V-03; world-state moved to
+> F-04; mention-syntax F-03/D-27/V-27; cache-planning F-03/D-28/V-28)
 > Priority: P0
-> Source evidence: codex-rs `core/src/context/*` (world-state and
-> environment-context fragments, model-switch fragment, token-budget
-> fragments), `core/src/context_manager/history.rs` (world-state baseline and
-> diffing), `core/tests/suite/model_switching.rs`
+> Source evidence: codex-rs `core/src/context/*`, `mention_syntax.rs`,
+> `core-skills` injection (`$` tool mentions), TUI `@path` file completion
+> (piko packages/tui), prompt caching suites
 
 ## Summary
 
@@ -75,15 +75,66 @@ facts beyond date/cwd, and the model-switch notification.
 
 ## Out of scope
 
-- World-state *diffing* across turns (emitting only what changed). This slice
-  freezes a full snapshot per run; diffing belongs to the F-04 context
-  management workstream.
-- Inter-agent message fragments (F-10 v2 collaboration surface) and
-  token-budget/rollout-budget fragments (M1).
-- Mention-syntax parsing and general prompt-debug tooling.
-- Provider-level cache-planning policies beyond the existing scope labels.
-- Model-switch detection for subagents spawned mid-run with a per-agent model
-  override; the slice covers session-level model continuity for hostd runs.
+- World-state *diffing* across turns (owned by F-04 once that lands; later
+  moved to F-04 D-17).
+- Inter-agent completion fragments (F-20).
+- Token-budget/rollout-budget fragments (rejected under F-05 fusion).
+- Plugin mentions (`plugin://`), linked markdown `[$x](url)` forms.
+- General prompt-debug tooling and provider cache-planning policies beyond
+  existing scope labels.
+- Rewriting the durable User message to strip mentions or inline bodies.
+- Model-switch detection for subagents with per-agent model override.
+
+## Mention-syntax slice (D-27)
+
+### In scope
+
+- Parse plain **file** mentions `@path` and **skill** mentions `$name` from
+  the submitted user text (after prompt-template expansion).
+- Inject one retained data-only Context message per distinct mention into the
+  durable run chain **before** the user input message (after world-state and
+  inter-agent completions when present).
+- Resolve `@path` under the session cwd; fail-soft with a short error Context
+  when the path is outside cwd, missing, unreadable, or non-UTF-8 binary.
+- Resolve `$name` against the loaded skill catalog for the cwd; inject full
+  skill body when found; fail-soft for unknown names (skip common env-var
+  false positives such as `$PATH`).
+- Bound file and skill body size for model injection; leave user text as
+  submitted so transcript search still shows `@path` / `$name`.
+
+### User journeys
+
+5. The user types / accepts `@src/main.rs` in the editor and submits
+   "explain this". The durable transcript contains a Context file-mention
+   message with the file body, then the user message text still containing
+   `@src/main.rs`. The model answers without first calling a read tool.
+6. The user writes `$my-skill please follow this`. A Context skill-mention
+   with the skill body is injected when the skill is in the catalog.
+7. The user mentions `@/etc/passwd` or a path outside the session cwd. A
+   Context error mention is injected; the path content is not read.
+
+## Cache-planning polish slice (D-28)
+
+### In scope
+
+- Stable cache tiers separate **CatalogStable** (skills + prompt templates +
+  tool catalog digest) from **ResourceSnapshot** (project context files).
+- `PromptCachePlan.policy` is carried from host settings
+  (`[prompt] cache-policy`) through the frozen run prompt to llmd.
+- Assembly version bumps when the prefix segment labels / block scopes change
+  so frozen prompts are not replayed under a new plan.
+- Documented invariants: RunDynamic never changes `semantic_prefix_digest`;
+  project vs catalog vs tools invalidate independent segments when possible.
+
+### User journeys
+
+8. The operator updates AGENTS.md. The ResourceSnapshot segment digest
+   changes; skill catalog and tool catalog digests remain stable for the same
+   inputs.
+9. The operator adds a skill or enables tools (tool catalog). The CatalogStable
+   segment changes without rewriting project context digests.
+10. The operator sets `[prompt] cache-policy = "disabled"`. Provider cache keys
+    and message breakpoints are not applied for that host.
 
 ## Behavior and states
 
@@ -97,16 +148,19 @@ The frozen per-run prompt is assembled from this catalog (in emission order):
 | `operator.settings` | Instruction | Operator | Trusted | `settings` / `host/operator-prompt` | OperatorStable |
 | `agent.instructions` | Instruction | Agent | by provenance | agent provenance | AgentStable |
 | `project.context.*` | Instruction | Project | WorkspaceControlled | `workspace-file` / path | ResourceSnapshot |
-| `catalog.skills` | Catalog | None | WorkspaceControlled | `workspace-catalog` / skills | ResourceSnapshot |
-| `catalog.prompt-templates` | Catalog | None | WorkspaceControlled | `workspace-catalog` / prompt-templates | ResourceSnapshot |
+| `catalog.skills` | Catalog | None | WorkspaceControlled | `workspace-catalog` / skills | CatalogStable |
+| `catalog.prompt-templates` | Catalog | None | WorkspaceControlled | `workspace-catalog` / prompt-templates | CatalogStable |
 | `environment.host` | Environment | None | Trusted | `environment` / `host` | RunDynamic |
 | `environment.run` | Environment | None | Trusted | `environment` / `accepted-run` | RunDynamic |
 | `context.model-switch` | Context | None | Trusted | `environment` / `model-switch` | RunDynamic |
 
-The blocks (`environment.host`, `context.model-switch`) are RunDynamic and
-therefore never participate in the stable cache prefix; a change in host
-facts or model never invalidates cached platform/operator/agent/resource
-segments.
+The blocks (`environment.host`, `context.model-switch`, `environment.run`)
+are RunDynamic and therefore never participate in the stable cache prefix; a
+change in host facts or model never invalidates cached
+platform/operator/agent/catalog/resource segments. Catalog blocks
+(`catalog.skills`, `catalog.prompt-templates`) and the tool catalog digest
+share **CatalogStable**; project context files use **ResourceSnapshot** so
+catalog churn does not invalidate project-file prefixes and vice versa.
 
 ### World-state fragment
 
@@ -199,10 +253,24 @@ context as generated by a different model.
 - [ ] The world-state full-snapshot content marks `run_kind: continuation`
       for a continued session and `run_kind: initial` for a fresh one
       (unit-tested in F-04 slice 2).
-- [ ] Differential validation: the model-switch fragment appears in the
+- [x] Differential validation: the model-switch fragment appears in the
       second turn of a two-turn model change and states both model ids,
       mirroring the codex-rs `model_change_appends_model_instructions_developer_message`
       fixture shape.
+- [x] A user message containing `@path` under the session cwd injects a
+      retained file-mention Context with the file body before the User
+      message; the User text still contains `@path` (D-27 / V-27).
+- [x] A user message containing `$skill` injects a skill-mention Context
+      with the skill body when the skill is cataloged; unknown skills get a
+      fail-soft error Context without body (D-27 / V-27).
+- [x] Paths outside the session cwd are not read; a fail-soft error Context
+      is injected instead (D-27 / V-27).
+- [x] Catalog-stable blocks (skills / prompt templates) and the tool catalog
+      digest share CatalogStable; project context uses ResourceSnapshot, so
+      each tier invalidates independently (D-28 / V-28).
+- [x] `[prompt] cache-policy` is reflected in `SemanticRunPrompt.cache_plan.policy`
+      (D-28 / V-28).
+- [x] RunDynamic blocks still never change `semantic_prefix_digest` (regression).
 
 ## Product decisions
 
@@ -211,8 +279,8 @@ context as generated by a different model.
 | What goes in world state? | Durable run facts only (session/agent/operation/model, run kind), not derived instructions | Keeps identity stable per run and diffable in M1 |
 | Where do host facts come from? | Whitelisted capture (consts + `SHELL`/hostname/locale/timezone) | Fail-closed: never dumps process env or secrets |
 | When is model-switch emitted? | Only on a known previous→current model change | Avoids noise on first run and unconfigured models |
-| Which cache scope for the new fragments? | `RunDynamic` for all three | Host/run facts change without invalidating stable prefix segments |
-| Are fragments optional? | Yes, omitted when no facts are available | Keeps tests and minimal setups stable; no fabricated values |
+| Which cache scope for catalog fragments? | `CatalogStable` (skills + templates + tool catalog digest); project files stay `ResourceSnapshot` | D-28: avoid co-invalidating catalog and project prefixes |
+| How is policy chosen? | `[prompt] cache-policy` → `PromptCachePlan.policy` (default provider-default) | Operator control without recompiling; llmd already respects the enum |
 
 ## Fusion decisions (codex-rs)
 
@@ -222,12 +290,11 @@ context as generated by a different model.
 | `EnvironmentContext` XML injected as a model-visible message | **kept (adapted)** | piko emits a typed `environment.host` block in the frozen prompt instead of an XML message; same model-visible facts |
 | `<model_switch>` developer message on model change | **kept (adapted)** | piko emits a `context.model-switch` block from hostd session continuity; wording is piko-native, not codex text |
 | ~30 fragment modules (token budget, guardian reminders, inter-agent, realtime, ...) | **rejected (deferred)** / **partial keep** | Each lands with its owning feature; F-20 keeps completion envelopes as retained Context (not frozen prompt blocks); remaining modules defer without 1:1 parity |
+| `$tool` / plugin `@` mention_syntax for skills and plugins | **kept (adapted)** | piko: `$skill` for catalog skills, `@path` for workspace files matching TUI; inject retained Context (D-27); plugin mentions deferred with F-14 |
 
 ## Open questions
 
-1. Should `environment.host` eventually move into the stable cache prefix
-   with a per-session key? Deferred; RunDynamic is safe and simple.
-2. Should model-switch handle subagent per-agent model overrides? Deferred to
+1. Should model-switch handle subagent per-agent model overrides? Deferred to
    the F-10 roles slice, which will own per-agent model resolution.
 
 ## Reference evidence

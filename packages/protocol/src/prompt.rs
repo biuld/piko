@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentInstanceId, AgentSpec, Message, ToolDef};
 
-pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 4;
+pub const AGENT_RUN_PROMPT_ASSEMBLY_VERSION: u32 = 5;
 
 /// Instruction authority is independent from rendered message order.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,6 +125,14 @@ pub struct PromptResourceSnapshot {
     /// is never rendered as a frozen prompt block.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_state: Option<Message>,
+    /// Retained file/skill mention Context messages for this run (F-03 / D-27).
+    /// Injected after world-state / inter-agent completions and before the
+    /// user input, in appearance order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_mentions: Vec<Message>,
+    /// Provider prompt-cache policy for this run (F-03 / D-28).
+    #[serde(default)]
+    pub cache_policy: PromptCachePolicy,
 }
 
 /// The canonical prompt value frozen and reused by every Model Step in a run.

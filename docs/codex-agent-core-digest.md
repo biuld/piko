@@ -98,7 +98,8 @@ is exceeded.
   Context message (full first, diff afterwards) with a hostd-owned durable
   baseline cleared on compaction. Inter-agent completion fragments landed in
   F-20/D-25/V-25 (unread detached reports → retained Context on the parent’s
-  next run). Gaps: mention-syntax parsing, cache-planning polish.
+  next run). Gaps: none on the F-03 critical path (mention-syntax D-27;
+  cache-planning polish D-28 landed).
 
 ### D. Context Management & Compaction
 
@@ -287,7 +288,7 @@ is exceeded.
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
 | B Model Gateway | F-02 | partial (F-02/D-02/D-16 landed) | prewarm, sticky routing |
-| C Prompt Assembly | F-03 | partial (F-03/D-03 + F-20 completions) | mention-syntax parsing, cache-planning polish |
+| C Prompt Assembly | F-03 | implemented (fragments + mentions D-27 + cache D-28) | — |
 | D Context & Compaction | F-04, F-05 | partial (F-04/D-04/D-17 + F-05/D-05/D-18) | token-budget fragments rejected |
 | E Tool System | F-06 | partial (core + parallel batch D-06) | dynamic tools / tool search (unscheduled) |
 | F Approvals & Safety | F-07, F-11, F-12 | partial (slices landed) | F-12 elicitation deferred until consumer |

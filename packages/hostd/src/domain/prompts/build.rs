@@ -67,7 +67,7 @@ pub fn snapshot_prompt_resources(
             piko_protocol::ContentTrust::WorkspaceControlled,
             piko_protocol::PromptSource::new("workspace-catalog", "skills"),
             skills,
-            piko_protocol::CacheScope::ResourceSnapshot,
+            piko_protocol::CacheScope::CatalogStable,
         ));
     }
     let templates = format_prompt_templates(&options.prompt_templates);
@@ -79,7 +79,7 @@ pub fn snapshot_prompt_resources(
             piko_protocol::ContentTrust::WorkspaceControlled,
             piko_protocol::PromptSource::new("workspace-catalog", "prompt-templates"),
             templates,
-            piko_protocol::CacheScope::ResourceSnapshot,
+            piko_protocol::CacheScope::CatalogStable,
         ));
     }
     if let Some(content) = environment_host {
@@ -117,6 +117,8 @@ pub fn snapshot_prompt_resources(
     piko_protocol::PromptResourceSnapshot {
         blocks,
         world_state: None,
+        user_mentions: Vec::new(),
+        cache_policy: options.cache_policy,
     }
 }
 
@@ -220,7 +222,7 @@ pub fn assemble_agent_run_prompt(
         assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
         source_digest,
         cache_plan: piko_protocol::PromptCachePlan {
-            policy: piko_protocol::PromptCachePolicy::ProviderDefault,
+            policy: request.resources.cache_policy,
             prefix_segments,
             semantic_prefix_digest,
         },

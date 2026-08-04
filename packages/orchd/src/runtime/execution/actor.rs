@@ -73,6 +73,11 @@ impl ExecutionActor {
         for completion in &request.inter_agent_completions {
             transcript.push_message(completion.clone());
         }
+        // File/skill mentions (F-03 / D-27): after inter-agent completions,
+        // before the user input on the durable chain.
+        for mention in &request.user_mentions {
+            transcript.push_message(mention.clone());
+        }
         transcript.push_user_content(request.input.clone(), None);
         let state = ExecutionState {
             status: ExecutionStatus::Accepted,

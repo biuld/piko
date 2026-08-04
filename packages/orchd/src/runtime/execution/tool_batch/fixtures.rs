@@ -361,6 +361,7 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
         tool_catalog: piko_protocol::ResolvedToolCatalog::new(tools, "digest"),
         world_state: None,
         inter_agent_completions: Vec::new(),
+        user_mentions: Vec::new(),
         input_message_id: "message-batch".into(),
         input: MessageContent::String("run tools".into()),
         context: piko_protocol::ConversationContext::empty(),

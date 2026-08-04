@@ -111,9 +111,13 @@ pub struct StartExecutionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub world_state: Option<Message>,
     /// Unread detached inter-agent completions (F-20). Committed after
-    /// `world_state` and before the run input, in vector order.
+    /// `world_state` and before user mentions / the run input, in vector order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inter_agent_completions: Vec<Message>,
+    /// File/skill mention Context messages (F-03 / D-27). Committed after
+    /// inter-agent completions and before the run input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_mentions: Vec<Message>,
     pub input_message_id: MessageId,
     pub input: MessageContent,
     pub context: ConversationContext,
@@ -286,6 +290,7 @@ mod tests {
             tool_catalog: crate::ResolvedToolCatalog::default(),
             world_state: None,
             inter_agent_completions: Vec::new(),
+            user_mentions: Vec::new(),
             input_message_id: "msg-1".into(),
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),

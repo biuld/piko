@@ -39,7 +39,7 @@ pub(super) fn fallback_run_prompt(
         assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
         source_digest: source_digest.clone(),
         cache_plan: piko_protocol::PromptCachePlan {
-            policy: piko_protocol::PromptCachePolicy::ProviderDefault,
+            policy: request.resources.cache_policy,
             prefix_segments: Vec::new(),
             semantic_prefix_digest: source_digest,
         },
