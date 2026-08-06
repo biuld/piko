@@ -1,6 +1,6 @@
 # F-17: Permission profiles (materialized file/network/command policies)
 
-> Status: proposed (slice 1)
+> Status: implemented (F-17/D-20/V-20)
 > Priority: P1
 > Source evidence: codex-rs `core/src/config/*` (config layers, permissions,
 > permission-profile catalog, managed features, agent roles, schema),
@@ -182,41 +182,41 @@ command tool call needing approval (bash / process start)
 
 ## Acceptance criteria
 
-- [ ] `[permissions]` settings merge field-by-field across
+- [x] `[permissions]` settings merge field-by-field across
       global/project/override: `profile` scalar override, `profiles` map
       per-name replace, base-only profiles preserved (fixture: settings
       merge unit tests, defaults template check).
-- [ ] No `[permissions]` section resolves to the built-in `default` profile;
+- [x] No `[permissions]` section resolves to the built-in `default` profile;
       an unknown active profile name warns and falls back to `default`
       (fixture: hostd domain resolver unit tests).
-- [ ] With `[permissions] profile = "locked"` and no `[sandbox] policy-path`,
+- [x] With `[permissions] profile = "locked"` and no `[sandbox] policy-path`,
       the session sandbox policy carries the profile's read/write/deny/
       network fields and the inherited execution whitelist (fixture: orchd
       policy-resolution test).
-- [ ] The built-in `default` profile (absent section, explicit `profile =
+- [x] The built-in `default` profile (absent section, explicit `profile =
       "default"` without a definition, or unknown-name fallback) never
       materializes: sandbox policy resolution is unchanged (fixture: hostd
       resolver tests + orchd policy-resolution test).
-- [ ] With a `[sandbox] policy-path` file present, the file wins for the
+- [x] With a `[sandbox] policy-path` file present, the file wins for the
       sandbox policy while profile command rules still apply to approvals
       (fixture: orchd policy-resolution test).
-- [ ] A `bash`/`process start` call matching a `denied-commands` prefix
+- [x] A `bash`/`process start` call matching a `denied-commands` prefix
       returns `PermissionDenied { reason }`; the orchd registry maps it to a
       non-retryable `permission_denied` error, and no user prompt is
       published (fixture: hostd gateway test + orchd registry decision
       test).
-- [ ] A store-granted command that matches a `denied-commands` prefix still
+- [x] A store-granted command that matches a `denied-commands` prefix still
       fails closed (deny wins over grants; fixture: hostd gateway test).
-- [ ] A `bash`/`process start` call matching an `allowed-commands` prefix
+- [x] A `bash`/`process start` call matching an `allowed-commands` prefix
       is accepted one-shot: no user prompt, no store grant, and an identical
       second call is evaluated again (fixture: hostd gateway test).
-- [ ] Token-boundary prefix matching: `cargo test` matches
+- [x] Token-boundary prefix matching: `cargo test` matches
       `cargo test --release`, not `cargo testrun`; `git` matches `git status`,
       not `gitlab-ci` (fixture: hostd domain unit tests).
-- [ ] Non-matching commands and non-command tools keep the existing approval
+- [x] Non-matching commands and non-command tools keep the existing approval
       flow unchanged (fixture: hostd gateway test + existing registry
       tests).
-- [ ] With no `[permissions]` section, sandbox policy resolution and
+- [x] With no `[permissions]` section, sandbox policy resolution and
       approval behavior are unchanged (fixture: existing tests green).
 
 ## Product decisions
@@ -238,8 +238,8 @@ command tool call needing approval (bash / process start)
 | Permission-profile catalog | kept (adapted) | `[permissions].profiles` map with named bundles, selected by `profile` |
 | Materialized file/network/command policies | kept (adapted) | file/network → sandbox `Policy`; command → approval gateway prefix rules |
 | Command allow/deny prefix rules | kept (adapted) | token-boundary prefix matching on `bash`/`process start` commands |
-| Managed-feature gating | rejected (deferred) | later M-config slice; no piko consumer yet for feature-flag gating |
-| Agent-role layers | rejected (deferred) | later M-config slice alongside F-10 agent roles |
+| Managed-feature gating | out of this slice | landed separately in F-18/D-21/V-21 |
+| Agent-role layers | out of this slice | permission-profile selection landed separately in F-19/D-22/V-22 |
 | `request_permissions` tool elevation | rejected | no piko consumer; out-of-policy commands fail closed or prompt via F-07 |
 | Network endpoint granularity | rejected | sandbox exposes a network boolean; profiles mirror the enforcement surface |
 

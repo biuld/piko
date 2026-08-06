@@ -223,36 +223,36 @@ effective_min_growth(config, window):
 
 ## Acceptance criteria
 
-- [ ] Unit evidence: the trigger decision respects `enabled`, the high
+- [x] Unit evidence: the trigger decision respects `enabled`, the high
       waterline, and the minimum-growth guard; the first compaction
       triggers, and after a recorded rearm baseline the same estimate does
       not re-trigger.
-- [ ] Unit evidence: `get_context_remaining` reports
+- [x] Unit evidence: `get_context_remaining` reports
       `window − fixed − transcript` from the same budget basis as the F-04
       preflight, and `null` when the window is unknown.
-- [ ] Integration evidence: two racing compacts on one session result in one
+- [x] Integration evidence: two racing compacts on one session result in one
       rewrite (pending guard).
-- [ ] Integration evidence: `session.compact` with `NewContextWindow` mode
+- [x] Integration evidence: `session.compact` with `NewContextWindow` mode
       drops the old prefix, retains the last user message, and emits
       `SessionReconciled` without invoking the summarizer.
-- [ ] Integration evidence: a configured summarizer model is used for the
+- [x] Integration evidence: a configured summarizer model is used for the
       summary; when it fails, hostd retries with the default model and the
       compaction lands (scripted gateway).
-- [ ] End-to-end evidence: a running agent calls `get_context_remaining` and
+- [x] End-to-end evidence: a running agent calls `get_context_remaining` and
       receives the expected remaining estimate; calling `new_context_window`
       produces the fresh-window rewrite and the run continues.
-- [ ] End-to-end evidence: `[transcript] max-tool-output-tokens` reaches the
+- [x] End-to-end evidence: `[transcript] max-tool-output-tokens` reaches the
       orchd model view (an oversized tool result is truncated at the
       configured cap).
-- [ ] Unit evidence (slice 2): `min_growth_tokens` unset + fraction
+- [x] Unit evidence (slice 2): `min_growth_tokens` unset + fraction
       configured derives `max(1, round(window × fraction))`; an explicit
       `min_growth_tokens` beats the fraction; window 0 falls back to the
       constant `16_384`.
-- [ ] Integration evidence (slice 2): with a default (fraction-only)
+- [x] Integration evidence (slice 2): with a default (fraction-only)
       config, a small-window model re-triggers auto-compact after growth of
       the window-derived amount; the trigger decision uses the resolved
       window basis.
-- [ ] `cargo fmt --all` and `cargo clippy --workspace --all-targets --
+- [x] `cargo fmt --all` and `cargo clippy --workspace --all-targets --
       -D warnings` clean; `cargo test --workspace` green.
 
 ## Product decisions

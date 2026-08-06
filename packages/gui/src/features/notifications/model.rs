@@ -140,8 +140,9 @@ mod tests {
     fn identical_notice_coalesces_into_one_row() {
         let mut center = AppNotificationCenter::default();
         assert!(push_bounded(&mut center, notice("boom")));
-        // Consecutive identical notices are deduped by the store.
-        assert!(!push_bounded(&mut center, notice("boom")));
+        // Final notices are occurrences: the second ingest refreshes
+        // delivery state while the stable notice id keeps one history row.
+        assert!(push_bounded(&mut center, notice("boom")));
         assert_eq!(center.records().len(), 1);
     }
 

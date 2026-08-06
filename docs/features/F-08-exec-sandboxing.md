@@ -147,34 +147,34 @@ is surfaced through an `environment` tool.
 
 ## Acceptance criteria
 
-- [ ] A `bash` call runs under the sandbox runner: with the sandbox enabled,
+- [x] A `bash` call runs under the sandbox runner: with the sandbox enabled,
       a command writing outside the policy's writable roots fails closed
       rather than touching the filesystem.
-- [ ] The process is a session-leading process group; killing the parent
+- [x] The process is a session-leading process group; killing the parent
       shell (timeout or cancellation) also terminates its child processes.
-- [ ] A timeout terminates a sleeping command and returns a bounded timeout
+- [x] A timeout terminates a sleeping command and returns a bounded timeout
       result, not a hung tool call.
-- [ ] Cancelling a run aborts an in-flight `bash` call and commits a bounded
+- [x] Cancelling a run aborts an in-flight `bash` call and commits a bounded
       result (existing F-06 contract preserved).
-- [ ] A command terminated by a signal reports the signal, not a fabricated
+- [x] A command terminated by a signal reports the signal, not a fabricated
       exit code.
-- [ ] The shell resolves from `[sandbox] shell_path`, then `$SHELL`, then the
+- [x] The shell resolves from `[sandbox] shell_path`, then `$SHELL`, then the
       platform default; the resolved path is reported in tool metadata.
-- [ ] With `allowNetwork: false`, a network probe (e.g. `curl localhost`)
+- [x] With `allowNetwork: false`, a network probe (e.g. `curl localhost`)
       fails inside the sandbox on macOS; with `allowNetwork: true`, the same
       probe succeeds.
-- [ ] Linux bwrap honors `allowNetwork: true` via `--share-net` instead of
+- [x] Linux bwrap honors `allowNetwork: true` via `--share-net` instead of
       erroring out.
-- [ ] The existing file-policy tests and tool-batch tests still pass
+- [x] The existing file-policy tests and tool-batch tests still pass
       (differential regression).
-- [ ] A `process start` keeps the command running across tool calls: output
+- [x] A `process start` keeps the command running across tool calls: output
       accumulates and is readable incrementally, stdin writes reach the
       process, and `stop` terminates the whole process group.
-- [ ] Unknown process ids produce a bounded error, and a process-list call
+- [x] Unknown process ids produce a bounded error, and a process-list call
       reflects current live processes.
-- [ ] The environment tool reports the resolved shell, OS/arch, cwd, PATH,
+- [x] The environment tool reports the resolved shell, OS/arch, cwd, PATH,
       and detected tools without exposing credentials.
-- [ ] Shell resolution falls back to a usable shell when the configured
+- [x] Shell resolution falls back to a usable shell when the configured
       shell is unavailable.
 
 ## Product decisions

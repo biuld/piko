@@ -161,28 +161,28 @@ whether built-in or user-defined).
 
 ## Acceptance criteria
 
-- [ ] `permissions_settings_merge_field_by_field`-style coverage proves
+- [x] `permissions_settings_merge_field_by_field`-style coverage proves
       `[permissions.roles]` merges per key across layers (override wins per
       key; base-only keys survive).
-- [ ] A role mapped to a defined profile resolves that profile's
+- [x] A role mapped to a defined profile resolves that profile's
       `PermissionConfig`; `evaluate_command` with that config denies
       `denied-commands` (fail closed, `permission_denied`) and one-shot
       accepts `allowed-commands` for `bash` and `process start`.
-- [ ] Unmapped roles and unknown roles evaluate against the session config
+- [x] Unmapped roles and unknown roles evaluate against the session config
       (existing F-17 behavior unchanged).
-- [ ] A mapping to an unknown profile logs a warning naming the role and
+- [x] A mapping to an unknown profile logs a warning naming the role and
       the profile and is dropped (role inherits the session profile).
-- [ ] A mapping to the built-in `default` is a no-op (role inherits the
+- [x] A mapping to the built-in `default` is a no-op (role inherits the
       session profile); roles can never loosen below the session profile.
-- [ ] Workspace tools executed by a mapped-role agent run under the role's
+- [x] Workspace tools executed by a mapped-role agent run under the role's
       materialized file/network policy (read/write roots, deny paths,
       network allow); unmapped roles keep the session policy.
-- [ ] Approval-time `writable_roots` reflects the executing role's policy
+- [x] Approval-time `writable_roots` reflects the executing role's policy
       (read-only role → no auto-approve for out-of-roots writes).
-- [ ] The approval request carries the executing agent's `role` from the
+- [x] The approval request carries the executing agent's `role` from the
       registered `AgentSpec` (identity, not model input); hostd resolves
       the profile.
-- [ ] No `[permissions]` / no `[permissions.roles]` changes behavior;
+- [x] No `[permissions]` / no `[permissions.roles]` changes behavior;
       `resources/settings.default.toml` documents the section.
 
 ## Product decisions

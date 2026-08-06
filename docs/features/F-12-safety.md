@@ -134,37 +134,37 @@ workspace write approval request (edit / write)
 
 ## Acceptance criteria
 
-- [ ] `[safety]` settings merge correctly across global/project/override with
+- [x] `[safety]` settings merge correctly across global/project/override with
       `auto-approve-workspace-writes` defaulting to `true` (fixture: settings
       merge unit tests, defaults template check).
-- [ ] With defaults, an `edit`/`write` request whose path resolves inside a
+- [x] With defaults, an `edit`/`write` request whose path resolves inside a
       writable root is accepted one-shot: no user prompt is published, no
       session/workspace/permanent grant is written, and an identical second
       request is assessed again (fixture: hostd gateway test).
-- [ ] A request targeting a path outside every writable root returns
+- [x] A request targeting a path outside every writable root returns
       `SafetyRejected { reason }`; the orchd registry maps it to a
       non-retryable `safety_rejected` error carrying the reason (fixture:
       hostd gateway test + orchd registry decision test).
-- [ ] When the request carries no writable roots, the request falls through
+- [x] When the request carries no writable roots, the request falls through
       to the user flow: a pending approval entry is created and a user
       decision resolves it (fixture: hostd gateway test).
-- [ ] When `auto-approve-workspace-writes = false`, in-roots writes fall
+- [x] When `auto-approve-workspace-writes = false`, in-roots writes fall
       through to the user flow exactly as before F-12 (fixture: hostd gateway
       test).
-- [ ] Non-write tools (`bash`, `process`, `read`) are unaffected: no safety
+- [x] Non-write tools (`bash`, `process`, `read`) are unaffected: no safety
       assessment is applied and their approval behavior is unchanged
       (fixture: hostd gateway test + existing registry tests).
-- [ ] Default deny covers `.piko/`: `write`/`edit` targeting
+- [x] Default deny covers `.piko/`: `write`/`edit` targeting
       `.piko/approvals.json` fail with `access_denied` and leave the file
       untouched (fixture: workspace handler test).
-- [ ] `edit`/`write` fingerprints include the target path, and a grant for
+- [x] `edit`/`write` fingerprints include the target path, and a grant for
       one path does not match another (fixture: approval fingerprint unit
       test).
-- [ ] `edit` rejects empty `oldText` (`edit_requires_old_text`), rejects
+- [x] `edit` rejects empty `oldText` (`edit_requires_old_text`), rejects
       non-unique matches (`edit_not_unique` with line numbers), and returns
       an actionable `edit_not_found` message (fixture: workspace handler
       tests).
-- [ ] Write-path re-verification accepts stable paths and rejects a swapped
+- [x] Write-path re-verification accepts stable paths and rejects a swapped
       symlink target (fixture: `piko-sandbox` policy test).
 
 ## Product decisions

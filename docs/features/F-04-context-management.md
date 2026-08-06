@@ -147,20 +147,20 @@ rollback(checkpoint) → messages/tokens truncated, generation += 1
 
 ## Acceptance criteria
 
-- [ ] Per-message token estimates are tracked by the transcript manager; the
+- [x] Per-message token estimates are tracked by the transcript manager; the
       running total equals the sum of estimates and stays consistent across
       push and rollback (unit evidence).
-- [ ] Two consecutive `snapshot()` calls share one allocation
+- [x] Two consecutive `snapshot()` calls share one allocation
       (`Arc::ptr_eq`); any mutation invalidates the cache and produces a new
       snapshot (unit evidence).
-- [ ] A tool result above the cap is truncated in the model view with an
+- [x] A tool result above the cap is truncated in the model view with an
       explicit marker containing retained/total counts; small results,
       image blocks, and error metadata pass through; the committed
       transcript retains the full output (unit + end-to-end evidence).
-- [ ] The budget preflight accounts the normalized model view and reports
+- [x] The budget preflight accounts the normalized model view and reports
       `context_remaining` on rejection; the estimate basis is identical to
       what is dispatched to the gateway (unit evidence).
-- [ ] End-to-end: a tool emitting output above the cap yields a truncated
+- [x] End-to-end: a tool emitting output above the cap yields a truncated
       marker in the next model request while the run completes normally and
       the committed transcript holds the full output (integration evidence).
 
@@ -307,27 +307,27 @@ the prompt noisier, while nothing tells the model what actually changed.
 
 ### Acceptance criteria
 
-- [ ] A fresh session run injects one full world-state Context message
+- [x] A fresh session run injects one full world-state Context message
       before the user message, with all available facts in fixed order
       (unit evidence).
-- [ ] A continuation run injects only the changed facts before its user
+- [x] A continuation run injects only the changed facts before its user
       message; unchanged facts are absent from the diff and remain visible
       through the retained full snapshot from the first run (unit +
       end-to-end evidence).
-- [ ] An unchanged fact set emits no world-state message (unit evidence).
-- [ ] A fact that becomes unavailable renders `<unset>` (unit evidence).
-- [ ] The durable baseline survives a hostd restart: the next continuation
+- [x] An unchanged fact set emits no world-state message (unit evidence).
+- [x] A fact that becomes unavailable renders `<unset>` (unit evidence).
+- [x] The durable baseline survives a hostd restart: the next continuation
       diffs against the restored baseline instead of re-emitting full
       (storage evidence).
-- [ ] A successful compaction (auto/manual/new-context-window) clears the
+- [x] A successful compaction (auto/manual/new-context-window) clears the
       baseline; the next run re-injects full (integration evidence).
-- [ ] The frozen prompt contains no `state.run` block; the assembly version
+- [x] The frozen prompt contains no `state.run` block; the assembly version
       is 4; environment blocks remain RunDynamic and never change the
       stable prefix digest (regression guard).
-- [ ] The durable transcript chain is linear: head → world-state → input;
+- [x] The durable transcript chain is linear: head → world-state → input;
       the world-state commit precedes the input commit (integration
       evidence).
-- [ ] Differential validation: a two-run session shows full → diff emission
+- [x] Differential validation: a two-run session shows full → diff emission
       mirroring codex-rs `update_world_state` full-then-patch behavior at
       the message level.
 

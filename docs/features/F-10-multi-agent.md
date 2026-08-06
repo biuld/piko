@@ -1,6 +1,6 @@
 # F-10: Multi-agent v2 collaboration tools
 
-> Status: reviewed
+> Status: implemented (F-10/D-10/V-10)
 > Priority: P1
 > Source evidence: codex-rs `multi_agents_v2/*` (followup_task, interrupt_agent,
 > list_agents, wait_agent); digest Block I (`docs/codex-agent-core-digest.md`)
@@ -54,8 +54,8 @@ supervising parent cannot steer them:
 
 ## Out of scope
 
-- Agent roles (role config layers) — separate F-10 slice under M5.
-- Inter-agent notification fragments in prompts — separate F-03 slice.
+- Agent role permission layers — landed separately in F-19/D-22/V-22.
+- Inter-agent completion fragments — landed separately in F-20/D-25/V-25.
 - Spawn and report-collection surfaces — already landed in the v1 slice.
 - New delivery modes beyond the existing `AgentInputDelivery` semantics.
 - Hostd/UI surfaces that consume mailbox events (the lane is orchd-internal
@@ -109,23 +109,23 @@ consumed with `collect_agent_reports`.
 
 ## Acceptance criteria
 
-- [ ] `followup_task` on an idle child starts a run and returns an `accepted`
+- [x] `followup_task` on an idle child starts a run and returns an `accepted`
       disposition; on a busy child it returns `queued` and an
       `InputQueued` durable command is committed.
-- [ ] `interrupt_agent` on a running child cancels the run, reports
+- [x] `interrupt_agent` on a running child cancels the run, reports
       `previous_activity: running`, and the child accepts a later follow-up.
-- [ ] `interrupt_agent` on an idle child returns `accepted: false` without an
+- [x] `interrupt_agent` on an idle child returns `accepted: false` without an
       error and without changing lifecycle.
-- [ ] `list_agents` returns every live agent with parents ordered before
+- [x] `list_agents` returns every live agent with parents ordered before
       children and depth matching parent-child edges.
-- [ ] `wait_agent` returns `timed_out: false` with the child's `RunFinished`
+- [x] `wait_agent` returns `timed_out: false` with the child's `RunFinished`
       or `InboxReport` event before `timeout_ms` when a detached child
       reports.
-- [ ] `wait_agent` with no matching events returns `timed_out: true` around
+- [x] `wait_agent` with no matching events returns `timed_out: true` around
       `timeout_ms` and leaves inbox items unconsumed.
-- [ ] `wait_agent` with an `agent_instance_id` filter ignores events from
+- [x] `wait_agent` with an `agent_instance_id` filter ignores events from
       other agents.
-- [ ] Every mailbox event is published only after the corresponding durable
+- [x] Every mailbox event is published only after the corresponding durable
       commit succeeds (durability before visibility).
 
 ## Product decisions
@@ -146,7 +146,7 @@ consumed with `collect_agent_reports`.
 | `interrupt_agent` | kept | Uses `AgentRuntime::cancel_agent_run` plus a pre-cancel snapshot; returns previous activity. |
 | `list_agents` | kept | Surfaces the existing `AgentRuntime::list_agents` depth-sorted tree as a tool. |
 | `wait_agent` | kept (adapted) | Piko waits on a mailbox notification lane instead of status messages; mandatory timeout; no durable consumption. |
-| Agent roles / inter-agent prompt fragments | rejected for this slice | Separate F-10/F-03 slices; no piko consumer yet. |
+| Agent roles / inter-agent prompt fragments | out of this slice | Permission-profile roles landed in F-19; completion fragments landed in F-20. Optional role prompt/model layers remain deferred. |
 
 ## Open questions
 

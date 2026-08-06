@@ -538,6 +538,35 @@ fn load_skills_prefers_project_over_global_visible_format() {
 }
 
 #[test]
+fn load_skills_prefers_nearest_definition_with_the_same_name() {
+    let temp = tempfile::tempdir().unwrap();
+    let parent_skill = temp.path().join(".piko").join("skills").join("demo");
+    let nested_cwd = temp.path().join("workspace").join("crate");
+    let nested_skill = nested_cwd.join(".piko").join("skills").join("demo");
+    fs::create_dir_all(&parent_skill).unwrap();
+    fs::create_dir_all(&nested_skill).unwrap();
+    fs::write(
+        parent_skill.join("SKILL.md"),
+        "---\nname: demo\ndescription: Parent skill\n---\nParent body",
+    )
+    .unwrap();
+    fs::write(
+        nested_skill.join("SKILL.md"),
+        "---\nname: demo\ndescription: Nearest skill\n---\nNearest body",
+    )
+    .unwrap();
+
+    let result = load_skills(&nested_cwd);
+    let skill = result
+        .skills
+        .iter()
+        .find(|skill| skill.name == "demo")
+        .expect("demo skill");
+    assert_eq!(skill.description, "Nearest skill");
+    assert_eq!(skill.file_path, nested_skill.join("SKILL.md"));
+}
+
+#[test]
 fn load_skills_parses_yaml_arrays_booleans_and_reports_malformed_frontmatter() {
     let temp = tempfile::tempdir().unwrap();
     let skills_dir = temp.path().join(".piko").join("skills");

@@ -106,24 +106,24 @@ requested (pending) --run cancelled--> declined (terminal, existing path)
 
 ## Acceptance criteria
 
-- [ ] With no response, a tool-approval request resolves to `Expired` after
+- [x] With no response, a tool-approval request resolves to `Expired` after
       the configured timeout: the pending entry is removed, an
       `ApprovalResolved { status: Expired }` event is published, and the
       gateway returns the expired decision (fixture: hostd gateway timeout
       test with a mock gateway input).
-- [ ] An expired approval fails the tool call with a deterministic,
+- [x] An expired approval fails the tool call with a deterministic,
       non-retryable `approval_expired` error whose message names the timeout
       (fixture: orchd registry decision-mapping test).
-- [ ] A user decline fails the tool call with `declined` and resolves the
+- [x] A user decline fails the tool call with `declined` and resolves the
       approval as `Rejected`; neither a decline nor an expiry writes a grant
       to any scope of the approval store (fixture: existing approval-store
       tests + gateway resolution tests).
-- [ ] A response arriving after the deadline is ignored (no double
+- [x] A response arriving after the deadline is ignored (no double
       resolution, no grant write) (fixture: late-response race test).
-- [ ] `[approvals] timeout-secs` overrides the default and merges correctly
+- [x] `[approvals] timeout-secs` overrides the default and merges correctly
       across global/project/override settings (fixture: settings merge unit
       tests).
-- [ ] Differential validation against codex-rs: `Denied` (continue the turn,
+- [x] Differential validation against codex-rs: `Denied` (continue the turn,
       no execution) and `TimedOut` (fail closed) map to piko's `Rejected` and
       `Expired`; codex-rs `Abort` (stop the turn on a synthetic denial) is
       rejected for this slice because piko's run cancellation already

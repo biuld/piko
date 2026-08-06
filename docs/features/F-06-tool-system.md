@@ -110,18 +110,18 @@ for differential replay against codex-rs.
 
 ## Acceptance criteria
 
-- [ ] A batch with two parallel-capable tools shows observable overlap in
+- [x] A batch with two parallel-capable tools shows observable overlap in
       execution and commits both results in call order.
-- [ ] A sequential tool in a batch never overlaps any other call.
-- [ ] A mixed batch keeps the sequential call exclusive while parallel calls
+- [x] A sequential tool in a batch never overlaps any other call.
+- [x] A mixed batch keeps the sequential call exclusive while parallel calls
       may overlap each other.
-- [ ] With a concurrency cap of 1, parallel calls do not overlap.
-- [ ] Results commit in `toolCallIndex` order even when completion order
+- [x] With a concurrency cap of 1, parallel calls do not overlap.
+- [x] Results commit in `toolCallIndex` order even when completion order
       differs.
-- [ ] Cancelling mid-batch commits a bounded error result for every in-flight
+- [x] Cancelling mid-batch commits a bounded error result for every in-flight
       call in call order and starts no new calls.
-- [ ] Unknown tools produce a bounded error result (unchanged).
-- [ ] Transcript ordering for a sequential batch is byte-identical to current
+- [x] Unknown tools produce a bounded error result (unchanged).
+- [x] Transcript ordering for a sequential batch is byte-identical to current
       behavior (differential regression).
 
 ## Product decisions

@@ -70,7 +70,6 @@ usage-carrying SSE stream, and asserts on the exported `llm.request` span.
   `run_agent` span-capture mechanism verified here for root runs; a dedicated
   `spawn_agent` trace assertion is deferred to the multi-agent slice and is
   also visible manually in Jaeger with `[observability] enabled = true`.
-- `json-logs = true` switches the hostd file layer to JSON lines (same events
-  and attributes, no collector needed); the layer composition is exercised by
-  `tests/logging.rs` with the non-JSON path and by the OTel end-to-end test
-  with the JSON path disabled — enabling it is a settings-only change.
+- File and JSON logging were removed in this slice. With observability
+  disabled, the supported fallback is the stderr console layer asserted by
+  `tests/logging.rs`.

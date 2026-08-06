@@ -1,6 +1,6 @@
 # codex-rs Agent Core Digest
 
-> Date: 2026-08-02
+> Date: 2026-08-06
 > Evidence: `/Users/biu/Projects/codex/codex-rs/core/src`
 > Status: living reference — update as new blocks are distilled into PRDs
 
@@ -228,8 +228,9 @@ is exceeded.
   (`F-13/D-23/V-23`): stdio provider, tool discovery/execution, resources
   (`mcp_resource` list/search/read), approval templates, and bounded
   prewarm, plus a TUI `/mcp` status command + panel (`D-24/V-24`).
-  `F-14 skills-plugins`: skills loader + prompt injection landed; plugin
-  system and hooks deferred (no piko consumer; not scheduled).
+  `F-14 skills-plugins`: the skills discovery/catalog and `$skill` baseline
+  landed (`F-14/D-14/V-14`); plugin system and hooks are deferred because no
+  piko consumer is scheduled.
 
 ### K. Realtime & Multimodal (extension)
 
@@ -250,7 +251,8 @@ is exceeded.
 - Distilled behavior: turn TTFT/TTFM metrics, usage accounting, event
   mapping/dedup, turn-diff tracking for UI deltas, rollout budget tracking,
   prompt debugging, rollout recording with cursor paging.
-- piko status: **implemented** for planned slices — `F-15 observability`
+- piko status: **partial reference coverage** — the planned `F-15`
+  observability slices are implemented
   (F-15/D-15/V-15 tracing + metrics; D-29/V-29 per-turn usage accounting with
   hostd as product ledger and OTel as write-through projection). Residual:
   rollout recorder polish, turn-diff tracking, prompt debugging (digest
@@ -284,6 +286,10 @@ is exceeded.
 
 ## 4. piko coverage matrix
 
+This matrix measures coverage of the distilled codex-rs reference block. It
+does not override roadmap completion for piko's intentionally committed
+scope; rejected or consumer-triggered behavior remains visible as residue.
+
 | Block | F-ID | piko status | First concrete slice / residue |
 |---|---|---|---|
 | A Turn & Agent Runtime | F-01 | implemented (F-01/D-01/V-01) | — |
@@ -295,9 +301,9 @@ is exceeded.
 | G Exec & Sandbox | F-08 | implemented (D-08/D-19) | — |
 | H Persistence & Resume | F-09 | partial (store + clone + branch-point fork D-26) | list paging, prewarm |
 | I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
-| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14 skills landed; plugins/hooks deferred |
+| J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14/D-14/V-14 skills baseline landed; plugins/hooks deferred |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
-| L Observability | F-15 | implemented (F-15/D-15 + D-29 usage) | rollout/diff/prompt-debug polish |
+| L Observability | F-15 | partial reference coverage (F-15/D-15 + D-29 usage landed) | rollout/diff/prompt-debug polish |
 | M Config & Permissions | F-17, F-18, F-19 | implemented | — |
 
 ## 5. Reading codex-rs per feature

@@ -179,39 +179,39 @@ already non-streaming.
 
 ## Acceptance criteria
 
-- [ ] Retryable transport/rate-limit failures (503/429/timeout) retry with
+- [x] Retryable transport/rate-limit failures (503/429/timeout) retry with
       capped, jittered backoff; attempts stop at `max_retries` or when the
       next delay exceeds the remaining budget (differential: codex-rs
       `responses_retry.rs` budget/retry-loop semantics).
-- [ ] Non-retryable failures (401/400/422) fail immediately without retries
+- [x] Non-retryable failures (401/400/422) fail immediately without retries
       and without fallback.
-- [ ] When the retry budget is exhausted and fallback is enabled, the gateway
+- [x] When the retry budget is exhausted and fallback is enabled, the gateway
       completes the request non-streaming and emits the standard event
       sequence (content/reasoning/tool calls, usage, done).
-- [ ] Streaming fallback is controllable per provider; when disabled, the
+- [x] Streaming fallback is controllable per provider; when disabled, the
       request fails with the streaming error.
-- [ ] Cancellation during backoff aborts immediately and never waits out the
+- [x] Cancellation during backoff aborts immediately and never waits out the
       sleep.
-- [ ] Every completed response emits one `Usage` event with input, output,
+- [x] Every completed response emits one `Usage` event with input, output,
       cache, and total token counts before `Done` when the provider reports
       usage (streaming requests enable usage capture).
-- [ ] A stream that breaks mid-response surfaces as an error without a
+- [x] A stream that breaks mid-response surfaces as an error without a
       silently restarted or duplicated response.
-- [ ] `RetryConfig` budget and cap settings flow from `settings.toml`
+- [x] `RetryConfig` budget and cap settings flow from `settings.toml`
       (`[retry]`) through hostd to the gateway.
 
 ### Model continuity (slice)
 
-- [ ] The session record stores the resolved provider + model id the runner
+- [x] The session record stores the resolved provider + model id the runner
       executes with, and survives a host restart (round-trips through
       `session.json`).
-- [ ] Two turns with the same model produce no `ModelChange` marker and no
+- [x] Two turns with the same model produce no `ModelChange` marker and no
       model-switch fragment; a provider or model change produces exactly one
       of each.
-- [ ] A config change emits `ModelEvent::ConfigChanged` and rebuilds the
+- [x] A config change emits `ModelEvent::ConfigChanged` and rebuilds the
       runner (unchanged) but does not append a session timeline marker by
       itself.
-- [ ] With no active model, a turn records nothing and emits no model
+- [x] With no active model, a turn records nothing and emits no model
       fragments.
 
 ### Model-continuity behavior

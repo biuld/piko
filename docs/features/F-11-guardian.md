@@ -131,26 +131,26 @@ circuit breaker: consecutive non-accepts (denies + failures)
 
 ## Acceptance criteria
 
-- [ ] `[guardian]` settings merge correctly across global/project/override
+- [x] `[guardian]` settings merge correctly across global/project/override
       with the documented defaults (fixture: settings merge unit tests).
-- [ ] With the guardian enabled and a model answering
+- [x] With the guardian enabled and a model answering
       `{"allow": true, ...}`, an on-request tool call executes without a user
       prompt and no grant is written to any approval-store scope (fixture:
       hostd gateway review test).
-- [ ] A guardian deny fails the call with a non-retryable `guardian_denied`
+- [x] A guardian deny fails the call with a non-retryable `guardian_denied`
       error whose message includes the guardian reason, and increments the
       session denial counter (fixture: hostd gateway + registry tests).
-- [ ] Timeout, malformed JSON, or model error fails the call closed with a
+- [x] Timeout, malformed JSON, or model error fails the call closed with a
       non-retryable `guardian_unavailable` error (fixture: hostd gateway
       review-failure test + parse unit tests).
-- [ ] After `max-consecutive-denials` consecutive non-accepting outcomes,
+- [x] After `max-consecutive-denials` consecutive non-accepting outcomes,
       the next request reaches the user (an `ApprovalRequested` event is
       published), and a user decision resets the breaker (fixture: hostd
       gateway circuit-breaker test).
-- [ ] Guardian decisions are excluded from `is_approval_accepted` and map to
+- [x] Guardian decisions are excluded from `is_approval_accepted` and map to
       distinct errors in the orchd registry (fixture: registry decision
       mapping tests).
-- [ ] Differential validation against codex-rs: the guardian auto-review
+- [x] Differential validation against codex-rs: the guardian auto-review
       loop is kept (adapted to a host-owned model call instead of a spawned
       review session); strict-JSON allow/deny is kept; fail-closed
       timeout/malformed is kept; the circuit breaker is kept (adapted:

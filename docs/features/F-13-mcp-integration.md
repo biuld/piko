@@ -221,28 +221,28 @@ generic question. No template → no `prompt` field → current generic renderin
 
 ## Acceptance criteria
 
-- [ ] `McpServerConfig` deserializes `timeout-ms`; `[mcp]` settings
+- [x] `McpServerConfig` deserializes `timeout-ms`; `[mcp]` settings
       deserialize/merge across layers; `resources/settings.default.toml`
       documents `[mcp]` and `[mcp.approval-templates]`.
-- [ ] A live MCP provider discovers `resources/list` + `resources/templates/list`
+- [x] A live MCP provider discovers `resources/list` + `resources/templates/list`
       at connect and caches them; a server that errors on `resources/list`
       still connects (empty resource catalog, tools registered).
-- [ ] `mcp_resource` lists (with optional `query` filter) and reads resources
+- [x] `mcp_resource` lists (with optional `query` filter) and reads resources
       through a registered provider; unknown server / missing URI / blob
       content fail closed with the distinct non-retryable errors; the tool's
       executor kind is `mcp` so the F-18 gate covers it.
-- [ ] Connect is bounded: a server whose handshake exceeds the effective
+- [x] Connect is bounded: a server whose handshake exceeds the effective
       timeout is skipped with a warning naming it, and other servers still
       register; a per-server `timeout-ms` overrides the section default.
-- [ ] The registry stamps `provider_id` on `ToolApprovalRequest`; the gateway
+- [x] The registry stamps `provider_id` on `ToolApprovalRequest`; the gateway
       resolves `server/tool` before bare `tool` and carries the rendered
       prompt on `ApprovalSnapshot`; no matching template leaves `prompt`
       absent.
-- [ ] TUI and GUI render `ApprovalSnapshot.prompt` when present and keep the
+- [x] TUI and GUI render `ApprovalSnapshot.prompt` when present and keep the
       generic question otherwise (existing rendering unchanged when absent).
-- [ ] `[features] mcp = false` skips all connections and does not register
+- [x] `[features] mcp = false` skips all connections and does not register
       `mcp_resource` (F-18 regression).
-- [ ] The TUI `/mcp` slash command sends `Command::McpStatus`; the
+- [x] The TUI `/mcp` slash command sends `Command::McpStatus`; the
       `McpStatusListed` result populates the MCP panel and opens it; the
       panel renders connected counts and disconnected errors; configured
       servers disabled by the `mcp` gate are shown with

@@ -154,29 +154,29 @@ direct call to a disabled tool (no route)
 
 ## Acceptance criteria
 
-- [ ] `[features]` merges per key across global/project/override for both
+- [x] `[features]` merges per key across global/project/override for both
       `enabled` and `managed`; absent sections resolve to empty maps
       (fixture: settings merge unit tests, defaults template check).
-- [ ] With no `[features]` section, every feature resolves enabled and the
+- [x] With no `[features]` section, every feature resolves enabled and the
       catalog is unchanged (fixture: hostd resolver test + orchd catalog
       test with default config).
-- [ ] `[features] process = false` removes `process` from the discovered
+- [x] `[features] process = false` removes `process` from the discovered
       tools and the route map; a direct `process start` call fails with a
       non-retryable `feature_disabled` error naming the feature (fixture:
       orchd registry test).
-- [ ] A pinned feature wins over an explicit `enabled` value in the same or
+- [x] A pinned feature wins over an explicit `enabled` value in the same or
       a higher layer: `enabled.process = true` + `managed.process = false`
       resolves off and logs a warning (fixture: hostd domain resolver
       tests).
-- [ ] Unknown feature keys warn and are ignored; they disable nothing
+- [x] Unknown feature keys warn and are ignored; they disable nothing
       (fixture: hostd domain resolver test).
-- [ ] MCP tools (executor kind `mcp`) are gated by the `mcp` feature: with
+- [x] MCP tools (executor kind `mcp`) are gated by the `mcp` feature: with
       `mcp` disabled they are absent from the catalog even when an MCP
       server registers (fixture: orchd registry/catalog test).
-- [ ] `active_tool_names` still intersects with the feature filter: a tool
+- [x] `active_tool_names` still intersects with the feature filter: a tool
       enabled by features but not in `active_tool_names` stays hidden
       (fixture: orchd registry test).
-- [ ] Non-feature behavior is unchanged: approvals, safety, guardian, and
+- [x] Non-feature behavior is unchanged: approvals, safety, guardian, and
       permission command rules still apply to enabled tools (fixture:
       existing hostd gateway + registry tests green).
 

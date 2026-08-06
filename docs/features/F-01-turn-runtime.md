@@ -226,30 +226,30 @@ surface.
 
 Landed behavior (verifiable against the current runtime):
 
-- [ ] Submitting while idle accepts, durably commits start and input before the
+- [x] Submitting while idle accepts, durably commits start and input before the
       first model request, and commits a terminal outcome with usage.
-- [ ] Transcript commits are deterministic: messages and tool results commit in
+- [x] Transcript commits are deterministic: messages and tool results commit in
       call order, independent of completion order.
-- [ ] Cancelling mid-run aborts in-flight tool calls, commits a bounded aborted
+- [x] Cancelling mid-run aborts in-flight tool calls, commits a bounded aborted
       result for every call of the interrupted step, starts no new calls, and
       terminates with a cancelled outcome.
-- [ ] Follow-up delivery queues durably while a run is active, starts after the
+- [x] Follow-up delivery queues durably while a run is active, starts after the
       run in FIFO order, and delivers its report exactly once.
-- [ ] Session attach reconstructs history, inboxes, queued inputs, and pending
+- [x] Session attach reconstructs history, inboxes, queued inputs, and pending
       deliveries without duplicate execution or delivery.
-- [ ] Retrying a request id with identical content returns a duplicate receipt
+- [x] Retrying a request id with identical content returns a duplicate receipt
       with no side effects; reuse with different content is rejected.
-- [ ] Closed or terminated agents reject input.
+- [x] Closed or terminated agents reject input.
 
 Delivered slices (D-01, verified in V-01):
 
-- [ ] The full admission matrix (delivery mode × agent state) is implemented
+- [x] The full admission matrix (delivery mode × agent state) is implemented
       and tested, including a fixed-cap follow-up queue that returns overload
       rather than unbounded growth.
-- [ ] An interrupted turn leaves a durable, model-visible abort marker, clients
+- [x] An interrupted turn leaves a durable, model-visible abort marker, clients
       receive an abort event, and a crash-interrupted run reconstructs as
       aborted without rerunning work.
-- [ ] Typed background tasks provide kinds, typed results, cancellation, and
+- [x] Typed background tasks provide kinds, typed results, cancellation, and
       session-scoped lifecycle, with no orphaned work on shutdown.
 
 ## Product decisions
