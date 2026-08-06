@@ -71,6 +71,74 @@ async fn command_catalog_get_returns_neutral_commands() {
     assert!(commands.iter().any(|command| command.id == "session.new"));
 }
 
+struct PromptDebugRunner;
+
+#[async_trait]
+impl AgentRunRunner for PromptDebugRunner {
+    async fn prompt_debug_snapshot(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Option<piko_protocol::PromptDebugSnapshot> {
+        (session_id == "s1" && agent_instance_id == "a1").then(|| {
+            piko_protocol::PromptDebugSnapshot {
+                session_id: session_id.into(),
+                agent_instance_id: agent_instance_id.into(),
+                run_prompt: piko_protocol::SemanticRunPrompt::default(),
+                resource_messages: Vec::new(),
+                tool_catalog: piko_protocol::ResolvedToolCatalog::new(Vec::new(), "tools"),
+                model_inputs: Vec::new(),
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn prompt_debug_get_returns_latest_runner_snapshot() {
+    let server = HostServer::with_turn_runner(Arc::new(PromptDebugRunner));
+    let events = server
+        .handle_command(Command::PromptDebugGet {
+            command_id: "debug-1".into(),
+            session_id: "s1".into(),
+            agent_instance_id: "a1".into(),
+        })
+        .await;
+
+    let [
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::PromptDebugged { snapshot, .. }),
+            ..
+        },
+    ] = events.as_slice()
+    else {
+        panic!("expected prompt debug snapshot, got {events:?}");
+    };
+    assert_eq!(snapshot.session_id, "s1");
+    assert_eq!(snapshot.agent_instance_id, "a1");
+    assert_eq!(snapshot.tool_catalog.digest, "tools");
+}
+
+#[tokio::test]
+async fn prompt_debug_get_is_explicit_when_snapshot_is_unavailable() {
+    let events = HostServer::new()
+        .handle_command(Command::PromptDebugGet {
+            command_id: "debug-missing".into(),
+            session_id: "s1".into(),
+            agent_instance_id: "a1".into(),
+        })
+        .await;
+
+    let [
+        Event::CommandResponse {
+            result: Err(error), ..
+        },
+    ] = events.as_slice()
+    else {
+        panic!("expected unavailable error, got {events:?}");
+    };
+    assert!(error.contains("prompt debug snapshot unavailable"));
+}
+
 struct AssistantRunner;
 
 #[async_trait]
@@ -635,6 +703,87 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
             if entry.id == "assistant-1"
                 && matches!(entry.message, piko_hostd::api::Message::Assistant { .. })
     ));
+}
+
+#[tokio::test]
+async fn rollout_pages_durable_agent_transcript_with_opaque_cursor() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create-page".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+    let target_agent_instance_id = format!("agent_{session_id}_root");
+    let turn_events = server
+        .handle_command(Command::ChatSubmit {
+            command_id: "submit-page".into(),
+            session_id: session_id.clone(),
+            target_agent_instance_id,
+            text: "hello".into(),
+        })
+        .await;
+    // AssistantRunner stores its fixture transcript under the operation id.
+    let agent_instance_id = turn_events
+        .iter()
+        .find_map(|event| match event {
+            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { turn_id, .. }) => {
+                Some(turn_id.clone())
+            }
+            _ => None,
+        })
+        .expect("started turn id");
+
+    let first = server
+        .handle_command(Command::RolloutPageGet {
+            command_id: "page-1".into(),
+            session_id: session_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+            after_cursor: None,
+            limit: Some(1),
+        })
+        .await;
+    let Event::CommandResponse {
+        result: Ok(piko_hostd::api::CommandResult::RolloutPaged { page, .. }),
+        ..
+    } = &first[0]
+    else {
+        panic!("expected rollout page, got {first:?}");
+    };
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].transcript_seq, 1);
+    assert!(matches!(page.items[0].message, Message::User { .. }));
+    let cursor = page.next_cursor.clone().expect("second page cursor");
+
+    let second = server
+        .handle_command(Command::RolloutPageGet {
+            command_id: "page-2".into(),
+            session_id,
+            agent_instance_id,
+            after_cursor: Some(cursor),
+            limit: Some(1),
+        })
+        .await;
+    let Event::CommandResponse {
+        result: Ok(piko_hostd::api::CommandResult::RolloutPaged { page, .. }),
+        ..
+    } = &second[0]
+    else {
+        panic!("expected second rollout page, got {second:?}");
+    };
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].transcript_seq, 2);
+    assert!(matches!(page.items[0].message, Message::Assistant { .. }));
+    assert!(page.next_cursor.is_none());
 }
 
 #[tokio::test]

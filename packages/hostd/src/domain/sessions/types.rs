@@ -76,6 +76,8 @@ pub struct TurnRecord {
     pub status: TurnStatus,
     /// Rolled-up model-step usage for this turn (hostd ledger; F-15/D-29).
     pub usage: Usage,
+    /// Net exact-content changes from built-in workspace mutations.
+    pub file_changes: Vec<piko_protocol::TurnFileChange>,
 }
 
 #[derive(Debug, Clone, Default)]

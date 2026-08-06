@@ -304,8 +304,31 @@ impl AppState {
                     self.clear_focus();
                 }
             }
+            Event::TurnDiff(diff) => {
+                if !self.accepts_session(&diff.session_id) {
+                    return effects;
+                }
+                self.status = format!(
+                    "turn {} changed {} file{}",
+                    diff.turn_id,
+                    diff.files.len(),
+                    if diff.files.len() == 1 { "" } else { "s" }
+                );
+            }
             Event::CommandResponse {
                 result: Ok(piko_protocol::CommandResult::Empty),
+                ..
+            }
+            | Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::PromptDebugged { .. }),
+                ..
+            }
+            | Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::RolloutPaged { .. }),
+                ..
+            }
+            | Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::TurnDiffGot { .. }),
                 ..
             }
             | Event::CommandResponse { result: Err(_), .. } => {}

@@ -161,6 +161,7 @@ impl HostState {
                 message: message.to_string(),
                 status: status.clone(),
                 usage: piko_protocol::messages::Usage::empty(),
+                file_changes: Vec::new(),
             },
         );
         Ok((turn_id, status))
@@ -267,6 +268,7 @@ impl HostState {
                 message: message.to_string(),
                 status: status.clone(),
                 usage: piko_protocol::messages::Usage::empty(),
+                file_changes: Vec::new(),
             },
         );
         if matches!(

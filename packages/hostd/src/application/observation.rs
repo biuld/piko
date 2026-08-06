@@ -123,16 +123,32 @@ impl HostApp {
                         message_id,
                         ..
                     } => {
-                        let committed = {
+                        let (committed, turn_diff) = {
                             let mut state = self.state.lock().await;
                             let store = self.session_store_factory.open(session_dir);
-                            record_committed_message(
+                            let committed = record_committed_message(
                                 &mut state,
                                 Some(store.as_ref()),
                                 session_id,
                                 &event.agent_instance_id,
                                 &message_id,
-                            )?
+                            )?;
+                            let turn_diff = committed.as_ref().and_then(|committed| {
+                                crate::domain::sessions::file_change_from_message(
+                                    &committed.message,
+                                )?;
+                                Some(
+                                    state
+                                        .turn_diff(session_id, &committed.source_turn_id)
+                                        .unwrap_or(piko_protocol::TurnDiffEvent {
+                                            session_id: session_id.to_string(),
+                                            turn_id: committed.source_turn_id.clone(),
+                                            files: Vec::new(),
+                                            unified_diff: String::new(),
+                                        }),
+                                )
+                            });
+                            (committed, turn_diff)
                         };
                         let committed = committed.ok_or_else(|| {
                             ProtocolError::ObservationFailed(format!(
@@ -141,6 +157,9 @@ impl HostApp {
                             ))
                         })?;
                         send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
+                        if let Some(turn_diff) = turn_diff {
+                            send_event(tx, ServerMessage::TurnDiff(turn_diff)).await;
+                        }
                     }
                     piko_protocol::agent_runtime::SessionEvent::AgentChanged { agent } => {
                         self.state

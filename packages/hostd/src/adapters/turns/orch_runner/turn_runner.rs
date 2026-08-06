@@ -12,6 +12,22 @@ use super::run::root_agent_spec;
 
 #[async_trait]
 impl AgentRunRunner for OrchAgentRunRunner {
+    async fn prompt_debug_snapshot(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Option<piko_protocol::PromptDebugSnapshot> {
+        let mut snapshot = self
+            .prompt_debug_snapshots
+            .lock()
+            .unwrap()
+            .get(&(session_id.to_string(), agent_instance_id.to_string()))
+            .cloned()?;
+        snapshot.model_inputs =
+            crate::telemetry::handle().model_inputs(session_id, agent_instance_id);
+        Some(snapshot)
+    }
+
     async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
         self.agent_runtime.list_processes()
     }

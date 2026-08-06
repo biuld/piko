@@ -6,8 +6,8 @@
 //! observability is disabled every instrument is `None` and all recording is
 //! a no-op.
 
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
@@ -42,6 +42,7 @@ pub fn handle() -> Arc<Telemetry> {
 }
 
 pub struct Telemetry {
+    prompt_inputs: Mutex<HashMap<(String, String), Vec<piko_protocol::ModelInputDebugSnapshot>>>,
     model_step_duration_ms: Option<Histogram<f64>>,
     model_step_calls: Option<Counter<u64>>,
     model_ttft_ms: Option<Histogram<f64>>,
@@ -60,6 +61,7 @@ pub struct Telemetry {
 impl Telemetry {
     fn disabled() -> Self {
         Self {
+            prompt_inputs: Mutex::new(HashMap::new()),
             model_step_duration_ms: None,
             model_step_calls: None,
             model_ttft_ms: None,
@@ -78,6 +80,7 @@ impl Telemetry {
 
     fn from_meter(meter: Meter) -> Self {
         Self {
+            prompt_inputs: Mutex::new(HashMap::new()),
             model_step_duration_ms: Some(
                 meter.f64_histogram("piko.model.step.duration_ms").build(),
             ),
@@ -155,9 +158,40 @@ impl Telemetry {
             KeyValue::new("provider", provider.to_string()),
         ]
     }
+
+    pub fn clear_model_inputs(&self, session_id: &str, agent_instance_id: &str) {
+        self.prompt_inputs
+            .lock()
+            .unwrap()
+            .remove(&(session_id.to_string(), agent_instance_id.to_string()));
+    }
+
+    pub fn model_inputs(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Vec<piko_protocol::ModelInputDebugSnapshot> {
+        self.prompt_inputs
+            .lock()
+            .unwrap()
+            .get(&(session_id.to_string(), agent_instance_id.to_string()))
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 impl GatewayTelemetry for Telemetry {
+    fn record_model_input(&self, input: piko_protocol::ModelInputDebugSnapshot) {
+        const MAX_MODEL_INPUTS: usize = 32;
+        let key = (input.session_id.clone(), input.agent_instance_id.clone());
+        let mut inputs = self.prompt_inputs.lock().unwrap();
+        let records = inputs.entry(key).or_default();
+        records.push(input);
+        if records.len() > MAX_MODEL_INPUTS {
+            records.remove(0);
+        }
+    }
+
     fn record_ttft(&self, model: &str, provider: &str, ttft_ms: u64) {
         if let Some(histogram) = &self.model_ttft_ms {
             histogram.record(ttft_ms as f64, &Self::model_provider(model, provider));

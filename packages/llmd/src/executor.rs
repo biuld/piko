@@ -278,6 +278,21 @@ impl LlmGateway for LlmdExecutor {
             }
             let chat_options = Some(chat_options);
 
+            telemetry.record_model_input(piko_protocol::ModelInputDebugSnapshot {
+                session_id: req.session_id.clone(),
+                agent_instance_id: req.agent_instance_id.clone(),
+                run_id: req.run_id.clone(),
+                step_id: req.step_id.clone(),
+                provider: req.provider.clone(),
+                model: req.model.clone(),
+                request: serde_json::to_value(&request).unwrap_or_else(
+                    |error| serde_json::json!({ "serializationError": error.to_string() }),
+                ),
+                options: serde_json::to_value(chat_options.as_ref()).unwrap_or_else(
+                    |error| serde_json::json!({ "serializationError": error.to_string() }),
+                ),
+            });
+
             // Eager open phase: retry with the shared budget, then fall back
             // to a non-streaming completion before returning the stream.
             let policy = RetryPolicy::from_config(&self.retry);

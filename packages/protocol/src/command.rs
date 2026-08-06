@@ -215,6 +215,28 @@ pub enum Command {
     CommandCatalogGet {
         command_id: CommandId,
     },
+    /// Read the latest successful production prompt assembly for one agent.
+    PromptDebugGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
+    },
+    /// Page through one agent's durable append-only rollout transcript.
+    RolloutPageGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    /// Read the exact net workspace diff recorded for one turn.
+    TurnDiffGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        turn_id: TurnId,
+    },
     /// Manually trigger session compaction (bypasses auto threshold).
     SessionCompact {
         command_id: CommandId,
@@ -296,6 +318,9 @@ impl Command {
             | Self::QueueSteer { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
+            | Self::PromptDebugGet { command_id, .. }
+            | Self::RolloutPageGet { command_id, .. }
+            | Self::TurnDiffGet { command_id, .. }
             | Self::SessionCompact { command_id, .. }
             | Self::ProcessList { command_id }
             | Self::ProcessStop { command_id, .. }
@@ -310,126 +335,8 @@ impl Command {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_compact_without_mode_defaults_to_summarize() {
-        // Older clients omit `mode`; the wire must stay compatible.
-        let parsed: Command = serde_json::from_value(serde_json::json!({
-            "type": "session_compact",
-            "command_id": "c1",
-            "session_id": "s1",
-            "agent_instance_id": "agent_s1_root",
-        }))
-        .unwrap();
-        assert!(matches!(
-            parsed,
-            Command::SessionCompact {
-                mode: CompactMode::Summarize,
-                ..
-            }
-        ));
-
-        let with_mode: Command = serde_json::from_value(serde_json::json!({
-            "type": "session_compact",
-            "command_id": "c2",
-            "session_id": "s1",
-            "agent_instance_id": "agent_s1_root",
-            "mode": "new-context-window",
-        }))
-        .unwrap();
-        assert!(matches!(
-            with_mode,
-            Command::SessionCompact {
-                mode: CompactMode::NewContextWindow,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn process_list_and_info_round_trip() {
-        let command: Command = serde_json::from_value(
-            serde_json::json!({ "type": "process_list", "command_id": "c1" }),
-        )
-        .unwrap();
-        assert!(matches!(command, Command::ProcessList { .. }));
-
-        let info = ProcessInfo {
-            process_id: "proc-1".into(),
-            pid: 42,
-            command: "cargo test -p tui".into(),
-            cwd: "/tmp/proj".into(),
-            exited: false,
-            exit_code: None,
-            signal: None,
-        };
-        let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["processId"], "proc-1");
-        assert_eq!(json["pid"], 42);
-        assert!(json.get("exitCode").is_none());
-        let back: ProcessInfo = serde_json::from_value(json).unwrap();
-        assert_eq!(back, info);
-    }
-
-    #[test]
-    fn process_stop_and_exit_round_trip() {
-        let command: Command = serde_json::from_value(serde_json::json!({
-            "type": "process_stop",
-            "command_id": "c1",
-            "process_id": "proc-3",
-        }))
-        .unwrap();
-        assert!(
-            matches!(command, Command::ProcessStop { process_id, .. } if process_id == "proc-3")
-        );
-
-        let exit = ProcessExit {
-            exit_code: None,
-            signal: Some(15),
-        };
-        let json = serde_json::to_value(exit).unwrap();
-        assert_eq!(json["signal"], 15);
-        assert!(json.get("exitCode").is_none());
-        assert_eq!(serde_json::from_value::<ProcessExit>(json).unwrap(), exit);
-    }
-
-    #[test]
-    fn mcp_status_and_server_info_round_trip() {
-        let command: Command =
-            serde_json::from_value(serde_json::json!({ "type": "mcp_status", "command_id": "c1" }))
-                .unwrap();
-        assert!(matches!(command, Command::McpStatus { .. }));
-
-        let info = McpServerInfo {
-            name: "filesystem".into(),
-            connected: true,
-            tool_count: 3,
-            resource_count: 1,
-            template_count: 0,
-            error: None,
-        };
-        let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["name"], "filesystem");
-        assert_eq!(json["toolCount"], 3);
-        assert!(json.get("error").is_none());
-        let back: McpServerInfo = serde_json::from_value(json).unwrap();
-        assert_eq!(back, info);
-
-        let failed = McpServerInfo {
-            name: "hang".into(),
-            connected: false,
-            tool_count: 0,
-            resource_count: 0,
-            template_count: 0,
-            error: Some("timed out after 10000 ms".into()),
-        };
-        let json = serde_json::to_value(&failed).unwrap();
-        assert_eq!(json["connected"], false);
-        assert!(json["error"].is_string());
-    }
-}
+#[path = "command/tests.rs"]
+mod tests;
 
 // ============================================================================
 // Errors

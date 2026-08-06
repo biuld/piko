@@ -12,6 +12,8 @@ use piko_protocol::tools::ToolDef;
 /// A simple, stateless request to the LLM Gateway.
 #[derive(Debug, Clone)]
 pub struct GatewayRequest {
+    pub session_id: String,
+    pub agent_instance_id: String,
     pub provider: String,
     pub model: String,
     pub run_prompt: piko_protocol::SemanticRunPrompt,

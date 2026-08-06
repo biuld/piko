@@ -76,9 +76,29 @@ pub enum ServerMessage {
     AgentChanged(AgentInfo),
     TurnLifecycle(TurnEvent),
     AgentRunLifecycle(AgentRunEvent),
+    TurnDiff(TurnDiffEvent),
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnDiffEvent {
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub files: Vec<TurnFileChange>,
+    pub unified_diff: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnFileChange {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -222,6 +242,19 @@ pub enum CommandResult {
     },
     CommandCatalogListed {
         commands: Vec<HostCommandDescriptor>,
+        timestamp: i64,
+    },
+    PromptDebugged {
+        snapshot: crate::PromptDebugSnapshot,
+        timestamp: i64,
+    },
+    RolloutPaged {
+        page: crate::RolloutPage,
+        timestamp: i64,
+    },
+    TurnDiffGot {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        diff: Option<TurnDiffEvent>,
         timestamp: i64,
     },
     /// Live set of external processes spawned by the `process` tool (F-08).

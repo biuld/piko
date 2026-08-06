@@ -44,7 +44,7 @@ M4 Ecosystem                 partial
  └─ J skills/plugins/MCP/hooks
 M5 Multi-agent depth         complete for committed scope
  └─ I followup/interrupt/list/wait · agent roles · fragments
-M6 Observability & ops       partial
+M6 Observability & ops       complete
  └─ L tracing/usage · rollout · diff-tracking · prompt debugging
 M7 Extension                 deferred
  └─ K realtime/multimodal
@@ -154,15 +154,15 @@ Role-specific prompt/model layers remain optional and consumer-triggered.
 
 Goal: production-ready tracing, accounting, rollout inspection, and debugging.
 
-Status: **partial**.
+Status: **complete for committed scope**.
 
 | Capability | Status | Evidence / next artifact |
 |---|---|---|
 | End-to-end spans, OTLP HTTP logs/metrics, stderr fallback, TTFT/TTFM | implemented | F-15/D-15/V-15 |
 | Per-turn and cumulative usage accounting | implemented | D-29/V-29 |
-| Rollout recorder/paging polish | not started | new F-15 slice required |
-| Turn-diff tracking | not started | new F-15 slice required |
-| Prompt debugging | not started | new F-15 slice required |
+| Durable rollout recorder/paging | implemented | D-31/V-31; existing v3 JSONL is the recorder |
+| Exact turn-diff tracking | implemented | D-32/V-32 |
+| Prompt and model-input debugging | implemented | D-30/V-30; adapter-private HTTP rendering intentionally excluded |
 
 There is no JSON/file-log fallback: when OTel export is disabled, hostd logs
 to stderr.
@@ -206,6 +206,4 @@ optional extensions and have no scheduled implementation.
 
 ## 6. Current next steps
 
-1. Decide whether production readiness is the next product goal. If yes,
-   write the next F-15 PRD/design for one M6 residue before implementation.
-2. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.
+1. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

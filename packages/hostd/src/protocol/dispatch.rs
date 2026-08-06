@@ -124,6 +124,66 @@ impl HostServer {
                     timestamp: now_ms(),
                 }),
             }]),
+            Command::PromptDebugGet {
+                session_id,
+                agent_instance_id,
+                ..
+            } => {
+                let runner = self.0.turn_runner.lock().await.clone();
+                let snapshot = runner
+                    .prompt_debug_snapshot(&session_id, &agent_instance_id)
+                    .await
+                    .ok_or_else(|| {
+                        ProtocolError::InvalidCommand(format!(
+                            "prompt debug snapshot unavailable for {session_id}/{agent_instance_id}"
+                        ))
+                    })?;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::PromptDebugged {
+                        snapshot,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
+            Command::RolloutPageGet {
+                session_id,
+                agent_instance_id,
+                after_cursor,
+                limit,
+                ..
+            } => {
+                let page = self
+                    .0
+                    .rollout_page(
+                        &session_id,
+                        &agent_instance_id,
+                        after_cursor.as_deref(),
+                        limit,
+                    )
+                    .await?;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::RolloutPaged {
+                        page,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
+            Command::TurnDiffGet {
+                session_id,
+                turn_id,
+                ..
+            } => {
+                let diff = self.0.turn_diff(&session_id, &turn_id).await?;
+                Ok(vec![ServerMessage::CommandResponse {
+                    command_id,
+                    result: Ok(crate::api::CommandResult::TurnDiffGot {
+                        diff,
+                        timestamp: now_ms(),
+                    }),
+                }])
+            }
             Command::ProcessList { .. } => {
                 let runner = self.0.turn_runner.lock().await.clone();
                 let processes = runner.list_processes().await;

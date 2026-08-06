@@ -10,9 +10,14 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use piko_llmd::executor::LlmdExecutor;
 use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::telemetry::GatewayTelemetry;
 use piko_protocol::config::{ProviderConfig, RetryConfig};
+use piko_protocol::messages::Usage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+
+#[path = "gateway_retry/cases.rs"]
+mod cases;
 
 // ---- Stub HTTP server ----
 
@@ -227,6 +232,8 @@ fn executor(addr: SocketAddr, streaming_fallback: Option<bool>) -> LlmdExecutor 
 
 fn request() -> GatewayRequest {
     GatewayRequest {
+        session_id: "session-1".to_string(),
+        agent_instance_id: "agent-1".to_string(),
         provider: "openai".to_string(),
         model: "gpt-test".to_string(),
         run_prompt: piko_protocol::SemanticRunPrompt::default(),
@@ -239,6 +246,43 @@ fn request() -> GatewayRequest {
         step_id: "step-1".to_string(),
         thinking: None,
     }
+}
+
+#[derive(Default)]
+struct PromptCapture(Mutex<Vec<piko_protocol::ModelInputDebugSnapshot>>);
+
+impl GatewayTelemetry for PromptCapture {
+    fn record_model_input(&self, input: piko_protocol::ModelInputDebugSnapshot) {
+        self.0.lock().unwrap().push(input);
+    }
+
+    fn record_ttft(&self, _model: &str, _provider: &str, _ttft_ms: u64) {}
+    fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage, _cost_usd: f64) {}
+    fn record_retry(&self, _model: &str, _provider: &str, _error_class: &str, _attempt: u32) {}
+    fn record_fallback(&self, _model: &str, _provider: &str) {}
+}
+
+#[tokio::test]
+async fn captures_actual_model_input_before_provider_dispatch() {
+    let stub = Stub::start(Script {
+        steps: vec![Step::StreamSuccess],
+    })
+    .await;
+    let capture = Arc::new(PromptCapture::default());
+    let stream = executor(stub.addr, Some(true))
+        .with_telemetry(capture.clone())
+        .chat_stream(request(), None)
+        .await
+        .unwrap();
+    let _ = stream.collect::<Vec<_>>().await;
+
+    let inputs = capture.0.lock().unwrap();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].session_id, "session-1");
+    assert_eq!(inputs[0].agent_instance_id, "agent-1");
+    assert_eq!(inputs[0].provider, "openai");
+    assert_eq!(inputs[0].request["messages"][0]["content"][0]["Text"], "hi");
+    assert_eq!(inputs[0].options["capture_usage"], true);
 }
 
 async fn collect(exec: &LlmdExecutor, req: GatewayRequest) -> Vec<GatewayEvent> {
@@ -419,84 +463,4 @@ async fn falls_back_to_non_streaming_after_budget_exhausted() {
         1,
         "exactly one fallback request"
     );
-}
-
-#[tokio::test]
-async fn fallback_disabled_fails_with_streaming_error() {
-    let stub = Stub::start(Script {
-        steps: vec![Step::Status(503)],
-    })
-    .await;
-    let exec = executor(stub.addr, Some(false));
-
-    let result = exec.chat_stream(request(), None).await;
-
-    // The 503 status surfaces during the open phase; after the retry budget
-    // the request fails closed without fallback.
-    assert!(result.is_err(), "fallback disabled must fail closed");
-    assert_eq!(stub.request_count(), 3, "retries still occur; no fallback");
-    assert_eq!(stub.non_streaming_count(), 0);
-}
-
-#[tokio::test]
-async fn mid_stream_break_surfaces_error_without_restart() {
-    let stub = Stub::start(Script {
-        steps: vec![Step::StreamPartialThenClose, Step::StreamSuccess],
-    })
-    .await;
-    let exec = executor(stub.addr, None);
-
-    let events = collect(&exec, request()).await;
-
-    // A mid-stream break surfaces as an error; the gateway never restarts
-    // after content has been delivered (consumers own commit boundaries), so
-    // no second request is made.
-    assert!(events.iter().any(|e| matches!(e, GatewayEvent::Error(_))));
-    assert!(!events.iter().any(|e| matches!(e, GatewayEvent::Done(_))));
-    assert_eq!(stub.request_count(), 1);
-}
-
-#[tokio::test]
-async fn non_retryable_open_fails_immediately() {
-    let stub = Stub::start(Script {
-        steps: vec![Step::Status(401)],
-    })
-    .await;
-    let exec = executor(stub.addr, None);
-
-    let result = exec.chat_stream(request(), None).await;
-
-    // genai surfaces the 401 as the first stream event; the open phase
-    // classifies it as non-retryable and fails immediately.
-    assert!(result.is_err());
-    assert_eq!(stub.request_count(), 1, "no retries for 401");
-}
-
-#[tokio::test]
-async fn llm_call_retries_transient_errors() {
-    let stub = Stub::start(Script {
-        steps: vec![Step::Status(503), Step::NonStreaming],
-    })
-    .await;
-    let exec = executor(stub.addr, None);
-
-    let model = piko_protocol::messages::Model {
-        id: "gpt-test".to_string(),
-        name: "gpt-test".to_string(),
-        provider: "openai".to_string(),
-        base_url: None,
-    };
-    let out = exec
-        .llm_call(
-            model,
-            None,
-            vec![],
-            piko_protocol::model::ModelRunSettings::default(),
-        )
-        .await
-        .expect("llm_call should retry and succeed");
-
-    assert_eq!(out, "fallback text");
-    assert_eq!(stub.request_count(), 2, "one failure then one success");
-    assert_eq!(stub.non_streaming_count(), 2);
 }

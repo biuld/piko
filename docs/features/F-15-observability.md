@@ -1,4 +1,4 @@
-# F-15: Observability (end-to-end tracing + usage accounting)
+# F-15: Observability and runtime debugging
 
 > Status: implemented
 > Priority: P1
@@ -9,6 +9,9 @@
 Slices:
 - Tracing + metrics (D-15 / V-15)
 - Per-turn usage accounting (D-29 / V-29)
+- Prompt assembly debugging (D-30 / V-30)
+- Durable rollout paging (D-31 / V-31)
+- Exact turn-diff tracking (D-32 / V-32)
 
 ## Summary
 
@@ -22,6 +25,10 @@ retry/fallback, tool and turn timing) and unified OTel log records, all
 exported out of the hostd process over OTLP HTTP. Logging is unified on OTel:
 the hand-rolled file appender is removed, with a stderr console layer as the
 only fallback when observability is disabled.
+
+The debugging slices add read-only inspection of the latest real prompt
+assembly and actual llmd model inputs, bounded paging over the existing
+durable AgentInstance rollouts, and exact net workspace diffs per turn.
 
 ## Problem
 
@@ -69,8 +76,7 @@ causality makes regressions slow to localize.
 
 ## Out of scope
 
-- Rollout recorder, turn-diff tracking, and prompt debugging (later F-15
-  slices; digest block L).
+- Provider-specific HTTP wire payloads after adapter-internal rendering.
 - Anonymous product telemetry / installation ID — no external data leaves the
   machine in this slice.
 - Cross-process trace-context propagation: hostd, orchd, and llmd run in one
@@ -116,6 +122,43 @@ causality makes regressions slow to localize.
 - Partial turns (failed/cancelled mid-run) still report usage for steps that
   committed before the terminal outcome.
 
+### Prompt assembly debugging (D-30)
+
+- After production prompt assembly succeeds, hostd retains the latest
+  in-memory debug snapshot per session and agent instance.
+- A snapshot contains the exact `SemanticRunPrompt`, resolved tool catalog,
+  and retained prompt-resource messages (`world_state` followed by user mentions)
+  used to start that run.
+- Reading a snapshot is observational: it does not create a turn, call a
+  provider, mutate prompt baselines, or write session storage.
+- Before an agent has assembled a prompt, and after hostd restarts before a
+  new assembly, the query fails explicitly with "snapshot unavailable".
+- New successful assembly atomically replaces the prior snapshot for that
+  session/agent. Failed assembly leaves the previous successful snapshot.
+- Prompt bodies may contain workspace-controlled or user-mentioned content;
+  the snapshot is returned only over the existing local hostd client
+  channel and is never emitted to logs or OTel exporters.
+- Each model step appends the actual provider-neutral request and options
+  produced by llmd after prompt mapping, tool conversion, middleware,
+  thinking, and cache policy, immediately before adapter dispatch.
+- Model inputs are bounded to the latest 32 steps for the captured assembly.
+
+### Durable rollout paging (D-31)
+
+- `RolloutPageGet` reads one AgentInstance shard with an opaque forward cursor.
+- Pages default to 50 items and are capped at 200; `next_cursor` is present
+  only when another page exists.
+- Reads never create a session store and preserve transcript sequence order.
+
+### Exact turn diffs (D-32)
+
+- Successful built-in `edit` and `write` results durably retain exact before
+  and after text in hidden ToolResult details excluded from model-visible output.
+- Hostd merges repeated writes as first-before/latest-after, removes net-zero
+  changes, and emits a `TurnDiff` event after durable commit.
+- `TurnDiffGet` returns live state or reconstructs the same net diff from
+  durable rollout shards after restart without reading current files.
+
 ## Acceptance criteria
 
 ### Tracing + metrics (V-15)
@@ -148,6 +191,35 @@ causality makes regressions slow to localize.
 - [x] Hostd records turn-level OTel token/cost counters from the same turn
       ledger at terminal lifecycle (does not invent a second total).
 
+### Prompt assembly debugging (V-30)
+
+- [x] A completed production assembly can be queried by session and agent
+      and returns the exact semantic prompt and resolved tool catalog used by
+      that run.
+- [x] The snapshot includes world-state and mention resource messages in
+      model-injection order without folding them into prompt blocks.
+- [x] Querying before a successful assembly returns an explicit unavailable
+      error and creates no turn, transcript entry, provider request, or
+      durable session write.
+- [x] A later successful assembly replaces the earlier snapshot for only
+      the addressed session/agent; other agents remain isolated.
+- [x] Debug prompt bodies are absent from tracing/log events.
+- [x] Actual llmd request and options are captured before provider dispatch
+      with the correct session, agent, run, and step identity.
+
+### Durable rollout paging (V-31)
+
+- [x] Durable transcript items page in sequence order with no overlap.
+- [x] Cursors are opaque, invalid cursors fail explicitly, and limits are bounded.
+- [x] Reading an unknown session does not create storage.
+
+### Exact turn diffs (V-32)
+
+- [x] Repeated mutations roll up to exact first-before/latest-after net state.
+- [x] Net-zero and failed changes contribute nothing.
+- [x] Change metadata is durable but absent from model-visible tool output.
+- [x] Historical diffs rebuild from rollouts without workspace reads.
+
 ## Product decisions
 
 | Question | Decision | Rationale |
@@ -163,6 +235,11 @@ causality makes regressions slow to localize.
 | Who owns the product usage ledger? | **hostd** turn + session roll-ups; transcript assistant messages are durable step facts | Matches hostd authority for user-visible state; OTel is a projection |
 | Natural grain for usage? | Model-step (assistant message); turn = sum of steps; session = sum of all steps | Provider usage arrives per completion; multi-step turns must not discard earlier steps |
 | Client surface for turn totals? | `TurnEvent` terminals carry `usage` | Live clients get totals without replaying the whole tree |
+| What is the first prompt-debug surface? | Last successful production assembly, queried through hostd | It is faithful by construction and keeps hostd authoritative for user-visible diagnostics |
+| Persist debug snapshots? | No, in-memory only | Prompt bodies can contain sensitive workspace content; diagnostics should not create a second durable transcript |
+| Model-input debug boundary | llmd request after mapping/middleware/options, before provider adapter | Faithful to dispatched model input without claiming adapter-private HTTP wire parity |
+| Rollout source | Existing per-AgentInstance append-only JSONL | Avoids a second recorder and preserves hostd's durable authority |
+| Turn-diff source | Exact successful built-in mutation results | Avoids racy filesystem rereads and permits restart reconstruction |
 
 ## Fusion decisions (codex-rs)
 
@@ -170,9 +247,10 @@ causality makes regressions slow to localize.
 |---|---|---|
 | `otel_init.rs` per-crate init | **kept (adapted)** | piko puts one `tracing-opentelemetry` layer in hostd's existing `logging.rs` subscriber; libraries only instrument |
 | Turn timing metadata (`turn_timing.rs`) | **kept (adapted)** | TTFT/TTFM become OTel histograms recorded at the same points as spans |
-| Rollout recorder / diff tracking | **deferred** | Separate later slices; digest block L lists them as gaps |
+| Rollout recorder / diff tracking | **kept (adapted)** | Page existing v3 AgentInstance JSONL; built-in mutation results carry exact durable content and hostd owns roll-up |
 | `installation_id.rs` anonymous telemetry | **rejected for this slice** | piko has no product-telemetry decision yet; tracing stays local |
 | Usage accounting / cost metadata | **kept (adapted)** | hostd session+turn ledger from durable assistant step usages; OTel turn counters write-through from the same ledger (not a second store) |
+| `prompt_debug.rs` standalone next-input builder | **kept (adapted)** | piko first exposes the last real hostd-owned assembly rather than constructing an ephemeral codex-shaped session; this preserves the host/orchestrator split and avoids predictive drift |
 
 ## Open questions
 

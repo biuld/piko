@@ -9,6 +9,7 @@ mod chat;
 pub mod compaction;
 mod guardian;
 pub mod host_app;
+mod observability;
 mod observation;
 pub mod sessions;
 pub mod turns;

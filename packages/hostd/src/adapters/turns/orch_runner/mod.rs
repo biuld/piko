@@ -35,12 +35,14 @@ use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
 type AgentRunKey = (String, String);
 type AgentHubMap = HashMap<AgentRunKey, Arc<piko_orchd::events::SessionOutputHub>>;
+type PromptDebugMap = HashMap<AgentRunKey, piko_protocol::PromptDebugSnapshot>;
 
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
     active_agent_runs: Arc<std::sync::Mutex<HashMap<AgentRunKey, ActiveAgentRunRuntime>>>,
     agent_hubs: Arc<std::sync::Mutex<AgentHubMap>>,
+    prompt_debug_snapshots: Arc<std::sync::Mutex<PromptDebugMap>>,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,
     realtime_routers: Arc<std::sync::Mutex<HashMap<String, Arc<RealtimeDeltaRouter>>>>,
     pending_approvals: Arc<std::sync::Mutex<HashMap<String, PendingApprovalEntry>>>,
@@ -291,6 +293,7 @@ impl OrchAgentRunRunner {
             agent_runtime,
             active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             agent_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            prompt_debug_snapshots: Arc::new(std::sync::Mutex::new(HashMap::new())),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),

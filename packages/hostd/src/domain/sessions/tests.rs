@@ -2,6 +2,46 @@ use super::*;
 use crate::api::{RealtimeMessageEvent, ServerMessage};
 use piko_protocol::agent_runtime::RealtimeDelta;
 
+#[test]
+fn turn_file_changes_roll_up_to_net_diff() {
+    let mut state = HostState::new();
+    let session_id = match state.create_session("/project") {
+        crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
+        other => panic!("unexpected create result: {other:?}"),
+    };
+    let (turn_id, _) = state.start_turn(&session_id, "root", "edit").unwrap();
+    let first = state
+        .track_turn_file_change(
+            &session_id,
+            &turn_id,
+            piko_protocol::TurnFileChange {
+                path: "a.rs".into(),
+                before: Some("one".into()),
+                after: Some("two".into()),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert!(first.unified_diff.contains("-one"));
+    assert!(first.unified_diff.contains("+two"));
+
+    let second = state
+        .track_turn_file_change(
+            &session_id,
+            &turn_id,
+            piko_protocol::TurnFileChange {
+                path: "a.rs".into(),
+                before: Some("two".into()),
+                after: Some("three".into()),
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.files[0].before.as_deref(), Some("one"));
+    assert_eq!(second.files[0].after.as_deref(), Some("three"));
+    assert!(!second.unified_diff.contains("two"));
+}
+
 fn realtime(agent_instance_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
     ServerMessage::RealtimeMessage(RealtimeMessageEvent {
         session_id: "session".into(),

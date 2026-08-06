@@ -10,6 +10,9 @@ use piko_protocol::messages::Usage;
 /// Metrics sink for model-gateway behavior. Hostd implements this with OTel
 /// meters; the default implementation records nothing.
 pub trait GatewayTelemetry: Send + Sync {
+    /// Capture the actual provider-neutral request for local prompt debugging.
+    fn record_model_input(&self, _input: piko_protocol::ModelInputDebugSnapshot) {}
+
     /// Time to first content token, in milliseconds.
     fn record_ttft(&self, model: &str, provider: &str, ttft_ms: u64);
 

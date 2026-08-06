@@ -251,12 +251,12 @@ is exceeded.
 - Distilled behavior: turn TTFT/TTFM metrics, usage accounting, event
   mapping/dedup, turn-diff tracking for UI deltas, rollout budget tracking,
   prompt debugging, rollout recording with cursor paging.
-- piko status: **partial reference coverage** — the planned `F-15`
-  observability slices are implemented
-  (F-15/D-15/V-15 tracing + metrics; D-29/V-29 per-turn usage accounting with
-  hostd as product ledger and OTel as write-through projection). Residual:
-  rollout recorder polish, turn-diff tracking, prompt debugging (digest
-  block L).
+- piko status: **implemented for committed scope** — tracing/metrics
+  (D-15/V-15), hostd-owned usage accounting (D-29/V-29), real assembly plus
+  llmd model-input debugging (D-30/V-30), durable v3 rollout paging
+  (D-31/V-31), and exact built-in-mutation turn diffs (D-32/V-32). Piko does
+  not build a parallel ephemeral debug session or claim adapter-private HTTP
+  wire payloads.
 
 ### M. Configuration & Permissions
 
@@ -303,7 +303,7 @@ scope; rejected or consumer-triggered behavior remains visible as residue.
 | I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14/D-14/V-14 skills baseline landed; plugins/hooks deferred |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |
-| L Observability | F-15 | partial reference coverage (F-15/D-15 + D-29 usage landed) | rollout/diff/prompt-debug polish |
+| L Observability | F-15 | implemented for committed scope (D-15, D-29–D-32) | — |
 | M Config & Permissions | F-17, F-18, F-19 | implemented | — |
 
 ## 5. Reading codex-rs per feature

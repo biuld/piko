@@ -80,6 +80,15 @@ pub struct AgentRunFailure {
 
 #[async_trait]
 pub trait AgentRunRunner: Send + Sync {
+    /// Latest successful production prompt assembly for diagnostics.
+    async fn prompt_debug_snapshot(
+        &self,
+        _session_id: &str,
+        _agent_instance_id: &str,
+    ) -> Option<piko_protocol::PromptDebugSnapshot> {
+        None
+    }
+
     /// Live set of external processes spawned by the `process` tool (F-08);
     /// empty when the runner has no process manager.
     async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {

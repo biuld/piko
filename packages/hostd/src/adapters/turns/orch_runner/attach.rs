@@ -131,7 +131,9 @@ impl OrchAgentRunRunner {
                         executions: SessionExecutionPorts::new(
                             commit_router.clone() as Arc<dyn ExecutionCommitPort>
                         )
-                        .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort))
+                        .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort {
+                            snapshots: Arc::clone(&self.prompt_debug_snapshots),
+                        }))
                         .with_realtime(realtime_router.clone() as Arc<dyn RealtimeDeltaSink>),
                     },
                 })
