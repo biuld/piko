@@ -247,22 +247,12 @@ impl AgentTimeline {
         ApplyOutcome::Applied
     }
 
-    /// Apply a realtime delta. Creates a draft if not already committed.
-    /// Returns false if this message_id is already committed (ignore further
-    /// realtime for it).
-    pub fn apply_realtime(
-        &mut self,
-        message_id: MessageId,
-        delta_seq: u64,
-        delta: &RealtimeDelta,
-    ) -> bool {
-        !matches!(
-            self.apply_realtime_checked(message_id, delta_seq, delta),
-            ApplyOutcome::Ignored
-        )
-    }
-
-    pub fn apply_realtime_checked(
+    /// Internal helper: apply a decoded realtime delta onto the timeline draft.
+    ///
+    /// Live host transport is StreamItem-only ([`apply_stream_item`]). External
+    /// crates must not call this; conversion from `StreamItemPatch` happens
+    /// inside `apply_stream_item`.
+    pub(crate) fn apply_realtime_checked(
         &mut self,
         message_id: MessageId,
         delta_seq: u64,
@@ -400,30 +390,26 @@ mod tests {
     #[test]
     fn tool_arg_chunks_upsert_by_tool_call_id() {
         let mut tl = AgentTimeline::new();
-        assert!(matches!(
-            tl.apply_realtime_checked(
-                "msg-1".into(),
-                1,
+        for (seq, chunk) in [(1u64, "{\"path\":"), (2, "\"a\"}")] {
+            let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("s".into()),
+                Some("root".into()),
+                "msg-1",
+                Some(seq),
                 &RealtimeDelta::ToolCall {
                     content_index: 0,
                     tool_call_id: "call-1".into(),
-                    delta: "{\"path\":".into(),
+                    delta: chunk.into(),
                 },
-            ),
-            ApplyOutcome::Applied
-        ));
-        assert!(matches!(
-            tl.apply_realtime_checked(
-                "msg-1".into(),
-                2,
-                &RealtimeDelta::ToolCall {
-                    content_index: 0,
-                    tool_call_id: "call-1".into(),
-                    delta: "\"a\"}".into(),
-                },
-            ),
-            ApplyOutcome::Applied
-        ));
+            )
+            .into_iter()
+            .next()
+            .unwrap();
+            assert!(matches!(
+                tl.apply_stream_item(&patch),
+                ApplyOutcome::Applied
+            ));
+        }
 
         // ToolCall chunks also open a RealtimeDraft for message-level seq tracking.
         let tool = tl

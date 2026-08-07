@@ -1597,9 +1597,13 @@ fn session_reconcile_projects_cumulative_usage() {
 #[test]
 fn usage_event_sets_chrome_and_clears_active_turn() {
     let mut app = live_app();
-    app.session
-        .active_turns
-        .insert("agent-1".into(), "turn-1".into());
+    app.session.active_turns.insert(
+        "agent-1".into(),
+        crate::app::ActiveTurnUi {
+            turn_id: "turn-1".into(),
+            status: piko_protocol::TurnStatus::Running,
+        },
+    );
 
     let mut turn_usage = piko_protocol::messages::Usage::empty();
     turn_usage.input = 12_200;
@@ -1713,6 +1717,98 @@ fn turn_diff_got_opens_diagnostics_panel() {
     assert_eq!(app.focus_manager.active_mode(), AppMode::Diagnostics);
     assert_eq!(app.last_turn_id.as_deref(), Some("turn-9"));
     assert!(app.last_turn_diff.is_some());
+}
+
+/// F-22: TUI foreground uses the same protocol projection as client-core.
+#[test]
+fn agent_foreground_matches_protocol_project_for_busy_states() {
+    use piko_protocol::{AgentActivity, AgentForeground, TurnStatus};
+
+    let mut app = live_app();
+    let agent_id = "agent-fg-1";
+    let activity = AgentActivity::Idle;
+
+    // Idle — no turn, no block.
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::project(false, None, Some(&activity))
+    );
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::Idle
+    );
+
+    // Queued turn.
+    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
+        session_id: "session-1".into(),
+        turn_id: "t-q".into(),
+        agent_instance_id: agent_id.into(),
+        timestamp: 0,
+    }));
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::Queued
+    );
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::project(false, Some(TurnStatus::Queued), Some(&activity))
+    );
+
+    // Running turn.
+    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
+        session_id: "session-1".into(),
+        turn_id: "t-q".into(),
+        agent_instance_id: agent_id.into(),
+        timestamp: 0,
+    }));
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::Running
+    );
+
+    // Approval blocks over running.
+    app.approvals
+        .push(crate::features::approval::PendingApproval {
+            id: "ap-1".into(),
+            agent_instance_id: agent_id.into(),
+            tool_name: "shell".into(),
+            args: json!({}),
+            prompt: None,
+        });
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::RequiresAction
+    );
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::project(true, Some(TurnStatus::Running), Some(&activity))
+    );
+    app.approvals.resolve("ap-1");
+
+    // Cancelling via tracked turn status (snapshot-style).
+    app.session.active_turns.insert(
+        agent_id.into(),
+        crate::app::ActiveTurnUi {
+            turn_id: "t-c".into(),
+            status: TurnStatus::Cancelling,
+        },
+    );
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::Cancelling
+    );
+    assert_eq!(
+        app.agent_foreground(agent_id, &activity),
+        AgentForeground::project(false, Some(TurnStatus::Cancelling), Some(&activity))
+    );
+
+    // Activity fallback when no turn.
+    app.session.active_turns.clear();
+    let cancelling = AgentActivity::Cancelling;
+    assert_eq!(
+        app.agent_foreground(agent_id, &cancelling),
+        AgentForeground::Cancelling
+    );
 }
 
 #[test]

@@ -212,6 +212,7 @@ impl AppState {
             }
             Event::Interaction(piko_protocol::InteractionEvent::Requested {
                 session_id,
+                agent_instance_id,
                 interaction_id,
                 title,
                 questions,
@@ -222,8 +223,13 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                self.interactions
-                    .push(interaction_id, title, questions, require_confirm);
+                self.interactions.push(
+                    interaction_id,
+                    agent_instance_id,
+                    title,
+                    questions,
+                    require_confirm,
+                );
                 if auto_resolution_ms.is_none() {
                     self.push_focus(AppMode::ToolInteraction);
                 }
@@ -402,6 +408,13 @@ impl AppState {
                 self.session
                     .pending
                     .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
+                self.session.active_turns.insert(
+                    agent_instance_id.clone(),
+                    super::ActiveTurnUi {
+                        turn_id: turn_id.clone(),
+                        status: piko_protocol::TurnStatus::Queued,
+                    },
+                );
                 self.status = format!("turn {turn_id} queued ({agent_instance_id})");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
@@ -416,9 +429,13 @@ impl AppState {
                 self.session
                     .pending
                     .clear_kind(super::pending::PendingCommandKind::ChatSubmit);
-                self.session
-                    .active_turns
-                    .insert(agent_instance_id.clone(), turn_id.clone());
+                self.session.active_turns.insert(
+                    agent_instance_id.clone(),
+                    super::ActiveTurnUi {
+                        turn_id: turn_id.clone(),
+                        status: piko_protocol::TurnStatus::Running,
+                    },
+                );
                 self.status = format!("turn {turn_id} running ({agent_instance_id})");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
@@ -434,7 +451,7 @@ impl AppState {
                     .session
                     .active_turns
                     .get(&agent_instance_id)
-                    .is_some_and(|active| active == &turn_id)
+                    .is_some_and(|active| active.turn_id == turn_id)
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
@@ -456,7 +473,7 @@ impl AppState {
                     .session
                     .active_turns
                     .get(&agent_instance_id)
-                    .is_some_and(|active| active == &turn_id)
+                    .is_some_and(|active| active.turn_id == turn_id)
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
@@ -477,7 +494,7 @@ impl AppState {
                     .session
                     .active_turns
                     .get(&agent_instance_id)
-                    .is_some_and(|active| active == &turn_id)
+                    .is_some_and(|active| active.turn_id == turn_id)
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
@@ -956,7 +973,15 @@ impl AppState {
         self.session.active_turns = snapshot
             .active_turns
             .into_iter()
-            .map(|turn| (turn.agent_instance_id, turn.turn_id))
+            .map(|turn| {
+                (
+                    turn.agent_instance_id,
+                    super::ActiveTurnUi {
+                        turn_id: turn.turn_id,
+                        status: turn.status,
+                    },
+                )
+            })
             .collect();
 
         self.approvals.clear();
@@ -983,6 +1008,7 @@ impl AppState {
         for interaction in snapshot.pending_interactions {
             self.interactions.push(
                 interaction.interaction_id,
+                interaction.agent_instance_id,
                 interaction.title,
                 interaction.questions,
                 interaction.require_confirm,

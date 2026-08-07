@@ -1,6 +1,15 @@
 //! Stream item identity and patch semantics (F-22 / D-34).
 //!
 //! Sole host→client stream envelope (`ServerMessage::StreamItem`).
+//!
+//! ## Kind coverage (Slice 3)
+//!
+//! | Kind | Live host path |
+//! |---|---|
+//! | `UserMessage` / `AgentMessage` / `AgentThought` / `ToolCall` | Emitted (realtime + tool mapping) |
+//! | `Plan` | **Deferred** — reserved; no host emitter until plan UX ships (F-22) |
+//! | `Usage` | **Not used on StreamItem** — live usage is `ServerMessage::Usage` |
+//! | `System` | **Deferred** — system/context markers stay on transcript/other events |
 
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +18,10 @@ use crate::event::ToolExecutionEvent;
 use crate::{AgentInstanceId, MessageRole, SessionId};
 
 /// Logical stream item class for client projections.
+///
+/// `Plan` and `System` are reserved for a future product path (deferred in
+/// F-22 / D-34); clients must tolerate unknown ops on those kinds as no-ops
+/// until an emitter lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamItemKind {
@@ -16,8 +29,11 @@ pub enum StreamItemKind {
     AgentMessage,
     AgentThought,
     ToolCall,
+    /// Deferred: no host→client emitter yet (plan UX not productized).
     Plan,
+    /// Reserved; live usage uses [`crate::UsageEvent`] / `ServerMessage::Usage`.
     Usage,
+    /// Deferred: system/context markers not yet folded into StreamItem.
     System,
 }
 

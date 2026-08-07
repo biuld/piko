@@ -661,7 +661,7 @@ pub struct TurnSnapshot {
     pub usage: Option<crate::messages::Usage>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnStatus {
     Queued,

@@ -259,7 +259,7 @@ impl LiveSession {
             .map(|t| ActiveTurn {
                 turn_id: t.turn_id.clone(),
                 agent_instance_id: t.agent_instance_id.clone(),
-                status: t.status.clone(),
+                status: t.status,
             })
             .collect();
 

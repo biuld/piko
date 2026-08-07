@@ -174,6 +174,13 @@ pub struct AppState {
     pub theme: Theme,
 }
 
+/// In-flight turn tracked for F-22 foreground projection (status-aware).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveTurnUi {
+    pub turn_id: String,
+    pub status: piko_protocol::TurnStatus,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SessionUiState {
     /// Session whose authoritative view has been reconciled and is live.
@@ -187,7 +194,8 @@ pub struct SessionUiState {
     pub pending_turn_text: Option<String>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
-    pub active_turns: HashMap<String, String>,
+    /// agent_instance_id → active turn (id + status) for F-22 foreground projection.
+    pub active_turns: HashMap<String, ActiveTurnUi>,
     pub pending: pending::PendingCommands,
     /// Session-wide token/cost ledger projected from hostd (F-15 / D-29).
     pub cumulative_usage: Option<piko_protocol::messages::Usage>,
@@ -344,27 +352,30 @@ impl AppState {
         self.session
             .active_turns
             .get(agent_instance_id)
-            .map(String::as_str)
+            .map(|t| t.turn_id.as_str())
     }
 
     /// Per-agent foreground work projection (F-22).
+    ///
+    /// Uses the sole protocol path [`piko_protocol::AgentForeground::project`]
+    /// so Queued / Running / RequiresAction / Cancelling match client-core.
     pub fn agent_foreground(
         &self,
         agent_instance_id: &str,
         activity: &piko_protocol::AgentActivity,
     ) -> piko_protocol::AgentForeground {
-        if self
+        let blocked = self
             .approvals
             .pending
             .iter()
             .any(|a| a.agent_instance_id == agent_instance_id)
-        {
-            return piko_protocol::AgentForeground::RequiresAction;
-        }
-        if self.session.active_turns.contains_key(agent_instance_id) {
-            return piko_protocol::AgentForeground::Running;
-        }
-        piko_protocol::AgentForeground::from_activity(activity)
+            || self.interactions.pending_for_agent(agent_instance_id);
+        let turn_status = self
+            .session
+            .active_turns
+            .get(agent_instance_id)
+            .map(|t| t.status);
+        piko_protocol::AgentForeground::project(blocked, turn_status, Some(activity))
     }
 
     pub fn cwd(&self) -> PathBuf {

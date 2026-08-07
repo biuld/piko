@@ -12,6 +12,8 @@ use crate::{
 
 pub struct PendingInteraction {
     pub id: InteractionId,
+    /// Agent instance that requested the interaction; F-22 foreground key.
+    pub agent_instance_id: String,
     pub questions: Vec<InteractionQuestion>,
     pub workflow: InteractiveWorkflow,
     pub submitting: bool,
@@ -31,6 +33,7 @@ impl ToolInteractionPanel {
     pub fn push(
         &mut self,
         id: InteractionId,
+        agent_instance_id: String,
         _title: Option<String>,
         questions: Vec<InteractionQuestion>,
         require_confirm: bool,
@@ -59,10 +62,18 @@ impl ToolInteractionPanel {
             .collect();
         self.pending.push_back(PendingInteraction {
             id,
+            agent_instance_id,
             questions,
             workflow: InteractiveWorkflow::new(workflow_questions, require_confirm),
             submitting: false,
         });
+    }
+
+    /// True when any pending interaction is attributed to `agent_instance_id`.
+    pub fn pending_for_agent(&self, agent_instance_id: &str) -> bool {
+        self.pending
+            .iter()
+            .any(|i| i.agent_instance_id == agent_instance_id)
     }
 
     pub fn resolve(&mut self, id: &str) {

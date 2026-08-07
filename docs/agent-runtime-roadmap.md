@@ -208,10 +208,12 @@ optional extensions and have no scheduled implementation.
 
 ## 6. Current next steps
 
-1. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3 landed:
-   usage `used`/`size` + silent model catalog bootstrap; dedicated
-   `ServerMessage::Usage` after terminal turns (sole usage chrome path);
-   sole stream transport `ServerMessage::StreamItem` (compat dual envelopes
-   removed); AgentInstance foreground projection. Optional next: Slice 4
-   ACP adapter (product-gated).
+1. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
+   **implemented** (docs status updated): usage `used`/`size` + silent model
+   catalog bootstrap; dedicated `ServerMessage::Usage` after terminal turns
+   (sole usage chrome path); sole stream transport `ServerMessage::StreamItem`
+   (compat dual envelopes removed; public timeline entry StreamItem-only);
+   shared `AgentForeground::project` for TUI/client-core/GUI. Plan/System
+   stream kinds deferred. Optional next: Slice 4 ACP adapter (product-gated;
+   not a full ACP transport rewrite).
 2. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

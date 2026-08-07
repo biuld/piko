@@ -1,6 +1,6 @@
 # F-22: Client agent projection lifecycle
 
-> Status: draft
+> Status: implemented (Slices 1–3; Slice 4 product-gated)
 > Priority: P0
 > Source evidence: Agent Client Protocol v1/v2 (modeling reference, ADR-003);
 > piko F-01 turn runtime, F-07 approvals, F-09 session persistence, F-10
@@ -142,9 +142,9 @@ Minimum kinds:
 | `agent_message` | message id | Model-visible assistant text |
 | `agent_thought` | message id | Optional; hideable by client settings |
 | `tool_call` | tool call id | Status + partial content/chunks |
-| `plan` | plan id | When planned work is projected |
-| `usage` | session or agent-scoped update | Does not invent transcript rows unless product decides otherwise |
-| `system` / context markers | stable derived ids | Abort markers, compaction notices, etc. |
+| `plan` | plan id | **Deferred** — enum reserved; no host emitter until plan UX ships |
+| `usage` (stream kind) | — | **Not used on StreamItem**; live usage is `ServerMessage::Usage` |
+| `system` / context markers | stable derived ids | **Deferred** — markers stay on transcript/other events until folded |
 
 Chunk operations **append** to the current content for that id. Full content
 on an upsert **replaces** prior content for that id (including earlier chunks).
@@ -202,21 +202,23 @@ Rules:
 
 ## Acceptance criteria
 
-- [ ] Documented foreground states and transitions match what TUI/GUI/client-core
-      can implement without reading hostd sources.
-- [ ] Submit acceptance is observable separately from foreground idle.
-- [ ] Stream kinds support upsert + chunk rules; ids survive session
-      re-open for the same durable identities.
-- [ ] Usage projection can render `used/size` when the active model window is
-      in the host catalog; bootstrap loads catalog or size on active model.
-- [ ] Multi-agent updates remain instance-attributed; parent idle is allowed
+- [x] Documented foreground states and transitions match what TUI/GUI/client-core
+      can implement without reading hostd sources (`AgentForeground::project`).
+- [x] Submit acceptance is observable separately from foreground idle
+      (CommandResult / turn start vs terminal + idle projection).
+- [x] Stream kinds support upsert + chunk rules for live kinds
+      (agent/tool/thought); durable ids survive session re-open. Plan/System
+      kinds reserved and **deferred** (see kind table).
+- [x] Usage projection can render `used/size` when the active model window is
+      in the host catalog; bootstrap loads catalog or size on active model;
+      live chrome via `ServerMessage::Usage`.
+- [x] Multi-agent updates remain instance-attributed; parent idle is allowed
       while a child runs.
-- [ ] F-01 admission dispositions and terminals remain the authority for
+- [x] F-01 admission dispositions and terminals remain the authority for
       runtime outcomes; this PRD only projects them.
-- [ ] ADR-003 fusion table is filled for ACP shapes used here.
-- [ ] Design D-34 (or successors) maps protocol DTOs and migration steps; at
-      least the usage + bootstrap + foreground-state slices are implementable
-      without ACP transport.
+- [x] ADR-003 fusion table is filled for ACP shapes used here.
+- [x] Design D-34 maps protocol DTOs; Slices 1–3 landed without ACP transport.
+- [ ] Slice 4 optional ACP adapter (product-gated; out of Slices 1–3 scope).
 
 ## Product decisions
 
@@ -235,13 +237,13 @@ ACP is a modeling reference (ADR-003), not a port target.
 
 | ACP behavior | Decision | piko landing / rationale |
 |---|---|---|
-| `state_update`: running / idle / requires_action | **kept (adapted)** | Per-AgentInstance foreground projection |
+| `state_update`: running / idle / requires_action | **kept (adapted)** | Per-AgentInstance via `AgentForeground::project` (sole client path) |
 | `session/prompt` returns on accept; completion via updates | **kept (adapted)** | Submit disposition vs terminal/idle |
-| Message / thought upsert + chunks + required ids | **kept (adapted)** | Stream item model under host ids |
-| Unified tool call update + content chunks | **kept (adapted)** | Tool projection |
-| `usage_update` used + size + cost | **kept (adapted)** | Status chrome + snapshot |
+| Message / thought upsert + chunks + required ids | **kept (adapted)** | `ServerMessage::StreamItem` sole live stream |
+| Unified tool call update + content chunks | **kept (adapted)** | StreamItem tool upsert/chunks |
+| `usage_update` used + size + cost | **kept (adapted)** | `ServerMessage::Usage` + snapshot |
 | Permission title + extensible subject | **kept (adapted)** | Link to F-07; no ACP-only permission taxonomies |
-| Plan item updates | **kept (adapted)** | When plan projection exists |
+| Plan item updates | **deferred** | `StreamItemKind::Plan` reserved; no emitter until plan UX |
 | Diff file states / git_patch | **deferred** | Improve when file-change UX is productized |
 | Client `fs/*` / `terminal/*` execution (v1) | **rejected** | piko host/sandbox owns execution |
 | Agent-owned display-only terminal chunks (v2) | **kept (adapted)** | Map to tool output projection later |
@@ -250,18 +252,33 @@ ACP is a modeling reference (ADR-003), not a port target.
 | JSON-RPC methods / ACP transport | **rejected** | Stay on piko command/event protocol |
 | Beyond-turn updates while idle | **kept (adapted)** | Child agents, background tasks |
 | Session list/resume shapes | **partial** | Already F-09; align naming where useful only |
+| System/context stream kinds | **deferred** | `StreamItemKind::System` reserved; markers stay elsewhere |
+
+## Implementation notes (Slices 1–3)
+
+- **Foreground**: sole mapping is `AgentForeground::from_activity` +
+  `AgentForeground::project` in `piko-protocol`. client-core and TUI both call
+  `project` (no parallel activity→foreground tables). Host does not emit a
+  dedicated foreground event; clients derive from turns, approvals,
+  interactions, and `AgentActivity`.
+- **Usage**: live chrome authority is `ServerMessage::Usage`; snapshot may
+  seed `last_context_tokens` from turn/entry usage when no live event yet.
+- **Stream**: sole live wire is `ServerMessage::StreamItem`. Public timeline
+  apply entry is `apply_stream_item`; orchd `RealtimeDelta` remains internal
+  mapping input only.
+- **Activity names**: runtime keeps `AgentActivity::WaitingForApproval`;
+  client chrome uses `RequiresAction` via the sole mapping table above.
 
 ## Open questions
 
-1. Is usage stream-only, snapshot fields only, or both for every update?
-2. Should session-level chrome aggregate multi-agent busy state, or only show
+1. Should session-level chrome aggregate multi-agent busy state, or only show
    the focused instance (client-configurable)?
-3. Exact formula for `used` when multiple model steps and cache reads apply —
+2. Exact formula for `used` when multiple model steps and cache reads apply —
    mirror latest terminal prompt-side sum vs live estimate service (F-04/F-05)?
-4. Whether plan/tool thought kinds need client capability bits (optional
-   surfaces) in protocol versioning.
-5. Migration: additive optional fields first, then deprecate ad-hoc client
-   heuristics — timeline for TUI vs GUI/client-core.
+3. When product prioritizes plan UX, emit `StreamItemKind::Plan` (and optionally
+   fold system markers into `System`) with a dedicated PRD slice.
+4. Optional host-emitted `ForegroundChanged` event if pure client projection
+   proves insufficient for multi-client sync (additive, wire-compatible).
 
 ## Reference evidence
 

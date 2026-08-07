@@ -1,4 +1,7 @@
 //! Per-AgentInstance foreground work projection (F-22 / D-34).
+//!
+//! Thin adapter over [`AgentForeground::project`] — the sole priority table
+//! lives in `piko-protocol` so TUI and GUI stay aligned.
 
 use piko_protocol::{AgentActivity, AgentForeground, AgentInfo, AgentInstanceId, TurnStatus};
 
@@ -6,11 +9,8 @@ use crate::state::{ActiveTurn, LiveSession, PendingApproval, PendingInteraction}
 
 /// Project foreground work for one agent instance.
 ///
-/// Priority:
-/// 1. Pending approval / interaction → `RequiresAction`
-/// 2. Active turn status (queued / running / waiting / cancelling)
-/// 3. Host `AgentInfo.activity` fall-back
-/// 4. `Idle`
+/// Delegates to [`AgentForeground::project`] (sole mapping). Inputs are only
+/// collected here from client-core state shapes.
 pub fn agent_foreground(
     agent_instance_id: &str,
     agents: &[AgentInfo],
@@ -24,30 +24,15 @@ pub fn agent_foreground(
         || pending_interactions
             .iter()
             .any(|i| i.agent_instance_id == agent_instance_id);
-    if blocked {
-        return AgentForeground::RequiresAction;
-    }
-
-    if let Some(turn) = active_turns
+    let turn_status = active_turns
         .iter()
         .find(|t| t.agent_instance_id == agent_instance_id)
-    {
-        return match turn.status {
-            TurnStatus::Queued => AgentForeground::Queued,
-            TurnStatus::Running => AgentForeground::Running,
-            TurnStatus::WaitingForApproval => AgentForeground::RequiresAction,
-            TurnStatus::Cancelling => AgentForeground::Cancelling,
-            TurnStatus::Completed | TurnStatus::Failed | TurnStatus::Cancelled => {
-                AgentForeground::Idle
-            }
-        };
-    }
-
-    agents
+        .map(|t| t.status);
+    let activity = agents
         .iter()
         .find(|a| a.agent_instance_id == agent_instance_id)
-        .map(|a| AgentForeground::from_activity(&a.activity))
-        .unwrap_or(AgentForeground::Idle)
+        .map(|a| &a.activity);
+    AgentForeground::project(blocked, turn_status, activity)
 }
 
 /// Project foreground for the session focus (selected agent), or any busy agent.
@@ -175,6 +160,15 @@ mod tests {
             agent_foreground("a1", &agents, &turns, &approvals, &[]),
             AgentForeground::RequiresAction
         );
+        // Same inputs via the protocol sole path.
+        assert_eq!(
+            AgentForeground::project(
+                true,
+                Some(TurnStatus::Running),
+                Some(&AgentActivity::Running)
+            ),
+            AgentForeground::RequiresAction
+        );
     }
 
     #[test]
@@ -192,6 +186,31 @@ mod tests {
             agent_foreground("a1", &agents, &[], &[], &[]),
             AgentForeground::Running
         );
+    }
+
+    #[test]
+    fn queued_running_cancelling_parity_with_protocol_project() {
+        let agents = vec![agent("a1", AgentActivity::Idle)];
+        for (status, expected) in [
+            (TurnStatus::Queued, AgentForeground::Queued),
+            (TurnStatus::Running, AgentForeground::Running),
+            (TurnStatus::Cancelling, AgentForeground::Cancelling),
+            (
+                TurnStatus::WaitingForApproval,
+                AgentForeground::RequiresAction,
+            ),
+        ] {
+            let turns = vec![ActiveTurn {
+                turn_id: "t1".into(),
+                agent_instance_id: "a1".into(),
+                status,
+            }];
+            let via_core = agent_foreground("a1", &agents, &turns, &[], &[]);
+            let via_protocol =
+                AgentForeground::project(false, Some(status), Some(&AgentActivity::Idle));
+            assert_eq!(via_core, expected, "status={status:?}");
+            assert_eq!(via_core, via_protocol, "status={status:?}");
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # D-34: Client agent projection lifecycle
 
-> Status: draft
+> Status: implemented (Slices 1–3; Slice 4 product-gated)
 > Implements: [F-22](../features/F-22-client-agent-projection.md)
 > Decisions: [ADR-003](../decisions/ADR-003-protocol-modeling-acp-reference.md)
 
@@ -253,9 +253,17 @@ No `island-rs` change required.
 ### Slice 2 — Foreground state (landed)
 
 1. Protocol `AgentForeground` enum (ACP-aligned names).
-2. client-core pure projection + approval/interaction turn status sync.
-3. TUI AgentPanel uses per-agent foreground (no session-global is_running).
-4. GUI agent tree labels use the same projection.
+2. **Sole mapping path**: `AgentForeground::from_activity` and
+   `AgentForeground::project(blocked, turn_status, activity)` in
+   `piko-protocol`. client-core `agent_foreground` and TUI
+   `AppState::agent_foreground` both call `project` (TUI tracks turn
+   `TurnStatus`, including Queued, not “any active turn ⇒ Running”).
+3. client-core approval/interaction turn status sync for
+   `WaitingForApproval`.
+4. TUI AgentPanel and GUI agent tree use the same projection semantics.
+5. Host does **not** emit a dedicated foreground event (optional later);
+   derivation from turns + pending user actions + `AgentActivity` is enough
+   for Slices 1–3.
 
 ### Slice 3 — Stream item envelope (landed — sole stream transport)
 
@@ -265,12 +273,17 @@ No `island-rs` change required.
    `RealtimeMessage` / `ToolExecution` ServerMessage variants).
 3. hostd emits StreamItem for assistant deltas and tool upserts (including
    hydrate/replay).
-4. client-core / TUI / GUI apply StreamItem only; tool `tool_call_id` is the
-   upsert key for arg chunks.
+4. client-core / TUI / GUI apply StreamItem only; public timeline entry is
+   `apply_stream_item` (`apply_realtime*` is `pub(crate)` / internal only).
 5. `ToolExecutionEvent` remains a non-wire helper for building tool patches
    (tests + host mapping), not a client-facing message.
+6. **`StreamItemKind::Plan` / `System` deferred**: kinds reserved on the enum
+   for forward compatibility; no host emitter until plan UX / system-marker
+   fold is productized. Live usage is **not** StreamItem — use
+   `ServerMessage::Usage`.
 
-### Slice 4 — Optional ACP adapter sketch
+### Slice 4 — Optional ACP adapter sketch (product-gated, not this goal)
 
 - Separate PRD when product prioritizes third-party editors; map F-22
   projections to ACP v1/v2 updates (subset).
+- Does **not** rewrite piko host–client wire as ACP JSON-RPC (ADR-003).
