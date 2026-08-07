@@ -177,6 +177,11 @@ impl Usage {
         self.cost.cache_write += other.cost.cache_write;
         self.cost.total += other.cost.total;
     }
+
+    /// Prompt-side fill used for context chrome (`used` in F-22 usage projection).
+    pub fn context_fill(&self) -> u64 {
+        self.input.saturating_add(self.cache_read)
+    }
 }
 
 #[cfg(test)]

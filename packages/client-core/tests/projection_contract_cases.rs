@@ -107,17 +107,21 @@ fn c6_realtime_then_committed_replaces_draft() {
     // Realtime delta
     let (state, _) = host(
         state,
-        ServerMessage::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-            session_id: "sess-1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            message_id: "msg-1".into(),
-            delta_seq: 1,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: "Hello".into(),
-            },
-        }),
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("sess-1".into()),
+                Some("root".into()),
+                "msg-1",
+                Some(1),
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "Hello".into(),
+                },
+            )
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
         &mut ids,
     );
 

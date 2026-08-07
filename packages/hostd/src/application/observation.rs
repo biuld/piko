@@ -3,9 +3,7 @@ use std::sync::Arc;
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::application::turns::projection::reconcile_committed_messages;
-use crate::application::turns::projection::{
-    realtime_message_from_delta, record_committed_message,
-};
+use crate::application::turns::projection::{record_committed_message, stream_items_from_delta};
 use crate::ports::{AgentOperationAddress, AgentRunRunner, OperationRunCompletion};
 use crate::util::{ClientEventSender, send_event};
 
@@ -107,8 +105,8 @@ impl HostApp {
     ) -> Result<Option<piko_protocol::agent_runtime::SessionCursor>, ProtocolError> {
         match envelope.output {
             piko_protocol::agent_runtime::SessionOutput::Delta(delta) => {
-                if let Some(event) = realtime_message_from_delta(session_id, &delta) {
-                    send_event(tx, ServerMessage::RealtimeMessage(event)).await;
+                for stream in stream_items_from_delta(session_id, &delta) {
+                    send_event(tx, stream).await;
                 }
                 Ok(None)
             }

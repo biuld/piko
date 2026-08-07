@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::{RealtimeMessageEvent, ServerMessage};
+use crate::api::ServerMessage;
 use piko_protocol::agent_runtime::RealtimeDelta;
 
 #[test]
@@ -42,17 +42,20 @@ fn turn_file_changes_roll_up_to_net_diff() {
     assert!(!second.unified_diff.contains("two"));
 }
 
-fn realtime(agent_instance_id: &str, agent_id: &str, message_id: &str, seq: u64) -> ServerMessage {
-    ServerMessage::RealtimeMessage(RealtimeMessageEvent {
-        session_id: "session".into(),
-        agent_instance_id: agent_instance_id.into(),
-        agent_id: agent_id.into(),
-        message_id: message_id.into(),
-        delta_seq: seq,
-        delta: RealtimeDelta::MessageStarted {
+fn stream_item(agent_instance_id: &str, message_id: &str, seq: u64) -> ServerMessage {
+    let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some("session".into()),
+        Some(agent_instance_id.into()),
+        message_id,
+        Some(seq),
+        &RealtimeDelta::MessageStarted {
             role: crate::api::MessageRole::Assistant,
         },
-    })
+    )
+    .into_iter()
+    .next()
+    .unwrap();
+    ServerMessage::StreamItem(patch)
 }
 
 #[test]
@@ -64,31 +67,35 @@ fn agent_view_store_records_task_views_and_replays_by_task() {
     };
 
     state
-        .append_agent_view_event(&session_id, "t1", "main", realtime("t1", "main", "m1", 0))
+        .append_agent_view_event(&session_id, "t1", "main", stream_item("t1", "m1", 0))
         .unwrap();
     state
-        .append_agent_view_event(&session_id, "t2", "child", realtime("t2", "child", "m2", 0))
+        .append_agent_view_event(&session_id, "t2", "child", stream_item("t2", "m2", 0))
         .unwrap();
     state
         .append_agent_view_event(
             &session_id,
             "t1",
             "main",
-            ServerMessage::RealtimeMessage(RealtimeMessageEvent {
-                session_id: "session".into(),
-                agent_instance_id: "t1".into(),
-                agent_id: "main".into(),
-                message_id: "m1".into(),
-                delta_seq: 1,
-                delta: RealtimeDelta::Text {
-                    content_index: 0,
-                    delta: "hello".into(),
-                },
-            }),
+            ServerMessage::StreamItem(
+                piko_protocol::StreamItemPatch::from_realtime_delta(
+                    Some("session".into()),
+                    Some("t1".into()),
+                    "m1",
+                    Some(1),
+                    &RealtimeDelta::Text {
+                        content_index: 0,
+                        delta: "hello".into(),
+                    },
+                )
+                .into_iter()
+                .next()
+                .unwrap(),
+            ),
         )
         .unwrap();
     state
-        .append_agent_view_event(&session_id, "t3", "main", realtime("t3", "main", "m3", 0))
+        .append_agent_view_event(&session_id, "t3", "main", stream_item("t3", "m3", 0))
         .unwrap();
 
     let main = state.agent_view_snapshot(&session_id, "t1").unwrap();

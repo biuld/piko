@@ -245,6 +245,7 @@ fn c3_config_changed_updates_model_state() {
             model_id: "gpt-4o".into(),
             provider: "openai".into(),
             thinking_level: Some(piko_protocol::ThinkingLevel::High),
+            context_window: Some(128_000),
             timestamp: 1,
         }),
         &mut ids,
@@ -253,6 +254,8 @@ fn c3_config_changed_updates_model_state() {
     assert_eq!(state.model.model_id.as_deref(), Some("gpt-4o"));
     assert_eq!(state.model.provider.as_deref(), Some("openai"));
     assert_eq!(state.model.thinking_level.as_deref(), Some("high"));
+    assert_eq!(state.model.context_window, Some(128_000));
+    assert_eq!(state.model.active_context_window(), Some(128_000));
     assert!(state.pending_commands.is_empty());
 }
 
@@ -282,6 +285,7 @@ fn c3_sync_model_event_fills_empty_model_state() {
             model_id: "gpt-4o".into(),
             provider: "openai".into(),
             thinking_level: None,
+            context_window: Some(128_000),
             timestamp: 1,
         }),
         &mut ids,
@@ -290,6 +294,7 @@ fn c3_sync_model_event_fills_empty_model_state() {
     assert_eq!(state.model.model_id.as_deref(), Some("gpt-4o"));
     assert_eq!(state.model.provider.as_deref(), Some("openai"));
     assert_eq!(state.model.thinking_level.as_deref(), Some("off"));
+    assert_eq!(state.model.context_window, Some(128_000));
 }
 
 #[test]
@@ -306,6 +311,7 @@ fn c3_sync_model_event_does_not_clobber_existing_model() {
             model_id: "gpt-4o".into(),
             provider: "openai".into(),
             thinking_level: Some(piko_protocol::ThinkingLevel::High),
+            context_window: Some(128_000),
             timestamp: 1,
         }),
         &mut ids,
@@ -314,4 +320,6 @@ fn c3_sync_model_event_does_not_clobber_existing_model() {
     assert_eq!(state.model.model_id.as_deref(), Some("session-model"));
     assert_eq!(state.model.provider.as_deref(), Some("anthropic"));
     assert_eq!(state.model.thinking_level.as_deref(), Some("medium"));
+    // Host-default window must not overwrite chrome for a session tree model.
+    assert_eq!(state.model.context_window, None);
 }

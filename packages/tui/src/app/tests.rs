@@ -69,14 +69,18 @@ fn realtime(
     seq: u64,
     delta: piko_protocol::agent_runtime::RealtimeDelta,
 ) -> Event {
-    Event::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-        session_id: "session-1".into(),
-        agent_instance_id: "task-1".into(),
-        agent_id: "agent-1".into(),
-        message_id: message_id.into(),
-        delta_seq: seq,
-        delta,
-    })
+    Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_realtime_delta(
+            Some("session-1".into()),
+            Some("task-1".into()),
+            message_id,
+            Some(seq),
+            &delta,
+        )
+        .into_iter()
+        .next()
+        .expect("realtime stream item"),
+    )
 }
 
 fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
@@ -205,27 +209,37 @@ fn conflicting_duplicate_commit_requests_authoritative_snapshot() {
 fn tool_start_and_end_update_one_timeline_item() {
     let mut app = live_app();
 
-    app.apply_event(Event::ToolExecution(
-        piko_protocol::ToolExecutionEvent::Started {
-            session_id: "session-1".into(),
-            agent_instance_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            args: json!({ "path": "Cargo.toml" }),
-            parent_message_id: Some("message-1".into()),
-        },
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Started {
+                session_id: "session-1".into(),
+                agent_instance_id: "task-1".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "read".into(),
+                args: json!({ "path": "Cargo.toml" }),
+                parent_message_id: Some("message-1".into()),
+            },
+        )
+        .into_iter()
+        .next()
+        .expect("tool stream item"),
     ));
-    app.apply_event(Event::ToolExecution(
-        piko_protocol::ToolExecutionEvent::Ended {
-            session_id: "session-1".into(),
-            agent_instance_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            result: json!({ "ok": true }),
-            is_error: false,
-        },
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Ended {
+                session_id: "session-1".into(),
+                agent_instance_id: "task-1".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "read".into(),
+                result: json!({ "ok": true }),
+                is_error: false,
+            },
+        )
+        .into_iter()
+        .next()
+        .expect("tool stream item"),
     ));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
@@ -237,27 +251,37 @@ fn tool_start_and_end_update_one_timeline_item() {
 fn committed_tool_result_updates_existing_tool_call() {
     let mut app = live_app();
 
-    app.apply_event(Event::ToolExecution(
-        piko_protocol::ToolExecutionEvent::Started {
-            session_id: "session-1".into(),
-            agent_instance_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "run".into(),
-            args: json!({ "cmd": "true" }),
-            parent_message_id: None,
-        },
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Started {
+                session_id: "session-1".into(),
+                agent_instance_id: "task-1".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "run".into(),
+                args: json!({ "cmd": "true" }),
+                parent_message_id: None,
+            },
+        )
+        .into_iter()
+        .next()
+        .expect("tool stream item"),
     ));
-    app.apply_event(Event::ToolExecution(
-        piko_protocol::ToolExecutionEvent::Ended {
-            session_id: "session-1".into(),
-            agent_instance_id: "task-1".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "run".into(),
-            result: json!({"done": true}),
-            is_error: true,
-        },
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Ended {
+                session_id: "session-1".into(),
+                agent_instance_id: "task-1".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "run".into(),
+                result: json!({"done": true}),
+                is_error: true,
+            },
+        )
+        .into_iter()
+        .next()
+        .expect("tool stream item"),
     ));
 
     assert_eq!(app.timeline.tool_calls.len(), 1);
@@ -388,34 +412,37 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
                 events: vec![
                     piko_protocol::SequencedServerMessage {
                         seq: 1,
-                        message: Box::new(Event::RealtimeMessage(
-                            piko_protocol::RealtimeMessageEvent {
-                                session_id: "session-1".into(),
-                                agent_instance_id: "task-child".into(),
-                                agent_id: "hello-agent".into(),
-                                message_id: "message-child".into(),
-                                delta_seq: 0,
-                                delta:
-                                    piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
-                                        role: piko_protocol::MessageRole::Assistant,
-                                    },
-                            },
+                        message: Box::new(Event::StreamItem(
+                            piko_protocol::StreamItemPatch::from_realtime_delta(
+                                Some("session-1".into()),
+                                Some("task-child".into()),
+                                "message-child",
+                                Some(0),
+                                &piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+                                    role: piko_protocol::MessageRole::Assistant,
+                                },
+                            )
+                            .into_iter()
+                            .next()
+                            .expect("realtime stream item"),
                         )),
                     },
                     piko_protocol::SequencedServerMessage {
                         seq: 2,
-                        message: Box::new(Event::RealtimeMessage(
-                            piko_protocol::RealtimeMessageEvent {
-                                session_id: "session-1".into(),
-                                agent_instance_id: "task-child".into(),
-                                agent_id: "hello-agent".into(),
-                                message_id: "message-child".into(),
-                                delta_seq: 1,
-                                delta: piko_protocol::agent_runtime::RealtimeDelta::Text {
+                        message: Box::new(Event::StreamItem(
+                            piko_protocol::StreamItemPatch::from_realtime_delta(
+                                Some("session-1".into()),
+                                Some("task-child".into()),
+                                "message-child",
+                                Some(1),
+                                &piko_protocol::agent_runtime::RealtimeDelta::Text {
                                     content_index: 0,
                                     delta: "Hello".into(),
                                 },
-                            },
+                            )
+                            .into_iter()
+                            .next()
+                            .expect("realtime stream item"),
                         )),
                     },
                 ],
@@ -1479,16 +1506,21 @@ fn tool_execution_scopes_to_non_active_agent_timeline() {
     let mut app = live_app();
     app.agent_panel.active_agent_instance_id = Some("active".into());
 
-    app.apply_event(Event::ToolExecution(
-        piko_protocol::ToolExecutionEvent::Started {
-            session_id: "session-1".into(),
-            agent_instance_id: "other".into(),
-            agent_id: "agent-1".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "read".into(),
-            args: json!({ "path": "Cargo.toml" }),
-            parent_message_id: Some("message-1".into()),
-        },
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Started {
+                session_id: "session-1".into(),
+                agent_instance_id: "other".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "read".into(),
+                args: json!({ "path": "Cargo.toml" }),
+                parent_message_id: Some("message-1".into()),
+            },
+        )
+        .into_iter()
+        .next()
+        .expect("tool stream item"),
     ));
 
     assert!(app.timeline.tool_calls.is_empty());
@@ -1563,7 +1595,7 @@ fn session_reconcile_projects_cumulative_usage() {
 }
 
 #[test]
-fn turn_completed_accumulates_usage_and_context_tokens() {
+fn usage_event_sets_chrome_and_clears_active_turn() {
     let mut app = live_app();
     app.session
         .active_turns
@@ -1576,11 +1608,26 @@ fn turn_completed_accumulates_usage_and_context_tokens() {
     turn_usage.total_tokens = 13_400;
     turn_usage.cost.total = 0.05;
 
+    // Turn terminal no longer rolls usage into chrome.
     app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
         session_id: "session-1".into(),
         turn_id: "turn-1".into(),
         agent_instance_id: "agent-1".into(),
-        usage: turn_usage,
+        usage: turn_usage.clone(),
+        timestamp: 0,
+    }));
+    assert!(app.session.last_context_tokens.is_none());
+    assert!(app.session.cumulative_usage.is_none());
+    assert!(app.session.active_turns.is_empty());
+
+    app.apply_event(Event::Usage(piko_protocol::UsageEvent::Updated {
+        session_id: "session-1".into(),
+        agent_instance_id: Some("agent-1".into()),
+        turn_id: Some("turn-1".into()),
+        used: 13_000,
+        size: Some(128_000),
+        cumulative: Some(turn_usage),
+        turn_usage: None,
         timestamp: 0,
     }));
 
@@ -1589,7 +1636,6 @@ fn turn_completed_accumulates_usage_and_context_tokens() {
         app.session.cumulative_usage.as_ref().map(|u| u.cost.total),
         Some(0.05)
     );
-    assert!(app.session.active_turns.is_empty());
 }
 
 #[test]

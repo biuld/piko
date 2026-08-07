@@ -198,19 +198,25 @@ fn project_agent_view_from_entry(
             else {
                 return Vec::new();
             };
-            vec![(
-                agent_instance_id.clone(),
-                agent_id.clone(),
-                ServerMessage::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
-                    session_id: session_id.to_string(),
-                    agent_instance_id: agent_instance_id.clone(),
-                    agent_id: agent_id.clone(),
-                    tool_call_id: tool.tool_call_id.clone(),
-                    tool_name: tool.tool_name.clone(),
-                    args: tool.arguments.clone(),
-                    parent_message_id: tool.parent_message_id.clone(),
-                }),
-            )]
+            let tool_event = piko_protocol::ToolExecutionEvent::Started {
+                session_id: session_id.to_string(),
+                agent_instance_id: agent_instance_id.clone(),
+                agent_id: agent_id.clone(),
+                tool_call_id: tool.tool_call_id.clone(),
+                tool_name: tool.tool_name.clone(),
+                args: tool.arguments.clone(),
+                parent_message_id: tool.parent_message_id.clone(),
+            };
+            piko_protocol::StreamItemPatch::from_tool_execution(&tool_event)
+                .into_iter()
+                .map(|patch| {
+                    (
+                        agent_instance_id.clone(),
+                        agent_id.clone(),
+                        ServerMessage::StreamItem(patch),
+                    )
+                })
+                .collect()
         }
         _ => Vec::new(),
     }

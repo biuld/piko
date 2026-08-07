@@ -415,3 +415,5 @@ agent.activity.approval:
   en: approval
 agent.activity.cancelling:
   en: cancelling
+agent.activity.queued:
+  en: queued

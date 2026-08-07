@@ -96,13 +96,18 @@ impl AppState {
                     }));
                 }
             }
-            Event::RealtimeMessage(realtime) => {
-                if !self.accepts_session(&realtime.session_id) {
+            Event::StreamItem(patch) => {
+                let Some(session_id) = patch.session_id.as_deref() else {
+                    return effects;
+                };
+                if !self.accepts_session(session_id) {
                     return effects;
                 }
-                let agent_instance_id = realtime.agent_instance_id.clone();
+                let Some(agent_instance_id) = patch.agent_instance_id.clone() else {
+                    return effects;
+                };
                 self.with_agent_timeline(&agent_instance_id, |timeline| {
-                    timeline.apply_realtime(realtime)
+                    timeline.apply_stream_item(&patch);
                 });
             }
             Event::SessionReconciled(reconciled) => {
@@ -204,71 +209,6 @@ impl AppState {
                         unread_report_count: agent.unread_report_count,
                         status: agent.status,
                     });
-            }
-            Event::ToolExecution(piko_protocol::ToolExecutionEvent::Started {
-                session_id,
-                agent_instance_id,
-                tool_call_id,
-                tool_name,
-                args,
-                parent_message_id,
-                ..
-            }) => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                let tool = ToolEntry::new(
-                    tool_call_id,
-                    tool_name,
-                    ToolStatus::Running,
-                    compact_json(&args),
-                    None,
-                    parent_message_id,
-                );
-                self.with_agent_timeline(&agent_instance_id, |timeline| {
-                    if !timeline.upsert_tool(tool.clone()) {
-                        timeline.push(TimelineEntry::Tool(tool));
-                    }
-                });
-            }
-            Event::ToolExecution(piko_protocol::ToolExecutionEvent::Ended {
-                session_id,
-                agent_instance_id,
-                tool_call_id,
-                tool_name,
-                result,
-                is_error,
-                ..
-            }) => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.with_agent_timeline(&agent_instance_id, |timeline| {
-                    let mut tool = timeline
-                        .tool_calls
-                        .iter()
-                        .find(|tool| tool.id == tool_call_id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            ToolEntry::new(
-                                tool_call_id.clone(),
-                                tool_name.clone(),
-                                ToolStatus::Running,
-                                String::new(),
-                                None,
-                                None,
-                            )
-                        });
-                    tool.status = if is_error {
-                        ToolStatus::Failed
-                    } else {
-                        ToolStatus::Completed
-                    };
-                    tool.result = Some(compact_json(&result));
-                    if !timeline.upsert_tool(tool.clone()) {
-                        timeline.push(TimelineEntry::Tool(tool));
-                    }
-                });
             }
             Event::Interaction(piko_protocol::InteractionEvent::Requested {
                 session_id,
@@ -485,7 +425,6 @@ impl AppState {
                 session_id,
                 turn_id,
                 agent_instance_id,
-                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -499,7 +438,7 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
-                self.account_turn_usage(&usage);
+                // Usage chrome is host-authoritative via Event::Usage only.
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} completed");
             }
@@ -508,7 +447,6 @@ impl AppState {
                 turn_id,
                 agent_instance_id,
                 error,
-                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -522,7 +460,6 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
-                self.account_turn_usage(&usage);
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
@@ -531,7 +468,6 @@ impl AppState {
                 session_id,
                 turn_id,
                 agent_instance_id,
-                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -545,13 +481,13 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
-                self.account_turn_usage(&usage);
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} cancelled");
             }
             Event::AgentRunLifecycle(_) => {}
             Event::Approval(piko_protocol::ApprovalEvent::Requested {
                 session_id,
+                agent_instance_id,
                 approval_id,
                 tool_name,
                 tool_args,
@@ -563,10 +499,19 @@ impl AppState {
                 }
                 self.approvals.push(PendingApproval {
                     id: approval_id.clone(),
+                    agent_instance_id: agent_instance_id.clone(),
                     tool_name: tool_name.clone(),
                     args: tool_args,
                     prompt,
                 });
+                if let Some(agent) = self
+                    .agent_panel
+                    .agents
+                    .iter_mut()
+                    .find(|a| a.agent_instance_id == agent_instance_id)
+                {
+                    agent.activity = piko_protocol::AgentActivity::WaitingForApproval;
+                }
                 self.status = format!("approval requested for {tool_name}");
                 self.notify(
                     NotificationLevel::Warning,
@@ -585,7 +530,33 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
+                let agent_instance_id = self
+                    .approvals
+                    .pending
+                    .iter()
+                    .find(|a| a.id == approval_id)
+                    .map(|a| a.agent_instance_id.clone());
                 self.approvals.resolve(&approval_id);
+                if let Some(agent_id) = agent_instance_id {
+                    let still_blocked = self
+                        .approvals
+                        .pending
+                        .iter()
+                        .any(|a| a.agent_instance_id == agent_id);
+                    if !still_blocked
+                        && let Some(agent) = self
+                            .agent_panel
+                            .agents
+                            .iter_mut()
+                            .find(|a| a.agent_instance_id == agent_id)
+                    {
+                        agent.activity = if self.session.active_turns.contains_key(&agent_id) {
+                            piko_protocol::AgentActivity::Running
+                        } else {
+                            piko_protocol::AgentActivity::Idle
+                        };
+                    }
+                }
                 self.status = format!("approval {approval_id} resolved: {decision:?}");
                 if self.approvals.is_empty()
                     && self.focus_manager.active_mode() == AppMode::Approval
@@ -639,18 +610,34 @@ impl AppState {
                 self.push(TimelineEntry::System(format!("{provider} logged out")));
             }
             Event::CommandResponse {
+                command_id,
                 result: Ok(piko_protocol::CommandResult::ModelListed { providers, .. }),
-                ..
             } => {
+                let pending = self.session.pending.take(&command_id);
                 self.model.providers = providers.clone();
                 let provider_names: Vec<String> =
                     providers.iter().map(|p| p.provider.clone()).collect();
                 self.auth_selector.reset(&provider_names);
                 self.models.load(flatten_models(providers));
-                if self.mode != AppMode::AuthSelector {
-                    self.push_focus(AppMode::Models);
+                match pending {
+                    Some(super::pending::PendingCommandKind::BootstrapModels) => {
+                        // Silent catalog warm-up for context size chrome.
+                        self.status = format!("{} models cached", self.models.len());
+                    }
+                    Some(super::pending::PendingCommandKind::ModelList) => {
+                        // Interactive open already pushed Models focus.
+                        self.status = format!("{} models available", self.models.len());
+                    }
+                    _ => {
+                        // Untracked ModelList (e.g. /login provider probe).
+                        if self.mode != AppMode::AuthSelector
+                            && !matches!(self.mode, AppMode::Models)
+                        {
+                            self.push_focus(AppMode::Models);
+                        }
+                        self.status = format!("{} models available", self.models.len());
+                    }
                 }
-                self.status = format!("{} models available", self.models.len());
             }
             Event::CommandResponse {
                 command_id,
@@ -812,6 +799,7 @@ impl AppState {
                 model_id,
                 provider,
                 thinking_level,
+                context_window,
                 ..
             }) => {
                 self.model.active_model_id = if model_id.is_empty() {
@@ -829,10 +817,32 @@ impl AppState {
                 } else {
                     self.model.active_thinking_level = Some("off".to_string());
                 }
+                self.model.host_context_window = context_window.filter(|w| *w > 0);
                 if self.model.active_model_id.is_some() && self.model.active_provider.is_some() {
                     self.status = format!("model {provider}/{model_id}");
                 } else {
                     self.status = "no model active".to_string();
+                }
+            }
+            Event::Usage(piko_protocol::UsageEvent::Updated {
+                session_id,
+                used,
+                size,
+                cumulative,
+                ..
+            }) => {
+                if !self.accepts_session(&session_id) {
+                    return effects;
+                }
+                if used > 0 {
+                    self.session.last_context_tokens = Some(used);
+                }
+                if let Some(window) = size.filter(|w| *w > 0) {
+                    self.model.host_context_window = Some(window);
+                }
+                if let Some(cumulative) = cumulative {
+                    // Host ledger is authoritative when present.
+                    self.session.cumulative_usage = Some(cumulative);
                 }
             }
             Event::CommandResponse {
@@ -851,24 +861,6 @@ impl AppState {
     }
 
     // ── snapshot application ──────────────────────────────────────────────────
-
-    /// Roll turn usage into the session ledger so BottomBar stays live between
-    /// reconciles (hostd already accounts the same numbers server-side).
-    fn account_turn_usage(&mut self, usage: &piko_protocol::messages::Usage) {
-        let has_signal =
-            usage.total_tokens > 0 || usage.cost.total > 0.0 || usage.input > 0 || usage.output > 0;
-        if !has_signal {
-            return;
-        }
-        let context = crate::features::bottom_bar::context_tokens_from_usage(usage);
-        if context > 0 {
-            self.session.last_context_tokens = Some(context);
-        }
-        match &mut self.session.cumulative_usage {
-            Some(total) => total.accumulate(usage),
-            None => self.session.cumulative_usage = Some(usage.clone()),
-        }
-    }
 
     fn apply_snapshot(&mut self, snapshot: SessionSnapshot) {
         self.timeline.clear();
@@ -981,6 +973,7 @@ impl AppState {
             };
             self.approvals.push(PendingApproval {
                 id: approval.approval_id,
+                agent_instance_id: approval.agent_instance_id,
                 tool_name,
                 args: approval.request,
                 prompt: approval.prompt,

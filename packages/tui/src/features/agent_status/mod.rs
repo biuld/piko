@@ -47,7 +47,8 @@ pub struct AgentPanelState {
 
 pub struct AgentPanelView<'a> {
     pub state: &'a AgentPanelState,
-    pub is_running: bool,
+    /// Foreground projection for each agent_instance_id (parallel to `state.agents`).
+    pub foreground: &'a [piko_protocol::AgentForeground],
     pub queue: &'a QueueStatus,
     pub spinner_frame: usize,
     pub theme: &'a Theme,
@@ -74,6 +75,7 @@ impl AgentPanelState {
         let has_queue = view.queue.steer_count > 0
             || view.queue.follow_up_count > 0
             || view.queue.next_turn_count > 0;
+        let any_busy = view.foreground.iter().any(|fg| fg.is_busy());
 
         let mut lines = Vec::new();
 
@@ -91,6 +93,11 @@ impl AgentPanelState {
                 let is_selected = view.state.focus && i == view.state.selected_idx;
                 let is_active = view.state.active_agent_instance_id.as_deref()
                     == Some(&agent.agent_instance_id);
+                let foreground = view
+                    .foreground
+                    .get(i)
+                    .copied()
+                    .unwrap_or(piko_protocol::AgentForeground::Idle);
 
                 let prefix = prefixes[i].as_str();
                 lines.push(render_agent_row(
@@ -98,13 +105,13 @@ impl AgentPanelState {
                     prefix,
                     is_selected,
                     is_active,
-                    view.is_running,
+                    foreground,
                     view.spinner_frame,
                     view.theme,
                 ));
             }
 
-            if !view.is_running && has_queue {
+            if !any_busy && has_queue {
                 let total_queue = view.queue.steer_count
                     + view.queue.follow_up_count
                     + view.queue.next_turn_count;
@@ -241,40 +248,26 @@ fn render_agent_row(
     indent: &str,
     is_selected: bool,
     is_active: bool,
-    is_running: bool,
+    foreground: piko_protocol::AgentForeground,
     frame_idx: usize,
     theme: &Theme,
 ) -> Line<'static> {
-    let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running)
-        && (is_running || agent.parent_agent_instance_id.is_some())
-    {
-        spinner_glyph(frame_idx)
-    } else {
-        match agent.status {
-            piko_protocol::AgentStatus::Running => ACTIVE_MARKER,
-            piko_protocol::AgentStatus::Completed => SUCCESS_GLYPH,
-            piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => {
-                FAIL_GLYPH
-            }
-            piko_protocol::AgentStatus::Closed => FAIL_GLYPH,
-            _ => {
-                if is_active {
-                    ACTIVE_MARKER
-                } else {
-                    IDLE_MARKER
-                }
-            }
+    let (status_char, status_color) = match foreground {
+        piko_protocol::AgentForeground::Running | piko_protocol::AgentForeground::Cancelling => {
+            (spinner_glyph(frame_idx), theme.warning)
         }
-    };
-
-    let status_color = match agent.status {
-        piko_protocol::AgentStatus::Running => theme.warning,
-        piko_protocol::AgentStatus::Completed => theme.success,
-        piko_protocol::AgentStatus::Failed
-        | piko_protocol::AgentStatus::Cancelled
-        | piko_protocol::AgentStatus::Closed => theme.error,
-        _ if is_active => theme.accent,
-        _ => theme.dim,
+        piko_protocol::AgentForeground::RequiresAction => (ACTIVE_MARKER, theme.warning),
+        piko_protocol::AgentForeground::Queued => (IDLE_MARKER, theme.muted),
+        piko_protocol::AgentForeground::Idle => match agent.status {
+            piko_protocol::AgentStatus::Running => (ACTIVE_MARKER, theme.warning),
+            piko_protocol::AgentStatus::Completed => (SUCCESS_GLYPH, theme.success),
+            piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => {
+                (FAIL_GLYPH, theme.error)
+            }
+            piko_protocol::AgentStatus::Closed => (FAIL_GLYPH, theme.error),
+            _ if is_active => (ACTIVE_MARKER, theme.accent),
+            _ => (IDLE_MARKER, theme.dim),
+        },
     };
 
     // Selected ≠ Active: selection uses ❯ + accent text; active uses status glyph.

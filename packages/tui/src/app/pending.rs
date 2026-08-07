@@ -5,6 +5,10 @@ use std::collections::HashMap;
 pub enum PendingCommandKind {
     BootstrapConfig,
     BootstrapCatalog,
+    /// Silent `ModelList` for catalog cache (no Models panel).
+    BootstrapModels,
+    /// Interactive model picker open.
+    ModelList,
     SessionCreate,
     SessionList,
     SessionOpen,

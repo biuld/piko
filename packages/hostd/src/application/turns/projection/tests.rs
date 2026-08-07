@@ -8,8 +8,8 @@ use crate::infra::storage::SessionStore;
 use super::*;
 
 #[test]
-fn realtime_projection_preserves_message_identity_and_delta_seq() {
-    let event = realtime_message_from_delta(
+fn stream_projection_preserves_message_identity_and_delta_seq() {
+    let events = stream_items_from_delta(
         "session-1",
         &RealtimeDeltaEnvelope {
             agent_instance_id: "root".into(),
@@ -22,22 +22,21 @@ fn realtime_projection_preserves_message_identity_and_delta_seq() {
                 delta: "hello".into(),
             },
         },
-    )
-    .unwrap();
-
-    assert_eq!(event.session_id, "session-1");
-    assert_eq!(event.message_id, "message-1");
-    assert_eq!(event.delta_seq, 7);
-    assert!(matches!(
-        event.delta,
-        RealtimeDelta::Text { delta, .. } if delta == "hello"
-    ));
+    );
+    assert_eq!(events.len(), 1);
+    let crate::api::ServerMessage::StreamItem(patch) = &events[0] else {
+        panic!("expected StreamItem");
+    };
+    assert_eq!(patch.session_id.as_deref(), Some("session-1"));
+    assert_eq!(patch.item_id, "message-1");
+    assert_eq!(patch.delta_seq, Some(7));
+    assert_eq!(patch.text.as_deref(), Some("hello"));
 }
 
 #[test]
-fn realtime_projection_rejects_missing_message_identity() {
+fn stream_projection_rejects_missing_message_identity() {
     assert!(
-        realtime_message_from_delta(
+        stream_items_from_delta(
             "session-1",
             &RealtimeDeltaEnvelope {
                 agent_instance_id: "root".into(),
@@ -50,7 +49,7 @@ fn realtime_projection_rejects_missing_message_identity() {
                 },
             },
         )
-        .is_none()
+        .is_empty()
     );
 }
 

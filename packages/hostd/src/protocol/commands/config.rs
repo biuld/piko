@@ -62,12 +62,27 @@ impl ConfigObserver for ModelRunnerObserver {
         let model_id = new.default_model.clone().unwrap_or_default();
         let provider = new.default_provider.clone().unwrap_or_default();
         let thinking_level = new.default_thinking_level.clone();
+        // Host-authoritative window for client chrome (F-22 / D-34 slice 1).
+        // Only resolve when a model id is configured so empty defaults do not
+        // advertise a hard-fallback catalog model's window.
+        let context_window = if model_id.is_empty() {
+            None
+        } else {
+            server
+                .model_registry
+                .lock()
+                .await
+                .resolve(Some(model_id.as_str()), provider_hint(provider.as_str()))
+                .map(|resolved| resolved.model.context_window)
+                .filter(|window| *window > 0)
+        };
 
         Ok(vec![ServerMessage::Model(
             crate::api::ModelEvent::ConfigChanged {
                 model_id,
                 provider,
                 thinking_level,
+                context_window,
                 timestamp: now_ms(),
             },
         )])
@@ -276,6 +291,14 @@ impl HostServer {
         }
 
         Ok(events)
+    }
+}
+
+fn provider_hint(provider: &str) -> Option<&str> {
+    if provider.is_empty() {
+        None
+    } else {
+        Some(provider)
     }
 }
 

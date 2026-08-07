@@ -187,18 +187,18 @@ fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
         )
         .unwrap();
     let events = state.finalize_interrupted_turns(&session_id).unwrap();
-    assert_eq!(events.len(), 1);
-    match &events[0] {
+    assert!(events.iter().any(|event| matches!(
+        event,
         Event::TurnLifecycle(piko_hostd::api::TurnEvent::Failed {
             turn_id: failed_id,
             error,
             ..
-        }) => {
-            assert_eq!(failed_id, &turn_id);
-            assert!(error.contains("interrupted"));
-        }
-        other => panic!("expected Failed turn event, got {other:?}"),
-    }
+        }) if failed_id == &turn_id && error.contains("interrupted")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Usage(piko_hostd::api::UsageEvent::Updated { .. })
+    )));
 
     let snapshot = state.snapshot(&session_id).unwrap();
     assert!(snapshot.active_turns.is_empty());

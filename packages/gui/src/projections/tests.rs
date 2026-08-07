@@ -252,6 +252,39 @@ fn status_bar_abbreviates_cwd_when_sidebar_hidden() {
     assert_eq!(vm.cwd.as_deref(), Some("…/projects/myapp"));
 }
 
+#[test]
+fn status_bar_formats_context_used_and_size() {
+    let mut state = live_state("s1");
+    if let Some(session) = state.live_session.as_mut() {
+        session.last_context_tokens = Some(12_200);
+    }
+    state.model.context_window = Some(200_000);
+    let vm = derive_status_bar(&state, false);
+    assert_eq!(vm.usage.as_deref(), Some("12.2k/200k"));
+}
+
+#[test]
+fn status_bar_appends_cost_when_cumulative_has_cost() {
+    let mut state = live_state("s1");
+    if let Some(session) = state.live_session.as_mut() {
+        session.last_context_tokens = Some(1000);
+        session.cumulative_usage = Some(piko_protocol::messages::Usage {
+            input: 1000,
+            output: 10,
+            cache_read: 0,
+            cache_write: 0,
+            total_tokens: 1010,
+            cost: piko_protocol::messages::UsageCost {
+                total: 0.42,
+                ..Default::default()
+            },
+        });
+    }
+    state.model.context_window = Some(128_000);
+    let vm = derive_status_bar(&state, false);
+    assert_eq!(vm.usage.as_deref(), Some("1k/128k · $0.42"));
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn stub_summary(id: &str, cwd: &str, name: Option<&str>) -> SessionSummary {

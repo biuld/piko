@@ -1,7 +1,7 @@
 //! Agent tree projection for selection.
 
-use piko_client_core::ClientState;
-use piko_protocol::AgentActivity;
+use piko_client_core::{ClientState, agent_foreground};
+use piko_protocol::AgentForeground;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentTreeNode {
@@ -30,12 +30,13 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
 
     // Roots first, then children by parent walk (stable host order preserved within levels).
     fn walk(
-        agents: &[piko_protocol::AgentInfo],
+        session: &piko_client_core::LiveSession,
         parent: Option<&str>,
         depth: usize,
         selected: Option<&str>,
         out: &mut Vec<AgentTreeNode>,
     ) {
+        let agents = &session.agents;
         for agent in agents
             .iter()
             .filter(|a| a.parent_agent_instance_id.as_deref() == parent)
@@ -44,6 +45,13 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
                 candidate.parent_agent_instance_id.as_deref()
                     == Some(agent.agent_instance_id.as_str())
             });
+            let fg = agent_foreground(
+                &agent.agent_instance_id,
+                &session.agents,
+                &session.active_turns,
+                &session.pending_approvals,
+                &session.pending_interactions,
+            );
             out.push(AgentTreeNode {
                 agent_instance_id: agent.agent_instance_id.clone(),
                 parent_agent_instance_id: agent.parent_agent_instance_id.clone(),
@@ -52,10 +60,10 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
                 depth,
                 selected: selected == Some(agent.agent_instance_id.as_str()),
                 has_children,
-                activity_label: activity_label(&agent.activity),
+                activity_label: foreground_label(fg),
             });
             walk(
-                agents,
+                session,
                 Some(agent.agent_instance_id.as_str()),
                 depth + 1,
                 selected,
@@ -64,7 +72,7 @@ pub fn derive_agent_tree(state: &ClientState) -> AgentTreeViewModel {
         }
     }
 
-    walk(&session.agents, None, 0, selected, &mut nodes);
+    walk(session, None, 0, selected, &mut nodes);
     AgentTreeViewModel { nodes }
 }
 
@@ -87,11 +95,12 @@ pub(crate) fn agent_node_visible(
     true
 }
 
-fn activity_label(activity: &AgentActivity) -> String {
-    match activity {
-        AgentActivity::Idle => crate::t!("agent.activity.idle"),
-        AgentActivity::Running => crate::t!("agent.activity.running"),
-        AgentActivity::WaitingForApproval => crate::t!("agent.activity.approval"),
-        AgentActivity::Cancelling => crate::t!("agent.activity.cancelling"),
+fn foreground_label(foreground: AgentForeground) -> String {
+    match foreground {
+        AgentForeground::Idle => crate::t!("agent.activity.idle"),
+        AgentForeground::Running => crate::t!("agent.activity.running"),
+        AgentForeground::RequiresAction => crate::t!("agent.activity.approval"),
+        AgentForeground::Cancelling => crate::t!("agent.activity.cancelling"),
+        AgentForeground::Queued => crate::t!("agent.activity.queued"),
     }
 }

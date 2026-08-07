@@ -256,7 +256,7 @@ impl HostApp {
                     },
                 )
                 .await;
-                send_event(tx, failed).await;
+                self.send_turn_terminal(tx, failed).await;
                 return Ok(());
             }
         };

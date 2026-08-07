@@ -23,6 +23,16 @@ impl AppState {
             command_id: catalog_id,
         }));
 
+        // Silent model catalog for BottomBar context size (F-22 / D-34).
+        let models_id = command_id();
+        self.session.pending.track(
+            models_id.clone(),
+            pending::PendingCommandKind::BootstrapModels,
+        );
+        effects.push(effect::Effect::send(Command::ModelList {
+            command_id: models_id,
+        }));
+
         effects.extend(self.bootstrap_config());
         if let Some(session_id) = self.session.requested_id.clone() {
             self.agent_panel.begin_loading();

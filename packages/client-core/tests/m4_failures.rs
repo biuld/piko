@@ -67,33 +67,41 @@ fn m4_stale_realtime_delta_seq_ignored() {
 
     let (state, _) = host(
         state,
-        ServerMessage::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-            session_id: "sess-1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            message_id: "msg-1".into(),
-            delta_seq: 2,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: "second".into(),
-            },
-        }),
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("sess-1".into()),
+                Some("root".into()),
+                "msg-1",
+                Some(2),
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "second".into(),
+                },
+            )
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
         &mut ids,
     );
 
     let (state, _) = host(
         state,
-        ServerMessage::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-            session_id: "sess-1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            message_id: "msg-1".into(),
-            delta_seq: 1,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: "STALE".into(),
-            },
-        }),
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("sess-1".into()),
+                Some("root".into()),
+                "msg-1",
+                Some(1),
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "STALE".into(),
+                },
+            )
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
         &mut ids,
     );
 

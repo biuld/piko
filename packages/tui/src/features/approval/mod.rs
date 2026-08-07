@@ -10,6 +10,8 @@ use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkf
 /// A single pending tool-approval request.
 pub struct PendingApproval {
     pub id: String,
+    /// Agent instance that requested the tool; used for F-22 foreground projection.
+    pub agent_instance_id: String,
     pub tool_name: String,
     pub args: serde_json::Value,
     /// F-13: operator-authored approval prompt (MCP approval templates);
@@ -144,6 +146,7 @@ mod tests {
     fn approval(tool_name: &str, args: serde_json::Value) -> PendingApproval {
         PendingApproval {
             id: "a1".into(),
+            agent_instance_id: "agent-1".into(),
             tool_name: tool_name.into(),
             args,
             prompt: None,
@@ -187,6 +190,7 @@ mod tests {
     fn operator_prompt_replaces_the_generic_question() {
         let templated = PendingApproval {
             id: "a2".into(),
+            agent_instance_id: "agent-1".into(),
             tool_name: "create_issue".into(),
             args: serde_json::json!({ "title": "x" }),
             prompt: Some("This creates a GitHub issue in the configured repository.".into()),

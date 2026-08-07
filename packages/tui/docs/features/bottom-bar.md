@@ -48,11 +48,13 @@ Shows the current context window fill: `used / total`.
   usage (`input + cache_read` on the last terminal turn or last assistant
   message with usage). This is the best host-authoritative proxy for window
   fill until a dedicated live estimate is pushed.
-- `total` — active model's context window size from the host model catalog
+- `total` — active model's context window from host
+  `ModelEvent::ConfigChanged.contextWindow` when present, otherwise the host
+  model catalog warmed at bootstrap
 - Human-readable: `12.2k/200k`, `1.5k/32k`
 - When both unknown: `—/—`; either side may show `—` when only one is known
-- Updates when a session is reconciled or a turn completes/fails/cancels with
-  usage
+- Updates when a session is reconciled, model config changes, or a turn
+  completes/fails/cancels with usage
 
 ### 4. Cost
 

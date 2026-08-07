@@ -383,18 +383,38 @@ pub fn derive_status_bar(state: &ClientState, session_sidebar_visible: bool) -> 
         state.live_session.as_ref().map(|s| abbreviate_cwd(&s.cwd))
     };
 
-    let usage = state
-        .live_session
-        .as_ref()
-        .and_then(|s| s.cumulative_usage.as_ref())
-        .map(format_usage)
-        .filter(|s| !s.is_empty());
+    let usage = format_status_usage(state).filter(|s| !s.is_empty());
 
     StatusBarViewModel {
         connection,
         cwd,
         usage,
     }
+}
+
+fn format_status_usage(state: &ClientState) -> Option<String> {
+    let session = state.live_session.as_ref()?;
+    let mut parts = Vec::new();
+
+    if session.last_context_tokens.is_some() || state.model.active_context_window().is_some() {
+        parts.push(piko_client_core::format_context(
+            session.last_context_tokens,
+            state.model.active_context_window(),
+        ));
+    }
+
+    if let Some(usage) = session.cumulative_usage.as_ref()
+        && usage.cost.total > 0.0
+    {
+        parts.push(piko_client_core::format_cost(usage.cost.total));
+    }
+
+    // Cost alone is fine before the first usage_update; no `Xtok` total fallback.
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(parts.join(" · "))
 }
 
 fn abbreviate_cwd(cwd: &str) -> String {
@@ -411,15 +431,4 @@ fn abbreviate_cwd(cwd: &str) -> String {
         [one] => one.to_string(),
         [.., a, b] => format!("…/{a}/{b}"),
     }
-}
-
-fn format_usage(usage: &piko_protocol::messages::Usage) -> String {
-    let mut parts = Vec::new();
-    if usage.total_tokens > 0 {
-        parts.push(format!("{}tok", usage.total_tokens));
-    }
-    if usage.cost.total > 0.0 {
-        parts.push(format!("${:.4}", usage.cost.total));
-    }
-    parts.join(" · ")
 }

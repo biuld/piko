@@ -15,15 +15,20 @@ fn tool_lifecycle_is_projected_and_scoped() {
     let state = drive_to_live(&mut ids, "s1");
     let (state, _) = host(
         state,
-        ServerMessage::ToolExecution(ToolExecutionEvent::Started {
-            session_id: "s1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "exec".into(),
-            args: serde_json::json!({"cmd": "true"}),
-            parent_message_id: Some("m1".into()),
-        }),
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_tool_execution(&ToolExecutionEvent::Started {
+                session_id: "s1".into(),
+                agent_instance_id: "root".into(),
+                agent_id: "main".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "exec".into(),
+                args: serde_json::json!({"cmd": "true"}),
+                parent_message_id: Some("m1".into()),
+            })
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
         &mut ids,
     );
     let tool = state.live_session.as_ref().unwrap().timelines["root"]
@@ -38,15 +43,20 @@ fn tool_lifecycle_is_projected_and_scoped() {
 
     let (state, _) = host(
         state,
-        ServerMessage::ToolExecution(ToolExecutionEvent::Ended {
-            session_id: "s1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            tool_call_id: "call-1".into(),
-            tool_name: "exec".into(),
-            result: serde_json::json!({"exit": 0}),
-            is_error: false,
-        }),
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_tool_execution(&ToolExecutionEvent::Ended {
+                session_id: "s1".into(),
+                agent_instance_id: "root".into(),
+                agent_id: "main".into(),
+                tool_call_id: "call-1".into(),
+                tool_name: "exec".into(),
+                result: serde_json::json!({"exit": 0}),
+                is_error: false,
+            })
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
         &mut ids,
     );
     let tool = state.live_session.as_ref().unwrap().timelines["root"]
@@ -140,17 +150,21 @@ fn realtime_gap_requests_one_refresh() {
     let mut ids = SeqIds(0);
     let state = drive_to_live(&mut ids, "s1");
     let realtime = |delta_seq, delta: &str| {
-        ServerMessage::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-            session_id: "s1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            message_id: "m1".into(),
-            delta_seq,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: delta.into(),
-            },
-        })
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("s1".into()),
+                Some("root".into()),
+                "m1",
+                Some(delta_seq),
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: delta.into(),
+                },
+            )
+            .into_iter()
+            .next()
+            .unwrap(),
+        )
     };
     let (state, effects) = host(state, realtime(1, "a"), &mut ids);
     assert!(effects.is_empty());

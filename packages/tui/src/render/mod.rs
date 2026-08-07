@@ -74,12 +74,18 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
 
     // Slot B: AgentPanel
     if let Some(idx) = slots.agent_panel {
+        let foreground: Vec<_> = app
+            .agent_panel
+            .agents
+            .iter()
+            .map(|agent| app.agent_foreground(&agent.agent_instance_id, &agent.activity))
+            .collect();
         AgentPanelState::render(
             frame,
             chunks[idx],
             AgentPanelView {
                 state: &app.agent_panel,
-                is_running: app.active_turn_id().is_some(),
+                foreground: &foreground,
                 queue: &app.queue_status,
                 spinner_frame: app.spinner_frame,
                 theme: &app.theme,

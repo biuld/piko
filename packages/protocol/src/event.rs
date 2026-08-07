@@ -5,7 +5,6 @@ use crate::session::SessionTreeEntry;
 use serde::{Deserialize, Serialize};
 
 use crate::AgentStatus;
-use crate::agent_runtime::RealtimeDelta;
 
 pub type SessionId = String;
 pub type TurnId = String;
@@ -62,14 +61,10 @@ pub enum ServerMessage {
     Auth(AuthEvent),
     /// 已完成 durable commit 的权威 transcript record。
     TranscriptCommitted(TranscriptCommittedEvent),
-    /// 可丢的实时消息草稿；不得用于恢复或修改 committed transcript。
-    RealtimeMessage(RealtimeMessageEvent),
     /// 带可靠事件边界的 session hydration/reconciliation。
     SessionReconciled(SessionReconciledEvent),
     /// Authoritative transition from a visible session to no session.
     SessionCleared(SessionClearedEvent),
-    /// 工具执行过程；与 committed ToolCall/ToolResult transcript 分离。
-    ToolExecution(ToolExecutionEvent),
     /// 用户交互生命周期；不属于消息 realtime delta。
     Interaction(InteractionEvent),
     /// 完整 agent 投影，以 agent_instance_id / execution_id 为实体 identity。
@@ -80,6 +75,10 @@ pub enum ServerMessage {
     Approval(ApprovalEvent),
     Queue(QueueEvent),
     Model(ModelEvent),
+    /// Host-authoritative context fill / cost chrome (F-22 / D-34).
+    Usage(UsageEvent),
+    /// Unified stream-item patch envelope — sole live stream transport (F-22).
+    StreamItem(crate::StreamItemPatch),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -112,17 +111,6 @@ pub struct TranscriptCommittedEvent {
     pub message_id: MessageId,
     pub transcript_seq: u64,
     pub message: crate::messages::Message,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct RealtimeMessageEvent {
-    pub session_id: SessionId,
-    pub agent_instance_id: crate::AgentInstanceId,
-    pub agent_id: AgentId,
-    pub message_id: MessageId,
-    pub delta_seq: u64,
-    pub delta: RealtimeDelta,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -461,6 +449,15 @@ pub enum ModelEvent {
         provider: String,
         #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
         thinking_level: Option<crate::model::ThinkingLevel>,
+        /// Active model context window (tokens) from the host catalog when known.
+        /// Clients use this for status chrome (`used/size`) without relying on a
+        /// local catalog cache (F-22 / D-34).
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            rename = "contextWindow"
+        )]
+        context_window: Option<u64>,
         timestamp: i64,
     },
 }
@@ -468,6 +465,47 @@ pub enum ModelEvent {
 impl From<ModelEvent> for ServerMessage {
     fn from(event: ModelEvent) -> Self {
         Self::Model(event)
+    }
+}
+
+/// Live usage / context chrome projection (ACP-inspired `usage_update`, piko-native).
+///
+/// Prefer this for status bars over client-side roll-up of turn usage alone.
+/// Host typically emits `Updated` immediately after a terminal `TurnLifecycle`
+/// message; clients may treat `cumulative` as authoritative session ledger.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UsageEvent {
+    Updated {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_instance_id: Option<crate::AgentInstanceId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<TurnId>,
+        /// Context fill estimate (prompt side: `input + cache_read`).
+        used: u64,
+        /// Active model context window when host can resolve it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<u64>,
+        /// Session cumulative ledger after this update (when known).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cumulative: Option<crate::messages::Usage>,
+        /// Turn-scoped usage that triggered this projection (when applicable).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_usage: Option<crate::messages::Usage>,
+        timestamp: i64,
+    },
+}
+
+impl From<UsageEvent> for ServerMessage {
+    fn from(event: UsageEvent) -> Self {
+        Self::Usage(event)
+    }
+}
+
+impl From<crate::StreamItemPatch> for ServerMessage {
+    fn from(event: crate::StreamItemPatch) -> Self {
+        Self::StreamItem(event)
     }
 }
 
@@ -745,7 +783,7 @@ mod observation_projection_tests {
     use super::*;
 
     #[test]
-    fn committed_and_realtime_server_messages_round_trip() {
+    fn committed_and_stream_server_messages_round_trip() {
         let committed = ServerMessage::TranscriptCommitted(TranscriptCommittedEvent {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -758,19 +796,19 @@ mod observation_projection_tests {
                 timestamp: Some(1),
             },
         });
-        let realtime = ServerMessage::RealtimeMessage(RealtimeMessageEvent {
-            session_id: "session-1".into(),
-            agent_instance_id: "root".into(),
-            agent_id: "main".into(),
-            message_id: "message-2".into(),
-            delta_seq: 4,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: "world".into(),
-            },
+        let stream = ServerMessage::StreamItem(crate::StreamItemPatch {
+            session_id: Some("session-1".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: "message-2".into(),
+            item_kind: crate::StreamItemKind::AgentMessage,
+            op: crate::StreamItemOp::AppendChunk,
+            text: Some("world".into()),
+            content_index: Some(0),
+            delta_seq: Some(4),
+            fields: Some(serde_json::json!({"parentMessageId": "message-2"})),
         });
 
-        for event in [committed, realtime] {
+        for event in [committed, stream] {
             let json = serde_json::to_string(&event).unwrap();
             let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
             assert_eq!(
@@ -778,5 +816,61 @@ mod observation_projection_tests {
                 serde_json::to_value(event).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn usage_updated_round_trips() {
+        let usage = ServerMessage::Usage(UsageEvent::Updated {
+            session_id: "session-1".into(),
+            agent_instance_id: Some("root".into()),
+            turn_id: Some("turn-1".into()),
+            used: 13_000,
+            size: Some(128_000),
+            cumulative: Some(crate::messages::Usage {
+                input: 10_000,
+                output: 100,
+                cache_read: 3_000,
+                cache_write: 0,
+                total_tokens: 13_100,
+                cost: Default::default(),
+            }),
+            turn_usage: Some(crate::messages::Usage {
+                input: 10_000,
+                output: 100,
+                cache_read: 3_000,
+                cache_write: 0,
+                total_tokens: 13_100,
+                cost: Default::default(),
+            }),
+            timestamp: 42,
+        });
+        let json = serde_json::to_string(&usage).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap(),
+            serde_json::to_value(usage).unwrap()
+        );
+    }
+
+    #[test]
+    fn stream_item_round_trips() {
+        let patch = crate::StreamItemPatch {
+            session_id: Some("session-1".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: "msg-1".into(),
+            item_kind: crate::StreamItemKind::AgentMessage,
+            op: crate::StreamItemOp::AppendChunk,
+            text: Some("hi".into()),
+            content_index: Some(0),
+            delta_seq: Some(2),
+            fields: None,
+        };
+        let event = ServerMessage::StreamItem(patch);
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap(),
+            serde_json::to_value(event).unwrap()
+        );
     }
 }

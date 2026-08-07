@@ -6,6 +6,38 @@ use crate::ports::{AgentOperationAddress, AgentRunHandle, AgentRunRunner};
 use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
+    /// Catalog-resolved context window for client chrome (no compaction fallback).
+    pub(crate) async fn client_context_window_size(&self) -> Option<u64> {
+        let (model, provider) = {
+            let settings = self.settings.lock().await;
+            (
+                settings.default_model.clone(),
+                settings.default_provider.clone(),
+            )
+        };
+        let model_id = model.filter(|id| !id.is_empty())?;
+        self.model_registry
+            .lock()
+            .await
+            .resolve(Some(model_id.as_str()), provider.as_deref())
+            .map(|resolved| resolved.model.context_window)
+            .filter(|window| *window > 0)
+    }
+
+    /// Emit a terminal turn event followed by a host usage projection when applicable.
+    pub(crate) async fn send_turn_terminal(&self, tx: &ClientEventSender, terminal: ServerMessage) {
+        let size = self.client_context_window_size().await;
+        let messages = {
+            let state = self.state.lock().await;
+            state.with_usage_projection(terminal, size)
+        };
+        for message in messages {
+            send_event(tx, message).await;
+        }
+    }
+}
+
+impl HostApp {
     /// Drive one Turn's session output stream to completion: apply realtime
     /// deltas and committed-message events, reconnecting on stream exhaustion,
     /// until the durable Agent run result reaches its observation barrier. Returns
@@ -115,7 +147,7 @@ impl HostApp {
                 turn_id = %turn_id,
                 "turn observation loop finished; emitting terminal"
             );
-            send_event(tx, complete_event).await;
+            self.send_turn_terminal(tx, complete_event).await;
         } else {
             tracing::info!(
                 session_id = %session_id,

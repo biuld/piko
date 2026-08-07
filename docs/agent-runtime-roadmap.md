@@ -190,6 +190,7 @@ optional extensions and have no scheduled implementation.
 | K Realtime | F-16 | realtime and multimodal preparation (deferred) |
 | L Observability | F-15 | tracing, timing, usage, rollout/diff/debugging slices |
 | M Config & Permissions | F-17/F-18/F-19 | permission profiles, managed features, agent roles |
+| Client projection (product wire) | F-22 | hostd→client foreground state, stream items, usage used/size (ACP modeling ref) |
 
 ## 5. Sequencing principles
 
@@ -207,4 +208,10 @@ optional extensions and have no scheduled implementation.
 
 ## 6. Current next steps
 
-1. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.
+1. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3 landed:
+   usage `used`/`size` + silent model catalog bootstrap; dedicated
+   `ServerMessage::Usage` after terminal turns (sole usage chrome path);
+   sole stream transport `ServerMessage::StreamItem` (compat dual envelopes
+   removed); AgentInstance foreground projection. Optional next: Slice 4
+   ACP adapter (product-gated).
+2. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

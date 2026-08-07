@@ -57,7 +57,8 @@ impl AppState {
         let mut effects = Vec::new();
         match pending {
             Some(pending::PendingCommandKind::BootstrapConfig)
-            | Some(pending::PendingCommandKind::BootstrapCatalog) => {
+            | Some(pending::PendingCommandKind::BootstrapCatalog)
+            | Some(pending::PendingCommandKind::BootstrapModels) => {
                 self.finish_bootstrap_command(&command_id);
             }
             Some(pending::PendingCommandKind::SessionCreate)
@@ -95,6 +96,12 @@ impl AppState {
                 // Turn lifecycle is authoritative. A rejected submit never
                 // creates an active Turn, so there is no optimistic run state
                 // to clear here.
+            }
+            Some(pending::PendingCommandKind::ModelList) => {
+                self.status = format!("model list failed: {reason}");
+                if matches!(self.mode, super::AppMode::Models) {
+                    self.pop_focus();
+                }
             }
             Some(pending::PendingCommandKind::SessionDelete) => {
                 self.session.pending.delete_session_id = None;

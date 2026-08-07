@@ -6,7 +6,7 @@
 //! `crate::infra` / `crate::adapters` dependency.
 
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
-use piko_protocol::{Message, RealtimeMessageEvent, SessionTreeEntry, TranscriptCommittedEvent};
+use piko_protocol::{Message, SessionTreeEntry, TranscriptCommittedEvent};
 
 use crate::api::{MessageEntry, ProtocolError, ServerMessage};
 use crate::domain::sessions::{HostState, file_change_from_message};
@@ -153,22 +153,24 @@ fn project_committed_message_from_store(
     })
 }
 
-/// Convert a best-effort orchd delta into the hostd-to-client realtime projection.
-pub fn realtime_message_from_delta(
+/// Convert orchd delta output to client `StreamItem` events (sole stream wire).
+pub fn stream_items_from_delta(
     session_id: &str,
     envelope: &RealtimeDeltaEnvelope,
-) -> Option<RealtimeMessageEvent> {
-    let agent_id = envelope.agent_id.clone();
-    let message_id = envelope.message_id.clone()?;
-
-    Some(RealtimeMessageEvent {
-        session_id: session_id.to_string(),
-        agent_instance_id: envelope.agent_instance_id.clone(),
-        agent_id,
+) -> Vec<ServerMessage> {
+    let Some(message_id) = envelope.message_id.as_deref() else {
+        return Vec::new();
+    };
+    piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some(session_id.to_string()),
+        Some(envelope.agent_instance_id.clone()),
         message_id,
-        delta_seq: envelope.delta_seq,
-        delta: envelope.delta.clone(),
-    })
+        Some(envelope.delta_seq),
+        &envelope.delta,
+    )
+    .into_iter()
+    .map(ServerMessage::StreamItem)
+    .collect()
 }
 
 #[allow(clippy::too_many_arguments)]

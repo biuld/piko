@@ -133,11 +133,12 @@ impl HostState {
                 turn_id = %turn_id,
                 "finalizing interrupted turn on session open"
             );
-            events.push(self.fail_turn(
+            let failed = self.fail_turn(
                 session_id,
                 &turn_id,
                 "turn interrupted: session reopened without a live execution",
-            )?);
+            )?;
+            events.extend(self.with_usage_projection(failed, None));
         }
         Ok(events)
     }

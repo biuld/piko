@@ -104,7 +104,7 @@ impl HostApp {
                         "turn interrupted: session reopened without a live execution",
                     )?,
                 };
-                events.push(event);
+                events.extend(state.with_usage_projection(event, None));
             }
             events
         } else {

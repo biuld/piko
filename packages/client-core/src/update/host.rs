@@ -45,24 +45,8 @@ pub(super) fn handle_host(
                 }
             }
         }
-        ServerMessage::RealtimeMessage(event) => {
-            if !is_live_session_event(state, &event.session_id) {
-                return;
-            }
-            if let Some(session) = &mut state.live_session {
-                let timeline = session
-                    .timelines
-                    .entry(event.agent_instance_id.clone())
-                    .or_default();
-                let outcome = timeline.apply_realtime_checked(
-                    event.message_id,
-                    event.delta_seq,
-                    &event.delta,
-                );
-                if outcome == ApplyOutcome::Inconsistent {
-                    request_refresh(state, ctx, effects);
-                }
-            }
+        ServerMessage::StreamItem(patch) => {
+            events::handle_stream_item(state, patch, ctx, effects);
         }
         ServerMessage::TurnLifecycle(event) => {
             events::handle_turn_lifecycle(state, event);
@@ -72,9 +56,6 @@ pub(super) fn handle_host(
         }
         ServerMessage::Interaction(event) => {
             events::handle_interaction_event(state, event);
-        }
-        ServerMessage::ToolExecution(event) => {
-            events::handle_tool_execution(state, event);
         }
         ServerMessage::Queue(event) => {
             events::handle_queue_event(state, event);
@@ -97,6 +78,9 @@ pub(super) fn handle_host(
         }
         ServerMessage::Model(model_event) => {
             apply_model_config_changed(state, model_event);
+        }
+        ServerMessage::Usage(event) => {
+            events::handle_usage_event(state, event);
         }
         _ => {}
     }
@@ -311,6 +295,7 @@ fn apply_model_config_changed(state: &mut ClientState, event: piko_protocol::Mod
         model_id,
         provider,
         thinking_level,
+        context_window,
         ..
     } = event;
 
@@ -338,18 +323,31 @@ fn apply_model_config_changed(state: &mut ClientState, event: piko_protocol::Mod
             .map(|level| level.as_str().to_string())
             .unwrap_or_else(|| "off".to_string()),
     );
+    let next_context_window = context_window.filter(|window| *window > 0);
 
-    // Soft-fill for bootstrap SyncModelConfig so a late ModelEvent cannot
-    // clobber session-tree overrides already applied during reconcile.
-    // Explicit SetModel / SetThinkingLevel always win.
-    if has_model_pending || state.model.model_id.is_none() {
-        state.model.model_id = next_model;
+    let applied_host_model = has_model_pending || state.model.model_id.is_none();
+    let applied_host_provider = has_model_pending || state.model.provider.is_none();
+
+    if applied_host_model {
+        state.model.model_id = next_model.clone();
     }
-    if has_model_pending || state.model.provider.is_none() {
+    if applied_host_provider {
         state.model.provider = next_provider;
     }
     if has_thinking_pending || state.model.thinking_level.is_none() {
         state.model.thinking_level = next_thinking;
+    }
+    // Context window tracks the host model only when this event’s model was
+    // applied (or matches the current projection). Otherwise a default-sync
+    // ConfigChanged must not overwrite size for a session-tree model override.
+    if next_context_window.is_some()
+        && (has_model_pending
+            || applied_host_model
+            || (next_model.is_some() && state.model.model_id == next_model))
+    {
+        state.model.context_window = next_context_window;
+    } else if has_model_pending && state.model.model_id.is_none() {
+        state.model.context_window = None;
     }
 
     let current_provider = state.model.provider.as_deref();
@@ -421,8 +419,10 @@ fn apply_sequenced_to_timeline(
                 event.source_turn_id.clone(),
             );
         }
-        ServerMessage::RealtimeMessage(event) if event.session_id == expected_session_id => {
-            timeline.apply_realtime(event.message_id.clone(), event.delta_seq, &event.delta);
+        ServerMessage::StreamItem(patch)
+            if patch.session_id.as_deref() == Some(expected_session_id) =>
+        {
+            let _ = timeline.apply_stream_item(patch);
         }
         _ => {}
     }

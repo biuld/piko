@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::{Message, RealtimeMessageEvent, TranscriptCommittedEvent};
+use piko_protocol::{Message, TranscriptCommittedEvent};
 
 mod component;
 mod highlight;
@@ -106,36 +106,141 @@ impl Timeline {
         }
     }
 
-    pub fn apply_realtime(&mut self, event: RealtimeMessageEvent) {
-        if self.committed_messages.contains_key(&event.message_id) {
+    fn apply_realtime_delta(&mut self, message_id: String, delta_seq: u64, delta: RealtimeDelta) {
+        if self.committed_messages.contains_key(&message_id) {
             return;
         }
         if self
             .realtime_delta_seq
-            .get(&event.message_id)
-            .is_some_and(|seq| *seq >= event.delta_seq)
+            .get(&message_id)
+            .is_some_and(|seq| *seq >= delta_seq)
         {
             return;
         }
         self.realtime_delta_seq
-            .insert(event.message_id.clone(), event.delta_seq);
-        match event.delta {
+            .insert(message_id.clone(), delta_seq);
+        match delta {
             RealtimeDelta::MessageStarted { role } => {
                 if matches!(role, piko_protocol::MessageRole::Assistant) {
-                    self.start_assistant(event.message_id);
+                    self.start_assistant(message_id);
                 }
             }
             RealtimeDelta::Text { delta, .. } => {
-                self.append_text_delta(event.message_id, delta);
+                self.append_text_delta(message_id, delta);
             }
             RealtimeDelta::Thinking { delta, .. } => {
-                self.append_thinking_delta(event.message_id, delta);
+                self.append_thinking_delta(message_id, delta);
             }
-            RealtimeDelta::ToolCall { .. } => {}
+            RealtimeDelta::ToolCall {
+                tool_call_id,
+                delta,
+                ..
+            } => {
+                self.append_tool_arg_chunk(tool_call_id, delta, Some(message_id));
+            }
             RealtimeDelta::MessageEnded {
                 stop_reason,
                 error_message,
-            } => self.end_assistant_draft(event.message_id, stop_reason, error_message),
+            } => self.end_assistant_draft(message_id, stop_reason, error_message),
+        }
+    }
+
+    /// Apply a host stream-item patch (sole live stream path; F-22).
+    pub fn apply_stream_item(&mut self, patch: &piko_protocol::StreamItemPatch) {
+        if let Some((message_id, delta_seq, delta)) = patch.as_realtime_apply() {
+            self.apply_realtime_delta(message_id, delta_seq, delta);
+            return;
+        }
+        if let (piko_protocol::StreamItemKind::ToolCall, piko_protocol::StreamItemOp::AppendChunk) =
+            (patch.item_kind, patch.op)
+        {
+            let parent = patch
+                .fields
+                .as_ref()
+                .and_then(|f| f.get("parentMessageId"))
+                .and_then(|v| v.as_str().map(str::to_string));
+            self.append_tool_arg_chunk(
+                patch.item_id.clone(),
+                patch.text.clone().unwrap_or_default(),
+                parent,
+            );
+            return;
+        }
+        if let Some(tool) = patch.tool_upsert_apply() {
+            match tool {
+                piko_protocol::ToolUpsertApply::Started {
+                    tool_call_id,
+                    tool_name,
+                    args,
+                    parent_message_id,
+                } => {
+                    let tool = ToolEntry::new(
+                        tool_call_id,
+                        tool_name,
+                        crate::app::ToolStatus::Running,
+                        crate::text::compact_json(&args),
+                        None,
+                        parent_message_id,
+                    );
+                    if !self.upsert_tool(tool.clone()) {
+                        self.push(TimelineEntry::Tool(tool));
+                    }
+                }
+                piko_protocol::ToolUpsertApply::Ended {
+                    tool_call_id,
+                    tool_name,
+                    result,
+                    is_error,
+                } => {
+                    let status = if is_error {
+                        crate::app::ToolStatus::Failed
+                    } else {
+                        crate::app::ToolStatus::Completed
+                    };
+                    let tool = ToolEntry::new(
+                        tool_call_id,
+                        tool_name,
+                        status,
+                        String::new(),
+                        Some(crate::text::compact_json(&result)),
+                        None,
+                    );
+                    if !self.upsert_tool(tool.clone()) {
+                        self.push(TimelineEntry::Tool(tool));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stream item discipline: upsert by tool_call_id, append argument JSON chunks.
+    pub fn append_tool_arg_chunk(
+        &mut self,
+        tool_call_id: String,
+        chunk: String,
+        parent_message_id: Option<String>,
+    ) {
+        if let Some(tool) = self.tool_calls.iter_mut().find(|t| t.id == tool_call_id) {
+            if matches!(tool.status, crate::app::ToolStatus::Running) {
+                tool.args.push_str(&chunk);
+                if tool.parent_message_id.is_none() {
+                    tool.parent_message_id = parent_message_id;
+                }
+                let tool = tool.clone();
+                let _ = self.upsert_tool(tool);
+            }
+            return;
+        }
+        let tool = ToolEntry::new(
+            tool_call_id,
+            String::new(),
+            crate::app::ToolStatus::Running,
+            chunk,
+            None,
+            parent_message_id,
+        );
+        if !self.upsert_tool(tool.clone()) {
+            self.push(TimelineEntry::Tool(tool));
         }
     }
 

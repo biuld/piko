@@ -200,12 +200,17 @@ pub struct ModelUiState {
     pub active_model_id: Option<String>,
     pub active_provider: Option<String>,
     pub active_thinking_level: Option<String>,
+    /// Host-pushed window from `ModelEvent::ConfigChanged` (F-22 / D-34).
+    pub host_context_window: Option<u64>,
     pub providers: Vec<ProviderInfo>,
 }
 
 impl ModelUiState {
-    /// Context window for the active model from the host catalog, when known.
+    /// Context window for the active model: host field first, then catalog.
     pub fn active_context_window(&self) -> Option<u64> {
+        if let Some(window) = self.host_context_window.filter(|w| *w > 0) {
+            return Some(window);
+        }
         let model_id = self.active_model_id.as_deref()?;
         for provider in &self.providers {
             for model in &provider.models {
@@ -244,6 +249,7 @@ impl AppState {
             active_model_id: initial_options.model_id.clone(),
             active_provider: initial_options.provider.clone(),
             active_thinking_level: initial_options.thinking_level.clone(),
+            host_context_window: None,
             providers: Vec::new(),
         };
         // Booting is loading even on a cold start. Required bootstrap results
@@ -339,6 +345,26 @@ impl AppState {
             .active_turns
             .get(agent_instance_id)
             .map(String::as_str)
+    }
+
+    /// Per-agent foreground work projection (F-22).
+    pub fn agent_foreground(
+        &self,
+        agent_instance_id: &str,
+        activity: &piko_protocol::AgentActivity,
+    ) -> piko_protocol::AgentForeground {
+        if self
+            .approvals
+            .pending
+            .iter()
+            .any(|a| a.agent_instance_id == agent_instance_id)
+        {
+            return piko_protocol::AgentForeground::RequiresAction;
+        }
+        if self.session.active_turns.contains_key(agent_instance_id) {
+            return piko_protocol::AgentForeground::Running;
+        }
+        piko_protocol::AgentForeground::from_activity(activity)
     }
 
     pub fn cwd(&self) -> PathBuf {

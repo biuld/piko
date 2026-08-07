@@ -55,17 +55,21 @@ fn scale_rapid_realtime_then_commit() {
     for seq in 1..=RAPID_DELTAS {
         let (next, _) = host(
             state,
-            ServerMessage::RealtimeMessage(piko_protocol::RealtimeMessageEvent {
-                session_id: "sess-1".into(),
-                agent_instance_id: "root".into(),
-                agent_id: "main".into(),
-                message_id: "stream-1".into(),
-                delta_seq: seq,
-                delta: RealtimeDelta::Text {
-                    content_index: 0,
-                    delta: "x".into(),
-                },
-            }),
+            ServerMessage::StreamItem(
+                piko_protocol::StreamItemPatch::from_realtime_delta(
+                    Some("sess-1".into()),
+                    Some("root".into()),
+                    "stream-1",
+                    Some(seq),
+                    &RealtimeDelta::Text {
+                        content_index: 0,
+                        delta: "x".into(),
+                    },
+                )
+                .into_iter()
+                .next()
+                .unwrap(),
+            ),
             &mut ids,
         );
         state = next;

@@ -69,6 +69,7 @@ pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protoco
     );
 
     if is_terminal {
+        // Usage chrome is projected only from ServerMessage::Usage.
         session.active_turns.retain(|t| t.turn_id != turn_id);
         if let Some(error) = failure {
             session.turn_failures.retain(|item| item.turn_id != turn_id);
@@ -96,54 +97,6 @@ pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protoco
             agent_instance_id,
             status,
         });
-    }
-}
-
-pub(super) fn handle_tool_execution(
-    state: &mut ClientState,
-    event: piko_protocol::ToolExecutionEvent,
-) {
-    match event {
-        piko_protocol::ToolExecutionEvent::Started {
-            session_id,
-            agent_instance_id,
-            tool_call_id,
-            tool_name,
-            args,
-            parent_message_id,
-            ..
-        } => {
-            if !is_live_session_event(state, &session_id) {
-                return;
-            }
-            if let Some(session) = &mut state.live_session {
-                session
-                    .timelines
-                    .entry(agent_instance_id)
-                    .or_default()
-                    .apply_tool_started(tool_call_id, tool_name, args, parent_message_id);
-            }
-        }
-        piko_protocol::ToolExecutionEvent::Ended {
-            session_id,
-            agent_instance_id,
-            tool_call_id,
-            tool_name,
-            result,
-            is_error,
-            ..
-        } => {
-            if !is_live_session_event(state, &session_id) {
-                return;
-            }
-            if let Some(session) = &mut state.live_session {
-                session
-                    .timelines
-                    .entry(agent_instance_id)
-                    .or_default()
-                    .apply_tool_ended(tool_call_id, tool_name, result, is_error);
-            }
-        }
     }
 }
 
@@ -194,12 +147,19 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
                     .pending_approvals
                     .push(crate::state::PendingApproval {
                         approval_id,
-                        agent_instance_id,
+                        agent_instance_id: agent_instance_id.clone(),
                         tool_name,
                         tool_args,
                         prompt,
                         response_in_flight: false,
                     });
+                crate::foreground::refresh_prompt_blocking(
+                    &mut session.agents,
+                    &mut session.active_turns,
+                    &session.pending_approvals,
+                    &session.pending_interactions,
+                    &agent_instance_id,
+                );
             }
         }
         piko_protocol::ApprovalEvent::Resolved {
@@ -211,9 +171,23 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
                 return;
             }
             if let Some(session) = &mut state.live_session {
+                let agent_instance_id = session
+                    .pending_approvals
+                    .iter()
+                    .find(|a| a.approval_id == approval_id)
+                    .map(|a| a.agent_instance_id.clone());
                 session
                     .pending_approvals
                     .retain(|a| a.approval_id != approval_id);
+                if let Some(agent_instance_id) = agent_instance_id {
+                    crate::foreground::refresh_prompt_blocking(
+                        &mut session.agents,
+                        &mut session.active_turns,
+                        &session.pending_approvals,
+                        &session.pending_interactions,
+                        &agent_instance_id,
+                    );
+                }
             }
         }
     }
@@ -245,11 +219,18 @@ pub(super) fn handle_interaction_event(
                     .pending_interactions
                     .push(crate::state::PendingInteraction {
                         interaction_id,
-                        agent_instance_id,
+                        agent_instance_id: agent_instance_id.clone(),
                         questions,
                         require_confirm,
                         response_in_flight: false,
                     });
+                crate::foreground::refresh_prompt_blocking(
+                    &mut session.agents,
+                    &mut session.active_turns,
+                    &session.pending_approvals,
+                    &session.pending_interactions,
+                    &agent_instance_id,
+                );
             }
         }
         piko_protocol::InteractionEvent::Resolved {
@@ -261,10 +242,80 @@ pub(super) fn handle_interaction_event(
                 return;
             }
             if let Some(session) = &mut state.live_session {
+                let agent_instance_id = session
+                    .pending_interactions
+                    .iter()
+                    .find(|i| i.interaction_id == interaction_id)
+                    .map(|i| i.agent_instance_id.clone());
                 session
                     .pending_interactions
                     .retain(|i| i.interaction_id != interaction_id);
+                if let Some(agent_instance_id) = agent_instance_id {
+                    crate::foreground::refresh_prompt_blocking(
+                        &mut session.agents,
+                        &mut session.active_turns,
+                        &session.pending_approvals,
+                        &session.pending_interactions,
+                        &agent_instance_id,
+                    );
+                }
             }
         }
+    }
+}
+
+pub(super) fn handle_usage_event(state: &mut ClientState, event: piko_protocol::UsageEvent) {
+    let piko_protocol::UsageEvent::Updated {
+        session_id,
+        used,
+        size,
+        cumulative,
+        ..
+    } = event;
+
+    if !is_live_session_event(state, &session_id) {
+        return;
+    }
+
+    if let Some(window) = size.filter(|w| *w > 0) {
+        state.model.context_window = Some(window);
+    }
+
+    let Some(session) = &mut state.live_session else {
+        return;
+    };
+    if used > 0 {
+        session.last_context_tokens = Some(used);
+    }
+    if let Some(cumulative) = cumulative {
+        // Authoritative ledger from host — replace any local turn roll-up.
+        session.cumulative_usage = Some(cumulative);
+    }
+}
+
+pub(super) fn handle_stream_item(
+    state: &mut ClientState,
+    patch: piko_protocol::StreamItemPatch,
+    ctx: &mut crate::update::UpdateContext<'_>,
+    effects: &mut Vec<crate::effect::ClientEffect>,
+) {
+    let Some(session_id) = patch.session_id.as_deref() else {
+        return;
+    };
+    if !is_live_session_event(state, session_id) {
+        return;
+    }
+    let Some(agent_instance_id) = patch.agent_instance_id.clone() else {
+        return;
+    };
+    let outcome = {
+        let Some(session) = &mut state.live_session else {
+            return;
+        };
+        let timeline = session.timelines.entry(agent_instance_id).or_default();
+        timeline.apply_stream_item(&patch)
+    };
+    if outcome == crate::timeline::ApplyOutcome::Inconsistent {
+        super::request_refresh(state, ctx, effects);
     }
 }

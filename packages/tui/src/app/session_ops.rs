@@ -27,9 +27,12 @@ impl AppState {
     }
 
     pub(crate) fn request_models(&mut self) -> Vec<Effect> {
-        let effects = vec![Effect::send(Command::ModelList {
-            command_id: command_id(),
-        })];
+        let command_id = command_id();
+        self.session.pending.track(
+            command_id.clone(),
+            super::pending::PendingCommandKind::ModelList,
+        );
+        let effects = vec![Effect::send(Command::ModelList { command_id })];
         self.push_focus(AppMode::Models);
         self.status = "loading models".to_string();
         effects

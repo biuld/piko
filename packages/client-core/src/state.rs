@@ -136,6 +136,8 @@ pub struct LiveSession {
     pub pending_approvals: Vec<PendingApproval>,
     pub pending_interactions: Vec<PendingInteraction>,
     pub cumulative_usage: Option<piko_protocol::messages::Usage>,
+    /// Latest prompt-side context fill (`input + cache_read`) for status chrome.
+    pub last_context_tokens: Option<u64>,
 }
 
 /// Model/thinking projection.
@@ -144,8 +146,36 @@ pub struct ModelState {
     pub model_id: Option<String>,
     pub provider: Option<String>,
     pub thinking_level: Option<String>,
+    /// Host-provided context window for the active model (F-22 / D-34).
+    pub context_window: Option<u64>,
     /// Catalog from the latest successful `ModelList`.
     pub providers: Vec<piko_protocol::ProviderInfo>,
+}
+
+impl ModelState {
+    /// Prefer host-pushed window; fall back to the model catalog when loaded.
+    pub fn active_context_window(&self) -> Option<u64> {
+        if let Some(window) = self.context_window.filter(|w| *w > 0) {
+            return Some(window);
+        }
+        let model_id = self.model_id.as_deref()?;
+        for provider in &self.providers {
+            for model in &provider.models {
+                let full = format!("{}/{}", provider.provider, model.id);
+                let provider_matches = self
+                    .provider
+                    .as_deref()
+                    .is_none_or(|p| p == provider.provider);
+                let matches = model_id == full
+                    || (provider_matches && model_id == model.id)
+                    || model_id == model.name;
+                if matches && model.context_window > 0 {
+                    return Some(model.context_window);
+                }
+            }
+        }
+        None
+    }
 }
 
 /// Apply the latest model / thinking overrides from the active session branch.
@@ -276,8 +306,51 @@ impl LiveSession {
             pending_approvals,
             pending_interactions,
             cumulative_usage: snapshot.cumulative_usage.clone(),
+            last_context_tokens: last_context_tokens_from_snapshot(snapshot),
         }
     }
+}
+
+fn last_context_tokens_from_snapshot(snapshot: &SessionSnapshot) -> Option<u64> {
+    use crate::usage::context_fill_from_usage;
+
+    snapshot
+        .active_turns
+        .iter()
+        .rev()
+        .find_map(|turn| {
+            turn.usage
+                .as_ref()
+                .map(context_fill_from_usage)
+                .filter(|&tokens| tokens > 0)
+        })
+        .or_else(|| {
+            last_context_tokens_from_entries(&snapshot.entries, snapshot.current_leaf_id.as_deref())
+        })
+}
+
+fn last_context_tokens_from_entries(
+    entries: &[SessionTreeEntry],
+    current_leaf_id: Option<&str>,
+) -> Option<u64> {
+    use crate::usage::context_fill_from_usage;
+
+    for entry in active_branch_entries(entries, current_leaf_id)
+        .into_iter()
+        .rev()
+    {
+        if let SessionTreeEntry::Message(message_entry) = entry
+            && let piko_protocol::Message::Assistant {
+                usage: Some(usage), ..
+            } = &message_entry.message
+        {
+            let tokens = context_fill_from_usage(usage);
+            if tokens > 0 {
+                return Some(tokens);
+            }
+        }
+    }
+    None
 }
 
 /// Build per-agent committed timelines from the active branch of the session tree.

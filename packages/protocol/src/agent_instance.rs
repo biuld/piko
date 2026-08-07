@@ -38,6 +38,38 @@ pub enum AgentActivity {
     Cancelling,
 }
 
+/// Client-facing foreground work state (F-22 / D-34).
+///
+/// This is a projection of host-authoritative turns, pending prompts, and
+/// [`AgentActivity`] — not a separate orchd-owned state machine. Maps to ACP
+/// v2-style session readiness semantics (`idle` / `running` / `requires_action`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentForeground {
+    Idle,
+    /// Follow-up accepted but not yet executing.
+    Queued,
+    Running,
+    /// Blocked on approval or structured user interaction.
+    RequiresAction,
+    Cancelling,
+}
+
+impl AgentForeground {
+    pub fn is_busy(self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    pub fn from_activity(activity: &AgentActivity) -> Self {
+        match activity {
+            AgentActivity::Idle => Self::Idle,
+            AgentActivity::Running => Self::Running,
+            AgentActivity::WaitingForApproval => Self::RequiresAction,
+            AgentActivity::Cancelling => Self::Cancelling,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunReport {

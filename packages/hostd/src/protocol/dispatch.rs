@@ -325,13 +325,14 @@ impl HostServer {
                         )));
                     }
                     let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
-                    return Ok(vec![
-                        ServerMessage::CommandResponse {
-                            command_id,
-                            result: Ok(crate::api::CommandResult::Empty),
-                        },
-                        event,
-                    ]);
+                    let size = self.client_context_window_size().await;
+                    let mut messages = self.state.lock().await.with_usage_projection(event, size);
+                    let mut out = vec![ServerMessage::CommandResponse {
+                        command_id,
+                        result: Ok(crate::api::CommandResult::Empty),
+                    }];
+                    out.append(&mut messages);
+                    return Ok(out);
                 }
                 let runner = self.turn_runner.lock().await.clone();
                 let address = crate::ports::AgentOperationAddress {
