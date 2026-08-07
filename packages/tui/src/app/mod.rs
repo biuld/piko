@@ -61,6 +61,8 @@ pub enum AppMode {
     /// MCP server status surface (F-13): per-server connection state and
     /// tool/resource/template counts from the `mcp.status` host command.
     Mcp,
+    /// Read-only diagnostics: turn diff, prompt debug, rollout (F-15 client).
+    Diagnostics,
     Help,
     Approval,
     ToolInteraction,
@@ -84,6 +86,7 @@ impl AppMode {
             AppMode::AgentList => Some(Placement::Full),
             AppMode::Tree => Some(Placement::Full),
             AppMode::Status => Some(Placement::Full),
+            AppMode::Diagnostics => Some(Placement::Full),
             AppMode::Mcp => Some(Placement::Partial),
             AppMode::Models => Some(Placement::Partial),
             AppMode::Settings => Some(Placement::Partial),
@@ -144,6 +147,11 @@ pub struct AppState {
     pub agent_timelines: HashMap<String, Timeline>,
     pub approvals: ApprovalPanel,
     pub mcp: crate::features::mcp::McpPanel,
+    pub diagnostics: crate::features::diagnostics::DiagnosticsPanel,
+    /// Last known turn id for `/diff` when no turn is actively running.
+    pub last_turn_id: Option<String>,
+    /// Last push/result turn diff for offline re-open via `/diff`.
+    pub last_turn_diff: Option<piko_protocol::TurnDiffEvent>,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
     pub agents: crate::features::agent_list::AgentList,
@@ -181,6 +189,10 @@ pub struct SessionUiState {
     pub continue_requested: bool,
     pub active_turns: HashMap<String, String>,
     pub pending: pending::PendingCommands,
+    /// Session-wide token/cost ledger projected from hostd (F-15 / D-29).
+    pub cumulative_usage: Option<piko_protocol::messages::Usage>,
+    /// Last known prompt-side tokens (input + cache_read) for context fill.
+    pub last_context_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -189,6 +201,29 @@ pub struct ModelUiState {
     pub active_provider: Option<String>,
     pub active_thinking_level: Option<String>,
     pub providers: Vec<ProviderInfo>,
+}
+
+impl ModelUiState {
+    /// Context window for the active model from the host catalog, when known.
+    pub fn active_context_window(&self) -> Option<u64> {
+        let model_id = self.active_model_id.as_deref()?;
+        for provider in &self.providers {
+            for model in &provider.models {
+                let full = format!("{}/{}", provider.provider, model.id);
+                let provider_matches = self
+                    .active_provider
+                    .as_deref()
+                    .is_none_or(|p| p == provider.provider);
+                let matches = model_id == full
+                    || (provider_matches && model_id == model.id)
+                    || model_id == model.name;
+                if matches && model.context_window > 0 {
+                    return Some(model.context_window);
+                }
+            }
+        }
+        None
+    }
 }
 
 impl AppState {
@@ -232,6 +267,9 @@ impl AppState {
             agent_timelines: HashMap::new(),
             approvals: ApprovalPanel::new(),
             mcp: crate::features::mcp::McpPanel::new(),
+            diagnostics: crate::features::diagnostics::DiagnosticsPanel::new(),
+            last_turn_id: None,
+            last_turn_diff: None,
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
             agents: crate::features::agent_list::AgentList::new(),

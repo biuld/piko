@@ -356,6 +356,7 @@ impl SessionList {
             body,
             action_prompt: ActionPrompt::Legend("Enter resume · Esc close"),
             gap: false,
+            focused: true,
         };
 
         panel.render(frame, area, theme);

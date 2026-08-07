@@ -1501,6 +1501,208 @@ fn tool_execution_scopes_to_non_active_agent_timeline() {
     );
 }
 
+#[test]
+fn session_reconcile_projects_cumulative_usage() {
+    let mut app = app();
+    app.session.opening_id = Some("session-1".into());
+    app.session.initializing = true;
+
+    let mut usage = piko_protocol::messages::Usage::empty();
+    usage.input = 10_000;
+    usage.output = 2_000;
+    usage.total_tokens = 12_000;
+    usage.cost.total = 0.42;
+
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::InitialHydration,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 0,
+            },
+            snapshot: piko_protocol::SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 0,
+                entries: Vec::new(),
+                current_leaf_id: None,
+                selected_agent_instance_id: Some("agent_session-1_root".into()),
+                active_turns: Vec::new(),
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: Some(usage.clone()),
+            },
+            agents: vec![piko_protocol::AgentInfo {
+                session_id: "session-1".into(),
+                agent_instance_id: "agent_session-1_root".into(),
+                agent_id: "main".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                name: "Main".into(),
+                role: "assistant".into(),
+                status: piko_protocol::AgentStatus::Idle,
+            }],
+        },
+    ));
+
+    assert_eq!(
+        app.session.cumulative_usage.as_ref().map(|u| u.cost.total),
+        Some(0.42)
+    );
+    assert_eq!(
+        app.session
+            .cumulative_usage
+            .as_ref()
+            .map(|u| u.total_tokens),
+        Some(12_000)
+    );
+}
+
+#[test]
+fn turn_completed_accumulates_usage_and_context_tokens() {
+    let mut app = live_app();
+    app.session
+        .active_turns
+        .insert("agent-1".into(), "turn-1".into());
+
+    let mut turn_usage = piko_protocol::messages::Usage::empty();
+    turn_usage.input = 12_200;
+    turn_usage.cache_read = 800;
+    turn_usage.output = 400;
+    turn_usage.total_tokens = 13_400;
+    turn_usage.cost.total = 0.05;
+
+    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
+        session_id: "session-1".into(),
+        turn_id: "turn-1".into(),
+        agent_instance_id: "agent-1".into(),
+        usage: turn_usage,
+        timestamp: 0,
+    }));
+
+    assert_eq!(app.session.last_context_tokens, Some(13_000));
+    assert_eq!(
+        app.session.cumulative_usage.as_ref().map(|u| u.cost.total),
+        Some(0.05)
+    );
+    assert!(app.session.active_turns.is_empty());
+}
+
+#[test]
+fn model_catalog_resolves_context_window() {
+    let mut app = app();
+    app.model.active_provider = Some("openai".into());
+    app.model.active_model_id = Some("gpt-4o".into());
+    app.model.providers = vec![piko_protocol::ProviderInfo {
+        provider: "openai".into(),
+        has_auth: true,
+        models: vec![piko_protocol::ModelSummary {
+            id: "gpt-4o".into(),
+            name: "GPT-4o".into(),
+            reasoning: false,
+            input: vec![],
+            context_window: 128_000,
+            max_tokens: 16_384,
+            thinking_level_map: None,
+        }],
+    }];
+
+    assert_eq!(app.model.active_context_window(), Some(128_000));
+}
+
+#[test]
+fn clear_session_view_clears_usage() {
+    let mut app = live_app();
+    app.session.cumulative_usage = Some(piko_protocol::messages::Usage::empty());
+    app.session.last_context_tokens = Some(1000);
+    app.clear_session_view();
+    assert!(app.session.cumulative_usage.is_none());
+    assert!(app.session.last_context_tokens.is_none());
+}
+
+fn with_local_slash_catalog(app: &mut AppState) {
+    app.command_catalog = crate::app::command::merge_command_catalog(&[]);
+}
+
+#[test]
+fn diff_slash_fetches_turn_diff_when_last_turn_known() {
+    let mut app = live_app();
+    with_local_slash_catalog(&mut app);
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    app.last_turn_id = Some("turn-9".into());
+
+    let effects = app.try_slash_command("/diff").expect("known slash");
+    assert!(effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send(piko_protocol::Command::TurnDiffGet { turn_id, .. })
+                if turn_id == "turn-9"
+        )
+    }));
+}
+
+#[test]
+fn turn_diff_got_opens_diagnostics_panel() {
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        command_id: "c1".into(),
+        result: Ok(piko_protocol::CommandResult::TurnDiffGot {
+            diff: Some(piko_protocol::TurnDiffEvent {
+                session_id: "session-1".into(),
+                turn_id: "turn-9".into(),
+                files: vec![piko_protocol::TurnFileChange {
+                    path: "src/main.rs".into(),
+                    before: None,
+                    after: None,
+                }],
+                unified_diff: "+fn main() {}\n".into(),
+            }),
+            timestamp: 0,
+        }),
+    });
+    assert_eq!(app.focus_manager.active_mode(), AppMode::Diagnostics);
+    assert_eq!(app.last_turn_id.as_deref(), Some("turn-9"));
+    assert!(app.last_turn_diff.is_some());
+}
+
+#[test]
+fn prompt_debug_slash_sends_command() {
+    let mut app = live_app();
+    with_local_slash_catalog(&mut app);
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    let effects = app.try_slash_command("/prompt-debug").expect("known slash");
+    assert!(effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send(piko_protocol::Command::PromptDebugGet {
+                agent_instance_id,
+                ..
+            }) if agent_instance_id == "agent-1"
+        )
+    }));
+}
+
+#[test]
+fn rollout_slash_sends_command() {
+    let mut app = live_app();
+    with_local_slash_catalog(&mut app);
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    let effects = app.try_slash_command("/rollout").expect("known slash");
+    assert!(effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Send(piko_protocol::Command::RolloutPageGet {
+                agent_instance_id,
+                ..
+            }) if agent_instance_id == "agent-1"
+        )
+    }));
+}
+
 /// `/help` is a TUI-local command, always merged in regardless of what
 /// hostd advertises; an empty host catalog is enough to exercise the
 /// bootstrap round-trip this fixture supports.

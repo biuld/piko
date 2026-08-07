@@ -1,6 +1,7 @@
 #![allow(clippy::type_complexity, clippy::large_enum_variant)]
 
 use crate::theme::Theme;
+use crate::ui::components::{frame_border_style, hint_style, row_primary_style, with_selected_bg};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Rect},
@@ -42,6 +43,8 @@ pub struct TablePanel<'a> {
     pub body: TableBody<'a>,
     pub action_prompt: ActionPrompt<'a>,
     pub gap: bool,
+    /// When true (default for open overlays), frame uses accent border.
+    pub focused: bool,
 }
 
 impl<'a> TablePanel<'a> {
@@ -52,7 +55,7 @@ impl<'a> TablePanel<'a> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border))
+            .border_style(frame_border_style(self.focused, theme))
             .title(Line::from(self.left_title).alignment(Alignment::Left))
             .title(Line::from(right_title).alignment(Alignment::Right));
 
@@ -107,17 +110,18 @@ impl<'a> TablePanel<'a> {
                 selected_idx,
             } => {
                 let mut table_state = TableState::default().with_selected(Some(selected_idx));
-                let table = Table::new(rows, widths).row_highlight_style(Style::default());
+                let highlight = with_selected_bg(row_primary_style(true, theme), true, theme);
+                let table = Table::new(rows, widths).row_highlight_style(highlight);
                 frame.render_stateful_widget(table, content_area, &mut table_state);
             }
         }
 
-        // 5. Render Action Prompt (Footer)
+        // 5. Render Action Prompt (Footer) — dim hints when legend
         match self.action_prompt {
             ActionPrompt::Legend(txt) => {
                 let p = Paragraph::new(Line::from(ratatui::text::Span::styled(
                     txt,
-                    Style::default().fg(theme.muted),
+                    hint_style(theme),
                 )));
                 frame.render_widget(p, footer_area);
             }

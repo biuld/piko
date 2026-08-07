@@ -311,13 +311,35 @@ fn tool_lines(
 }
 
 fn filled_line(text: impl Into<String>, style: Style, width: u16) -> Line<'static> {
-    let mut text = text.into();
+    use unicode_width::UnicodeWidthChar;
+
     let target = usize::from(width);
-    let current = text.chars().count();
-    if current < target {
-        text.push_str(&" ".repeat(target - current));
+    if target == 0 {
+        return Line::from(Span::styled(String::new(), style));
     }
-    Line::from(Span::styled(text, style))
+
+    let raw = text.into();
+    // Fit to terminal display columns (not UTF-8 char count) so card backgrounds
+    // do not leave a default-black gap on the right of wide/narrow text.
+    let mut out = String::with_capacity(raw.len().saturating_add(target));
+    let mut cols = 0usize;
+    for ch in raw.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w == 0 {
+            // Combining marks attach without consuming columns.
+            out.push(ch);
+            continue;
+        }
+        if cols.saturating_add(w) > target {
+            break;
+        }
+        out.push(ch);
+        cols += w;
+    }
+    if cols < target {
+        out.push_str(&" ".repeat(target - cols));
+    }
+    Line::from(Span::styled(out, style))
 }
 
 fn text_lines(text: &str) -> Vec<String> {

@@ -132,6 +132,9 @@ pub enum SlashAction {
     ListProcesses,
     KillProcess(String),
     ListMcpStatus,
+    RequestDiff,
+    RequestPromptDebug,
+    RequestRollout,
 }
 
 #[derive(Debug)]
@@ -242,6 +245,12 @@ pub enum LocalCommandId {
     ToolsToggle,
     ClearNotifications,
     Agents,
+    /// Open last/active turn workspace diff.
+    Diff,
+    /// Fetch latest prompt-assembly debug snapshot.
+    PromptDebug,
+    /// Page durable rollout transcript for the active agent.
+    Rollout,
     Quit,
 }
 
@@ -326,6 +335,24 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "Agents",
         "List available named agents and their capabilities",
     ),
+    (
+        "/diff",
+        LocalCommandId::Diff,
+        "Turn diff",
+        "Show workspace diff for the last or active turn",
+    ),
+    (
+        "/prompt-debug",
+        LocalCommandId::PromptDebug,
+        "Prompt debug",
+        "Show latest prompt assembly and model-input diagnostics",
+    ),
+    (
+        "/rollout",
+        LocalCommandId::Rollout,
+        "Rollout",
+        "Page the active agent's durable rollout transcript",
+    ),
     ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
 ];
 
@@ -393,6 +420,9 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
         LocalCommandId::ToolsToggle => TimelineAction::ToggleToolsExpanded.into(),
         LocalCommandId::ClearNotifications => NotificationAction::ClearAndClose.into(),
+        LocalCommandId::Diff => SlashAction::RequestDiff.into(),
+        LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),
+        LocalCommandId::Rollout => SlashAction::RequestRollout.into(),
         LocalCommandId::Quit => AppAction::Quit.into(),
     }
 }

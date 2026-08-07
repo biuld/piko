@@ -8,6 +8,9 @@ use ratatui::{
 use std::path::Path;
 
 use crate::app::command::TuiCommandEntry;
+use crate::ui::components::{
+    NO_MATCHES, frame_border_style, row_primary_style, selection_prefix, with_selected_bg,
+};
 
 pub mod command_palette;
 pub mod file_browser;
@@ -130,10 +133,12 @@ impl AutoComplete {
 
     /// Renders the completions list in the allocated area.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
+        // Suggestions capture navigation while open → focused frame.
+        let border = frame_border_style(true, theme);
         if self.items.is_empty() {
             let table = Table::new(
                 vec![Row::new(vec![Cell::from(Line::from(vec![Span::styled(
-                    "  no matches",
+                    format!("  {NO_MATCHES}"),
                     Style::default().fg(theme.dim),
                 )]))])],
                 [ratatui::layout::Constraint::Fill(1)],
@@ -141,7 +146,7 @@ impl AutoComplete {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_muted))
+                    .border_style(border)
                     .title("suggestions [0/0]"),
             );
             frame.render_widget(table, area);
@@ -189,26 +194,26 @@ impl AutoComplete {
                 };
 
                 let mut cells = vec![Cell::from(Line::from(Span::styled(
-                    if is_selected { "> " } else { "  " },
+                    selection_prefix(is_selected),
                     marker_style,
                 )))];
                 for cell in &row.cells {
                     let style = match cell.style {
-                        CellStyle::Default => {
-                            if is_selected {
-                                Style::default()
-                                    .fg(theme.accent)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default()
-                            }
-                        }
+                        CellStyle::Default => with_selected_bg(
+                            row_primary_style(is_selected, theme),
+                            is_selected,
+                            theme,
+                        ),
                         CellStyle::Dim => Style::default().fg(theme.dim),
                         CellStyle::Accent => {
                             if is_selected {
-                                Style::default()
-                                    .fg(theme.accent)
-                                    .add_modifier(Modifier::BOLD)
+                                with_selected_bg(
+                                    Style::default()
+                                        .fg(theme.accent)
+                                        .add_modifier(Modifier::BOLD),
+                                    true,
+                                    theme,
+                                )
                             } else {
                                 Style::default().fg(theme.accent)
                             }
@@ -231,11 +236,15 @@ impl AutoComplete {
         };
 
         let table = Table::new(rows, widths)
-            .row_highlight_style(Style::default())
+            .row_highlight_style(with_selected_bg(
+                row_primary_style(true, theme),
+                true,
+                theme,
+            ))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_muted))
+                    .border_style(border)
                     .title(title),
             );
 

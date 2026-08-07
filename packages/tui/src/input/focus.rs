@@ -396,8 +396,8 @@ impl InputRouter {
                 }
                 Self::handle_filterable_surface(key, ka)
             }
-            // Info panels: Status / MCP server status
-            AppMode::Status | AppMode::Mcp => match ka {
+            // Info panels: Status / MCP / Diagnostics
+            AppMode::Status | AppMode::Mcp | AppMode::Diagnostics => match ka {
                 Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
                 Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),

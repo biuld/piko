@@ -16,6 +16,9 @@ use crate::{
     app::QueueStatus,
     layout::{DEFAULT_HORIZONTAL_INSET, inset_horizontal},
     theme::Theme,
+    ui::components::{
+        ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH, selection_prefix, spinner_glyph,
+    },
 };
 
 /// Agent entry displayed in the panel.
@@ -75,10 +78,9 @@ impl AgentPanelState {
         let mut lines = Vec::new();
 
         if view.state.is_loading() {
-            lines.push(render_loading_agent_row(
+            lines.push(crate::ui::components::feedback::loading_line(
                 view.spinner_frame,
-                view.theme.accent,
-                view.theme.dim,
+                view.theme,
             ));
         } else if agent_count == 0 {
             lines.push(render_empty_agent_row(view.theme.dim));
@@ -113,8 +115,9 @@ impl AgentPanelState {
             }
         }
 
+        // Focused strip uses accent border; passive uses muted (Selected ≠ Focused).
         let border_color = if view.state.focus {
-            view.theme.accent
+            view.theme.border_accent
         } else {
             view.theme.border_muted
         };
@@ -245,16 +248,22 @@ fn render_agent_row(
     let status_char = if matches!(agent.activity, piko_protocol::AgentActivity::Running)
         && (is_running || agent.parent_agent_instance_id.is_some())
     {
-        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        frames[frame_idx % frames.len()]
+        spinner_glyph(frame_idx)
     } else {
         match agent.status {
-            piko_protocol::AgentStatus::Running => "●",
-            piko_protocol::AgentStatus::Completed => "✓",
-            piko_protocol::AgentStatus::Failed => "✗",
-            piko_protocol::AgentStatus::Cancelled => "✗",
-            piko_protocol::AgentStatus::Closed => "×",
-            _ => "●",
+            piko_protocol::AgentStatus::Running => ACTIVE_MARKER,
+            piko_protocol::AgentStatus::Completed => SUCCESS_GLYPH,
+            piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => {
+                FAIL_GLYPH
+            }
+            piko_protocol::AgentStatus::Closed => FAIL_GLYPH,
+            _ => {
+                if is_active {
+                    ACTIVE_MARKER
+                } else {
+                    IDLE_MARKER
+                }
+            }
         }
     };
 
@@ -264,16 +273,20 @@ fn render_agent_row(
         piko_protocol::AgentStatus::Failed
         | piko_protocol::AgentStatus::Cancelled
         | piko_protocol::AgentStatus::Closed => theme.error,
-        _ => theme.accent,
+        _ if is_active => theme.accent,
+        _ => theme.dim,
     };
 
-    let mut name_style = Style::default();
-    if is_active {
-        name_style = name_style.add_modifier(Modifier::BOLD).fg(theme.accent);
-    }
-    if is_selected {
-        name_style = name_style.add_modifier(Modifier::REVERSED);
-    }
+    // Selected ≠ Active: selection uses ❯ + accent text; active uses status glyph.
+    let name_style = if is_selected {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else if is_active {
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.text)
+    };
 
     let lifecycle = match agent.lifecycle {
         piko_protocol::AgentInstanceLifecycle::Open => String::new(),
@@ -287,41 +300,45 @@ fn render_agent_row(
         String::new()
     };
 
-    Line::from(vec![
+    let mut spans = vec![
+        Span::styled(
+            selection_prefix(is_selected),
+            if is_selected {
+                Style::default().fg(theme.accent)
+            } else {
+                Style::default()
+            },
+        ),
         Span::raw(indent.to_string()),
-        Span::styled(status_char, Style::default().fg(status_color)),
+        Span::styled(status_char.to_string(), Style::default().fg(status_color)),
         Span::raw(" "),
         Span::styled(agent.name.clone(), name_style),
         Span::styled(lifecycle, Style::default().fg(theme.dim)),
         Span::styled(unread, Style::default().fg(theme.warning)),
-    ])
-}
-
-fn render_loading_agent_row(frame_idx: usize, accent: Color, dim: Color) -> Line<'static> {
-    let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let spinner = frames[frame_idx % frames.len()];
-    Line::from(vec![
-        Span::styled(spinner, Style::default().fg(accent)),
-        Span::raw(" "),
-        Span::styled("loading…", Style::default().fg(dim)),
-    ])
+    ];
+    if is_active && !is_selected {
+        // Quiet "current view" cue without stealing selection style.
+        spans.push(Span::styled(" current", Style::default().fg(theme.muted)));
+    }
+    Line::from(spans)
 }
 
 fn render_empty_agent_row(dim: Color) -> Line<'static> {
-    Line::from(vec![Span::styled("no agents", Style::default().fg(dim))])
+    Line::from(vec![Span::styled("No agents", Style::default().fg(dim))])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme::Theme;
+    use crate::ui::components::feedback::loading_line;
 
     #[test]
     fn loading_until_hydrated_never_uses_fake_main_label() {
         let state = AgentPanelState::default();
         assert!(state.is_loading());
 
-        let line = render_loading_agent_row(0, Theme::dark().accent, Theme::dark().dim);
+        let line = loading_line(0, &Theme::dark());
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains("loading"));
         assert!(!text.contains("main"));
@@ -336,6 +353,6 @@ mod tests {
 
         let line = render_empty_agent_row(Theme::dark().dim);
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "no agents");
+        assert_eq!(text, "No agents");
     }
 }

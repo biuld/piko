@@ -127,6 +127,13 @@ fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
             model_id: app.model.active_model_id.as_deref(),
             thinking_level: app.model.active_thinking_level.as_deref(),
             cwd: &app.cwd,
+            context_used: app.session.last_context_tokens,
+            context_total: app.model.active_context_window(),
+            cost_usd: app
+                .session
+                .cumulative_usage
+                .as_ref()
+                .map(|usage| usage.cost.total),
             theme: &app.theme,
         },
     );
@@ -164,6 +171,7 @@ fn render_full_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode: Ap
             &app.timeline,
             &app.approvals,
         ),
+        AppMode::Diagnostics => app.diagnostics.render(frame, area, &app.theme),
         _ => {}
     }
 }

@@ -105,6 +105,7 @@ impl TreePanel {
             body,
             action_prompt,
             gap: true,
+            focused: true,
         };
 
         panel.render(frame, area, theme);

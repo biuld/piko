@@ -173,6 +173,7 @@ impl AgentList {
             body,
             action_prompt: ActionPrompt::Legend("↑/↓ select · Esc close"),
             gap: false,
+            focused: true,
         };
 
         panel.render(frame, area, theme);

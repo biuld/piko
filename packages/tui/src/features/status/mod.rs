@@ -98,8 +98,8 @@ impl StatusPanel {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(view.theme.border_muted))
-                    .title("status | Esc close"),
+                    .border_style(crate::ui::components::frame_border_style(true, view.theme))
+                    .title("status"),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(widget, popup);

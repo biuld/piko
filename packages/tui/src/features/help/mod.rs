@@ -1,12 +1,12 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::app::command::TuiCommandEntry;
 use crate::theme::Theme;
+use crate::ui::components::frame_border_style;
 
 /// Help panel: static keybinding reference.
 pub struct HelpPanel;
@@ -33,6 +33,9 @@ impl HelpPanel {
             "  /thinking          list and set default thinking level",
             "  /settings          open hostd-backed runtime settings",
             "  /status            show turn, queue, approval, and tool state",
+            "  /diff              show workspace diff for last/active turn",
+            "  /prompt-debug      show latest prompt assembly diagnostics",
+            "  /rollout           page active agent rollout transcript",
             "  /mcp               show connected MCP servers, tools, and resources",
             "  F1 or /help        show help",
             "  ~/.piko/keybindings.json and .piko/keybindings.json override keys",
@@ -66,7 +69,7 @@ impl HelpPanel {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_muted))
+                    .border_style(frame_border_style(true, theme))
                     .title("help"),
             )
             .wrap(Wrap { trim: false });

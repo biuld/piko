@@ -2,6 +2,7 @@
 
 use super::text_box::TextBox;
 use crate::theme::Theme;
+use crate::ui::components::{hint_style, selection_prefix};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -250,7 +251,7 @@ impl InteractiveWorkflow {
             // 2. Render choices vertically
             for (i, choice) in q.choices.iter().enumerate() {
                 let is_selected = i == q.selected_idx;
-                let prefix = if is_selected { "❯ " } else { "  " };
+                let prefix = selection_prefix(is_selected);
                 let num_str = format!("{}. ", i + 1);
 
                 let style = if is_selected {
@@ -262,7 +263,14 @@ impl InteractiveWorkflow {
                 };
 
                 let mut spans = vec![
-                    Span::styled(prefix, Style::default().fg(theme.accent)),
+                    Span::styled(
+                        prefix,
+                        if is_selected {
+                            Style::default().fg(theme.accent)
+                        } else {
+                            Style::default()
+                        },
+                    ),
                     Span::styled(num_str, style),
                     Span::styled(choice.label.clone(), style),
                 ];
@@ -297,10 +305,7 @@ impl InteractiveWorkflow {
             }
         }
 
-        lines.push(Line::from(Span::styled(
-            help_txt,
-            Style::default().fg(theme.muted),
-        )));
+        lines.push(Line::from(Span::styled(help_txt, hint_style(theme))));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }

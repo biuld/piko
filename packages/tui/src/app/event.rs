@@ -308,6 +308,8 @@ impl AppState {
                 if !self.accepts_session(&diff.session_id) {
                     return effects;
                 }
+                self.last_turn_id = Some(diff.turn_id.clone());
+                self.last_turn_diff = Some(diff.clone());
                 self.status = format!(
                     "turn {} changed {} file{}",
                     diff.turn_id,
@@ -319,19 +321,44 @@ impl AppState {
                 result: Ok(piko_protocol::CommandResult::Empty),
                 ..
             }
-            | Event::CommandResponse {
-                result: Ok(piko_protocol::CommandResult::PromptDebugged { .. }),
-                ..
-            }
-            | Event::CommandResponse {
-                result: Ok(piko_protocol::CommandResult::RolloutPaged { .. }),
-                ..
-            }
-            | Event::CommandResponse {
-                result: Ok(piko_protocol::CommandResult::TurnDiffGot { .. }),
-                ..
-            }
             | Event::CommandResponse { result: Err(_), .. } => {}
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::PromptDebugged { snapshot, .. }),
+                ..
+            } => {
+                self.diagnostics.set_prompt_debug(&snapshot);
+                self.push_focus(AppMode::Diagnostics);
+                self.status = "prompt debug".to_string();
+            }
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::RolloutPaged { page, .. }),
+                ..
+            } => {
+                self.diagnostics.set_rollout(&page);
+                self.push_focus(AppMode::Diagnostics);
+                self.status = format!("rollout {} item(s)", page.items.len());
+            }
+            Event::CommandResponse {
+                result: Ok(piko_protocol::CommandResult::TurnDiffGot { diff, .. }),
+                ..
+            } => match diff {
+                Some(diff) => {
+                    self.last_turn_id = Some(diff.turn_id.clone());
+                    self.last_turn_diff = Some(diff.clone());
+                    self.diagnostics.set_diff(&diff);
+                    self.push_focus(AppMode::Diagnostics);
+                    self.status = "turn diff".to_string();
+                }
+                None => {
+                    self.diagnostics.set_message(
+                        crate::features::diagnostics::DiagnosticsKind::Diff,
+                        "turn diff",
+                        "No diff recorded for that turn.",
+                    );
+                    self.push_focus(AppMode::Diagnostics);
+                    self.status = "no turn diff".to_string();
+                }
+            },
             Event::CommandResponse {
                 command_id: response_command_id,
                 result:
@@ -458,6 +485,7 @@ impl AppState {
                 session_id,
                 turn_id,
                 agent_instance_id,
+                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -471,6 +499,8 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
+                self.account_turn_usage(&usage);
+                self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} completed");
             }
             Event::TurnLifecycle(piko_protocol::TurnEvent::Failed {
@@ -478,6 +508,7 @@ impl AppState {
                 turn_id,
                 agent_instance_id,
                 error,
+                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -491,6 +522,8 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
+                self.account_turn_usage(&usage);
+                self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} failed");
                 self.push_error(error);
             }
@@ -498,6 +531,7 @@ impl AppState {
                 session_id,
                 turn_id,
                 agent_instance_id,
+                usage,
                 ..
             }) => {
                 if !self.accepts_session(&session_id) {
@@ -511,6 +545,8 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
+                self.account_turn_usage(&usage);
+                self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} cancelled");
             }
             Event::AgentRunLifecycle(_) => {}
@@ -816,11 +852,47 @@ impl AppState {
 
     // ── snapshot application ──────────────────────────────────────────────────
 
+    /// Roll turn usage into the session ledger so BottomBar stays live between
+    /// reconciles (hostd already accounts the same numbers server-side).
+    fn account_turn_usage(&mut self, usage: &piko_protocol::messages::Usage) {
+        let has_signal =
+            usage.total_tokens > 0 || usage.cost.total > 0.0 || usage.input > 0 || usage.output > 0;
+        if !has_signal {
+            return;
+        }
+        let context = crate::features::bottom_bar::context_tokens_from_usage(usage);
+        if context > 0 {
+            self.session.last_context_tokens = Some(context);
+        }
+        match &mut self.session.cumulative_usage {
+            Some(total) => total.accumulate(usage),
+            None => self.session.cumulative_usage = Some(usage.clone()),
+        }
+    }
+
     fn apply_snapshot(&mut self, snapshot: SessionSnapshot) {
         self.timeline.clear();
         self.agent_timelines.clear();
         self.agent_panel.active_agent_instance_id = None;
         self.queue_status = QueueStatus::default();
+        // Authoritative session ledger replaces any local roll-up.
+        self.session.cumulative_usage = snapshot.cumulative_usage.clone();
+        self.session.last_context_tokens = snapshot
+            .active_turns
+            .iter()
+            .rev()
+            .find_map(|turn| {
+                turn.usage
+                    .as_ref()
+                    .map(crate::features::bottom_bar::context_tokens_from_usage)
+            })
+            .filter(|&tokens| tokens > 0)
+            .or_else(|| {
+                last_context_tokens_from_entries(
+                    &snapshot.entries,
+                    snapshot.current_leaf_id.as_deref(),
+                )
+            });
         self.tree
             .load(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
@@ -931,4 +1003,25 @@ impl AppState {
             self.push_focus(AppMode::ToolInteraction);
         }
     }
+}
+
+/// Walk the active branch newest-first for the latest assistant prompt-side tokens.
+fn last_context_tokens_from_entries(
+    entries: &[SessionTreeEntry],
+    current_leaf_id: Option<&str>,
+) -> Option<u64> {
+    let branch = get_active_branch_entries(entries, current_leaf_id);
+    for entry in branch.into_iter().rev() {
+        if let SessionTreeEntry::Message(message_entry) = entry
+            && let piko_protocol::Message::Assistant {
+                usage: Some(usage), ..
+            } = message_entry.message
+        {
+            let tokens = crate::features::bottom_bar::context_tokens_from_usage(&usage);
+            if tokens > 0 {
+                return Some(tokens);
+            }
+        }
+    }
+    None
 }

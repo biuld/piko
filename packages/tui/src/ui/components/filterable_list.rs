@@ -1,24 +1,28 @@
 //! FilterableList — reusable component for overlays with keyboard-navigable items.
 //!
-//! Used by: CommandPalette, ModelSelector, SessionList, SettingsPanel, TreePanel, etc.
+//! Feedback contract: [component-feedback](../../../docs/features/component-feedback.md)
+//! Selected (`❯` + accent) ≠ Active (`●`) ≠ Focused (`borderAccent`).
 
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use ratatui::widgets::Clear;
-
 use crate::theme::Theme;
+use crate::ui::components::feedback::{
+    active_marker_span, default_list_hints, empty_line, frame_border_style, hint_line, list_title,
+    row_detail_style, row_primary_style, selection_prefix, with_selected_bg,
+};
 
 /// A single display row in a filterable list.
 #[derive(Clone)]
 pub struct FilterableItem {
     pub primary: String,
     pub detail: String,
+    /// Authoritative "already in force" value (not keyboard selection).
     pub is_active: bool,
 }
 
@@ -82,7 +86,10 @@ impl<T> FilterableList<T> {
     }
 }
 
-/// Renders a filterable list with keyboard navigation markers.
+/// Renders a filterable list with component-feedback selection language.
+///
+/// `focused`: when true, frame uses accent border (surface owns keyboard).
+#[allow(clippy::too_many_arguments)]
 pub fn render_filterable_list(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -90,6 +97,7 @@ pub fn render_filterable_list(
     items: &[FilterableItem],
     selected: usize,
     filter: &str,
+    focused: bool,
     theme: &Theme,
 ) {
     let filtered: Vec<(usize, &FilterableItem)> = items
@@ -107,18 +115,24 @@ pub fn render_filterable_list(
 
     frame.render_widget(Clear, area);
 
+    let border = frame_border_style(focused, theme);
+
     if filtered.is_empty() {
-        let body = if filter.is_empty() {
-            "No items available."
-        } else {
-            "No items match the filter."
-        };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_muted))
-            .title(title);
-        let widget = Paragraph::new(body).block(block);
-        frame.render_widget(widget, area);
+            .border_style(border)
+            .title(list_title(title, filter, 0, 0));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.height == 0 {
+            return;
+        }
+        let body = Paragraph::new(vec![
+            empty_line(!filter.is_empty(), theme),
+            Line::default(),
+            hint_line(default_list_hints(), theme),
+        ]);
+        frame.render_widget(body, inner);
         return;
     }
 
@@ -132,69 +146,98 @@ pub fn render_filterable_list(
         .iter()
         .enumerate()
         .map(|(idx, &(_, item))| {
-            let marker = if idx == selected_filtered_idx {
-                "> "
-            } else {
-                "  "
-            };
-            let style = if idx == selected_filtered_idx {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+            let is_selected = idx == selected_filtered_idx;
+            let marker = selection_prefix(is_selected);
+            let mut primary_style =
+                with_selected_bg(row_primary_style(is_selected, theme), is_selected, theme);
+            // Non-selected active rows keep default text; active marker carries the cue.
+            if !is_selected && item.is_active {
+                primary_style = primary_style.fg(theme.text);
+            }
 
-            let active_suffix = if item.is_active { " *" } else { "" };
-            let primary_disp = format!(
-                "{}{}",
-                middle_elide_chars(&item.primary, 60, 30, 27),
-                active_suffix
-            );
+            let primary_disp = middle_elide_chars(&item.primary, 60, 30, 27);
+            let mut primary_spans = vec![
+                Span::styled(
+                    marker,
+                    if is_selected {
+                        Style::default().fg(theme.accent)
+                    } else {
+                        Style::default()
+                    },
+                ),
+                Span::styled(primary_disp, primary_style),
+            ];
+            if item.is_active {
+                primary_spans.push(active_marker_span(theme));
+            }
 
-            let detail_disp = if item.detail.len() > area.width.saturating_sub(10) as usize {
-                let mut d = item
-                    .detail
-                    .chars()
-                    .take(area.width.saturating_sub(13) as usize)
-                    .collect::<String>();
-                d.push_str("...");
-                d
-            } else {
-                item.detail.clone()
-            };
+            let detail_disp =
+                if item.detail.chars().count() > area.width.saturating_sub(10) as usize {
+                    let mut d = item
+                        .detail
+                        .chars()
+                        .take(area.width.saturating_sub(13) as usize)
+                        .collect::<String>();
+                    d.push_str("...");
+                    d
+                } else {
+                    item.detail.clone()
+                };
 
             ListItem::new(vec![
-                Line::from(Span::styled(format!("{marker}{primary_disp}"), style)),
+                Line::from(primary_spans),
                 Line::from(Span::styled(
                     format!("  {detail_disp}"),
-                    Style::default().fg(theme.dim),
+                    row_detail_style(theme),
                 )),
             ])
         })
         .collect();
 
-    let filter_part = if filter.is_empty() {
-        "".to_string()
+    let full_title = list_title(title, filter, selected_filtered_idx + 1, filtered.len());
+
+    // Reserve last line of the block for dim key hints when height allows.
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border)
+        .title(full_title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    let (list_area, hint_area) = if inner.height >= 3 {
+        (
+            Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: inner.height.saturating_sub(1),
+            },
+            Some(Rect {
+                x: inner.x,
+                y: inner.y + inner.height.saturating_sub(1),
+                width: inner.width,
+                height: 1,
+            }),
+        )
     } else {
-        format!(" | filter: {}", filter)
+        (inner, None)
     };
-    let counter_part = format!(" [{}/{}]", selected_filtered_idx + 1, filtered.len());
-    let full_title = format!(
-        "{} {}{} | Enter confirm | Esc close",
-        title, filter_part, counter_part
-    );
 
-    let list = List::new(list_items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_muted))
-            .title(full_title),
-    );
-
+    let list = List::new(list_items);
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(selected_filtered_idx));
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    if let Some(hint_area) = hint_area {
+        frame.render_widget(
+            Paragraph::new(hint_line(default_list_hints(), theme)),
+            hint_area,
+        );
+    }
 }
 
 fn middle_elide_chars(

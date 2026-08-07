@@ -44,18 +44,24 @@ The current working directory, abbreviated to fit.
 
 Shows the current context window fill: `used / total`.
 
-- `used` — approximate token count of the current context window
-- `total` — model's context window size
+- `used` — approximate prompt-side tokens from the latest projected model
+  usage (`input + cache_read` on the last terminal turn or last assistant
+  message with usage). This is the best host-authoritative proxy for window
+  fill until a dedicated live estimate is pushed.
+- `total` — active model's context window size from the host model catalog
 - Human-readable: `12.2k/200k`, `1.5k/32k`
-- When unknown: `—/—`
-- Updates as the conversation grows
+- When both unknown: `—/—`; either side may show `—` when only one is known
+- Updates when a session is reconciled or a turn completes/fails/cancels with
+  usage
 
 ### 4. Cost
 
 Estimated cumulative cost for the current session.
 
-- Displayed in USD: `$0.42`
-- Blank (`—`) when pricing data is unavailable
+- Source: hostd session `cumulativeUsage` (and live roll-up of terminal turn
+  usage between reconciles)
+- Displayed in USD: `$0.42` (four decimals for amounts under `$0.01`)
+- Blank (`—`) when no usage has been projected yet
 - Updates as tokens are consumed
 
 ## Configuration

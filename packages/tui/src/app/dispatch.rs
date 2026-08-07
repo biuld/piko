@@ -395,6 +395,9 @@ impl AppState {
                 self.clear_focus();
                 self.status = "listing mcp servers".to_string();
             }
+            SlashAction::RequestDiff => effects.extend(self.request_turn_diff()),
+            SlashAction::RequestPromptDebug => effects.extend(self.request_prompt_debug()),
+            SlashAction::RequestRollout => effects.extend(self.request_rollout_page()),
             SlashAction::KillProcess(process_id) => {
                 effects.push(Effect::send(Command::ProcessStop {
                     command_id: command_id(),
@@ -421,6 +424,7 @@ impl AppState {
             AppMode::AgentList => self.agents.move_down(),
             AppMode::Models => self.models.select_next(),
             AppMode::AuthSelector => self.auth_selector.select_next(),
+            AppMode::Diagnostics => self.diagnostics.scroll_down(1),
             _ => {}
         }
     }
@@ -433,8 +437,81 @@ impl AppState {
             AppMode::AgentList => self.agents.move_up(),
             AppMode::Models => self.models.select_prev(),
             AppMode::AuthSelector => self.auth_selector.select_prev(),
+            AppMode::Diagnostics => self.diagnostics.scroll_up(1),
             _ => {}
         }
+    }
+
+    fn request_turn_diff(&mut self) -> Vec<Effect> {
+        let Some(session_id) = self.session.id.clone() else {
+            self.status = "no active session for /diff".to_string();
+            return Vec::new();
+        };
+        let turn_id = self
+            .active_turn_id()
+            .map(str::to_string)
+            .or_else(|| self.last_turn_id.clone());
+        let Some(turn_id) = turn_id else {
+            if let Some(diff) = self.last_turn_diff.clone() {
+                self.diagnostics.set_diff(&diff);
+                self.push_focus(AppMode::Diagnostics);
+                self.status = "turn diff".to_string();
+            } else {
+                self.status = "no turn id for /diff".to_string();
+            }
+            return Vec::new();
+        };
+        // Prefer cached push if it matches the requested turn.
+        if let Some(diff) = self.last_turn_diff.as_ref()
+            && diff.turn_id == turn_id
+        {
+            self.diagnostics.set_diff(diff);
+            self.push_focus(AppMode::Diagnostics);
+            self.status = "turn diff".to_string();
+            return Vec::new();
+        }
+        self.status = format!("fetching diff for turn {turn_id}");
+        vec![Effect::send(Command::TurnDiffGet {
+            command_id: command_id(),
+            session_id,
+            turn_id,
+        })]
+    }
+
+    fn request_prompt_debug(&mut self) -> Vec<Effect> {
+        let Some(session_id) = self.session.id.clone() else {
+            self.status = "no active session for /prompt-debug".to_string();
+            return Vec::new();
+        };
+        let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
+            self.status = "no active agent for /prompt-debug".to_string();
+            return Vec::new();
+        };
+        self.status = "fetching prompt debug".to_string();
+        vec![Effect::send(Command::PromptDebugGet {
+            command_id: command_id(),
+            session_id,
+            agent_instance_id,
+        })]
+    }
+
+    fn request_rollout_page(&mut self) -> Vec<Effect> {
+        let Some(session_id) = self.session.id.clone() else {
+            self.status = "no active session for /rollout".to_string();
+            return Vec::new();
+        };
+        let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
+            self.status = "no active agent for /rollout".to_string();
+            return Vec::new();
+        };
+        self.status = "fetching rollout page".to_string();
+        vec![Effect::send(Command::RolloutPageGet {
+            command_id: command_id(),
+            session_id,
+            agent_instance_id,
+            after_cursor: None,
+            limit: Some(50),
+        })]
     }
 
     fn close_surface(&mut self) {
@@ -580,6 +657,7 @@ impl AppState {
             AppMode::AuthSelector => self.confirm_auth_selection(),
             AppMode::Status
             | AppMode::Mcp
+            | AppMode::Diagnostics
             | AppMode::Help
             | AppMode::Chat
             | AppMode::Approval

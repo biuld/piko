@@ -4,6 +4,7 @@ pub mod approval;
 pub mod auth_selector;
 pub mod auto_completion;
 pub mod bottom_bar;
+pub mod diagnostics;
 pub mod editor;
 pub mod help;
 pub mod mcp;

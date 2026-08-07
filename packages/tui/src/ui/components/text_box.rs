@@ -73,11 +73,12 @@ impl TextBox {
     }
 
     pub fn render_line(&self, theme: &crate::theme::Theme, focused: bool) -> Line<'static> {
+        use crate::ui::components::placeholder_style;
         use ratatui::style::Style;
         if self.text.is_empty() {
             let mut spans = vec![Span::styled(
                 self.placeholder.clone(),
-                Style::default().fg(theme.muted),
+                placeholder_style(theme),
             )];
             if focused {
                 spans.push(Span::styled("█", Style::default().fg(theme.accent)));

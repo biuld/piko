@@ -1,0 +1,345 @@
+//! Read-only diagnostic overlays: turn diff, prompt debug, rollout page.
+//!
+//! Fed by existing host wire commands (`TurnDiffGet`, `PromptDebugGet`,
+//! `RolloutPageGet`) and optional push `TurnDiff` events. Presentation-only.
+
+use piko_protocol::{PromptDebugSnapshot, RolloutPage, TurnDiffEvent, messages::Message};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+};
+
+use crate::theme::Theme;
+use crate::ui::components::frame_border_style;
+
+use super::centered_rect;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiagnosticsKind {
+    #[default]
+    Diff,
+    PromptDebug,
+    Rollout,
+}
+
+/// Scrollable diagnostic text panel.
+#[derive(Default)]
+pub struct DiagnosticsPanel {
+    kind: DiagnosticsKind,
+    title: String,
+    lines: Vec<String>,
+    scroll: u16,
+}
+
+impl DiagnosticsPanel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn scroll_up(&mut self, n: u16) {
+        self.scroll = self.scroll.saturating_sub(n);
+    }
+
+    pub fn scroll_down(&mut self, n: u16) {
+        let max = self.lines.len().saturating_sub(1) as u16;
+        self.scroll = (self.scroll.saturating_add(n)).min(max);
+    }
+
+    pub fn set_diff(&mut self, diff: &TurnDiffEvent) {
+        self.kind = DiagnosticsKind::Diff;
+        self.title = format!("turn diff · {}", short(&diff.turn_id));
+        self.scroll = 0;
+        self.lines = format_diff(diff);
+    }
+
+    pub fn set_prompt_debug(&mut self, snapshot: &PromptDebugSnapshot) {
+        self.kind = DiagnosticsKind::PromptDebug;
+        self.title = format!("prompt debug · {}", short(&snapshot.agent_instance_id));
+        self.scroll = 0;
+        self.lines = format_prompt_debug(snapshot);
+    }
+
+    pub fn set_rollout(&mut self, page: &RolloutPage) {
+        self.kind = DiagnosticsKind::Rollout;
+        self.title = format!(
+            "rollout · {} · {} item(s)",
+            short(&page.agent_instance_id),
+            page.items.len()
+        );
+        self.scroll = 0;
+        self.lines = format_rollout(page);
+    }
+
+    pub fn set_message(
+        &mut self,
+        kind: DiagnosticsKind,
+        title: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        self.kind = kind;
+        self.title = title.into();
+        self.scroll = 0;
+        self.lines = vec![message.into()];
+    }
+
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let popup = centered_rect(82, 70, area);
+        frame.render_widget(Clear, popup);
+
+        let block = Block::default()
+            .title(format!(" {} ", self.title))
+            .borders(Borders::ALL)
+            .border_style(frame_border_style(true, theme));
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+
+        if inner.height == 0 {
+            return;
+        }
+
+        let body_height = inner.height.saturating_sub(1);
+        let body_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: body_height,
+        };
+        let hint_area = Rect {
+            x: inner.x,
+            y: inner.y + body_height,
+            width: inner.width,
+            height: 1,
+        };
+
+        let styled: Vec<Line<'_>> = self
+            .lines
+            .iter()
+            .map(|line| style_diagnostic_line(line, self.kind, theme))
+            .collect();
+
+        let paragraph = Paragraph::new(styled)
+            .wrap(Wrap { trim: false })
+            .scroll((self.scroll, 0));
+        frame.render_widget(paragraph, body_area);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " ↑/↓ scroll · Esc close",
+                Style::default().fg(theme.dim),
+            ))),
+            hint_area,
+        );
+    }
+}
+
+fn short(id: &str) -> String {
+    id.chars().take(10).collect()
+}
+
+fn format_diff(diff: &TurnDiffEvent) -> Vec<String> {
+    let mut lines = vec![
+        format!("session  {}", diff.session_id),
+        format!("turn     {}", diff.turn_id),
+        format!("files    {}", diff.files.len()),
+        String::new(),
+    ];
+    if diff.files.is_empty() && diff.unified_diff.trim().is_empty() {
+        lines.push("No file changes recorded for this turn.".into());
+        return lines;
+    }
+    for file in &diff.files {
+        lines.push(format!("· {}", file.path));
+    }
+    if !diff.files.is_empty() {
+        lines.push(String::new());
+    }
+    if diff.unified_diff.trim().is_empty() {
+        lines.push("(no unified diff text)".into());
+    } else {
+        for line in diff.unified_diff.lines() {
+            lines.push(line.to_string());
+        }
+    }
+    lines
+}
+
+fn format_prompt_debug(snapshot: &PromptDebugSnapshot) -> Vec<String> {
+    let mut lines = vec![
+        format!("session  {}", snapshot.session_id),
+        format!("agent    {}", snapshot.agent_instance_id),
+        format!("tools    {}", snapshot.tool_catalog.tools.len()),
+        format!("resources {} message(s)", snapshot.resource_messages.len()),
+        format!("model inputs {}", snapshot.model_inputs.len()),
+        String::new(),
+        "── run prompt ──".into(),
+    ];
+    // SemanticRunPrompt is structured; serialize compactly for display.
+    match serde_json::to_string_pretty(&snapshot.run_prompt) {
+        Ok(text) => {
+            for line in text.lines().take(80) {
+                lines.push(line.to_string());
+            }
+            if text.lines().count() > 80 {
+                lines.push("… (truncated)".into());
+            }
+        }
+        Err(_) => lines.push("(failed to format run prompt)".into()),
+    }
+
+    if !snapshot.model_inputs.is_empty() {
+        lines.push(String::new());
+        lines.push("── model inputs ──".into());
+        for (i, step) in snapshot.model_inputs.iter().enumerate() {
+            lines.push(format!(
+                "[{}] {}/{}  run={} step={}",
+                i + 1,
+                step.provider,
+                step.model,
+                short(&step.run_id),
+                short(&step.step_id)
+            ));
+            if let Ok(req) = serde_json::to_string_pretty(&step.request) {
+                for line in req.lines().take(40) {
+                    lines.push(format!("  {line}"));
+                }
+                if req.lines().count() > 40 {
+                    lines.push("  … (truncated)".into());
+                }
+            }
+            lines.push(String::new());
+        }
+    }
+    lines
+}
+
+fn format_rollout(page: &RolloutPage) -> Vec<String> {
+    let mut lines = vec![
+        format!("session  {}", page.session_id),
+        format!("agent    {}", page.agent_instance_id),
+        format!("items    {}", page.items.len()),
+    ];
+    if let Some(cursor) = &page.next_cursor {
+        lines.push(format!("next     {cursor}"));
+    }
+    lines.push(String::new());
+    if page.items.is_empty() {
+        lines.push("No rollout items on this page.".into());
+        return lines;
+    }
+    for item in &page.items {
+        let role = message_role(&item.message);
+        let preview = message_preview(&item.message);
+        lines.push(format!(
+            "seq {:>4}  {}  {}  {}",
+            item.transcript_seq,
+            short(&item.message_id),
+            role,
+            preview
+        ));
+    }
+    lines
+}
+
+fn message_role(message: &Message) -> &'static str {
+    match message {
+        Message::User { .. } => "user",
+        Message::Assistant { .. } => "assistant",
+        Message::ToolCall { .. } => "tool_call",
+        Message::ToolResult { .. } => "tool_result",
+        Message::Context { .. } => "context",
+    }
+}
+
+fn message_preview(message: &Message) -> String {
+    let raw = match message {
+        Message::User { content, .. } | Message::Context { content, .. } => match content {
+            piko_protocol::messages::MessageContent::String(t) => t.clone(),
+            piko_protocol::messages::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    piko_protocol::messages::ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        },
+        Message::Assistant { content, .. } => content
+            .iter()
+            .filter_map(|b| match b {
+                piko_protocol::messages::ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        Message::ToolCall { name, .. } => format!("tool {name}"),
+        Message::ToolResult { tool_call_id, .. } => format!("result {tool_call_id}"),
+    };
+    let flat: String = raw.chars().filter(|c| *c != '\n').take(72).collect();
+    if raw.chars().count() > 72 {
+        format!("{flat}…")
+    } else {
+        flat
+    }
+}
+
+fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme) -> Line<'a> {
+    let style = match kind {
+        DiagnosticsKind::Diff if line.starts_with('+') && !line.starts_with("+++") => {
+            let c = theme.get("toolDiffAdded");
+            if matches!(c, ratatui::style::Color::Reset) {
+                Style::default().fg(theme.success)
+            } else {
+                Style::default().fg(c)
+            }
+        }
+        DiagnosticsKind::Diff if line.starts_with('-') && !line.starts_with("---") => {
+            let c = theme.get("toolDiffRemoved");
+            if matches!(c, ratatui::style::Color::Reset) {
+                Style::default().fg(theme.error)
+            } else {
+                Style::default().fg(c)
+            }
+        }
+        DiagnosticsKind::Diff if line.starts_with("@@") => Style::default().fg(theme.info),
+        _ if line.starts_with("──") => Style::default().fg(theme.muted),
+        _ => Style::default().fg(theme.text),
+    };
+    Line::from(Span::styled(line, style))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_diff_empty() {
+        let diff = TurnDiffEvent {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            files: vec![],
+            unified_diff: String::new(),
+        };
+        let lines = format_diff(&diff);
+        assert!(lines.iter().any(|l| l.contains("No file changes")));
+    }
+
+    #[test]
+    fn format_diff_unified() {
+        let diff = TurnDiffEvent {
+            session_id: "s".into(),
+            turn_id: "t".into(),
+            files: vec![piko_protocol::TurnFileChange {
+                path: "a.rs".into(),
+                before: None,
+                after: None,
+            }],
+            unified_diff: "--- a\n+++ b\n@@\n-old\n+new\n".into(),
+        };
+        let lines = format_diff(&diff);
+        assert!(lines.iter().any(|l| l.contains("a.rs")));
+        assert!(lines.iter().any(|l| l == "+new"));
+    }
+}

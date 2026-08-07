@@ -1,5 +1,7 @@
 # Themes
 
+> Status: reviewed
+
 ## Overview
 
 The piko theme system controls all colors in the TUI through a set of semantic

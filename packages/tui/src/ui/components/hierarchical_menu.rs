@@ -2,7 +2,10 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::{
     theme::Theme,
-    ui::components::filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    ui::components::{
+        GROUP_DRILL,
+        filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+    },
 };
 
 /// A node in the hierarchical menu tree.
@@ -162,8 +165,8 @@ impl<T: Clone> HierarchicalMenu<T> {
                 };
 
                 let suffix = match item {
-                    MenuNode::Group { .. } => " >",
-                    MenuNode::Action { .. } => "",
+                    MenuNode::Group { .. } => format!(" {GROUP_DRILL}"),
+                    MenuNode::Action { .. } => String::new(),
                 };
 
                 FilterableItem {
@@ -174,6 +177,7 @@ impl<T: Clone> HierarchicalMenu<T> {
             })
             .collect();
 
+        // Hierarchical menus are always the focus owner while open.
         render_filterable_list(
             frame,
             area,
@@ -181,6 +185,7 @@ impl<T: Clone> HierarchicalMenu<T> {
             &items,
             current_frame.list.selected,
             filter,
+            true,
             theme,
         );
     }
