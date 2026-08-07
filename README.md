@@ -117,19 +117,34 @@ cargo build --release
 
 ### Run
 
-Set your LLM provider API key and start the terminal user interface:
+Set your LLM provider API key and start the terminal user interface.
+
+**Preferred (keeps hostd in sync):** TUI/GUI only talk to a separate
+`piko-hostd` process. `cargo run -p piko-tui` rebuilds the UI only and can
+silently use a stale hostd (old tools / orchd). Use the dev scripts so both
+binaries are rebuilt together:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Start a new session
+# Build hostd + tui, then run (pass-through args after the script name)
+./scripts/dev-tui.sh
+./scripts/dev-tui.sh -c
+./scripts/dev-tui.sh -m claude-3-5-sonnet-20241022 --thinking-level medium
+
+# Same for the desktop client
+./scripts/dev-gui.sh
+
+# Release profile
+PIKO_DEV_PROFILE=release ./scripts/dev-tui.sh
+```
+
+Direct cargo (UI only; ensure hostd was built recently):
+
+```bash
+cargo build -p piko-hostd -p piko-tui
 cargo run -p piko-tui
-
-# Continue the most recent session
 cargo run -p piko-tui -- -c
-
-# Run with a specific model and thinking level
-cargo run -p piko-tui -- -m claude-3-5-sonnet-20241022 --thinking-level medium
 ```
 
 ---

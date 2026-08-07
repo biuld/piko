@@ -132,6 +132,17 @@ UI and settings docs live in their package docs:
 
 Crate-local context: `packages/tui/AGENTS.md`, `packages/gui/AGENTS.md`, `packages/protocol/AGENTS.md`.
 
+## Local development (TUI / GUI)
+
+Clients talk to a separate `piko-hostd` binary over stdio. Rebuilds of
+`piko-tui` / `piko-gui` alone do **not** refresh orchd or multi-agent tools.
+
+```bash
+./scripts/dev-tui.sh          # cargo build -p piko-hostd -p piko-tui && run
+./scripts/dev-gui.sh          # same for gui
+./scripts/dev-tui.sh -c       # args forwarded to the client
+```
+
 ## Before committing
 
 ```bash
