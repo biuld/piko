@@ -68,6 +68,7 @@ Status: **complete for committed scope**.
 | F-07 approvals | bounded approval timeout with distinct deny/expiry semantics | D-07/V-07 |
 | F-09 persistence | schema-v3 store, resume/recovery, full clone, branch-point fork | D-26/V-26 |
 | F-10 multi-agent core | agent tree plus v2 followup/interrupt/list/wait tools | D-10/V-10 |
+| F-21 multi-agent tool surface | model-facing tools: spec catalog, message_agent(when), spawn defaults/errors | implemented (F-21/D-33 A–C; prompt hint deferred) |
 
 Deferred residue: model prewarm/sticky routing; dynamic/extension tools and
 tool search; session-list cursor paging and session prewarm. These are not on
@@ -184,7 +185,7 @@ optional extensions and have no scheduled implementation.
 | F Approvals & Safety | F-07/F-11/F-12 | approvals, guardian, elicitation decision, safety assessment |
 | G Exec & Sandbox | F-08 | process lifecycle, shell, unified processes, platform sandbox |
 | H Persistence & Resume | F-09 | store, fork/resume, recovery, interrupted markers |
-| I Multi-Agent | F-10/F-19/F-20 | agent tree, v2 tools, role permissions, completion fragments |
+| I Multi-Agent | F-10/F-19/F-20/F-21 | agent tree, v2 tools, role permissions, completion fragments, model tool surface |
 | J Skills/Plugins/MCP | F-13/F-14 | skills, plugins, MCP, hooks |
 | K Realtime | F-16 | realtime and multimodal preparation (deferred) |
 | L Observability | F-15 | tracing, timing, usage, rollout/diff/debugging slices |

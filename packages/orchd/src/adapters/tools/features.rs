@@ -30,14 +30,17 @@ pub fn feature_for_tool_name(name: &str) -> Option<&'static str> {
         "todo_read" | "todo_write" => "todo",
         "spawn_agent"
         | "spawn_agent_detached"
-        | "send_agent_message"
+        | "message_agent"
         | "collect_agent_reports"
         | "close_agent"
         | "reopen_agent"
-        | "followup_task"
         | "interrupt_agent"
         | "list_agents"
-        | "wait_agent" => "multi-agent",
+        | "list_agent_specs"
+        | "wait_agent"
+        // Legacy names kept for disable-by-name if an old transcript retries.
+        | "send_agent_message"
+        | "followup_task" => "multi-agent",
         "ask_user" | "request_user_input" => "user-interaction",
         _ => return None,
     })

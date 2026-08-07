@@ -260,7 +260,7 @@ async fn wait_until_activity(
 }
 
 #[tokio::test]
-async fn v2_followup_task_starts_a_turn_when_idle() {
+async fn v2_message_agent_queue_starts_a_turn_when_idle() {
     let (runtime, _commits, model) = attached_runtime().await;
     let runtime = Arc::new(runtime);
     let provider = MultiAgentToolProvider::new(runtime.clone() as Arc<dyn AgentRuntimeApi>);
@@ -277,7 +277,7 @@ async fn v2_followup_task_starts_a_turn_when_idle() {
     let followup = provider
         .execute(
             v2_call(
-                "followup_task",
+                "message_agent",
                 serde_json::json!({
                     "agent_instance_id": child,
                     "message": "do second work",
@@ -286,8 +286,9 @@ async fn v2_followup_task_starts_a_turn_when_idle() {
             v2_context(),
         )
         .await;
-    assert!(followup.ok, "followup failed: {:?}", followup.error);
+    assert!(followup.ok, "message_agent failed: {:?}", followup.error);
     assert_eq!(followup.value.as_ref().unwrap()["disposition"], "accepted");
+    assert_eq!(followup.value.as_ref().unwrap()["when"], "queue");
 
     for _ in 0..200 {
         if model.call_count().await == 2 {
@@ -299,7 +300,7 @@ async fn v2_followup_task_starts_a_turn_when_idle() {
 }
 
 #[tokio::test]
-async fn v2_followup_task_queues_while_busy_and_commits_input() {
+async fn v2_message_agent_queue_while_busy_and_commits_input() {
     let (runtime, commits, model) = attached_runtime().await;
     let runtime = Arc::new(runtime);
     let provider = MultiAgentToolProvider::new(runtime.clone() as Arc<dyn AgentRuntimeApi>);
@@ -313,24 +314,26 @@ async fn v2_followup_task_queues_while_busy_and_commits_input() {
     let followup = provider
         .execute(
             v2_call(
-                "followup_task",
+                "message_agent",
                 serde_json::json!({
                     "agent_instance_id": child,
                     "message": "queued work",
+                    "when": "queue",
                 }),
             ),
             v2_context(),
         )
         .await;
-    assert!(followup.ok, "followup failed: {:?}", followup.error);
+    assert!(followup.ok, "message_agent failed: {:?}", followup.error);
     assert_eq!(followup.value.as_ref().unwrap()["disposition"], "queued");
+    assert_eq!(followup.value.as_ref().unwrap()["when"], "queue");
 
     let commands = commits.commands.lock().await;
     assert!(commands.iter().any(|command| matches!(
         command,
         AgentDurableCommand::InputQueued { queued_input, .. }
             if queued_input.request.agent_instance_id == child
-                && queued_input.request.request_id.starts_with("followup:")
+                && queued_input.request.request_id.starts_with("message:")
     )));
     drop(commands);
 
@@ -372,7 +375,7 @@ async fn v2_interrupt_agent_cancels_running_and_keeps_agent_usable() {
     let followup = provider
         .execute(
             v2_call(
-                "followup_task",
+                "message_agent",
                 serde_json::json!({
                     "agent_instance_id": child,
                     "message": "continue",
@@ -381,7 +384,7 @@ async fn v2_interrupt_agent_cancels_running_and_keeps_agent_usable() {
             v2_context(),
         )
         .await;
-    assert!(followup.ok, "follow-up after interrupt failed: {:?}", followup.error);
+    assert!(followup.ok, "message_agent after interrupt failed: {:?}", followup.error);
     assert_eq!(followup.value.as_ref().unwrap()["disposition"], "accepted");
     wait_until_activity(&runtime, &child, piko_protocol::AgentActivity::Idle).await;
 }
@@ -557,7 +560,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     let followup = provider
         .execute(
             v2_call(
-                "followup_task",
+                "message_agent",
                 serde_json::json!({
                     "agent_instance_id": child,
                     "message": "block again",
@@ -566,7 +569,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
             v2_context(),
         )
         .await;
-    assert!(followup.ok, "second follow-up failed: {:?}", followup.error);
+    assert!(followup.ok, "second message_agent failed: {:?}", followup.error);
     wait_until_activity(&runtime, &child, piko_protocol::AgentActivity::Running).await;
 
     let wait_task = tokio::spawn({
@@ -614,13 +617,13 @@ async fn v2_consolidated_surface_has_no_redundant_tools() {
         .await;
 
     let expected = [
+        "list_agent_specs",
         "spawn_agent",
         "spawn_agent_detached",
-        "send_agent_message",
+        "message_agent",
         "collect_agent_reports",
         "close_agent",
         "reopen_agent",
-        "followup_task",
         "interrupt_agent",
         "list_agents",
         "wait_agent",
@@ -628,19 +631,109 @@ async fn v2_consolidated_surface_has_no_redundant_tools() {
     .into_iter()
     .collect::<std::collections::BTreeSet<_>>();
     let names: std::collections::BTreeSet<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
-    assert_eq!(names, expected, "multi-agent surface drifted from the consolidated set");
+    assert_eq!(names, expected, "multi-agent surface drifted from the F-21 set");
 
-    let send = tools
+    let message = tools
         .iter()
-        .find(|tool| tool.name == "send_agent_message")
+        .find(|tool| tool.name == "message_agent")
         .unwrap();
-    assert!(
-        send.input_schema
-            .get("properties")
-            .and_then(|properties| properties.get("delivery"))
-            .is_none(),
-        "send_agent_message must not expose a delivery mode; follow-up lives on followup_task"
-    );
+    let when = message
+        .input_schema
+        .get("properties")
+        .and_then(|properties| properties.get("when"))
+        .expect("message_agent exposes when");
+    assert_eq!(when["enum"], serde_json::json!(["queue", "steer"]));
+}
+
+#[tokio::test]
+async fn f21_list_agent_specs_and_spawn_default_general() {
+    let (runtime, _commits, model) = attached_runtime().await;
+    let runtime = Arc::new(runtime);
+    // Default spawn uses "general" when present.
+    let mut general = test_agent();
+    general.id = "general".into();
+    general.name = "General".into();
+    general.description = Some("General helper".into());
+    runtime.register_agent(general).await;
+    let provider = MultiAgentToolProvider::new(runtime.clone() as Arc<dyn AgentRuntimeApi>);
+    model.push_text("ok").await;
+
+    let listed = provider
+        .execute(v2_call("list_agent_specs", serde_json::json!({})), v2_context())
+        .await;
+    assert!(listed.ok, "{:?}", listed.error);
+    let value = listed.value.as_ref().unwrap();
+    assert_eq!(value["default_spawn_spec_id"], "general");
+    let ids: Vec<_> = value["specs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"general"));
+    assert!(ids.contains(&"main"));
+
+    let spawned = provider
+        .execute(
+            v2_call(
+                "spawn_agent",
+                serde_json::json!({ "prompt": "hello from default" }),
+            ),
+            v2_context(),
+        )
+        .await;
+    assert!(spawned.ok, "{:?}", spawned.error);
+    assert_eq!(spawned.value.as_ref().unwrap()["agent_spec_id"], "general");
+    assert_eq!(spawned.value.as_ref().unwrap()["attached"], true);
+}
+
+#[tokio::test]
+async fn f21_spawn_unknown_spec_lists_valid_ids() {
+    let (runtime, _commits, _model) = attached_runtime().await;
+    let provider = MultiAgentToolProvider::new(Arc::new(runtime) as Arc<dyn AgentRuntimeApi>);
+    let result = provider
+        .execute(
+            v2_call(
+                "spawn_agent",
+                serde_json::json!({
+                    "agent_spec_id": "agents/main",
+                    "prompt": "nope",
+                }),
+            ),
+            v2_context(),
+        )
+        .await;
+    assert!(!result.ok);
+    let err = result.error.as_ref().unwrap();
+    assert_eq!(err.code, "agent_spec_not_found");
+    assert!(err.message.contains("main") || err.message.contains("coder"));
+    assert!(err.message.contains("agents/main"));
+}
+
+#[tokio::test]
+async fn f21_message_agent_steer_idle_fails_closed() {
+    let (runtime, _commits, model) = attached_runtime().await;
+    let runtime = Arc::new(runtime);
+    let provider = MultiAgentToolProvider::new(runtime.clone() as Arc<dyn AgentRuntimeApi>);
+    model.push_text("done").await;
+    let child = spawn_detached_v2(&provider, "quick").await;
+    wait_until_activity(&runtime, &child, piko_protocol::AgentActivity::Idle).await;
+
+    let result = provider
+        .execute(
+            v2_call(
+                "message_agent",
+                serde_json::json!({
+                    "agent_instance_id": child,
+                    "message": "steer me",
+                    "when": "steer",
+                }),
+            ),
+            v2_context(),
+        )
+        .await;
+    assert!(!result.ok);
+    assert_eq!(result.error.as_ref().unwrap().code, "agent_not_running");
 }
 
 // ---- F-20 inter-agent completion fragments ----

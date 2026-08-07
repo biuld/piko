@@ -165,6 +165,9 @@ pub trait AgentRuntimeApi: Send + Sync {
 
     async fn list_agents(&self, session_id: String) -> Result<Vec<AgentSnapshot>, AgentApiError>;
 
+    /// Registered AgentSpec templates available for spawn (F-21). Session-independent.
+    async fn list_agent_specs(&self) -> Result<Vec<piko_protocol::AgentSpec>, AgentApiError>;
+
     async fn agent_inbox(
         &self,
         session_id: String,

@@ -46,6 +46,13 @@ impl ExecutionServices {
         self.agent_specs.read().await.get(agent_id).cloned()
     }
 
+    /// Snapshot of registered AgentSpecs, sorted by id (F-21 catalog).
+    pub async fn list_agent_specs(&self) -> Vec<AgentSpec> {
+        let mut specs: Vec<AgentSpec> = self.agent_specs.read().await.values().cloned().collect();
+        specs.sort_by(|left, right| left.id.cmp(&right.id));
+        specs
+    }
+
     pub fn model_executor(&self) -> Arc<dyn LlmGateway> {
         Arc::clone(&self.model_executor)
     }

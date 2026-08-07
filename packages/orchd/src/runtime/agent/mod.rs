@@ -114,7 +114,10 @@ impl AgentRuntime {
             .register_tool_set(piko_protocol::tools::ToolSet {
                 id: "multi_agent".into(),
                 name: "Multi-Agent Tools".into(),
-                description: Some("AgentInstance creation, reuse, and status".into()),
+                description: Some(
+                    "Multi-agent: list_agent_specs, spawn, message_agent (queue/steer), list_agents, wait"
+                        .into(),
+                ),
                 metadata: None,
                 policy: None,
                 tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
@@ -742,6 +745,10 @@ impl AgentRuntimeApi for AgentRuntime {
                 })
         });
         Ok(snapshots)
+    }
+
+    async fn list_agent_specs(&self) -> Result<Vec<piko_protocol::AgentSpec>, AgentApiError> {
+        Ok(self.execution.services().list_agent_specs().await)
     }
 
     async fn agent_inbox(
