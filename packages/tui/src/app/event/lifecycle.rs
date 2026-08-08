@@ -148,8 +148,8 @@ impl AppState {
                     NotificationLevel::Warning,
                     format!("approval requested for {tool_name}"),
                 );
-                if self.focus_manager.active_mode() != AppMode::Approval {
-                    self.push_focus(AppMode::Approval);
+                if self.focus_manager.active_mode() != AppMode::Surface(SurfaceId::Approval) {
+                    self.push_surface(SurfaceId::Approval);
                 }
             }
             piko_protocol::ApprovalEvent::Resolved {
@@ -190,15 +190,16 @@ impl AppState {
                 }
                 self.status = format!("approval {approval_id} resolved: {decision:?}");
                 if self.approvals.is_empty()
-                    && self.focus_manager.active_mode() == AppMode::Approval
+                    && self.focus_manager.active_mode() == AppMode::Surface(SurfaceId::Approval)
                 {
                     self.pop_focus();
                 }
                 if self.approvals.is_empty()
                     && !self.interactions.is_empty()
-                    && self.focus_manager.active_mode() != AppMode::ToolInteraction
+                    && self.focus_manager.active_mode()
+                        != AppMode::Surface(SurfaceId::ToolInteraction)
                 {
-                    self.push_focus(AppMode::ToolInteraction);
+                    self.push_surface(SurfaceId::ToolInteraction);
                 }
             }
         }

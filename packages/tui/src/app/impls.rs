@@ -30,7 +30,7 @@ impl AppState {
             session,
             model,
             mode: AppMode::Chat,
-            focus_manager: FocusManager::new(),
+            focus_manager: FocusManager::new(AppMode::Chat),
             quit: false,
             last_tick: Instant::now(),
             editor: Editor::default(),
@@ -65,13 +65,13 @@ impl AppState {
 
     pub fn active_text_box(&mut self) -> Option<&mut TextBox> {
         match self.focus_manager.active_mode() {
-            AppMode::AuthSelector => match &mut self.auth_selector.state {
+            AppMode::Surface(SurfaceId::AuthSelector) => match &mut self.auth_selector.state {
                 crate::features::auth_selector::AuthSelectorState::ApiKeyInput {
                     input, ..
                 } => Some(input),
                 _ => None,
             },
-            AppMode::SummaryPrompt => {
+            AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = &mut self.summary_prompt
                     && !workflow.questions.is_empty()
                 {
@@ -82,14 +82,14 @@ impl AppState {
                 }
                 None
             }
-            AppMode::Tree => {
+            AppMode::Surface(SurfaceId::Tree) => {
                 if let Some(editor) = &mut self.tree.label_editor {
                     Some(&mut editor.input)
                 } else {
                     None
                 }
             }
-            AppMode::ToolInteraction => {
+            AppMode::Surface(SurfaceId::ToolInteraction) => {
                 if let Some(interaction) = self.interactions.front_mut()
                     && !interaction.workflow.questions.is_empty()
                 {
@@ -147,17 +147,22 @@ impl AppState {
     pub fn push_focus(&mut self, mode: AppMode) {
         self.focus_manager.push(mode);
         self.mode = self.focus_manager.active_mode();
-        if mode != AppMode::SummaryPrompt {
+        if !mode.is_surface(SurfaceId::SummaryPrompt) {
             self.clear_filter_for_mode(mode);
         }
-        // Sync widget panel focus flags
-        self.agent_panel.focus = mode == AppMode::AgentPanel;
+        // Runtime agent tree surface owns its own selection chrome.
+        self.agent_panel.focus = mode.is_surface(SurfaceId::Agents);
+    }
+
+    /// Push a catalog surface onto the focus stack.
+    pub fn push_surface(&mut self, surface: SurfaceId) {
+        self.push_focus(AppMode::from_surface(surface));
     }
 
     pub fn pop_focus(&mut self) {
         let popped = self.focus_manager.pop();
         self.mode = self.focus_manager.active_mode();
-        if popped != Some(AppMode::SummaryPrompt)
+        if !popped.is_some_and(|m| m.is_surface(SurfaceId::SummaryPrompt))
             && let Some(mode) = popped
         {
             self.clear_filter_for_mode(mode);
@@ -173,12 +178,12 @@ impl AppState {
 
     pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {
         match mode {
-            AppMode::Sessions => self.sessions.filter.clear(),
-            AppMode::AgentList => self.agents.filter.clear(),
-            AppMode::Tree => self.tree.filter.clear(),
-            AppMode::Models => self.models.filter.clear(),
-            AppMode::Settings => self.settings.filter.clear(),
-            AppMode::AuthSelector => self.auth_selector.filter.clear(),
+            AppMode::Surface(SurfaceId::Sessions) => self.sessions.filter.clear(),
+            AppMode::Surface(SurfaceId::AgentList) => self.agents.filter.clear(),
+            AppMode::Surface(SurfaceId::Tree) => self.tree.filter.clear(),
+            AppMode::Surface(SurfaceId::Models) => self.models.filter.clear(),
+            AppMode::Surface(SurfaceId::Settings) => self.settings.filter.clear(),
+            AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.filter.clear(),
             _ => {}
         }
     }
@@ -193,12 +198,12 @@ impl AppState {
 
     pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
         match self.mode {
-            AppMode::Sessions => Some(&mut self.sessions.filter),
-            AppMode::AgentList => Some(&mut self.agents.filter),
-            AppMode::Tree => Some(&mut self.tree.filter),
-            AppMode::Models => Some(&mut self.models.filter),
-            AppMode::Settings => Some(&mut self.settings.filter),
-            AppMode::AuthSelector => match self.auth_selector.state {
+            AppMode::Surface(SurfaceId::Sessions) => Some(&mut self.sessions.filter),
+            AppMode::Surface(SurfaceId::AgentList) => Some(&mut self.agents.filter),
+            AppMode::Surface(SurfaceId::Tree) => Some(&mut self.tree.filter),
+            AppMode::Surface(SurfaceId::Models) => Some(&mut self.models.filter),
+            AppMode::Surface(SurfaceId::Settings) => Some(&mut self.settings.filter),
+            AppMode::Surface(SurfaceId::AuthSelector) => match self.auth_selector.state {
                 crate::features::auth_selector::AuthSelectorState::Menu => {
                     Some(&mut self.auth_selector.filter)
                 }

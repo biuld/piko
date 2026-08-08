@@ -11,12 +11,12 @@ impl AppState {
             Ok(piko_protocol::CommandResult::Empty) | Err(_) => {}
             Ok(piko_protocol::CommandResult::PromptDebugged { snapshot, .. }) => {
                 self.diagnostics.set_prompt_debug(&snapshot);
-                self.push_focus(AppMode::Diagnostics);
+                self.push_surface(SurfaceId::Diagnostics);
                 self.status = "prompt debug".to_string();
             }
             Ok(piko_protocol::CommandResult::RolloutPaged { page, .. }) => {
                 self.diagnostics.set_rollout(&page);
-                self.push_focus(AppMode::Diagnostics);
+                self.push_surface(SurfaceId::Diagnostics);
                 self.status = format!("rollout {} item(s)", page.items.len());
             }
             Ok(piko_protocol::CommandResult::TurnDiffGot { diff, .. }) => match diff {
@@ -24,7 +24,7 @@ impl AppState {
                     self.last_turn_id = Some(diff.turn_id.clone());
                     self.last_turn_diff = Some(diff.clone());
                     self.diagnostics.set_diff(&diff);
-                    self.push_focus(AppMode::Diagnostics);
+                    self.push_surface(SurfaceId::Diagnostics);
                     self.status = "turn diff".to_string();
                 }
                 None => {
@@ -33,7 +33,7 @@ impl AppState {
                         "turn diff",
                         "No diff recorded for that turn.",
                     );
-                    self.push_focus(AppMode::Diagnostics);
+                    self.push_surface(SurfaceId::Diagnostics);
                     self.status = "no turn diff".to_string();
                 }
             },
@@ -75,7 +75,7 @@ impl AppState {
                 self.session.opening_id = Some(session_id.clone());
                 self.status = format!("session {session_id}");
                 self.notify(NotificationLevel::Info, "session opened");
-                if self.focus_manager.active_mode() == AppMode::Sessions {
+                if self.focus_manager.active_mode() == AppMode::Surface(SurfaceId::Sessions) {
                     self.clear_focus();
                 }
             }
@@ -112,7 +112,7 @@ impl AppState {
                     }
                     return effects;
                 }
-                self.push_focus(AppMode::Sessions);
+                self.push_surface(SurfaceId::Sessions);
                 self.status = format!("{} sessions available", self.sessions.list.items.len());
             }
             Ok(piko_protocol::CommandResult::ModelListed { providers, .. }) => {
@@ -133,10 +133,10 @@ impl AppState {
                     }
                     _ => {
                         // Untracked ModelList (e.g. /login provider probe).
-                        if self.mode != AppMode::AuthSelector
-                            && !matches!(self.mode, AppMode::Models)
+                        if self.mode != AppMode::Surface(SurfaceId::AuthSelector)
+                            && !matches!(self.mode, AppMode::Surface(SurfaceId::Models))
                         {
-                            self.push_focus(AppMode::Models);
+                            self.push_surface(SurfaceId::Models);
                         }
                         self.status = format!("{} models available", self.models.len());
                     }
@@ -203,7 +203,7 @@ impl AppState {
             }
             Ok(piko_protocol::CommandResult::McpStatusListed { servers, .. }) => {
                 self.mcp.set_servers(servers);
-                self.push_focus(AppMode::Mcp);
+                self.push_surface(SurfaceId::Mcp);
                 let connected = self.mcp.connected_count();
                 let names: Vec<String> = self
                     .mcp
@@ -294,7 +294,7 @@ impl AppState {
                         self.model.active_thinking_level = Some(level);
                     }
                     // Refresh open Settings so ValueSummaries track host authority.
-                    if self.mode == AppMode::Settings {
+                    if self.mode == AppMode::Surface(SurfaceId::Settings) {
                         let snap = self.settings_snapshot();
                         // Rebuild without collapsing depth would need path restore;
                         // open-time refresh rebuilds from root with fresh summaries.

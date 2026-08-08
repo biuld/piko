@@ -1,7 +1,7 @@
 use piko_protocol::Command;
 
 use crate::{
-    app::{AppMode, AppState, command_id, config_command_for_setting, effect::Effect},
+    app::{AppState, SurfaceId, command_id, config_command_for_setting, effect::Effect},
     features::{notifications::NotificationLevel, settings::action_requires_hostd_restart},
     ui::components::{hierarchical_menu::MenuConfirmResult, setting::SettingConfirmResult},
 };
@@ -21,7 +21,7 @@ impl AppState {
         self.session
             .pending
             .track(command_id, super::pending::PendingCommandKind::SessionList);
-        self.push_focus(AppMode::Sessions);
+        self.push_surface(SurfaceId::Sessions);
         self.status = "loading sessions".to_string();
         effects
     }
@@ -33,7 +33,7 @@ impl AppState {
             super::pending::PendingCommandKind::ModelList,
         );
         let effects = vec![Effect::send(Command::ModelList { command_id })];
-        self.push_focus(AppMode::Models);
+        self.push_surface(SurfaceId::Models);
         self.status = "loading models".to_string();
         effects
     }

@@ -6,27 +6,27 @@ impl AppState {
     }
 
     pub(super) fn select_next(&mut self) {
-        match self.mode {
-            AppMode::Tree => self.tree.select_next_filtered(),
-            AppMode::Settings => self.settings.select_next(),
-            AppMode::Sessions => self.sessions.select_next(),
-            AppMode::AgentList => self.agents.move_down(),
-            AppMode::Models => self.models.select_next(),
-            AppMode::AuthSelector => self.auth_selector.select_next(),
-            AppMode::Diagnostics => self.diagnostics.scroll_down(1),
+        match self.mode.as_surface() {
+            Some(SurfaceId::Tree) => self.tree.select_next_filtered(),
+            Some(SurfaceId::Settings) => self.settings.select_next(),
+            Some(SurfaceId::Sessions) => self.sessions.select_next(),
+            Some(SurfaceId::AgentList) => self.agents.move_down(),
+            Some(SurfaceId::Models) => self.models.select_next(),
+            Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
+            Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
             _ => {}
         }
     }
 
     pub(super) fn select_prev(&mut self) {
-        match self.mode {
-            AppMode::Tree => self.tree.select_prev_filtered(),
-            AppMode::Settings => self.settings.select_prev(),
-            AppMode::Sessions => self.sessions.select_prev(),
-            AppMode::AgentList => self.agents.move_up(),
-            AppMode::Models => self.models.select_prev(),
-            AppMode::AuthSelector => self.auth_selector.select_prev(),
-            AppMode::Diagnostics => self.diagnostics.scroll_up(1),
+        match self.mode.as_surface() {
+            Some(SurfaceId::Tree) => self.tree.select_prev_filtered(),
+            Some(SurfaceId::Settings) => self.settings.select_prev(),
+            Some(SurfaceId::Sessions) => self.sessions.select_prev(),
+            Some(SurfaceId::AgentList) => self.agents.move_up(),
+            Some(SurfaceId::Models) => self.models.select_prev(),
+            Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
+            Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
             _ => {}
         }
     }
@@ -43,7 +43,7 @@ impl AppState {
         let Some(turn_id) = turn_id else {
             if let Some(diff) = self.last_turn_diff.clone() {
                 self.diagnostics.set_diff(&diff);
-                self.push_focus(AppMode::Diagnostics);
+                self.push_surface(SurfaceId::Diagnostics);
                 self.status = "turn diff".to_string();
             } else {
                 self.status = "no turn id for /diff".to_string();
@@ -55,7 +55,7 @@ impl AppState {
             && diff.turn_id == turn_id
         {
             self.diagnostics.set_diff(diff);
-            self.push_focus(AppMode::Diagnostics);
+            self.push_surface(SurfaceId::Diagnostics);
             self.status = "turn diff".to_string();
             return Vec::new();
         }
@@ -105,14 +105,14 @@ impl AppState {
 
     pub(super) fn close_surface(&mut self) {
         match self.mode {
-            AppMode::SummaryPrompt => {
+            AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 self.summary_prompt = None;
                 self.pop_focus();
             }
-            AppMode::Tree if self.tree.label_editor.is_some() => {
+            AppMode::Surface(SurfaceId::Tree) if self.tree.label_editor.is_some() => {
                 self.tree.cancel_label_edit();
             }
-            AppMode::ToolInteraction => {
+            AppMode::Surface(SurfaceId::ToolInteraction) => {
                 if let Some(interaction) = self.interactions.front_mut()
                     && interaction.workflow.input_active()
                 {
@@ -121,7 +121,7 @@ impl AppState {
                 }
                 self.pop_focus();
             }
-            AppMode::Settings => {
+            AppMode::Surface(SurfaceId::Settings) => {
                 if !self.settings.pop() {
                     self.pop_focus();
                 }
@@ -133,7 +133,7 @@ impl AppState {
 
     pub(super) fn select_surface_next(&mut self) {
         match self.mode {
-            AppMode::SummaryPrompt => {
+            AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.next_step();
                 }
@@ -144,7 +144,7 @@ impl AppState {
 
     pub(super) fn select_surface_prev(&mut self) {
         match self.mode {
-            AppMode::SummaryPrompt => {
+            AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.prev_step();
                 }
@@ -164,14 +164,14 @@ impl AppState {
         }
 
         match self.mode {
-            AppMode::Tree => {
+            AppMode::Surface(SurfaceId::Tree) => {
                 self.tree.rebuild_visible_for_filter();
             }
-            AppMode::Sessions => self.sessions.list.selected = 0,
-            AppMode::AgentList => self.agents.list.selected = 0,
-            AppMode::Models => self.models.reset(),
-            AppMode::Settings => self.settings.reset_selection(),
-            AppMode::AuthSelector => {
+            AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
+            AppMode::Surface(SurfaceId::AgentList) => self.agents.list.selected = 0,
+            AppMode::Surface(SurfaceId::Models) => self.models.reset(),
+            AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
+            AppMode::Surface(SurfaceId::AuthSelector) => {
                 if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
                     frame.list.selected = 0;
                 }
@@ -191,14 +191,14 @@ impl AppState {
         }
 
         match self.mode {
-            AppMode::Tree => {
+            AppMode::Surface(SurfaceId::Tree) => {
                 self.tree.rebuild_visible_for_filter();
             }
-            AppMode::Sessions => self.sessions.list.selected = 0,
-            AppMode::AgentList => self.agents.list.selected = 0,
-            AppMode::Models => self.models.reset(),
-            AppMode::Settings => self.settings.reset_selection(),
-            AppMode::AuthSelector => {
+            AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
+            AppMode::Surface(SurfaceId::AgentList) => self.agents.list.selected = 0,
+            AppMode::Surface(SurfaceId::Models) => self.models.reset(),
+            AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
+            AppMode::Surface(SurfaceId::AuthSelector) => {
                 if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
                     frame.list.selected = 0;
                 }
@@ -226,33 +226,39 @@ impl AppState {
     }
 
     pub(super) fn confirm_selection(&mut self) -> Vec<Effect> {
-        if self.focus_manager.active_mode() == AppMode::SummaryPrompt {
+        if self
+            .focus_manager
+            .active_mode()
+            .is_surface(SurfaceId::SummaryPrompt)
+        {
             return self.confirm_summary_prompt();
         }
 
-        if self.mode == AppMode::Tree && self.tree.label_editor.is_some() {
+        if self.mode.is_surface(SurfaceId::Tree) && self.tree.label_editor.is_some() {
             return self.confirm_tree_label_edit();
         }
 
-        match self.mode {
-            AppMode::Tree => self.confirm_tree_entry(),
-            AppMode::Sessions => self.open_selected_session(),
-            AppMode::AgentList => {
+        match self.mode.as_surface() {
+            Some(SurfaceId::Tree) => self.confirm_tree_entry(),
+            Some(SurfaceId::Sessions) => self.open_selected_session(),
+            Some(SurfaceId::AgentList) => {
                 self.pop_focus(); // Just close the view
                 Vec::new()
             }
-            AppMode::Models => self.apply_selected_model(),
-            AppMode::Settings => self.apply_selected_setting(),
-            AppMode::AuthSelector => self.confirm_auth_selection(),
-            AppMode::Status
-            | AppMode::Mcp
-            | AppMode::Diagnostics
-            | AppMode::Help
-            | AppMode::Chat
-            | AppMode::Approval
-            | AppMode::ToolInteraction
-            | AppMode::SummaryPrompt
-            | AppMode::AgentPanel => Vec::new(),
+            Some(SurfaceId::Models) => self.apply_selected_model(),
+            Some(SurfaceId::Settings) => self.apply_selected_setting(),
+            Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
+            Some(
+                SurfaceId::Status
+                | SurfaceId::Mcp
+                | SurfaceId::Diagnostics
+                | SurfaceId::Help
+                | SurfaceId::Approval
+                | SurfaceId::ToolInteraction
+                | SurfaceId::SummaryPrompt
+                | SurfaceId::Agents,
+            )
+            | None => Vec::new(),
         }
     }
 

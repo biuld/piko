@@ -6,8 +6,8 @@ use piko_protocol::{
 use serde_json::json;
 
 use crate::app::{
-    AppMode, AppState, InitialOptions, ToolStatus, command::EditorAction, effect::Effect,
-    get_active_branch_entries,
+    AppMode, AppState, InitialOptions, SurfaceId, ToolStatus, command::EditorAction,
+    effect::Effect, get_active_branch_entries,
 };
 use crate::features::timeline::TimelineKind;
 

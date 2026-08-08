@@ -2,8 +2,8 @@ use piko_protocol::{Command, ServerMessage as Event, SessionSnapshot, SessionTre
 
 use crate::{
     app::{
-        AppMode, AppState, QueueStatus, ToolStatus, command_id, effect::Effect, flatten_models,
-        get_active_branch_entries,
+        AppMode, AppState, QueueStatus, SurfaceId, ToolStatus, command_id, effect::Effect,
+        flatten_models, get_active_branch_entries,
     },
     config::TuiConfig,
     features::notifications::NotificationLevel,

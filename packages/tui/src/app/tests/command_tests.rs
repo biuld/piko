@@ -134,7 +134,10 @@ fn mcp_status_listed_event_opens_panel() {
     assert_eq!(app.mcp.connected_count(), 1);
     assert_eq!(app.mcp.servers().len(), 2);
     assert_eq!(app.status, "1 MCP server(s) connected");
-    assert_eq!(app.focus_manager.active_mode(), AppMode::Mcp);
+    assert_eq!(
+        app.focus_manager.active_mode(),
+        AppMode::Surface(SurfaceId::Mcp)
+    );
     let latest = app.notifications.items().back().expect("notification");
     assert!(latest.message.contains("filesystem"));
 }

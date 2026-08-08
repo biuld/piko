@@ -36,7 +36,10 @@ fn turn_diff_got_opens_diagnostics_panel() {
             timestamp: 0,
         }),
     });
-    assert_eq!(app.focus_manager.active_mode(), AppMode::Diagnostics);
+    assert_eq!(
+        app.focus_manager.active_mode(),
+        AppMode::Surface(SurfaceId::Diagnostics)
+    );
     assert_eq!(app.last_turn_id.as_deref(), Some("turn-9"));
     assert!(app.last_turn_diff.is_some());
 }

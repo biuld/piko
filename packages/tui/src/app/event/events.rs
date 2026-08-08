@@ -184,7 +184,7 @@ impl AppState {
                     require_confirm,
                 );
                 if auto_resolution_ms.is_none() {
-                    self.push_focus(AppMode::ToolInteraction);
+                    self.push_surface(SurfaceId::ToolInteraction);
                 }
             }
             piko_protocol::InteractionEvent::Resolved {
@@ -198,7 +198,8 @@ impl AppState {
                 }
                 self.interactions.resolve(&interaction_id);
                 if self.interactions.is_empty()
-                    && self.focus_manager.active_mode() == AppMode::ToolInteraction
+                    && self.focus_manager.active_mode()
+                        == AppMode::Surface(SurfaceId::ToolInteraction)
                 {
                     self.clear_focus();
                 }

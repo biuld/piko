@@ -103,13 +103,13 @@ impl AppState {
     pub(super) fn dispatch_surface_action(&mut self, action: SurfaceAction) -> Vec<Effect> {
         match action {
             SurfaceAction::OpenHelp => {
-                self.push_focus(AppMode::Help);
+                self.push_surface(SurfaceId::Help);
                 self.status = "help".to_string();
             }
             SurfaceAction::OpenSettings => {
                 let snap = self.settings_snapshot();
                 self.settings.open_root(&snap);
-                self.push_focus(AppMode::Settings);
+                self.push_surface(SurfaceId::Settings);
                 self.status = "settings".to_string();
                 let command_id = super::command_id();
                 self.session.pending.track(
@@ -122,19 +122,19 @@ impl AppState {
                 })];
             }
             SurfaceAction::OpenStatus => {
-                self.push_focus(AppMode::Status);
+                self.push_surface(SurfaceId::Status);
                 self.status = "status".to_string();
             }
             SurfaceAction::OpenTree => {
                 self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
-                self.push_focus(AppMode::Tree);
+                self.push_surface(SurfaceId::Tree);
                 self.tree.rebuild_visible_for_filter();
                 self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             SurfaceAction::OpenThinking => {
                 let snap = self.settings_snapshot();
                 self.settings.open_thinking(&snap);
-                self.push_focus(AppMode::Settings);
+                self.push_surface(SurfaceId::Settings);
                 self.status = "thinking level".to_string();
             }
             SurfaceAction::Close => self.close_surface(),
@@ -152,7 +152,7 @@ impl AppState {
         match action {
             SessionAction::RequestList => effects.extend(self.request_sessions()),
             SessionAction::ToggleScope => {
-                if self.mode == AppMode::Sessions {
+                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.scope = match self.sessions.scope {
                         crate::features::session_list::SessionScope::CurrentFolder => {
                             crate::features::session_list::SessionScope::All
@@ -165,13 +165,13 @@ impl AppState {
                 }
             }
             SessionAction::ToggleNamed => {
-                if self.mode == AppMode::Sessions {
+                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.named_only = !self.sessions.named_only;
                     self.reset_overlay_selection();
                 }
             }
             SessionAction::TogglePath => {
-                if self.mode == AppMode::Sessions {
+                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.show_path = !self.sessions.show_path;
                 }
             }
@@ -189,7 +189,7 @@ impl AppState {
         match action {
             AgentAction::RequestList => {
                 self.agents.loading = true;
-                self.push_focus(AppMode::AgentList);
+                self.push_surface(SurfaceId::AgentList);
                 vec![Effect::send(Command::AgentSpecList {
                     command_id: command_id(),
                 })]

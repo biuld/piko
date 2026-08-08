@@ -1,0 +1,9 @@
+[package]
+name = "piko-tui-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generic ratatui flex layout engine: plane compositions, modal z-stack, focus"
+
+[dependencies]
+ratatui = "0.30.2"

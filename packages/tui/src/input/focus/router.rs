@@ -23,27 +23,27 @@ impl InputRouter {
             return Some(action);
         }
 
-        // ── P1.5: Global keybindings that push focus modes ──
+        // ── P1.5: Global keybindings that open browse surfaces ──
         if ka == Some(KeyAction::AgentPanel) {
-            app.push_focus(AppMode::AgentPanel);
+            app.push_surface(SurfaceId::Agents);
             return None;
         }
 
         // ── P2: Focus Owner ═══
         let active = app.focus_manager.active_mode();
-        // AgentPanel focus: ↑↓ select, Enter subscribe, Esc dismiss
-        if active == AppMode::AgentPanel {
-            if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
-                app.clear_focus();
-                return None;
-            }
+        // Agents surface: ↑↓ select, Enter subscribe, Esc close (P1 may also Close).
+        if active.is_surface(SurfaceId::Agents) {
             match ka {
-                Some(KeyAction::SelectNext) => app.agent_panel.select_next(),
-                Some(KeyAction::SelectPrev) => app.agent_panel.select_prev(),
+                Some(KeyAction::SelectNext) => {
+                    app.agent_panel.select_next();
+                    return None;
+                }
+                Some(KeyAction::SelectPrev) => {
+                    app.agent_panel.select_prev();
+                    return None;
+                }
                 Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
                     if let Some(agent) = app.agent_panel.selected_agent().cloned() {
-                        // Do not mark active here — AgentSubscribed swaps/clears
-                        // the timeline and sets the viewed agent.
                         app.clear_focus();
                         return Some(
                             AgentPanelAction::Subscribe {
@@ -53,14 +53,18 @@ impl InputRouter {
                             .into(),
                         );
                     }
+                    return None;
                 }
                 _ => {}
             }
-            return None;
+            // Capture remaining keys so editor does not type under the surface.
+            if key.code != KeyCode::Esc && ka != Some(KeyAction::Cancel) {
+                return None;
+            }
         }
         if active != AppMode::Chat {
             // Check if SummaryPrompt overrides
-            if active == AppMode::SummaryPrompt {
+            if active.is_surface(SurfaceId::SummaryPrompt) {
                 match key.code {
                     KeyCode::Esc => {
                         if let Some(state) = &mut app.summary_prompt
@@ -125,10 +129,18 @@ impl InputRouter {
     ) -> Option<Action> {
         // ── Esc (Cancel) ──
         if ka == Some(KeyAction::Cancel) || key.code == KeyCode::Esc {
-            if app.focus_manager.active_mode() == AppMode::Approval {
+            if app
+                .focus_manager
+                .active_mode()
+                .is_surface(SurfaceId::Approval)
+            {
                 return Some(ApprovalAction::Respond(ApprovalDecision::Decline).into());
             }
-            if app.focus_manager.active_mode() == AppMode::ToolInteraction {
+            if app
+                .focus_manager
+                .active_mode()
+                .is_surface(SurfaceId::ToolInteraction)
+            {
                 return Some(ToolInteractionAction::Cancel.into());
             }
             // 1. Blocking surface active → close it
@@ -177,8 +189,8 @@ impl InputRouter {
         ka: Option<KeyAction>,
         key: KeyEvent,
     ) -> Option<Action> {
-        // Approval mode: special handling before generic surface routing
-        if active == AppMode::Approval {
+        // Approval / tool-interaction / summary have dedicated capture paths.
+        if active.is_surface(SurfaceId::Approval) {
             if let Some(action) = match ka {
                 Some(KeyAction::ApprovalAccept) => {
                     Some(ApprovalAction::Respond(ApprovalDecision::Accept).into())
@@ -212,7 +224,7 @@ impl InputRouter {
             };
         }
 
-        if active == AppMode::ToolInteraction {
+        if active.is_surface(SurfaceId::ToolInteraction) {
             return match key.code {
                 KeyCode::Enter => Some(ToolInteractionAction::Submit.into()),
                 KeyCode::Esc => Some(ToolInteractionAction::Cancel.into()),
@@ -242,15 +254,17 @@ impl InputRouter {
             };
         }
 
-        match active {
-            // Filterable list surfaces: Tree, Sessions, Settings, Models, AuthSelector
-            AppMode::Tree
-            | AppMode::Sessions
-            | AppMode::AgentList
-            | AppMode::Settings
-            | AppMode::Models
-            | AppMode::AuthSelector => {
-                if active == AppMode::Tree {
+        match active.as_surface() {
+            // Filterable list surfaces
+            Some(
+                surface @ (SurfaceId::Tree
+                | SurfaceId::Sessions
+                | SurfaceId::AgentList
+                | SurfaceId::Settings
+                | SurfaceId::Models
+                | SurfaceId::AuthSelector),
+            ) => {
+                if surface == SurfaceId::Tree {
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         return Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
                             TreeAction::FilterCycleBackward.into()
@@ -307,7 +321,7 @@ impl InputRouter {
                     }
                 }
 
-                if active == AppMode::Sessions {
+                if surface == SurfaceId::Sessions {
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         return Some(SessionAction::ToggleScope.into());
                     }
@@ -325,8 +339,8 @@ impl InputRouter {
                 }
                 Self::handle_filterable_surface(key, ka)
             }
-            // Info panels: Status / MCP / Diagnostics
-            AppMode::Status | AppMode::Mcp | AppMode::Diagnostics => match ka {
+            // Info panels
+            Some(SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Diagnostics) => match ka {
                 Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
                 Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
@@ -335,8 +349,7 @@ impl InputRouter {
                 None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
             },
-            // Help: passive info panel
-            AppMode::Help => match ka {
+            Some(SurfaceId::Help) => match ka {
                 Some(KeyAction::Cancel | KeyAction::Submit | KeyAction::Confirm) => {
                     Some(SurfaceAction::Close.into())
                 }
@@ -344,11 +357,15 @@ impl InputRouter {
                 None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
             },
-            AppMode::AgentPanel => None,
-            AppMode::Chat
-            | AppMode::Approval
-            | AppMode::ToolInteraction
-            | AppMode::SummaryPrompt => None,
+            // Handled above; fall through if focus somehow reached here.
+            Some(
+                SurfaceId::Approval
+                | SurfaceId::ToolInteraction
+                | SurfaceId::SummaryPrompt
+                | SurfaceId::Agents,
+            ) => None,
+            // Editor chrome never reaches filter routing via this path.
+            None => None,
         }
     }
 

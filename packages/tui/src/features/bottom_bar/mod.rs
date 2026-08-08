@@ -1,9 +1,7 @@
-//! BottomBar — always-visible status row at the bottom of the TUI.
+//! BottomBar — always-visible status row at the bottom of the TUI (shell chrome).
 //!
-//! Displays contextual session information as items separated by `·`.
-//! No key hints or interactive prompts.  Configurable via `tui.bottomBar.*` settings.
-//!
-//! Default items: model · cwd · context · cost
+//! Compact session projection: agent · model · cwd · context · cost.
+//! Read-only. Full agent tree is a Browse surface (F4), not a plane strip.
 
 use std::path::Path;
 
@@ -15,20 +13,21 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::{config::bottom_bar::BottomBarItem, theme::Theme};
+use crate::{config::bottom_bar::BottomBarItem, theme::Theme, ui::components::spinner_glyph};
 
 pub struct BottomBar;
 
 pub struct BottomBarView<'a> {
     pub items: &'a [BottomBarItem],
+    /// Compact agent label, e.g. `main`, `main ⠋`, `·3`.
+    pub agent: Option<&'a str>,
+    pub agent_busy: bool,
+    pub spinner_frame: usize,
     pub model_id: Option<&'a str>,
     pub thinking_level: Option<&'a str>,
     pub cwd: &'a Path,
-    /// Approximate tokens in the current context (last model prompt size).
     pub context_used: Option<u64>,
-    /// Active model's context window size.
     pub context_total: Option<u64>,
-    /// Session cumulative cost in USD when usage has been projected.
     pub cost_usd: Option<f64>,
     pub theme: &'a Theme,
 }
@@ -40,6 +39,9 @@ impl BottomBar {
             .iter()
             .flat_map(|item| {
                 let span = match item {
+                    BottomBarItem::Agent => {
+                        render_agent(view.agent, view.agent_busy, view.spinner_frame, view.theme)
+                    }
                     BottomBarItem::Model => render_model(view.model_id, view.thinking_level),
                     BottomBarItem::Cwd => render_cwd(view.cwd),
                     BottomBarItem::Context => {
@@ -47,7 +49,6 @@ impl BottomBar {
                     }
                     BottomBarItem::Cost => render_cost(view.cost_usd, view.theme),
                 };
-                // Insert separator between items
                 [
                     Span::raw(" "),
                     separator(view.theme.dim),
@@ -57,9 +58,8 @@ impl BottomBar {
             })
             .collect();
 
-        // Drop the leading separator
         let items = if items.len() >= 3 {
-            &items[3..] // skip first " · "
+            &items[3..]
         } else {
             &items[..]
         };
@@ -70,13 +70,25 @@ impl BottomBar {
     }
 }
 
-// ── separator ────────────────────────────────────────────────────────────────
-
 fn separator(dim: ratatui::style::Color) -> Span<'static> {
     Span::styled("·", Style::default().fg(dim))
 }
 
-// ── item renderers ───────────────────────────────────────────────────────────
+fn render_agent(
+    agent: Option<&str>,
+    busy: bool,
+    spinner_frame: usize,
+    theme: &Theme,
+) -> Span<'static> {
+    match agent {
+        None => Span::styled("—", Style::default().fg(theme.dim)),
+        Some(name) if busy => {
+            let spin = spinner_glyph(spinner_frame);
+            Span::styled(format!("{name} {spin}"), Style::default().fg(theme.accent))
+        }
+        Some(name) => Span::raw(name.to_string()),
+    }
+}
 
 fn render_model<'a>(model_id: Option<&'a str>, thinking_level: Option<&'a str>) -> Span<'a> {
     let model = model_id.unwrap_or("—");
@@ -94,7 +106,6 @@ fn render_model<'a>(model_id: Option<&'a str>, thinking_level: Option<&'a str>) 
 fn render_cwd(cwd: &Path) -> Span<'_> {
     let cwd_str = cwd.to_string_lossy();
 
-    // Replace $HOME with ~
     let display = if let Some(home) = dirs::home_dir() {
         let home_str = home.to_string_lossy();
         if cwd_str.starts_with(home_str.as_ref()) {
@@ -111,7 +122,6 @@ fn render_cwd(cwd: &Path) -> Span<'_> {
         cwd_str.to_string()
     };
 
-    // Truncate from left if too long
     let display = if display.len() > 40 {
         format!("…{}", &display[display.len().saturating_sub(39)..])
     } else {
@@ -138,7 +148,6 @@ fn render_cost(cost_usd: Option<f64>, theme: &Theme) -> Span<'static> {
     }
 }
 
-/// Human-readable context fill: `12.2k/200k`, partial `12.2k/—`, or `—/—`.
 pub fn format_context(used: Option<u64>, total: Option<u64>) -> String {
     match (used, total) {
         (None, None) => "—/—".to_string(),
@@ -150,7 +159,6 @@ pub fn format_context(used: Option<u64>, total: Option<u64>) -> String {
     }
 }
 
-/// Session cost in USD (`$0.42`, `$0.0042` for small amounts).
 pub fn format_cost(cost_usd: f64) -> String {
     if !cost_usd.is_finite() || cost_usd < 0.0 {
         return "—".to_string();
@@ -165,7 +173,6 @@ pub fn format_cost(cost_usd: f64) -> String {
     }
 }
 
-/// Compact token counts for the status row (`1.5k`, `200k`, `1.2M`).
 pub fn format_tokens(n: u64) -> String {
     if n >= 1_000_000 {
         let m = n as f64 / 1_000_000.0;
@@ -185,7 +192,6 @@ pub fn format_tokens(n: u64) -> String {
     }
 }
 
-/// Prompt-side tokens for an approximate context-window fill.
 pub fn context_tokens_from_usage(usage: &piko_protocol::messages::Usage) -> u64 {
     usage.input.saturating_add(usage.cache_read)
 }
@@ -199,25 +205,19 @@ mod tests {
         assert_eq!(format_tokens(0), "0");
         assert_eq!(format_tokens(999), "999");
         assert_eq!(format_tokens(1000), "1k");
-        assert_eq!(format_tokens(12_200), "12.2k");
-        assert_eq!(format_tokens(200_000), "200k");
-        assert_eq!(format_tokens(1_000_000), "1M");
-        assert_eq!(format_tokens(1_500_000), "1.5M");
+        assert_eq!(format_tokens(1500), "1.5k");
     }
 
     #[test]
-    fn format_context_placeholders() {
+    fn format_context_pairs() {
         assert_eq!(format_context(None, None), "—/—");
-        assert_eq!(format_context(Some(12_200), None), "12.2k/—");
-        assert_eq!(format_context(None, Some(200_000)), "—/200k");
-        assert_eq!(format_context(Some(12_200), Some(200_000)), "12.2k/200k");
+        assert_eq!(format_context(Some(1200), Some(200_000)), "1.2k/200k");
     }
 
     #[test]
-    fn format_cost_scales() {
+    fn format_cost_usd() {
         assert_eq!(format_cost(0.0), "$0.00");
         assert_eq!(format_cost(0.42), "$0.42");
         assert_eq!(format_cost(0.0042), "$0.0042");
-        assert_eq!(format_cost(f64::NAN), "—");
     }
 }

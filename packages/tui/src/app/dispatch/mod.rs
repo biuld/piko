@@ -1,7 +1,7 @@
 use piko_protocol::Command;
 
 use crate::app::{
-    AppMode, AppState,
+    AppMode, AppState, SurfaceId,
     command::{
         Action, AgentAction, AppAction, ApprovalAction, EditorAction, ModelAction,
         NotificationAction, SessionAction, SlashAction, SurfaceAction, TimelineAction,

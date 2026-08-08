@@ -19,7 +19,7 @@ impl Default for BottomBarConfig {
 
 fn default_items() -> Vec<BottomBarItem> {
     use BottomBarItem::*;
-    vec![Model, Cwd, Context, Cost]
+    vec![Agent, Model, Cwd, Context, Cost]
 }
 
 // ── BottomBarItem ────────────────────────────────────────────────────────────
@@ -28,6 +28,8 @@ fn default_items() -> Vec<BottomBarItem> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BottomBarItem {
+    /// Compact agent summary (active / busy / count). Open full tree via F4.
+    Agent,
     /// Model provider + model ID + thinking level.
     Model,
     /// Project working directory (abbreviated).

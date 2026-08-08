@@ -62,28 +62,28 @@ Goals:
 
 ## Shell layout (information zones)
 
-Chat shell zones, top to bottom:
+Workspace + shell chrome (not A–E slots):
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ A  Timeline          conversation + tools + notices          │
+│ STREAM            conversation / tools (plane, grow)         │
 ├──────────────────────────────────────────────────────────────┤
-│ B  Agent strip       who is selected / running / queued      │
+│ DOCK (plane bottom stack)                                    │
+│   Notice?         ephemeral warning/error                    │
+│   Suggest?        completions when free composer             │
+│   Composer        editor                                     │
 ├──────────────────────────────────────────────────────────────┤
-│ C  Notification      ephemeral warning/error (conditional)   │
-├──────────────────────────────────────────────────────────────┤
-│ D' Suggestions       completions / slash menu (conditional)  │
-├──────────────────────────────────────────────────────────────┤
-│ D  Composer zone     editor OR partial overlay (palette,     │
-│                      model, settings, approval, workflow)    │
-├──────────────────────────────────────────────────────────────┤
-│ E  Bottom bar        model · cwd · context · cost (read-only)│
+│ CHROME            agent · model · cwd · context · cost       │
 └──────────────────────────────────────────────────────────────┘
+
+Z-modals (intent):
+  Browse  CoverBody   — sessions, tree, settings, agents, help…
+  Select  ComposerBand — models, MCP, auth…
+  Decide  Centered     — approval, tool workflow
 ```
 
-Full overlays (session list, tree, help, status) temporarily replace zones A–D
-while BottomBar may remain for orientation. Partial overlays replace only the
-composer zone so Timeline and Agent strip stay visible for context.
+Agents are not a permanent strip: F4 opens Browse surface `Agents`. Chrome shows
+a compact agent chip only.
 
 ## Global interaction grammar
 

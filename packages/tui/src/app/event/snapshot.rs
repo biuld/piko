@@ -136,12 +136,14 @@ impl AppState {
                 interaction.require_confirm,
             );
         }
-        if !self.approvals.is_empty() && self.focus_manager.active_mode() != AppMode::Approval {
-            self.push_focus(AppMode::Approval);
-        } else if !self.interactions.is_empty()
-            && self.focus_manager.active_mode() != AppMode::ToolInteraction
+        if !self.approvals.is_empty()
+            && self.focus_manager.active_mode() != AppMode::Surface(SurfaceId::Approval)
         {
-            self.push_focus(AppMode::ToolInteraction);
+            self.push_surface(SurfaceId::Approval);
+        } else if !self.interactions.is_empty()
+            && self.focus_manager.active_mode() != AppMode::Surface(SurfaceId::ToolInteraction)
+        {
+            self.push_surface(SurfaceId::ToolInteraction);
         }
     }
 }

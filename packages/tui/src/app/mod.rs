@@ -40,63 +40,15 @@ mod tests;
 
 // ── public types ──────────────────────────────────────────────────────────────
 
+// Product focus / surface catalog (lives under navigation; engine is generic).
+pub use crate::navigation::{AppMode, SurfaceId};
+
 /// Tool status shared between surfaces.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolStatus {
     Running,
     Completed,
     Failed,
-}
-
-/// Which overlay / mode is currently shown.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppMode {
-    Chat,
-    Sessions,
-    AgentList,
-    Tree,
-    Models,
-    Settings,
-    Status,
-    /// MCP server status surface (F-13): per-server connection state and
-    /// tool/resource/template counts from the `mcp.status` host command.
-    Mcp,
-    /// Read-only diagnostics: turn diff, prompt debug, rollout (F-15 client).
-    Diagnostics,
-    Help,
-    Approval,
-    ToolInteraction,
-    SummaryPrompt,
-    AuthSelector,
-    AgentPanel,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Placement {
-    Full,
-    Partial,
-}
-
-impl AppMode {
-    pub fn placement(&self) -> Option<Placement> {
-        match self {
-            AppMode::Chat => None,
-            AppMode::Help => Some(Placement::Full),
-            AppMode::Sessions => Some(Placement::Full),
-            AppMode::AgentList => Some(Placement::Full),
-            AppMode::Tree => Some(Placement::Full),
-            AppMode::Status => Some(Placement::Full),
-            AppMode::Diagnostics => Some(Placement::Full),
-            AppMode::Mcp => Some(Placement::Partial),
-            AppMode::Models => Some(Placement::Partial),
-            AppMode::Settings => Some(Placement::Partial),
-            AppMode::Approval => Some(Placement::Partial),
-            AppMode::ToolInteraction => Some(Placement::Partial),
-            AppMode::SummaryPrompt => Some(Placement::Full),
-            AppMode::AuthSelector => Some(Placement::Partial),
-            AppMode::AgentPanel => None,
-        }
-    }
 }
 
 #[derive(Clone, Default)]

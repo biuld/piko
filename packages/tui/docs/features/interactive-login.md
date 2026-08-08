@@ -6,7 +6,8 @@ The Interactive Login Overlay provides a user-friendly, keyboard-navigable inter
 
 ## Layout
 
-The selector opens as a centered partial overlay panel over the timeline view (using `Placement::Partial` slot allocation). It has two main states:
+The selector opens as a `ComposerBand` modal over the workspace plane
+(`Region::Surface(AuthSelector)`). It has two main states:
 
 1. **Selection Menu State**:
    - A list view presenting top-level choices: `Use a subscription (OAuth)` and `Use an API key`.

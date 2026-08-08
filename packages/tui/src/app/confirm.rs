@@ -1,6 +1,6 @@
 use piko_protocol::{Command, SessionTreeEntry};
 
-use crate::app::{AppMode, AppState, command_id, effect::Effect};
+use crate::app::{AppState, SurfaceId, command_id, effect::Effect};
 
 impl AppState {
     pub(crate) fn confirm_summary_prompt(&mut self) -> Vec<Effect> {
@@ -59,7 +59,7 @@ impl AppState {
             self.summary_prompt = Some(crate::features::tree::create_summary_prompt(
                 entry_id.clone(),
             ));
-            self.push_focus(AppMode::SummaryPrompt);
+            self.push_surface(SurfaceId::SummaryPrompt);
             return Vec::new();
         }
 

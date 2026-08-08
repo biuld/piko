@@ -34,12 +34,13 @@ hostd remains authoritative for durable user-visible session state. The TUI
 requests mutations and then rebuilds from hostd snapshots or mutation-result
 events.
 
-## Placement And Focus
+## Body mount and focus
 
-Session Tree is an `AppMode::Tree` full overlay. It replaces Slots A, B, C, and
-D and leaves the BottomBar in Slot E.
+Session Tree is `SurfaceId::Tree` as a `CoverBody` modal
+(`Region::Surface(Tree)`). Workspace plane stays solved underneath but is not
+painted while covered; BottomBar remains shell chrome.
 
-Opening the tree pushes `AppMode::Tree` onto `FocusManager`. Closing the panel
+Opening the tree pushes `AppMode::Surface(SurfaceId::Tree)`. Closing the panel
 pops focus back to the previous mode, usually Chat. Successful navigation clears
 focus back to Chat after hostd acknowledges the mutation.
 

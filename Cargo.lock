@@ -5036,6 +5036,7 @@ dependencies = [
  "dirs 6.0.0",
  "piko-comms",
  "piko-protocol",
+ "piko-tui-layout",
  "pulldown-cmark",
  "ratatui",
  "serde",
@@ -5045,6 +5046,13 @@ dependencies = [
  "two-face",
  "unicode-width",
  "uuid",
+]
+
+[[package]]
+name = "piko-tui-layout"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
 ]
 
 [[package]]

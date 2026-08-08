@@ -3,7 +3,7 @@
 > Status: implemented (value visibility + Settings kit; draft→reviewed pending
 > product walkthrough)
 >
-> Parent: [ui-ux.md](./ui-ux.md) (partial overlay, slash/palette openers)
+> Parent: [ui-ux.md](./ui-ux.md) (full overlay, slash/palette openers)
 > Feedback language: [component-feedback.md](./component-feedback.md)
 > (Selected ≠ Active; new Settings components listed there)
 > Persistence transport: hostd `ConfigGet` / `ConfigUpdate` (JSON merge patch;
@@ -12,8 +12,8 @@
 ## Overview
 
 The Settings surface lets the user inspect and change runtime configuration
-while staying in the chat session. It opens as a **partial overlay** over the
-timeline (same placement family as model selector / thinking picker).
+while staying in the chat session. It opens as a **full overlay** (replaces
+zones A–D above BottomBar), same placement family as Sessions / Help / Tree.
 
 Settings are **not** a free-form editor and **not** a wall of Enable/Disable
 commands. They are a **value-first catalog** of named settings: at every level
@@ -88,7 +88,7 @@ logical components. Names are product contracts; rust module names may differ
 as long as the boundaries stay clear.
 
 ```text
-Settings surface (partial overlay)
+Settings surface (full overlay)
 └─ SettingsNavStack          # depth, title, Esc pop, filter scope
    ├─ SettingCatalog (root)  # list of SettingSection rows
    │    └─ SettingSectionRow # label · ValueSummary · EffectBadge · drill
@@ -257,8 +257,9 @@ Reserved so we do not overload ChoiceList later.
 
 ## Layout
 
-Settings remains a **partial overlay** (centered, over timeline + editor
-region per ui-ux; not a full-screen zone A takeover).
+Settings is a **full overlay** (replaces content above BottomBar; BottomBar
+may remain for orientation). The catalog uses full terminal height for value
+lists and nested options.
 
 Root catalog is **domain-chunked**: non-selectable group captions group related
 rows (Thinking · Context · Tools · Diagnostics · Appearance · Advanced). Section

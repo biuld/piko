@@ -44,30 +44,11 @@ Previously, typing `/login` immediately launched an OAuth flow for `anthropic`, 
 └────────────────────────┘                    └────────────────────────┘
 ```
 
-### 1. Mode and Placement Updates
+### 1. Focus surface
 
-`AppMode` includes the authentication selector:
-
-```rust
-pub enum AppMode {
-    Chat,
-    Sessions,
-    Tree,
-    Models,
-    Settings,
-    Status,
-    Help,
-    Approval,
-    ToolInteraction,
-    SummaryPrompt,
-    AuthSelector, // <-- New Mode
-}
-```
-
-Its placement is defined as `Placement::Partial` in `AppMode::placement()`:
-```rust
-AppMode::AuthSelector => Some(Placement::Partial)
-```
+Auth opens as `AppMode::Surface(SurfaceId::AuthSelector)` with a
+`ModalPlacement::ComposerBand` layer (`Region::Surface(AuthSelector)`).
+The workspace plane stays underneath (stream + agent + buried composer).
 
 ### 2. Panel Definition (`packages/tui/src/features/auth_selector/mod.rs`)
 

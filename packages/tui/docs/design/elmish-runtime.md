@@ -102,15 +102,15 @@ side effects directly through a client reference.
 
 ## Rendering Boundary
 
-Rendering remains slot/panel based:
+Rendering is shell / plane / modal (`piko-tui-layout` + product trees):
 
-- layout computes `LayoutMode` and slot constraints from state
-- render dispatch delegates to feature panels
-- root render builds narrow view structs or arguments from `AppState`
+- `compose_plane` + `compose_modals` declare `Node` / `ModalLayer` from state
+- `split_shell` + `solve` produce chrome + `FramePlan`; panels paint rects
+- root render builds narrow view structs from `AppState`
 - feature panels render from their own state plus narrow props; they do not take
   `AppState`
 
-The Elm-ish runtime does not change the no-floaters slot model.
+No floaters: only solved regions and shell chrome.
 
 ## Feature State Boundary
 

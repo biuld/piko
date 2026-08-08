@@ -5,7 +5,7 @@ use crate::{
     host::HostLine,
 };
 
-use super::{AppState, effect, pending};
+use super::{AppState, SurfaceId, effect, pending};
 
 impl AppState {
     pub fn update(&mut self, msg: effect::Msg) -> Vec<effect::Effect> {
@@ -99,7 +99,7 @@ impl AppState {
             }
             Some(pending::PendingCommandKind::ModelList) => {
                 self.status = format!("model list failed: {reason}");
-                if matches!(self.mode, super::AppMode::Models) {
+                if matches!(self.mode, super::AppMode::Surface(SurfaceId::Models)) {
                     self.pop_focus();
                 }
             }

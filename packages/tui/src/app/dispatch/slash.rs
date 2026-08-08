@@ -53,7 +53,7 @@ impl AppState {
                         .map(|p| p.provider.clone())
                         .collect();
                     self.auth_selector.reset(&provider_names);
-                    self.push_focus(AppMode::AuthSelector);
+                    self.push_surface(SurfaceId::AuthSelector);
                     self.status = "Select authentication method".to_string();
                 }
             }

@@ -1,8 +1,7 @@
-//! AgentPanel — agent list in slot B between Timeline and Editor.
+//! Agent instances panel — Browse surface (`SurfaceId::Agents`).
 //!
-//! Shows active agents with status indicators and tree connectors for
-//! parent-child spawn relationships. Supports selection with ↑↓ and
-//! Enter to switch the viewed agent.
+//! Compact agent status also projects into BottomBar chrome; this module
+//! paints the full selectable tree when the surface is open.
 
 use ratatui::{
     Frame,
@@ -136,16 +135,6 @@ impl AgentPanelState {
         let content_area = inset_horizontal(border.inner(area), DEFAULT_HORIZONTAL_INSET);
         frame.render_widget(border, area);
         frame.render_widget(Paragraph::new(lines), content_area);
-    }
-
-    pub fn height(&self) -> u16 {
-        let agent_count = self.agents.len();
-        let base = if agent_count == 0 {
-            1
-        } else {
-            agent_count as u16
-        };
-        base + 1 // +1 for top border
     }
 
     pub fn select_next(&mut self) {

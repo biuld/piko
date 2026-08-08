@@ -205,7 +205,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 
 ## Behavior when overlays are active
 
-- **Partial overlay** (Model Selector, Command Palette, Settings, etc.): the
+- **Partial overlay** (Model Selector, Command Palette, etc.): the
   Editor is replaced by the overlay. Keystrokes go to the overlay, not the
   Editor. Editor content is preserved and restored when the overlay closes.
 - **Full overlay** (Session List, Help, Tree, Status): the Editor is replaced

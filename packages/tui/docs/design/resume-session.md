@@ -202,50 +202,36 @@ surface.
 The integration path is:
 
 ```text
-AppMode::Sessions
+AppMode::Surface(SurfaceId::Sessions)
         |
         v
-Placement::Full
+ModalLayer { CoverBody, tree: leaf(Surface(Sessions)) }
         |
         v
-LayoutMode::FullOverlay { mode: AppMode::Sessions }
-        |
-        v
-build_full()
-        |
-        +--> Slot A: Resume Session panel, Constraint::Fill(1)
-        +--> Slot E: BottomBar, Constraint::Length(1)
+solve → layer rect = full body; plane still solved underneath (not painted)
 ```
 
-This means that while Resume Session is open:
+While Resume Session is open:
 
-- Slot A is replaced by the Resume Session panel.
-- Slot B AgentPanel is absent.
-- Slot C NotificationRow is absent.
-- Slot D' Suggestions is absent.
-- Slot D Editor is absent.
-- Slot E BottomBar remains visible.
+- Chrome (BottomBar) remains.
+- A `CoverBody` modal owns `Region::Surface(Sessions)`.
+- Workspace plane is not painted while cover is up.
 
-`build_constraints()` must remain pure and should not gain Resume Session
-specific branches. It already supports this feature through
-`LayoutMode::FullOverlay`. The only layout requirement is that
-`AppMode::Sessions.placement()` remains `Some(Placement::Full)`.
+`compose_plane` / `compose_modals` / `resolve_modal_surface` stay pure; Sessions
+only needs `modal_placement() == CoverBody`.
 
-Rendering stays in the existing full-panel dispatch:
+Rendering paints the surface leaf:
 
 ```rust
-fn render_full_panel(frame, app, area, mode) {
-    match mode {
-        AppMode::Sessions => app.sessions.render(...),
+Region::Surface(SurfaceId::Sessions) => app.sessions.render(...),
         ...
     }
 }
 ```
 
-The panel receives the full Slot A rectangle and must fit all visible content
-inside that area. Any header, filter row, list body, empty state, or status line
-is internal to the Session panel's own render method; none of these internal
-regions are layout slots.
+The panel receives the full cover-body host rect and must fit all visible
+content inside that area. Header, filter, list, empty state are internal to
+the panel — not separate layout regions.
 
 Focus also follows the existing LIFO stack:
 

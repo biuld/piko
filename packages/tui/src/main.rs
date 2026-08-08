@@ -5,6 +5,7 @@ mod features;
 mod host;
 mod input;
 mod layout;
+mod navigation;
 mod render;
 mod text;
 mod theme;

@@ -279,7 +279,7 @@ State snapshots should include any pending interactions so a TUI reconnect or
 resume can restore the visible workflow instead of leaving the tool blocked
 without UI.
 
-## TUI State And Placement
+## TUI state and body mount
 
 Add a workflow panel state owned by `AppState`, for example:
 
@@ -290,21 +290,18 @@ pub interactions: ToolInteractionPanel
 The panel stores a queue of pending interaction view models. The active item is
 the oldest unresolved request.
 
-Add `AppMode::ToolInteraction`. It uses the same partial-overlay placement as
-Approval mode:
+Open as `AppMode::Surface(SurfaceId::ToolInteraction)` with
+`SurfaceIntent::Decide` (`ModalPlacement::Centered`):
 
-- it is a partial overlay that replaces the Editor slot
-- Timeline and AgentPanel remain visible above it
-- Editor draft state is preserved while the panel is active
+- layer hosts `Region::Surface(ToolInteraction)` as a centered host
+- Stream + Composer remain on the plane under the layer
+- Editor draft is preserved
 - focus is pushed when the first interaction arrives
 - focus is popped when the queue becomes empty
 
-Approval should use the same partial-overlay placement. Approval and Tool
-Interactive Workflow both represent "the TUI is waiting for a user decision",
-so both replace the Editor instead of inserting an additional panel above it.
-If approvals and interactions are both pending, Approval should win because it
-controls security-sensitive tool execution. After approvals resolve, the
-workflow panel can become active.
+Approval uses the same Decide intent. If both are pending, Approval wins
+in `resolve_modal_surface`. After approvals resolve, the workflow panel can
+become active.
 
 TUI keeps its own queues as a defensive layer. Even if multiple prompt events
 arrive during reconnect or from older hostd versions, it displays and routes

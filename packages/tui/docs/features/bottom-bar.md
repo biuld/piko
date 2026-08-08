@@ -2,19 +2,26 @@
 
 ## Overview
 
-BottomBar is the always-visible status row at the bottom of the TUI. It displays
-contextual information about the current session in a compact, non-interactive
-format. It is purely read-only — no input, no focus.
+BottomBar is the always-visible status row at the bottom of the TUI (shell
+chrome). It displays compact session information as items separated by `·`.
+It is purely read-only — no input, no focus.
 
 ## Layout
 
 ```
-model_id thinking_level · ~/project/dir · context 12.2k/200k · $0.42
+agent · model_id thinking · ~/project · 12.2k/200k · $0.42
 ```
 
-Items are separated by `·` (U+00B7 middle dot). Each item is a single logical
-unit of information. No key hints, help text, or interactive prompts appear in
-the BottomBar.
+### Agent chip
+
+Compact projection of the viewed / primary agent instance:
+
+- Name of active agent (or first agent)
+- Busy → name + spinner (accent)
+- Multi-agent → `name·N`
+- Loading → `…`; empty → `—`
+- Full tree UI is Browse surface `Agents` (F4 / keymap AgentPanel), not chrome
+
 
 ## Items
 
@@ -75,12 +82,13 @@ the host. Settings live under the `tui.bottomBar` namespace.
 
 | Key                     | Type      | Default                           | Description                              |
 |-------------------------|-----------|-----------------------------------|------------------------------------------|
-| `tui.bottomBar.items`   | `string[]` | `["model", "cwd", "context", "cost"]` | Which items to show, in display order    |
+| `tui.bottomBar.items`   | `string[]` | `["agent", "model", "cwd", "context", "cost"]` | Which items to show, in display order    |
 
 ### Item identifiers
 
 | Identifier  | Item                |
 |-------------|---------------------|
+| `agent`     | Agent chip          |
 | `model`     | Model + thinking    |
 | `cwd`       | Project directory   |
 | `context`   | Context usage       |

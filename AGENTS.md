@@ -31,7 +31,8 @@ sandbox (leaf)
 | `piko-llmd` | lib | Model gateway, provider registry, OAuth, token/cost middleware. |
 | `piko-sandbox` | lib | Fail-closed filesystem and process sandbox. |
 | `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
-| `piko-tui` | binary | Ratatui UI (Slot → Panel → Component). Talks to hostd over stdio. See `packages/tui/AGENTS.md`. |
+| `piko-tui` | binary | Ratatui product UI over hostd. See `packages/tui/AGENTS.md`. |
+| `piko-tui-layout` | lib | Product-agnostic flex layout + focus generics. See `packages/tui-layout/AGENTS.md`. |
 | `piko-gui` | binary | GPUI desktop client (app / features / shell). Talks to hostd over stdio via client-core. See `packages/gui/AGENTS.md`. |
 | `island` | external lib | GPUI Islands infrastructure (theme, island panel, layout tree, overlay surface, widgets). No product ids/messages. Developed in the sibling `island-rs` repository. |
 
@@ -83,10 +84,11 @@ header; a landed PRD supersedes earlier conflicting documents.
 4. Provider abstraction, OAuth, token tracking → `llmd`
 5. Sandboxed file/process access → `sandbox`
 6. Wire types shared across packages → `packages/protocol`
-7. Terminal UI, panels, keybindings, focus, themes, CLI → `tui` (see `packages/tui/AGENTS.md`)
-8. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md`)
-9. Reusable Islands infrastructure (panel, theme, generic layout, overlay surface) → sibling `island-rs` repository (`island` crate); product ids/messages stay in `gui`
-10. Island infrastructure docs → sibling `island-rs/docs/` (`features/` · `design/` · `roadmap/`)
+7. Terminal UI, panels, keybindings, themes, CLI, product compose of layout → `tui` (see `packages/tui/AGENTS.md`)
+8. Terminal flex layout, shell split, modal z-stack, generic focus stack → `tui-layout` (`piko-tui-layout`); product surfaces/recipes remain in `tui`
+9. Desktop GUI (GPUI), islands, overlays, Settings, `[gui]` → `gui` (see `packages/gui/AGENTS.md`)
+10. Reusable Islands infrastructure (panel, theme, generic layout, overlay surface) → sibling `island-rs` repository (`island` crate); product ids/messages stay in `gui`
+11. Island infrastructure docs → sibling `island-rs/docs/` (`features/` · `design/` · `roadmap/`)
 
 ## Session storage
 
