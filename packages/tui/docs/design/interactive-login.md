@@ -39,7 +39,7 @@ Previously, typing `/login` immediately launched an OAuth flow for `anthropic`, 
          │                                              │
          ▼                                              ▼
 ┌────────────────────────┐                    ┌────────────────────────┐
-│    HierarchicalMenu    │                    │     ApiKeyInputSub     │
+│       MenuStack        │                    │     ApiKeyInputSub     │
 │ (Select type & prov)   │                    │ (Input key masked)     │
 └────────────────────────┘                    └────────────────────────┘
 ```
@@ -53,7 +53,7 @@ The workspace plane stays underneath (stream + agent + buried composer).
 ### 2. Panel Definition (`packages/tui/src/features/auth_selector/mod.rs`)
 
 The `auth_selector` feature module encapsulates the menu and API-key entry state machine.
-This panel encapsulates a `HierarchicalMenu<AuthAction>` for navigation and a simple state machine for the API key text entry phase.
+This panel encapsulates a `MenuStack<AuthAction>` for navigation and a simple state machine for the API key text entry phase.
 
 ```rust
 #[derive(Clone, Debug)]
@@ -72,14 +72,14 @@ pub enum AuthSelectorState {
 
 pub struct AuthSelector {
     pub state: AuthSelectorState,
-    pub menu: HierarchicalMenu<AuthAction>,
+    pub menu: MenuStack<AuthAction>,
     pub filter: String,
 }
 ```
 
 ### 3. Rendering and Focus Details
 
-* **Menu Phase**: The hierarchical menu is rendered using `HierarchicalMenu::render`.
+* **Menu Phase**: The menu is rendered using `MenuStack::render_minimal`.
 * **API Key Phase**: The user is presented with a text input prompt:
   * Prompt: `Enter API key for <provider>:`
   * The characters typed are masked using `*`.

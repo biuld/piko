@@ -59,6 +59,7 @@ fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBu
     }
     Some(match surface {
         SurfaceId::Models => app.models.select_band_budget(),
+        SurfaceId::Thinking => app.thinking.select_band_budget(),
         SurfaceId::Agents => app.agent_panel.select_band_budget(),
         SurfaceId::AuthSelector => app.auth_selector.select_band_budget(),
         SurfaceId::Mcp => app.mcp.select_band_budget(),

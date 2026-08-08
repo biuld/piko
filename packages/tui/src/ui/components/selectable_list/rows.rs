@@ -1,4 +1,4 @@
-//! Line-layout paint for [`super::SelectableItem`] (Stacked / KeyValue / Settings).
+//! Line-layout paint for [`super::SelectableItem`] (Stacked / Settings / Columns).
 
 use ratatui::{
     style::{Modifier, Style},
@@ -10,8 +10,7 @@ use super::{
 };
 use crate::theme::Theme;
 use crate::ui::components::feedback::{
-    ACTIVE_MARKER, active_marker_span, row_detail_style, row_primary_style, selection_prefix,
-    with_selected_bg,
+    row_detail_style, row_primary_style, selection_prefix, with_active_text, with_selected_bg,
 };
 use crate::ui::components::pane::section_rule_line;
 
@@ -22,13 +21,11 @@ pub(super) fn row_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     match item.layout {
-        SelectableRowLayout::KeyValue => {
-            vec![key_value_line(item, is_selected, row_width, theme)]
-        }
         SelectableRowLayout::Stacked => stacked_lines(item, is_selected, row_width, theme),
         SelectableRowLayout::Columns => {
-            // Columns uses the table body path; list fallback is primary only.
-            vec![key_value_line(item, is_selected, row_width, theme)]
+            // Columns normally paints through the table body; this is only a
+            // defensive fallback for mixed-layout lists.
+            stacked_lines(item, is_selected, row_width, theme)
         }
         SelectableRowLayout::SettingsRow => {
             vec![settings_row_line(item, is_selected, row_width, theme)]
@@ -40,12 +37,8 @@ pub(super) fn row_lines(
 }
 
 fn primary_style_for(is_selected: bool, is_active: bool, theme: &Theme) -> Style {
-    let mut primary_style =
-        with_selected_bg(row_primary_style(is_selected, theme), is_selected, theme);
-    if !is_selected && is_active {
-        primary_style = primary_style.fg(theme.text);
-    }
-    primary_style
+    let primary_style = with_selected_bg(row_primary_style(is_selected, theme), is_selected, theme);
+    with_active_text(primary_style, is_selected, is_active, theme)
 }
 
 pub(super) fn leading_group_lines(
@@ -95,28 +88,36 @@ fn stacked_lines(
     row_width: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-    let marker = selection_prefix(is_selected);
     let primary_style = primary_style_for(is_selected, item.is_active, theme);
     let primary_disp = middle_elide_chars(&item.primary, 60, 30, 27);
+    let marker = selection_prefix(is_selected);
+    let marker_style = with_selected_bg(
+        if is_selected {
+            Style::default().fg(theme.accent)
+        } else {
+            Style::default()
+        },
+        is_selected,
+        theme,
+    );
+    let chrome_style = with_selected_bg(Style::default().fg(theme.dim), is_selected, theme);
+    let pad_style = with_selected_bg(Style::default(), is_selected, theme);
     let mut primary_spans = vec![
-        Span::styled(
-            marker,
-            if is_selected {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default()
-            },
-        ),
+        Span::styled(marker, marker_style),
         Span::styled(primary_disp, primary_style),
     ];
     if let Some(trailing) = &item.trailing {
-        primary_spans.push(Span::styled(
-            format!(" {trailing}"),
-            Style::default().fg(theme.dim),
-        ));
+        primary_spans.push(Span::styled(format!(" {trailing}"), chrome_style));
     }
-    if item.is_active {
-        primary_spans.push(active_marker_span(theme));
+    let primary_used: usize = primary_spans
+        .iter()
+        .map(|s| s.content.chars().count())
+        .sum();
+    if primary_used < row_width {
+        primary_spans.push(Span::styled(
+            " ".repeat(row_width - primary_used),
+            pad_style,
+        ));
     }
 
     let badge_len = item
@@ -127,109 +128,18 @@ fn stacked_lines(
     let detail_budget = row_width.saturating_sub(2).saturating_sub(badge_len);
     let detail_disp = end_elide_chars(&item.detail, detail_budget);
 
-    let mut detail_spans = vec![Span::styled(
-        format!("  {detail_disp}"),
-        row_detail_style(theme),
-    )];
+    let detail_style = with_selected_bg(row_detail_style(theme), is_selected, theme);
+    let badge_style = with_selected_bg(Style::default().fg(theme.warning), is_selected, theme);
+    let mut detail_spans = vec![Span::styled(format!("  {detail_disp}"), detail_style)];
     if let Some(badge) = &item.badge {
-        detail_spans.push(Span::styled(
-            format!(" [{badge}]"),
-            Style::default().fg(theme.warning),
-        ));
+        detail_spans.push(Span::styled(format!(" [{badge}]"), badge_style));
+    }
+    let detail_used: usize = detail_spans.iter().map(|s| s.content.chars().count()).sum();
+    if detail_used < row_width {
+        detail_spans.push(Span::styled(" ".repeat(row_width - detail_used), pad_style));
     }
 
     vec![Line::from(primary_spans), Line::from(detail_spans)]
-}
-
-/// Single line: `❯ key .......... value [badge] ▸ ●`
-fn key_value_line(
-    item: &SelectableItem,
-    is_selected: bool,
-    row_width: usize,
-    theme: &Theme,
-) -> Line<'static> {
-    let marker = selection_prefix(is_selected);
-    let marker_style = if is_selected {
-        Style::default().fg(theme.accent)
-    } else {
-        Style::default()
-    };
-    let key_style = primary_style_for(is_selected, item.is_active, theme);
-    let value_style = row_detail_style(theme);
-    let chrome_style = Style::default().fg(theme.dim);
-    let badge_style = Style::default().fg(theme.warning);
-
-    let active_affix = if item.is_active {
-        format!(" {ACTIVE_MARKER}")
-    } else {
-        String::new()
-    };
-    let badge_affix = item
-        .badge
-        .as_ref()
-        .map(|b| format!(" [{b}]"))
-        .unwrap_or_default();
-    let trailing_affix = item
-        .trailing
-        .as_ref()
-        .map(|t| format!(" {t}"))
-        .unwrap_or_default();
-
-    let right_fixed_chars =
-        badge_affix.chars().count() + trailing_affix.chars().count() + active_affix.chars().count();
-    let left_fixed = marker.chars().count();
-    let has_value = !item.detail.is_empty();
-
-    let budget_for_key_and_value = row_width
-        .saturating_sub(left_fixed)
-        .saturating_sub(right_fixed_chars)
-        .saturating_sub(usize::from(has_value));
-
-    let max_key = if has_value {
-        (budget_for_key_and_value * 45 / 100)
-            .max(8)
-            .min(budget_for_key_and_value)
-    } else {
-        budget_for_key_and_value
-    };
-    let key_disp = end_elide_chars(&item.primary, max_key);
-    let key_chars = key_disp.chars().count();
-
-    let value_budget = budget_for_key_and_value.saturating_sub(key_chars);
-    let value_disp = if !has_value {
-        String::new()
-    } else {
-        end_elide_chars(&item.detail, value_budget)
-    };
-    let value_chars = value_disp.chars().count();
-
-    let used = left_fixed
-        + key_chars
-        + value_chars
-        + right_fixed_chars
-        + usize::from(!value_disp.is_empty());
-    let pad = row_width.saturating_sub(used);
-
-    let mut spans = vec![
-        Span::styled(marker, marker_style),
-        Span::styled(key_disp, key_style),
-    ];
-    if pad > 0 {
-        spans.push(Span::raw(" ".repeat(pad)));
-    }
-    if !value_disp.is_empty() {
-        spans.push(Span::styled(value_disp, value_style));
-    }
-    if !badge_affix.is_empty() {
-        spans.push(Span::styled(badge_affix, badge_style));
-    }
-    if !trailing_affix.is_empty() {
-        spans.push(Span::styled(trailing_affix, chrome_style));
-    }
-    if item.is_active {
-        spans.push(active_marker_span(theme));
-    }
-    Line::from(spans)
 }
 
 /// Settings catalog: `▸ Label ………… value [badge] >`
@@ -243,9 +153,7 @@ fn settings_row_line(
     let expand = SETTINGS_EXPAND;
     let label_style = with_selected_bg(
         if is_selected {
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme.text)
         },
@@ -254,15 +162,7 @@ fn settings_row_line(
     );
     let value_style = with_selected_bg(row_detail_style(theme), is_selected, theme);
     let expand_style = with_selected_bg(Style::default().fg(theme.dim), is_selected, theme);
-    let bullet_style = with_selected_bg(
-        if is_selected {
-            Style::default().fg(theme.accent)
-        } else {
-            Style::default().fg(theme.dim)
-        },
-        is_selected,
-        theme,
-    );
+    let bullet_style = with_selected_bg(Style::default().fg(theme.dim), is_selected, theme);
     let badge_style = with_selected_bg(Style::default().fg(theme.warning), is_selected, theme);
     let pad_style = with_selected_bg(Style::default(), is_selected, theme);
 
@@ -318,36 +218,25 @@ fn settings_option_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let bullet = SETTINGS_BULLET;
-    let bullet_style = with_selected_bg(
-        if is_selected {
-            Style::default().fg(theme.accent)
-        } else {
-            Style::default().fg(theme.dim)
-        },
+    let bullet_style = with_selected_bg(Style::default().fg(theme.dim), is_selected, theme);
+    let label_style = with_active_text(
+        with_selected_bg(
+            if is_selected {
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.text)
+            },
+            is_selected,
+            theme,
+        ),
         is_selected,
+        item.is_active,
         theme,
     );
-    let label_style = with_selected_bg(
-        if is_selected {
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.text)
-        },
-        is_selected,
-        theme,
-    );
-    let active_affix = if item.is_active {
-        format!(" {ACTIVE_MARKER}")
-    } else {
-        String::new()
-    };
     let left = bullet.chars().count();
-    let right = active_affix.chars().count();
-    let budget = row_width.saturating_sub(left).saturating_sub(right);
+    let budget = row_width.saturating_sub(left);
     let key = end_elide_chars(&item.primary, budget);
-    let pad = row_width.saturating_sub(left + key.chars().count() + right);
+    let pad = row_width.saturating_sub(left + key.chars().count());
 
     let mut primary_spans = vec![
         Span::styled(bullet.to_string(), bullet_style),
@@ -358,9 +247,6 @@ fn settings_option_lines(
             " ".repeat(pad),
             with_selected_bg(Style::default(), is_selected, theme),
         ));
-    }
-    if item.is_active {
-        primary_spans.push(active_marker_span(theme));
     }
 
     let badge = item
@@ -373,12 +259,16 @@ fn settings_option_lines(
         .saturating_sub(indent.chars().count())
         .saturating_sub(badge.chars().count());
     let detail = end_elide_chars(&item.detail, detail_budget);
-    let mut detail_spans = vec![Span::styled(
-        format!("{indent}{detail}"),
-        row_detail_style(theme),
-    )];
+    let detail_style = with_selected_bg(row_detail_style(theme), is_selected, theme);
+    let badge_style = with_selected_bg(Style::default().fg(theme.warning), is_selected, theme);
+    let pad_style = with_selected_bg(Style::default(), is_selected, theme);
+    let mut detail_spans = vec![Span::styled(format!("{indent}{detail}"), detail_style)];
     if !badge.is_empty() {
-        detail_spans.push(Span::styled(badge, Style::default().fg(theme.warning)));
+        detail_spans.push(Span::styled(badge, badge_style));
+    }
+    let detail_used: usize = detail_spans.iter().map(|s| s.content.chars().count()).sum();
+    if detail_used < row_width {
+        detail_spans.push(Span::styled(" ".repeat(row_width - detail_used), pad_style));
     }
 
     vec![Line::from(primary_spans), Line::from(detail_spans)]

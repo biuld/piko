@@ -13,7 +13,6 @@ use crate::{
     features::{
         agent_status::{AgentPanelState, AgentPanelView},
         bottom_bar::{BottomBar, BottomBarView},
-        help::HelpPanel,
         notifications::NotificationLevel,
         status::{StatusPanel, StatusPanelView},
     },
@@ -141,7 +140,6 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 },
             );
         }
-        SurfaceId::Help => HelpPanel::render(frame, area, &app.theme, &app.command_catalog),
         SurfaceId::Sessions => app
             .sessions
             .render(frame, area, app.session_id(), &app.theme),
@@ -174,6 +172,13 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
             frame,
             area,
             app.model.active_model_id.as_deref(),
+            app.model.active_provider.as_deref(),
+            &app.theme,
+        ),
+        SurfaceId::Thinking => app.thinking.render(
+            frame,
+            area,
+            app.model.active_thinking_level.as_deref(),
             &app.theme,
         ),
         SurfaceId::Approval => app.approvals.render(frame, area, &app.theme),

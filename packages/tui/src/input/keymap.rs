@@ -35,7 +35,6 @@ pub enum KeyAction {
     TimelineUp,
     TimelineDown,
     TimelineLatest,
-    Help,
     Models,
 
     // Newly added for alignment with pi-mono:
@@ -55,7 +54,6 @@ pub enum KeyAction {
     Suspend,
     ThinkingCycle,
     ThinkingToggle,
-    ToolsExpand,
     SessionToggleNamedFilter,
     EditorExternal,
     MessageFollowUp,
@@ -199,7 +197,6 @@ impl Default for Keymap {
         keymap.bind("ctrl+p", KeyAction::HistoryPrev); // Overriden to cycle model or filter tree in specific panels
         keymap.bind("ctrl+e", KeyAction::HistoryNext);
         keymap.bind("ctrl+l", KeyAction::Models); // Open model selector
-        keymap.bind("ctrl+o", KeyAction::ToolsExpand);
         keymap.bind("ctrl+t", KeyAction::ThinkingToggle);
         keymap.bind("ctrl+n", KeyAction::SessionToggleNamedFilter);
         keymap.bind("ctrl+g", KeyAction::EditorExternal);
@@ -209,7 +206,6 @@ impl Default for Keymap {
         keymap.bind("alt+v", KeyAction::ClipboardPasteImage);
 
         // Functional keys
-        keymap.bind("f1", KeyAction::Help);
         keymap.bind("f2", KeyAction::SessionTree);
         keymap.bind("f3", KeyAction::Models);
         keymap.bind("f4", KeyAction::AgentPanel);
@@ -299,7 +295,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.suspend" => KeyAction::Suspend,
         "app.thinking.cycle" => KeyAction::ThinkingCycle,
         "app.thinking.toggle" => KeyAction::ThinkingToggle,
-        "app.tools.expand" => KeyAction::ToolsExpand,
         "app.session.toggleNamedFilter" => KeyAction::SessionToggleNamedFilter,
         "app.editor.external" => KeyAction::EditorExternal,
         "app.message.followUp" => KeyAction::MessageFollowUp,
@@ -378,7 +373,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.settings" => KeyAction::Settings,
         "app.status" => KeyAction::Status,
         "app.notifications.clear" => KeyAction::ClearNotifications,
-        "app.help" => KeyAction::Help,
         "app.model.select" => KeyAction::Models,
         _ => return None,
     })

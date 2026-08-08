@@ -1,6 +1,6 @@
 # Settings surface
 
-> Status: implemented (value visibility + Settings kit; draft→reviewed pending
+> Status: implemented (value visibility + shared MenuStack; draft→reviewed pending
 > product walkthrough)
 >
 > Parent: [ui-ux.md](./ui-ux.md) (full overlay, slash/palette openers)
@@ -13,7 +13,7 @@
 
 The Settings surface lets the user inspect and change runtime configuration
 while staying in the chat session. It opens as a **full overlay** (replaces
-zones A–D above BottomBar), same placement family as Sessions / Help / Tree.
+zones A–D above BottomBar), same placement family as Sessions / Tree.
 
 Settings are **not** a free-form editor and **not** a wall of Enable/Disable
 commands. They are a **value-first catalog** of named settings: at every level
@@ -21,11 +21,12 @@ the user can see **what is currently in force**, which option is **active**,
 and (when relevant) whether a change is **persisted only** or also **already
 live**.
 
-Importantly, Settings is **not “one Hierarchical menu with more fields.”**
-Command palettes and model pickers correctly reuse List / hierarchical menu.
-Settings needs its **own small component kit** composed *under* the List
-selection language — rows that know about values, effect classes, and exclusive
-choice — rather than overloading menu `Group` / `Action` nodes until they lie.
+Settings and command-palette-style surfaces share the **same drill-down
+component** (`MenuStack`) — depth stack, per-frame filter, Esc pop. What makes
+Settings “settings” is the **row payload**, not a second navigation stack:
+`MenuRow` carries an optional ValueSummary, EffectBadge, Active flag, and
+exclusive choice children, painted as `SettingsRow` / `SettingsOption`
+layouts on the shared List selection language.
 
 This PRD is the product contract for Settings: surface behavior, catalog, and
 the **TUI components** the surface composes.
@@ -38,7 +39,7 @@ Today the menu fails basic “settings list” jobs:
    Sandbox, Retries show only static description text. The user cannot tell
    On vs Off without leaving the TUI or reading `settings.toml`.
 2. **Boolean pairs look like two equal commands.** “Enable OTLP export” and
-   “Disable OTLP export” compete with no ● marker on the in-force side.
+   “Disable OTLP export” compete with no in-force highlight on the chosen side.
 3. **Incomplete Active markers.** Only thinking level, theme, and a few TUI
    presentation flags participate in “selected vs active.” Host-backed keys
    (observability, sandbox, retry, compaction, endpoints) mostly use `_ => false`.
@@ -48,19 +49,20 @@ Today the menu fails basic “settings list” jobs:
 5. **Stale local picture.** TUI only bootstraps `ConfigGet { namespace: "tui" }`.
    Host namespace values are never loaded for the settings panel, so even a
    perfect active marker has nothing truthful to show.
-6. **Wrong component.** A palettes-style `MenuNode::Group|Action` tree cannot
-   express “section + live value + effect class + exclusive choice” without
-   lying in titles/details. Settings must own dedicated components (below)
-   that still speak the shared Selected/Active language.
+6. **Wrong component.** A plain action tree cannot express “section + live
+   value + effect class + exclusive choice”. `MenuRow` (shared with Auth /
+   palettes) carries those fields so one drill-down component serves both,
+   with Settings-specific row layouts.
 
 ## Goals
 
-- Introduce a **Settings component kit** (see § Component kit) and compose the
-  surface from it; stop encoding settings solely as hierarchical menu actions.
+- Compose the Settings surface from the shared **`MenuStack`** (see
+  § Component kit) with value-aware `MenuRow` payloads; stop encoding settings
+  solely as plain action rows.
 - At the **catalog root**, every setting that owns a durable value shows a
   **value summary** (and effect hint when needed). Scanning answers “what do
   I have set?” without drilling.
-- Inside a choice leaf, the **in-force option** uses **Active** (`●`), distinct
+- Inside a choice leaf, the **in-force option** uses **Active** (accent label), distinct
   from keyboard **Selected** (`❯`).
 - TUI holds a **client mirror** of host + tui keys shown in the catalog.
 - Apply via `ConfigUpdate`; mirror updates optimistically so reopen is honest.
@@ -77,45 +79,45 @@ Today the menu fails basic “settings list” jobs:
 - Editing every hostd key — only the catalog in this PRD.
 - Replacing the shell List selection language (Settings components **extend**
   List/chromelets; they do not invent private carets or focus borders).
-- Making `Hierarchical menu` the “settings product” forever; menu remains a
-  navigation pattern for other surfaces, while Settings composes the kit below.
+- Reintroducing a separate settings navigation stack: `MenuStack` is the one
+  drill-down component for Settings and menu-style surfaces.
 - GUI Settings parity.
 
 ## Component kit
 
-Settings is a **surface** (panel + focus mode) that stacks and renders these
-logical components. Names are product contracts; rust module names may differ
-as long as the boundaries stay clear.
+Settings is a **surface** (panel + focus mode) that composes the shared
+drill-down component with value-aware rows. Names are product contracts;
+rust module names may differ as long as the boundaries stay clear.
 
 ```text
 Settings surface (full overlay)
-└─ SettingsNavStack          # depth, title, Esc pop, filter scope
-   ├─ SettingCatalog (root)  # list of SettingSection rows
-   │    └─ SettingSectionRow # label · ValueSummary · EffectBadge · drill
-   ├─ SettingBranch (folder) # intermediate groups (e.g. Compaction)
-   │    └─ SettingSectionRow …
-   └─ SettingChoiceList      # exclusive options (bool as On/Off, enums, presets)
-        └─ SettingOptionRow  # label · consequence detail · Active
+└─ MenuStack<SettingsAction>  # shared drill-down (also Auth); depth, title,
+   │                          # Esc pop, filter scoped to current frame
+   ├─ root frame              # SettingsRow layout: catalog sections
+   │    └─ MenuRow::Section    # label · ValueSummary · EffectBadge · drill
+   ├─ branch frame            # MenuRow::Branch (e.g. Compaction) → SettingsRow
+   └─ choice frame            # SettingsOption layout: exclusive options
+        └─ MenuRow::Option     # label · consequence detail · Active
 ```
 
 Shared chromelets (from component-feedback): selection caret, active marker,
 frame border, list filter, footer hints, loading placeholder.
 
-### Why not only Hierarchical menu
+### Why MenuRow carries settings fields
 
-| Concern | Menu Group/Action | Settings kit |
-|---------|-------------------|--------------|
-| Show current value on parent | Detail is static string, hand-authored | `ValueSummary` derived from client mirror |
-| Exclusive active among N options | Optional callback; often incomplete | `SettingChoiceList` requires Active model |
-| On/Off | Two parallel “Enable/Disable …” actions | `SettingChoiceList` with binary options + short labels |
-| Restart vs live | Free-text in detail | `EffectBadge` / effect class on summary |
-| Intermediate section | Same node type as leaf action | `SettingBranch` vs `SettingChoiceList` |
-| Reuse thinking picker | Ad-hoc open of menu subtree | Same `SettingChoiceList` for thinking levels |
+| Concern | Plain action row | `MenuRow` (Settings) |
+|---------|------------------|----------------------|
+| Show current value on parent | Detail is static string, hand-authored | `value` (ValueSummary) derived from client mirror |
+| Exclusive active among N options | Optional callback; often incomplete | `is_active` required on option rows |
+| On/Off | Two parallel “Enable/Disable …” actions | binary options with short labels |
+| Restart vs live | Free-text in detail | `badge` (`restart hostd`) on summary |
+| Intermediate section | Same node type as leaf action | `Branch` vs `Choice` children |
+| Thinking selector | Band-mode picker (`/thinking`) | Settings → Thinking shares level copy/actions |
 
-New catalog keys must land as **kit compositions**, not one more
-static-string menu branch.
+New catalog keys must land as **`MenuRow` compositions**, not one more
+static-string action row.
 
-### SettingsNavStack
+### MenuStack (shared drill-down)
 
 **Job:** Own drill depth, panel title (current section name), filter string
 scoped to the **current frame only**, Esc/q pop, open-at-branch (thinking
@@ -132,7 +134,7 @@ picker).
 - Own ConfigUpdate semantics (parent surface / session applies).
 - Mix unrelated surfaces’ nodes into the same stack without a product reason.
 
-### SettingSectionRow (catalog / branch row)
+### SettingsRow (catalog / branch row)
 
 **Job:** One navigable row that answers “what is this setting **now**?” and
 invites drill-in.
@@ -158,7 +160,7 @@ invites drill-in.
 
 **Must not**
 
-- Use Active (`●`) as a substitute for the value summary on section rows.
+- Use Active (accent label) as a substitute for the value summary on section rows.
 - Present two peer command slogans (“Enable…”, “Disable…”) as the section row.
 
 ### ValueSummary
@@ -188,12 +190,12 @@ Rules:
 Badge is secondary; it must not steal Selection accent. Text alone must work
 without color-only meaning.
 
-### SettingChoiceList
+### Choice frame (SettingsOption rows)
 
 **Job:** Exclusive pick among closed options for **one** logical key (or a
 tight pair of keys only when a product catalogs them as one choice set).
 
-Renders N `SettingOptionRow`s. Exactly one is Active when the mirror matches a
+Renders N `SettingsOption` rows. Exactly one is Active when the mirror matches a
 listed option; zero when custom/unmatched.
 
 Enter on an option → **apply** that value and close Settings (surface policy).
@@ -209,12 +211,12 @@ mode, compaction size leaves.
 
 Thinking picker reuses **this** list shape for levels — not a one-off menu.
 
-### SettingOptionRow
+### SettingsOption row
 
 **Job:** One choosable value.
 
 ```text
-❯ On                                                  ●
+❯ On
   Export traces/metrics/logs when hostd starts
   Off
   Stderr only when hostd starts
@@ -223,12 +225,12 @@ Thinking picker reuses **this** list shape for levels — not a one-off menu.
 | Zone | Content |
 |------|---------|
 | Primary | Option label |
-| Active | `●` when in-force |
+| Active | accent label when in-force |
 | Detail | What choosing this does (and restart note when Restart class) |
 
 Selected ≠ Active always holds.
 
-### SettingBranch
+### Branch frame (SettingsRow rows)
 
 **Job:** Intermediate folder whose children are more section rows or choice
 lists (e.g. Automatic Compaction → enable + reserve + keep). Own value summary
@@ -244,7 +246,7 @@ Enter drills; never applies a partial value at branch row.
 Owns product catalog wiring (which section → which keys). Does not reimplement
 List selection paint.
 
-### Future kit (explicitly out of this PRD’s ship, reserved names)
+### Future settings components (explicitly out of this PRD’s ship, reserved names)
 
 | Component | When needed |
 |-----------|-------------|
@@ -286,7 +288,7 @@ Choice leaf (OTLP export):
 
 ```
 ┌─ OTLP export ─────────────────────── [1/2] ─┐
-│ ❯ On                                    ●   │
+│ ❯ On                                       │
 │   Export via OTLP HTTP · restart hostd      │
 │   Off                                       │
 │   Stderr only after hostd starts            │
@@ -309,9 +311,8 @@ Footer hints may distinguish **open** (catalog/branch) vs **apply**
   refresh channel exists (`ConfigGet` for relevant namespaces). Stale disk
   from an external editor is not a hard guarantee if the user never reopens;
   reopen/open must re-fetch or rehydrate.
-- Thinking picker (`/thinking` family) may open only the Thinking Level
-  subtree; it must use the **same** Active/value rules as Settings for that
-  branch.
+- `/thinking` opens the band-mode Thinking Selector (ComposerBand) with the
+  **same** level set and Active/value rules as the Settings → Thinking branch.
 
 ### Navigation and confirm
 
@@ -320,19 +321,19 @@ Bindings stay keyboard-first (ui-ux + component-feedback):
 | Input | Behavior |
 |-------|----------|
 | ↑ / ↓ | Move selection in current frame |
-| typing | Filter **current** NavStack frame |
-| Enter on SettingSectionRow / SettingBranch | Drill in; clear filter |
-| Enter on SettingOptionRow | Apply value; **close** Settings; return to chat |
-| Esc / q | Pop NavStack; at root, close surface |
+| typing | Filter **current** MenuStack frame |
+| Enter on SettingsRow / Branch frame | Drill in; clear filter |
+| Enter on SettingsOption | Apply value; **close** Settings; return to chat |
+| Esc / q | Pop MenuStack; at root, close surface |
 
 Closing without Enter applies nothing.
 
 ### Active vs selected
 
-Per component-feedback and kit:
+Per component-feedback:
 
 - **Selected** = keyboard row (`❯`).
-- **Active** = in-force option on `SettingOptionRow` only (`●`).
+- **Active** = in-force option on `SettingsOption` rows only.
 - Section/branch rows use **ValueSummary**, never Active as a fake value.
 
 When the mirror value is outside the choice set (custom endpoint):
@@ -399,7 +400,7 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Compaction reserve / keep | closed token sizes | host `[compaction]` (Live on next compaction evaluation) |
 | OTLP Endpoint | closed presets (`127.0.0.1:4318`, `localhost:4318`, …) | host `[observability].otel-endpoint` (**Restart hostd**) |
 
-### Booleans → SettingChoiceList (binary)
+### Booleans → binary choice frame
 
 | Group | Storage | Effect class |
 |-------|---------|--------------|
@@ -410,7 +411,7 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Observability (OTLP export) | `[observability].enabled` | **Restart hostd** |
 | Active Tools Mode | enable-all vs empty list via active-tool-names | Live |
 
-Each maps to a binary **SettingChoiceList**, not a pair of parallel command
+Each maps to a binary **choice frame**, not a pair of parallel command
 menu actions. Labels: short **On** / **Off** (or Hide / Show for thinking
 blocks only when clearer).
 
@@ -460,19 +461,19 @@ export **Off**, otel endpoint `http://127.0.0.1:4318`).
 
 ### Components
 
-- [ ] Settings is composed from the kit in § Component kit (NavStack +
-      SectionRow + ChoiceList + OptionRow + ValueSummary + EffectBadge at
-      minimum), not only ad-hoc Hierarchical menu nodes with static strings.
-- [ ] SettingChoiceList: one Active when matched; zero when custom.
-- [ ] Thinking picker reuses SettingChoiceList rules for thinking levels.
-- [ ] Selected ≠ Active holds on all OptionRows.
-- [ ] SectionRows never use Active in place of ValueSummary.
+- [x] Settings composes the shared MenuStack (§ Component kit) with
+      SettingsRow / SettingsOption layouts; the catalog builds `MenuRow`
+      trees, not ad-hoc static rows.
+- [ ] Choice frames: one Active when matched; zero when custom.
+- [x] Thinking selector shares level copy with Settings → Thinking.
+- [ ] Selected ≠ Active holds on all SettingsOption rows.
+- [ ] SettingsRow never uses Active in place of ValueSummary.
 - [ ] No free-text field ships in this PRD.
 
 ### Regression
 
 - [ ] Existing openers (`/settings`, palette, thinking open-at-branch) still
-      work under NavStack.
+      work under MenuStack.
 
 ## Out of catalog (this PRD)
 
@@ -492,9 +493,9 @@ later PRD adds them with the same value-summary + Active rules.
 4. Should EffectBadge be a glyph/chip on the primary line or only a trailing
    phrase in ValueSummary? **Recommendation:** trailing affix on SectionRow
    secondary line, shared badge chromelet.
-5. Implementation: evolve hierarchical_menu vs new modules under
-   `ui/components/setting_*`? **Recommendation:** new setting components +
-   thin reuse of List filter/selection paint (design doc).
+5. Implementation: ~~evolve hierarchical_menu vs new modules~~ **Resolved:**
+   one shared `MenuStack` (`ui/components/menu`) serves Auth + Settings;
+   Settings adds row payload (value / badge / active) and row layouts.
 
 ## Configuration (product keys, not implementation)
 

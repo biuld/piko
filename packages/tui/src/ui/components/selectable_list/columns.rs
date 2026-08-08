@@ -11,7 +11,7 @@ use ratatui::{
 use super::{ColumnAlign, ColumnCell, ColumnCellStyle, SelectableItem};
 use crate::theme::Theme;
 use crate::ui::components::feedback::{
-    active_marker_span, row_primary_style, selection_prefix, with_selected_bg,
+    row_primary_style, selection_prefix, with_active_text, with_selected_bg,
 };
 
 /// Rows already filtered; `selected` is an index into this slice (filtered order).
@@ -80,11 +80,6 @@ pub fn paint_column_rows(
             for (col_idx, cell) in row.cells.iter().enumerate() {
                 max_col_widths[col_idx] = max_col_widths[col_idx].max(cell.text.chars().count());
             }
-            if row.is_active
-                && let Some(last) = max_col_widths.last_mut()
-            {
-                *last = (*last).saturating_add(2);
-            }
         }
         for width in max_col_widths.iter_mut().take(num_cols.saturating_sub(1)) {
             *width = (*width).min(40);
@@ -112,18 +107,17 @@ pub fn paint_column_rows(
                 Style::default()
             };
 
-            let mut cells = vec![Cell::from(Line::from(Span::styled(
-                selection_prefix(is_selected),
-                marker_style,
-            )))];
+            let mut cells = vec![
+                Cell::from(Line::from(Span::styled(
+                    selection_prefix(is_selected),
+                    marker_style,
+                )))
+                .style(with_selected_bg(Style::default(), is_selected, theme)),
+            ];
 
-            for (col_idx, cell) in row.cells.iter().enumerate() {
-                let base = cell_style(cell.style, is_selected, theme);
-                let mut spans = vec![Span::styled(cell.text.clone(), base)];
-                if row.is_active && col_idx + 1 == row.cells.len() {
-                    spans.push(active_marker_span(theme));
-                }
-                let mut line = Line::from(spans);
+            for cell in row.cells.iter() {
+                let base = cell_style(cell.style, is_selected, row.is_active, theme);
+                let mut line = Line::from(Span::styled(cell.text.clone(), base));
                 if cell.align == ColumnAlign::Right {
                     line = line.alignment(Alignment::Right);
                 }
@@ -147,25 +141,33 @@ pub fn paint_column_rows(
     frame.render_stateful_widget(table, content, &mut state);
 }
 
-fn cell_style(style: ColumnCellStyle, is_selected: bool, theme: &Theme) -> Style {
+fn cell_style(style: ColumnCellStyle, is_selected: bool, is_active: bool, theme: &Theme) -> Style {
     match style {
-        ColumnCellStyle::Primary => {
-            with_selected_bg(row_primary_style(is_selected, theme), is_selected, theme)
+        ColumnCellStyle::Primary => with_active_text(
+            with_selected_bg(row_primary_style(is_selected, theme), is_selected, theme),
+            is_selected,
+            is_active,
+            theme,
+        ),
+        ColumnCellStyle::Secondary => {
+            with_selected_bg(Style::default().fg(theme.dim), is_selected, theme)
         }
-        ColumnCellStyle::Secondary => Style::default().fg(theme.dim),
         ColumnCellStyle::Emphasized => {
-            let base = if is_selected {
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
-            };
-            with_selected_bg(base, is_selected, theme)
+            let base = Style::default().fg(theme.text).add_modifier(Modifier::BOLD);
+            with_active_text(
+                with_selected_bg(base, is_selected, theme),
+                is_selected,
+                is_active,
+                theme,
+            )
         }
-        ColumnCellStyle::Status => Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
+        ColumnCellStyle::Status => with_selected_bg(
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+            is_selected,
+            theme,
+        ),
     }
 }
 

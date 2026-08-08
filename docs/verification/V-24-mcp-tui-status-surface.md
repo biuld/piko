@@ -42,8 +42,8 @@ All F-13 TUI-surface acceptance criteria pass:
   sets the status line, and posts a notification naming the connected
   server; `connected_server_line_renders_counts`,
   `disconnected_server_line_shows_error`, and `panel_tracks_connected_count`
-  cover the panel formatting and count projection; `features/help` lists
-  `/mcp` in the Surfaces section.
+  cover the panel formatting and count projection; the merged slash catalog
+  lists `/mcp`.
 - **Regression**: `cargo test --workspace --exclude piko-llmd` green across
   all packages (hostd lib 117/117, orchd 104/104, tui 100/100, protocol
   24/24, gui, client-core, sandbox). `piko-llmd tests/gateway_retry` remains

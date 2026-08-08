@@ -48,10 +48,11 @@ impl AppState {
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
             models: ModelSelector::new(),
+            thinking: ThinkingSelector::new(),
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
             summary_prompt: None,
-            auth_selector: AuthSelector::new(&[]),
+            auth_selector: AuthSelector::new(&[], &[]),
             agent_panel,
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
@@ -222,6 +223,7 @@ impl AppState {
                 .clone()
                 .or_else(|| self.host_settings.thinking_level.clone()),
             thinking_visible: self.timeline.thinking_visible,
+            tools_expanded: self.timeline.tools_expanded,
             theme_name: self.theme.name.clone(),
             no_tools: self.initial_options.no_tools || !self.host_settings.all_tools,
         }
@@ -240,6 +242,10 @@ impl AppState {
             SettingsAction::HideThinking(hide) => {
                 self.timeline.thinking_visible = !*hide;
                 self.tui_config.hide_thinking_block = *hide;
+            }
+            SettingsAction::ToolDetails(expanded) => {
+                self.timeline.tools_expanded = *expanded;
+                self.tui_config.tools_expanded = *expanded;
             }
             SettingsAction::Compaction(v) => self.host_settings.compaction_enabled = *v,
             SettingsAction::CompactionKeep(n) => self.host_settings.compaction_keep = *n,

@@ -51,12 +51,10 @@ pub enum TimelineAction {
     ScrollUp(usize),
     ScrollDown(usize),
     JumpLatest,
-    ToggleToolsExpanded,
 }
 
 #[derive(Debug)]
 pub enum SurfaceAction {
-    OpenHelp,
     OpenSettings,
     OpenStatus,
     OpenTree,
@@ -111,7 +109,6 @@ pub enum ToolInteractionAction {
 #[derive(Debug)]
 pub enum NotificationAction {
     Clear,
-    ClearAndClose,
 }
 
 #[derive(Debug)]
@@ -130,7 +127,6 @@ pub enum SlashAction {
     ListMcpStatus,
     RequestDiff,
     RequestPromptDebug,
-    RequestRollout,
 }
 
 #[derive(Debug)]
@@ -222,25 +218,21 @@ impl From<SlashAction> for Action {
 // presentation-only commands. Slash strings never leave this module.
 
 /// TUI-local presentation command ids. These are never sent to hostd as a
-/// catalog id — hostd does not own Help/Settings/Tree/Models-opener/Quit/etc.
+/// catalog id — hostd does not own Settings/Tree/Models-opener/Quit/etc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalCommandId {
-    Help,
     Settings,
     Tree,
     Status,
     Sessions,
     Models,
     Thinking,
-    ToolsToggle,
-    ClearNotifications,
+    Clear,
     Agents,
     /// Open last/active turn workspace diff.
     Diff,
     /// Fetch latest prompt-assembly debug snapshot.
     PromptDebug,
-    /// Page durable rollout transcript for the active agent.
-    Rollout,
     Quit,
 }
 
@@ -265,12 +257,6 @@ pub struct TuiCommandEntry {
 /// Local slash aliases and their target — always present, independent of
 /// what hostd advertises.
 const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
-    (
-        "/help",
-        LocalCommandId::Help,
-        "Help",
-        "Show keyboard shortcuts and slash commands",
-    ),
     (
         "/resume",
         LocalCommandId::Sessions,
@@ -308,16 +294,10 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "List and set default thinking/reasoning level",
     ),
     (
-        "/tools",
-        LocalCommandId::ToolsToggle,
-        "Toggle tool details",
-        "Switch between folded and expanded tool result rendering",
-    ),
-    (
         "/clear",
-        LocalCommandId::ClearNotifications,
-        "Clear notifications",
-        "Dismiss all notification messages",
+        LocalCommandId::Clear,
+        "Clear session",
+        "Start a new session and clear the timeline",
     ),
     (
         "/agents",
@@ -336,12 +316,6 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         LocalCommandId::PromptDebug,
         "Prompt debug",
         "Show latest prompt assembly and model-input diagnostics",
-    ),
-    (
-        "/rollout",
-        LocalCommandId::Rollout,
-        "Rollout",
-        "Page the active agent's durable rollout transcript",
     ),
     ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
 ];
@@ -400,7 +374,6 @@ pub struct HostCommandArgs {
 /// Always-available mapping for a TUI-local presentation command.
 pub fn action_for_local_command(id: LocalCommandId) -> Action {
     match id {
-        LocalCommandId::Help => SurfaceAction::OpenHelp.into(),
         LocalCommandId::Sessions => SessionAction::RequestList.into(),
         LocalCommandId::Models => ModelAction::RequestList.into(),
         LocalCommandId::Agents => SurfaceAction::OpenAgents.into(),
@@ -408,11 +381,9 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
         LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
-        LocalCommandId::ToolsToggle => TimelineAction::ToggleToolsExpanded.into(),
-        LocalCommandId::ClearNotifications => NotificationAction::ClearAndClose.into(),
+        LocalCommandId::Clear => SlashAction::New.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
         LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),
-        LocalCommandId::Rollout => SlashAction::RequestRollout.into(),
         LocalCommandId::Quit => AppAction::Quit.into(),
     }
 }

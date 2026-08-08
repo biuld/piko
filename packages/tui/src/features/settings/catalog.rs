@@ -1,21 +1,21 @@
-//! Static Settings catalog → SettingSection tree from a snapshot.
+//! Static Settings catalog → [`MenuRow`] tree from a snapshot.
 //!
 //! Root is a **flat value-first list** chunked into domain groups (headers painted
-//! by the kit). Nested branches only where a composite needs more than one key.
+//! by the shared menu rows). Nested branches only where a composite needs more
+//! than one key.
 
 use super::mirror::{
     SettingsSnapshot, compaction_summary, observability_summary, on_off, otel_endpoint_is_custom,
     otel_endpoint_preset_active,
 };
-use crate::ui::components::setting::{
-    EffectClass, SettingBody, SettingChoiceList, SettingOption, SettingSection,
-};
+use crate::ui::components::menu::{MenuRow, MenuRowKind};
 
 /// Action applied when a setting option is confirmed.
 #[derive(Clone, Debug)]
 pub enum SettingsAction {
     Thinking(&'static str),
     HideThinking(bool),
+    ToolDetails(bool),
     Compaction(bool),
     CompactionKeep(u64),
     CompactionReserve(u64),
@@ -39,69 +39,78 @@ const GROUP_DIAGNOSTICS: &str = "Diagnostics";
 const GROUP_APPEARANCE: &str = "Appearance";
 const GROUP_ADVANCED: &str = "Advanced";
 
-fn binary_choice(
-    title: &str,
-    effect: EffectClass,
+fn option_row(
+    label: &str,
+    detail: &str,
+    action: SettingsAction,
+    is_active: bool,
+) -> MenuRow<SettingsAction> {
+    MenuRow {
+        title: label.into(),
+        detail: detail.into(),
+        value: None,
+        badge: None,
+        group: None,
+        is_active,
+        kind: MenuRowKind::Action(action),
+    }
+}
+
+fn binary_options(
     current: bool,
     on_detail: &str,
     off_detail: &str,
     on_action: SettingsAction,
     off_action: SettingsAction,
-) -> SettingChoiceList<SettingsAction> {
-    SettingChoiceList {
-        title: title.to_string(),
-        effect,
-        options: vec![
-            SettingOption {
-                label: "On".into(),
-                detail: on_detail.into(),
-                action: on_action,
-                is_active: current,
-            },
-            SettingOption {
-                label: "Off".into(),
-                detail: off_detail.into(),
-                action: off_action,
-                is_active: !current,
-            },
-        ],
-    }
+) -> Vec<MenuRow<SettingsAction>> {
+    vec![
+        option_row("On", on_detail, on_action, current),
+        option_row("Off", off_detail, off_action, !current),
+    ]
 }
 
 fn section_choice(
     title: &str,
     summary: String,
-    effect: EffectClass,
+    badge: Option<&'static str>,
     group: Option<&str>,
-    choice: SettingChoiceList<SettingsAction>,
-) -> SettingSection<SettingsAction> {
-    SettingSection {
-        title: title.to_string(),
-        value_summary: summary,
-        effect,
+    choice_title: &str,
+    options: Vec<MenuRow<SettingsAction>>,
+) -> MenuRow<SettingsAction> {
+    MenuRow {
+        title: title.into(),
+        detail: String::new(),
+        value: Some(summary),
+        badge: badge.map(str::to_string),
         group: group.map(str::to_string),
-        body: SettingBody::Choice(choice),
+        is_active: false,
+        kind: MenuRowKind::Choice {
+            title: choice_title.into(),
+            options,
+        },
     }
 }
 
 fn section_branch(
     title: &str,
     summary: String,
-    effect: EffectClass,
+    badge: Option<&'static str>,
     group: Option<&str>,
-    children: Vec<SettingSection<SettingsAction>>,
-) -> SettingSection<SettingsAction> {
-    SettingSection {
-        title: title.to_string(),
-        value_summary: summary,
-        effect,
+    children: Vec<MenuRow<SettingsAction>>,
+) -> MenuRow<SettingsAction> {
+    MenuRow {
+        title: title.into(),
+        detail: String::new(),
+        value: Some(summary),
+        badge: badge.map(str::to_string),
         group: group.map(str::to_string),
-        body: SettingBody::Branch(children),
+        is_active: false,
+        kind: MenuRowKind::Branch(children),
     }
 }
 
 /// Full Settings catalog rooted as domain-chunked sections.
-pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsAction>> {
+pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>> {
     let host = &snap.host;
     let thinking = snap
         .thinking_level
@@ -109,42 +118,34 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
         .or(host.thinking_level.as_deref());
 
     let thinking_levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-    let thinking_choice = SettingChoiceList {
-        title: "Thinking Level".into(),
-        effect: EffectClass::Live,
-        options: thinking_levels
-            .iter()
-            .map(|level| SettingOption {
-                label: (*level).into(),
-                detail: thinking_level_detail(level).into(),
-                action: SettingsAction::Thinking(level),
-                is_active: thinking == Some(*level),
-            })
-            .collect(),
-    };
+    let thinking_options: Vec<MenuRow<SettingsAction>> = thinking_levels
+        .iter()
+        .map(|level| {
+            option_row(
+                level,
+                thinking_level_detail(level),
+                SettingsAction::Thinking(level),
+                thinking == Some(*level),
+            )
+        })
+        .collect();
 
-    let thinking_blocks = SettingChoiceList {
-        title: "Thinking Blocks".into(),
-        effect: EffectClass::Presentation,
-        options: vec![
-            SettingOption {
-                label: "Shown".into(),
-                detail: "Show thinking content in the timeline where supported".into(),
-                action: SettingsAction::HideThinking(false),
-                is_active: snap.thinking_visible,
-            },
-            SettingOption {
-                label: "Hidden".into(),
-                detail: "Hide thinking content in future rendering".into(),
-                action: SettingsAction::HideThinking(true),
-                is_active: !snap.thinking_visible,
-            },
-        ],
-    };
+    let thinking_blocks_options = vec![
+        option_row(
+            "Shown",
+            "Show thinking content in the timeline where supported",
+            SettingsAction::HideThinking(false),
+            snap.thinking_visible,
+        ),
+        option_row(
+            "Hidden",
+            "Hide thinking content in future rendering",
+            SettingsAction::HideThinking(true),
+            !snap.thinking_visible,
+        ),
+    ];
 
-    let compaction_enable = binary_choice(
-        "Automatic Compaction",
-        EffectClass::Live,
+    let compaction_enable_options = binary_options(
         host.compaction_enabled,
         "Enable hostd automatic compaction",
         "Disable hostd automatic compaction",
@@ -153,19 +154,17 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
     );
 
     let reserve_opts: &[(u64, &str)] = &[(8192, "8k"), (16384, "16k (default)"), (32768, "32k")];
-    let reserve_choice = SettingChoiceList {
-        title: "Reserve Tokens".into(),
-        effect: EffectClass::Live,
-        options: reserve_opts
-            .iter()
-            .map(|(n, label)| SettingOption {
-                label: (*label).into(),
-                detail: format!("Reserve {n} tokens for system context"),
-                action: SettingsAction::CompactionReserve(*n),
-                is_active: host.compaction_reserve == *n,
-            })
-            .collect(),
-    };
+    let reserve_options: Vec<MenuRow<SettingsAction>> = reserve_opts
+        .iter()
+        .map(|(n, label)| {
+            option_row(
+                label,
+                &format!("Reserve {n} tokens for system context"),
+                SettingsAction::CompactionReserve(*n),
+                host.compaction_reserve == *n,
+            )
+        })
+        .collect();
 
     let keep_opts: &[(u64, &str)] = &[
         (10000, "10k"),
@@ -173,83 +172,79 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
         (30000, "30k"),
         (50000, "50k"),
     ];
-    let keep_choice = SettingChoiceList {
-        title: "Keep Recent Tokens".into(),
-        effect: EffectClass::Live,
-        options: keep_opts
-            .iter()
-            .map(|(n, label)| SettingOption {
-                label: (*label).into(),
-                detail: format!("Keep {n} recent tokens intact"),
-                action: SettingsAction::CompactionKeep(*n),
-                is_active: host.compaction_keep == *n,
-            })
-            .collect(),
-    };
+    let keep_options: Vec<MenuRow<SettingsAction>> = keep_opts
+        .iter()
+        .map(|(n, label)| {
+            option_row(
+                label,
+                &format!("Keep {n} recent tokens intact"),
+                SettingsAction::CompactionKeep(*n),
+                host.compaction_keep == *n,
+            )
+        })
+        .collect();
 
     let compaction_branch = section_branch(
         "Compaction",
         compaction_summary(host),
-        EffectClass::Live,
+        None,
         Some(GROUP_CONTEXT),
         vec![
             section_choice(
                 "Enable",
                 on_off(host.compaction_enabled).into(),
-                EffectClass::Live,
                 None,
-                compaction_enable,
+                None,
+                "Automatic Compaction",
+                compaction_enable_options,
             ),
             section_choice(
                 "Reserve Tokens",
                 format_reserve(host.compaction_reserve),
-                EffectClass::Live,
                 None,
-                reserve_choice,
+                None,
+                "Reserve Tokens",
+                reserve_options,
             ),
             section_choice(
                 "Keep Recent Tokens",
                 format_keep(host.compaction_keep),
-                EffectClass::Live,
                 None,
-                keep_choice,
+                None,
+                "Keep Recent Tokens",
+                keep_options,
             ),
         ],
     );
 
-    let mut otel_options: Vec<SettingOption<SettingsAction>> = vec![
-        SettingOption {
-            label: "Local collector".into(),
-            detail: "http://127.0.0.1:4318 — Aspire / Jaeger / OTel collector".into(),
-            action: SettingsAction::ObservabilityEndpoint("http://127.0.0.1:4318"),
-            is_active: otel_endpoint_preset_active(host, "http://127.0.0.1:4318"),
-        },
-        SettingOption {
-            label: "Localhost".into(),
-            detail: "http://localhost:4318".into(),
-            action: SettingsAction::ObservabilityEndpoint("http://localhost:4318"),
-            is_active: otel_endpoint_preset_active(host, "http://localhost:4318"),
-        },
+    let otel_options: Vec<MenuRow<SettingsAction>> = vec![
+        option_row(
+            "Local collector",
+            "http://127.0.0.1:4318 — Aspire / Jaeger / OTel collector",
+            SettingsAction::ObservabilityEndpoint("http://127.0.0.1:4318"),
+            otel_endpoint_preset_active(host, "http://127.0.0.1:4318"),
+        ),
+        option_row(
+            "Localhost",
+            "http://localhost:4318",
+            SettingsAction::ObservabilityEndpoint("http://localhost:4318"),
+            otel_endpoint_preset_active(host, "http://localhost:4318"),
+        ),
     ];
-    if otel_endpoint_is_custom(host, OTEL_PRESETS) {
-        // Custom value stays on the summary line only; no Active preset.
-        let _ = &mut otel_options;
-    }
 
     let observability_branch = section_branch(
         "Observability",
         observability_summary(host),
-        EffectClass::RestartHostd,
+        Some("restart hostd"),
         Some(GROUP_DIAGNOSTICS),
         vec![
             section_choice(
                 "OTLP export",
                 on_off(host.observability_enabled).into(),
-                EffectClass::RestartHostd,
+                Some("restart hostd"),
                 None,
-                binary_choice(
-                    "OTLP export",
-                    EffectClass::RestartHostd,
+                "OTLP export",
+                binary_options(
                     host.observability_enabled,
                     "Export traces/metrics/logs over OTLP HTTP (restart hostd to apply)",
                     "Stderr only when hostd starts (restart hostd to apply)",
@@ -266,13 +261,10 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
                     }
                     s
                 },
-                EffectClass::RestartHostd,
+                Some("restart hostd"),
                 None,
-                SettingChoiceList {
-                    title: "OTLP Endpoint".into(),
-                    effect: EffectClass::RestartHostd,
-                    options: otel_options,
-                },
+                "OTLP Endpoint",
+                otel_options,
             ),
         ],
     );
@@ -284,9 +276,10 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
         section_choice(
             "Level",
             thinking.unwrap_or("—").to_string(),
-            EffectClass::Live,
+            None,
             Some(GROUP_THINKING),
-            thinking_choice,
+            "Thinking Level",
+            thinking_options,
         ),
         section_choice(
             "Blocks",
@@ -295,20 +288,20 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
             } else {
                 "hidden".into()
             },
-            EffectClass::Presentation,
+            None,
             Some(GROUP_THINKING),
-            thinking_blocks,
+            "Thinking Blocks",
+            thinking_blocks_options,
         ),
         // ── Context ───────────────────────────────────────────────────────
         compaction_branch,
         section_choice(
             "API Retries",
             on_off(host.retry_enabled).into(),
-            EffectClass::Live,
+            None,
             Some(GROUP_CONTEXT),
-            binary_choice(
-                "API Retries",
-                EffectClass::Live,
+            "API Retries",
+            binary_options(
                 host.retry_enabled,
                 "Automatic retries on LLM API failure",
                 "No automatic retries",
@@ -320,11 +313,10 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
         section_choice(
             "Sandbox",
             on_off(host.sandbox_enabled).into(),
-            EffectClass::Live,
+            None,
             Some(GROUP_TOOLS),
-            binary_choice(
-                "Sandbox",
-                EffectClass::Live,
+            "Sandbox",
+            binary_options(
                 host.sandbox_enabled,
                 "Filesystem & shell sandboxing",
                 "Sandbox disabled",
@@ -339,26 +331,23 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
             } else {
                 "none".into()
             },
-            EffectClass::Live,
+            None,
             Some(GROUP_TOOLS),
-            SettingChoiceList {
-                title: "Active Tools".into(),
-                effect: EffectClass::Live,
-                options: vec![
-                    SettingOption {
-                        label: "All tools".into(),
-                        detail: "Allow all discovered tools".into(),
-                        action: SettingsAction::EnableAllTools,
-                        is_active: tools_all,
-                    },
-                    SettingOption {
-                        label: "No tools".into(),
-                        detail: "Set active tools to an empty list".into(),
-                        action: SettingsAction::DisableTools,
-                        is_active: !tools_all,
-                    },
-                ],
-            },
+            "Active Tools",
+            vec![
+                option_row(
+                    "All tools",
+                    "Allow all discovered tools",
+                    SettingsAction::EnableAllTools,
+                    tools_all,
+                ),
+                option_row(
+                    "No tools",
+                    "Set active tools to an empty list",
+                    SettingsAction::DisableTools,
+                    !tools_all,
+                ),
+            ],
         ),
         // ── Diagnostics ───────────────────────────────────────────────────
         observability_branch,
@@ -366,74 +355,63 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<SettingSection<SettingsActi
         section_choice(
             "Theme",
             snap.theme_name.clone(),
-            EffectClass::Presentation,
+            None,
             Some(GROUP_APPEARANCE),
-            SettingChoiceList {
-                title: "Theme".into(),
-                effect: EffectClass::Presentation,
-                options: vec![
-                    SettingOption {
-                        label: "dark".into(),
-                        detail: "Dark theme".into(),
-                        action: SettingsAction::Theme("dark"),
-                        is_active: snap.theme_name == "dark",
-                    },
-                    SettingOption {
-                        label: "light".into(),
-                        detail: "Light theme".into(),
-                        action: SettingsAction::Theme("light"),
-                        is_active: snap.theme_name == "light",
-                    },
-                ],
+            "Theme",
+            vec![
+                option_row(
+                    "dark",
+                    "Dark theme",
+                    SettingsAction::Theme("dark"),
+                    snap.theme_name == "dark",
+                ),
+                option_row(
+                    "light",
+                    "Light theme",
+                    SettingsAction::Theme("light"),
+                    snap.theme_name == "light",
+                ),
+            ],
+        ),
+        section_choice(
+            "Tool details",
+            if snap.tools_expanded {
+                "expanded".into()
+            } else {
+                "folded".into()
             },
+            None,
+            Some(GROUP_APPEARANCE),
+            "Tool details",
+            binary_options(
+                snap.tools_expanded,
+                "Show expanded tool results by default",
+                "Fold tool results by default",
+                SettingsAction::ToolDetails(true),
+                SettingsAction::ToolDetails(false),
+            ),
         ),
         // ── Advanced ──────────────────────────────────────────────────────
         section_choice(
             "Transport",
             host.transport.clone().unwrap_or_else(|| "stdio".into()),
-            EffectClass::Live,
+            None,
             Some(GROUP_ADVANCED),
-            SettingChoiceList {
-                title: "Transport".into(),
-                effect: EffectClass::Live,
-                options: vec![SettingOption {
-                    label: "stdio".into(),
-                    detail: "Host transport preference (stdio)".into(),
-                    action: SettingsAction::Transport("stdio"),
-                    is_active: host
-                        .transport
-                        .as_deref()
-                        .map(|t| t == "stdio")
-                        .unwrap_or(true),
-                }],
-            },
+            "Transport",
+            vec![option_row(
+                "stdio",
+                "Host transport preference (stdio)",
+                SettingsAction::Transport("stdio"),
+                host.transport
+                    .as_deref()
+                    .map(|t| t == "stdio")
+                    .unwrap_or(true),
+            )],
         ),
     ]
 }
 
-/// Thinking Level choice list for the dedicated thinking picker.
-pub fn build_thinking_choice(snap: &SettingsSnapshot) -> SettingChoiceList<SettingsAction> {
-    let thinking = snap
-        .thinking_level
-        .as_deref()
-        .or(snap.host.thinking_level.as_deref());
-    let levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
-    SettingChoiceList {
-        title: "Thinking Level".into(),
-        effect: EffectClass::Live,
-        options: levels
-            .iter()
-            .map(|level| SettingOption {
-                label: (*level).into(),
-                detail: thinking_level_detail(level).into(),
-                action: SettingsAction::Thinking(level),
-                is_active: thinking == Some(*level),
-            })
-            .collect(),
-    }
-}
-
-fn thinking_level_detail(level: &str) -> &'static str {
+pub fn thinking_level_detail(level: &str) -> &'static str {
     match level {
         "off" => "Disable assistant thinking/reasoning",
         "minimal" => "Minimal reasoning budget",

@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn completion_acceptance_replaces_range() {
     let mut app = app();
-    app.editor.restore_text("/he");
+    app.editor.restore_text("/res");
     app.dispatch(EditorAction::AcceptSuggestion.into());
-    assert_eq!(app.editor.text(), "/he");
+    assert_eq!(app.editor.text(), "/res");
 
     app.apply_event(Event::CommandResponse {
         result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
@@ -16,7 +16,7 @@ fn completion_acceptance_replaces_range() {
     });
     app.refresh_suggestions();
     app.dispatch(EditorAction::AcceptSuggestion.into());
-    assert_eq!(app.editor.text(), "/help ");
+    assert_eq!(app.editor.text(), "/resume ");
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn test_completion_cycling_fills_editor() {
     let mut app = app();
     app.apply_event(Event::CommandResponse {
         result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
-            // `/help` and `/quit` are TUI-local commands, always merged in
+            // `/resume` and `/quit` are TUI-local commands, always merged in
             // regardless of what hostd advertises.
             commands: Vec::new(),
             timestamp: 0,

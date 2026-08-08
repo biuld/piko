@@ -3,7 +3,7 @@ use piko_protocol::Command;
 use crate::{
     app::{AppState, SurfaceId, command_id, config_command_for_setting, effect::Effect},
     features::{notifications::NotificationLevel, settings::action_requires_hostd_restart},
-    ui::components::setting::SettingConfirmResult,
+    ui::components::menu::MenuConfirmResult,
 };
 
 impl AppState {
@@ -102,11 +102,27 @@ impl AppState {
         effects
     }
 
+    pub(crate) fn apply_selected_thinking(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if let Some(level) = self.thinking.confirm() {
+            self.model.active_thinking_level = Some(level.to_string());
+            self.host_settings.thinking_level = Some(level.to_string());
+            effects.push(Effect::send(config_command_for_setting(
+                crate::features::settings::SettingsAction::Thinking(level),
+            )));
+            self.clear_focus();
+            self.status = format!("thinking level {level}");
+        } else {
+            self.status = "no thinking level selected".to_string();
+        }
+        effects
+    }
+
     pub(crate) fn apply_selected_setting(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
         match self.settings.confirm() {
-            SettingConfirmResult::Drilled => {}
-            SettingConfirmResult::Apply(action) => {
+            MenuConfirmResult::Drilled => {}
+            MenuConfirmResult::Apply(action) => {
                 self.apply_settings_action_optimistically(&action);
                 let restart = action_requires_hostd_restart(&action);
                 effects.push(Effect::send(config_command_for_setting(action.clone())));
@@ -118,7 +134,7 @@ impl AppState {
                 };
                 self.notify(NotificationLevel::Info, self.status.clone());
             }
-            SettingConfirmResult::None => {
+            MenuConfirmResult::None => {
                 self.status = "no setting selected".to_string();
             }
         }

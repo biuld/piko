@@ -29,8 +29,6 @@ pub enum SelectableRowLayout {
     /// Primary line + detail line underneath (menus, long descriptions).
     #[default]
     Stacked,
-    /// Single line: key left-aligned, value right-aligned (`❯` selection).
-    KeyValue,
     /// Multi-column single line (command palette, model picker, file browser).
     Columns,
     /// Settings catalog row: `▸ key …… value [badge] >` (selected via bg, no caret).
@@ -205,11 +203,6 @@ impl SelectableItem {
 
     pub fn group_rule(mut self) -> Self {
         self.group_style = GroupHeaderStyle::Rule;
-        self
-    }
-
-    pub fn key_value(mut self) -> Self {
-        self.layout = SelectableRowLayout::KeyValue;
         self
     }
 

@@ -333,7 +333,7 @@ fn session_row(
     };
     cells.push(active_cell);
 
-    SelectableItem::columns(cells).active(false)
+    SelectableItem::columns(cells).active(is_active)
 }
 
 fn format_age(timestamp_str: Option<&str>) -> String {
@@ -356,5 +356,34 @@ fn format_age(timestamp_str: Option<&str>) -> String {
         format!("{}h", diff_secs / 3600)
     } else {
         format!("{}d", diff_secs / 86400)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_protocol::SessionSummary;
+
+    fn summary(session_id: &str) -> SessionSummary {
+        SessionSummary {
+            session_id: session_id.into(),
+            cwd: "/tmp".into(),
+            seq: 1,
+            name: None,
+            first_message: None,
+            message_count: 0,
+            created_at: None,
+            modified_at: None,
+            session_path: None,
+            parent_session_path: None,
+        }
+    }
+
+    #[test]
+    fn session_row_marks_active_session() {
+        let row = session_row(&summary("s1"), Some("s1"), false, false);
+        assert!(row.is_active);
+        let row = session_row(&summary("s1"), Some("s2"), false, false);
+        assert!(!row.is_active);
     }
 }

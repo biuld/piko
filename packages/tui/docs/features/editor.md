@@ -146,8 +146,7 @@ Editor has focus (no overlay active):
 | Enter | Submit prompt |
 | Ctrl+P | Previous history entry |
 | Ctrl+E | Next history entry |
-| F1 | Open help |
-| F2 / Ctrl+R | Open session list |
+| F2 | Open session tree |
 | F3 | Open model selector |
 | Ctrl+K | Open command palette |
 
@@ -208,7 +207,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 - **Partial overlay** (Model Selector, Command Palette, etc.): the
   Editor is replaced by the overlay. Keystrokes go to the overlay, not the
   Editor. Editor content is preserved and restored when the overlay closes.
-- **Full overlay** (Session List, Help, Tree, Status): the Editor is replaced
+- **Full overlay** (Session List, Tree, Status): the Editor is replaced
   along with all middle slots. Same preservation on close.
 - **Approval mode**: the Approval panel replaces the Editor as a partial
   overlay. The Editor draft is preserved and restored after the approval is

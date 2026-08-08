@@ -83,29 +83,12 @@ impl AppState {
             TimelineAction::ScrollUp(n) => self.timeline.scroll_up(n),
             TimelineAction::ScrollDown(n) => self.timeline.scroll_down(n),
             TimelineAction::JumpLatest => self.timeline.jump_latest(),
-            TimelineAction::ToggleToolsExpanded => {
-                self.timeline.tools_expanded = !self.timeline.tools_expanded;
-                self.clear_focus();
-                self.status = if self.timeline.tools_expanded {
-                    "tool details expanded".to_string()
-                } else {
-                    "tool details folded".to_string()
-                };
-                self.notify(
-                    crate::features::notifications::NotificationLevel::Info,
-                    self.status.clone(),
-                );
-            }
         }
         Vec::new()
     }
 
     pub(super) fn dispatch_surface_action(&mut self, action: SurfaceAction) -> Vec<Effect> {
         match action {
-            SurfaceAction::OpenHelp => {
-                self.push_surface(SurfaceId::Help);
-                self.status = "help".to_string();
-            }
             SurfaceAction::OpenSettings => {
                 let snap = self.settings_snapshot();
                 self.settings.open_root(&snap);
@@ -132,9 +115,13 @@ impl AppState {
                 self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             SurfaceAction::OpenThinking => {
-                let snap = self.settings_snapshot();
-                self.settings.open_thinking(&snap);
-                self.push_surface(SurfaceId::Settings);
+                let active = self
+                    .model
+                    .active_thinking_level
+                    .clone()
+                    .or_else(|| self.host_settings.thinking_level.clone());
+                self.thinking.prepare(active.as_deref());
+                self.push_surface(SurfaceId::Thinking);
                 self.status = "thinking level".to_string();
             }
             SurfaceAction::OpenAgents => {
@@ -263,11 +250,6 @@ impl AppState {
     ) -> Vec<Effect> {
         match action {
             NotificationAction::Clear => self.notifications.clear(),
-            NotificationAction::ClearAndClose => {
-                self.notifications.clear();
-                self.clear_focus();
-                self.status = "notifications cleared".to_string();
-            }
         }
         Vec::new()
     }

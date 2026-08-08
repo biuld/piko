@@ -1,7 +1,7 @@
 # Component Visual & Interaction Feedback
 
 > Status: draft (contract); base-component feedback landed for List, menu,
-> table, workflow, suggestions, agent strip, help/status frames
+> table, workflow, suggestions, agent strip, status frames
 >
 > Parent: [ui-ux.md](./ui-ux.md) (shell information architecture & product UX)
 > Paint system: [themes.md](./themes.md) (semantic color tokens)
@@ -29,25 +29,24 @@ list) and **beside** the shell UI/UX contract:
 
 - **Pane** — framed overlay chrome: title · optional search · content · optional tip · hints
 - **List** — filterable, keyboard-navigable rows (selectors, palette, sessions)
-- **Hierarchical menu** — nested list with drill-in / drill-out (commands,
-  simple trees — **not** the Settings product model)
-- **Settings kit** — value-aware settings composition (see below + [settings.md](./settings.md)):
-  NavStack, SectionRow, ValueSummary, EffectBadge, ChoiceList, OptionRow **on Pane**
+- **Drill-down menu (MenuStack)** — nested list with drill-in / drill-out
+  (auth selector, command trees, **and** Settings; Settings rows carry
+  ValueSummary / EffectBadge / Active payload — see [settings.md](./settings.md))
 - **Text field** — single- or multi-line editable text (editor, forms, rename)
 - **Table** — columnar read/scan lists (processes, diagnostics)
 - **Choice workflow** — numbered options + optional free text + multi-step tabs
 - **Confirm step** — destructive or explicit-commit decision
-- **Read-only body** — help, status, long diagnostic text
+- **Read-only body** — status, long diagnostic text
 - **Chrome chromelets** — borders, separators, hint lines, spinners, carets,
   state glyphs, notification chips
 
 Product panels **compose** these primitives; they must not invent a private
 selection or focus language that contradicts this document.
 
-**Settings vs hierarchical menu:** a command palette is an action tree; Settings
-is a **value catalog**. Reusing menu nodes alone fails ValueSummary / exclusive
-Active / effect-class disclosure. Settings surfaces must compose the kit (or an
-explicit successor), while still using this document’s Selected / Active /
+**Settings vs menu:** a command palette is an action tree; Settings is a
+**value catalog**. One `MenuStack` serves both, so the difference lives in the
+row payload: Settings rows carry ValueSummary / exclusive Active / effect-class
+badges, while still using this document’s Selected / Active /
 focus chrome.
 
 ## Design principles
@@ -83,8 +82,8 @@ These three concepts must remain visually distinct:
 | Concept | Meaning | Typical cue |
 |---------|---------|-------------|
 | **Focused** | This surface owns the keyboard | Accent border / frame; caret in text fields |
-| **Selected** | Highlighted row/item within the focused surface | Accent text and/or selected background; `❯` caret |
-| **Active / current** | Authoritative “in use” value (model, agent, session) | Secondary marker (e.g. `●`, check, muted “current” label) without stealing the selection style |
+| **Selected** | Highlighted row/item within the focused surface | Bold text and/or selected background; `❯` caret |
+| **Active / current** | Authoritative “in use” value (model, agent, session) | Accent label color without full selected style |
 
 Never use only one style for both “highlighted” and “already selected value.”
 
@@ -182,8 +181,8 @@ Every interactive component supports a subset of these **visual states**.
 | State | Visual feedback |
 |-------|-----------------|
 | Default | Primary `text`, detail `dim`/`muted` |
-| Selected | Leading `❯` (or equivalent), primary in `accent`, optional `bg_selected` |
-| Active / current | Distinct marker (`●`, `✓`, or trailing muted “current”) **without** full selected style when not selected |
+| Selected | Leading `❯` (or equivalent), primary in `text` + bold, optional `bg_selected` |
+| Active / current | Accent label color **without** full selected style when not selected |
 | Selected + active | Both cues may combine; selected still wins contrast |
 | Disabled | `dim`; not selectable; confirm ignored |
 | Hover (optional) | Same as soft selection preview; must not outrank keyboard selection |
@@ -264,7 +263,7 @@ Rules:
 - Hints update when the step changes (e.g. workflow Submit tab)
 - Hints use `dim` / `muted`; never compete with selection accent
 - BottomBar and other passive chrome **do not** carry key hints
-- Full binding dumps live in Help, not on every component
+- Full binding lists live in the keybindings docs, not on every component
 
 ## Component catalog (feedback contracts)
 
@@ -273,9 +272,9 @@ Rules:
 **Visual**
 
 ```text
-  Current model          ← active marker (e.g. ●) without full selection style
-❯ Other model            ← selected: ❯ + accent
-  Third model            ← rest
+  Current model              ← active: accent label, no selection style
+❯ Other model                ← selected: ❯ + bold + background
+  Third model                ← rest
   short detail…          ← dim on same or secondary line
 ```
 
@@ -290,7 +289,7 @@ Rules:
 - Scroll selection out of view without following it
 - Confirm a disabled or empty placeholder row
 
-### Hierarchical menu
+### Drill-down menu (MenuStack)
 
 Same as List, plus:
 
@@ -298,25 +297,23 @@ Same as List, plus:
 - Enter on group drills in; Esc/left drills out (bindings per keybindings feature)
 - Breadcrumb or panel title always shows depth context
 
-Fit: command palettes, simple navigational trees, one-shot action menus.
+Fit: command palettes, simple navigational trees, one-shot action menus, and
+Settings (with value-aware row payloads).
 
-**Not** the Settings product model for host/tui configuration (use Settings kit).
-
-### Settings kit
+### Settings on MenuStack
 
 Product owner: [settings.md](./settings.md). Feedback constraints that every
 Settings component must obey:
 
 | Component | Selected | Active | Value | Extra |
 |-----------|----------|--------|-------|-------|
-| SettingsNavStack | owns focus frame | n/a | n/a | depth title; filter per frame |
-| SettingSectionRow | `❯` | never substitutes for value | **ValueSummary** required when value exists | drill `>`; optional **EffectBadge** |
+| MenuStack | owns focus frame | n/a | n/a | depth title; filter per frame |
+| SettingsRow | `▸` + bg (no caret) | never substitutes for value | **ValueSummary** required when value exists | drill `>`; optional **EffectBadge** |
 | ValueSummary | n/a | n/a | data-driven one line | compounds with `·`; honest custom |
 | EffectBadge | n/a | n/a | n/a | restart/latency class; no accent theft |
-| SettingChoiceList | one selected index | **exactly one** Active when matched | mirror-driven | binary or multi enum |
-| SettingOptionRow | `❯` | `●` if in-force | option detail = consequence | On/Off short labels for bools |
+| SettingsOption | one selected index | accent label when in-force | option detail = consequence | On/Off short labels for bools |
 
-**Visual (section catalog)** — domain chunk captions (non-selectable) + KeyValue rows:
+**Visual (section catalog)** — domain chunk captions (non-selectable) + settings rows:
 
 ```text
   Thinking
@@ -330,7 +327,7 @@ Settings component must obey:
 **Visual (choice leaf)** — stacked option + consequence:
 
 ```text
-❯ On                                                  ●
+❯ On
   consequence detail (dim)
   Off
   consequence detail (dim)
@@ -340,13 +337,13 @@ Settings component must obey:
 
 - Same List filter / clamp / empty rules
 - Enter on section/branch → drill; Enter on option → apply (surface closes by Settings PRD)
-- Esc pops NavStack
+- Esc pops MenuStack
 - Loading mirror: placeholders, not invented Off
 
 **Must not**
 
 - Encode booleans as two peer “Enable/Disable” command rows without Active + summary
-- Use only Hierarchical menu nodes while omitting ValueSummary / EffectBadge
+- Use plain action rows while omitting ValueSummary / EffectBadge
 - Private selection/active glyphs that diverge from this document
 
 Reserved follow-ons (not feedback-stable until their feature PRD lands):
@@ -396,7 +393,7 @@ SettingTextField, SettingConfirmStep, SettingMultiToggle.
 Shared shape for approval gates and tool questions; **copy and outcomes** stay
 feature-specific (allow/deny vs answer questionnaire).
 
-### Read-only body (help, status, diagnostics)
+### Read-only body (status, diagnostics)
 
 **Visual**
 
@@ -482,7 +479,7 @@ present themselves:
 
 ## Acceptance criteria
 
-1. Any List-based selector (models, sessions, palette) and Settings kit rows share the
+1. Any List-based selector (models, sessions, palette) and Settings rows share the
    same selection caret, accent, and empty/loading language.
 2. A user can always answer “where is focus?” from border/caret alone.
 3. Active model/agent/session remains identifiable when the highlight moves away.

@@ -15,7 +15,7 @@ Filter typing lives in the editor — the pane uses **`.no_search()`**.
 ### Command Palette Layout
 ```
 ─ command palette ──────────────────── [1/15] ─
-❯ /help               Show help and shortcuts
+❯ /resume             List and open hostd sessions
   /models             List and set default model
   /resume             List and open sessions
 Tab cycle | Enter execute

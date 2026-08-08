@@ -174,4 +174,18 @@ mod tests {
         ));
         assert!(plan.rects.contains_key(&Region::Stream));
     }
+
+    #[test]
+    fn thinking_uses_composer_band() {
+        let body = Rect::new(0, 0, 80, 30);
+        let plan = solve(
+            body,
+            &compose_plane(metrics()),
+            &compose_modals(Some(SurfaceId::Thinking), metrics(), body),
+        );
+        assert!(matches!(
+            plan.layers[0].placement,
+            ModalPlacement::ComposerBand
+        ));
+    }
 }

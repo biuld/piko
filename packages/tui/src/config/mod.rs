@@ -48,6 +48,9 @@ pub struct TuiConfig {
     /// of the GUI's `[gui].hide-thinking-block`.
     #[serde(default)]
     pub hide_thinking_block: bool,
+    /// TUI-only: default expanded/folded tool result rendering.
+    #[serde(default)]
+    pub tools_expanded: bool,
 }
 
 impl TuiConfig {

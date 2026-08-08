@@ -164,10 +164,10 @@ mod tests {
 
     fn commands() -> Vec<TuiCommandEntry> {
         vec![TuiCommandEntry {
-            slash: "/help".to_string(),
-            title: "Help".to_string(),
-            detail: "show help".to_string(),
-            target: CommandTarget::Local(LocalCommandId::Help),
+            slash: "/resume".to_string(),
+            title: "Sessions".to_string(),
+            detail: "list and open sessions".to_string(),
+            target: CommandTarget::Local(LocalCommandId::Sessions),
         }]
     }
 
@@ -182,23 +182,23 @@ mod tests {
     #[test]
     fn slash_completion_uses_command_token_range() {
         let mut ac = AutoComplete::new();
-        ac.update(Path::new("."), &commands(), "/he", 3);
+        ac.update(Path::new("."), &commands(), "/res", 4);
         assert!(ac.active);
-        let help = ac
+        let resume = ac
             .list
             .items
             .iter()
-            .find(|item| item.cells[0].text == "/help")
+            .find(|item| item.cells[0].text == "/resume")
             .unwrap();
-        assert_eq!(help.start, 0);
-        assert_eq!(help.end, 3);
-        assert_eq!(help.replacement, "/help ");
+        assert_eq!(resume.start, 0);
+        assert_eq!(resume.end, 4);
+        assert_eq!(resume.replacement, "/resume ");
     }
 
     #[test]
     fn slash_trigger_inactive_in_arguments() {
         let mut ac = AutoComplete::new();
-        ac.update(Path::new("."), &commands(), "/help now", 6);
+        ac.update(Path::new("."), &commands(), "/resume now", 8);
         assert!(!ac.active);
     }
 }

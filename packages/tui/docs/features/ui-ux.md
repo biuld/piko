@@ -77,7 +77,7 @@ Workspace + shell chrome (not A–E slots):
 └──────────────────────────────────────────────────────────────┘
 
 Z-modals (intent):
-  Browse  CoverBody   — sessions, tree, settings, help…
+  Browse  CoverBody   — sessions, tree, settings…
   Select  ComposerBand — agents (viewed switch), models, MCP, auth…
   Decide  Centered     — approval, tool workflow
 ```
@@ -145,7 +145,7 @@ sections:
 ### Escape priority (high → low)
 
 1. Close ephemeral UI: completion menu, inline search, text selection if any.
-2. Close top overlay / partial panel (palette, model, settings, help, status,
+2. Close top overlay / partial panel (palette, model, settings, status,
    session list, tree, workflow, approval when cancel is allowed).
 3. While a turn is running: cancel the active turn for the viewed agent; keep
    the Editor draft.
@@ -162,8 +162,8 @@ the bound clear action; it remains distinct from Esc cancel semantics.
 
 Interactive panels show a **single compact hint line** of currently valid
 keys (e.g. `↑/↓ navigate · Enter confirm · Esc cancel`). Hints update when
-the step changes (e.g. multi-question workflow). Permanent key dumps belong in
-Help, not in every panel.
+the step changes (e.g. multi-question workflow). Full binding lists live in
+the keybindings docs, not in every panel.
 
 BottomBar does **not** show key hints (read-only status only).
 
@@ -356,12 +356,6 @@ Detail ownership: [resume-session.md](./resume-session.md),
   confirm—or commit-on-select if the feature PRD says so, but never silent
   discard of the previous value without Esc-cancel semantics
 
-### Help panel
-
-**Must show** contextual and global keybindings in scannable groups.
-
-**Must not** replace Settings for durable preferences.
-
 ### Status / diagnostics panel
 
 **Must show** (read-only snapshot)
@@ -375,7 +369,7 @@ Detail ownership: [resume-session.md](./resume-session.md),
 
 **Should show** (when protocol + hostd already expose them)
 
-- Prompt-debug / rollout / turn-diff entry points or last-fetched summaries via
+- Prompt-debug / turn-diff entry points or last-fetched summaries via
   slash or status subsections (developer-oriented; not Timeline clutter)
 - Cumulative usage mirrors (context, cost) consistent with BottomBar
 
@@ -391,14 +385,14 @@ Wire protocol design stays in system/feature design docs.
 
 | Layer | Owner | Purpose |
 |-------|--------|---------|
-| **Presentation commands** | TUI (local) | Open Help, Settings, Tree, Sessions, Models, Thinking, Status, Agents, toggle tools, clear notifications, Quit. Never sent as host catalog ids. |
+| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Agents, start a new session (`/clear`), Quit. Never sent as host catalog ids. |
 | **Host product commands** | hostd catalog + wire | Session/auth/runtime/model intents (`session.new`, `auth.login`, `session.compact`, `process.list`, …). Frontends map stable dotted ids to wire calls and local slash names. |
 
 Rules:
 
 1. **Slash names are TUI-local** (e.g. `/new` → `session.new`). Host catalog
    never ships slash strings or “open panel” semantics.
-2. **Palette and Help list the merged catalog**: local presentation rows plus
+2. **Palette lists the merged catalog**: local presentation rows plus
    host-advertised product rows (with TUI slash aliases when mapped).
 3. **Every listed row must do something visible**: open a surface, send a host
    intent, or show a structured result. Dead palette rows are a defect.
@@ -430,16 +424,14 @@ Each palette/slash entry **must** expose:
 
 | Slash (illustrative) | Opens / does | Result the user sees |
 |----------------------|--------------|----------------------|
-| `/help` | Help panel | Grouped keybindings + command list |
 | `/resume` | Session list | Openable sessions; select opens session |
 | `/tree` | Session tree | Branch navigation / labels as feature allows |
 | `/models` | Model selector | Apply model; BottomBar model text updates |
-| `/thinking` | Thinking selector | Apply level; BottomBar thinking text updates |
+| `/thinking` | Thinking selector (ComposerBand) | Apply level; BottomBar thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
 | `/status` | Status panel | Session/turn/queue/tools/approvals snapshot |
 | `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
-| `/tools` | Toggle tool detail density | Timeline tool cards fold/expand |
-| `/clear` | Clear notifications | Notification row empties |
+| `/clear` | Start a new session | New empty session; timeline clears |
 | `/quit` | Exit | Process exits (not Esc) |
 
 ### Current host product commands (content + result)
@@ -475,7 +467,6 @@ not new protocol variants.
 |------------|------------|--------|---------------|
 | Context / cost | Session/turn usage projection | BottomBar still placeholder when data exists | Project into BottomBar (no new command) |
 | Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel | Local presentation command |
-| Rollout page | `RolloutPageGet` + result | **Landed:** `/rollout` → diagnostics panel | Local presentation command |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
 | Queue steer | `QueueSteer` | No first-class user entry | Local slash or Editor mode only if product wants steer; else keep protocol for automation |
 | `model.set` / `thinking.set` in catalog | Catalog advertised | Selectors use other paths | Keep selectors; optional slash args later; no second set API |
@@ -494,7 +485,7 @@ Add a new protocol command **only if** all of the following hold:
 Examples that **do not** justify a new wire command:
 
 - “Show usage in the footer” → project existing usage fields.
-- “Open help / settings / status” → local presentation command.
+- “Open settings / status” → local presentation command.
 - “Pretty-print prompt debug” → consume `PromptDebugGet`.
 
 Examples that **would** justify a new wire command (future, not required by
@@ -510,7 +501,7 @@ Add a local slash/palette row when:
 1. The action is open/toggle/quit/navigate chrome, or
 2. It is a thin launcher over an existing host getter (debug/diff/status
    subsections), and
-3. Help + palette can describe it with title, detail, and result surface.
+3. The palette can describe it with title, detail, and result surface.
 
 Local commands **must not** invent host authority (e.g. claiming to change
 model without going through host config/model APIs).
@@ -522,7 +513,7 @@ model without going through host config/model APIs).
 | Session lifecycle | View rehydrate + short status/notification on failure |
 | Lists (sessions, models, agents, processes, MCP) | Dedicated overlay or structured panel—not a wall of Timeline chat |
 | Destructive confirm | Confirm step before wire send |
-| Diagnostics (status, prompt debug, rollout, diff) | Full or partial overlay; monospace/scroll for long text |
+| Diagnostics (status, prompt debug, diff) | Full or partial overlay; monospace/scroll for long text |
 | Transient ack | Status line or info notification |
 | Errors | Error notification with host message; keep draft/focus safe |
 
@@ -540,7 +531,6 @@ assistant messages.
 
 - `/diff` → `TurnDiffGet` / last turn diff panel
 - `/prompt-debug` → `PromptDebugGet` panel
-- `/rollout` → `RolloutPageGet` paged panel
 - Optional catalog advertisement for debug ids if other frontends need
   discovery (still frontend-neutral titles; slash stays local)
 
@@ -648,8 +638,8 @@ how existing and future settings surface:
 6. BottomBar never shows fabricated context or cost; placeholders until real
    projection arrives, then live values.
 7. Every slash/palette row either opens a surface, runs a host intent, or shows
-   a structured result; Help lists the same merged set the user can run.
-8. Diagnostic host results (prompt debug, rollout, turn diff) are never silently
+   a structured result; the palette lists the same merged set the user can run.
+8. Diagnostic host results (prompt debug, turn diff) are never silently
    discarded once their presentation commands ship; they do not pollute Timeline
    as fake chat.
 9. Feature PRDs that contradict this document are updated or explicitly

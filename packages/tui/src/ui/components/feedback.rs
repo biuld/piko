@@ -63,9 +63,7 @@ pub fn frame_border_style(focused: bool, theme: &Theme) -> Style {
 /// Primary label style for a list/table row.
 pub fn row_primary_style(selected: bool, theme: &Theme) -> Style {
     if selected {
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.text)
     }
@@ -74,6 +72,16 @@ pub fn row_primary_style(selected: bool, theme: &Theme) -> Style {
 /// Secondary detail on a row (always dim hierarchy).
 pub fn row_detail_style(theme: &Theme) -> Style {
     Style::default().fg(theme.dim)
+}
+
+/// Mark an in-force (active) row through its label color instead of a marker:
+/// accent text when the row is active but not keyboard-selected.
+pub fn with_active_text(style: Style, is_selected: bool, is_active: bool, theme: &Theme) -> Style {
+    if !is_selected && is_active {
+        style.fg(theme.accent)
+    } else {
+        style
+    }
 }
 
 /// Footer key-hint line (currently valid keys only).
@@ -102,14 +110,6 @@ pub fn with_selected_bg(style: Style, selected: bool, theme: &Theme) -> Style {
         return style.bg(bg);
     }
     style
-}
-
-/// Active/current marker span (`●` in accent), distinct from selection caret.
-pub fn active_marker_span(theme: &Theme) -> Span<'static> {
-    Span::styled(
-        format!(" {ACTIVE_MARKER}"),
-        Style::default().fg(theme.accent),
-    )
 }
 
 /// Loading row: spinner + dim label.
@@ -164,6 +164,11 @@ mod tests {
         assert_eq!(selection_prefix(true).chars().count(), 2);
         assert_eq!(selection_prefix(false).chars().count(), 2);
         assert!(selection_prefix(true).starts_with(SELECTION_CARET));
+        let theme = Theme::dark();
+        let active = with_active_text(Style::default().fg(theme.text), false, true, &theme);
+        assert_eq!(active.fg, Some(theme.accent));
+        let plain = with_active_text(Style::default().fg(theme.text), false, false, &theme);
+        assert_eq!(plain.fg, Some(theme.text));
         assert!(
             loading_line(0, &Theme::dark())
                 .spans

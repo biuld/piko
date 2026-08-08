@@ -27,7 +27,7 @@ pub enum SelectBandBudget {
     /// (always a multiple of `row_lines` so multi-line items pack flush).
     List {
         item_count: usize,
-        /// Lines per list item (`1` = KeyValue, `2` = Stacked).
+        /// Lines per list item (`1` = single-line rows, `2` = Stacked).
         row_lines: u16,
         max_visible_items: u16,
         chrome_rows: u16,

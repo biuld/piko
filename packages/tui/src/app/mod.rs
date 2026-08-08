@@ -13,6 +13,7 @@ use crate::{
         notifications::NotificationCenter,
         session_list::SessionList,
         settings::{HostRuntimeSettings, SettingsAction, SettingsPanel},
+        thinking::ThinkingSelector,
         timeline::Timeline,
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
@@ -107,6 +108,7 @@ pub struct AppState {
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
     pub models: ModelSelector,
+    pub thinking: ThinkingSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
     pub summary_prompt: Option<InteractiveWorkflow>,
@@ -256,6 +258,12 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
             // TUI-only presentation; lives under `[tui]`, not shared with GUI.
             serde_json::json!({
                 "tui": { "hide_thinking_block": value }
+            })
+        }
+        SettingsAction::ToolDetails(value) => {
+            // TUI-only presentation; lives under `[tui]`, not shared with GUI.
+            serde_json::json!({
+                "tui": { "tools_expanded": value }
             })
         }
         SettingsAction::Compaction(value) => {

@@ -78,9 +78,8 @@ impl InputRouter {
             if let Some(action) = Self::handle_focus_key(app, active, ka, key) {
                 return Some(action);
             }
-            // Capture panels: consume event, don't pass to Editor
-            // (All non-Chat modes are Capture; Help/Status are theoretically
-            // Passive per architecture but current code treats them as Capture too)
+            // Capture panels: consume event, don't pass to Editor. All non-Chat
+            // modes are treated as Capture today.
             return None;
         }
 
@@ -230,6 +229,7 @@ impl InputRouter {
                 | SurfaceId::Agents
                 | SurfaceId::Settings
                 | SurfaceId::Models
+                | SurfaceId::Thinking
                 | SurfaceId::AuthSelector),
             ) => {
                 if surface == SurfaceId::Tree {
@@ -313,14 +313,6 @@ impl InputRouter {
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
                 Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
                 Some(KeyAction::Cancel) => Some(SurfaceAction::Close.into()),
-                Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
-                None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
-                _ => None,
-            },
-            Some(SurfaceId::Help) => match ka {
-                Some(KeyAction::Cancel | KeyAction::Submit | KeyAction::Confirm) => {
-                    Some(SurfaceAction::Close.into())
-                }
                 Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
                 None if matches!(key.code, KeyCode::Char('q')) => Some(SurfaceAction::Close.into()),
                 _ => None,
@@ -437,7 +429,6 @@ impl InputRouter {
                 Some(TimelineAction::ScrollDown(1).into())
             }
             Some(KeyAction::TimelineLatest) => Some(TimelineAction::JumpLatest.into()),
-            Some(KeyAction::Help) => Some(SurfaceAction::OpenHelp.into()),
             Some(KeyAction::Models) => Some(ModelAction::RequestList.into()),
             None => {
                 if let KeyCode::Char(ch) = key.code {

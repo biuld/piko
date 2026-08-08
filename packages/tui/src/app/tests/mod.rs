@@ -144,7 +144,7 @@ fn with_local_slash_catalog(app: &mut AppState) {
     app.command_catalog = crate::app::command::merge_command_catalog(&[]);
 }
 
-/// `/help` is a TUI-local command, always merged in regardless of what
+/// `/resume` is a TUI-local command, always merged in regardless of what
 /// hostd advertises; an empty host catalog is enough to exercise the
 /// bootstrap round-trip this fixture supports.
 fn test_command_catalog() -> Vec<HostCommandDescriptor> {

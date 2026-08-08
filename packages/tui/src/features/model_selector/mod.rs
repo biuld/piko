@@ -96,6 +96,7 @@ impl ModelSelector {
         frame: &mut Frame<'_>,
         area: Rect,
         active_model_id: Option<&str>,
+        active_provider: Option<&str>,
         theme: &Theme,
     ) {
         let items: Vec<SelectableItem> = self
@@ -103,13 +104,10 @@ impl ModelSelector {
             .items
             .iter()
             .map(|action| {
-                let model_id_full = action.full_id();
-                let is_active = active_model_id
-                    .map(|id| id == model_id_full)
-                    .unwrap_or(false);
+                let is_active = model_is_active(action, active_model_id, active_provider);
                 let auth = if action.has_auth { "auth" } else { "no auth" };
                 SelectableItem::columns([
-                    ColumnCell::primary(model_id_full),
+                    ColumnCell::primary(action.full_id()),
                     ColumnCell::secondary(action.name.clone()),
                     ColumnCell::secondary(auth),
                 ])
@@ -130,6 +128,22 @@ impl ModelSelector {
     }
 }
 
+/// Whether `model` is the currently active one. Host reports the active model
+/// as a bare id (or name); match full `provider/id`, provider-scoped bare id,
+/// or model name.
+fn model_is_active(
+    model: &ModelOption,
+    active_model_id: Option<&str>,
+    active_provider: Option<&str>,
+) -> bool {
+    let Some(id) = active_model_id else {
+        return false;
+    };
+    id == model.full_id()
+        || (active_provider.is_none_or(|p| p == model.provider.as_str()) && id == model.id)
+        || id == model.name
+}
+
 fn model_matches(m: &ModelOption, filter: &str) -> bool {
     if filter.is_empty() {
         return true;
@@ -140,4 +154,33 @@ fn model_matches(m: &ModelOption, filter: &str) -> bool {
         || m.name.to_lowercase().contains(&f)
         || m.full_id().to_lowercase().contains(&f)
         || if m.has_auth { "auth" } else { "no auth" }.contains(filter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn option(provider: &str, id: &str, name: &str) -> ModelOption {
+        ModelOption {
+            provider: provider.into(),
+            id: id.into(),
+            name: name.into(),
+            has_auth: true,
+        }
+    }
+
+    #[test]
+    fn active_matches_bare_id_with_provider() {
+        let m = option("openai", "gpt-4o", "GPT-4o");
+        assert!(model_is_active(&m, Some("gpt-4o"), Some("openai")));
+        assert!(!model_is_active(&m, Some("gpt-4o"), Some("anthropic")));
+    }
+
+    #[test]
+    fn active_matches_full_id_and_name() {
+        let m = option("openai", "gpt-4o", "GPT-4o");
+        assert!(model_is_active(&m, Some("openai/gpt-4o"), None));
+        assert!(model_is_active(&m, Some("GPT-4o"), None));
+        assert!(!model_is_active(&m, Some("claude-3"), Some("openai")));
+    }
 }

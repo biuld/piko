@@ -12,9 +12,9 @@ fn editor_with_history() -> Editor {
 #[test]
 fn replace_range_replaces_existing_text() {
     let mut editor = Editor::default();
-    editor.restore_text("/he");
-    editor.replace_range(0, 3, "/help");
-    assert_eq!(editor.text(), "/help");
+    editor.restore_text("/res");
+    editor.replace_range(0, 4, "/resume");
+    assert_eq!(editor.text(), "/resume");
 }
 
 #[test]

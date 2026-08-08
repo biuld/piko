@@ -219,7 +219,7 @@ by:
 
 - slash command parser
 - completion provider
-- command palette/help display
+- command palette display
 
 This avoids divergent hard-coded command lists.
 

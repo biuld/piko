@@ -20,7 +20,7 @@
 //! ```text
 //! ─ agents ────────────────────────── 1/3 ─
 //! / query
-//! ❯ ○ main                    current ●
+//! ❯ ○ main                   current
 //!   ○ coder                   idle
 //! ↑/↓ | Enter switch | Esc
 //! ────────────────────────────────────────
@@ -31,7 +31,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::theme::Theme;
@@ -46,7 +46,7 @@ pub const SEARCH_PLACEHOLDER: &str = "type to filter";
 /// Pane chrome **complexity** for a surface’s job.
 ///
 /// This is product/chrome density, not modal placement. A full session browser
-/// and a full-screen help panel both use [`Standard`]; a viewed-agent switcher or
+/// and a long-form info panel both use [`Standard`]; a viewed-agent switcher or
 /// model picker uses [`Minimal`] because the interaction is a short pick.
 ///
 /// Applying a mode via [`PaneSpec::mode`] sets padding / borders / search-rule
@@ -490,25 +490,6 @@ pub fn render_pane(
         footer,
         inner,
     })
-}
-
-/// Paint a read-only text body into a fully specified pane (Help / MCP / …).
-pub fn render_text_pane(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    spec: &PaneSpec<'_>,
-    text: impl Into<String>,
-    theme: &Theme,
-) {
-    let Some(areas) = render_pane(frame, area, spec, theme) else {
-        return;
-    };
-    frame.render_widget(
-        Paragraph::new(text.into())
-            .style(Style::default().fg(theme.text))
-            .wrap(Wrap { trim: false }),
-        areas.content,
-    );
 }
 
 fn inset_xy(area: Rect, pad: PanePadding) -> Rect {

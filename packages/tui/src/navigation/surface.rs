@@ -18,11 +18,11 @@ pub enum SurfaceId {
     Sessions,
     Tree,
     Models,
+    Thinking,
     Settings,
     Status,
     Mcp,
     Diagnostics,
-    Help,
     Approval,
     ToolInteraction,
     SummaryPrompt,
@@ -47,13 +47,14 @@ impl SurfaceId {
             | Self::Tree
             | Self::Status
             | Self::Diagnostics
-            | Self::Help
             | Self::SummaryPrompt
             | Self::Settings => SurfaceIntent::Browse,
 
             // Session agent picker (viewed-agent switch) sits near the composer,
-            // same as Models / Auth.
-            Self::Agents | Self::Mcp | Self::Models | Self::AuthSelector => SurfaceIntent::Select,
+            // same as Models / Thinking / Auth.
+            Self::Agents | Self::Mcp | Self::Models | Self::Thinking | Self::AuthSelector => {
+                SurfaceIntent::Select
+            }
 
             Self::Approval | Self::ToolInteraction => SurfaceIntent::Decide,
         }

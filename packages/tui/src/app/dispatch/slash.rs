@@ -52,7 +52,14 @@ impl AppState {
                         .iter()
                         .map(|p| p.provider.clone())
                         .collect();
-                    self.auth_selector.reset(&provider_names);
+                    let auth_names: Vec<String> = self
+                        .model
+                        .providers
+                        .iter()
+                        .filter(|p| p.has_auth)
+                        .map(|p| p.provider.clone())
+                        .collect();
+                    self.auth_selector.reset(&provider_names, &auth_names);
                     self.push_surface(SurfaceId::AuthSelector);
                     self.status = "Select authentication method".to_string();
                 }
@@ -103,7 +110,6 @@ impl AppState {
             }
             SlashAction::RequestDiff => effects.extend(self.request_turn_diff()),
             SlashAction::RequestPromptDebug => effects.extend(self.request_prompt_debug()),
-            SlashAction::RequestRollout => effects.extend(self.request_rollout_page()),
             SlashAction::KillProcess(process_id) => {
                 effects.push(Effect::send(Command::ProcessStop {
                     command_id: command_id(),

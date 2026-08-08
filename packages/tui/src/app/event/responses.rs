@@ -14,11 +14,8 @@ impl AppState {
                 self.push_surface(SurfaceId::Diagnostics);
                 self.status = "prompt debug".to_string();
             }
-            Ok(piko_protocol::CommandResult::RolloutPaged { page, .. }) => {
-                self.diagnostics.set_rollout(&page);
-                self.push_surface(SurfaceId::Diagnostics);
-                self.status = format!("rollout {} item(s)", page.items.len());
-            }
+            // Rollout is no longer surfaced by the TUI; ignore stale responses.
+            Ok(piko_protocol::CommandResult::RolloutPaged { .. }) => {}
             Ok(piko_protocol::CommandResult::TurnDiffGot { diff, .. }) => match diff {
                 Some(diff) => {
                     self.last_turn_id = Some(diff.turn_id.clone());
@@ -120,7 +117,12 @@ impl AppState {
                 self.model.providers = providers.clone();
                 let provider_names: Vec<String> =
                     providers.iter().map(|p| p.provider.clone()).collect();
-                self.auth_selector.reset(&provider_names);
+                let auth_names: Vec<String> = providers
+                    .iter()
+                    .filter(|p| p.has_auth)
+                    .map(|p| p.provider.clone())
+                    .collect();
+                self.auth_selector.reset(&provider_names, &auth_names);
                 self.models.load(flatten_models(providers));
                 match pending {
                     Some(crate::app::pending::PendingCommandKind::BootstrapModels) => {
@@ -279,6 +281,7 @@ impl AppState {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);
                     self.timeline.thinking_visible = !self.tui_config.hide_thinking_block;
+                    self.timeline.tools_expanded = self.tui_config.tools_expanded;
                     if let Some(name) = value
                         .get("theme")
                         .and_then(|t| t.get("name"))

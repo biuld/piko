@@ -11,7 +11,9 @@ use crate::{
     theme::Theme,
     ui::components::{
         ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH,
-        selectable_list::{SelectableItem, SelectableList, render_selectable_list_minimal},
+        selectable_list::{
+            ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
+        },
         spinner_glyph,
     },
 };
@@ -69,7 +71,7 @@ impl AgentPanelState {
         self.agents_hydrated = false;
     }
 
-    /// ComposerBand content-row budget (dense KeyValue rows).
+    /// ComposerBand content-row budget (dense single-line rows).
     pub fn select_band_budget(&self) -> SelectBandBudget {
         if self.is_loading() {
             return SelectBandBudget::minimal_dense_list(1);
@@ -102,8 +104,10 @@ impl AgentPanelState {
             let line =
                 crate::ui::components::feedback::loading_line(view.spinner_frame, view.theme);
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            let items =
-                vec![SelectableItem::new(text, "waiting for session agent list").key_value()];
+            let items = vec![SelectableItem::columns([
+                ColumnCell::primary(text),
+                ColumnCell::secondary("waiting for session agent list"),
+            ])];
             render_selectable_list_minimal(
                 frame,
                 area,
@@ -216,9 +220,8 @@ fn build_selectable_items(view: &AgentPanelView<'_>) -> Vec<SelectableItem> {
                     format!("{detail} · {queue_note}")
                 };
             }
-            SelectableItem::new(primary, detail)
+            SelectableItem::columns([ColumnCell::primary(primary), ColumnCell::secondary(detail)])
                 .active(is_active)
-                .key_value()
         })
         .collect()
 }

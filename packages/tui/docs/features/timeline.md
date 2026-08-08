@@ -15,8 +15,8 @@ rendered as one generic text row style.
 Timeline occupies the top elastic area of the Chat layout.
 
 - It sits above the AgentPanel, notifications, suggestions, Editor, and BottomBar.
-- It is replaced by full-screen overlays such as the session list, tree, help,
-  and status views.
+- It is replaced by full-screen overlays such as the session list, tree, and
+  status views.
 - It remains visible when partial overlays replace the Editor.
 - It has no enclosing box by default; it may use subtle separators or status
   hints when useful.

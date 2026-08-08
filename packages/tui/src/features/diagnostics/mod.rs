@@ -1,9 +1,9 @@
-//! Read-only diagnostic overlays: turn diff, prompt debug, rollout page.
+//! Read-only diagnostic overlays: turn diff, prompt debug.
 //!
-//! Fed by existing host wire commands (`TurnDiffGet`, `PromptDebugGet`,
-//! `RolloutPageGet`) and optional push `TurnDiff` events. Presentation-only.
+//! Fed by existing host wire commands (`TurnDiffGet`, `PromptDebugGet`) and
+//! optional push `TurnDiff` events. Presentation-only.
 
-use piko_protocol::{PromptDebugSnapshot, RolloutPage, TurnDiffEvent, messages::Message};
+use piko_protocol::{PromptDebugSnapshot, TurnDiffEvent};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -22,7 +22,6 @@ pub enum DiagnosticsKind {
     #[default]
     Diff,
     PromptDebug,
-    Rollout,
 }
 
 /// Scrollable diagnostic text panel.
@@ -60,17 +59,6 @@ impl DiagnosticsPanel {
         self.title = format!("prompt debug · {}", short(&snapshot.agent_instance_id));
         self.scroll = 0;
         self.lines = format_prompt_debug(snapshot);
-    }
-
-    pub fn set_rollout(&mut self, page: &RolloutPage) {
-        self.kind = DiagnosticsKind::Rollout;
-        self.title = format!(
-            "rollout · {} · {} item(s)",
-            short(&page.agent_instance_id),
-            page.items.len()
-        );
-        self.scroll = 0;
-        self.lines = format_rollout(page);
     }
 
     pub fn set_message(
@@ -186,76 +174,6 @@ fn format_prompt_debug(snapshot: &PromptDebugSnapshot) -> Vec<String> {
         }
     }
     lines
-}
-
-fn format_rollout(page: &RolloutPage) -> Vec<String> {
-    let mut lines = vec![
-        format!("session  {}", page.session_id),
-        format!("agent    {}", page.agent_instance_id),
-        format!("items    {}", page.items.len()),
-    ];
-    if let Some(cursor) = &page.next_cursor {
-        lines.push(format!("next     {cursor}"));
-    }
-    lines.push(String::new());
-    if page.items.is_empty() {
-        lines.push("No rollout items on this page.".into());
-        return lines;
-    }
-    for item in &page.items {
-        let role = message_role(&item.message);
-        let preview = message_preview(&item.message);
-        lines.push(format!(
-            "seq {:>4}  {}  {}  {}",
-            item.transcript_seq,
-            short(&item.message_id),
-            role,
-            preview
-        ));
-    }
-    lines
-}
-
-fn message_role(message: &Message) -> &'static str {
-    match message {
-        Message::User { .. } => "user",
-        Message::Assistant { .. } => "assistant",
-        Message::ToolCall { .. } => "tool_call",
-        Message::ToolResult { .. } => "tool_result",
-        Message::Context { .. } => "context",
-    }
-}
-
-fn message_preview(message: &Message) -> String {
-    let raw = match message {
-        Message::User { content, .. } | Message::Context { content, .. } => match content {
-            piko_protocol::messages::MessageContent::String(t) => t.clone(),
-            piko_protocol::messages::MessageContent::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    piko_protocol::messages::ContentBlock::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(" "),
-        },
-        Message::Assistant { content, .. } => content
-            .iter()
-            .filter_map(|b| match b {
-                piko_protocol::messages::ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        Message::ToolCall { name, .. } => format!("tool {name}"),
-        Message::ToolResult { tool_call_id, .. } => format!("result {tool_call_id}"),
-    };
-    let flat: String = raw.chars().filter(|c| *c != '\n').take(72).collect();
-    if raw.chars().count() > 72 {
-        format!("{flat}…")
-    } else {
-        flat
-    }
 }
 
 fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme) -> Line<'a> {

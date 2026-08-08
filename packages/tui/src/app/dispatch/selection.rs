@@ -12,6 +12,7 @@ impl AppState {
             Some(SurfaceId::Sessions) => self.sessions.select_next(),
             Some(SurfaceId::Agents) => self.agent_panel.select_next(),
             Some(SurfaceId::Models) => self.models.select_next(),
+            Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
             _ => {}
@@ -25,6 +26,7 @@ impl AppState {
             Some(SurfaceId::Sessions) => self.sessions.select_prev(),
             Some(SurfaceId::Agents) => self.agent_panel.select_prev(),
             Some(SurfaceId::Models) => self.models.select_prev(),
+            Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
             _ => {}
@@ -81,25 +83,6 @@ impl AppState {
             command_id: command_id(),
             session_id,
             agent_instance_id,
-        })]
-    }
-
-    pub(super) fn request_rollout_page(&mut self) -> Vec<Effect> {
-        let Some(session_id) = self.session.id.clone() else {
-            self.status = "no active session for /rollout".to_string();
-            return Vec::new();
-        };
-        let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
-            self.status = "no active agent for /rollout".to_string();
-            return Vec::new();
-        };
-        self.status = "fetching rollout page".to_string();
-        vec![Effect::send(Command::RolloutPageGet {
-            command_id: command_id(),
-            session_id,
-            agent_instance_id,
-            after_cursor: None,
-            limit: Some(50),
         })]
     }
 
@@ -171,11 +154,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
-            AppMode::Surface(SurfaceId::AuthSelector) => {
-                if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
-                    frame.list.selected = 0;
-                }
-            }
+            AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
             _ => {}
         }
     }
@@ -198,11 +177,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
-            AppMode::Surface(SurfaceId::AuthSelector) => {
-                if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
-                    frame.list.selected = 0;
-                }
-            }
+            AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
             _ => {}
         }
     }
@@ -243,13 +218,13 @@ impl AppState {
             Some(SurfaceId::Sessions) => self.open_selected_session(),
             Some(SurfaceId::Agents) => self.apply_selected_agent_view(),
             Some(SurfaceId::Models) => self.apply_selected_model(),
+            Some(SurfaceId::Thinking) => self.apply_selected_thinking(),
             Some(SurfaceId::Settings) => self.apply_selected_setting(),
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
             Some(
                 SurfaceId::Status
                 | SurfaceId::Mcp
                 | SurfaceId::Diagnostics
-                | SurfaceId::Help
                 | SurfaceId::Approval
                 | SurfaceId::ToolInteraction
                 | SurfaceId::SummaryPrompt,

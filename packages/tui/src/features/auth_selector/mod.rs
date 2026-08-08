@@ -4,7 +4,7 @@ use crate::{
     navigation::SelectBandBudget,
     theme::Theme,
     ui::components::{
-        hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
+        menu::{MenuConfirmResult, MenuRow, MenuRowKind, MenuRowLayout, MenuStack},
         text_box::TextBox,
     },
 };
@@ -29,21 +29,26 @@ pub enum AuthConfirmResult {
 
 pub struct AuthSelector {
     pub state: AuthSelectorState,
-    pub menu: HierarchicalMenu<AuthAction>,
+    pub menu: MenuStack<AuthAction>,
     pub filter: String,
 }
 
 impl AuthSelector {
-    pub fn new(available_providers: &[String]) -> Self {
-        let root = Self::build_menu_tree(available_providers);
+    pub fn new(available_providers: &[String], authenticated: &[String]) -> Self {
+        let rows = Self::build_menu_tree(available_providers, authenticated);
+        let mut menu = MenuStack::new();
+        menu.open("authentication", MenuRowLayout::Stacked, rows);
         Self {
             state: AuthSelectorState::Menu,
-            menu: HierarchicalMenu::new(root),
+            menu,
             filter: String::new(),
         }
     }
 
-    pub fn build_menu_tree(available_providers: &[String]) -> MenuNode<AuthAction> {
+    pub fn build_menu_tree(
+        available_providers: &[String],
+        authenticated: &[String],
+    ) -> Vec<MenuRow<AuthAction>> {
         let oauth_providers = vec!["openai".to_string()];
         let mut api_key_providers = vec![
             "anthropic".to_string(),
@@ -68,11 +73,13 @@ impl AuthSelector {
                     ),
                     _ => (p.clone(), format!("OAuth login for {p}")),
                 };
-                MenuNode::Action {
+                action_row(
                     title,
                     detail,
-                    action: AuthAction::StartOAuth { provider: p },
-                }
+                    p,
+                    |provider| AuthAction::StartOAuth { provider },
+                    authenticated,
+                )
             })
             .collect();
 
@@ -88,37 +95,38 @@ impl AuthSelector {
                     "deepseek" => ("DeepSeek".to_string(), "Set DeepSeek API key".to_string()),
                     _ => (p.clone(), format!("Set API key for {p}")),
                 };
-                MenuNode::Action {
+                action_row(
                     title,
                     detail,
-                    action: AuthAction::StartApiKey { provider: p },
-                }
+                    p,
+                    |provider| AuthAction::StartApiKey { provider },
+                    authenticated,
+                )
             })
             .collect();
 
-        MenuNode::Group {
-            title: "authentication".to_string(),
-            detail: "Configure provider authentication".to_string(),
-            children: vec![
-                MenuNode::Group {
-                    title: "Use a subscription (OAuth)".to_string(),
-                    detail: "Log in using a web browser subscription".to_string(),
-                    children: oauth_children,
-                },
-                MenuNode::Group {
-                    title: "Use an API Key".to_string(),
-                    detail: "Manually configure an API key".to_string(),
-                    children: api_key_children,
-                },
-            ],
-        }
+        // Root frame lists the two auth methods directly (frame title is the
+        // panel title); no extra single-row "authentication" level.
+        vec![
+            group_row(
+                "Use a subscription (OAuth)",
+                "Log in using a web browser subscription",
+                oauth_children,
+            ),
+            group_row(
+                "Use an API Key",
+                "Manually configure an API key",
+                api_key_children,
+            ),
+        ]
     }
 
-    pub fn reset(&mut self, available_providers: &[String]) {
+    pub fn reset(&mut self, available_providers: &[String], authenticated: &[String]) {
         self.state = AuthSelectorState::Menu;
         self.filter.clear();
-        let root = Self::build_menu_tree(available_providers);
-        self.menu.open(root);
+        let rows = Self::build_menu_tree(available_providers, authenticated);
+        self.menu
+            .open("authentication", MenuRowLayout::Stacked, rows);
     }
 
     /// ComposerBand content-row budget (stacked menu or fixed form).
@@ -149,10 +157,10 @@ impl AuthSelector {
     pub fn confirm(&mut self) -> AuthConfirmResult {
         match &mut self.state {
             AuthSelectorState::Menu => match self.menu.confirm(&mut self.filter) {
-                MenuConfirmResult::Action(AuthAction::StartOAuth { provider }, _) => {
+                MenuConfirmResult::Apply(AuthAction::StartOAuth { provider }) => {
                     AuthConfirmResult::StartOAuth { provider }
                 }
-                MenuConfirmResult::Action(AuthAction::StartApiKey { provider }, _) => {
+                MenuConfirmResult::Apply(AuthAction::StartApiKey { provider }) => {
                     self.state = AuthSelectorState::ApiKeyInput {
                         provider,
                         input: TextBox::new()
@@ -162,9 +170,7 @@ impl AuthSelector {
                     self.filter.clear();
                     AuthConfirmResult::StartApiKeyInput
                 }
-                MenuConfirmResult::SubMenuPushed | MenuConfirmResult::None => {
-                    AuthConfirmResult::None
-                }
+                MenuConfirmResult::Drilled | MenuConfirmResult::None => AuthConfirmResult::None,
             },
             AuthSelectorState::ApiKeyInput { provider, input } => AuthConfirmResult::SetApiKey {
                 provider: provider.clone(),
@@ -176,8 +182,7 @@ impl AuthSelector {
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         match &self.state {
             AuthSelectorState::Menu => {
-                self.menu
-                    .render(frame, area, &self.filter, |_action| false, theme);
+                self.menu.render_minimal(frame, area, &self.filter, theme);
             }
             AuthSelectorState::ApiKeyInput { provider, input } => {
                 use crate::ui::components::pane::{PaneSpec, render_pane};
@@ -212,5 +217,53 @@ impl AuthSelector {
                 frame.render_widget(Paragraph::new(lines), areas.content);
             }
         }
+    }
+}
+
+fn action_row(
+    title: String,
+    detail: String,
+    provider: String,
+    kind: impl Fn(String) -> AuthAction,
+    authenticated: &[String],
+) -> MenuRow<AuthAction> {
+    let mut row = MenuRow::action(title, detail, kind(provider.clone()));
+    row.is_active = authenticated.contains(&provider);
+    row
+}
+
+fn group_row(title: &str, detail: &str, children: Vec<MenuRow<AuthAction>>) -> MenuRow<AuthAction> {
+    MenuRow {
+        title: title.to_string(),
+        detail: detail.to_string(),
+        value: None,
+        badge: None,
+        group: None,
+        is_active: false,
+        kind: MenuRowKind::Branch(children),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_tree_marks_authenticated_providers() {
+        let providers = vec!["anthropic".to_string(), "openai".to_string()];
+        let rows = AuthSelector::build_menu_tree(&providers, &["anthropic".to_string()]);
+        let MenuRowKind::Branch(api_key_children) = &rows[1].kind else {
+            panic!("second root row must be the API-key group");
+        };
+        let anthropic = api_key_children
+            .iter()
+            .find(|r| r.title.contains("Anthropic"))
+            .expect("anthropic row");
+        assert!(anthropic.is_active);
+        let openai = api_key_children
+            .iter()
+            .find(|r| r.title.contains("OpenAI"))
+            .expect("openai row");
+        assert!(!openai.is_active);
     }
 }
