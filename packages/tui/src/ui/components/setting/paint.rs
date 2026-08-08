@@ -1,4 +1,4 @@
-//! Settings surface → [`FilterableItem`] rows drawn by FilterableList.
+//! Settings surface → [`SelectableItem`] rows drawn by SelectableList.
 //!
 //! Domain model stays in the setting kit; paint maps onto list layouts and a
 //! product-shaped [`PaneSpec`] (title · `/ to search` · content · pipe hints).
@@ -9,8 +9,8 @@ use super::{FrameContent, NavFrame};
 use crate::theme::Theme;
 use crate::ui::components::{
     feedback::{settings_apply_hints, settings_open_hints},
-    filterable_list::{FilterableItem, render_filterable_list_with_pane},
     pane::PaneSpec,
+    selectable_list::{SelectableItem, render_selectable_list_with_pane},
 };
 
 pub(super) fn paint_frame<T: Clone>(
@@ -29,10 +29,10 @@ pub(super) fn paint_frame<T: Clone>(
 
     let (items, hints) = match &nav.content {
         FrameContent::Sections(sections) => {
-            let items: Vec<FilterableItem> = sections
+            let items: Vec<SelectableItem> = sections
                 .iter()
                 .map(|s| {
-                    let mut row = FilterableItem::new(&s.title, &s.value_summary).settings_row();
+                    let mut row = SelectableItem::new(&s.title, &s.value_summary).settings_row();
                     if let Some(badge) = s.effect.badge_label() {
                         row = row.badge(badge);
                     }
@@ -45,11 +45,11 @@ pub(super) fn paint_frame<T: Clone>(
             (items, settings_open_hints(at_root))
         }
         FrameContent::Choice(choice) => {
-            let items: Vec<FilterableItem> = choice
+            let items: Vec<SelectableItem> = choice
                 .options
                 .iter()
                 .map(|o| {
-                    let mut row = FilterableItem::new(&o.label, &o.detail)
+                    let mut row = SelectableItem::new(&o.label, &o.detail)
                         .settings_option()
                         .active(o.is_active);
                     if let Some(badge) = choice.effect.badge_label() {
@@ -73,5 +73,5 @@ pub(super) fn paint_frame<T: Clone>(
         spec = spec.affix(crate::ui::components::pane::PaneTitleAffix::Close);
     }
 
-    render_filterable_list_with_pane(frame, area, spec, &items, nav.list.selected, filter, theme);
+    render_selectable_list_with_pane(frame, area, spec, &items, nav.list.selected, filter, theme);
 }

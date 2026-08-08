@@ -152,7 +152,7 @@ fn cold_start_shows_loading_until_required_bootstrap_completes() {
         }),
     });
     assert!(!app.agent_panel.is_loading());
-    assert!(app.agent_panel.agents.is_empty());
+    assert!(app.agent_panel.agents().is_empty());
     assert!(app.host_settings.loaded);
 }
 
@@ -222,9 +222,9 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
 
     assert!(!app.agent_panel.is_loading());
     assert!(!app.session.initializing);
-    assert_eq!(app.agent_panel.agents.len(), 1);
-    assert_eq!(app.agent_panel.agents[0].name, "Main");
-    assert_eq!(app.agent_panel.agents[0].agent_id, "main");
+    assert_eq!(app.agent_panel.agents().len(), 1);
+    assert_eq!(app.agent_panel.agents()[0].name, "Main");
+    assert_eq!(app.agent_panel.agents()[0].agent_id, "main");
 }
 
 #[test]

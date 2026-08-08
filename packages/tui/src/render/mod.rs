@@ -67,7 +67,7 @@ fn paint_regions(
 
 fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
     let agent_label = agent_chrome_label(app);
-    let agent_busy = app.agent_panel.agents.iter().any(|a| {
+    let agent_busy = app.agent_panel.agents().iter().any(|a| {
         app.agent_foreground(&a.agent_instance_id, &a.activity)
             .is_busy()
     });
@@ -103,7 +103,7 @@ fn agent_chrome_label(app: &AppState) -> Option<String> {
     if app.agent_panel.is_loading() {
         return Some("…".to_string());
     }
-    let agents = &app.agent_panel.agents;
+    let agents = &app.agent_panel.agents();
     if agents.is_empty() {
         return None;
     }
@@ -125,7 +125,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
         SurfaceId::Agents => {
             let foreground: Vec<_> = app
                 .agent_panel
-                .agents
+                .agents()
                 .iter()
                 .map(|agent| app.agent_foreground(&agent.agent_instance_id, &agent.activity))
                 .collect();

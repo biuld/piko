@@ -68,15 +68,8 @@ pub struct CompletionRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionCell {
     pub text: String,
-    pub style: CellStyle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CellStyle {
-    Default,
-    Dim,
-    Accent,
-    Bold,
+    /// Shared with selectable Columns body (`Primary` | `Secondary`).
+    pub style: ColumnCellStyle,
 }
 ```
 

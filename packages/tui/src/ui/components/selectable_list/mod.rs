@@ -1,6 +1,11 @@
-//! FilterableList — keyboard list state + row paint on shared [`Pane`] chrome.
+//! SelectableList — shared selection kernel + row body strategies on [`Pane`] chrome.
 //!
-//! Feedback: Selected ≠ Active ≠ Focused ([component-feedback](../../../docs/features/component-feedback.md)).
+//! Feedback: Selected ≠ Active ≠ Focused
+//! ([component-feedback](../../../docs/features/component-feedback.md)).
+//!
+//! **Kernel** owns items / selected / filter navigation.
+//! **Body** is either multi-line List (`Stacked` / Settings…) or multi-column
+//! Table (`Columns`) — same interaction contract, different paint.
 
 use ratatui::{
     Frame,
@@ -12,21 +17,94 @@ use crate::theme::Theme;
 use crate::ui::components::feedback::{default_list_hints, empty_line};
 use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
 
+mod columns;
+mod panel;
 mod rows;
 
-/// How a filterable row lays out primary vs detail / value.
+pub use panel::{SelectablePanelBody, paint_selectable_panel};
+
+/// How a selectable row lays out primary vs detail / value / columns.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FilterableRowLayout {
+pub enum SelectableRowLayout {
     /// Primary line + detail line underneath (menus, long descriptions).
     #[default]
     Stacked,
     /// Single line: key left-aligned, value right-aligned (`❯` selection).
-    #[allow(dead_code)] // reserved for key/value menus
     KeyValue,
+    /// Multi-column single line (command palette, model picker, file browser).
+    Columns,
     /// Settings catalog row: `▸ key …… value [badge] >` (selected via bg, no caret).
     SettingsRow,
     /// Settings choice option: `▸ label` (+ Active) with consequence under.
     SettingsOption,
+}
+
+/// Style role for a column cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnCellStyle {
+    /// Primary label: accent when the row is selected.
+    Primary,
+    /// Secondary / muted description column.
+    Secondary,
+    /// Bold primary (named sessions); accent when selected.
+    Emphasized,
+    /// Status label (e.g. “active”); always accent weight.
+    Status,
+}
+
+/// Horizontal alignment for a column cell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColumnAlign {
+    #[default]
+    Left,
+    Right,
+}
+
+/// One cell in a multi-column row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnCell {
+    pub text: String,
+    pub style: ColumnCellStyle,
+    pub align: ColumnAlign,
+}
+
+impl ColumnCell {
+    pub fn primary(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            style: ColumnCellStyle::Primary,
+            align: ColumnAlign::Left,
+        }
+    }
+
+    pub fn secondary(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            style: ColumnCellStyle::Secondary,
+            align: ColumnAlign::Left,
+        }
+    }
+
+    pub fn emphasized(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            style: ColumnCellStyle::Emphasized,
+            align: ColumnAlign::Left,
+        }
+    }
+
+    pub fn status(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            style: ColumnCellStyle::Status,
+            align: ColumnAlign::Left,
+        }
+    }
+
+    pub fn align(mut self, align: ColumnAlign) -> Self {
+        self.align = align;
+        self
+    }
 }
 
 /// How a domain group caption is painted above the first visible row of a chunk.
@@ -44,9 +122,9 @@ pub(super) const SETTINGS_BULLET: &str = "▸ ";
 /// Drill / expand affix after a Settings catalog value (screenshot chevron).
 pub(super) const SETTINGS_EXPAND: &str = " ›";
 
-/// A single display row in a filterable list.
+/// A single display row in a selectable list / table.
 #[derive(Clone)]
-pub struct FilterableItem {
+pub struct SelectableItem {
     pub primary: String,
     pub detail: String,
     /// Authoritative "already in force" value (not keyboard selection).
@@ -58,10 +136,13 @@ pub struct FilterableItem {
     /// Domain chunk name: filter match + non-selectable header when group changes.
     pub group: Option<String>,
     pub group_style: GroupHeaderStyle,
-    pub layout: FilterableRowLayout,
+    pub layout: SelectableRowLayout,
+    /// Explicit columns for [`SelectableRowLayout::Columns`]; when empty, paint falls
+    /// back to `[primary, detail]`.
+    pub cells: Vec<ColumnCell>,
 }
 
-impl FilterableItem {
+impl SelectableItem {
     pub fn new(primary: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             primary: primary.into(),
@@ -71,7 +152,34 @@ impl FilterableItem {
             trailing: None,
             group: None,
             group_style: GroupHeaderStyle::Caption,
-            layout: FilterableRowLayout::Stacked,
+            layout: SelectableRowLayout::Stacked,
+            cells: Vec::new(),
+        }
+    }
+
+    /// Multi-column row. Primary/detail are filled from the first cells for filter.
+    pub fn columns(cells: impl IntoIterator<Item = ColumnCell>) -> Self {
+        let cells: Vec<ColumnCell> = cells.into_iter().collect();
+        let primary = cells.first().map(|c| c.text.clone()).unwrap_or_default();
+        let detail = cells
+            .get(1..)
+            .map(|rest| {
+                rest.iter()
+                    .map(|c| c.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            })
+            .unwrap_or_default();
+        Self {
+            primary,
+            detail,
+            is_active: false,
+            badge: None,
+            trailing: None,
+            group: None,
+            group_style: GroupHeaderStyle::Caption,
+            layout: SelectableRowLayout::Columns,
+            cells,
         }
     }
 
@@ -100,35 +208,74 @@ impl FilterableItem {
         self
     }
 
-    #[allow(dead_code)] // reserved for key/value menus
     pub fn key_value(mut self) -> Self {
-        self.layout = FilterableRowLayout::KeyValue;
+        self.layout = SelectableRowLayout::KeyValue;
         self
     }
 
     /// Settings catalog section row (`▸ label … value >`).
     pub fn settings_row(mut self) -> Self {
-        self.layout = FilterableRowLayout::SettingsRow;
+        self.layout = SelectableRowLayout::SettingsRow;
         self.group_style = GroupHeaderStyle::Rule;
         self
     }
 
     /// Settings exclusive-option row (`▸ label` + Active, detail under).
     pub fn settings_option(mut self) -> Self {
-        self.layout = FilterableRowLayout::SettingsOption;
+        self.layout = SelectableRowLayout::SettingsOption;
         self
+    }
+
+    /// Resolve paint cells: explicit columns or `[primary, detail]`.
+    pub(super) fn resolved_cells(&self) -> Vec<ColumnCell> {
+        if !self.cells.is_empty() {
+            return self.cells.clone();
+        }
+        let mut cells = vec![ColumnCell::primary(self.primary.clone())];
+        if !self.detail.is_empty() {
+            cells.push(ColumnCell::secondary(self.detail.clone()));
+        }
+        cells
     }
 }
 
-/// Selection state for a list of items.
-pub struct FilterableList<T> {
+/// Selection state for a list of items (shared by menus, sessions, settings).
+pub struct SelectableList<T> {
     pub items: Vec<T>,
     pub selected: usize,
 }
 
-impl<T> FilterableList<T> {
+impl<T> Default for SelectableList<T> {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl<T> SelectableList<T> {
     pub fn new(items: Vec<T>) -> Self {
         Self { items, selected: 0 }
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.selected = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Select first match under `filter` (or 0 if none).
+    pub fn reset_selection<F>(&mut self, filter: &str, f: F)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        let filtered = self.filtered_indices(filter, f);
+        self.selected = filtered.first().copied().unwrap_or(0);
     }
 
     pub fn filtered_indices<F>(&self, filter: &str, mut f: F) -> Vec<usize>
@@ -178,24 +325,28 @@ impl<T> FilterableList<T> {
             self.selected = orig_idx;
         }
     }
+
+    pub fn selected_item(&self) -> Option<&T> {
+        self.items.get(self.selected)
+    }
 }
 
-/// Filterable list with **minimal** pane chrome (quick pick: agent switch, model, auth).
+/// Selectable list with **minimal** pane chrome (quick pick: agent, model, auth).
 ///
 /// Complex browse surfaces should build a [`PaneSpec`] with
-/// [`PaneMode::Standard`] and call [`render_filterable_list_with_pane`].
+/// [`PaneMode::Standard`] and call [`render_selectable_list_with_pane`].
 #[allow(clippy::too_many_arguments)]
-pub fn render_filterable_list_minimal(
+pub fn render_selectable_list_minimal(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
-    items: &[FilterableItem],
+    items: &[SelectableItem],
     selected: usize,
     filter: &str,
     focused: bool,
     theme: &Theme,
 ) {
-    render_filterable_list_with_mode(
+    render_selectable_list_with_mode(
         frame,
         area,
         title,
@@ -210,11 +361,11 @@ pub fn render_filterable_list_minimal(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_filterable_list_with_mode(
+fn render_selectable_list_with_mode(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
-    items: &[FilterableItem],
+    items: &[SelectableItem],
     selected: usize,
     filter: &str,
     focused: bool,
@@ -234,14 +385,12 @@ fn render_filterable_list_with_mode(
         .map(|i| i + 1)
         .unwrap_or(0);
 
-    let full_title = title; // counter lives in title_affixes, not left title
-    // Complexity defaults + explicit override path (padding / borders).
     let mut spec = match mode {
-        PaneMode::Minimal => PaneSpec::minimal(full_title)
+        PaneMode::Minimal => PaneSpec::minimal(title)
             .padding(PaneMode::Minimal.padding())
             .borders(PaneMode::Minimal.borders())
             .search_rule(false),
-        PaneMode::Standard => PaneSpec::new(full_title)
+        PaneMode::Standard => PaneSpec::new(title)
             .padding(PaneMode::Standard.padding())
             .borders(PaneMode::Standard.borders()),
     };
@@ -252,34 +401,32 @@ fn render_filterable_list_with_mode(
     }
     spec = spec.search_filter(filter).hints(hints).focused(focused);
 
-    paint_list_body(frame, area, &spec, items, selected, filter, theme);
+    paint_selectable_body(frame, area, &spec, items, selected, filter, theme);
 }
 
-/// Render a filterable list into a fully specified [`PaneSpec`].
-///
-/// Title is used as-is (no `[n/total]` rewrite) — for Settings-style product chrome.
-pub fn render_filterable_list_with_pane(
+/// Render a selectable list into a fully specified [`PaneSpec`].
+pub fn render_selectable_list_with_pane(
     frame: &mut Frame<'_>,
     area: Rect,
     spec: PaneSpec<'_>,
-    items: &[FilterableItem],
+    items: &[SelectableItem],
     selected: usize,
     filter: &str,
     theme: &Theme,
 ) {
-    paint_list_body(frame, area, &spec, items, selected, filter, theme);
+    paint_selectable_body(frame, area, &spec, items, selected, filter, theme);
 }
 
-fn paint_list_body(
+fn paint_selectable_body(
     frame: &mut Frame<'_>,
     area: Rect,
     spec: &PaneSpec<'_>,
-    items: &[FilterableItem],
+    items: &[SelectableItem],
     selected: usize,
     filter: &str,
     theme: &Theme,
 ) {
-    let filtered: Vec<(usize, &FilterableItem)> = items
+    let filtered: Vec<(usize, &SelectableItem)> = items
         .iter()
         .enumerate()
         .filter(|(_, item)| item_matches_filter(item, filter))
@@ -304,6 +451,16 @@ fn paint_list_body(
         .unwrap_or(0)
         .min(filtered.len().saturating_sub(1));
 
+    let use_columns = filtered
+        .first()
+        .is_some_and(|(_, item)| item.layout == SelectableRowLayout::Columns);
+
+    if use_columns {
+        let col_items: Vec<&SelectableItem> = filtered.iter().map(|(_, item)| *item).collect();
+        columns::paint_column_items(frame, content, &col_items, selected_filtered_idx, theme);
+        return;
+    }
+
     let row_width = content.width.max(1) as usize;
     let list_items: Vec<ListItem<'_>> = filtered
         .iter()
@@ -323,7 +480,7 @@ fn paint_list_body(
     frame.render_stateful_widget(list, content, &mut list_state);
 }
 
-fn item_matches_filter(item: &FilterableItem, filter: &str) -> bool {
+fn item_matches_filter(item: &SelectableItem, filter: &str) -> bool {
     if filter.is_empty() {
         return true;
     }
@@ -338,4 +495,8 @@ fn item_matches_filter(item: &FilterableItem, filter: &str) -> bool {
             .group
             .as_ref()
             .is_some_and(|g| g.to_lowercase().contains(&f))
+        || item
+            .cells
+            .iter()
+            .any(|c| c.text.to_lowercase().contains(&f))
 }

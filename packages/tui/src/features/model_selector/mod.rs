@@ -3,7 +3,9 @@ use ratatui::{Frame, layout::Rect};
 use crate::{
     navigation::SelectBandBudget,
     theme::Theme,
-    ui::components::hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
+    ui::components::selectable_list::{
+        ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
+    },
 };
 
 /// A discovered model option.
@@ -15,78 +17,78 @@ pub struct ModelOption {
     pub has_auth: bool,
 }
 
-/// Model selector panel: encapsulates a generic HierarchicalMenu.
+impl ModelOption {
+    pub fn full_id(&self) -> String {
+        format!("{}/{}", self.provider, self.id)
+    }
+}
+
+/// Flat model picker on shared [`SelectableList`] + Columns body.
 pub struct ModelSelector {
-    pub menu: HierarchicalMenu<ModelOption>,
+    pub list: SelectableList<ModelOption>,
     pub filter: String,
 }
 
 impl ModelSelector {
     pub fn new() -> Self {
-        let root = MenuNode::Group {
-            title: "models".to_string(),
-            detail: "List and set default model".to_string(),
-            children: Vec::new(),
-        };
         Self {
-            menu: HierarchicalMenu::new(root),
+            list: SelectableList::new(Vec::new()),
             filter: String::new(),
         }
     }
 
-    /// Load dynamic models retrieved from hostd into the hierarchical menu tree.
     pub fn load(&mut self, models: Vec<ModelOption>) {
-        let children = models
-            .into_iter()
-            .map(|item| {
-                let auth = if item.has_auth { "auth" } else { "no auth" };
-                let title = format!("{}/{}", item.provider, item.id);
-                let detail = format!("{}  {}", item.name, auth);
-                MenuNode::Action {
-                    title,
-                    detail,
-                    action: item,
-                }
-            })
-            .collect();
-
-        let root = MenuNode::Group {
-            title: "models".to_string(),
-            detail: "List and set default model".to_string(),
-            children,
-        };
-        self.menu.open(root);
+        self.list = SelectableList::new(models);
     }
 
     pub fn len(&self) -> usize {
-        self.menu
-            .stack
-            .last()
-            .map(|frame| frame.list.items.len())
-            .unwrap_or(0)
+        self.list.len()
     }
 
-    /// ComposerBand content-row budget (Stacked rows × capped visible items).
+    /// ComposerBand content-row budget (dense Columns rows).
     pub fn select_band_budget(&self) -> SelectBandBudget {
-        SelectBandBudget::minimal_stacked_list(self.menu.filtered_item_count(&self.filter))
+        SelectBandBudget::minimal_dense_list(self.filtered_count())
     }
 
     pub fn reset(&mut self) {
-        if let Some(frame) = self.menu.stack.last_mut() {
-            frame.list.selected = 0;
-        }
+        self.list.selected = 0;
     }
 
     pub fn select_next(&mut self) {
-        self.menu.select_next(&self.filter);
+        let filter = self.filter.clone();
+        self.list
+            .select_next(&filter, |m| model_matches(m, &filter));
     }
 
     pub fn select_prev(&mut self) {
-        self.menu.select_prev(&self.filter);
+        let filter = self.filter.clone();
+        self.list
+            .select_prev(&filter, |m| model_matches(m, &filter));
     }
 
-    pub fn confirm(&mut self) -> MenuConfirmResult<ModelOption> {
-        self.menu.confirm(&mut self.filter)
+    /// Confirm highlighted model (already filtered list).
+    pub fn confirm(&mut self) -> Option<ModelOption> {
+        let filter = self.filter.as_str();
+        let filtered = self
+            .list
+            .filtered_indices(filter, |m| model_matches(m, filter));
+        if filtered.is_empty() {
+            return None;
+        }
+        let selected_filtered_idx = filtered
+            .iter()
+            .position(|&orig_idx| orig_idx == self.list.selected)
+            .unwrap_or(0)
+            .min(filtered.len().saturating_sub(1));
+        filtered
+            .get(selected_filtered_idx)
+            .and_then(|&idx| self.list.items.get(idx).cloned())
+    }
+
+    fn filtered_count(&self) -> usize {
+        self.list
+            .filtered_indices(&self.filter, |m| model_matches(m, &self.filter))
+            .len()
     }
 
     pub fn render(
@@ -96,17 +98,46 @@ impl ModelSelector {
         active_model_id: Option<&str>,
         theme: &Theme,
     ) {
-        self.menu.render(
+        let items: Vec<SelectableItem> = self
+            .list
+            .items
+            .iter()
+            .map(|action| {
+                let model_id_full = action.full_id();
+                let is_active = active_model_id
+                    .map(|id| id == model_id_full)
+                    .unwrap_or(false);
+                let auth = if action.has_auth { "auth" } else { "no auth" };
+                SelectableItem::columns([
+                    ColumnCell::primary(model_id_full),
+                    ColumnCell::secondary(action.name.clone()),
+                    ColumnCell::secondary(auth),
+                ])
+                .active(is_active)
+            })
+            .collect();
+
+        render_selectable_list_minimal(
             frame,
             area,
+            "models",
+            &items,
+            self.list.selected,
             &self.filter,
-            |model| {
-                let model_id_full = format!("{}/{}", model.provider, model.id);
-                active_model_id
-                    .map(|id| id == model_id_full)
-                    .unwrap_or(false)
-            },
+            true,
             theme,
         );
     }
+}
+
+fn model_matches(m: &ModelOption, filter: &str) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let f = filter.to_lowercase();
+    m.provider.to_lowercase().contains(&f)
+        || m.id.to_lowercase().contains(&f)
+        || m.name.to_lowercase().contains(&f)
+        || m.full_id().to_lowercase().contains(&f)
+        || if m.has_auth { "auth" } else { "no auth" }.contains(filter)
 }

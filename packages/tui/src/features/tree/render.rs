@@ -1,16 +1,17 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row},
+    widgets::Paragraph,
 };
 
 use super::{ConnectorKind, TreeFilterMode, TreePanel, visible};
 use crate::theme::Theme;
 use crate::ui::components::interactive_workflow::InteractiveWorkflow;
-use crate::ui::components::pane::PaneTitleAffix;
-use crate::ui::components::table_panel::{ActionPrompt, TableBody, TablePanel};
+use crate::ui::components::pane::{PaneFooter, PaneSearch, PaneSpec, PaneTitleAffix};
+use crate::ui::components::selectable_list::{SelectablePanelBody, paint_selectable_panel};
+use crate::ui::components::selection_prefix;
 
 impl TreePanel {
     pub fn render(
@@ -62,67 +63,66 @@ impl TreePanel {
             ])
         };
 
-        let body = if self.visible.rows.is_empty() {
-            let msg = if filter.is_empty() {
-                "No entries found."
-            } else {
-                "No entries match the filter."
-            };
-            TableBody::Message(Paragraph::new(msg).style(Style::default().fg(theme.muted)))
+        let lines: Vec<Line<'static>> = self
+            .visible
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| self.row_line(row, idx == self.selected_idx, theme))
+            .collect();
+
+        let footer = if summary_prompt.is_some() {
+            PaneFooter::Reserved { height: 7 }
         } else {
-            let rows: Vec<Row> = self
-                .visible
-                .rows
-                .iter()
-                .enumerate()
-                .map(|(idx, row)| self.render_row(row, idx == self.selected_idx, theme))
-                .collect();
-            TableBody::Rows {
-                widths: &[Constraint::Fill(1)],
-                rows,
-                selected_idx: self.selected_idx,
-            }
+            PaneFooter::Hints("Enter confirm · Esc close")
         };
 
-        // SummaryPrompt uses a constant height of 7 to prevent height updates from causing layout jitter
-        let action_prompt = if let Some(state) = summary_prompt {
-            ActionPrompt::Interactive {
-                height: 7,
-                render: Box::new(move |frame, area| {
-                    state.render(frame, area, theme);
-                }),
-            }
-        } else {
-            ActionPrompt::Legend("Enter confirm · Esc close")
-        };
-
-        let panel = TablePanel {
-            left_title,
-            affixes: vec![
+        let spec = PaneSpec::new(&left_title)
+            .mode(crate::ui::components::pane::PaneMode::Standard)
+            .title_affixes([
                 PaneTitleAffix::mode_strip_static(
                     &["Default", "NoTools", "User", "Labeled", "All"],
                     mode_active,
                 ),
                 PaneTitleAffix::selection(sel_at, sel_of),
-            ],
-            help_text,
-            search_line,
-            body,
-            action_prompt,
-            gap: true,
-            focused: true,
+            ])
+            .search(PaneSearch::Custom(search_line))
+            .tip(help_text)
+            .footer(footer)
+            .focused(true);
+
+        let body = if lines.is_empty() {
+            let msg = if filter.is_empty() {
+                "No entries found."
+            } else {
+                "No entries match the filter."
+            };
+            SelectablePanelBody::Message(
+                Paragraph::new(msg).style(Style::default().fg(theme.muted)),
+            )
+        } else {
+            SelectablePanelBody::RichLines {
+                lines: &lines,
+                selected: self.selected_idx,
+            }
         };
 
-        panel.render(frame, area, theme);
+        let Some(areas) = paint_selectable_panel(frame, area, theme, &spec, body) else {
+            return;
+        };
+
+        if let (Some(footer_area), Some(state)) = (areas.footer, summary_prompt) {
+            state.render(frame, footer_area, theme);
+        }
     }
 
-    fn render_row(&self, row: &visible::TreeRow, is_selected: bool, theme: &Theme) -> Row<'static> {
+    fn row_line(&self, row: &visible::TreeRow, is_selected: bool, theme: &Theme) -> Line<'static> {
         let bg = if is_selected {
             theme.bg_selected
         } else {
             Color::Reset
         };
-        let styled = |text: String, color| {
+        let styled = |text: String, color: Color| {
             let style = Style::default().fg(color).bg(bg);
             let style = if is_selected {
                 style.add_modifier(Modifier::BOLD)
@@ -133,10 +133,7 @@ impl TreePanel {
         };
 
         let mut spans = Vec::new();
-        spans.push(styled(
-            if is_selected { "› " } else { "  " }.to_string(),
-            theme.accent,
-        ));
+        spans.push(styled(selection_prefix(is_selected), theme.accent));
 
         let prefix = tree_row_prefix(row);
         if !prefix.is_empty() {
@@ -170,7 +167,7 @@ impl TreePanel {
         spans.push(styled(" ".to_string(), theme.text));
         spans.push(styled(row.text_preview.clone(), theme.text));
 
-        Row::new(vec![Cell::from(Line::from(spans))])
+        Line::from(spans)
     }
 
     fn role_color(&self, row: &visible::TreeRow, theme: &Theme) -> Color {

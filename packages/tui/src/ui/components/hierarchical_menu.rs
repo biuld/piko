@@ -4,7 +4,7 @@ use crate::{
     theme::Theme,
     ui::components::{
         GROUP_DRILL,
-        filterable_list::{FilterableItem, FilterableList, render_filterable_list_minimal},
+        selectable_list::{SelectableItem, SelectableList, render_selectable_list_minimal},
     },
 };
 
@@ -42,7 +42,7 @@ impl<T: Clone> MenuNode<T> {
 /// A single frame representing the current level in the navigation stack.
 pub struct MenuFrame<T: Clone> {
     pub title: String,
-    pub list: FilterableList<MenuNode<T>>,
+    pub list: SelectableList<MenuNode<T>>,
 }
 
 /// Result returned when confirming a menu selection.
@@ -54,6 +54,10 @@ pub enum MenuConfirmResult<T> {
 }
 
 /// A generic keyboard-navigable hierarchical menu component.
+///
+/// Renders Stacked rows via [`render_selectable_list_minimal`]. Feature surfaces
+/// that need Columns (e.g. models) map items themselves and call the shared
+/// paint path directly.
 pub struct HierarchicalMenu<T: Clone> {
     pub stack: Vec<MenuFrame<T>>,
 }
@@ -79,7 +83,7 @@ impl<T: Clone> HierarchicalMenu<T> {
         {
             self.stack.push(MenuFrame {
                 title,
-                list: FilterableList::new(children),
+                list: SelectableList::new(children),
             });
         }
     }
@@ -170,7 +174,7 @@ impl<T: Clone> HierarchicalMenu<T> {
             return;
         };
 
-        let items: Vec<FilterableItem> = current_frame
+        let items: Vec<SelectableItem> = current_frame
             .list
             .items
             .iter()
@@ -186,7 +190,7 @@ impl<T: Clone> HierarchicalMenu<T> {
                 };
 
                 let mut row =
-                    FilterableItem::new(item.title().to_string(), item.detail().to_string())
+                    SelectableItem::new(item.title().to_string(), item.detail().to_string())
                         .active(is_active);
                 if !suffix.is_empty() {
                     row = row.trailing(suffix.trim());
@@ -195,8 +199,7 @@ impl<T: Clone> HierarchicalMenu<T> {
             })
             .collect();
 
-        // Quick multi-level pick → minimal chrome.
-        render_filterable_list_minimal(
+        render_selectable_list_minimal(
             frame,
             area,
             &current_frame.title,

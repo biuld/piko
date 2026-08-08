@@ -3,7 +3,7 @@ use piko_protocol::Command;
 use crate::{
     app::{AppState, SurfaceId, command_id, config_command_for_setting, effect::Effect},
     features::{notifications::NotificationLevel, settings::action_requires_hostd_restart},
-    ui::components::{hierarchical_menu::MenuConfirmResult, setting::SettingConfirmResult},
+    ui::components::setting::SettingConfirmResult,
 };
 
 impl AppState {
@@ -84,23 +84,20 @@ impl AppState {
 
     pub(crate) fn apply_selected_model(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        match self.models.confirm() {
-            MenuConfirmResult::Action(model, _) => {
-                let provider = model.provider.clone();
-                let model_id = model.id.clone();
-                effects.push(Effect::send(Command::ConfigUpdate {
-                    command_id: command_id(),
-                    patch: serde_json::json!({
-                        "default-provider": provider,
-                        "default-model": model_id,
-                    }),
-                }));
-                self.clear_focus();
-                self.status = format!("switching model to {provider}/{model_id}");
-            }
-            _ => {
-                self.status = "no model selected".to_string();
-            }
+        if let Some(model) = self.models.confirm() {
+            let provider = model.provider.clone();
+            let model_id = model.id.clone();
+            effects.push(Effect::send(Command::ConfigUpdate {
+                command_id: command_id(),
+                patch: serde_json::json!({
+                    "default-provider": provider,
+                    "default-model": model_id,
+                }),
+            }));
+            self.clear_focus();
+            self.status = format!("switching model to {provider}/{model_id}");
+        } else {
+            self.status = "no model selected".to_string();
         }
         effects
     }

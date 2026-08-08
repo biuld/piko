@@ -1,4 +1,4 @@
-//! Row paint for [`super::FilterableItem`] layouts.
+//! Line-layout paint for [`super::SelectableItem`] (Stacked / KeyValue / Settings).
 
 use ratatui::{
     style::{Modifier, Style},
@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use super::{
-    FilterableItem, FilterableRowLayout, GroupHeaderStyle, SETTINGS_BULLET, SETTINGS_EXPAND,
+    GroupHeaderStyle, SETTINGS_BULLET, SETTINGS_EXPAND, SelectableItem, SelectableRowLayout,
 };
 use crate::theme::Theme;
 use crate::ui::components::feedback::{
@@ -16,20 +16,24 @@ use crate::ui::components::feedback::{
 use crate::ui::components::pane::section_rule_line;
 
 pub(super) fn row_lines(
-    item: &FilterableItem,
+    item: &SelectableItem,
     is_selected: bool,
     row_width: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     match item.layout {
-        FilterableRowLayout::KeyValue => {
+        SelectableRowLayout::KeyValue => {
             vec![key_value_line(item, is_selected, row_width, theme)]
         }
-        FilterableRowLayout::Stacked => stacked_lines(item, is_selected, row_width, theme),
-        FilterableRowLayout::SettingsRow => {
+        SelectableRowLayout::Stacked => stacked_lines(item, is_selected, row_width, theme),
+        SelectableRowLayout::Columns => {
+            // Columns uses the table body path; list fallback is primary only.
+            vec![key_value_line(item, is_selected, row_width, theme)]
+        }
+        SelectableRowLayout::SettingsRow => {
             vec![settings_row_line(item, is_selected, row_width, theme)]
         }
-        FilterableRowLayout::SettingsOption => {
+        SelectableRowLayout::SettingsOption => {
             settings_option_lines(item, is_selected, row_width, theme)
         }
     }
@@ -45,9 +49,9 @@ fn primary_style_for(is_selected: bool, is_active: bool, theme: &Theme) -> Style
 }
 
 pub(super) fn leading_group_lines(
-    item: &FilterableItem,
+    item: &SelectableItem,
     not_first: bool,
-    prev: Option<&FilterableItem>,
+    prev: Option<&SelectableItem>,
     row_width: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
@@ -86,7 +90,7 @@ pub(super) fn leading_group_lines(
 }
 
 fn stacked_lines(
-    item: &FilterableItem,
+    item: &SelectableItem,
     is_selected: bool,
     row_width: usize,
     theme: &Theme,
@@ -139,7 +143,7 @@ fn stacked_lines(
 
 /// Single line: `❯ key .......... value [badge] ▸ ●`
 fn key_value_line(
-    item: &FilterableItem,
+    item: &SelectableItem,
     is_selected: bool,
     row_width: usize,
     theme: &Theme,
@@ -230,7 +234,7 @@ fn key_value_line(
 
 /// Settings catalog: `▸ Label ………… value [badge] >`
 fn settings_row_line(
-    item: &FilterableItem,
+    item: &SelectableItem,
     is_selected: bool,
     row_width: usize,
     theme: &Theme,
@@ -308,7 +312,7 @@ fn settings_row_line(
 
 /// Settings choice: primary with Active · detail consequence under.
 fn settings_option_lines(
-    item: &FilterableItem,
+    item: &SelectableItem,
     is_selected: bool,
     row_width: usize,
     theme: &Theme,

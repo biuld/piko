@@ -1,9 +1,8 @@
 use std::path::Path;
 
 use crate::app::command::TuiCommandEntry;
-use crate::features::auto_completion::{
-    CellStyle, CompletionCell, CompletionRow, provider::AutoCompleteProvider,
-};
+use crate::features::auto_completion::{CompletionRow, provider::AutoCompleteProvider};
+use crate::ui::components::selectable_list::ColumnCell;
 
 pub struct CommandPaletteProvider;
 
@@ -44,15 +43,8 @@ impl AutoCompleteProvider for CommandPaletteProvider {
                 start: 0,
                 end,
                 cells: vec![
-                    CompletionCell {
-                        text: command.slash.clone(),
-                        // Primary label: text when idle, accent only when selected.
-                        style: CellStyle::Default,
-                    },
-                    CompletionCell {
-                        text: command.detail.clone(),
-                        style: CellStyle::Dim,
-                    },
+                    ColumnCell::primary(command.slash.clone()),
+                    ColumnCell::secondary(command.detail.clone()),
                 ],
                 keep_active: false,
             })

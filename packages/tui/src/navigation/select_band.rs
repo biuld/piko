@@ -4,7 +4,7 @@
 //! visible viewport. Overflow list items scroll. Compose converts
 //! `chrome_rows + content_rows` → band cells and body-clamps.
 
-/// Chrome for Minimal filterable list panes used by Models / Agents / Auth menu:
+/// Chrome for Minimal selectable list panes used by Models / Agents / Auth menu:
 /// top border · search · footer · bottom border.
 pub const MINIMAL_LIST_CHROME_ROWS: u16 = 4;
 
@@ -37,7 +37,7 @@ pub enum SelectBandBudget {
 }
 
 impl SelectBandBudget {
-    /// Stacked filterable list (primary + detail) — Models / auth menus.
+    /// Stacked selectable list (primary + detail) — auth menus.
     pub fn minimal_stacked_list(item_count: usize) -> Self {
         Self::List {
             item_count,
@@ -47,7 +47,7 @@ impl SelectBandBudget {
         }
     }
 
-    /// Single-line filterable list — Agents.
+    /// Single-line selectable list — Agents / Models (Columns body).
     pub fn minimal_dense_list(item_count: usize) -> Self {
         Self::List {
             item_count,

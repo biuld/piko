@@ -11,7 +11,7 @@ use crate::{
     theme::Theme,
     ui::components::{
         ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH,
-        filterable_list::{FilterableItem, render_filterable_list_minimal},
+        selectable_list::{SelectableItem, SelectableList, render_selectable_list_minimal},
         spinner_glyph,
     },
 };
@@ -32,8 +32,7 @@ pub struct AgentEntry {
 /// AgentPanel state (maintained in AppState).
 #[derive(Default)]
 pub struct AgentPanelState {
-    pub agents: Vec<AgentEntry>,
-    pub selected_idx: usize,
+    pub list: SelectableList<AgentEntry>,
     pub active_agent_instance_id: Option<String>,
     pub focus: bool,
     pub filter: String,
@@ -43,7 +42,7 @@ pub struct AgentPanelState {
 
 pub struct AgentPanelView<'a> {
     pub state: &'a AgentPanelState,
-    /// Foreground projection for each agent_instance_id (parallel to `state.agents`).
+    /// Foreground projection for each agent_instance_id (parallel to list items).
     pub foreground: &'a [piko_protocol::AgentForeground],
     pub queue: &'a QueueStatus,
     pub spinner_frame: usize,
@@ -51,6 +50,10 @@ pub struct AgentPanelView<'a> {
 }
 
 impl AgentPanelState {
+    pub fn agents(&self) -> &[AgentEntry] {
+        &self.list.items
+    }
+
     pub fn is_loading(&self) -> bool {
         !self.agents_hydrated
     }
@@ -60,9 +63,8 @@ impl AgentPanelState {
     }
 
     pub fn begin_loading(&mut self) {
-        self.agents.clear();
+        self.list.clear();
         self.active_agent_instance_id = None;
-        self.selected_idx = 0;
         self.filter.clear();
         self.agents_hydrated = false;
     }
@@ -72,7 +74,11 @@ impl AgentPanelState {
         if self.is_loading() {
             return SelectBandBudget::minimal_dense_list(1);
         }
-        SelectBandBudget::minimal_dense_list(self.filtered_indices(&self.filter).len())
+        SelectBandBudget::minimal_dense_list(
+            self.list
+                .filtered_indices(&self.filter, |a| agent_matches(a, &self.filter))
+                .len(),
+        )
     }
 
     /// Align keyboard selection with the currently viewed agent before open.
@@ -80,26 +86,25 @@ impl AgentPanelState {
         self.filter.clear();
         if let Some(active) = self.active_agent_instance_id.as_deref()
             && let Some(idx) = self
-                .agents
+                .list
+                .items
                 .iter()
                 .position(|a| a.agent_instance_id == active)
         {
-            self.selected_idx = idx;
-        } else if self.selected_idx >= self.agents.len() {
-            self.selected_idx = 0;
+            self.list.selected = idx;
+        } else if self.list.selected >= self.list.len() {
+            self.list.selected = 0;
         }
     }
 
     pub fn render(frame: &mut Frame<'_>, area: Rect, view: AgentPanelView<'_>) {
         if view.state.is_loading() {
-            // Match Models-band chrome under filterable list while reusing feedback loading copy.
             let line =
                 crate::ui::components::feedback::loading_line(view.spinner_frame, view.theme);
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-            // Single-line list chrome; loading may keep a short detail but stays KeyValue dense.
             let items =
-                vec![FilterableItem::new(text, "waiting for session agent list").key_value()];
-            render_filterable_list_minimal(
+                vec![SelectableItem::new(text, "waiting for session agent list").key_value()];
+            render_selectable_list_minimal(
                 frame,
                 area,
                 "agents",
@@ -112,13 +117,13 @@ impl AgentPanelState {
             return;
         }
 
-        let items = build_filterable_items(&view);
-        render_filterable_list_minimal(
+        let items = build_selectable_items(&view);
+        render_selectable_list_minimal(
             frame,
             area,
             "agents",
             &items,
-            view.state.selected_idx,
+            view.state.list.selected,
             &view.state.filter,
             view.state.focus,
             view.theme,
@@ -126,56 +131,31 @@ impl AgentPanelState {
     }
 
     pub fn select_next(&mut self) {
-        if self.agents.is_empty() {
-            return;
-        }
         let filter = self.filter.clone();
-        let filtered = self.filtered_indices(&filter);
-        if filtered.is_empty() {
-            return;
-        }
-        let pos = filtered
-            .iter()
-            .position(|&i| i == self.selected_idx)
-            .unwrap_or(0);
-        let next = (pos + 1).min(filtered.len() - 1);
-        if let Some(&idx) = filtered.get(next) {
-            self.selected_idx = idx;
-        }
+        self.list
+            .select_next(&filter, |a| agent_matches(a, &filter));
     }
 
     pub fn select_prev(&mut self) {
-        if self.agents.is_empty() {
-            return;
-        }
         let filter = self.filter.clone();
-        let filtered = self.filtered_indices(&filter);
-        if filtered.is_empty() {
-            return;
-        }
-        let pos = filtered
-            .iter()
-            .position(|&i| i == self.selected_idx)
-            .unwrap_or(0);
-        let prev = pos.saturating_sub(1);
-        if let Some(&idx) = filtered.get(prev) {
-            self.selected_idx = idx;
-        }
+        self.list
+            .select_prev(&filter, |a| agent_matches(a, &filter));
     }
 
     pub fn reset_selection(&mut self) {
         let filter = self.filter.clone();
-        let filtered = self.filtered_indices(&filter);
-        self.selected_idx = filtered.first().copied().unwrap_or(0);
+        self.list
+            .reset_selection(&filter, |a| agent_matches(a, &filter));
     }
 
     pub fn selected_agent(&self) -> Option<&AgentEntry> {
-        self.agents.get(self.selected_idx)
+        self.list.selected_item()
     }
 
     pub fn upsert_agent(&mut self, agent: AgentEntry) {
         if let Some(existing) = self
-            .agents
+            .list
+            .items
             .iter_mut()
             .find(|a| a.agent_instance_id == agent.agent_instance_id)
         {
@@ -189,17 +169,8 @@ impl AgentPanelState {
             existing.activity = agent.activity;
             existing.unread_report_count = agent.unread_report_count;
         } else {
-            self.agents.push(agent);
+            self.list.items.push(agent);
         }
-    }
-
-    fn filtered_indices(&self, filter: &str) -> Vec<usize> {
-        self.agents
-            .iter()
-            .enumerate()
-            .filter(|(_, agent)| agent_matches(agent, filter))
-            .map(|(idx, _)| idx)
-            .collect()
     }
 }
 
@@ -213,16 +184,17 @@ fn agent_matches(agent: &AgentEntry, filter: &str) -> bool {
         || agent.agent_instance_id.to_lowercase().contains(&q)
 }
 
-fn build_filterable_items(view: &AgentPanelView<'_>) -> Vec<FilterableItem> {
-    if view.state.agents.is_empty() {
+fn build_selectable_items(view: &AgentPanelView<'_>) -> Vec<SelectableItem> {
+    if view.state.list.is_empty() {
         return Vec::new();
     }
 
-    let prefixes = build_tree_prefixes(&view.state.agents);
+    let prefixes = build_tree_prefixes(view.state.agents());
     let queue_note = queue_detail(view.queue, view.foreground);
 
     view.state
-        .agents
+        .list
+        .items
         .iter()
         .enumerate()
         .map(|(i, agent)| {
@@ -235,7 +207,6 @@ fn build_filterable_items(view: &AgentPanelView<'_>) -> Vec<FilterableItem> {
                 .unwrap_or(piko_protocol::AgentForeground::Idle);
             let (glyph, status_label) =
                 status_label(agent, is_active, foreground, view.spinner_frame);
-            // Tree indent + status glyph + name; status text as right-hand detail (single line).
             let primary = format!("{}{glyph} {}", prefixes[i], agent.name);
             let mut detail = status_label;
             if !queue_note.is_empty() && is_active {
@@ -245,7 +216,7 @@ fn build_filterable_items(view: &AgentPanelView<'_>) -> Vec<FilterableItem> {
                     format!("{detail} · {queue_note}")
                 };
             }
-            FilterableItem::new(primary, detail)
+            SelectableItem::new(primary, detail)
                 .active(is_active)
                 .key_value()
         })
@@ -312,10 +283,6 @@ fn queue_detail(queue: &QueueStatus, foreground: &[piko_protocol::AgentForegroun
 
 // ── tree prefix builder ──────────────────────────────────────────────────────
 
-/// Build tree connector prefix for each agent.
-///
-/// Root agents get no prefix. Children get "├─ " or "└─ " with "│ "
-/// continuation lines for ancestors that have more descendants coming.
 fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
     let n = agents.len();
     let mut prefixes = Vec::with_capacity(n);
@@ -386,7 +353,7 @@ mod tests {
     fn prepare_for_switch_selects_active_agent() {
         let mut state = AgentPanelState::default();
         state.mark_hydrated();
-        state.agents = vec![
+        state.list = SelectableList::new(vec![
             AgentEntry {
                 agent_id: "main".into(),
                 agent_instance_id: "a-root".into(),
@@ -407,11 +374,11 @@ mod tests {
                 unread_report_count: 0,
                 status: piko_protocol::AgentStatus::Idle,
             },
-        ];
+        ]);
         state.active_agent_instance_id = Some("a-child".into());
-        state.selected_idx = 0;
+        state.list.selected = 0;
         state.prepare_for_switch();
-        assert_eq!(state.selected_idx, 1);
+        assert_eq!(state.list.selected, 1);
         assert_eq!(
             state.selected_agent().map(|a| a.agent_instance_id.as_str()),
             Some("a-child")
@@ -422,7 +389,7 @@ mod tests {
     fn filter_select_next_stays_in_matches() {
         let mut state = AgentPanelState::default();
         state.mark_hydrated();
-        state.agents = vec![
+        state.list = SelectableList::new(vec![
             AgentEntry {
                 agent_id: "main".into(),
                 agent_instance_id: "a1".into(),
@@ -443,11 +410,11 @@ mod tests {
                 unread_report_count: 0,
                 status: piko_protocol::AgentStatus::Idle,
             },
-        ];
+        ]);
         state.filter = "cod".into();
         state.reset_selection();
-        assert_eq!(state.selected_idx, 1);
+        assert_eq!(state.list.selected, 1);
         state.select_next();
-        assert_eq!(state.selected_idx, 1);
+        assert_eq!(state.list.selected, 1);
     }
 }

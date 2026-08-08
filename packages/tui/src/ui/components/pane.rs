@@ -8,7 +8,7 @@
 //! Standard (default surfaces: settings, sessions, long-form info):
 //! ```text
 //! ┌─ Title                                 [x] ─┐
-//! │ / to search                                 │
+//! │ Search:                                      │
 //! │ ─────────────────────────────────────────── │
 //! │ Content…                                    │
 //! │ Tip · …                                     │
@@ -19,7 +19,7 @@
 //! Minimal (quick pickers / simple prompts — fewer zones by default):
 //! ```text
 //! ─ agents ────────────────────────── 1/3 ─
-//! / filter…
+//! Search: query
 //! ❯ ○ main                    current ●
 //!   ○ coder                   idle
 //! ↑/↓ | Enter switch | Esc

@@ -111,10 +111,11 @@ TUI applies editor text, rebuilds Timeline, reloads TreePanel
 
 ## Tree Model
 
-TreePanel should move from a flat `FilterableList<TreeEntry>` to a tree-specific
-model. The shared `FilterableList` remains useful for simple overlay lists, but
-Session Tree needs tree connectors, active path marking, folded descendants,
-nearest-visible ancestor selection, and branch-segment movement.
+TreePanel uses a tree-specific document model rather than a flat
+`SelectableList<TreeEntry>`. Shared `SelectableList` remains useful for simple
+overlay lists, but Session Tree needs tree connectors, active path marking,
+folded descendants, nearest-visible ancestor selection, and branch-segment
+movement.
 
 ```rust
 pub struct TreePanel {

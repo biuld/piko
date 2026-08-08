@@ -231,7 +231,7 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                self.agent_panel.agents.clear();
+                self.agent_panel.list.clear();
                 for a in &agents {
                     self.agent_panel
                         .upsert_agent(crate::features::agent_status::AgentEntry {

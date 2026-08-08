@@ -2,9 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::app::command::TuiCommandEntry;
-use crate::features::auto_completion::{
-    CellStyle, CompletionCell, CompletionRow, provider::AutoCompleteProvider,
-};
+use crate::features::auto_completion::{CompletionRow, provider::AutoCompleteProvider};
+use crate::ui::components::selectable_list::ColumnCell;
 
 pub struct FileBrowserProvider;
 
@@ -55,18 +54,12 @@ impl AutoCompleteProvider for FileBrowserProvider {
                         start,
                         end: cursor,
                         cells: vec![
-                            CompletionCell {
-                                text: if is_dir {
-                                    format!("@{name}/")
-                                } else {
-                                    format!("@{name}")
-                                },
-                                style: CellStyle::Default,
-                            },
-                            CompletionCell {
-                                text: detail,
-                                style: CellStyle::Dim,
-                            },
+                            ColumnCell::primary(if is_dir {
+                                format!("@{name}/")
+                            } else {
+                                format!("@{name}")
+                            }),
+                            ColumnCell::secondary(detail),
                         ],
                         keep_active: false,
                     }
@@ -88,14 +81,8 @@ impl AutoCompleteProvider for FileBrowserProvider {
                         start,
                         end: cursor,
                         cells: vec![
-                            CompletionCell {
-                                text: format!("@{rel_str}"),
-                                style: CellStyle::Default,
-                            },
-                            CompletionCell {
-                                text: format!("file ({})", format_size(size)),
-                                style: CellStyle::Dim,
-                            },
+                            ColumnCell::primary(format!("@{rel_str}")),
+                            ColumnCell::secondary(format!("file ({})", format_size(size))),
                         ],
                         keep_active: false,
                     }

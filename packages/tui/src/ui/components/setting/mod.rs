@@ -1,7 +1,7 @@
 //! Settings kit — value-aware settings navigation and choice lists.
 //!
 //! Product: `docs/features/settings.md`
-//! Paint: thin map onto [`FilterableItem`] + [`render_filterable_list_with_pane`](crate::ui::components::filterable_list::render_filterable_list_with_pane)
+//! Paint: thin map onto [`SelectableItem`] + [`render_selectable_list_with_pane`](crate::ui::components::selectable_list::render_selectable_list_with_pane)
 //! (Standard [`PaneSpec`](crate::ui::components::pane::PaneSpec)).
 //! (via `paint`); chrome from shared Pane.
 //! Feedback: Selected (bg + accent on Settings rows) ≠ Active (`●`); effect badges use `warning`.
@@ -10,7 +10,7 @@ mod paint;
 
 use ratatui::{Frame, layout::Rect};
 
-use crate::{theme::Theme, ui::components::filterable_list::FilterableList};
+use crate::{theme::Theme, ui::components::selectable_list::SelectableList};
 
 /// Latency-to-effect class for a setting key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -87,7 +87,7 @@ pub(super) enum FrameContent<T: Clone> {
 pub(super) struct NavFrame<T: Clone> {
     pub title: String,
     pub content: FrameContent<T>,
-    pub list: FilterableList<()>,
+    pub list: SelectableList<()>,
 }
 
 /// Settings navigation stack (depth + current frame selection).
@@ -131,7 +131,7 @@ impl<T: Clone> SettingsNavStack<T> {
         self.frames.push(NavFrame {
             title: title.into(),
             content: FrameContent::Sections(sections),
-            list: FilterableList::new(vec![(); len]),
+            list: SelectableList::new(vec![(); len]),
         });
     }
 
@@ -141,7 +141,7 @@ impl<T: Clone> SettingsNavStack<T> {
         self.frames.push(NavFrame {
             title,
             content: FrameContent::Choice(choice),
-            list: FilterableList::new(vec![(); len]),
+            list: SelectableList::new(vec![(); len]),
         });
     }
 

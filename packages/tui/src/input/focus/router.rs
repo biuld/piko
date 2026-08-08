@@ -223,7 +223,7 @@ impl InputRouter {
         }
 
         match active.as_surface() {
-            // Filterable list surfaces
+            // Selectable list surfaces (filter + keyboard nav)
             Some(
                 surface @ (SurfaceId::Tree
                 | SurfaceId::Sessions
@@ -305,7 +305,7 @@ impl InputRouter {
                         }
                     }
                 }
-                Self::handle_filterable_surface(key, ka)
+                Self::handle_selectable_surface(key, ka)
             }
             // Info panels
             Some(SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Diagnostics) => match ka {
@@ -334,8 +334,8 @@ impl InputRouter {
         }
     }
 
-    /// Shared logic for all filterable list surfaces (Commands, Tree, Sessions, Settings, Models).
-    pub(super) fn handle_filterable_surface(
+    /// Shared logic for selectable list surfaces (Tree, Sessions, Settings, Models, …).
+    pub(super) fn handle_selectable_surface(
         key: KeyEvent,
         ka: Option<KeyAction>,
     ) -> Option<Action> {

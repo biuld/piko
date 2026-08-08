@@ -52,7 +52,7 @@ These keys are active when the Editor is focused and not blocked by active overl
 | `tui.input.copy` | `ctrl+c` | Copy the selected text to the system clipboard |
 
 ### 2. Selection & Navigation (List Overlays)
-These keys are active within filterable lists (e.g., Command Palette, Model Selector, Session List):
+These keys are active within selectable lists (e.g., Command Palette, Model Selector, Session List):
 
 | Keybinding ID | Default Key(s) | Description |
 |---|---|---|

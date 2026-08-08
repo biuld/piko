@@ -269,7 +269,7 @@ fn agent_disconnected_preserves_parent_task_relationship() {
 
     let child = app
         .agent_panel
-        .agents
+        .agents()
         .iter()
         .find(|agent| agent.agent_instance_id == "task-child")
         .expect("child agent should remain visible");

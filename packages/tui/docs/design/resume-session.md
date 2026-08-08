@@ -259,7 +259,7 @@ pub enum SessionScope {
 }
 
 pub struct SessionList {
-    list: FilterableList<SessionSummary>,
+    list: SelectableList<SessionSummary>,
     scope: SessionScope,
     named_only: bool,
     show_path: bool,
@@ -289,12 +289,8 @@ Display title order:
 2. `first_message`
 3. `untitled`
 
-`FilterableList` can continue to provide selection mechanics, but the current
-generic renderer is too limited for the desired row layout.
-
-To achieve robust vertical column alignment and handle wide CJK characters (like
-Chinese) correctly, the panel renders the filtered items using a `Table` widget
-(`ratatui::widgets::Table`) instead of a `List` widget.
+`SelectableList` + [`paint_selectable_panel`] provide selection and multi-column
+body paint; Session list maps summaries to `SelectableItem` / `Columns`.
 
 The columns are laid out dynamically:
 1. Marker & Title: `Constraint::Fill(1)` (left-aligned)

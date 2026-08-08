@@ -54,8 +54,8 @@ impl AppState {
                 let keep_active = self
                     .editor
                     .auto_complete
-                    .items
-                    .get(self.editor.auto_complete.selected)
+                    .list
+                    .selected_item()
                     .is_some_and(|item| item.keep_active);
                 self.accept_suggestion();
                 if !keep_active {
@@ -140,7 +140,7 @@ impl AppState {
             SurfaceAction::OpenAgents => {
                 self.agent_panel.prepare_for_switch();
                 self.push_surface(SurfaceId::Agents);
-                let n = self.agent_panel.agents.len();
+                let n = self.agent_panel.list.len();
                 self.status = if self.agent_panel.is_loading() {
                     "loading agents".to_string()
                 } else if n == 0 {

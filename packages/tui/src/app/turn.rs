@@ -56,7 +56,7 @@ impl AppState {
         };
         let target_name = self
             .agent_panel
-            .agents
+            .agents()
             .iter()
             .find(|agent| agent.agent_instance_id == target_agent_instance_id)
             .map(|agent| agent.name.clone())
@@ -237,8 +237,7 @@ impl AppState {
     }
 
     fn fill_editor_with_selected_suggestion(&mut self) {
-        let selected_idx = self.editor.auto_complete.selected;
-        if let Some(item) = self.editor.auto_complete.items.get(selected_idx).cloned() {
+        if let Some(item) = self.editor.auto_complete.list.selected_item().cloned() {
             let cursor = self.editor.cursor();
             let is_file = item.replacement.starts_with('@');
             if is_file {

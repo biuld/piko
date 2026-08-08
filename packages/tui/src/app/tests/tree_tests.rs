@@ -77,7 +77,8 @@ fn submit_targets_the_viewed_child_agent() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.agent_panel
-        .agents
+        .list
+        .items
         .push(crate::features::agent_status::AgentEntry {
             agent_id: "coder".into(),
             agent_instance_id: "agent-child".into(),
@@ -111,7 +112,8 @@ fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.agent_panel
-        .agents
+        .list
+        .items
         .push(crate::features::agent_status::AgentEntry {
             agent_id: "coder".into(),
             agent_instance_id: "agent-child".into(),
@@ -132,7 +134,7 @@ fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
         },
     ));
 
-    let agent = &app.agent_panel.agents[0];
+    let agent = &app.agent_panel.agents()[0];
     assert_eq!(agent.activity, piko_protocol::AgentActivity::Idle);
     assert_eq!(agent.status, piko_protocol::AgentStatus::Idle);
     assert!(app.session.active_turns.is_empty());

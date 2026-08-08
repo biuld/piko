@@ -55,7 +55,7 @@ impl AppState {
             self.session.previous_live_id = None;
             self.session.initializing = false;
             self.apply_snapshot(reconciled.snapshot);
-            self.agent_panel.agents.clear();
+            self.agent_panel.list.clear();
             for agent in reconciled.agents {
                 self.agent_panel
                     .upsert_agent(crate::features::agent_status::AgentEntry {
@@ -73,16 +73,16 @@ impl AppState {
             let active_agent_instance_id = selected_agent_instance_id
                 .filter(|selected| {
                     self.agent_panel
-                        .agents
+                        .agents()
                         .iter()
                         .any(|agent| &agent.agent_instance_id == selected)
                 })
                 .or_else(|| {
                     self.agent_panel
-                        .agents
+                        .agents()
                         .iter()
                         .find(|agent| agent.parent_agent_instance_id.is_none())
-                        .or_else(|| self.agent_panel.agents.first())
+                        .or_else(|| self.agent_panel.agents().first())
                         .map(|agent| agent.agent_instance_id.clone())
                 });
             if let Some(active_agent_instance_id) = active_agent_instance_id {

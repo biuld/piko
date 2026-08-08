@@ -137,7 +137,8 @@ impl AppState {
                 });
                 if let Some(agent) = self
                     .agent_panel
-                    .agents
+                    .list
+                    .items
                     .iter_mut()
                     .find(|a| a.agent_instance_id == agent_instance_id)
                 {
@@ -177,7 +178,8 @@ impl AppState {
                     if !still_blocked
                         && let Some(agent) = self
                             .agent_panel
-                            .agents
+                            .list
+                            .items
                             .iter_mut()
                             .find(|a| a.agent_instance_id == agent_id)
                     {

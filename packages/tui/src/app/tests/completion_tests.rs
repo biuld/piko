@@ -37,8 +37,8 @@ fn test_completion_cycling_fills_editor() {
     app.refresh_suggestions();
 
     // Check suggestions: should match /quit
-    assert_eq!(app.editor.auto_complete.items.len(), 1);
-    assert_eq!(app.editor.auto_complete.items[0].replacement, "/quit ");
+    assert_eq!(app.editor.auto_complete.list.len(), 1);
+    assert_eq!(app.editor.auto_complete.list.items[0].replacement, "/quit ");
 
     // Cycle next (Tab equivalent)
     app.dispatch(EditorAction::SuggestionSelectNext.into());
@@ -57,14 +57,16 @@ fn test_file_completion_inserted_as_placeholder_block() {
 
     // We mock file suggestions by manually updating AutoComplete state
     app.editor.auto_complete.active = true;
-    app.editor.auto_complete.items = vec![crate::features::auto_completion::CompletionRow {
-        replacement: "@src/main.rs ".to_string(),
-        start: 0,
-        end: 2,
-        cells: vec![],
-        keep_active: false,
-    }];
-    app.editor.auto_complete.selected = 0;
+    app.editor.auto_complete.list =
+        crate::ui::components::selectable_list::SelectableList::new(vec![
+            crate::features::auto_completion::CompletionRow {
+                replacement: "@src/main.rs ".to_string(),
+                start: 0,
+                end: 2,
+                cells: vec![],
+                keep_active: false,
+            },
+        ]);
 
     // Cycle next to preview
     app.dispatch(EditorAction::SuggestionSelectNext.into());
@@ -85,14 +87,16 @@ fn test_file_completion_inserted_as_placeholder_block() {
 
     // Re-do completion and submit to verify expansion
     app.editor.auto_complete.active = true;
-    app.editor.auto_complete.items = vec![crate::features::auto_completion::CompletionRow {
-        replacement: "@src/main.rs ".to_string(),
-        start: 0,
-        end: 0,
-        cells: vec![],
-        keep_active: false,
-    }];
-    app.editor.auto_complete.selected = 0;
+    app.editor.auto_complete.list =
+        crate::ui::components::selectable_list::SelectableList::new(vec![
+            crate::features::auto_completion::CompletionRow {
+                replacement: "@src/main.rs ".to_string(),
+                start: 0,
+                end: 0,
+                cells: vec![],
+                keep_active: false,
+            },
+        ]);
     app.dispatch(EditorAction::AcceptSuggestion.into());
     assert_eq!(app.editor.text(), "[@src/main.rs] ");
 
@@ -120,5 +124,5 @@ fn slash_completion_visible_with_empty_results() {
     app.editor.restore_text("/zzz");
     app.refresh_suggestions();
     assert!(app.has_suggestions());
-    assert!(app.editor.auto_complete.items.is_empty());
+    assert!(app.editor.auto_complete.list.is_empty());
 }

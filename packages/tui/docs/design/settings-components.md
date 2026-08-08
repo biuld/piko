@@ -7,8 +7,8 @@
 
 ```
 SettingSection / Choice
-  → FilterableItem (settings_row | settings_option)
-  → render_filterable_list_with_pane (product PaneSpec)
+  → SelectableItem (settings_row | settings_option)
+  → render_selectable_list_with_pane (product PaneSpec)
   → Pane
 ```
 

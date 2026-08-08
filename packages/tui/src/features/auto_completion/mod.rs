@@ -1,14 +1,17 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::Paragraph,
 };
 use std::path::Path;
 
 use crate::app::command::TuiCommandEntry;
-use crate::ui::components::{NO_MATCHES, row_primary_style, selection_prefix, with_selected_bg};
+use crate::ui::components::selectable_list::{
+    ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_selectable_panel,
+};
+use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
 
 pub mod command_palette;
 pub mod file_browser;
@@ -18,33 +21,19 @@ use command_palette::CommandPaletteProvider;
 use file_browser::FileBrowserProvider;
 use provider::AutoCompleteProvider;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CellStyle {
-    /// Primary column: `text` idle, `accent` when the row is selected.
-    Default,
-    /// Secondary / description column.
-    Dim,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletionCell {
-    pub text: String,
-    pub style: CellStyle,
-}
-
+/// One completion suggestion (domain payload + column cells for paint).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionRow {
     pub replacement: String,
     pub start: usize,
     pub end: usize,
-    pub cells: Vec<CompletionCell>,
+    pub cells: Vec<ColumnCell>,
     pub keep_active: bool,
 }
 
 pub struct AutoComplete {
     pub active: bool,
-    pub items: Vec<CompletionRow>,
-    pub selected: usize,
+    pub list: SelectableList<CompletionRow>,
     pub active_provider_idx: Option<usize>,
     pub providers: Vec<Box<dyn AutoCompleteProvider>>,
 }
@@ -59,8 +48,7 @@ impl AutoComplete {
     pub fn new() -> Self {
         Self {
             active: false,
-            items: Vec::new(),
-            selected: 0,
+            list: SelectableList::new(Vec::new()),
             active_provider_idx: None,
             providers: vec![
                 Box::new(CommandPaletteProvider),
@@ -74,36 +62,30 @@ impl AutoComplete {
     }
 
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.list.len()
     }
 
     pub fn select_next(&mut self) {
-        if !self.items.is_empty() {
-            self.selected = (self.selected + 1).min(self.items.len() - 1);
-        }
+        self.list.select_next("", |_| true);
     }
 
     pub fn select_prev(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        self.list.select_prev("", |_| true);
     }
 
     /// Accepts the currently selected completion item.
     /// Clears selection and deactivates if keep_active is false.
     pub fn accept(&mut self) -> Option<CompletionRow> {
-        let item = self.items.get(self.selected).cloned();
+        let item = self.list.selected_item().cloned();
         if item.as_ref().is_some_and(|i| !i.keep_active) {
-            self.active = false;
-            self.items.clear();
-            self.selected = 0;
-            self.active_provider_idx = None;
+            self.clear();
         }
         item
     }
 
     pub fn clear(&mut self) {
         self.active = false;
-        self.items.clear();
-        self.selected = 0;
+        self.list.clear();
         self.active_provider_idx = None;
     }
 
@@ -126,116 +108,52 @@ impl AutoComplete {
         // Safety limit to avoid performance issues
         items.truncate(100);
 
-        self.items = items;
-        self.selected = self.selected.min(self.items.len().saturating_sub(1));
+        let prev = self.list.selected;
+        self.list = SelectableList::new(items);
+        self.list.selected = prev.min(self.list.len().saturating_sub(1));
     }
 
     /// Renders the completions list in the allocated area (Minimal pane, no search).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
-        use crate::ui::components::pane::{PaneSpec, PaneTitleAffix, render_pane};
-
         let (label, hints) = if let Some(idx) = self.active_provider_idx {
             (self.providers[idx].label(), self.providers[idx].hints())
         } else {
             ("suggestions", "Esc cancel")
         };
 
-        let total = self.items.len();
-        let selected_one = if total == 0 { 0 } else { self.selected + 1 };
+        let total = self.list.len();
+        let selected_one = if total == 0 {
+            0
+        } else {
+            self.list.selected + 1
+        };
         let spec = PaneSpec::minimal(label)
             .no_search()
             .affix(PaneTitleAffix::selection(selected_one, total))
             .hints(hints)
-            .focused(true); // suggestions capture nav while open
+            .focused(true);
 
-        let Some(areas) = render_pane(frame, area, &spec, theme) else {
-            return;
-        };
-        let content = areas.content;
-
-        if self.items.is_empty() {
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![Span::styled(
-                    format!("  {NO_MATCHES}"),
-                    Style::default().fg(theme.dim),
-                )])),
-                content,
-            );
-            return;
-        }
-
-        // Calculate maximum content width for each provider-defined column.
-        let num_cols = self.items[0].cells.len();
-        let mut max_col_widths = vec![0; num_cols];
-        for item in &self.items {
-            for (col_idx, cell) in item.cells.iter().enumerate() {
-                if col_idx < num_cols {
-                    max_col_widths[col_idx] = max_col_widths[col_idx].max(cell.text.len());
-                }
-            }
-        }
-        // Cap column widths at reasonable limits to prevent stretching
-        for width in max_col_widths.iter_mut().take(num_cols.saturating_sub(1)) {
-            *width = (*width).min(40);
-        }
-
-        let mut widths = Vec::with_capacity(num_cols + 1);
-        widths.push(ratatui::layout::Constraint::Length(2));
-        for (col_idx, width) in max_col_widths.iter().enumerate() {
-            let width = (*width as u16).max(1);
-            if col_idx < num_cols - 1 {
-                widths.push(ratatui::layout::Constraint::Length(width.saturating_add(2)));
-            } else {
-                widths.push(ratatui::layout::Constraint::Min(width));
-            }
-        }
-
-        let rows: Vec<Row<'_>> = self
+        let items: Vec<SelectableItem> = self
+            .list
             .items
             .iter()
-            .enumerate()
-            .map(|(idx, row)| {
-                let is_selected = idx == self.selected;
-                let marker_style = if is_selected {
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-
-                let mut cells = vec![Cell::from(Line::from(Span::styled(
-                    selection_prefix(is_selected),
-                    marker_style,
-                )))];
-                for cell in &row.cells {
-                    let style = match cell.style {
-                        CellStyle::Default => with_selected_bg(
-                            row_primary_style(is_selected, theme),
-                            is_selected,
-                            theme,
-                        ),
-                        CellStyle::Dim => Style::default().fg(theme.dim),
-                    };
-
-                    cells.push(Cell::from(Line::from(Span::styled(
-                        cell.text.clone(),
-                        style,
-                    ))));
-                }
-                Row::new(cells)
-            })
+            .map(|row| SelectableItem::columns(row.cells.clone()))
             .collect();
 
-        let table = Table::new(rows, widths).row_highlight_style(with_selected_bg(
-            row_primary_style(true, theme),
-            true,
-            theme,
-        ));
+        let body = if items.is_empty() {
+            SelectablePanelBody::Message(Paragraph::new(Line::from(vec![Span::styled(
+                format!("  {NO_MATCHES}"),
+                Style::default().fg(theme.dim),
+            )])))
+        } else {
+            SelectablePanelBody::Columns {
+                items: &items,
+                selected: self.list.selected,
+                widths: None,
+            }
+        };
 
-        let mut state = TableState::default();
-        state.select(Some(self.selected));
-        frame.render_stateful_widget(table, content, &mut state);
+        let _ = paint_selectable_panel(frame, area, theme, &spec, body);
     }
 }
 
@@ -258,7 +176,7 @@ mod tests {
         let mut ac = AutoComplete::new();
         ac.update(Path::new("."), &commands(), "/zzz", 4);
         assert!(ac.active);
-        assert!(ac.items.is_empty());
+        assert!(ac.list.is_empty());
     }
 
     #[test]
@@ -267,6 +185,7 @@ mod tests {
         ac.update(Path::new("."), &commands(), "/he", 3);
         assert!(ac.active);
         let help = ac
+            .list
             .items
             .iter()
             .find(|item| item.cells[0].text == "/help")
