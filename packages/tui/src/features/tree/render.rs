@@ -48,19 +48,19 @@ impl TreePanel {
 
         let help_text = "Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold";
 
-        let search_line = if let Some(editor) = &self.label_editor {
+        let search = if let Some(editor) = &self.label_editor {
             let mut spans = vec![Span::styled(
                 "Label (Enter to save, Esc to cancel): ",
                 Style::default().fg(theme.accent),
             )];
             let tb_line = editor.input.render_line(theme, true);
             spans.extend(tb_line.spans);
-            Line::from(spans)
+            PaneSearch::Custom(Line::from(spans))
         } else {
-            Line::from(vec![
-                Span::raw("Search: "),
-                Span::styled(filter, Style::default().fg(theme.accent)),
-            ])
+            PaneSearch::Shown {
+                filter,
+                placeholder: None,
+            }
         };
 
         let lines: Vec<Line<'static>> = self
@@ -86,7 +86,7 @@ impl TreePanel {
                 ),
                 PaneTitleAffix::selection(sel_at, sel_of),
             ])
-            .search(PaneSearch::Custom(search_line))
+            .search(search)
             .tip(help_text)
             .footer(footer)
             .focused(true);

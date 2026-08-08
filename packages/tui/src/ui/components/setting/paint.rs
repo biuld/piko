@@ -1,7 +1,7 @@
 //! Settings surface → [`SelectableItem`] rows drawn by SelectableList.
 //!
 //! Domain model stays in the setting kit; paint maps onto list layouts and a
-//! product-shaped [`PaneSpec`] (title · `/ to search` · content · pipe hints).
+//! product-shaped [`PaneSpec`] (title · `/ type to filter` · content · pipe hints).
 
 use ratatui::{Frame, layout::Rect};
 

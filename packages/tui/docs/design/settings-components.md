@@ -16,7 +16,7 @@ SettingSection / Choice
 
 ```text
 ┌─ Settings                              [x] ─┐
-│ / to search                                 │
+│ / type to filter                             │
 │ ─────────────────────────────────────────── │
 │ Appearance ──────────────────────────────── │
 │ ▸ Compact mode                          off │
@@ -25,7 +25,7 @@ SettingSection / Choice
 └─────────────────────────────────────────────┘
 ```
 
-- Search: `/` + dim `to search` (or live filter)
+- Search: `/` glyph + dim `type to filter` (live filter shows `/ <filter>` accent)
 - Hairline rule under search
 - Title plain (no counter); root shows `[x]`
 - Footer: pipe-separated legend; multi-line via `\n`

@@ -8,7 +8,7 @@
 //! Standard (default surfaces: settings, sessions, long-form info):
 //! ```text
 //! ┌─ Title                                 [x] ─┐
-//! │ Search:                                      │
+//! │ / type to filter                             │
 //! │ ─────────────────────────────────────────── │
 //! │ Content…                                    │
 //! │ Tip · …                                     │
@@ -19,7 +19,7 @@
 //! Minimal (quick pickers / simple prompts — fewer zones by default):
 //! ```text
 //! ─ agents ────────────────────────── 1/3 ─
-//! Search: query
+//! / query
 //! ❯ ○ main                    current ●
 //!   ○ coder                   idle
 //! ↑/↓ | Enter switch | Esc
@@ -37,8 +37,11 @@ use ratatui::{
 use crate::theme::Theme;
 use crate::ui::components::feedback::{frame_border_style, hint_line};
 
-/// Default search placeholder (product convention: type to filter).
-pub const SEARCH_PLACEHOLDER: &str = "to search";
+/// Search-row glyph (product convention: command-style `/` affordance).
+pub const SEARCH_GLYPH: &str = "/";
+
+/// Default search placeholder shown while the filter is empty.
+pub const SEARCH_PLACEHOLDER: &str = "type to filter";
 
 /// Pane chrome **complexity** for a surface’s job.
 ///
@@ -112,7 +115,7 @@ pub enum PaneSearch<'a> {
     /// Placeholder when empty; live filter text when non-empty.
     Shown {
         filter: &'a str,
-        /// Text after `/ ` when empty; defaults to [`SEARCH_PLACEHOLDER`].
+        /// Text after the glyph when empty; defaults to [`SEARCH_PLACEHOLDER`].
         placeholder: Option<&'a str>,
     },
     /// Fully custom search / prompt line (label editor, scoped filters, …).
@@ -572,17 +575,18 @@ fn paint_search(frame: &mut Frame<'_>, area: Rect, search: &PaneSearch<'_>, them
             filter,
             placeholder,
         } => {
+            // Product convention: `/` glyph + dim placeholder when empty,
+            // `/ <filter>` with accent filter while typing.
             let placeholder = placeholder.unwrap_or(SEARCH_PLACEHOLDER);
-            // Screenshot language: `/` + dim "to search", or `/ <filter>`.
             let line = if filter.is_empty() {
-                Line::from(vec![
-                    Span::styled("/ ", Style::default().fg(theme.dim)),
-                    Span::styled(placeholder.to_string(), Style::default().fg(theme.dim)),
-                ])
+                Line::from(vec![Span::styled(
+                    format!("{SEARCH_GLYPH} {placeholder}"),
+                    Style::default().fg(theme.dim),
+                )])
             } else {
                 Line::from(vec![
-                    Span::styled("/ ", Style::default().fg(theme.muted)),
-                    Span::styled(filter.to_string(), Style::default().fg(theme.text)),
+                    Span::styled(format!("{SEARCH_GLYPH} "), Style::default().fg(theme.muted)),
+                    Span::styled(filter.to_string(), Style::default().fg(theme.accent)),
                 ])
             };
             frame.render_widget(Paragraph::new(line), area);

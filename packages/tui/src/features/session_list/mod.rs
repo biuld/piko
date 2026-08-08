@@ -3,12 +3,11 @@ use ratatui::{
     Frame,
     layout::{Constraint, Rect},
     style::Style,
-    text::{Line, Span},
     widgets::Paragraph,
 };
 
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneSearch, PaneSpec, PaneTitleAffix};
+use crate::ui::components::pane::{PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{
     ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
     paint_selectable_panel,
@@ -222,18 +221,13 @@ impl SessionList {
             .map(|item| session_row(item, active_session_id, self.show_path, show_path_col))
             .collect();
 
-        let search_line = Line::from(vec![
-            Span::raw("Search: "),
-            Span::styled(filter, Style::default().fg(theme.accent)),
-        ]);
-
         let spec = PaneSpec::new("Resume Session")
             .mode(crate::ui::components::pane::PaneMode::Standard)
             .title_affixes([
                 PaneTitleAffix::mode_strip_static(&["Current", "All"], scope_active),
                 PaneTitleAffix::selection(counter_at, counter_of),
             ])
-            .search(PaneSearch::Custom(search_line))
+            .search_filter(filter)
             .tip("Tab scope · Ctrl+N named · path")
             .hints("Enter resume · Esc close")
             .focused(true);
