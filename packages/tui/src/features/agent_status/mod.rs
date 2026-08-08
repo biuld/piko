@@ -122,9 +122,9 @@ impl AgentPanelState {
             }
         }
 
-        // Focused strip uses accent border; passive uses muted (Selected ≠ Focused).
+        // Focused strip uses panel border; passive uses muted (Selected ≠ Focused).
         let border_color = if view.state.focus {
-            view.theme.border_accent
+            view.theme.border
         } else {
             view.theme.border_muted
         };

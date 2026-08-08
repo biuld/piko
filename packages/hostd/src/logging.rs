@@ -27,8 +27,56 @@ use crate::domain::config::ObservabilitySettings;
 
 pub const DEFAULT_FILTER: &str = "info,piko_hostd=info,piko_orchd=info";
 pub const DEBUG_FILTER: &str = "debug,piko_hostd=debug,piko_orchd=debug";
-pub const DEFAULT_OTEL_ENDPOINT: &str = "http://127.0.0.1:4318";
+pub const DEFAULT_OTEL_ENDPOINT: &str = "http://localhost:4318";
 pub const DEFAULT_SERVICE_NAME: &str = "piko-hostd";
+
+/// Join an OTLP HTTP base URL with a signal path (`/v1/traces` etc.).
+///
+/// `opentelemetry-otlp` 0.31 treats a programmatically set endpoint as a final
+/// URL and does **not** append signal paths. Posting to the base alone hits
+/// Aspire's root (302) and redirects to invalid routes such as
+/// `/structuredlogs` (404). Always provide per-signal absolute paths.
+fn otlp_signal_endpoint(base: &str, path: &str) -> String {
+    let base = base.trim_end_matches('/');
+    let path = if path.starts_with('/') {
+        path
+    } else {
+        return format!("{base}/{path}");
+    };
+    // If the operator already gave a full signal URL, keep it.
+    if base.ends_with("/v1/traces") || base.ends_with("/v1/metrics") || base.ends_with("/v1/logs") {
+        return base.to_string();
+    }
+    format!("{base}{path}")
+}
+
+/// Merge loopback hosts into `NO_PROXY` so local collectors skip Shadowrocket-style system proxies.
+fn ensure_otlp_no_proxy() {
+    const BYPASS: &str = "localhost,127.0.0.1,::1";
+    let merged = match std::env::var("NO_PROXY").or_else(|_| std::env::var("no_proxy")) {
+        Ok(existing) if !existing.is_empty() => {
+            let lower = existing.to_ascii_lowercase();
+            let mut parts: Vec<String> = existing
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            for host in BYPASS.split(',') {
+                if !lower.split(',').any(|h| h.trim() == host) {
+                    parts.push(host.to_string());
+                }
+            }
+            parts.join(",")
+        }
+        _ => BYPASS.to_string(),
+    };
+    // SAFETY: process-local, before OTLP clients are constructed.
+    unsafe {
+        std::env::set_var("NO_PROXY", &merged);
+        std::env::set_var("no_proxy", &merged);
+    }
+}
 
 /// Resolved logging configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,8 +195,11 @@ pub fn init(
     let observability_enabled = observability
         .map(|obs| obs.enabled.unwrap_or(false))
         .unwrap_or(false);
-    crate::telemetry::init(observability_enabled);
+
+    // Build OTel providers first so the global meter is installed before
+    // `telemetry::init` binds instruments (and so batch exporters start).
     let otel = init_otel(observability)?;
+    crate::telemetry::init(observability_enabled);
 
     let console = fmt::layer().with_writer(io::stderr).with_ansi(config.ansi);
     if observability_enabled {
@@ -214,9 +265,15 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
         .with_service_name(service_name.clone())
         .build();
 
+    ensure_otlp_no_proxy();
+
+    let traces_endpoint = otlp_signal_endpoint(&endpoint, "/v1/traces");
+    let metrics_endpoint = otlp_signal_endpoint(&endpoint, "/v1/metrics");
+    let logs_endpoint = otlp_signal_endpoint(&endpoint, "/v1/logs");
+
     let span_exporter = SpanExporter::builder()
         .with_http()
-        .with_endpoint(&endpoint)
+        .with_endpoint(&traces_endpoint)
         .build()
         .map_err(|err| LogError::Otel(err.to_string()))?;
     let tracer_provider = SdkTracerProvider::builder()
@@ -228,7 +285,7 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
 
     let metric_exporter = MetricExporter::builder()
         .with_http()
-        .with_endpoint(&endpoint)
+        .with_endpoint(&metrics_endpoint)
         .build()
         .map_err(|err| LogError::Otel(err.to_string()))?;
     let meter_provider = SdkMeterProvider::builder()
@@ -238,7 +295,7 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
 
     let log_exporter = LogExporter::builder()
         .with_http()
-        .with_endpoint(&endpoint)
+        .with_endpoint(&logs_endpoint)
         .build()
         .map_err(|err| LogError::Otel(err.to_string()))?;
     let logger_provider = SdkLoggerProvider::builder()
@@ -250,6 +307,12 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
     global::set_tracer_provider(tracer_provider.clone());
     global::set_meter_provider(meter_provider.clone());
 
+    // stderr: export errors are mostly silent; surface enablement for ops.
+    eprintln!(
+        "[piko-hostd] OTLP export enabled service={service_name} base={endpoint} \
+         traces={traces_endpoint} metrics={metrics_endpoint} logs={logs_endpoint}"
+    );
+
     Ok(OtelRuntime {
         layer: Some(layer),
         logs_bridge: Some(logs_bridge),
@@ -257,4 +320,29 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
         meter_provider: Some(meter_provider),
         logger_provider: Some(logger_provider),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::otlp_signal_endpoint;
+
+    #[test]
+    fn appends_signal_paths_to_base() {
+        assert_eq!(
+            otlp_signal_endpoint("http://localhost:4318", "/v1/traces"),
+            "http://localhost:4318/v1/traces"
+        );
+        assert_eq!(
+            otlp_signal_endpoint("http://localhost:4318/", "/v1/logs"),
+            "http://localhost:4318/v1/logs"
+        );
+    }
+
+    #[test]
+    fn keeps_full_signal_urls() {
+        assert_eq!(
+            otlp_signal_endpoint("http://localhost:4318/v1/traces", "/v1/logs"),
+            "http://localhost:4318/v1/traces"
+        );
+    }
 }

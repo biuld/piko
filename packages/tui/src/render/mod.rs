@@ -25,7 +25,6 @@ use crate::{
         bottom_bar::{BottomBar, BottomBarView},
         help::HelpPanel,
         notifications::NotificationLevel,
-        settings::SettingsRenderState,
         status::{StatusPanel, StatusPanelView},
     },
     layout::{
@@ -190,17 +189,7 @@ fn render_partial_panel(frame: &mut Frame<'_>, app: &AppState, area: Rect, mode:
             app.model.active_model_id.as_deref(),
             &app.theme,
         ),
-        AppMode::Settings => app.settings.render(
-            frame,
-            area,
-            SettingsRenderState {
-                thinking_level: app.model.active_thinking_level.as_deref(),
-                thinking_visible: app.timeline.thinking_visible,
-                theme_name: &app.theme.name,
-                no_tools: app.initial_options.no_tools,
-            },
-            &app.theme,
-        ),
+        AppMode::Settings => app.settings.render(frame, area, &app.theme),
         AppMode::Approval => app.approvals.render(frame, area, &app.theme),
         AppMode::ToolInteraction => app.interactions.render(frame, area, &app.theme),
         AppMode::AuthSelector => app.auth_selector.render(frame, area, &app.theme),

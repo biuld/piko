@@ -82,17 +82,24 @@ impl Timeline {
 
     fn render_lines(&self, theme: &Theme, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
-        for (index, component) in self.components.iter().enumerate() {
-            if index > 0 {
-                lines.push(Line::from(""));
-            }
-            lines.extend(component_lines(
+        // Zero-height components (e.g. tool_use-only assistant with empty body)
+        // stay in the timeline for transcript fidelity but must not contribute
+        // inter-component gap rows.
+        for component in &self.components {
+            let body = component_lines(
                 component,
                 self.tools_expanded,
                 self.thinking_visible,
                 theme,
                 width,
-            ));
+            );
+            if body.is_empty() {
+                continue;
+            }
+            if !lines.is_empty() {
+                lines.push(Line::from(""));
+            }
+            lines.extend(body);
         }
         lines
     }
@@ -347,4 +354,75 @@ fn text_lines(text: &str) -> Vec<String> {
         return vec![String::new()];
     }
     text.lines().map(str::to_string).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::ToolStatus;
+    use crate::features::timeline::{
+        AssistantMessageComponent, ComponentId, ContentBlock, Timeline, TimelineComponent,
+        TimelineEntry, ToolEntry,
+    };
+    use crate::theme::Theme;
+
+    fn tool_entry(id: &str, name: &str) -> ToolEntry {
+        ToolEntry::new(
+            id.into(),
+            name.into(),
+            ToolStatus::Completed,
+            String::new(),
+            Some(r#"{"ok":true}"#.into()),
+            None,
+        )
+    }
+
+    fn empty_tool_use_assistant(id: &str) -> TimelineComponent {
+        TimelineComponent::Assistant(AssistantMessageComponent {
+            id: ComponentId::MessageId(id.into()),
+            blocks: vec![ContentBlock::Text(String::new())],
+            stop_reason: Some("tool_use".into()),
+            error_message: None,
+        })
+    }
+
+    #[test]
+    fn zero_height_assistant_does_not_double_gap_between_tools() {
+        let theme = Theme::dark();
+        let mut timeline = Timeline::new();
+        timeline.push(TimelineEntry::Tool(tool_entry("c1", "list_agent_specs")));
+        timeline
+            .components
+            .push_back(empty_tool_use_assistant("a-empty"));
+        timeline.push(TimelineEntry::Tool(tool_entry("c2", "spawn_agent")));
+
+        let lines = timeline.render_lines(&theme, 40);
+        let blank_rows = lines
+            .iter()
+            .filter(|line| {
+                line.spans
+                    .iter()
+                    .all(|span| span.content.chars().all(char::is_whitespace))
+                    && line.spans.iter().all(|span| span.style.bg.is_none())
+            })
+            .count();
+
+        // Only one inter-component separator between the two visible tool cards.
+        assert_eq!(blank_rows, 1, "unexpected blank rows: {lines:?}");
+        assert!(
+            lines.iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("list_agent_specs"))
+            }),
+            "first tool missing: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.contains("spawn_agent"))
+            }),
+            "second tool missing: {lines:?}"
+        );
+    }
 }

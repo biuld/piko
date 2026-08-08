@@ -73,6 +73,33 @@ impl HostServer {
         ))
     }
 
+    /// Rebuild the orch turn runner from current settings and on-disk auth.
+    ///
+    /// Startup and model config changes share this path. Auth login/logout must
+    /// also call it so an `ErrorAgentRunRunner` installed when credentials were
+    /// missing is replaced after keys land in `auth.json`.
+    pub(crate) async fn rebuild_turn_runner(&self) {
+        use crate::ports::ErrorAgentRunRunner;
+
+        let settings = self.settings.lock().await.clone();
+        let (runner, executor, active_model) = super::build_orch_turn_runner(&settings)
+            .await
+            .unwrap_or_else(|e| {
+                (
+                    Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
+                    None,
+                    None,
+                )
+            });
+        *self.turn_runner.lock().await = runner;
+        if let Some(exec) = executor {
+            self.set_model_executor(exec).await;
+        }
+        self.wire_context_window_callback().await;
+        self.wire_guardian_callback().await;
+        *self.active_model.lock().await = active_model;
+    }
+
     pub async fn handle_command(&self, command: Command) -> Vec<ServerMessage> {
         let mut rx = self.handle_command_stream(command);
         let mut events = Vec::new();

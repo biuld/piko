@@ -27,8 +27,12 @@ list) and **beside** the shell UI/UX contract:
 
 **Base components** (logical, not implementation names):
 
+- **Pane** — framed overlay chrome: title · optional search · content · optional tip · hints
 - **List** — filterable, keyboard-navigable rows (selectors, palette, sessions)
-- **Hierarchical menu** — nested list with drill-in / drill-out
+- **Hierarchical menu** — nested list with drill-in / drill-out (commands,
+  simple trees — **not** the Settings product model)
+- **Settings kit** — value-aware settings composition (see below + [settings.md](./settings.md)):
+  NavStack, SectionRow, ValueSummary, EffectBadge, ChoiceList, OptionRow **on Pane**
 - **Text field** — single- or multi-line editable text (editor, forms, rename)
 - **Table** — columnar read/scan lists (processes, diagnostics)
 - **Choice workflow** — numbered options + optional free text + multi-step tabs
@@ -39,6 +43,12 @@ list) and **beside** the shell UI/UX contract:
 
 Product panels **compose** these primitives; they must not invent a private
 selection or focus language that contradicts this document.
+
+**Settings vs hierarchical menu:** a command palette is an action tree; Settings
+is a **value catalog**. Reusing menu nodes alone fails ValueSummary / exclusive
+Active / effect-class disclosure. Settings surfaces must compose the kit (or an
+explicit successor), while still using this document’s Selected / Active /
+focus chrome.
 
 ## Design principles
 
@@ -128,7 +138,7 @@ Components consume theme tokens (see [themes.md](./themes.md)):
 |--------|------------------|
 | Body | `text` |
 | Metadata | `muted`, `dim` |
-| Selection / focus | `accent`, `borderAccent`, optional `selectedBg` |
+| Selection / focus | `accent` (selection / caret / labels), optional `selectedBg`; frames use `border` / `borderMuted` only |
 | Success | `success`, optional `toolSuccessBg` |
 | Warning / in progress | `warning`, optional `toolPendingBg` |
 | Error | `error`, optional `toolErrorBg` |
@@ -162,10 +172,10 @@ Every interactive component supports a subset of these **visual states**.
 
 | State | When | Visual |
 |-------|------|--------|
-| Rest | Visible, not focus owner | `border` or `borderMuted`; body at normal contrast |
-| Focused | Top of focus stack | `borderAccent` (or top-border accent for partial overlays) |
-| Passive chrome | Never focusable (BottomBar, separators) | No accent border; muted/dim text only |
-| Blocking | Awaits user decision (approval, workflow) | Focused frame + warning accent on title/prompt as appropriate |
+| Rest | Visible, not focus owner | `borderMuted`; body at normal contrast |
+| Focused | Top of focus stack | `border` (never accent); partial overlays may use top border only |
+| Passive chrome | Never focusable (BottomBar, separators) | Muted/dim text only |
+| Blocking | Awaits user decision (approval, workflow) | Focused frame chrome + warning on title/prompt as appropriate |
 
 ### Item / control states
 
@@ -287,6 +297,60 @@ Same as List, plus:
 - Group titles may be non-selectable or expandable section headers
 - Enter on group drills in; Esc/left drills out (bindings per keybindings feature)
 - Breadcrumb or panel title always shows depth context
+
+Fit: command palettes, simple navigational trees, one-shot action menus.
+
+**Not** the Settings product model for host/tui configuration (use Settings kit).
+
+### Settings kit
+
+Product owner: [settings.md](./settings.md). Feedback constraints that every
+Settings component must obey:
+
+| Component | Selected | Active | Value | Extra |
+|-----------|----------|--------|-------|-------|
+| SettingsNavStack | owns focus frame | n/a | n/a | depth title; filter per frame |
+| SettingSectionRow | `❯` | never substitutes for value | **ValueSummary** required when value exists | drill `>`; optional **EffectBadge** |
+| ValueSummary | n/a | n/a | data-driven one line | compounds with `·`; honest custom |
+| EffectBadge | n/a | n/a | n/a | restart/latency class; no accent theft |
+| SettingChoiceList | one selected index | **exactly one** Active when matched | mirror-driven | binary or multi enum |
+| SettingOptionRow | `❯` | `●` if in-force | option detail = consequence | On/Off short labels for bools |
+
+**Visual (section catalog)** — domain chunk captions (non-selectable) + KeyValue rows:
+
+```text
+  Thinking
+❯ Level                                                       medium ▸
+  Blocks                                                       shown ▸
+
+  Diagnostics
+  Observability                    On · http://127.0.0.1:4318 [restart hostd] ▸
+```
+
+**Visual (choice leaf)** — stacked option + consequence:
+
+```text
+❯ On                                                  ●
+  consequence detail (dim)
+  Off
+  consequence detail (dim)
+```
+
+**Interaction**
+
+- Same List filter / clamp / empty rules
+- Enter on section/branch → drill; Enter on option → apply (surface closes by Settings PRD)
+- Esc pops NavStack
+- Loading mirror: placeholders, not invented Off
+
+**Must not**
+
+- Encode booleans as two peer “Enable/Disable” command rows without Active + summary
+- Use only Hierarchical menu nodes while omitting ValueSummary / EffectBadge
+- Private selection/active glyphs that diverge from this document
+
+Reserved follow-ons (not feedback-stable until their feature PRD lands):
+SettingTextField, SettingConfirmStep, SettingMultiToggle.
 
 ### Text field
 
@@ -418,7 +482,7 @@ present themselves:
 
 ## Acceptance criteria
 
-1. Any List-based selector (models, sessions, palette, settings rows) shares the
+1. Any List-based selector (models, sessions, palette) and Settings kit rows share the
    same selection caret, accent, and empty/loading language.
 2. A user can always answer “where is focus?” from border/caret alone.
 3. Active model/agent/session remains identifiable when the highlight moves away.

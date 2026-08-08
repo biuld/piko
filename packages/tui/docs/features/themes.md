@@ -44,7 +44,6 @@ gray = 242
 [colors]
 accent = "blue"
 border = "blue"
-borderAccent = "#00d7ff"
 borderMuted = "gray"
 success = "#b5bd68"
 error = "#cc6666"
@@ -87,15 +86,14 @@ These tokens are actively used by all components.
 | `text`        | Default body text                                    |
 | `dim`         | Tertiary / very dim text (details, placeholders)      |
 | `muted`       | Secondary / muted text (descriptions, metadata)       |
-| `accent`      | Primary accent (selected items, active states)        |
+| `accent`      | Primary accent: selected items, active marks, links — **not** chrome borders |
 | `accentAlt`   | Secondary accent (session labels, alternate states)   |
 | `success`     | Success states (completed, assistant label)           |
 | `error`       | Error states (failed tools, error labels)             |
 | `warning`     | Warning states (running tools, warning notifications) |
 | `info`        | Info states (system messages, info notifications)     |
-| `border`      | Normal panel borders                                  |
-| `borderAccent` | Highlighted / focused panel borders                 |
-| `borderMuted`  | Subtle borders (agent panel top line)                |
+| `border`      | Panel / focused frame chrome                          |
+| `borderMuted` | Subtle / unfocused frame chrome                       |
 
 ### Layer 2 — Extended
 
@@ -134,15 +132,15 @@ Where each token is used:
 | Component            | Tokens used                                              |
 |----------------------|----------------------------------------------------------|
 | Timeline             | `text`, `dim`, `accent` (system), `accentAlt` (session), `success` (assistant), `error`, `warning` (tool running), `border`, `userMessageBg`, `toolPendingBg`, `toolSuccessBg`, `toolErrorBg` |
-| AgentPanel           | `accent` (idle marker), `warning` (active marker), `text` (agent name), `dim` (queue count), `borderMuted` (top line) |
-| Editor               | `text`, `borderMuted` (normal mode), `borderAccent` (command/approval active) |
+| AgentPanel           | `accent` for markers when active, `warning` / `text` / `dim`; chrome: `border` / `borderMuted` |
+| Editor               | `text`, `borderMuted` (chrome) |
 | NotificationRow      | `info`, `warning`, `error` (by notification level)        |
 | BottomBar            | `muted` (body text), `dim` (separator dots)               |
-| FilterableList       | `accent` (selected item), `dim` (detail), `borderMuted`   |
-| Suggestions          | `accent` (selected), `dim` (detail), `borderMuted`        |
-| ApprovalPanel        | `warning` (prompt text), `warning` (border)               |
-| StatusPanel          | `accent` (key labels), `warning` (preview text), `borderMuted` |
-| HelpPanel            | `text`, `dim`, `borderMuted`                              |
+| FilterableList / Pane | `accent` (selected row), `dim` (detail); frame: `border` / `borderMuted` |
+| Suggestions          | `accent` (selected), `dim` (detail); frame: `border`      |
+| ApprovalPanel        | `warning` (prompt text); frame: `border`                  |
+| StatusPanel          | `accent` (key labels), `warning` (preview); frame: `border` |
+| HelpPanel            | `text`, `dim`; frame: `border`                            |
 
 ## File Locations
 
@@ -214,169 +212,35 @@ notification is shown.
 
 ## Built-in Themes
 
-piko ships with two built-in themes: `dark` (default) and `light`.
+Authoritative definitions live under `packages/tui/resources/themes/`. Missing
+tokens on custom themes are filled from the dark defaults.
 
 ### `dark`
 
-Optimized for dark terminal backgrounds.
+Optimized for dark terminal backgrounds. Brand accent is `#5f87ff` for
+selection and highlights only. Panel chrome uses neutral `border` / `borderMuted`
+— never the accent color.
 
 ```toml
 [theme]
 name = "dark"
 
 [vars]
+accent_blue = "#5f87ff"
 cyan = "#00d7ff"
-blue = "#5f87ff"
-green = "#b5bd68"
-red = "#cc6666"
-yellow = "#ffff00"
-text_color = "#d4d4d4"
-gray = "#808080"
-dim_gray = "#666666"
-dark_gray = "#505050"
-accent_color = "#8abeb7"
-selected_bg = "#3a3a4a"
-user_msg_bg = "#343541"
-tool_pending_bg = "#282832"
-tool_success_bg = "#283228"
-tool_error_bg = "#3c2828"
-custom_msg_bg = "#2d2838"
+# … full palette in resources/themes/dark.toml
 
 [colors]
-accent = "accent_color"
-accentAlt = "blue"
-border = "blue"
-borderAccent = "cyan"
+accent = "accent_blue"
+accentAlt = "cyan"
+border = "gray"
 borderMuted = "dark_gray"
-success = "green"
-error = "red"
-warning = "yellow"
-info = "blue"
-muted = "gray"
-dim = "dim_gray"
-text = "text_color"
-
-thinkingText = "gray"
-selectedBg = "selected_bg"
-userMessageBg = "user_msg_bg"
-userMessageText = "text_color"
-customMessageBg = "custom_msg_bg"
-customMessageText = "text_color"
-customMessageLabel = "#9575cd"
-toolPendingBg = "tool_pending_bg"
-toolSuccessBg = "tool_success_bg"
-toolErrorBg = "tool_error_bg"
-toolTitle = "text_color"
-toolOutput = "gray"
-mdHeading = "#f0c674"
-mdLink = "#81a2be"
-mdLinkUrl = "dim_gray"
-mdCode = "accent_color"
-mdCodeBlock = "green"
-mdCodeBlockBorder = "gray"
-mdQuote = "gray"
-mdQuoteBorder = "gray"
-mdHr = "gray"
-mdListBullet = "accent_color"
-toolDiffAdded = "green"
-toolDiffRemoved = "red"
-toolDiffContext = "gray"
-syntaxComment = "#6A9955"
-syntaxKeyword = "#569CD6"
-syntaxFunction = "#DCDCAA"
-syntaxVariable = "#9CDCFE"
-syntaxString = "#CE9178"
-syntaxNumber = "#B5CEA8"
-syntaxType = "#4EC9B0"
-syntaxOperator = "#D4D4D4"
-syntaxPunctuation = "#D4D4D4"
-thinkingOff = "dark_gray"
-thinkingMinimal = "#6e6e6e"
-thinkingLow = "#5f87af"
-thinkingMedium = "#81a2be"
-thinkingHigh = "#b294bb"
-thinkingXhigh = "#d183e8"
-bashMode = "green"
+# …
 ```
 
 ### `light`
 
-Optimized for light terminal backgrounds.
+Optimized for light terminal backgrounds. Same token model; accent stays on
+selection, borders stay neutral gray.
 
-```toml
-[theme]
-name = "light"
-
-[vars]
-teal = "#5a8080"
-blue = "#547da7"
-green = "#588458"
-red = "#aa5555"
-yellow = "#9a7326"
-text_color = "#1f2328"
-medium_gray = "#6c6c6c"
-dim_gray = "#767676"
-light_gray = "#b0b0b0"
-selected_bg = "#d0d0e0"
-user_msg_bg = "#e8e8e8"
-tool_pending_bg = "#e8e8f0"
-tool_success_bg = "#e8f0e8"
-tool_error_bg = "#f0e8e8"
-custom_msg_bg = "#ede7f6"
-
-[colors]
-accent = "teal"
-accentAlt = "blue"
-border = "blue"
-borderAccent = "teal"
-borderMuted = "light_gray"
-success = "green"
-error = "red"
-warning = "yellow"
-info = "blue"
-muted = "medium_gray"
-dim = "dim_gray"
-text = "text_color"
-
-thinkingText = "medium_gray"
-selectedBg = "selected_bg"
-userMessageBg = "user_msg_bg"
-userMessageText = "text_color"
-customMessageBg = "custom_msg_bg"
-customMessageText = "text_color"
-customMessageLabel = "#7e57c2"
-toolPendingBg = "tool_pending_bg"
-toolSuccessBg = "tool_success_bg"
-toolErrorBg = "tool_error_bg"
-toolTitle = "text_color"
-toolOutput = "medium_gray"
-mdHeading = "yellow"
-mdLink = "blue"
-mdLinkUrl = "dim_gray"
-mdCode = "teal"
-mdCodeBlock = "green"
-mdCodeBlockBorder = "medium_gray"
-mdQuote = "medium_gray"
-mdQuoteBorder = "medium_gray"
-mdHr = "medium_gray"
-mdListBullet = "green"
-toolDiffAdded = "green"
-toolDiffRemoved = "red"
-toolDiffContext = "medium_gray"
-syntaxComment = "#008000"
-syntaxKeyword = "#0000FF"
-syntaxFunction = "#795E26"
-syntaxVariable = "#001080"
-syntaxString = "#A31515"
-syntaxNumber = "#098658"
-syntaxType = "#267F99"
-syntaxOperator = "#000000"
-syntaxPunctuation = "#000000"
-thinkingOff = "light_gray"
-thinkingMinimal = "#767676"
-thinkingLow = "blue"
-thinkingMedium = "teal"
-thinkingHigh = "#875f87"
-thinkingXhigh = "#8b008b"
-bashMode = "green"
-```
+See `resources/themes/light.toml` for the full assignment table.

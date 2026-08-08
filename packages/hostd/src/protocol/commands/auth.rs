@@ -19,6 +19,7 @@ impl HostServer {
     ) {
         let command_id = command_id.to_string();
         let tx_clone = tx.clone();
+        let server = self.clone();
         let registry = self.model_registry.clone();
         tokio::spawn(async move {
             let oauth = {
@@ -36,7 +37,7 @@ impl HostServer {
                 return;
             }
 
-            let reg = registry.lock().await;
+            let mut reg = registry.lock().await;
             let flow = match reg.get_oauth(&provider) {
                 Some(f) => f,
                 None => {
@@ -64,7 +65,28 @@ impl HostServer {
 
                     match flow.poll_device_auth(&info).await {
                         Ok((code, verifier)) => match flow.exchange_code(code, verifier).await {
-                            Ok(_cred) => {
+                            Ok(cred) => {
+                                if let Err(e) = {
+                                    let auth = reg.auth_storage_mut();
+                                    auth.set(&provider, cred).and_then(|_| auth.flush())
+                                } {
+                                    let _ = tx_clone
+                                        .send(ServerMessage::Auth(
+                                            crate::api::AuthEvent::LoginFailed {
+                                                provider: provider.clone(),
+                                                error: format!("Failed to store credentials: {e}"),
+                                            },
+                                        ))
+                                        .await;
+                                    return;
+                                }
+
+                                let providers = reg.list_providers();
+                                drop(reg);
+
+                                // Replace any ErrorAgentRunRunner installed pre-login.
+                                server.rebuild_turn_runner().await;
+
                                 let _ = tx_clone
                                     .send(ServerMessage::Auth(
                                         crate::api::AuthEvent::LoginSuccess {
@@ -72,8 +94,6 @@ impl HostServer {
                                         },
                                     ))
                                     .await;
-                                let reg = registry.lock().await;
-                                let providers = reg.list_providers();
                                 let _ = tx_clone
                                     .send(server_response_ok(
                                         &command_id,
@@ -121,17 +141,21 @@ impl HostServer {
         provider: String,
         api_key: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let mut registry = self.model_registry.lock().await;
-        let auth = registry.auth_storage_mut();
-        auth.set(
-            &provider,
-            piko_llmd::auth::AuthCredential::ApiKey { key: api_key },
-        )
-        .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
-        auth.flush()
+        let providers = {
+            let mut registry = self.model_registry.lock().await;
+            let auth = registry.auth_storage_mut();
+            auth.set(
+                &provider,
+                piko_llmd::auth::AuthCredential::ApiKey { key: api_key },
+            )
             .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+            auth.flush()
+                .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+            registry.list_providers()
+        };
 
-        let providers = registry.list_providers();
+        // Auth is durable; rebuild so turns no longer hit a stale error runner.
+        self.rebuild_turn_runner().await;
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoginSuccess { provider }),
@@ -150,14 +174,18 @@ impl HostServer {
         command_id: &str,
         provider: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let mut registry = self.model_registry.lock().await;
-        let auth = registry.auth_storage_mut();
-        auth.remove(&provider)
-            .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
-        auth.flush()
-            .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+        let providers = {
+            let mut registry = self.model_registry.lock().await;
+            let auth = registry.auth_storage_mut();
+            auth.remove(&provider)
+                .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+            auth.flush()
+                .map_err(|e| ProtocolError::InvalidCommand(e.to_string()))?;
+            registry.list_providers()
+        };
 
-        let providers = registry.list_providers();
+        // Dropping credentials may invalidate the active default provider.
+        self.rebuild_turn_runner().await;
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoggedOut { provider }),

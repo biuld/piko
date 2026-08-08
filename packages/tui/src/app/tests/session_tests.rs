@@ -104,20 +104,42 @@ fn cold_start_shows_loading_until_required_bootstrap_completes() {
     assert!(!app.session.initializing);
     assert!(app.agent_panel.is_loading());
     let effects = app.bootstrap();
-    let config_id = match &effects[0] {
-        Effect::Send(piko_protocol::Command::ConfigGet { command_id, .. }) => command_id.clone(),
-        other => panic!("unexpected effect: {other:?}"),
-    };
-    let catalog_id = match &effects[1] {
-        Effect::Send(piko_protocol::Command::CommandCatalogGet { command_id }) => {
-            command_id.clone()
+
+    let mut tui_config_id = None;
+    let mut host_config_id = None;
+    let mut catalog_id = None;
+    for effect in &effects {
+        match effect {
+            Effect::Send(piko_protocol::Command::ConfigGet {
+                command_id,
+                namespace,
+            }) if namespace == "tui" => tui_config_id = Some(command_id.clone()),
+            Effect::Send(piko_protocol::Command::ConfigGet {
+                command_id,
+                namespace,
+            }) if namespace == "host" => host_config_id = Some(command_id.clone()),
+            Effect::Send(piko_protocol::Command::CommandCatalogGet { command_id }) => {
+                catalog_id = Some(command_id.clone());
+            }
+            _ => {}
         }
-        other => panic!("unexpected effect: {other:?}"),
-    };
+    }
+    let tui_config_id = tui_config_id.expect("bootstrap ConfigGet tui");
+    let host_config_id = host_config_id.expect("bootstrap ConfigGet host");
+    let catalog_id = catalog_id.expect("bootstrap CommandCatalogGet");
+
     app.apply_event(Event::CommandResponse {
-        command_id: config_id,
+        command_id: tui_config_id,
         result: Ok(piko_protocol::CommandResult::ConfigEntry {
             namespace: "tui".into(),
+            value: serde_json::json!({}),
+        }),
+    });
+    assert!(app.agent_panel.is_loading());
+    app.apply_event(Event::CommandResponse {
+        command_id: host_config_id,
+        result: Ok(piko_protocol::CommandResult::ConfigEntry {
+            namespace: "host".into(),
             value: serde_json::json!({}),
         }),
     });
@@ -131,6 +153,7 @@ fn cold_start_shows_loading_until_required_bootstrap_completes() {
     });
     assert!(!app.agent_panel.is_loading());
     assert!(app.agent_panel.agents.is_empty());
+    assert!(app.host_settings.loaded);
 }
 
 #[test]

@@ -88,6 +88,20 @@ fn json_patch_for_action(action: SettingsAction) -> serde_json::Value {
                 "transport": value
             })
         }
+        SettingsAction::Observability(value) => {
+            serde_json::json!({
+                "observability": {
+                    "enabled": value
+                }
+            })
+        }
+        SettingsAction::ObservabilityEndpoint(endpoint) => {
+            serde_json::json!({
+                "observability": {
+                    "otel-endpoint": endpoint
+                }
+            })
+        }
         SettingsAction::DisableTools => {
             serde_json::json!({
                 "active-tool-names": []

@@ -170,7 +170,7 @@ impl AppState {
             AppMode::Sessions => self.sessions.list.selected = 0,
             AppMode::AgentList => self.agents.list.selected = 0,
             AppMode::Models => self.models.reset(),
-            AppMode::Settings => self.settings.open_root(),
+            AppMode::Settings => self.settings.reset_selection(),
             AppMode::AuthSelector => {
                 if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
                     frame.list.selected = 0;
@@ -197,7 +197,7 @@ impl AppState {
             AppMode::Sessions => self.sessions.list.selected = 0,
             AppMode::AgentList => self.agents.list.selected = 0,
             AppMode::Models => self.models.reset(),
-            AppMode::Settings => self.settings.open_root(),
+            AppMode::Settings => self.settings.reset_selection(),
             AppMode::AuthSelector => {
                 if let Some(frame) = self.auth_selector.menu.stack.last_mut() {
                     frame.list.selected = 0;
@@ -259,7 +259,8 @@ impl AppState {
     pub(super) fn reset_overlay_selection(&mut self) {
         self.sessions.list.selected = 0;
         self.models.reset();
-        self.settings.open_root();
+        let snap = self.settings_snapshot();
+        self.settings.open_root(&snap);
         self.tree.selected_idx = 0;
     }
 

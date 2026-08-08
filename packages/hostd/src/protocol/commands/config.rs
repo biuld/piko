@@ -1,11 +1,9 @@
 use async_trait::async_trait;
-use std::sync::Arc;
 
 use crate::api::{Command, ProtocolError, ServerMessage};
 use crate::domain::config::HostSettings;
-use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
-use crate::protocol::{HostServer, build_orch_turn_runner, now_ms};
+use crate::protocol::{HostServer, now_ms};
 
 fn server_response_ok(command_id: &str, result: crate::api::CommandResult) -> ServerMessage {
     ServerMessage::CommandResponse {
@@ -42,21 +40,8 @@ impl ConfigObserver for ModelRunnerObserver {
             || new.default_thinking_level != old.default_thinking_level;
 
         if changed {
-            let (runner, executor, active_model) =
-                build_orch_turn_runner(new).await.unwrap_or_else(|e| {
-                    (
-                        Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
-                        None,
-                        None,
-                    )
-                });
-            *server.turn_runner.lock().await = runner;
-            if let Some(exec) = executor {
-                server.set_model_executor(exec).await;
-            }
-            server.wire_context_window_callback().await;
-            server.wire_guardian_callback().await;
-            *server.active_model.lock().await = active_model;
+            // settings already updated on the server before observers run
+            server.rebuild_turn_runner().await;
         }
 
         let model_id = new.default_model.clone().unwrap_or_default();

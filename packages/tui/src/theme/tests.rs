@@ -11,6 +11,9 @@ fn test_dark_theme_loads() {
     assert_ne!(theme.text, Color::Reset);
     assert_ne!(theme.border, Color::Reset);
     assert_ne!(theme.border_muted, Color::Reset);
+    // Brand accent is #5f87ff (selection); borders are neutral chrome only.
+    assert_eq!(theme.accent, Color::Rgb(95, 135, 255));
+    assert_ne!(theme.border, theme.accent);
 }
 
 #[test]

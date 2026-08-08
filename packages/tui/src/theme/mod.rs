@@ -65,7 +65,6 @@ pub struct Theme {
     pub warning: Color,
     pub info: Color,
     pub border: Color,
-    pub border_accent: Color,
     pub border_muted: Color,
 
     // All resolved tokens (Layer 1 + Layer 2 + Layer 3), keyed by token name.

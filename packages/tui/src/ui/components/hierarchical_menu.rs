@@ -48,7 +48,8 @@ pub struct MenuFrame<T: Clone> {
 /// Result returned when confirming a menu selection.
 pub enum MenuConfirmResult<T> {
     SubMenuPushed,
-    Action(T, String),
+    /// Action payload and display title (title kept for callers that show feedback).
+    Action(T, #[allow(dead_code)] String),
     None,
 }
 
@@ -85,6 +86,7 @@ impl<T: Clone> HierarchicalMenu<T> {
 
     /// Pop the top frame off the navigation stack.
     /// Returns true if frames still remain, false if the stack is now empty.
+    #[allow(dead_code)]
     pub fn pop(&mut self) -> bool {
         self.stack.pop();
         !self.stack.is_empty()
@@ -169,11 +171,13 @@ impl<T: Clone> HierarchicalMenu<T> {
                     MenuNode::Action { .. } => String::new(),
                 };
 
-                FilterableItem {
-                    primary: format!("{}{}", item.title(), suffix),
-                    detail: item.detail().to_string(),
-                    is_active,
+                let mut row =
+                    FilterableItem::new(item.title().to_string(), item.detail().to_string())
+                        .active(is_active);
+                if !suffix.is_empty() {
+                    row = row.trailing(suffix.trim());
                 }
+                row
             })
             .collect();
 

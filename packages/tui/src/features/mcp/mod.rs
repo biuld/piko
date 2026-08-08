@@ -8,12 +8,12 @@ use piko_protocol::command::McpServerInfo;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::Style,
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::theme::Theme;
+use crate::ui::components::frame_border_style;
 
 use super::centered_rect;
 
@@ -62,7 +62,7 @@ impl McpPanel {
         let block = Block::default()
             .title(" MCP servers ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border));
+            .border_style(frame_border_style(true, theme));
         let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, popup);
     }

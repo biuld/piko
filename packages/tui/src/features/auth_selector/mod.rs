@@ -166,13 +166,14 @@ impl AuthSelector {
                     .render(frame, area, &self.filter, |_action| false, theme);
             }
             AuthSelectorState::ApiKeyInput { provider, input } => {
+                use crate::ui::components::frame_border_style;
                 use ratatui::style::Style;
                 use ratatui::text::{Line, Span};
                 use ratatui::widgets::{Block, Borders, Paragraph};
 
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_accent))
+                    .border_style(frame_border_style(true, theme))
                     .title(format!(" Configure {} API Key ", provider));
                 frame.render_widget(block, area);
 

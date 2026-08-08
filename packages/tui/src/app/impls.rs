@@ -56,6 +56,7 @@ impl AppState {
             agent_panel,
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
+            host_settings: HostRuntimeSettings::default(),
             theme: Theme::dark(),
         }
     }
@@ -204,6 +205,61 @@ impl AppState {
                 crate::features::auth_selector::AuthSelectorState::ApiKeyInput { .. } => None,
             },
             _ => None,
+        }
+    }
+
+    pub(crate) fn settings_snapshot(&self) -> crate::features::settings::SettingsSnapshot {
+        crate::features::settings::SettingsSnapshot {
+            host: self.host_settings.clone(),
+            thinking_level: self
+                .model
+                .active_thinking_level
+                .clone()
+                .or_else(|| self.host_settings.thinking_level.clone()),
+            thinking_visible: self.timeline.thinking_visible,
+            theme_name: self.theme.name.clone(),
+            no_tools: self.initial_options.no_tools || !self.host_settings.all_tools,
+        }
+    }
+
+    pub(crate) fn apply_settings_action_optimistically(
+        &mut self,
+        action: &crate::features::settings::SettingsAction,
+    ) {
+        use crate::features::settings::SettingsAction;
+        match action {
+            SettingsAction::Thinking(level) => {
+                self.model.active_thinking_level = Some((*level).to_string());
+                self.host_settings.thinking_level = Some((*level).to_string());
+            }
+            SettingsAction::HideThinking(hide) => {
+                self.timeline.thinking_visible = !*hide;
+                self.tui_config.hide_thinking_block = *hide;
+            }
+            SettingsAction::Compaction(v) => self.host_settings.compaction_enabled = *v,
+            SettingsAction::CompactionKeep(n) => self.host_settings.compaction_keep = *n,
+            SettingsAction::CompactionReserve(n) => self.host_settings.compaction_reserve = *n,
+            SettingsAction::Theme(name) => {
+                // Theme reload rides host ConfigEntry for tui; name tracked for summary.
+                self.theme.name = (*name).to_string();
+            }
+            SettingsAction::Transport(t) => {
+                self.host_settings.transport = Some((*t).to_string());
+            }
+            SettingsAction::Sandbox(v) => self.host_settings.sandbox_enabled = *v,
+            SettingsAction::Retry(v) => self.host_settings.retry_enabled = *v,
+            SettingsAction::Observability(v) => self.host_settings.observability_enabled = *v,
+            SettingsAction::ObservabilityEndpoint(ep) => {
+                self.host_settings.otel_endpoint = (*ep).to_string();
+            }
+            SettingsAction::EnableAllTools => {
+                self.host_settings.all_tools = true;
+                self.initial_options.no_tools = false;
+            }
+            SettingsAction::DisableTools => {
+                self.host_settings.all_tools = false;
+                self.initial_options.no_tools = true;
+            }
         }
     }
 }

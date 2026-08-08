@@ -64,7 +64,10 @@ Reusable rendering units used inside panels. Not tied to a slot.
 
 | Component       | Description                        | Used by                        |
 |-----------------|------------------------------------|--------------------------------|
-| FilterableList  | Filterable, keyboard-navigable list | All overlay panels             |
+| Pane            | Framed chrome: title/search/content/tip/footer | All list/table overlays |
+| FilterableList  | List state + row layouts (incl. Settings) on Pane | Menus, Settings, … |
+| TablePanel      | Table body on Pane                 | Session list, tree, agents     |
+| Settings kit    | Domain/nav + thin map → FilterableItem | SettingsPanel              |
 | InfoPanel       | Read-only paragraph display         | HelpPanel, StatusPanel         |
 | ConfirmDialog   | Centered confirmation popup         | ApprovalPanel, ForkConfirm     |
 | FormPanel       | Form input                          | LoginPanel, RenamePanel        |

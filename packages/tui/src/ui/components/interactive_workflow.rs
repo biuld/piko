@@ -2,7 +2,7 @@
 
 use super::text_box::TextBox;
 use crate::theme::Theme;
-use crate::ui::components::{hint_style, selection_prefix};
+use crate::ui::components::{frame_border_style, hint_style, selection_prefix};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -178,7 +178,7 @@ impl InteractiveWorkflow {
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let block = Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(theme.border_accent));
+            .border_style(frame_border_style(true, theme));
         frame.render_widget(block, area);
 
         let inner = prompt_content_area(area);

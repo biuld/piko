@@ -50,10 +50,11 @@ pub fn selection_prefix(selected: bool) -> String {
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
-/// Focused interactive frame → accent border; passive/rest → muted border.
+/// Interactive frame chrome: focused → `border`, rest → `borderMuted`.
+/// Borders never use `accent` (accent is for selection / marks / labels).
 pub fn frame_border_style(focused: bool, theme: &Theme) -> Style {
     Style::default().fg(if focused {
-        theme.border_accent
+        theme.border
     } else {
         theme.border_muted
     })
@@ -134,13 +135,24 @@ pub fn default_list_hints() -> &'static str {
     "↑/↓ navigate · Enter confirm · Esc cancel"
 }
 
-/// Title line for filterable lists: product title + counter; filter shown when set.
-pub fn list_title(title: &str, filter: &str, selected_one_based: usize, total: usize) -> String {
-    if filter.is_empty() {
-        format!("{title} [{selected_one_based}/{total}]")
+/// Settings catalog / branch: open or back (pipe-separated, screenshot language).
+pub fn settings_open_hints(at_root: bool) -> &'static str {
+    if at_root {
+        "↑/↓ nav | Enter open | → expand | Esc close"
     } else {
-        format!("{title} | filter: {filter} [{selected_one_based}/{total}]")
+        "↑/↓ nav | Enter open | Esc back"
     }
+}
+
+/// Settings choice leaf: apply value.
+pub fn settings_apply_hints() -> &'static str {
+    "↑/↓ nav | Enter apply | Esc back"
+}
+
+/// Title line for filterable lists: product title + counter.
+/// Filter is shown separately on the Pane search row (not duplicated here).
+pub fn list_title(title: &str, _filter: &str, selected_one_based: usize, total: usize) -> String {
+    format!("{title} [{selected_one_based}/{total}]")
 }
 
 /// Hint spans for embedding under a list (dim).
@@ -183,12 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn focused_border_uses_accent() {
+    fn focused_border_uses_border_not_accent() {
         let theme = Theme::dark();
-        assert_eq!(
-            frame_border_style(true, &theme).fg,
-            Some(theme.border_accent)
-        );
+        assert_ne!(theme.border, theme.accent);
+        assert_eq!(frame_border_style(true, &theme).fg, Some(theme.border));
         assert_eq!(
             frame_border_style(false, &theme).fg,
             Some(theme.border_muted)

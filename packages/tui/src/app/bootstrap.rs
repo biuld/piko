@@ -5,14 +5,23 @@ use super::{AppState, command_id, effect, pending};
 impl AppState {
     pub fn bootstrap(&mut self) -> Vec<effect::Effect> {
         let mut effects = Vec::new();
-        let config_id = command_id();
+        let tui_config_id = command_id();
         self.session.pending.track(
-            config_id.clone(),
+            tui_config_id.clone(),
             pending::PendingCommandKind::BootstrapConfig,
         );
         effects.push(effect::Effect::send(Command::ConfigGet {
-            command_id: config_id,
+            command_id: tui_config_id,
             namespace: "tui".to_string(),
+        }));
+        let host_config_id = command_id();
+        self.session.pending.track(
+            host_config_id.clone(),
+            pending::PendingCommandKind::BootstrapConfig,
+        );
+        effects.push(effect::Effect::send(Command::ConfigGet {
+            command_id: host_config_id,
+            namespace: "host".to_string(),
         }));
         let catalog_id = command_id();
         self.session.pending.track(

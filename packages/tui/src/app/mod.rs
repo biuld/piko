@@ -12,7 +12,7 @@ use crate::{
         model_selector::{ModelOption, ModelSelector},
         notifications::NotificationCenter,
         session_list::SessionList,
-        settings::{SettingsAction, SettingsPanel},
+        settings::{HostRuntimeSettings, SettingsAction, SettingsPanel},
         timeline::Timeline,
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
@@ -170,6 +170,9 @@ pub struct AppState {
     // tui config (from hostd settings under `tui` namespace)
     pub tui_config: TuiConfig,
 
+    // host runtime settings mirror (ConfigGet namespace "host")
+    pub host_settings: HostRuntimeSettings,
+
     // active theme (resolved color tokens)
     pub theme: Theme,
 }
@@ -291,7 +294,7 @@ fn flatten_models(providers: Vec<ProviderInfo>) -> Vec<ModelOption> {
         .collect()
 }
 
-fn config_command_for_setting(action: SettingsAction) -> Command {
+pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
     let patch = match action {
         SettingsAction::Thinking(level) => {
             serde_json::json!({
@@ -347,6 +350,20 @@ fn config_command_for_setting(action: SettingsAction) -> Command {
             serde_json::json!({
                 "retry": {
                     "enabled": value
+                }
+            })
+        }
+        SettingsAction::Observability(value) => {
+            serde_json::json!({
+                "observability": {
+                    "enabled": value
+                }
+            })
+        }
+        SettingsAction::ObservabilityEndpoint(endpoint) => {
+            serde_json::json!({
+                "observability": {
+                    "otel-endpoint": endpoint
                 }
             })
         }

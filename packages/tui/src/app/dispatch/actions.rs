@@ -107,9 +107,19 @@ impl AppState {
                 self.status = "help".to_string();
             }
             SurfaceAction::OpenSettings => {
-                self.settings.open_root();
+                let snap = self.settings_snapshot();
+                self.settings.open_root(&snap);
                 self.push_focus(AppMode::Settings);
                 self.status = "settings".to_string();
+                let command_id = super::command_id();
+                self.session.pending.track(
+                    command_id.clone(),
+                    crate::app::pending::PendingCommandKind::BootstrapConfig,
+                );
+                return vec![Effect::send(Command::ConfigGet {
+                    command_id,
+                    namespace: "host".to_string(),
+                })];
             }
             SurfaceAction::OpenStatus => {
                 self.push_focus(AppMode::Status);
@@ -122,7 +132,8 @@ impl AppState {
                 self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
             SurfaceAction::OpenThinking => {
-                self.settings.open_thinking();
+                let snap = self.settings_snapshot();
+                self.settings.open_thinking(&snap);
                 self.push_focus(AppMode::Settings);
                 self.status = "thinking level".to_string();
             }

@@ -279,6 +279,30 @@ impl AppState {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);
                     self.timeline.thinking_visible = !self.tui_config.hide_thinking_block;
+                    if let Some(name) = value
+                        .get("theme")
+                        .and_then(|t| t.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
+                        // Theme file resolution may happen elsewhere; keep mirror name.
+                        self.theme.name = name.to_string();
+                    }
+                } else if namespace == "host" {
+                    self.host_settings.apply_host_json(&value);
+                    if let Some(level) = self.host_settings.thinking_level.clone()
+                        && self.model.active_thinking_level.is_none()
+                    {
+                        self.model.active_thinking_level = Some(level);
+                    }
+                    // Refresh open Settings so ValueSummaries track host authority.
+                    if self.mode == AppMode::Settings {
+                        let snap = self.settings_snapshot();
+                        // Rebuild without collapsing depth would need path restore;
+                        // open-time refresh rebuilds from root with fresh summaries.
+                        if self.settings.stack.at_root() {
+                            self.settings.open_root(&snap);
+                        }
+                    }
                 }
                 self.finish_bootstrap_command(&response_command_id);
             }

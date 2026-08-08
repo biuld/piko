@@ -70,25 +70,38 @@ pub(super) fn build_genai_messages(
         )));
     }
 
-    for message in transcript {
-        messages.push(map_transcript_message(message));
-        if let piko_protocol::messages::Message::ToolResult {
-            tool_call_id,
-            content,
-            ..
-        } = message
-        {
-            let mut images = vec![genai::chat::ContentPart::Text(format!(
-                "[piko data-only image content from tool result {tool_call_id}; authority=None; trust=Untrusted]"
-            ))];
-            images.extend(content.iter().filter_map(|block| match block {
-                ContentBlock::Image { data, mime_type } => Some(
-                    genai::chat::ContentPart::from_binary_base64(mime_type, data.clone(), None),
-                ),
-                _ => None,
-            }));
-            if images.len() > 1 {
-                messages.push(genai::chat::ChatMessage::user(images));
+    // Fuse each durable Assistant with immediately following ToolCall items
+    // into one provider-facing ChatMessage (model-turn shape). Domain
+    // transcripts stay itemized; only this outbound projection groups them.
+    let mut idx = 0;
+    while idx < transcript.len() {
+        match &transcript[idx] {
+            piko_protocol::messages::Message::Assistant { content, .. } => {
+                let mut parts = assistant_content_parts(content);
+                idx += 1;
+                while let Some(piko_protocol::messages::Message::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                }) = transcript.get(idx)
+                {
+                    parts.push(tool_call_part(id, name, arguments));
+                    idx += 1;
+                }
+                messages.push(genai::chat::ChatMessage::assistant(parts));
+            }
+            message => {
+                messages.push(map_transcript_message(message));
+                if let piko_protocol::messages::Message::ToolResult {
+                    tool_call_id,
+                    content,
+                    ..
+                } = message
+                {
+                    push_tool_result_images(&mut messages, tool_call_id, content);
+                }
+                idx += 1;
             }
         }
     }
@@ -119,14 +132,10 @@ fn map_transcript_message(message: &piko_protocol::messages::Message) -> genai::
             name,
             arguments,
             ..
-        } => genai::chat::ChatMessage::assistant(vec![genai::chat::ContentPart::ToolCall(
-            genai::chat::ToolCall {
-                call_id: id.clone(),
-                fn_name: name.clone(),
-                fn_arguments: arguments.clone(),
-                thought_signatures: None,
-            },
-        )]),
+        } => {
+            // Orphan tool call (no preceding Assistant in the run of items).
+            genai::chat::ChatMessage::assistant(vec![tool_call_part(id, name, arguments)])
+        }
         piko_protocol::messages::Message::ToolResult {
             tool_call_id,
             content,
@@ -143,6 +152,34 @@ fn map_transcript_message(message: &piko_protocol::messages::Message) -> genai::
     }
 }
 
+fn push_tool_result_images(
+    messages: &mut Vec<genai::chat::ChatMessage>,
+    tool_call_id: &str,
+    content: &[ContentBlock],
+) {
+    let mut images = vec![genai::chat::ContentPart::Text(format!(
+        "[piko data-only image content from tool result {tool_call_id}; authority=None; trust=Untrusted]"
+    ))];
+    images.extend(content.iter().filter_map(|block| match block {
+        ContentBlock::Image { data, mime_type } => Some(
+            genai::chat::ContentPart::from_binary_base64(mime_type, data.clone(), None),
+        ),
+        _ => None,
+    }));
+    if images.len() > 1 {
+        messages.push(genai::chat::ChatMessage::user(images));
+    }
+}
+
+fn tool_call_part(id: &str, name: &str, arguments: &serde_json::Value) -> genai::chat::ContentPart {
+    genai::chat::ContentPart::ToolCall(genai::chat::ToolCall {
+        call_id: id.to_string(),
+        fn_name: name.to_string(),
+        fn_arguments: arguments.clone(),
+        thought_signatures: None,
+    })
+}
+
 fn message_content_text(content: &MessageContent) -> String {
     match content {
         MessageContent::String(text) => text.clone(),
@@ -150,7 +187,7 @@ fn message_content_text(content: &MessageContent) -> String {
     }
 }
 
-fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
+fn assistant_content_parts(content: &[ContentBlock]) -> Vec<genai::chat::ContentPart> {
     let mut parts = Vec::with_capacity(content.len() * 2);
     for block in content {
         match block {
@@ -173,7 +210,11 @@ fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage
             ),
         }
     }
-    genai::chat::ChatMessage::assistant(parts)
+    parts
+}
+
+fn build_assistant_message(content: &[ContentBlock]) -> genai::chat::ChatMessage {
+    genai::chat::ChatMessage::assistant(assistant_content_parts(content))
 }
 
 fn content_parts(content: &MessageContent) -> genai::chat::MessageContent {
@@ -364,5 +405,115 @@ mod tests {
                 .iter()
                 .any(|part| matches!(part, genai::chat::ContentPart::Binary(_)))
         );
+    }
+
+    fn assistant_with_thinking(thinking: &str, text: &str) -> piko_protocol::Message {
+        piko_protocol::Message::Assistant {
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: thinking.into(),
+                    thinking_signature: None,
+                },
+                ContentBlock::Text { text: text.into() },
+            ],
+            api: "openai-completions".into(),
+            provider: "deepseek".into(),
+            model: "deepseek-v4-flash".into(),
+            usage: None,
+            stop_reason: Some("tool_use".into()),
+            error_message: None,
+            timestamp: None,
+        }
+    }
+
+    fn tool_call(id: &str, name: &str) -> piko_protocol::Message {
+        piko_protocol::Message::ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: serde_json::json!({}),
+            model: Some("deepseek-v4-flash".into()),
+            provider: Some("deepseek".into()),
+            timestamp: None,
+        }
+    }
+
+    fn tool_result(id: &str, body: &str) -> piko_protocol::Message {
+        piko_protocol::Message::ToolResult {
+            tool_call_id: id.into(),
+            tool_name: None,
+            content: vec![ContentBlock::Text { text: body.into() }],
+            details: None,
+            is_error: None,
+            timestamp: None,
+        }
+    }
+
+    #[test]
+    fn fuses_assistant_thinking_with_following_tool_calls_into_one_message() {
+        let transcript = vec![
+            piko_protocol::Message::User {
+                content: MessageContent::String("spawn an agent".into()),
+                timestamp: None,
+            },
+            assistant_with_thinking("list specs and agents", ""),
+            tool_call("call-1", "list_agent_specs"),
+            tool_call("call-2", "list_agents"),
+            tool_result("call-1", r#"{"specs":[]}"#),
+            tool_result("call-2", r#"{"agents":[]}"#),
+        ];
+        let messages =
+            build_genai_messages(&piko_protocol::SemanticRunPrompt::default(), &transcript);
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, genai::chat::ChatRole::User);
+        assert_eq!(messages[1].role, genai::chat::ChatRole::Assistant);
+        assert_eq!(messages[2].role, genai::chat::ChatRole::Tool);
+        assert_eq!(messages[3].role, genai::chat::ChatRole::Tool);
+
+        let parts = messages[1].content.parts();
+        assert!(parts.iter().any(|part| matches!(
+            part,
+            genai::chat::ContentPart::ReasoningContent(value)
+                if value == "list specs and agents"
+        )));
+        let tool_calls: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                genai::chat::ContentPart::ToolCall(tc) => Some(tc.fn_name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tool_calls, vec!["list_agent_specs", "list_agents"]);
+    }
+
+    #[test]
+    fn fuses_each_model_step_separately() {
+        let transcript = vec![
+            assistant_with_thinking("first", ""),
+            tool_call("c1", "a"),
+            tool_result("c1", "ok"),
+            assistant_with_thinking("second", "done"),
+            tool_call("c2", "b"),
+            tool_result("c2", "ok"),
+        ];
+        let messages =
+            build_genai_messages(&piko_protocol::SemanticRunPrompt::default(), &transcript);
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0].role, genai::chat::ChatRole::Assistant);
+        assert_eq!(messages[1].role, genai::chat::ChatRole::Tool);
+        assert_eq!(messages[2].role, genai::chat::ChatRole::Assistant);
+        assert_eq!(messages[3].role, genai::chat::ChatRole::Tool);
+        assert_eq!(messages[0].content.tool_calls().len(), 1);
+        assert_eq!(messages[2].content.tool_calls().len(), 1);
+    }
+
+    #[test]
+    fn orphan_tool_call_still_maps_when_missing_assistant() {
+        let transcript = vec![tool_call("orphan", "solo")];
+        let messages =
+            build_genai_messages(&piko_protocol::SemanticRunPrompt::default(), &transcript);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, genai::chat::ChatRole::Assistant);
+        assert_eq!(messages[0].content.tool_calls().len(), 1);
     }
 }

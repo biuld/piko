@@ -1,13 +1,17 @@
 #![allow(clippy::type_complexity, clippy::large_enum_variant)]
 
+//! Table panel — tabular overlay body on shared [`Pane`](crate::ui::components::pane) chrome.
+//!
+//! Layout: title · search · content · tip · footer (hints or reserved interactive).
+
 use crate::theme::Theme;
-use crate::ui::components::{frame_border_style, hint_style, row_primary_style, with_selected_bg};
+use crate::ui::components::pane::{PaneFooter, PaneSearch, PaneSpec, render_pane};
+use crate::ui::components::{row_primary_style, with_selected_bg};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Rect},
-    style::Style,
+    layout::{Constraint, Rect},
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table, TableState},
+    widgets::{Paragraph, Row, Table, TableState},
 };
 
 /// ActionPrompt represents the footer area content of the table panel.
@@ -33,15 +37,17 @@ pub enum TableBody<'a> {
     Message(Paragraph<'a>),
 }
 
-/// A high-level container component for panels displaying searchable lists/tables.
+/// A high-level container for searchable list/table overlays (session list, tree, agents).
 pub struct TablePanel<'a> {
     pub left_title: String,
     pub mode_indicator: String,
     pub counter: String,
+    /// Muted tip under content (secondary bindings / mode copy).
     pub help_text: &'a str,
     pub search_line: Line<'a>,
     pub body: TableBody<'a>,
     pub action_prompt: ActionPrompt<'a>,
+    /// Kept for API stability; Pane layout no longer uses an extra gap row.
     pub gap: bool,
     /// When true (default for open overlays), frame uses accent border.
     pub focused: bool,
@@ -49,60 +55,35 @@ pub struct TablePanel<'a> {
 
 impl<'a> TablePanel<'a> {
     pub fn render(self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        frame.render_widget(Clear, area);
-
         let right_title = format!("{}  {}", self.mode_indicator, self.counter);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(frame_border_style(self.focused, theme))
-            .title(Line::from(self.left_title).alignment(Alignment::Left))
-            .title(Line::from(right_title).alignment(Alignment::Right));
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        let footer_height = match &self.action_prompt {
-            ActionPrompt::Legend(_) => 1,
-            ActionPrompt::Interactive { height, .. } => *height,
+        let (footer, interactive) = match self.action_prompt {
+            ActionPrompt::Legend(txt) => (PaneFooter::Hints(txt), None),
+            ActionPrompt::Interactive { height, render } => {
+                (PaneFooter::Reserved { height }, Some(render))
+            }
         };
 
-        let gap_size = if self.gap { 1 } else { 0 };
-        let min_inner_height = 4 + gap_size + 1 + footer_height;
-        if inner.height < min_inner_height {
+        let tip = if self.help_text.is_empty() {
+            None
+        } else {
+            Some(self.help_text)
+        };
+
+        let spec = PaneSpec::new(&self.left_title)
+            .title_right(Some(right_title.as_str()))
+            .search(PaneSearch::Custom(self.search_line))
+            .tip(tip)
+            .footer(footer)
+            .focused(self.focused);
+
+        let Some(areas) = render_pane(frame, area, &spec, theme) else {
             return;
-        }
+        };
 
-        // 1. Render Help Text (row 0 of inner)
-        frame.render_widget(
-            Paragraph::new(Line::from(ratatui::text::Span::styled(
-                self.help_text,
-                Style::default().fg(theme.muted),
-            ))),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
-
-        // 2. Render Search/Input line (row 2 of inner, row 1 is empty)
-        frame.render_widget(
-            Paragraph::new(self.search_line),
-            Rect::new(inner.x, inner.y + 2, inner.width, 1),
-        );
-
-        // 3. Compute Areas
-        let content_height = inner.height - 4 - footer_height - gap_size;
-        let content_area = Rect::new(inner.x, inner.y + 4, inner.width, content_height);
-
-        let footer_area = Rect::new(
-            inner.x,
-            inner.y + inner.height - footer_height,
-            inner.width,
-            footer_height,
-        );
-
-        // 4. Render Body
         match self.body {
             TableBody::Message(p) => {
-                frame.render_widget(p, content_area);
+                frame.render_widget(p, areas.content);
             }
             TableBody::Rows {
                 widths,
@@ -112,22 +93,14 @@ impl<'a> TablePanel<'a> {
                 let mut table_state = TableState::default().with_selected(Some(selected_idx));
                 let highlight = with_selected_bg(row_primary_style(true, theme), true, theme);
                 let table = Table::new(rows, widths).row_highlight_style(highlight);
-                frame.render_stateful_widget(table, content_area, &mut table_state);
+                frame.render_stateful_widget(table, areas.content, &mut table_state);
             }
         }
 
-        // 5. Render Action Prompt (Footer) — dim hints when legend
-        match self.action_prompt {
-            ActionPrompt::Legend(txt) => {
-                let p = Paragraph::new(Line::from(ratatui::text::Span::styled(
-                    txt,
-                    hint_style(theme),
-                )));
-                frame.render_widget(p, footer_area);
-            }
-            ActionPrompt::Interactive { render, .. } => {
-                render(frame, footer_area);
-            }
+        if let (Some(footer_area), Some(render_footer)) = (areas.footer, interactive) {
+            render_footer(frame, footer_area);
         }
+
+        let _ = self.gap;
     }
 }

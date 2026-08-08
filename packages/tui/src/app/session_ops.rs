@@ -2,8 +2,8 @@ use piko_protocol::Command;
 
 use crate::{
     app::{AppMode, AppState, command_id, config_command_for_setting, effect::Effect},
-    features::notifications::NotificationLevel,
-    ui::components::hierarchical_menu::MenuConfirmResult,
+    features::{notifications::NotificationLevel, settings::action_requires_hostd_restart},
+    ui::components::{hierarchical_menu::MenuConfirmResult, setting::SettingConfirmResult},
 };
 
 impl AppState {
@@ -107,17 +107,21 @@ impl AppState {
 
     pub(crate) fn apply_selected_setting(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        use crate::features::settings::SettingsConfirmResult;
         match self.settings.confirm() {
-            SettingsConfirmResult::SubMenuPushed => {}
-            SettingsConfirmResult::Action(action, title) => {
-                let command = config_command_for_setting(action);
-                effects.push(Effect::send(command));
+            SettingConfirmResult::Drilled => {}
+            SettingConfirmResult::Apply(action) => {
+                self.apply_settings_action_optimistically(&action);
+                let restart = action_requires_hostd_restart(&action);
+                effects.push(Effect::send(config_command_for_setting(action.clone())));
                 self.clear_focus();
-                self.status = format!("setting applied: {}", title);
+                self.status = if restart {
+                    "setting saved — restart hostd for OTLP export".to_string()
+                } else {
+                    "setting applied".to_string()
+                };
                 self.notify(NotificationLevel::Info, self.status.clone());
             }
-            SettingsConfirmResult::None => {
+            SettingConfirmResult::None => {
                 self.status = "no setting selected".to_string();
             }
         }

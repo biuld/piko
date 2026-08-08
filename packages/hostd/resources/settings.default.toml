@@ -160,5 +160,7 @@ auto-approve-workspace-writes = true
 enabled = false
 # OTLP HTTP endpoint; /v1/traces and /v1/metrics are appended automatically
 otel-endpoint = "http://127.0.0.1:4318"
+# Prefer http://localhost:4318 when system HTTP proxies (e.g. Shadowrocket)
+# hijack 127.0.0.1; hostd exporters also disable proxy for OTLP.
 # service.name used in the exported resource
 # service-name = "piko-hostd"
