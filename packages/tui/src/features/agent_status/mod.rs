@@ -246,7 +246,7 @@ fn status_label(
             piko_protocol::AgentStatus::Failed => (FAIL_GLYPH, vec!["failed".into()]),
             piko_protocol::AgentStatus::Cancelled => (FAIL_GLYPH, vec!["cancelled".into()]),
             piko_protocol::AgentStatus::Closed => (FAIL_GLYPH, vec!["closed".into()]),
-            _ if is_active => (ACTIVE_MARKER, vec!["current".into()]),
+            _ if is_active => (ACTIVE_MARKER, Vec::new()),
             _ => (IDLE_MARKER, Vec::new()),
         },
     };

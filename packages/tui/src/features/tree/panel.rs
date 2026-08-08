@@ -18,10 +18,23 @@ impl TreePanel {
             filter: String::new(),
             filter_mode: TreeFilterMode::Default,
             folded: HashSet::new(),
+            agent_filter: None,
             show_label_timestamps: false,
             label_editor: None,
             selected_idx: 0,
         }
+    }
+
+    /// Restrict the visible tree to the currently viewed agent. Entries without
+    /// agent attribution (session-level) remain visible under any filter.
+    pub fn set_agent_filter(&mut self, agent_instance_id: Option<&str>) {
+        let next = agent_instance_id.map(str::to_string);
+        if self.agent_filter == next {
+            return;
+        }
+        self.agent_filter = next;
+        self.folded.clear(); // Agent switch changes the visible set; reset folding.
+        self.rebuild_visible_for_filter();
     }
 
     pub fn load(&mut self, snapshot_entries: &[SessionTreeEntry], current_leaf_id: Option<&str>) {
@@ -43,8 +56,13 @@ impl TreePanel {
     }
 
     pub fn rebuild_visible(&mut self, search_query: &str) {
-        self.visible =
-            VisibleTree::build(&self.document, self.filter_mode, search_query, &self.folded);
+        self.visible = VisibleTree::build(
+            &self.document,
+            self.filter_mode,
+            search_query,
+            &self.folded,
+            self.agent_filter.as_deref(),
+        );
 
         // Nearest-visible selection fallback
         if let Some(sel) = self.selection.clone() {

@@ -101,6 +101,9 @@ pub struct TreePanel {
     pub filter: String,
     pub filter_mode: TreeFilterMode,
     pub folded: HashSet<String>,
+    /// Restrict the visible tree to one agent instance's entries. `None` shows
+    /// all agents (session-level entries are always visible).
+    pub agent_filter: Option<String>,
     pub show_label_timestamps: bool,
     pub label_editor: Option<LabelEditorState>,
     pub selected_idx: usize,

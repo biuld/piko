@@ -5,6 +5,7 @@ impl AppState {
         self.timeline.clear();
         self.agent_timelines.clear();
         self.agent_panel.active_agent_instance_id = None;
+        self.tree.set_agent_filter(None);
         self.queue_status = QueueStatus::default();
         // Authoritative session ledger replaces any local roll-up.
         self.session.cumulative_usage = snapshot.cumulative_usage.clone();

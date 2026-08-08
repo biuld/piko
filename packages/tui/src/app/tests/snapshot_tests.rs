@@ -148,6 +148,121 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
 }
 
 #[test]
+fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
+    use piko_protocol::{
+        AgentActivity, AgentInfo, AgentInstanceLifecycle, AgentStatus, MessageEntry,
+        SessionSnapshot, SessionTreeEntry, ToolCallEntry,
+    };
+
+    let root = SessionTreeEntry::Message(MessageEntry {
+        id: "root".into(),
+        parent_id: None,
+        timestamp: "2026-06-29T12:00:00Z".into(),
+        agent_id: "main".into(),
+        agent_instance_id: "task-1".into(),
+        source_turn_id: "work-1".into(),
+        transcript_seq: 1,
+        message: Message::User {
+            content: piko_protocol::MessageContent::String("root prompt".into()),
+            timestamp: None,
+        },
+    });
+    let spawn = SessionTreeEntry::ToolCall(ToolCallEntry {
+        id: "spawn".into(),
+        parent_id: Some("root".into()),
+        timestamp: "2026-06-29T12:00:01Z".into(),
+        agent_id: Some("main".into()),
+        agent_instance_id: Some("task-1".into()),
+        tool_call_id: "call-spawn".into(),
+        tool_name: "spawn_agent".into(),
+        arguments: serde_json::json!({}),
+        parent_message_id: None,
+        model: None,
+        provider: None,
+    });
+    let child = SessionTreeEntry::Message(MessageEntry {
+        id: "child".into(),
+        parent_id: Some("spawn".into()),
+        timestamp: "2026-06-29T12:00:02Z".into(),
+        agent_id: "coder".into(),
+        agent_instance_id: "task-child".into(),
+        source_turn_id: "work-child".into(),
+        transcript_seq: 1,
+        message: Message::User {
+            content: piko_protocol::MessageContent::String("child prompt".into()),
+            timestamp: None,
+        },
+    });
+    let agents = vec![
+        AgentInfo {
+            session_id: "session-1".into(),
+            agent_instance_id: "task-1".into(),
+            agent_id: "main".into(),
+            parent_agent_instance_id: None,
+            lifecycle: AgentInstanceLifecycle::Open,
+            activity: AgentActivity::Idle,
+            unread_report_count: 0,
+            name: "Main".into(),
+            role: "main".into(),
+            status: AgentStatus::Idle,
+        },
+        AgentInfo {
+            session_id: "session-1".into(),
+            agent_instance_id: "task-child".into(),
+            agent_id: "coder".into(),
+            parent_agent_instance_id: Some("task-1".into()),
+            lifecycle: AgentInstanceLifecycle::Open,
+            activity: AgentActivity::Idle,
+            unread_report_count: 0,
+            name: "Coder".into(),
+            role: "coder".into(),
+            status: AgentStatus::Idle,
+        },
+    ];
+
+    let mut app = app();
+    app.session.opening_id = Some("session-1".into());
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 3,
+            },
+            snapshot: SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 3,
+                entries: vec![root, spawn, child],
+                current_leaf_id: Some("child".into()),
+                selected_agent_instance_id: Some("task-child".into()),
+                active_turns: Vec::new(),
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+            },
+            agents,
+        },
+    ));
+
+    assert_eq!(
+        app.agent_panel.active_agent_instance_id.as_deref(),
+        Some("task-child")
+    );
+    assert_eq!(
+        app.tree
+            .visible
+            .rows
+            .iter()
+            .map(|row| row.entry_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["child"]
+    );
+}
+
+#[test]
 fn queue_update_populates_status_data() {
     let mut app = live_app();
 

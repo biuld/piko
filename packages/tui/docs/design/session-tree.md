@@ -15,7 +15,8 @@ entry without creating a separate session file.
 TreePanel owns:
 
 - transient panel state: selected row, search query, active filter mode, folded
-  node ids, label editing input, and label timestamp visibility
+  node ids, the agent-scope filter (currently viewed agent), label editing
+  input, and label timestamp visibility
 - building a visible tree projection from `SessionSnapshot.entries`
 - rendering the full-screen tree overlay
 - local keyboard handling for tree navigation, search, filters, folding, and
@@ -63,7 +64,7 @@ Opening the tree uses the latest local `SessionSnapshot` already held by
 stays in Chat.
 
 ```text
-SessionSnapshot.entries + current_leaf_id
+SessionSnapshot.entries + current_leaf_id + viewed agent
         |
         v
 TreePanel::load(...)
@@ -79,6 +80,7 @@ TreeDocument
         v
 VisibleTree
         |
+        +--> agent scope filter
         +--> filter
         +--> search
         +--> folded descendants removal
@@ -87,6 +89,14 @@ VisibleTree
         v
 TreePanel render
 ```
+
+`AppState` keeps the viewed agent authoritative on
+`agent_panel.active_agent_instance_id`. Whenever it changes (reconcile,
+`AgentSubscribed`, or the first live agent event), `AppState` pushes it into
+`TreePanel::set_agent_filter`, and the visible projection is rebuilt. Entries
+attributed to another agent instance are dropped; entries without agent
+attribution (session-level entries) are kept, matching the GUI tree's agent
+scope semantics.
 
 Navigation sends a command to hostd:
 

@@ -16,17 +16,29 @@ pub enum TreeFilterMode {
 mod tests {
     use std::collections::HashSet;
 
-    use piko_protocol::{LeafEntry, Message, MessageContent, MessageEntry, SessionTreeEntry};
+    use piko_protocol::{
+        CompactionEntry, LeafEntry, Message, MessageContent, MessageEntry, SessionTreeEntry,
+        ToolCallEntry,
+    };
 
     use super::{ConnectorKind, TreeDocument, TreeFilterMode, VisibleTree};
 
     fn user_entry(id: &str, parent_id: Option<&str>, text: &str) -> SessionTreeEntry {
+        message_entry(id, parent_id, "task-main", text)
+    }
+
+    fn message_entry(
+        id: &str,
+        parent_id: Option<&str>,
+        agent_instance_id: &str,
+        text: &str,
+    ) -> SessionTreeEntry {
         SessionTreeEntry::Message(MessageEntry {
             id: id.to_string(),
             parent_id: parent_id.map(str::to_string),
             timestamp: "2026-07-02T00:00:00Z".to_string(),
             agent_id: "main".into(),
-            agent_instance_id: "task-main".into(),
+            agent_instance_id: agent_instance_id.into(),
             source_turn_id: "work-main".into(),
             transcript_seq: 1,
             message: Message::User {
@@ -45,6 +57,40 @@ mod tests {
         })
     }
 
+    fn compaction_entry(id: &str, parent_id: Option<&str>) -> SessionTreeEntry {
+        SessionTreeEntry::Compaction(CompactionEntry {
+            id: id.to_string(),
+            parent_id: parent_id.map(str::to_string),
+            timestamp: "2026-07-02T00:00:00Z".to_string(),
+            summary: "compacted".to_string(),
+            first_kept_entry_id: "a".to_string(),
+            tokens_before: 100,
+            details: None,
+            from_hook: None,
+        })
+    }
+
+    fn tool_call_entry(
+        id: &str,
+        parent_id: Option<&str>,
+        agent_instance_id: Option<&str>,
+        tool_name: &str,
+    ) -> SessionTreeEntry {
+        SessionTreeEntry::ToolCall(ToolCallEntry {
+            id: id.to_string(),
+            parent_id: parent_id.map(str::to_string),
+            timestamp: "2026-07-02T00:00:00Z".to_string(),
+            agent_id: Some("main".into()),
+            agent_instance_id: agent_instance_id.map(str::to_string),
+            tool_call_id: format!("{id}-call"),
+            tool_name: tool_name.to_string(),
+            arguments: serde_json::json!({}),
+            parent_message_id: None,
+            model: None,
+            provider: None,
+        })
+    }
+
     #[test]
     fn single_child_chain_stays_flat_without_fake_connectors() {
         let entries = vec![
@@ -53,7 +99,7 @@ mod tests {
             user_entry("c", Some("b"), "c"),
         ];
         let doc = TreeDocument::build(&entries, Some("c"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new());
+        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
 
         assert_eq!(visible.rows.len(), 3);
         assert!(
@@ -72,7 +118,7 @@ mod tests {
             user_entry("right", Some("root"), "right"),
         ];
         let doc = TreeDocument::build(&entries, Some("left"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new());
+        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
 
         assert_eq!(visible.rows[0].connector, ConnectorKind::None);
         assert_eq!(visible.rows[1].depth, 1);
@@ -90,7 +136,7 @@ mod tests {
             leaf_entry("leaf-b", Some("leaf-a"), Some("child")),
         ];
         let doc = TreeDocument::build(&entries, Some("child"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new());
+        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
 
         assert_eq!(
             visible
@@ -116,7 +162,7 @@ mod tests {
             user_entry("active", Some("root"), "active"),
         ];
         let doc = TreeDocument::build(&entries, Some("active"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new());
+        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
 
         assert_eq!(
             visible
@@ -136,7 +182,7 @@ mod tests {
             user_entry("future", Some("active-leaf"), "future"),
         ];
         let doc = TreeDocument::build(&entries, Some("active-leaf"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new());
+        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
 
         let future = visible
             .rows
@@ -146,6 +192,82 @@ mod tests {
         assert_eq!(future.depth, 0);
         assert_eq!(future.connector, ConnectorKind::None);
         assert!(!future.is_active_path);
+    }
+
+    #[test]
+    fn agent_filter_hides_other_agent_entries_and_keeps_session_level_entries() {
+        let entries = vec![
+            user_entry("root", None, "root"),
+            message_entry("sub", Some("root"), "task-child", "sub"),
+            compaction_entry("compaction", Some("root")),
+            tool_call_entry("tool", Some("root"), None, "read_file"),
+        ];
+        let doc = TreeDocument::build(&entries, Some("root"));
+
+        let root_visible = VisibleTree::build(
+            &doc,
+            TreeFilterMode::Default,
+            "",
+            &HashSet::new(),
+            Some("task-main"),
+        );
+        assert_eq!(
+            root_visible
+                .rows
+                .iter()
+                .map(|row| row.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["root", "compaction", "tool"]
+        );
+
+        let child_visible = VisibleTree::build(
+            &doc,
+            TreeFilterMode::Default,
+            "",
+            &HashSet::new(),
+            Some("task-child"),
+        );
+        assert_eq!(
+            child_visible
+                .rows
+                .iter()
+                .map(|row| row.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sub", "compaction", "tool"]
+        );
+    }
+
+    #[test]
+    fn agent_filter_reparents_entries_whose_parent_belongs_to_another_agent() {
+        let entries = vec![
+            user_entry("root", None, "root"),
+            tool_call_entry("spawn", Some("root"), Some("task-main"), "spawn_agent"),
+            message_entry("sub", Some("spawn"), "task-child", "sub"),
+            tool_call_entry("sub-tool", Some("sub"), Some("task-child"), "read_file"),
+        ];
+        let doc = TreeDocument::build(&entries, Some("sub"));
+        let visible = VisibleTree::build(
+            &doc,
+            TreeFilterMode::Default,
+            "",
+            &HashSet::new(),
+            Some("task-child"),
+        );
+
+        assert_eq!(
+            visible
+                .rows
+                .iter()
+                .map(|row| row.entry_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sub", "sub-tool"]
+        );
+        assert!(
+            visible
+                .rows
+                .iter()
+                .all(|row| row.depth == 0 && row.connector == ConnectorKind::None)
+        );
     }
 }
 
@@ -201,6 +323,7 @@ impl VisibleTree {
         filter_mode: TreeFilterMode,
         search_query: &str,
         folded: &HashSet<String>,
+        agent_filter: Option<&str>,
     ) -> Self {
         let mut visible = Self::default();
         let query_tokens: Vec<&str> = search_query.split_whitespace().collect();
@@ -210,6 +333,12 @@ impl VisibleTree {
         for entry in &doc.nodes {
             if let SessionTreeEntry::Label(_) = entry
                 && filter_mode != TreeFilterMode::All
+            {
+                continue;
+            }
+            if let Some(filter) = agent_filter
+                && let Some(entry_agent) = entry_agent_instance(entry)
+                && entry_agent != filter
             {
                 continue;
             }
@@ -446,5 +575,16 @@ impl VisibleTree {
         }
 
         visible
+    }
+}
+
+/// Agent attribution of a session entry, if it belongs to a specific agent
+/// instance. Entries without attribution are session-level and stay visible
+/// under any agent filter.
+fn entry_agent_instance(entry: &SessionTreeEntry) -> Option<&str> {
+    match entry {
+        SessionTreeEntry::Message(message) => Some(message.agent_instance_id.as_str()),
+        SessionTreeEntry::ToolCall(tool_call) => tool_call.agent_instance_id.as_deref(),
+        _ => None,
     }
 }

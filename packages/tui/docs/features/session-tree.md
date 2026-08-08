@@ -2,10 +2,10 @@
 
 ## Overview
 
-Session Tree is a full-screen navigator for the current session history. It
-shows the session as a branchable tree instead of only the active conversation
-path, so users can inspect earlier turns, switch to another point, and continue
-without creating a separate session file.
+Session Tree is a full-screen navigator for the currently viewed agent's
+session history. It shows the session as a branchable tree instead of only the
+active conversation path, so users can inspect earlier turns, switch to another
+point, and continue without creating a separate session file.
 
 Use Session Tree when alternatives should remain together in one session. Use
 session fork or clone workflows when the result should become a separate
@@ -23,8 +23,12 @@ present, and the primary confirm/cancel hints.
 Tree rows use indentation and branch connectors to show the visible tree
 structure. The visual structure follows pi's tree selector:
 
-- The full session history is a parent/child tree rooted at the first visible
-  session entries.
+- The session history of the currently viewed agent is a parent/child tree
+  rooted at the first visible session entries. Entries attributed to another
+  agent instance are hidden, so subagent content is only visible when that
+  subagent is the viewed agent. Entries without agent attribution
+  (session-level entries such as compactions and branch summaries) remain
+  visible under any agent scope.
 - Filter and search produce a visible subset of entries.
 - When a filtered view hides intermediate entries, each visible entry attaches
   to its nearest visible ancestor.
@@ -48,6 +52,11 @@ active path do not show that dot. A missing dot means "not on the current active
 path"; it does not by itself create a branch connector. The active leaf, or the
 nearest visible ancestor when the leaf is hidden by the active filter, is
 selected by default when the panel opens.
+
+Agent scope follows the currently viewed agent, the same selection the Timeline
+and the Agents surface display. Changing the viewed agent rebuilds the visible
+tree and resets folded state, matching filter-mode changes. When the session
+has no selected agent, the tree shows every agent's entries.
 
 Rows show a concise entry preview. User messages, assistant messages, tool
 results, shell executions, compactions, branch summaries, custom messages,

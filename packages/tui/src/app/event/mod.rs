@@ -34,6 +34,7 @@ impl AppState {
         if is_active {
             if self.agent_panel.active_agent_instance_id.is_none() {
                 self.agent_panel.active_agent_instance_id = Some(agent_instance_id.to_string());
+                self.tree.set_agent_filter(Some(agent_instance_id));
             }
             apply(&mut self.timeline);
         } else {
@@ -58,6 +59,7 @@ impl AppState {
 
     fn select_agent_timeline(&mut self, agent_instance_id: &str) {
         if self.agent_panel.active_agent_instance_id.as_deref() == Some(agent_instance_id) {
+            self.tree.set_agent_filter(Some(agent_instance_id));
             return;
         }
         if let Some(previous) = self
@@ -78,6 +80,7 @@ impl AppState {
                 .remove(agent_instance_id)
                 .unwrap_or_else(crate::features::timeline::Timeline::new);
         }
+        self.tree.set_agent_filter(Some(agent_instance_id));
     }
 
     pub fn apply_event(&mut self, event: Event) -> Vec<Effect> {
