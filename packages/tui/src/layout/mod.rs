@@ -202,10 +202,10 @@ mod tests {
         let map = build_surface_hitmap(&app, terminal);
         assert!(!map.hits.is_empty());
 
-        // First choice row: single-question layout → prompt(0), blank(1),
-        // choices start at inner.y + 2 = host.y + 3.
+        // Standard pane chrome: border(1) + padding(1) → content.y = host.y+2;
+        // single-question layout → prompt(0), blank(1), choices at +2.
         let hit = map
-            .hit_test(host.x.saturating_add(2), host.y.saturating_add(3))
+            .hit_test(host.x.saturating_add(2), host.y.saturating_add(4))
             .expect("choice row cell");
         assert_eq!(hit.region, Region::Surface(SurfaceId::Approval));
         assert_eq!(hit.z, 1);

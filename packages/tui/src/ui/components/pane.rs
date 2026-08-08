@@ -29,7 +29,7 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
@@ -192,6 +192,8 @@ impl PaneModeStrip {
 pub enum PaneTitleAffix {
     /// Esc-close affordance → `[x]`.
     Close,
+    /// Free-form chip (e.g. `tool: bash`).
+    Label(String),
     /// List/table selection counter → `[at/of]` (1-based `at`).
     Selection { at: usize, of: usize },
     /// Mutually-exclusive options; Pane highlights the active one.
@@ -199,6 +201,10 @@ pub enum PaneTitleAffix {
 }
 
 impl PaneTitleAffix {
+    pub fn label(label: impl Into<String>) -> Self {
+        Self::Label(label.into())
+    }
+
     pub fn mode_strip(options: impl IntoIterator<Item = impl Into<String>>, active: usize) -> Self {
         Self::ModeStrip(PaneModeStrip::new(options, active))
     }
@@ -218,6 +224,7 @@ impl PaneTitleAffix {
     pub fn display(&self) -> String {
         match self {
             Self::Close => "[x]".to_string(),
+            Self::Label(label) => label.clone(),
             Self::Selection { at, of } => format!("[{at}/{of}]"),
             Self::ModeStrip(strip) => strip.display(),
         }
@@ -249,6 +256,8 @@ pub struct PaneSpec<'a> {
     pub footer: PaneFooter<'a>,
     /// Optional tip line above the footer.
     pub tip: Option<&'a str>,
+    /// Optional backdrop fill behind the chrome (opaque modal dialogs).
+    pub fill: Option<Color>,
     pub focused: bool,
 }
 
@@ -265,6 +274,7 @@ impl<'a> PaneSpec<'a> {
             search_rule: PaneMode::Standard.search_rule(),
             footer: PaneFooter::None,
             tip: None,
+            fill: None,
             focused: true,
         }
     }
@@ -351,6 +361,49 @@ impl<'a> PaneSpec<'a> {
         self
     }
 
+    /// Fill the whole area with `color` behind the chrome (modal backdrop).
+    pub fn fill(mut self, color: Color) -> Self {
+        self.fill = Some(color);
+        self
+    }
+
+    /// The content zone [`render_pane`] paints into for this area — pure
+    /// geometry shared by renderers and hit-testing so they cannot drift.
+    pub fn content_rect(&self, area: Rect) -> Option<Rect> {
+        let bordered = Block::default().borders(self.borders).inner(area);
+        let inner = inset_xy(bordered, self.padding);
+        if inner.width == 0 || inner.height == 0 {
+            return None;
+        }
+        let footer_h = footer_height(self.footer);
+        let show_search = !matches!(self.search, PaneSearch::Hidden);
+        let show_rule = show_search && self.search_rule;
+        let show_tip = self.tip.is_some_and(|t| !t.is_empty());
+        let chrome = u16::from(show_search)
+            .saturating_add(u16::from(show_rule))
+            .saturating_add(u16::from(show_tip))
+            .saturating_add(footer_h);
+        if inner.height <= chrome {
+            // Mirrors render_pane's fallback: content is inner minus footer
+            // when a footer fits, otherwise the whole inner.
+            if footer_h > 0 && inner.height > footer_h {
+                return Some(Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height - footer_h,
+                ));
+            }
+            return Some(inner);
+        }
+        Some(Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height - chrome,
+        ))
+    }
+
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
@@ -379,6 +432,9 @@ pub fn render_pane(
     theme: &Theme,
 ) -> Option<PaneAreas> {
     frame.render_widget(Clear, area);
+    if let Some(color) = spec.fill {
+        frame.render_widget(Block::default().style(Style::default().bg(color)), area);
+    }
 
     let mut block = Block::default()
         .borders(spec.borders)
@@ -650,6 +706,7 @@ mod tests {
     #[test]
     fn title_affixes_paint_semantics() {
         assert_eq!(PaneTitleAffix::Close.display(), "[x]");
+        assert_eq!(PaneTitleAffix::label("tool: bash").display(), "tool: bash");
         assert_eq!(PaneTitleAffix::selection(2, 9).display(), "[2/9]");
         assert_eq!(
             PaneModeStrip::new(["Current", "All"], 1).display(),
@@ -666,6 +723,36 @@ mod tests {
                 PaneTitleAffix::Close,
             ]),
             "[Current] | All  [1/3]  [x]"
+        );
+    }
+
+    #[test]
+    fn content_rect_matches_manual_geometry() {
+        let area = Rect::new(0, 0, 60, 12);
+
+        // Minimal: borders TOP|BOTTOM → (0,1,60,10); padding (1,0) →
+        // (1,1,58,10); one-row hints footer → (1,1,58,9).
+        let spec = PaneSpec::minimal("t").hints("help");
+        assert_eq!(spec.content_rect(area), Some(Rect::new(1, 1, 58, 9)));
+
+        // Standard: borders ALL → (1,1,58,10); padding (1,1) → (2,2,56,8);
+        // one-row hints footer → (2,2,56,7).
+        let spec = PaneSpec::new("t").hints("help");
+        assert_eq!(spec.content_rect(area), Some(Rect::new(2, 2, 56, 7)));
+
+        // Standard + search + rule + tip + reserved footer: chrome = 5.
+        let spec = PaneSpec::new("t")
+            .search_filter("x")
+            .tip("tip")
+            .footer(PaneFooter::Reserved { height: 2 });
+        assert_eq!(spec.content_rect(area), Some(Rect::new(2, 2, 56, 3)));
+
+        // Too small for any chrome: no content.
+        assert_eq!(
+            PaneSpec::new("t")
+                .hints("h")
+                .content_rect(Rect::new(0, 0, 60, 2)),
+            None
         );
     }
 

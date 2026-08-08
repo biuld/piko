@@ -136,3 +136,16 @@ Landed as designed:
 - `app/tests/pointer_tests.rs` covers approval decisions, workflow choice /
   tab / submit clicks, wheel zones, composer cursor, notice clear, suggestion
   accept, and hover tracking.
+
+### Pane integration for Decide modals
+
+`InteractiveWorkflow` renders standalone modals through `render_pane`:
+
+- `PaneSpec` gains `fill` (opaque modal backdrop) and
+  `PaneTitleAffix::Label` (e.g. `tool: bash`).
+- `PaneSpec::content_rect` is the pure geometry shared by `render_pane` and
+  workflow hit regions, so painted rows and click targets cannot drift.
+- Approval uses title `Approval` + tool-name affix + shortcut hint footer;
+  Tool Interaction uses title `Tool Interaction` + queue-position affix.
+- The embedded summary-prompt path keeps its compact top-border rendering
+  (no pane chrome) to avoid double frames inside the tree pane.

@@ -8,6 +8,7 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::app::HitId;
 use crate::navigation::SurfaceId;
+use crate::ui::components::pane::PaneTitleAffix;
 use crate::{
     theme::Theme,
     ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question},
@@ -108,7 +109,14 @@ impl ToolInteractionPanel {
         let Some(interaction) = self.pending.front() else {
             return;
         };
-        interaction.workflow.render(frame, area, theme);
+        let affixes = if self.pending.len() > 1 {
+            vec![PaneTitleAffix::selection(1, self.pending.len())]
+        } else {
+            Vec::new()
+        };
+        interaction
+            .workflow
+            .render_modal(frame, area, theme, "Tool Interaction", affixes);
     }
 
     pub fn submit_response(&mut self) -> Option<(InteractionId, UserInteractionResponse)> {
@@ -158,7 +166,7 @@ impl Component<HitId, Theme> for ToolInteractionPanel {
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
         self.pending
             .front()
-            .map(|interaction| interaction.workflow.component_regions(area))
+            .map(|interaction| interaction.workflow.component_regions_modal(area))
             .unwrap_or_default()
     }
 }

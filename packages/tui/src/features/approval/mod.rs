@@ -6,6 +6,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::app::HitId;
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
+use crate::ui::components::pane::PaneTitleAffix;
 
 use crate::text::compact_json;
 use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
@@ -106,7 +107,11 @@ impl ApprovalPanel {
     /// Render the approval popup if there is a pending request.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         if let Some(workflow) = self.workflow() {
-            workflow.render(frame, area, theme);
+            let affix = self
+                .pending
+                .front()
+                .map(|a| PaneTitleAffix::label(format!("tool: {}", a.tool_name)));
+            workflow.render_modal(frame, area, theme, "Approval", affix.into_iter().collect());
         }
     }
 }
@@ -118,7 +123,7 @@ impl Component<HitId, Theme> for ApprovalPanel {
 
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
         self.workflow()
-            .map(|workflow| workflow.component_regions(area))
+            .map(|workflow| workflow.component_regions_modal(area))
             .unwrap_or_default()
     }
 }

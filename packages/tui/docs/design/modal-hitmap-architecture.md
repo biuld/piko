@@ -475,6 +475,9 @@ Landed in this pass:
   AuthSelector, Agents — each with its own render context type), and
   `render_surface` is a thin match of trait calls. `build_surface_hitmap`
   covers all modal surfaces; plane regions still contribute no hit specs.
+- `piko-tui`: Decide modals render through the shared pane chrome
+  (`PaneSpec::fill` backdrop, `PaneTitleAffix::Label`, hint footer), and
+  `PaneSpec::content_rect` is the single geometry source for paint and hits.
 
 Follow-ups that landed afterwards:
 

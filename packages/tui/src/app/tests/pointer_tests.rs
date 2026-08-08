@@ -65,7 +65,8 @@ fn approval_choice_click_resolves_the_matching_decision() {
     push_approval(&mut app);
     let host = approval_host(&app);
 
-    // Single-question layout: choices start at host.y + 3 (prompt, blank).
+    // Standard pane chrome: content.y = host.y + 2; single-question layout →
+    // choices at content.y + 2 = host.y + 4.
     let decisions = [
         ApprovalDecision::Accept,
         ApprovalDecision::AcceptSession,
@@ -80,7 +81,7 @@ fn approval_choice_click_resolves_the_matching_decision() {
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 host.x + 2,
-                host.y + 3 + i as u16,
+                host.y + 4 + i as u16,
             ),
         );
         assert_eq!(actions.len(), 1, "choice {i} resolves exactly one action");
@@ -162,15 +163,16 @@ fn workflow_choice_click_selects_then_submits_like_enter() {
     let mut app = app();
     push_workflow(&mut app);
     let host = workflow_host(&app);
-    // Multi-question layout: choices of the active question start at
-    // host.y + 5 (tabs, blank, prompt, blank).
+    // Standard pane chrome: content.y = host.y + 2; choices of the active
+    // question start at content.y + 4 = host.y + 6 (tabs, blank, prompt,
+    // blank).
     let actions = route_pointer(
         &mut app,
         Rect::new(0, 0, 80, 24),
         mouse(
             MouseEventKind::Down(MouseButton::Left),
             host.x + 2,
-            host.y + 5,
+            host.y + 6,
         ),
     );
     assert_eq!(actions.len(), 2);
@@ -189,9 +191,9 @@ fn workflow_tab_click_jumps_to_that_step() {
     let mut app = app();
     push_workflow(&mut app);
     let host = workflow_host(&app);
-    // Tab row at host.y + 1: [Scope] (width 7) at inner.x, then 3 spaces,
-    // then [Format] (width 8) at inner.x + 10, then [Submit].
-    let inner_x = host.x + 3;
+    // Tab row at content.y = host.y + 2: [Scope] (width 7) at content.x
+    // (host.x + 2), then 3 spaces, then [Format] (width 8) at +10.
+    let inner_x = host.x + 2;
     let format_x = inner_x + 10;
     let actions = route_pointer(
         &mut app,
@@ -199,7 +201,7 @@ fn workflow_tab_click_jumps_to_that_step() {
         mouse(
             MouseEventKind::Down(MouseButton::Left),
             format_x,
-            host.y + 1,
+            host.y + 2,
         ),
     );
     assert!(matches!(

@@ -193,6 +193,10 @@ Landed:
   implement `Component` / `SurfacePanel`; `render_surface` is a thin match of
   trait calls and every modal surface contributes a surface-default hit
   region.
+- `piko-tui`: Decide modals now render through the shared pane chrome
+  (`PaneSpec` title/affixes/hint footer + opaque `fill`), with
+  `PaneSpec::content_rect` as the single geometry source for both paint and
+  hit-testing.
 
 Remaining follow-ups (tracked by the goal):
 

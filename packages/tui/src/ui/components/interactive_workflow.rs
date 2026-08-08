@@ -1,7 +1,11 @@
 use super::text_box::TextBox;
 use crate::app::HitId;
 use crate::theme::Theme;
-use crate::ui::components::{frame_border_style, hint_style, selection_prefix};
+use crate::ui::components::{
+    frame_border_style, hint_style,
+    pane::{PaneSpec, PaneTitleAffix, render_pane},
+    selection_prefix,
+};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -184,8 +188,7 @@ impl InteractiveWorkflow {
     /// Row geometry of the active question, mirroring the renderer's line
     /// order exactly. Used by [`Self::component_regions`] so painting and
     /// hit-testing cannot drift.
-    fn rows(&self, area: Rect) -> WorkflowRows {
-        let inner = prompt_content_area(area);
+    fn rows_in(&self, inner: Rect) -> WorkflowRows {
         let mut rows = WorkflowRows::default();
         if self.confirm_focused {
             rows.submit_y = Some(inner.y.saturating_add(2));
@@ -222,19 +225,31 @@ impl InteractiveWorkflow {
         rows
     }
 
-    /// Interactive sub-regions for pointer hit-testing.
-    pub fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
-        let rows = self.rows(area);
+    /// Modal content zone: Standard pane chrome + hint footer.
+    fn modal_content_area(&self, area: Rect) -> Rect {
+        let help = self.help_text();
+        // Must mirror `render_modal`'s spec exactly (Standard chrome + hints
+        // footer) so hit geometry cannot drift from paint.
+        PaneSpec::new("")
+            .hints(&help)
+            .content_rect(area)
+            .unwrap_or(area)
+    }
+
+    /// Interactive sub-regions for pointer hit-testing on the modal chrome.
+    pub fn component_regions_modal(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let inner = self.modal_content_area(area);
+        let rows = self.rows_in(inner);
         let mut out = Vec::new();
         if let Some(y) = rows.submit_y {
-            out.push((row_rect(area, y), HitId::Submit));
+            out.push((row_rect(inner, y), HitId::Submit));
         }
         for (question, rect) in rows.tab_rects {
             out.push((clamp_rect(rect, area), HitId::Tab(question)));
         }
         for (choice, y) in rows.choice_y.iter().enumerate() {
             out.push((
-                row_rect(area, *y),
+                row_rect(inner, *y),
                 HitId::Choice {
                     question: self.active_question_idx,
                     choice,
@@ -244,21 +259,32 @@ impl InteractiveWorkflow {
         out
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .border_style(frame_border_style(true, theme))
-            .style(Style::default().bg(theme.bg_elevated));
-        // Opaque backdrop: the centered dialog never leaks plane cells or
-        // stale glyphs from previous frames.
-        frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
+    /// The state-derived help line (or the approval shortcut override).
+    pub fn help_text(&self) -> String {
+        if let Some(help) = &self.help_override {
+            return help.clone();
+        }
+        if self.confirm_focused {
+            "Enter to submit · Tab to cycle · Esc to cancel".into()
+        } else if !self.questions.is_empty() {
+            let q = &self.questions[self.active_question_idx];
+            if q.is_input_active {
+                "Enter to save · Esc to exit editing".into()
+            } else if self.questions.len() > 1 {
+                "Enter to select · ↑/↓ choose · Tab switch question · Esc cancel".into()
+            } else {
+                "Enter to select · ↑/↓ to navigate · Esc to cancel".into()
+            }
+        } else {
+            "Esc to cancel".into()
+        }
+    }
 
-        let inner = prompt_content_area(area);
-
+    /// Workflow body lines (tabs, prompt, choices, confirm) — shared by the
+    /// embedded and modal renderers.
+    fn body_lines<'a>(&'a self, theme: &Theme) -> Vec<Line<'a>> {
         let mut lines = Vec::new();
 
-        // Multi-question tab header
         if self.questions.len() > 1 {
             let mut tab_spans = Vec::new();
             for i in 0..self.questions.len() {
@@ -361,33 +387,54 @@ impl InteractiveWorkflow {
             }
         }
 
+        lines
+    }
+
+    /// Render as a standalone modal: full pane chrome (title, affixes, hint
+    /// footer) with an opaque backdrop. Used by Approval / Tool Interaction.
+    pub fn render_modal(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &Theme,
+        title: &str,
+        affixes: Vec<PaneTitleAffix>,
+    ) {
+        let help = self.help_text();
+        let spec = PaneSpec::new(title)
+            .title_affixes(affixes)
+            .fill(theme.bg_elevated)
+            .hints(&help)
+            .focused(true);
+        if let Some(areas) = render_pane(frame, area, &spec, theme) {
+            let lines = self.body_lines(theme);
+            frame.render_widget(Paragraph::new(lines), areas.content);
+        }
+    }
+
+    /// Render embedded inside another pane (tree summary prompt): compact
+    /// top-border chrome + inline help, no floating frame.
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(frame_border_style(true, theme))
+            .style(Style::default().bg(theme.bg_elevated));
+        frame.render_widget(Clear, area);
+        frame.render_widget(block, area);
+
+        let inner = prompt_content_area(area);
+        let mut lines = self.body_lines(theme);
         lines.push(Line::default());
-
-        // Help line: override (approval shortcut legend) or state-derived.
-        let help_txt = if let Some(help) = &self.help_override {
-            help.as_str()
-        } else if self.confirm_focused {
-            "Enter to submit · Tab to cycle · Esc to cancel"
-        } else if !self.questions.is_empty() {
-            let q = &self.questions[self.active_question_idx];
-            if q.is_input_active {
-                "Enter to save · Esc to exit editing"
-            } else if self.questions.len() > 1 {
-                "Enter to select · ↑/↓ choose · Tab switch question · Esc cancel"
-            } else {
-                "Enter to select · ↑/↓ to navigate · Esc to cancel"
-            }
-        } else {
-            "Esc to cancel"
-        };
-        lines.push(Line::from(Span::styled(help_txt, hint_style(theme))));
-
+        lines.push(Line::from(Span::styled(
+            self.help_text(),
+            hint_style(theme),
+        )));
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }
 
 /// Geometry shared by [`InteractiveWorkflow::render`] and
-/// [`InteractiveWorkflow::component_regions`].
+/// [`InteractiveWorkflow::component_regions_modal`].
 #[derive(Clone, Debug, Default)]
 struct WorkflowRows {
     /// (question index, rect) for each tab, plus a trailing Submit tab when

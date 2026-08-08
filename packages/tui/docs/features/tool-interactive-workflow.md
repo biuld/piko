@@ -43,13 +43,14 @@ feature that opened them.
 
 ### Panel frame
 
-- The panel occupies the same vertical slot normally used by the Editor.
-- It uses a top border only, matching the compact Editor/partial-overlay
-  treatment.
-- The focused border uses the accent border color.
-- Content is inset from the left and right edges so choices do not touch the
-  terminal boundary.
-- The panel does not draw a floating popup, modal box, or nested card.
+- As a standalone modal (Approval / Tool Interaction), the panel uses the
+  shared **pane chrome**: full frame, title, right-aligned affixes (tool name,
+  queue position), an opaque backdrop, and a hint footer. The workflow body
+  (tabs, prompt, choices, inline input) paints into the pane content zone.
+- Embedded inside another pane (tree summary prompt), it keeps the compact
+  top-border treatment with an inline help line and no floating frame.
+- The focused border uses the accent border color; content is inset so
+  choices do not touch the terminal boundary.
 
 ### Content order
 
