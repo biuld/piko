@@ -20,7 +20,7 @@ impl SessionState {
                 .map(|turn| TurnSnapshot {
                     turn_id: turn.turn_id.clone(),
                     agent_instance_id: turn.agent_instance_id.clone(),
-                    status: turn.status.clone(),
+                    status: turn.status,
                     assistant_text: String::new(),
                     tool_calls: Vec::new(),
                     usage: Some(turn.usage.clone()),

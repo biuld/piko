@@ -268,7 +268,7 @@ pub enum Command {
         command_id: CommandId,
         namespace: String,
     },
-    /// 查询所有活跃 agent
+    /// Query all active agents.
     /// List available named agents (System/Workspace configurations)
     AgentSpecList {
         command_id: CommandId,

@@ -160,7 +160,7 @@ impl HostState {
                 turn_id: turn_id.clone(),
                 agent_instance_id: agent_instance_id.to_string(),
                 message: message.to_string(),
-                status: status.clone(),
+                status,
                 usage: piko_protocol::messages::Usage::empty(),
                 file_changes: Vec::new(),
             },
@@ -229,7 +229,7 @@ impl HostState {
                 turn.status = crate::api::TurnStatus::Failed;
             }
         }
-        Ok(turn.status.clone())
+        Ok(turn.status)
     }
 
     pub fn mark_turn_running(
@@ -267,7 +267,7 @@ impl HostState {
                 turn_id: turn_id.to_string(),
                 agent_instance_id: agent_instance_id.to_string(),
                 message: message.to_string(),
-                status: status.clone(),
+                status,
                 usage: piko_protocol::messages::Usage::empty(),
                 file_changes: Vec::new(),
             },

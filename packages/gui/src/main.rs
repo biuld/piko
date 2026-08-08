@@ -117,7 +117,7 @@ fn main() {
             ],
         }]);
 
-        // Close last window → quit process (关窗即退出).
+        // Close last window → quit process.
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

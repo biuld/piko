@@ -1,0 +1,93 @@
+use serde::{Deserialize, Serialize};
+
+use super::*;
+use crate::ExecutionId;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxWaitRequest {
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller_agent_instance_id: Option<AgentInstanceId>,
+    pub timeout_ms: u64,
+    /// Optional single-agent filter; `None` waits on any live agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_instance_id: Option<AgentInstanceId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxWaitSummary {
+    pub timed_out: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<AgentMailboxEvent>,
+    /// Tree-sorted live snapshots at wait completion (see `list_agents`).
+    pub agents: Vec<AgentSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AgentDurableCommand {
+    Create {
+        identity: AgentInstanceIdentity,
+        spec: crate::AgentSpec,
+    },
+    SetLifecycle {
+        agent_instance_id: AgentInstanceId,
+        lifecycle: AgentInstanceLifecycle,
+    },
+    RunStarted {
+        agent_instance_id: AgentInstanceId,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
+        started_at: i64,
+    },
+    RunTerminal {
+        run_id: String,
+        report: AgentRunReport,
+        finished_at: i64,
+    },
+    InputQueued {
+        agent_instance_id: AgentInstanceId,
+        queued_input: DurableAgentInput,
+    },
+    QueuedInputCancelled {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        cancelled_at: i64,
+    },
+    QueuedInputStarted {
+        agent_instance_id: AgentInstanceId,
+        queued_input_id: String,
+        run_id: String,
+        internal_execution_id: ExecutionId,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
+        #[serde(default)]
+        prompt_assembly_version: u32,
+        #[serde(default)]
+        prompt_digest: String,
+        started_at: i64,
+    },
+    CommitReport {
+        recipient_agent_instance_id: AgentInstanceId,
+        report: AgentRunReport,
+    },
+    ConsumeInboxItem {
+        agent_instance_id: AgentInstanceId,
+        report_id: String,
+        consumed_at: i64,
+    },
+}
