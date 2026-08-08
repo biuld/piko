@@ -214,9 +214,8 @@ impl Theme {
         theme_slots!(names)
     };
 
-    /// Look up a slot by canonical name (or known legacy alias).
+    /// Look up a slot by canonical snake_case name.
     pub fn get(&self, key: &str) -> Color {
-        let key = canonicalize_slot(key);
         macro_rules! match_fields {
             ($($f:ident),* $(,)?) => {
                 match key {
@@ -228,9 +227,8 @@ impl Theme {
         theme_slots!(match_fields)
     }
 
-    /// Apply a resolved color to a slot (known names / aliases only).
+    /// Apply a resolved color to a known snake_case slot (unknown keys ignored).
     pub(crate) fn apply_slot(&mut self, key: &str, color: Color) {
-        let key = canonicalize_slot(key);
         macro_rules! assign {
             ($($f:ident),* $(,)?) => {
                 match key {
@@ -266,63 +264,6 @@ impl Theme {
             5 => self.md_heading_h5,
             _ => self.md_heading_h6,
         }
-    }
-}
-
-/// Map legacy camelCase / pre-catalog names to canonical snake_case slots.
-pub(crate) fn canonicalize_slot(key: &str) -> &str {
-    match key {
-        // Legacy camelCase layer-1 / layer-2
-        "accentAlt" => "accent_alt",
-        "borderMuted" => "border_muted",
-        "selectedBg" => "bg_selected",
-        "userMessageBg" => "user_message_bg",
-        "userMessageText" => "user_message_text",
-        "customMessageBg" => "custom_message_bg",
-        "customMessageText" => "custom_message_text",
-        "customMessageLabel" => "custom_message_label",
-        "toolPendingBg" => "tool_pending_bg",
-        "toolSuccessBg" => "tool_success_bg",
-        "toolErrorBg" => "tool_error_bg",
-        "toolTitle" => "tool_title",
-        "toolOutput" => "tool_output",
-        "thinkingText" => "thinking_text",
-        "mdHeading" => "md_heading_h1",
-        "mdLink" => "md_link",
-        "mdLinkUrl" => "md_link_url",
-        "mdCode" => "md_code",
-        "mdCodeBlock" => "md_code",
-        "mdCodeBlockBorder" => "border_muted",
-        "mdQuote" => "md_quote",
-        "mdQuoteBorder" => "md_quote_border",
-        "mdHr" => "md_hr",
-        "mdListBullet" => "md_list_bullet",
-        "toolDiffAdded" => "diff_insert_fg",
-        "toolDiffRemoved" => "diff_delete_fg",
-        "toolDiffContext" => "diff_equal_fg",
-        "syntaxComment" => "syntax_comment",
-        "syntaxKeyword" => "syntax_keyword",
-        "syntaxFunction" => "syntax_function",
-        "syntaxVariable" => "syntax_variable",
-        "syntaxString" => "syntax_string",
-        "syntaxNumber" => "syntax_number",
-        "syntaxType" => "syntax_type",
-        "syntaxOperator" => "syntax_operator",
-        "syntaxPunctuation" => "syntax_punctuation",
-        "thinkingOff" => "thinking_off",
-        "thinkingMinimal" => "thinking_minimal",
-        "thinkingLow" => "thinking_low",
-        "thinkingMedium" => "thinking_medium",
-        "thinkingHigh" => "thinking_high",
-        "thinkingXhigh" => "thinking_xhigh",
-        "bashMode" => "bash_mode",
-        // Grok-aligned aliases
-        "bg_light" => "bg_elevated",
-        "bg_dark" => "bg_sunken",
-        "text_primary" => "text",
-        "gray_dim" => "dim",
-        "gray" => "muted",
-        other => other,
     }
 }
 

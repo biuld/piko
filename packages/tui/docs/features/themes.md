@@ -28,8 +28,8 @@ may override any subset of slots via TOML in `~/.piko/themes/` or
 3. **TOML authoring** — Theme files use TOML, consistent with other piko config.
    `[vars]` holds reusable palette colors; `[colors]` maps slots → values.
 4. **No hardcoded colors in UI** — Components read `theme.<slot>` (or
-   `theme.get("…")` for dynamic / legacy names). Empty string `""` means
-   terminal default (`Color::Reset`).
+   `theme.get("…")` for dynamic lookup by snake_case slot name). Empty string
+   `""` means terminal default (`Color::Reset`).
 5. **Accent ≠ chrome** — `accent` is selection / active marks only. Panel frames
    use `border` / `border_muted`.
 
@@ -205,12 +205,6 @@ border = "gray"
 | string | `"blue"` | `[vars]` reference (chainable) |
 | integer | `39` | xterm 256 index |
 | `""` | `""` | Terminal default (`Reset`) |
-
-### Legacy key aliases
-
-Older camelCase names still resolve (e.g. `userMessageBg` →
-`user_message_bg`, `mdHeading` → `md_heading_h1`, `toolDiffAdded` →
-`diff_insert_fg`). Prefer snake_case slots for new themes.
 
 ## Token-to-component mapping
 

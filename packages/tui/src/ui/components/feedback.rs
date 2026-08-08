@@ -50,7 +50,7 @@ pub fn selection_prefix(selected: bool) -> String {
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
-/// Interactive frame chrome: focused → `border`, rest → `borderMuted`.
+/// Interactive frame chrome: focused → `border`, rest → `border_muted`.
 /// Borders never use `accent` (accent is for selection / marks / labels).
 pub fn frame_border_style(focused: bool, theme: &Theme) -> Style {
     Style::default().fg(if focused {

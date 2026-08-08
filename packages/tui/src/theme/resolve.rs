@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use ratatui::style::Color;
 
-use super::slots::{Theme, canonicalize_slot};
+use super::slots::Theme;
 use super::{ColorValue, ThemeError};
 
 pub(super) fn resolve_vars(
@@ -57,9 +57,7 @@ pub(super) fn resolve_colors(
 
     for (key, value) in colors {
         let color = resolve_color_value(value, vars)?;
-        // Store under canonical slot name so construction is uniform.
-        let canon = canonicalize_slot(key).to_string();
-        resolved.insert(canon, color);
+        resolved.insert(key.clone(), color);
     }
     Ok(resolved)
 }

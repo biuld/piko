@@ -39,14 +39,18 @@ fn test_all_slots_present_on_dark() {
 }
 
 #[test]
-fn test_legacy_aliases_resolve() {
-    let theme = Theme::dark();
-    assert_eq!(theme.get("userMessageBg"), theme.user_message_bg);
-    assert_eq!(theme.get("selectedBg"), theme.bg_selected);
-    assert_eq!(theme.get("mdHeading"), theme.md_heading_h1);
-    assert_eq!(theme.get("toolDiffAdded"), theme.diff_insert_fg);
-    assert_eq!(theme.get("borderMuted"), theme.border_muted);
-    assert_eq!(theme.get("accentAlt"), theme.accent_alt);
+fn test_unknown_slot_key_is_ignored() {
+    let toml = r##"
+            [theme]
+            name = "test"
+            [colors]
+            accent = "#00ff00"
+            userMessageBg = "#ff0000"
+        "##;
+    let theme = Theme::from_toml_str(toml).unwrap();
+    assert_eq!(theme.accent, Color::Rgb(0, 255, 0));
+    // camelCase keys are not accepted; fallback keeps dark's user_message_bg.
+    assert_ne!(theme.user_message_bg, Color::Rgb(255, 0, 0));
 }
 
 #[test]

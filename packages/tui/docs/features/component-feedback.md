@@ -138,11 +138,11 @@ Components consume theme tokens (see [themes.md](./themes.md)):
 |--------|------------------|
 | Body | `text` |
 | Metadata | `muted`, `dim` |
-| Selection / focus | `accent` (selection / caret / labels), optional `selectedBg`; frames use `border` / `borderMuted` only |
-| Success | `success`, optional `toolSuccessBg` |
-| Warning / in progress | `warning`, optional `toolPendingBg` |
-| Error | `error`, optional `toolErrorBg` |
-| Quiet chrome | `border`, `borderMuted` |
+| Selection / focus | `accent` (selection / caret / labels), optional `bg_selected`; frames use `border` / `border_muted` only |
+| Success | `success`, optional `tool_success_bg` |
+| Warning / in progress | `warning`, optional `tool_pending_bg` |
+| Error | `error`, optional `tool_error_bg` |
+| Quiet chrome | `border`, `border_muted` |
 | Info notice | `info` |
 
 No hard-coded “green means go” outside tokens. Themes re-skin without structure
@@ -172,7 +172,7 @@ Every interactive component supports a subset of these **visual states**.
 
 | State | When | Visual |
 |-------|------|--------|
-| Rest | Visible, not focus owner | `borderMuted`; body at normal contrast |
+| Rest | Visible, not focus owner | `border_muted`; body at normal contrast |
 | Focused | Top of focus stack | `border` (never accent); partial overlays may use top border only |
 | Passive chrome | Never focusable (BottomBar, separators) | Muted/dim text only |
 | Blocking | Awaits user decision (approval, workflow) | Focused frame chrome + warning on title/prompt as appropriate |
@@ -182,7 +182,7 @@ Every interactive component supports a subset of these **visual states**.
 | State | Visual feedback |
 |-------|-----------------|
 | Default | Primary `text`, detail `dim`/`muted` |
-| Selected | Leading `❯` (or equivalent), primary in `accent`, optional `selectedBg` |
+| Selected | Leading `❯` (or equivalent), primary in `accent`, optional `bg_selected` |
 | Active / current | Distinct marker (`●`, `✓`, or trailing muted “current”) **without** full selected style when not selected |
 | Selected + active | Both cues may combine; selected still wins contrast |
 | Disabled | `dim`; not selectable; confirm ignored |
@@ -199,7 +199,7 @@ Every interactive component supports a subset of these **visual states**.
 | Success / completed | `success`; static check or filled success glyph |
 | Failed | `error`; short reason when available |
 | Cancelled | `muted`/`dim`; not styled as success |
-| Info / system | `info` or `accentAlt` for session/system lines |
+| Info / system | `info` or `accent_alt` for session/system lines |
 
 ### Text field states
 

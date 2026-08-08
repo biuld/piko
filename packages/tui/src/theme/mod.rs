@@ -4,7 +4,7 @@
 //! 1. [`Theme`] — every render-facing color is a named field ([`Theme::SLOT_COUNT`] slots).
 //! 2. Built-in themes ship as TOML; custom themes live in `~/.piko/themes/`.
 //! 3. Missing slots on custom files fall back to built-in `dark`.
-//! 4. Legacy camelCase keys are accepted via slot aliases.
+//! 4. Slot keys are snake_case only (matching `Theme` field names).
 
 mod resolve;
 mod slots;
