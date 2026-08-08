@@ -6,8 +6,12 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+use piko_tui_layout::{Component, SurfacePanel};
+
+use crate::app::HitId;
 use crate::features::approval::ApprovalPanel;
 use crate::features::timeline::Timeline;
+use crate::navigation::SurfaceId;
 use crate::{
     app::{QueueStatus, ToolStatus},
     features::notifications::NotificationCenter,
@@ -20,12 +24,36 @@ use super::centered_rect;
 /// Status panel: read-only diagnostic panel.
 pub struct StatusPanel;
 
+#[derive(Clone, Copy)]
 pub struct StatusPanelView<'a> {
     pub session_id: Option<&'a str>,
     pub turn_id: Option<&'a str>,
     pub queue: &'a QueueStatus,
     pub notifications: &'a NotificationCenter,
     pub theme: &'a Theme,
+}
+
+/// Render context for the status surface.
+pub struct StatusCtx<'a> {
+    pub view: StatusPanelView<'a>,
+    pub timeline: &'a Timeline,
+    pub approvals: &'a ApprovalPanel,
+}
+
+impl Component<HitId, StatusCtx<'_>> for StatusPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &StatusCtx<'_>) {
+        StatusPanel::render(frame, area, ctx.view, ctx.timeline, ctx.approvals);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, StatusCtx<'_>> for StatusPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Status
+    }
 }
 
 impl StatusPanel {

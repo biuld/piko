@@ -42,7 +42,26 @@ mod tests;
 // ── public types ──────────────────────────────────────────────────────────────
 
 // Product focus / surface catalog (lives under navigation; engine is generic).
-pub use crate::navigation::{AppMode, SurfaceId};
+pub use crate::navigation::{AppMode, Region, SurfaceId};
+
+/// Stable element ids for pointer hit-testing inside a surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum HitId {
+    /// The conversation stream (wheel scroll; click no-op).
+    Stream,
+    /// The composer (click → focus + place cursor).
+    Composer,
+    /// The transient notice row (click → dismiss).
+    Notice,
+    /// One completion suggestion row (click → accept it).
+    Suggest(usize),
+    /// A question tab in a multi-question workflow.
+    Tab(usize),
+    /// One choice row of the active question.
+    Choice { question: usize, choice: usize },
+    /// The Submit step (confirm row or the Submit tab).
+    Submit,
+}
 
 /// Tool status shared between surfaces.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +104,9 @@ pub struct AppState {
     pub focus_manager: FocusManager,
     pub quit: bool,
     pub last_tick: Instant,
+    /// Last pointer hover target (region + element), resolved from the hit
+    /// map on `Moved`. No visual effect yet.
+    pub hovered: Option<(Region, Option<HitId>)>,
 
     // core input
     pub editor: Editor,

@@ -25,6 +25,11 @@ impl InputRouter {
 
         // ── P1.5: Global keybindings that open select surfaces ──
         if ka == Some(KeyAction::AgentPanel) {
+            // Modal authority: a pending Decide surface is a focus barrier.
+            // Opening Agents here would desync focus from the drawn modal.
+            if app.pending_decide().is_some() {
+                return None;
+            }
             return Some(SurfaceAction::OpenAgents.into());
         }
 
@@ -178,13 +183,22 @@ impl InputRouter {
             return match key.code {
                 KeyCode::Enter => Some(ApprovalAction::Respond(ApprovalDecision::Accept).into()),
                 KeyCode::Esc => Some(ApprovalAction::Respond(ApprovalDecision::Decline).into()),
-                KeyCode::Char('a' | 'A') => {
+                KeyCode::Char('a' | 'A')
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
                     Some(ApprovalAction::Respond(ApprovalDecision::AcceptSession).into())
                 }
-                KeyCode::Char('w' | 'W') => {
+                KeyCode::Char('w' | 'W')
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
                     Some(ApprovalAction::Respond(ApprovalDecision::AcceptWorkspace).into())
                 }
-                KeyCode::Char('p' | 'P') => {
+                KeyCode::Char('p' | 'P')
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
                     Some(ApprovalAction::Respond(ApprovalDecision::AcceptPermanent).into())
                 }
                 _ => None,
@@ -195,12 +209,13 @@ impl InputRouter {
             return match key.code {
                 KeyCode::Enter => Some(ToolInteractionAction::Submit.into()),
                 KeyCode::Esc => Some(ToolInteractionAction::Cancel.into()),
-                KeyCode::Tab | KeyCode::Down | KeyCode::Right => {
-                    Some(ToolInteractionAction::NextStep.into())
-                }
-                KeyCode::BackTab | KeyCode::Up | KeyCode::Left => {
-                    Some(ToolInteractionAction::PrevStep.into())
-                }
+                // Choice navigation: Up/Down move within the active question.
+                KeyCode::Down => Some(ToolInteractionAction::SelectNext.into()),
+                KeyCode::Up => Some(ToolInteractionAction::SelectPrev.into()),
+                // Step navigation: Tab/Shift+Tab (and Left/Right) move between
+                // questions and the Submit step.
+                KeyCode::Tab | KeyCode::Right => Some(ToolInteractionAction::NextStep.into()),
+                KeyCode::BackTab | KeyCode::Left => Some(ToolInteractionAction::PrevStep.into()),
                 KeyCode::Backspace => Some(SurfaceAction::FilterBackspace.into()),
                 KeyCode::Char(ch)
                     if ch.is_ascii_digit()

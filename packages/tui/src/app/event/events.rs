@@ -182,6 +182,7 @@ impl AppState {
                     title,
                     questions,
                     require_confirm,
+                    auto_resolution_ms.is_none(),
                 );
                 if auto_resolution_ms.is_none() {
                     self.push_surface(SurfaceId::ToolInteraction);
@@ -201,7 +202,7 @@ impl AppState {
                     && self.focus_manager.active_mode()
                         == AppMode::Surface(SurfaceId::ToolInteraction)
                 {
-                    self.clear_focus();
+                    self.pop_focus();
                 }
             }
         }

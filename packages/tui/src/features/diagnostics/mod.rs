@@ -4,6 +4,7 @@
 //! optional push `TurnDiff` events. Presentation-only.
 
 use piko_protocol::{PromptDebugSnapshot, TurnDiffEvent};
+use piko_tui_layout::{Component, SurfacePanel};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -12,10 +13,28 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 
+use crate::app::HitId;
+use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 use crate::ui::components::pane::{PaneSpec, render_pane};
 
 use super::centered_rect;
+
+impl Component<HitId, Theme> for DiagnosticsPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for DiagnosticsPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Diagnostics
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiagnosticsKind {

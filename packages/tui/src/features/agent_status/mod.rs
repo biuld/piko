@@ -5,9 +5,11 @@
 
 use ratatui::{Frame, layout::Rect};
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use crate::{
-    app::QueueStatus,
-    navigation::SelectBandBudget,
+    app::{HitId, QueueStatus},
+    navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::{
         ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH,
@@ -42,6 +44,7 @@ pub struct AgentPanelState {
     pub agents_hydrated: bool,
 }
 
+#[derive(Clone, Copy)]
 pub struct AgentPanelView<'a> {
     pub state: &'a AgentPanelState,
     /// Foreground projection for each agent_instance_id (parallel to list items).
@@ -49,6 +52,22 @@ pub struct AgentPanelView<'a> {
     pub queue: &'a QueueStatus,
     pub spinner_frame: usize,
     pub theme: &'a Theme,
+}
+
+impl Component<HitId, AgentPanelView<'_>> for AgentPanelState {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &AgentPanelView<'_>) {
+        AgentPanelState::render(frame, area, *ctx);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, AgentPanelView<'_>> for AgentPanelState {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Agents
+    }
 }
 
 impl AgentPanelState {

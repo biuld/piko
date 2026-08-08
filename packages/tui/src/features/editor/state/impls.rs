@@ -104,6 +104,28 @@ impl Editor {
         self.cursor = self.current_line_end();
     }
 
+    /// Move the cursor to display column `col` of the current visual line
+    /// (pointer clicks). `col` is clamped to the line's display width.
+    pub fn move_to_column(&mut self, width: u16, col: u16) {
+        self.exit_history_browse();
+        let lines = self.visual_lines(width);
+        let index = self.cursor_visual_line_index(&lines);
+        let Some(line) = lines.get(index) else {
+            return;
+        };
+        let mut target = line.end;
+        let mut used = 0u16;
+        for (offset, ch) in self.text[line.start..line.end].char_indices() {
+            let w = UnicodeWidthStr::width(ch.to_string().as_str()) as u16;
+            if used + w > col {
+                target = line.start + offset;
+                break;
+            }
+            used += w;
+        }
+        self.cursor = target;
+    }
+
     pub fn take_trimmed(&mut self) -> Option<String> {
         let text = self.expanded_text().trim().to_string();
         if text.is_empty() {

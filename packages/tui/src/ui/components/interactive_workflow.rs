@@ -1,6 +1,5 @@
-#![allow(dead_code)]
-
 use super::text_box::TextBox;
+use crate::app::HitId;
 use crate::theme::Theme;
 use crate::ui::components::{frame_border_style, hint_style, selection_prefix};
 use ratatui::{
@@ -8,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,14 +44,19 @@ impl Question {
     }
 }
 
+/// Shared low-level workflow panel: choice-based prompts with optional inline
+/// text input and an explicit Submit step. Used by approval prompts, tool
+/// interaction workflows, and the tree summary prompt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InteractiveWorkflow {
     pub questions: Vec<Question>,
     pub active_question_idx: usize,
     pub require_confirm: bool,
     pub confirm_focused: bool,
-    pub is_completed: bool,
     pub target_entry_id: Option<String>,
+    /// When set, replaces the state-derived help line (e.g. approval's
+    /// shortcut legend, which the generic choice help does not describe).
+    pub help_override: Option<String>,
 }
 
 impl InteractiveWorkflow {
@@ -62,9 +66,14 @@ impl InteractiveWorkflow {
             active_question_idx: 0,
             require_confirm,
             confirm_focused: false,
-            is_completed: false,
             target_entry_id: None,
+            help_override: None,
         }
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help_override = Some(help.into());
+        self
     }
 
     pub fn select_next(&mut self) {
@@ -119,6 +128,21 @@ impl InteractiveWorkflow {
         }
     }
 
+    /// Jump to a step directly (pointer tabs). `step == questions.len()` is
+    /// the Submit step; larger values clamp to the last question.
+    pub fn goto_step(&mut self, step: usize) {
+        if self.questions.is_empty() {
+            return;
+        }
+        if step >= self.questions.len() {
+            self.active_question_idx = self.questions.len().saturating_sub(1);
+            self.confirm_focused = self.require_confirm;
+        } else {
+            self.active_question_idx = step;
+            self.confirm_focused = false;
+        }
+    }
+
     pub fn can_submit(&self) -> bool {
         !self.questions.is_empty()
     }
@@ -155,30 +179,79 @@ impl InteractiveWorkflow {
         self.questions[self.active_question_idx].is_input_active = active;
     }
 
-    pub fn push_char(&mut self, ch: char) {
-        if self.questions.is_empty() {
-            return;
+    // ── geometry (shared by render and hit regions) ────────────────────────
+
+    /// Row geometry of the active question, mirroring the renderer's line
+    /// order exactly. Used by [`Self::component_regions`] so painting and
+    /// hit-testing cannot drift.
+    fn rows(&self, area: Rect) -> WorkflowRows {
+        let inner = prompt_content_area(area);
+        let mut rows = WorkflowRows::default();
+        if self.confirm_focused {
+            rows.submit_y = Some(inner.y.saturating_add(2));
+            return rows;
         }
-        let q = &mut self.questions[self.active_question_idx];
-        if q.is_input_active {
-            q.input_value.insert_char(ch);
+        let Some(q) = self.questions.get(self.active_question_idx) else {
+            return rows;
+        };
+        let mut y = inner.y;
+        if self.questions.len() > 1 {
+            let mut x = inner.x;
+            for (i, question) in self.questions.iter().enumerate() {
+                if i > 0 {
+                    x = x.saturating_add(3);
+                }
+                let width = (question.header.chars().count() as u16).saturating_add(2);
+                rows.tab_rects.push((i, Rect::new(x, y, width, 1)));
+                x = x.saturating_add(width);
+            }
+            if self.require_confirm {
+                let width = 8; // "[Submit]"
+                rows.tab_rects.push((
+                    self.questions.len(),
+                    Rect::new(x.saturating_add(3), y, width, 1),
+                ));
+            }
+            y = y.saturating_add(2);
         }
+        // Prompt line + blank spacer.
+        y = y.saturating_add(2);
+        rows.choice_y = (0..q.choices.len())
+            .map(|i| y.saturating_add(i as u16))
+            .collect();
+        rows
     }
 
-    pub fn pop_char(&mut self) {
-        if self.questions.is_empty() {
-            return;
+    /// Interactive sub-regions for pointer hit-testing.
+    pub fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let rows = self.rows(area);
+        let mut out = Vec::new();
+        if let Some(y) = rows.submit_y {
+            out.push((row_rect(area, y), HitId::Submit));
         }
-        let q = &mut self.questions[self.active_question_idx];
-        if q.is_input_active {
-            q.input_value.backspace();
+        for (question, rect) in rows.tab_rects {
+            out.push((clamp_rect(rect, area), HitId::Tab(question)));
         }
+        for (choice, y) in rows.choice_y.iter().enumerate() {
+            out.push((
+                row_rect(area, *y),
+                HitId::Choice {
+                    question: self.active_question_idx,
+                    choice,
+                },
+            ));
+        }
+        out
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let block = Block::default()
             .borders(Borders::TOP)
-            .border_style(frame_border_style(true, theme));
+            .border_style(frame_border_style(true, theme))
+            .style(Style::default().bg(theme.bg_elevated));
+        // Opaque backdrop: the centered dialog never leaks plane cells or
+        // stale glyphs from previous frames.
+        frame.render_widget(Clear, area);
         frame.render_widget(block, area);
 
         let inner = prompt_content_area(area);
@@ -235,7 +308,6 @@ impl InteractiveWorkflow {
             )));
         } else if !self.questions.is_empty() {
             let q = &self.questions[self.active_question_idx];
-            // 1. Question Prompt
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{}: ", q.header),
@@ -248,7 +320,6 @@ impl InteractiveWorkflow {
 
             lines.push(Line::default());
 
-            // 2. Render choices vertically
             for (i, choice) in q.choices.iter().enumerate() {
                 let is_selected = i == q.selected_idx;
                 let prefix = selection_prefix(is_selected);
@@ -292,23 +363,40 @@ impl InteractiveWorkflow {
 
         lines.push(Line::default());
 
-        // 3. Render help instructions
-        let mut help_txt = "Enter to select · ↑/↓ to navigate · Esc to cancel";
-        if self.confirm_focused {
-            help_txt = "Enter to submit · Tab to cycle · Esc to cancel";
+        // Help line: override (approval shortcut legend) or state-derived.
+        let help_txt = if let Some(help) = &self.help_override {
+            help.as_str()
+        } else if self.confirm_focused {
+            "Enter to submit · Tab to cycle · Esc to cancel"
         } else if !self.questions.is_empty() {
             let q = &self.questions[self.active_question_idx];
             if q.is_input_active {
-                help_txt = "Enter to save · Esc to exit editing";
+                "Enter to save · Esc to exit editing"
             } else if self.questions.len() > 1 {
-                help_txt = "Enter to select · ↑/↓ navigate · Tab switch question · Esc cancel";
+                "Enter to select · ↑/↓ choose · Tab switch question · Esc cancel"
+            } else {
+                "Enter to select · ↑/↓ to navigate · Esc to cancel"
             }
-        }
-
+        } else {
+            "Esc to cancel"
+        };
         lines.push(Line::from(Span::styled(help_txt, hint_style(theme))));
 
         frame.render_widget(Paragraph::new(lines), inner);
     }
+}
+
+/// Geometry shared by [`InteractiveWorkflow::render`] and
+/// [`InteractiveWorkflow::component_regions`].
+#[derive(Clone, Debug, Default)]
+struct WorkflowRows {
+    /// (question index, rect) for each tab, plus a trailing Submit tab when
+    /// confirmation is required. The submit sentinel is `questions.len()`.
+    tab_rects: Vec<(usize, Rect)>,
+    /// y of each choice row of the active question.
+    choice_y: Vec<u16>,
+    /// y of the Confirm action row.
+    submit_y: Option<u16>,
 }
 
 fn prompt_content_area(area: Rect) -> Rect {
@@ -319,4 +407,20 @@ fn prompt_content_area(area: Rect) -> Rect {
         area.width.saturating_sub(horizontal_padding * 2),
         area.height.saturating_sub(1),
     )
+}
+
+fn row_rect(area: Rect, y: u16) -> Rect {
+    clamp_rect(Rect::new(area.x, y, area.width, 1), area)
+}
+
+fn clamp_rect(rect: Rect, area: Rect) -> Rect {
+    let x = rect.x.max(area.x);
+    let y = rect.y.max(area.y);
+    let right = (rect.x + rect.width).min(area.x + area.width);
+    let bottom = (rect.y + rect.height).min(area.y + area.height);
+    if right <= x || bottom <= y {
+        Rect::default()
+    } else {
+        Rect::new(x, y, right - x, bottom - y)
+    }
 }

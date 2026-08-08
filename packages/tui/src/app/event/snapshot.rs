@@ -135,6 +135,7 @@ impl AppState {
                 interaction.title,
                 interaction.questions,
                 interaction.require_confirm,
+                true,
             );
         }
         if !self.approvals.is_empty()

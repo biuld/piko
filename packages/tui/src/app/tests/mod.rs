@@ -113,6 +113,8 @@ mod completion_tests;
 mod delete_scope_tests;
 mod diff_tests;
 mod foreground_tests;
+mod modal_tests;
+mod pointer_tests;
 mod prompt_tests;
 mod session_tests;
 mod snapshot_tests;

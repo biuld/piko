@@ -6,12 +6,39 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use super::{ConnectorKind, TreeFilterMode, TreePanel, visible};
+use crate::app::HitId;
+use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 use crate::ui::components::interactive_workflow::InteractiveWorkflow;
 use crate::ui::components::pane::{PaneFooter, PaneSearch, PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{SelectablePanelBody, paint_selectable_panel};
 use crate::ui::components::selection_prefix;
+
+/// Render context for the session-tree surface (including its summary prompt).
+pub struct TreeCtx<'a> {
+    pub filter: &'a str,
+    pub summary_prompt: Option<&'a InteractiveWorkflow>,
+    pub theme: &'a Theme,
+}
+
+impl Component<HitId, TreeCtx<'_>> for TreePanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &TreeCtx<'_>) {
+        TreePanel::render(self, frame, area, ctx.filter, ctx.summary_prompt, ctx.theme);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, TreeCtx<'_>> for TreePanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Tree
+    }
+}
 
 impl TreePanel {
     pub fn render(

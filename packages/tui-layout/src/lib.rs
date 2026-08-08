@@ -8,6 +8,7 @@
 mod engine;
 mod flex;
 mod focus;
+mod hitmap;
 mod modal;
 mod shell;
 mod util;
@@ -18,6 +19,7 @@ pub use flex::{
     row,
 };
 pub use focus::FocusManager;
+pub use hitmap::{Component, Hit, HitMap, HitRegion, SurfacePanel, build_hitmap};
 pub use modal::{ModalLayer, ModalPlacement};
 pub use shell::{ShellChrome, ShellSplit, split_shell};
 pub use util::{DEFAULT_HORIZONTAL_INSET, inset_horizontal};

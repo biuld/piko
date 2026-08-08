@@ -7,13 +7,38 @@
 
 use ratatui::{Frame, layout::Rect};
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use crate::{
-    navigation::SelectBandBudget,
+    app::HitId,
+    navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::selectable_list::{
         ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
     },
 };
+
+/// Render context for the thinking-level surface.
+pub struct ThinkingCtx<'a> {
+    pub active_level: Option<&'a str>,
+    pub theme: &'a Theme,
+}
+
+impl Component<HitId, ThinkingCtx<'_>> for ThinkingSelector {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &ThinkingCtx<'_>) {
+        self.render(frame, area, ctx.active_level, ctx.theme);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, ThinkingCtx<'_>> for ThinkingSelector {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Thinking
+    }
+}
 
 use super::settings::thinking_level_detail;
 

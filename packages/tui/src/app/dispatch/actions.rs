@@ -235,6 +235,27 @@ impl AppState {
                 }
                 Vec::new()
             }
+            ToolInteractionAction::GotoStep(step) => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    if interaction.workflow.input_active() {
+                        interaction.workflow.set_input_active(false);
+                    }
+                    interaction.workflow.goto_step(step);
+                }
+                Vec::new()
+            }
+            ToolInteractionAction::SelectNext => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    interaction.workflow.select_next();
+                }
+                Vec::new()
+            }
+            ToolInteractionAction::SelectPrev => {
+                if let Some(interaction) = self.interactions.front_mut() {
+                    interaction.workflow.select_prev();
+                }
+                Vec::new()
+            }
             ToolInteractionAction::Choice(idx) => {
                 if let Some(interaction) = self.interactions.front_mut() {
                     interaction.workflow.select_choice(idx);

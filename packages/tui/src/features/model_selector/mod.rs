@@ -1,12 +1,44 @@
 use ratatui::{Frame, layout::Rect};
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use crate::{
-    navigation::SelectBandBudget,
+    app::HitId,
+    navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::selectable_list::{
         ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
     },
 };
+
+/// Render context for the model selector surface.
+pub struct ModelCtx<'a> {
+    pub active_model_id: Option<&'a str>,
+    pub active_provider: Option<&'a str>,
+    pub theme: &'a Theme,
+}
+
+impl Component<HitId, ModelCtx<'_>> for ModelSelector {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &ModelCtx<'_>) {
+        self.render(
+            frame,
+            area,
+            ctx.active_model_id,
+            ctx.active_provider,
+            ctx.theme,
+        );
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, ModelCtx<'_>> for ModelSelector {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Models
+    }
+}
 
 /// A discovered model option.
 #[derive(Clone, Debug)]

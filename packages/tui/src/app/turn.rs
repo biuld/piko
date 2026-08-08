@@ -133,6 +133,10 @@ impl AppState {
             self.status = "no pending interaction".to_string();
             return effects;
         };
+        if interaction.submitting {
+            self.status = "interaction response already sent".to_string();
+            return effects;
+        }
         let workflow = &mut interaction.workflow;
         if workflow.input_active() {
             workflow.set_input_active(false);
@@ -180,6 +184,12 @@ impl AppState {
             && interaction.workflow.input_active()
         {
             interaction.workflow.set_input_active(false);
+            return effects;
+        }
+        if let Some(interaction) = self.interactions.front()
+            && interaction.submitting
+        {
+            self.status = "interaction already cancelled".to_string();
             return effects;
         }
         let Some((interaction_id, response)) = self.interactions.cancel_response() else {

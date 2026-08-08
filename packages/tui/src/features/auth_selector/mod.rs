@@ -1,13 +1,32 @@
 use ratatui::{Frame, layout::Rect};
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use crate::{
-    navigation::SelectBandBudget,
+    app::HitId,
+    navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::{
         menu::{MenuConfirmResult, MenuRow, MenuRowKind, MenuRowLayout, MenuStack},
         text_box::TextBox,
     },
 };
+
+impl Component<HitId, Theme> for AuthSelector {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for AuthSelector {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::AuthSelector
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum AuthAction {

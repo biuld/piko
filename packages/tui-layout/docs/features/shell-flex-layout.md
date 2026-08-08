@@ -63,12 +63,74 @@ tree rooted in that host rect. Solved as layers on top of the plane.
 `FocusManager<T>`: LIFO stack of client-defined targets `T`. Base value is
 passed to `FocusManager::new(base)`.
 
+### Pointer readiness (hit contract)
+
+`FramePlan<R>` is the **single geometry authority**: plane rects plus ordered
+modal layer rects. A derived hit-test over those rects answers "which region
+owns cell (x, y)" without a second region table:
+
+```rust
+impl<R: Copy + Eq + Hash> FramePlan<R> {
+    /// Region-level z-hit. Ratatui cell semantics:
+    /// x in [rect.x, rect.x + rect.width).
+    pub fn hit_test(&self, x: u16, y: u16) -> Option<(R, Option<usize>)>;
+}
+
+pub struct HitRegion<R, E> {
+    pub region: R,
+    pub rect: Rect,
+    pub element: Option<E>, // None = surface default action
+}
+
+pub struct Hit<R, E> {
+    pub region: R,
+    pub element: Option<E>,
+    pub rect: Rect,
+    pub z: u16,               // plane = 0, layer i = i + 1
+    pub layer: Option<usize>,
+}
+
+pub struct HitMap<R, E> { pub hits: Vec<Hit<R, E>> }
+
+pub fn build_hitmap<R, E, F>(
+    plan: &FramePlan<R>,
+    regions: F, // FnMut(R, Rect) -> Vec<HitRegion<R, E>>
+) -> HitMap<R, E>;
+```
+
+Rules:
+
+- Layers are scanned in reverse solve order (last painted wins), then the
+  plane.
+- `HitMap::hit_test(x, y)` returns the top-most entry; within one `z` an
+  element beats its surface-default entry.
+- Both are pure functions of solved rects; no product types, no input state.
+- Clients may declare per-surface sub-regions (rows, tabs, buttons) relative
+  to a surface rect via `SurfacePanel::hit_regions`; the engine does not model
+  sub-regions.
+
+The **component contract** also lives here: a generic `Component<E, C>` base
+trait (`render` + `component_regions` + `focusable`) shared by every
+drawable/hittable piece, plus `SurfacePanel<R, E, C>: Component<E, C>`
+stamping region ids on top of it. `R`/`E` are product region/element ids, `C`
+is a product render context; the crate references no product types.
+
+No app-level facade type: the crate stays pure functions + data (`solve`,
+`FramePlan`, `build_hitmap`, `HitMap`, `hit_test`, `FocusManager<T>`) and the
+client's `AppState` is the composition root calling them each frame.
+Composition policy (which plane/modal, metrics, push guards) stays in the
+client.
+
+Mouse input itself is out of scope for this crate. Product design:
+[`../../../tui/docs/design/modal-hitmap-architecture.md`](../../../tui/docs/design/modal-hitmap-architecture.md).
+
 ## Non-goals
 
 - Product surface catalogs  
 - SPA routing  
 - Full CSS flexbox  
 - Free absolute drawing outside solved rects  
+- Mouse input handling (pointer readiness is geometry-only)
 
 ## Acceptance
 
@@ -76,3 +138,5 @@ passed to `FocusManager::new(base)`.
 - [ ] No `piko-*` dependencies  
 - [ ] Generic `R` / `T` used for regions and focus  
 - [ ] Tests use local dummy enums, not product ids  
+- [x] `FramePlan::hit_test` and `HitMap::hit_test` covered by unit tests
+      (layer priority, surface default, edges, no-hit)

@@ -3,8 +3,11 @@ use std::collections::VecDeque;
 use piko_protocol::{
     InteractionAnswer, InteractionId, InteractionQuestion, UserInteractionResponse,
 };
+use piko_tui_layout::{Component, SurfacePanel};
 use ratatui::{Frame, layout::Rect};
 
+use crate::app::HitId;
+use crate::navigation::SurfaceId;
 use crate::{
     theme::Theme,
     ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question},
@@ -17,6 +20,9 @@ pub struct PendingInteraction {
     pub questions: Vec<InteractionQuestion>,
     pub workflow: InteractiveWorkflow,
     pub submitting: bool,
+    /// True when this interaction owns the ToolInteraction surface (it was
+    /// surfaced to the user). Auto-resolving interactions never surface.
+    pub surfaced: bool,
 }
 
 pub struct ToolInteractionPanel {
@@ -37,6 +43,7 @@ impl ToolInteractionPanel {
         _title: Option<String>,
         questions: Vec<InteractionQuestion>,
         require_confirm: bool,
+        surfaced: bool,
     ) {
         let workflow_questions = questions
             .iter()
@@ -66,6 +73,7 @@ impl ToolInteractionPanel {
             questions,
             workflow: InteractiveWorkflow::new(workflow_questions, require_confirm),
             submitting: false,
+            surfaced,
         });
     }
 
@@ -86,6 +94,10 @@ impl ToolInteractionPanel {
 
     pub fn front_mut(&mut self) -> Option<&mut PendingInteraction> {
         self.pending.front_mut()
+    }
+
+    pub fn front(&self) -> Option<&PendingInteraction> {
+        self.pending.front()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -135,5 +147,24 @@ impl ToolInteractionPanel {
                 reason: Some("User cancelled".into()),
             },
         ))
+    }
+}
+
+impl Component<HitId, Theme> for ToolInteractionPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.pending
+            .front()
+            .map(|interaction| interaction.workflow.component_regions(area))
+            .unwrap_or_default()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for ToolInteractionPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::ToolInteraction
     }
 }

@@ -8,7 +8,11 @@ pub use mirror::{HostRuntimeSettings, SettingsSnapshot};
 
 use ratatui::{Frame, layout::Rect};
 
+use piko_tui_layout::{Component, SurfacePanel};
+
 use crate::{
+    app::HitId,
+    navigation::SurfaceId,
     theme::Theme,
     ui::components::{
         feedback::{settings_apply_hints, settings_open_hints},
@@ -17,6 +21,22 @@ use crate::{
         selectable_list::{SelectableItem, render_selectable_list_with_pane},
     },
 };
+
+impl Component<HitId, Theme> for SettingsPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for SettingsPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Settings
+    }
+}
 
 use catalog::build_catalog;
 

@@ -2,7 +2,7 @@ use std::io::Stdout;
 
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{DisableBracketedPaste, EnableBracketedPaste},
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -16,8 +16,13 @@ impl TerminalGuard {
     pub fn enter() -> Result<Self> {
         enable_raw_mode().context("enable raw mode")?;
         let mut stdout = std::io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
-            .context("enter alternate screen")?;
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture
+        )
+        .context("enter alternate screen")?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend).context("create terminal")?;
         Ok(Self { terminal })
@@ -28,7 +33,8 @@ impl TerminalGuard {
         execute!(
             self.terminal.backend_mut(),
             DisableBracketedPaste,
-            LeaveAlternateScreen
+            LeaveAlternateScreen,
+            DisableMouseCapture
         )
         .context("leave alternate screen")?;
         self.terminal.show_cursor().context("show cursor")?;
@@ -42,7 +48,8 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             self.terminal.backend_mut(),
             DisableBracketedPaste,
-            LeaveAlternateScreen
+            LeaveAlternateScreen,
+            DisableMouseCapture
         );
         let _ = self.terminal.show_cursor();
     }

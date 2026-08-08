@@ -125,6 +125,14 @@ fn run_app(
                             app.update(Msg::Action(EditorAction::InsertPaste(text).into()));
                         run_effects(app, host, effects);
                     }
+                    CrosstermEvent::Mouse(event) => {
+                        let size = terminal.size().context("read terminal size")?;
+                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+                        for action in input::pointer::route_pointer(app, rect, event) {
+                            let effects = app.update(Msg::Action(action));
+                            run_effects(app, host, effects);
+                        }
+                    }
                     _ => {}
                 }
 

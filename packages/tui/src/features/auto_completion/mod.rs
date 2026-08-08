@@ -73,6 +73,13 @@ impl AutoComplete {
         self.list.select_prev("", |_| true);
     }
 
+    /// Select the suggestion at `idx` (pointer clicks), clamped to the list.
+    pub fn select_index(&mut self, idx: usize) {
+        if idx < self.list.len() {
+            self.list.selected = idx;
+        }
+    }
+
     /// Accepts the currently selected completion item.
     /// Clears selection and deactivates if keep_active is false.
     pub fn accept(&mut self) -> Option<CompletionRow> {

@@ -1,4 +1,5 @@
 use piko_protocol::{SessionListScope, SessionSummary};
+use piko_tui_layout::{Component, SurfacePanel};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -6,12 +7,36 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+use crate::app::HitId;
+use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 use crate::ui::components::pane::{PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{
     ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
     paint_selectable_panel,
 };
+
+/// Render context for the sessions surface.
+pub struct SessionListCtx<'a> {
+    pub active_session_id: Option<&'a str>,
+    pub theme: &'a Theme,
+}
+
+impl Component<HitId, SessionListCtx<'_>> for SessionList {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &SessionListCtx<'_>) {
+        self.render(frame, area, ctx.active_session_id, ctx.theme);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, SessionListCtx<'_>> for SessionList {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Sessions
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionScope {

@@ -36,6 +36,33 @@ impl<R: Eq + Hash + Copy> FramePlan<R> {
     pub fn get(&self, region: R) -> Option<Rect> {
         self.rects.get(&region).copied()
     }
+
+    /// Region-level z-hit: which region owns the cell, respecting layer order
+    /// (top-most layer wins, then the plane).
+    ///
+    /// Ratatui cell semantics: `x in [rect.x, rect.x + rect.width)`.
+    pub fn hit_test(&self, x: u16, y: u16) -> Option<(R, Option<usize>)> {
+        for (i, layer) in self.layers.iter().enumerate().rev() {
+            for (region, rect) in &layer.rects {
+                if rect_contains(*rect, x, y) {
+                    return Some((*region, Some(i)));
+                }
+            }
+        }
+        for (region, rect) in &self.rects {
+            if rect_contains(*rect, x, y) {
+                return Some((*region, None));
+            }
+        }
+        None
+    }
+}
+
+fn rect_contains(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x
+        && x < rect.x.saturating_add(rect.width)
+        && y >= rect.y
+        && y < rect.y.saturating_add(rect.height)
 }
 
 /// Solve a plane tree in `area` (no modals).

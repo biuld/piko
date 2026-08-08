@@ -5,14 +5,32 @@
 //! when a server failed or timed out at session start.
 
 use piko_protocol::command::McpServerInfo;
+use piko_tui_layout::{Component, SurfacePanel};
 use ratatui::{Frame, layout::Rect, text::Line};
 
-use crate::navigation::SelectBandBudget;
+use crate::app::HitId;
+use crate::navigation::{SelectBandBudget, SurfaceId};
 use crate::theme::Theme;
 use crate::ui::components::pane::{PaneSpec, render_pane};
 use ratatui::widgets::Paragraph;
 
 use super::centered_rect;
+
+impl Component<HitId, Theme> for McpPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+        Vec::new()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for McpPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Mcp
+    }
+}
 
 /// Read-only MCP status panel.
 #[derive(Default)]

@@ -1,7 +1,10 @@
 use std::collections::VecDeque;
 
-use ratatui::{Frame, layout::Rect, style::Style, widgets::Paragraph};
+use piko_tui_layout::{Component, SurfacePanel};
+use ratatui::{Frame, layout::Rect};
 
+use crate::app::HitId;
+use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 
 use crate::text::compact_json;
@@ -55,12 +58,11 @@ impl ApprovalPanel {
         self.pending.len()
     }
 
-    /// Render the approval popup if there is a pending request.
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let Some(approval) = self.pending.front() else {
-            return;
-        };
-        let workflow = InteractiveWorkflow::new(
+    /// Build the single-question approval workflow for the front request.
+    fn workflow(&self) -> Option<InteractiveWorkflow> {
+        let approval = self.pending.front()?;
+        Some(
+            InteractiveWorkflow::new(
             vec![Question::new(
                 "Approval",
                 approval_question(approval),
@@ -93,18 +95,37 @@ impl ApprovalPanel {
                 ],
             )],
             false,
-        );
-        workflow.render(frame, area, theme);
-        let help = Paragraph::new(format!(
-            " Enter accept once · A session · W workspace · P permanent · Esc decline · tool {} ",
-            approval.tool_name,
-        ))
-        .style(Style::default().fg(theme.muted));
-        let y = area.y + area.height.saturating_sub(1);
-        frame.render_widget(
-            help,
-            Rect::new(area.x.saturating_add(2), y, area.width.saturating_sub(4), 1),
-        );
+            )
+            .with_help(format!(
+                " Enter accept once · A session · W workspace · P permanent · Esc decline · tool {} ",
+                approval.tool_name,
+            )),
+        )
+    }
+
+    /// Render the approval popup if there is a pending request.
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        if let Some(workflow) = self.workflow() {
+            workflow.render(frame, area, theme);
+        }
+    }
+}
+
+impl Component<HitId, Theme> for ApprovalPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
+        self.render(frame, area, ctx);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.workflow()
+            .map(|workflow| workflow.component_regions(area))
+            .unwrap_or_default()
+    }
+}
+
+impl SurfacePanel<SurfaceId, HitId, Theme> for ApprovalPanel {
+    fn region(&self) -> SurfaceId {
+        SurfaceId::Approval
     }
 }
 

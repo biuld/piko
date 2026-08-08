@@ -1,10 +1,13 @@
 //! Product composition: shell + plane + modal stack via `piko-tui-layout`.
 
 use crate::{
-    app::AppState,
-    navigation::{FocusManagerExt, SelectBandBudget, compose_modals, compose_plane},
+    app::{AppState, HitId},
+    navigation::{SelectBandBudget, compose_modals, compose_plane},
 };
-use piko_tui_layout::{FramePlan, ShellChrome, ShellSplit, solve, split_shell};
+use piko_tui_layout::{
+    FramePlan, HitMap, HitRegion, ShellChrome, ShellSplit, SurfacePanel, build_hitmap, solve,
+    split_shell,
+};
 
 pub use crate::navigation::{PlaneMetrics, Region, SurfaceId};
 pub use piko_tui_layout::{DEFAULT_HORIZONTAL_INSET, inset_horizontal};
@@ -19,16 +22,7 @@ pub struct ProductFrame {
 }
 
 pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
-    if !app.approvals.is_empty() || app.focus_manager.active_surface() == Some(SurfaceId::Approval)
-    {
-        return Some(SurfaceId::Approval);
-    }
-    if !app.interactions.is_empty()
-        || app.focus_manager.active_surface() == Some(SurfaceId::ToolInteraction)
-    {
-        return Some(SurfaceId::ToolInteraction);
-    }
-    app.focus_manager.active().as_surface()
+    app.modal_surface()
 }
 
 pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetrics {
@@ -81,6 +75,77 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
     }
 }
 
+/// Build the per-frame hit map for the current composition: plane regions at
+/// `z = 0`, modal layers above. Surfaces that implement [`SurfacePanel`]
+/// contribute element hit regions; the rest are non-interactive for now.
+#[allow(dead_code)] // exercised by layout tests; consumed by pointer-input PRD
+pub fn build_surface_hitmap(
+    app: &AppState,
+    terminal: ratatui::layout::Rect,
+) -> HitMap<Region, HitId> {
+    let composed = compose_frame(app, terminal);
+    let stamp = |hrs: Vec<HitRegion<SurfaceId, HitId>>| -> Vec<HitRegion<Region, HitId>> {
+        hrs.into_iter()
+            .map(|hr| HitRegion {
+                region: Region::Surface(hr.region),
+                rect: hr.rect,
+                element: hr.element,
+            })
+            .collect()
+    };
+    build_hitmap(&composed.plan, |region, rect| match region {
+        Region::Stream => vec![HitRegion {
+            region: Region::Stream,
+            rect,
+            element: Some(HitId::Stream),
+        }],
+        Region::Notice => vec![HitRegion {
+            region: Region::Notice,
+            rect,
+            element: Some(HitId::Notice),
+        }],
+        Region::Suggest => (0..app.editor.auto_complete.len().min(6))
+            .map(|i| HitRegion {
+                region: Region::Suggest,
+                rect: ratatui::layout::Rect::new(
+                    rect.x,
+                    rect.y.saturating_add(1).saturating_add(i as u16),
+                    rect.width,
+                    1,
+                ),
+                element: Some(HitId::Suggest(i)),
+            })
+            .collect(),
+        Region::Composer => vec![HitRegion {
+            region: Region::Composer,
+            rect,
+            element: Some(HitId::Composer),
+        }],
+        Region::Surface(SurfaceId::Agents) => stamp(app.agent_panel.hit_regions(rect)),
+        Region::Surface(SurfaceId::Sessions) => stamp(app.sessions.hit_regions(rect)),
+        Region::Surface(SurfaceId::Tree) | Region::Surface(SurfaceId::SummaryPrompt) => {
+            stamp(app.tree.hit_regions(rect))
+        }
+        Region::Surface(SurfaceId::Status) => {
+            stamp(<crate::features::status::StatusPanel as SurfacePanel<
+                SurfaceId,
+                HitId,
+                crate::features::status::StatusCtx<'_>,
+            >>::hit_regions(
+                &crate::features::status::StatusPanel, rect
+            ))
+        }
+        Region::Surface(SurfaceId::Diagnostics) => stamp(app.diagnostics.hit_regions(rect)),
+        Region::Surface(SurfaceId::Settings) => stamp(app.settings.hit_regions(rect)),
+        Region::Surface(SurfaceId::Models) => stamp(app.models.hit_regions(rect)),
+        Region::Surface(SurfaceId::Thinking) => stamp(app.thinking.hit_regions(rect)),
+        Region::Surface(SurfaceId::Approval) => stamp(app.approvals.hit_regions(rect)),
+        Region::Surface(SurfaceId::ToolInteraction) => stamp(app.interactions.hit_regions(rect)),
+        Region::Surface(SurfaceId::AuthSelector) => stamp(app.auth_selector.hit_regions(rect)),
+        Region::Surface(SurfaceId::Mcp) => stamp(app.mcp.hit_regions(rect)),
+    })
+}
+
 pub fn has_visible_suggestions(app: &AppState) -> bool {
     app.mode.is_editor_base() && app.editor.auto_complete.is_active()
 }
@@ -108,6 +173,60 @@ mod tests {
         assert!(frame.plan.rects.contains_key(&Region::Stream));
         assert!(frame.plan.rects.contains_key(&Region::Composer));
         assert_eq!(frame.shell.chrome.height, 1);
+    }
+
+    #[test]
+    fn approval_modal_hitmap_has_z_order_and_choice_rows() {
+        use crate::features::approval::PendingApproval;
+
+        let mut app = app_state();
+        app.session.id = Some("s1".into());
+        app.approvals.push(PendingApproval {
+            id: "a1".into(),
+            agent_instance_id: "agent-1".into(),
+            tool_name: "bash".into(),
+            args: serde_json::json!({ "command": "cargo test" }),
+            prompt: None,
+        });
+        app.push_surface(SurfaceId::Approval);
+
+        let terminal = Rect::new(0, 0, 80, 24);
+        let composed = compose_frame(&app, terminal);
+        let host = composed
+            .plan
+            .layers
+            .first()
+            .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Approval)))
+            .copied()
+            .expect("approval layer host");
+        let map = build_surface_hitmap(&app, terminal);
+        assert!(!map.hits.is_empty());
+
+        // First choice row: single-question layout → prompt(0), blank(1),
+        // choices start at inner.y + 2 = host.y + 3.
+        let hit = map
+            .hit_test(host.x.saturating_add(2), host.y.saturating_add(3))
+            .expect("choice row cell");
+        assert_eq!(hit.region, Region::Surface(SurfaceId::Approval));
+        assert_eq!(hit.z, 1);
+        assert!(matches!(
+            hit.element,
+            Some(HitId::Choice {
+                question: 0,
+                choice: 0
+            })
+        ));
+
+        // Below the choices the surface-default entry still owns the cell —
+        // never a fall-through to the plane.
+        let bottom = map
+            .hit_test(
+                host.x.saturating_add(2),
+                host.y.saturating_add(host.height.saturating_sub(1)),
+            )
+            .expect("surface default cell");
+        assert_eq!(bottom.region, Region::Surface(SurfaceId::Approval));
+        assert_eq!(bottom.element, None);
     }
 
     #[test]

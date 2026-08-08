@@ -1,4 +1,5 @@
 use super::*;
+use crate::navigation::FocusManagerExt;
 
 impl AppState {
     pub fn new(
@@ -33,6 +34,7 @@ impl AppState {
             focus_manager: FocusManager::new(AppMode::Chat),
             quit: false,
             last_tick: Instant::now(),
+            hovered: None,
             editor: Editor::default(),
             command_catalog: Vec::new(),
             status: "starting hostd".to_string(),
@@ -156,7 +158,36 @@ impl AppState {
 
     /// Push a catalog surface onto the focus stack.
     pub fn push_surface(&mut self, surface: SurfaceId) {
+        // Modal authority invariant: while a Decide surface is pending, no
+        // other surface may take focus — the drawn modal IS the focus owner.
+        if let Some(decide) = self.pending_decide()
+            && decide != surface
+        {
+            return;
+        }
         self.push_focus(AppMode::from_surface(surface));
+    }
+
+    /// Host-priority surface currently in progress: Approval beats Tool
+    /// Interaction beats the focused surface. This is the single authority
+    /// for what is drawn **and** what owns input.
+    pub fn modal_surface(&self) -> Option<SurfaceId> {
+        self.pending_decide()
+            .or_else(|| self.focus_manager.active_surface())
+    }
+
+    /// A blocking Decide surface with a pending request (including the
+    /// pending-submission state, where hostd has not resolved yet).
+    pub fn pending_decide(&self) -> Option<SurfaceId> {
+        if !self.approvals.is_empty() {
+            Some(SurfaceId::Approval)
+        } else if !self.interactions.is_empty()
+            && self.interactions.front().is_some_and(|i| i.surfaced)
+        {
+            Some(SurfaceId::ToolInteraction)
+        } else {
+            None
+        }
     }
 
     pub fn pop_focus(&mut self) {

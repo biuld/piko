@@ -9,15 +9,20 @@ use ratatui::{
 };
 
 use crate::{
-    app::{AppMode, AppState},
+    app::{AppMode, AppState, HitId},
     features::{
-        agent_status::{AgentPanelState, AgentPanelView},
+        agent_status::AgentPanelView,
         bottom_bar::{BottomBar, BottomBarView},
+        model_selector::ModelCtx,
         notifications::NotificationLevel,
-        status::{StatusPanel, StatusPanelView},
+        session_list::SessionListCtx,
+        status::{StatusCtx, StatusPanel, StatusPanelView},
+        thinking::ThinkingCtx,
+        tree::TreeCtx,
     },
     layout::{Region, SurfaceId, compose_frame},
 };
+use piko_tui_layout::Component;
 
 pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let composed = compose_frame(app, frame.area());
@@ -119,6 +124,16 @@ fn agent_chrome_label(app: &AppState) -> Option<String> {
     )
 }
 
+/// Thin dispatch: call a surface panel's unified render via the
+/// [`Component`] trait, letting the compiler infer the context type.
+fn render_panel<P, C>(panel: &P, frame: &mut Frame<'_>, area: Rect, ctx: &C)
+where
+    P: Component<HitId, C>,
+    C: ?Sized,
+{
+    Component::<HitId, C>::render(panel, frame, area, ctx);
+}
+
 fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: SurfaceId) {
     match surface {
         SurfaceId::Agents => {
@@ -128,63 +143,74 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 .iter()
                 .map(|agent| app.agent_foreground(&agent.agent_instance_id, &agent.activity))
                 .collect();
-            AgentPanelState::render(
-                frame,
-                area,
-                AgentPanelView {
-                    state: &app.agent_panel,
-                    foreground: &foreground,
-                    queue: &app.queue_status,
-                    spinner_frame: app.spinner_frame,
-                    theme: &app.theme,
-                },
-            );
+            let view = AgentPanelView {
+                state: &app.agent_panel,
+                foreground: &foreground,
+                queue: &app.queue_status,
+                spinner_frame: app.spinner_frame,
+                theme: &app.theme,
+            };
+            render_panel(&app.agent_panel, frame, area, &view);
         }
-        SurfaceId::Sessions => app
-            .sessions
-            .render(frame, area, app.session_id(), &app.theme),
-        SurfaceId::Tree => app
-            .tree
-            .render(frame, area, &app.tree.filter, None, &app.theme),
-        SurfaceId::SummaryPrompt => app.tree.render(
-            frame,
-            area,
-            &app.tree.filter,
-            app.summary_prompt.as_ref(),
-            &app.theme,
-        ),
-        SurfaceId::Status => StatusPanel::render(
-            frame,
-            area,
-            StatusPanelView {
+        SurfaceId::Sessions => {
+            let ctx = SessionListCtx {
+                active_session_id: app.session_id(),
+                theme: &app.theme,
+            };
+            render_panel(&app.sessions, frame, area, &ctx);
+        }
+        SurfaceId::Tree => {
+            let ctx = TreeCtx {
+                filter: &app.tree.filter,
+                summary_prompt: None,
+                theme: &app.theme,
+            };
+            render_panel(&app.tree, frame, area, &ctx);
+        }
+        SurfaceId::SummaryPrompt => {
+            let ctx = TreeCtx {
+                filter: &app.tree.filter,
+                summary_prompt: app.summary_prompt.as_ref(),
+                theme: &app.theme,
+            };
+            render_panel(&app.tree, frame, area, &ctx);
+        }
+        SurfaceId::Status => {
+            let view = StatusPanelView {
                 session_id: app.session_id(),
                 turn_id: app.active_turn_id(),
                 queue: &app.queue_status,
                 notifications: &app.notifications,
                 theme: &app.theme,
-            },
-            &app.timeline,
-            &app.approvals,
-        ),
-        SurfaceId::Diagnostics => app.diagnostics.render(frame, area, &app.theme),
-        SurfaceId::Settings => app.settings.render(frame, area, &app.theme),
-        SurfaceId::Models => app.models.render(
-            frame,
-            area,
-            app.model.active_model_id.as_deref(),
-            app.model.active_provider.as_deref(),
-            &app.theme,
-        ),
-        SurfaceId::Thinking => app.thinking.render(
-            frame,
-            area,
-            app.model.active_thinking_level.as_deref(),
-            &app.theme,
-        ),
-        SurfaceId::Approval => app.approvals.render(frame, area, &app.theme),
-        SurfaceId::ToolInteraction => app.interactions.render(frame, area, &app.theme),
-        SurfaceId::AuthSelector => app.auth_selector.render(frame, area, &app.theme),
-        SurfaceId::Mcp => app.mcp.render(frame, area, &app.theme),
+            };
+            let ctx = StatusCtx {
+                view,
+                timeline: &app.timeline,
+                approvals: &app.approvals,
+            };
+            render_panel(&StatusPanel, frame, area, &ctx);
+        }
+        SurfaceId::Diagnostics => render_panel(&app.diagnostics, frame, area, &app.theme),
+        SurfaceId::Settings => render_panel(&app.settings, frame, area, &app.theme),
+        SurfaceId::Models => {
+            let ctx = ModelCtx {
+                active_model_id: app.model.active_model_id.as_deref(),
+                active_provider: app.model.active_provider.as_deref(),
+                theme: &app.theme,
+            };
+            render_panel(&app.models, frame, area, &ctx);
+        }
+        SurfaceId::Thinking => {
+            let ctx = ThinkingCtx {
+                active_level: app.model.active_thinking_level.as_deref(),
+                theme: &app.theme,
+            };
+            render_panel(&app.thinking, frame, area, &ctx);
+        }
+        SurfaceId::Approval => render_panel(&app.approvals, frame, area, &app.theme),
+        SurfaceId::ToolInteraction => render_panel(&app.interactions, frame, area, &app.theme),
+        SurfaceId::AuthSelector => render_panel(&app.auth_selector, frame, area, &app.theme),
+        SurfaceId::Mcp => render_panel(&app.mcp, frame, area, &app.theme),
     }
 }
 

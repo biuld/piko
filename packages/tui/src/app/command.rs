@@ -103,6 +103,9 @@ pub enum ToolInteractionAction {
     Cancel,
     NextStep,
     PrevStep,
+    GotoStep(usize),
+    SelectNext,
+    SelectPrev,
     Choice(usize),
 }
 
