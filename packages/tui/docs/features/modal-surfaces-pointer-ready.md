@@ -7,11 +7,11 @@
 ## Overview
 
 The TUI shows one modal surface at a time over a stable workspace plane.
-Surfaces are mounted by intent (Browse covers the body, Select and Decide sit
-in the composer dock, replacing it while active), and the modal that is
-**drawn** must be the surface that owns **focus and input**. Layout is solved
-once per frame into a single rect map; that map is the only geometry authority
-and is the source for pointer hit-testing.
+Surfaces are mounted by intent (Browse covers the body, Select/Dock sit in the
+composer dock replacing it while active, Modal is a centered dialog), and the
+modal that is **drawn** must be the surface that owns **focus and input**.
+Layout is solved once per frame into a single rect map; that map is the only
+geometry authority and is the source for pointer hit-testing.
 
 ## Problem
 

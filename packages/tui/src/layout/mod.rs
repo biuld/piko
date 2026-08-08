@@ -5,8 +5,8 @@ use crate::{
     navigation::{SelectBandBudget, compose_modals, compose_plane},
 };
 use piko_tui_layout::{
-    FramePlan, HitMap, HitRegion, ShellChrome, ShellSplit, SurfacePanel, build_hitmap, solve,
-    split_shell,
+    FramePlan, HitMap, HitRegion, ShellChrome, ShellSplit, SurfacePanel, build_hitmap,
+    cells_from_percent, solve, split_shell,
 };
 
 pub use crate::navigation::{PlaneMetrics, Region, SurfaceId};
@@ -28,6 +28,10 @@ pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
 pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetrics {
     let modal = resolve_modal_surface(app);
     let suggest = has_visible_suggestions(app) && modal.is_none();
+    let centered_size = match modal {
+        Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
+        _ => None,
+    };
 
     PlaneMetrics {
         notice: app.notifications.has_visible(),
@@ -42,7 +46,19 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
             .visible_height(&app.tui_config.editor, body.width),
         body_height: body.height,
         select_band: modal.and_then(|s| select_band_budget(app, s)),
+        centered_size,
     }
+}
+
+/// Centered size for the settings dialog: width 88% of the body, height from
+/// the menu content budget, capped below the body so it never fills the frame.
+fn settings_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let budget = app.settings.select_band_budget();
+    let width = cells_from_percent(body.width, 88).max(40).min(body.width);
+    let height = budget
+        .preferred_band_rows()
+        .min(body.height.saturating_sub(2));
+    (width, height)
 }
 
 /// Feature-declared content-row budget for Select / ComposerBand only.
@@ -78,7 +94,6 @@ fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBu
                 .unwrap_or(7);
             SelectBandBudget::standard_info(rows)
         }
-        SurfaceId::Settings => app.settings.select_band_budget(),
         _ => SelectBandBudget::minimal_stacked_list(0),
     })
 }
@@ -88,7 +103,7 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
     let modal_surface = resolve_modal_surface(app);
     let metrics = plane_metrics(app, shell.body);
     let plane = compose_plane(metrics);
-    let modals = compose_modals(modal_surface, metrics);
+    let modals = compose_modals(modal_surface, metrics, shell.body);
     let plan = solve(shell.body, &plane, &modals);
     ProductFrame {
         modal_surface,

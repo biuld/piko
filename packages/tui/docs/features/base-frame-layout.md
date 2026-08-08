@@ -7,7 +7,8 @@ frame
   → modals by SurfaceIntent
        Browse  → CoverBody
        Select  → ComposerBand (height from content-row budget)
-       Dock    → ComposerBand (approval / tool workflow / settings replace the composer)
+       Dock    → ComposerBand (approval / tool workflow replace the composer)
+       Modal   → Centered (settings dialog)
   → solve → paint
 ```
 

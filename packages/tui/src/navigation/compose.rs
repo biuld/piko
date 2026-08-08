@@ -1,9 +1,10 @@
 //! Product layout trees with `piko-tui-layout` primitives only.
 //!
 //! Workspace plane = Stream + optional Notice/Suggest + Composer.
-//! Surfaces = modal z-stack (Browse / Select / Dock).
+//! Surfaces = modal z-stack (Browse / Select / Dock / Modal).
 
 use piko_tui_layout::{FlexItem, ModalLayer, Node, flex_column, leaf};
+use ratatui::layout::Rect;
 
 use super::select_band::SelectBandBudget;
 use super::{Region, SurfaceId, SurfaceIntent};
@@ -19,6 +20,8 @@ pub struct PlaneMetrics {
     /// When the active modal is Select / Dock: content-row budget for
     /// ComposerBand.
     pub select_band: Option<SelectBandBudget>,
+    /// Preferred centered size (w, h) of the active Modal surface, when known.
+    pub centered_size: Option<(u16, u16)>,
 }
 
 /// Stable workspace plane (always composed).
@@ -41,12 +44,13 @@ pub fn compose_plane(m: PlaneMetrics) -> Node<Region> {
 pub fn compose_modals(
     host_surface: Option<SurfaceId>,
     metrics: PlaneMetrics,
+    body: Rect,
 ) -> Vec<ModalLayer<Region>> {
     let Some(surface) = host_surface else {
         return Vec::new();
     };
     let band = select_band_height(surface, metrics);
-    vec![surface.modal_layer(band)]
+    vec![surface.modal_layer(body, band, metrics.centered_size)]
 }
 
 fn select_band_height(surface: SurfaceId, m: PlaneMetrics) -> u16 {
@@ -82,6 +86,7 @@ mod tests {
             composer_height: 5,
             body_height: 30,
             select_band: None,
+            centered_size: None,
         }
     }
 
@@ -107,7 +112,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Sessions), metrics()),
+            &compose_modals(Some(SurfaceId::Sessions), metrics(), body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -122,7 +127,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Approval), metrics),
+            &compose_modals(Some(SurfaceId::Approval), metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -138,7 +143,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::ToolInteraction), metrics),
+            &compose_modals(Some(SurfaceId::ToolInteraction), metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -149,17 +154,18 @@ mod tests {
     }
 
     #[test]
-    fn settings_uses_composer_band() {
+    fn settings_is_centered_modal() {
         let body = Rect::new(0, 0, 80, 30);
-        let metrics = metrics_with_budget(SelectBandBudget::standard_search_list(6));
+        let mut metrics = metrics();
+        metrics.centered_size = Some((60, 24));
         let plan = solve(
             body,
             &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Settings), metrics),
+            &compose_modals(Some(SurfaceId::Settings), metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
-            ModalPlacement::ComposerBand
+            ModalPlacement::Centered { .. }
         ));
         assert!(plan.rects.contains_key(&Region::Stream));
     }
@@ -170,7 +176,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Models), metrics()),
+            &compose_modals(Some(SurfaceId::Models), metrics(), body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -186,7 +192,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics_with_budget(budget)),
-            &compose_modals(Some(SurfaceId::Models), metrics_with_budget(budget)),
+            &compose_modals(Some(SurfaceId::Models), metrics_with_budget(budget), body),
         );
         let layer = &plan.layers[0];
         assert!(matches!(layer.placement, ModalPlacement::ComposerBand));
@@ -202,7 +208,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Agents), metrics()),
+            &compose_modals(Some(SurfaceId::Agents), metrics(), body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -217,7 +223,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Thinking), metrics()),
+            &compose_modals(Some(SurfaceId::Thinking), metrics(), body),
         );
         assert!(matches!(
             plan.layers[0].placement,

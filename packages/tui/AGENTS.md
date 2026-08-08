@@ -11,7 +11,7 @@ piko-tui         →  Region / SurfaceId / AppMode, declare trees, paint, route 
 Terminal
   → split_shell (BottomBar chrome: agent · model · cwd · ctx · cost)
   → plane      Stream | Notice? | Suggest? | Composer
-  → modals     Browse CoverBody | Select ComposerBand | Dock ComposerBand
+  → modals     Browse CoverBody | Select/Dock ComposerBand | Modal Centered
   → solve → paint chrome → plane (unless CoverBody) → layers
 ```
 
@@ -31,7 +31,8 @@ Terminal
         modal z (intent)
         · Browse  CoverBody
         · Select  ComposerBand
-        · Dock    ComposerBand (approval / tool workflow / settings replace the composer)
+        · Dock    ComposerBand (approval / tool workflow replace the composer)
+        · Modal   Centered (settings dialog)
 ```
 
 **Agents** are a Select surface (`SurfaceId::Agents`, F4 / `/agents`) on
@@ -44,7 +45,8 @@ summary only.
 |--------|-----------|----------|
 | Browse | `CoverBody` | Sessions, Tree, Help, Status, Diagnostics, SummaryPrompt |
 | Select | `ComposerBand` | Agents, Models, Mcp, AuthSelector |
-| Dock | `ComposerBand` | Approval, ToolInteraction, Settings |
+| Dock | `ComposerBand` | Approval, ToolInteraction |
+| Modal | `Centered` | Settings |
 
 Define via `SurfaceId::intent()` / `modal_layer(body, band_h)`.
 

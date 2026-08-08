@@ -5,8 +5,10 @@
 //! - **Select** → [`ModalPlacement::ComposerBand`]
 //! - **Dock** → [`ModalPlacement::ComposerBand`] (approval and tool
 //!   interaction replace the composer)
+//! - **Modal** → [`ModalPlacement::Centered`] (settings dialog)
 
-use piko_tui_layout::{ModalLayer, ModalPlacement, leaf};
+use piko_tui_layout::{ModalLayer, ModalPlacement, cells_from_percent, leaf};
+use ratatui::layout::Rect;
 
 use super::Region;
 
@@ -39,6 +41,8 @@ pub enum SurfaceIntent {
     /// Blocking prompt that replaces the composer dock (approval, tool
     /// interaction).
     Dock,
+    /// Centered dialog (settings).
+    Modal,
 }
 
 impl SurfaceId {
@@ -56,14 +60,24 @@ impl SurfaceId {
                 SurfaceIntent::Select
             }
 
-            Self::Approval | Self::ToolInteraction | Self::Settings => SurfaceIntent::Dock,
+            Self::Approval | Self::ToolInteraction => SurfaceIntent::Dock,
+
+            Self::Settings => SurfaceIntent::Modal,
         }
     }
 
-    pub fn modal_placement(self) -> ModalPlacement {
+    pub fn modal_placement(self, body: Rect, centered_size: Option<(u16, u16)>) -> ModalPlacement {
         match self.intent() {
             SurfaceIntent::Browse => ModalPlacement::CoverBody,
             SurfaceIntent::Select | SurfaceIntent::Dock => ModalPlacement::ComposerBand,
+            SurfaceIntent::Modal => ModalPlacement::Centered {
+                max_width: centered_size
+                    .map(|(w, _)| w)
+                    .unwrap_or_else(|| cells_from_percent(body.width, 88).max(40)),
+                max_height: centered_size
+                    .map(|(_, h)| h)
+                    .unwrap_or_else(|| cells_from_percent(body.height, 70).max(8)),
+            },
         }
     }
 
@@ -72,8 +86,13 @@ impl SurfaceId {
     /// `composer_band_height` applies to ComposerBand surfaces (Select / Dock).
     /// Height is computed from feature **content-row** budgets (see
     /// [`crate::navigation::SelectBandBudget`]), not a fixed body percent.
-    pub fn modal_layer(self, composer_band_height: u16) -> ModalLayer<Region> {
-        let placement = self.modal_placement();
+    pub fn modal_layer(
+        self,
+        body: Rect,
+        composer_band_height: u16,
+        centered_size: Option<(u16, u16)>,
+    ) -> ModalLayer<Region> {
+        let placement = self.modal_placement(body, centered_size);
         let host_band_height = match placement {
             ModalPlacement::ComposerBand => composer_band_height,
             _ => 0,
