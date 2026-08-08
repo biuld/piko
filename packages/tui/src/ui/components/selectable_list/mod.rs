@@ -46,8 +46,6 @@ pub enum ColumnCellStyle {
     Secondary,
     /// Bold primary (named sessions); accent when selected.
     Emphasized,
-    /// Status label (e.g. “active”); always accent weight.
-    Status,
 }
 
 /// Horizontal alignment for a column cell.
@@ -87,14 +85,6 @@ impl ColumnCell {
         Self {
             text: text.into(),
             style: ColumnCellStyle::Emphasized,
-            align: ColumnAlign::Left,
-        }
-    }
-
-    pub fn status(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            style: ColumnCellStyle::Status,
             align: ColumnAlign::Left,
         }
     }

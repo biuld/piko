@@ -161,13 +161,6 @@ fn cell_style(style: ColumnCellStyle, is_selected: bool, is_active: bool, theme:
                 theme,
             )
         }
-        ColumnCellStyle::Status => with_selected_bg(
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-            is_selected,
-            theme,
-        ),
     }
 }
 

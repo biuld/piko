@@ -210,11 +210,7 @@ impl SessionList {
         if show_path_col {
             widths.push(Constraint::Percentage(30));
         }
-        widths.extend([
-            Constraint::Length(12),
-            Constraint::Length(8),
-            Constraint::Length(8),
-        ]);
+        widths.extend([Constraint::Length(12), Constraint::Length(8)]);
 
         let items: Vec<SelectableItem> = filtered
             .iter()
@@ -326,12 +322,6 @@ fn session_row(
     let is_active = active_session_id
         .map(|id| id == item.session_id)
         .unwrap_or(false);
-    let active_cell = if is_active {
-        ColumnCell::status("active").align(ColumnAlign::Right)
-    } else {
-        ColumnCell::secondary("").align(ColumnAlign::Right)
-    };
-    cells.push(active_cell);
 
     SelectableItem::columns(cells).active(is_active)
 }
@@ -383,6 +373,12 @@ mod tests {
     fn session_row_marks_active_session() {
         let row = session_row(&summary("s1"), Some("s1"), false, false);
         assert!(row.is_active);
+        assert!(
+            row.cells
+                .iter()
+                .all(|cell| !cell.text.eq_ignore_ascii_case("active")),
+            "active state must come from the component default, not a hand-drawn cell"
+        );
         let row = session_row(&summary("s1"), Some("s2"), false, false);
         assert!(!row.is_active);
     }
