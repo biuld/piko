@@ -1,31 +1,49 @@
 # piko built-in theme: dark
-# Optimized for dark terminal backgrounds.
-# Accent (#5f87ff) is for selection/highlights only — never panel borders.
+# Complete semantic catalog (96 color slots). See packages/tui/docs/features/themes.md.
+# Accent is for selection / marks only — never panel borders.
 
 [theme]
 name = "dark"
 
 [vars]
-# Brand / selection accent
+# Neutral gray ramp (GrokNight-inspired)
+bg_terminal_v = "#0a0a0a"
+bg_base_v = "#141414"
+bg_elevated_v = "#1c1c1c"
+bg_sunken_v = "#1c1c1c"
+bg_highlight_v = "#242424"
+bg_hover_v = "#2c2c2c"
+bg_selected_v = "#3a3a4a"
+bg_visual_v = "#363636"
+
+text_v = "#e1e1e1"
+text_secondary_v = "#c8c8c8"
+dim_v = "#585858"
+muted_v = "#6c6c6c"
+gray_bright_v = "#787878"
+
+# TokyoNight / GrokNight accents
+blue = "#7aa2f7"
+cyan = "#7dcfff"
+green = "#9ece6a"
+red = "#f7768e"
+yellow = "#e0af68"
+orange = "#ff9e64"
+magenta = "#bb9af7"
+purple = "#9d7cd8"
+teal = "#1abc9c"
+blue1 = "#3a95ab"
+gold = "#ffdb8d"
 accent_blue = "#5f87ff"
-cyan = "#00d7ff"
-green = "#b5bd68"
-red = "#cc6666"
-yellow = "#ffff00"
-text_color = "#d4d4d4"
-gray = "#808080"
-dim_gray = "#666666"
-dark_gray = "#505050"
-selected_bg = "#3a3a4a"
+
+red_dark = "#420e14"
+green_dark = "#063806"
 user_msg_bg = "#343541"
 tool_pending_bg = "#282832"
 tool_success_bg = "#283228"
 tool_error_bg = "#3c2828"
 custom_msg_bg = "#2d2838"
-# Layer-2 palette (referenced below — not used raw in UI code)
-purple = "#9575cd"
-gold = "#f0c674"
-sky = "#81a2be"
+
 syntax_comment = "#6A9955"
 syntax_keyword = "#569CD6"
 syntax_function = "#DCDCAA"
@@ -40,58 +58,126 @@ thinking_high = "#b294bb"
 thinking_xhigh = "#d183e8"
 
 [colors]
-# Layer 1 — accent is selection / marks; borders are neutral chrome only
+# Surfaces
+bg_base = "bg_base_v"
+bg_elevated = "bg_elevated_v"
+bg_sunken = "bg_sunken_v"
+bg_highlight = "bg_highlight_v"
+bg_hover = "bg_hover_v"
+bg_selected = "bg_selected_v"
+bg_terminal = "bg_terminal_v"
+bg_visual = "bg_visual_v"
+
+# Role accents
+accent_user = "text_secondary_v"
+accent_assistant = "magenta"
+accent_thinking = "magenta"
+accent_tool = "gray_bright_v"
+accent_system = "blue"
+accent_error = "red"
+accent_success = "green"
+accent_running = "magenta"
+accent_skill = "blue"
+
+# UI / mode accents
 accent = "accent_blue"
-accentAlt = "cyan"
-border = "gray"
-borderMuted = "dark_gray"
+accent_alt = "cyan"
+accent_plan = "gold"
+accent_model = "teal"
+accent_remember = "green"
+
+# Text hierarchy
+text = "text_v"
+text_secondary = "text_secondary_v"
+dim = "dim_v"
+muted = "muted_v"
+gray_bright = "gray_bright_v"
+
+# Status
 success = "green"
 error = "red"
 warning = "yellow"
 info = "accent_blue"
-muted = "gray"
-dim = "dim_gray"
-text = "text_color"
 
-# Layer 2 / 3
-thinkingText = "gray"
-selectedBg = "selected_bg"
-userMessageBg = "user_msg_bg"
-userMessageText = "text_color"
-customMessageBg = "custom_msg_bg"
-customMessageText = "text_color"
-customMessageLabel = "purple"
-toolPendingBg = "tool_pending_bg"
-toolSuccessBg = "tool_success_bg"
-toolErrorBg = "tool_error_bg"
-toolTitle = "text_color"
-toolOutput = "gray"
-mdHeading = "gold"
-mdLink = "sky"
-mdLinkUrl = "dim_gray"
-mdCode = "accent_blue"
-mdCodeBlock = "green"
-mdCodeBlockBorder = "gray"
-mdQuote = "gray"
-mdQuoteBorder = "gray"
-mdHr = "gray"
-mdListBullet = "accent_blue"
-toolDiffAdded = "green"
-toolDiffRemoved = "red"
-toolDiffContext = "gray"
-syntaxComment = "syntax_comment"
-syntaxKeyword = "syntax_keyword"
-syntaxFunction = "syntax_function"
-syntaxVariable = "syntax_variable"
-syntaxString = "syntax_string"
-syntaxNumber = "syntax_number"
-syntaxType = "syntax_type"
-syntaxOperator = "text_color"
-syntaxPunctuation = "text_color"
-thinkingOff = "dark_gray"
-thinkingMinimal = "thinking_minimal"
-thinkingLow = "thinking_low"
-thinkingMedium = "thinking_medium"
-thinkingHigh = "thinking_high"
-thinkingXhigh = "thinking_xhigh"
-bashMode = "green"
+# Borders / chrome
+border = "muted_v"
+border_muted = "dim_v"
+prompt_border = "#323237"
+prompt_border_active = "#505058"
+selection_border = "#3c3c41"
+hover_border = "#1e1e22"
+
+# Content semantic
+command = "yellow"
+path = "orange"
+running = "cyan"
+
+# Scrollbar
+scrollbar_bg = "#111111"
+scrollbar_fg = "bg_highlight_v"
+
+# Diff
+diff_delete_bg = "red_dark"
+diff_delete_fg = "red"
+diff_insert_bg = "green_dark"
+diff_insert_fg = "green"
+diff_equal_fg = "muted_v"
+diff_gutter_fg = "muted_v"
+
+# Transcript blocks
+user_message_bg = "user_msg_bg"
+user_message_text = "text_v"
+tool_pending_bg = "tool_pending_bg"
+tool_success_bg = "tool_success_bg"
+tool_error_bg = "tool_error_bg"
+tool_title = "text_v"
+tool_output = "muted_v"
+custom_message_bg = "custom_msg_bg"
+custom_message_text = "text_v"
+custom_message_label = "purple"
+thinking_text = "muted_v"
+
+# Markdown
+md_heading_h1 = "teal"
+md_heading_h2 = "blue"
+md_heading_h3 = "purple"
+md_heading_h4 = "gray_bright_v"
+md_heading_h5 = "muted_v"
+md_heading_h6 = "dim_v"
+md_code = "blue1"
+md_code_bg = "bg_sunken_v"
+md_text = "text_secondary_v"
+md_muted = "muted_v"
+md_link = "#7aa6da"
+md_link_url = "dim_v"
+md_quote = "muted_v"
+md_quote_border = "muted_v"
+md_hr = "muted_v"
+md_list_bullet = "accent_blue"
+md_task_checked = "green"
+md_task_unchecked = "text_secondary_v"
+
+# Syntax
+syntax_comment = "syntax_comment"
+syntax_keyword = "syntax_keyword"
+syntax_function = "syntax_function"
+syntax_variable = "syntax_variable"
+syntax_string = "syntax_string"
+syntax_number = "syntax_number"
+syntax_type = "syntax_type"
+syntax_operator = "text_v"
+syntax_punctuation = "text_v"
+
+# Thinking levels
+thinking_off = "dim_v"
+thinking_minimal = "thinking_minimal"
+thinking_low = "thinking_low"
+thinking_medium = "thinking_medium"
+thinking_high = "thinking_high"
+thinking_xhigh = "thinking_xhigh"
+
+# Misc
+bash_mode = "green"
+paste_bg = "#111111"
+paste_fg = "text_secondary_v"
+paste_dim = "dim_v"

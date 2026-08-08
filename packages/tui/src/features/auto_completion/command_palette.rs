@@ -46,7 +46,8 @@ impl AutoCompleteProvider for CommandPaletteProvider {
                 cells: vec![
                     CompletionCell {
                         text: command.slash.clone(),
-                        style: CellStyle::Accent,
+                        // Primary label: text when idle, accent only when selected.
+                        style: CellStyle::Default,
                     },
                     CompletionCell {
                         text: command.detail.clone(),

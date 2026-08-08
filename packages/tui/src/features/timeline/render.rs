@@ -130,8 +130,8 @@ fn component_lines(
 }
 
 fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    let bg = theme.get("userMessageBg");
-    let body = Style::default().fg(theme.get("userMessageText")).bg(bg);
+    let bg = theme.user_message_bg;
+    let body = Style::default().fg(theme.user_message_text).bg(bg);
     let mut lines = vec![filled_line("", body, width)];
     for line in text_lines(&component.text) {
         lines.push(filled_line(format!(" {line}"), body, width));
@@ -161,7 +161,7 @@ fn notice_lines(label: &'static str, color: Color, text: String) -> Vec<Line<'st
 }
 
 fn error_lines(component: &ErrorComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    let bg = theme.get("toolErrorBg");
+    let bg = theme.tool_error_bg;
     let body = Style::default().fg(theme.error).bg(bg);
     let mut lines = vec![filled_line("", body, width)];
     for line in text_lines(&component.text) {
@@ -204,7 +204,7 @@ fn assistant_lines(
                     lines.push(Line::from(Span::styled(
                         format!(" {line}"),
                         Style::default()
-                            .fg(theme.get("thinkingText"))
+                            .fg(theme.thinking_text)
                             .add_modifier(Modifier::ITALIC),
                     )));
                 }
@@ -213,7 +213,7 @@ fn assistant_lines(
                 lines.push(Line::from(Span::styled(
                     " Thinking...",
                     Style::default()
-                        .fg(theme.get("thinkingText"))
+                        .fg(theme.thinking_text)
                         .add_modifier(Modifier::ITALIC),
                 )));
             }
@@ -264,15 +264,15 @@ fn tool_lines(
     width: u16,
 ) -> Vec<Line<'static>> {
     let bg = match tool.status {
-        ToolStatus::Running => theme.get("toolPendingBg"),
-        ToolStatus::Completed => theme.get("toolSuccessBg"),
-        ToolStatus::Failed => theme.get("toolErrorBg"),
+        ToolStatus::Running => theme.tool_pending_bg,
+        ToolStatus::Completed => theme.tool_success_bg,
+        ToolStatus::Failed => theme.tool_error_bg,
     };
     let title_style = Style::default()
-        .fg(theme.get("toolTitle"))
+        .fg(theme.tool_title)
         .add_modifier(Modifier::BOLD)
         .bg(bg);
-    let output_style = Style::default().fg(theme.get("toolOutput")).bg(bg);
+    let output_style = Style::default().fg(theme.tool_output).bg(bg);
     let muted_style = Style::default().fg(theme.dim).bg(bg);
     let mut lines = vec![
         filled_line("", output_style, width),

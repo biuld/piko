@@ -4,243 +4,270 @@
 
 ## Overview
 
-The piko theme system controls all colors in the TUI through a set of semantic
-color tokens. Theme files are TOML documents that assign concrete colors to
-each token. Switching themes changes the entire visual appearance without
-modifying any rendering code.
+The piko TUI theme system is a **fixed semantic color catalog**: every theme
+defines the same set of typed slots (backgrounds, role accents, text ramp,
+borders, markdown, syntax, …). Paint changes with the theme; structure does
+not.
+
+This matches the model used by Grok’s pager theme
+(`Theme` slots in xai-grok-pager-render): all colors come from the theme
+struct; render code never hard-codes RGB.
+
+Built-in paint lives under `packages/tui/resources/themes/`. Users and projects
+may override any subset of slots via TOML in `~/.piko/themes/` or
+`.piko/themes/`.
 
 ## Design Principles
 
-1. **Semantic over literal** — Tokens describe meaning (`success`, `error`,
-   `dim`), not appearance (`green`, `red`, `gray`). A "dark" theme and a
-   "light" theme define different concrete colors for the same semantic token.
+1. **Semantic over literal** — Slots describe meaning (`accent_user`,
+   `success`, `dim`), not “that blue”. Dark and light themes assign different
+   concrete colors to the same slots.
+2. **Fixed catalog** — A theme always has
+   [`Theme::SLOT_COUNT`](../../src/theme/slots.rs) (= **96**) color slots plus a
+   display `name`. Missing custom keys fall back to built-in `dark`.
+3. **TOML authoring** — Theme files use TOML, consistent with other piko config.
+   `[vars]` holds reusable palette colors; `[colors]` maps slots → values.
+4. **No hardcoded colors in UI** — Components read `theme.<slot>` (or
+   `theme.get("…")` for dynamic / legacy names). Empty string `""` means
+   terminal default (`Color::Reset`).
+5. **Accent ≠ chrome** — `accent` is selection / active marks only. Panel frames
+   use `border` / `border_muted`.
 
-2. **TOML format** — Theme files use TOML, consistent with piko's other
-   configuration files. TOML sections naturally separate metadata, variables,
-   and color definitions.
+## Catalog (96 slots)
 
-3. **No hardcoded colors** — Every component renders with theme tokens. The
-   only exception is "default terminal color" (token `text` resolving to `""`).
+Grouped the same way as the typed `Theme` struct.
 
-4. **Extensible** — Built-in themes ship with piko. Users and projects can add
-   custom themes in `~/.piko/themes/` and `.piko/themes/`. Priority:
-   built-in < global < project.
+### Surfaces — 8
+
+| Slot | Purpose |
+|------|---------|
+| `bg_base` | Default viewport / body background |
+| `bg_elevated` | Raised surface (input, elevated panels) |
+| `bg_sunken` | Recessed surface (code blocks) |
+| `bg_highlight` | Soft highlight fill |
+| `bg_hover` | Hover row fill |
+| `bg_selected` | Selected list/tree row background |
+| `bg_terminal` | Explicit terminal background |
+| `bg_visual` | Text selection background |
+
+### Role accents — 9
+
+Vertical marks / author labels on transcript blocks.
+
+| Slot | Purpose |
+|------|---------|
+| `accent_user` | User prompt |
+| `accent_assistant` | Assistant message |
+| `accent_thinking` | Reasoning / thinking |
+| `accent_tool` | Tool call |
+| `accent_system` | System notice |
+| `accent_error` | Error mark |
+| `accent_success` | Success mark |
+| `accent_running` | In-progress mark |
+| `accent_skill` | Skill / slash skill invocation |
+
+### UI / mode accents — 5
+
+| Slot | Purpose |
+|------|---------|
+| `accent` | Selection, active marks (not borders) |
+| `accent_alt` | Secondary marks (session labels) |
+| `accent_plan` | Plan mode |
+| `accent_model` | Model name chrome |
+| `accent_remember` | Remember / pin mode |
+
+### Text hierarchy — 5
+
+| Slot | Purpose |
+|------|---------|
+| `text` | Primary body text |
+| `text_secondary` | Secondary body |
+| `dim` | Tertiary / meta punctuation / separators |
+| `muted` | Secondary meta, collapsed content |
+| `gray_bright` | Bright gray (tool labels) |
+
+### Status — 4
+
+| Slot | Purpose |
+|------|---------|
+| `success` | Completed / positive outcomes |
+| `error` | Failed / error labels |
+| `warning` | Running / warning notifications |
+| `info` | Info notifications |
+
+### Borders / chrome — 6
+
+| Slot | Purpose |
+|------|---------|
+| `border` | Focused frame chrome |
+| `border_muted` | Unfocused frame chrome |
+| `prompt_border` | Composer border (idle) |
+| `prompt_border_active` | Composer border (focused) |
+| `selection_border` | Selection box edge |
+| `hover_border` | Hover outline |
+
+### Content semantic — 3
+
+| Slot | Purpose |
+|------|---------|
+| `command` | Shell command text |
+| `path` | File paths |
+| `running` | Live / running indicator color |
+
+### Scrollbar — 2
+
+| Slot | Purpose |
+|------|---------|
+| `scrollbar_bg` | Track |
+| `scrollbar_fg` | Thumb |
+
+### Diff — 6
+
+| Slot | Purpose |
+|------|---------|
+| `diff_delete_bg` / `diff_delete_fg` | Removed lines |
+| `diff_insert_bg` / `diff_insert_fg` | Added lines |
+| `diff_equal_fg` | Context / unchanged |
+| `diff_gutter_fg` | Line numbers / gutter |
+
+### Transcript blocks — 11
+
+| Slot | Purpose |
+|------|---------|
+| `user_message_bg` / `user_message_text` | User prompt card |
+| `tool_pending_bg` / `tool_success_bg` / `tool_error_bg` | Tool card fill by status |
+| `tool_title` / `tool_output` | Tool header / body |
+| `custom_message_bg` / `custom_message_text` / `custom_message_label` | Extension messages |
+| `thinking_text` | Thinking block body |
+
+### Markdown — 18
+
+| Slot | Purpose |
+|------|---------|
+| `md_heading_h1` … `md_heading_h6` | Heading levels |
+| `md_code` / `md_code_bg` | Inline / fenced code |
+| `md_text` / `md_muted` | Body / muted markdown |
+| `md_link` / `md_link_url` | Links |
+| `md_quote` / `md_quote_border` | Blockquotes |
+| `md_hr` | Horizontal rules |
+| `md_list_bullet` | List markers |
+| `md_task_checked` / `md_task_unchecked` | Task list markers |
+
+### Syntax — 9
+
+`syntax_comment`, `syntax_keyword`, `syntax_function`, `syntax_variable`,
+`syntax_string`, `syntax_number`, `syntax_type`, `syntax_operator`,
+`syntax_punctuation`.
+
+(Note: fenced code highlighting currently uses bundled syntect themes; these
+slots are reserved for token-level paint when the highlight path is fully
+token-driven.)
+
+### Thinking level picker — 6
+
+`thinking_off`, `thinking_minimal`, `thinking_low`, `thinking_medium`,
+`thinking_high`, `thinking_xhigh`.
+
+### Misc — 4
+
+| Slot | Purpose |
+|------|---------|
+| `bash_mode` | Bash / shell mode indicator |
+| `paste_bg` / `paste_fg` / `paste_dim` | Paste chip / preview |
 
 ## File Format
 
-Theme files use TOML with three sections:
-
 ```toml
-# piko theme: my-theme
-# Custom theme description.
-
 [theme]
 name = "my-theme"
 
 [vars]
-blue = "#5f87ff"
-gray = 242
+blue = "#7aa2f7"
+gray = "#6c6c6c"
 
 [colors]
 accent = "blue"
-border = "blue"
-borderMuted = "gray"
-success = "#b5bd68"
-error = "#cc6666"
-warning = "#ffff00"
-muted = "#808080"
-dim = "#666666"
-text = ""
+border = "gray"
+# any of the 96 slots …
 ```
 
-| Section   | Required | Description                                              |
-|-----------|----------|----------------------------------------------------------|
-| `[theme]` | yes      | Metadata: `name` (unique, must not contain `/`)          |
-| `[vars]`  | no       | Reusable color variables. Keys are referenced by name in `[colors]` |
-| `[colors]` | yes     | All color token assignments (see Token Reference)         |
+| Section | Required | Description |
+|---------|----------|-------------|
+| `[theme]` | yes | `name` (must not contain `/`) |
+| `[vars]` | no | Reusable palette; referenced from `[colors]` |
+| `[colors]` | yes | Slot → color |
 
 ### Color Values
 
-A color value in `[vars]` or `[colors]` can be one of:
+| TOML type | Example | Meaning |
+|-----------|---------|---------|
+| `"#rrggbb"` | `"#ff0000"` | Hex RGB |
+| string | `"blue"` | `[vars]` reference (chainable) |
+| integer | `39` | xterm 256 index |
+| `""` | `""` | Terminal default (`Reset`) |
 
-| TOML type      | Example      | Meaning                                |
-|---------------|-------------|----------------------------------------|
-| string `"#…"`  | `"#ff0000"` | 6-digit hex RGB                        |
-| string (other) | `"blue"`    | Variable reference to a key in `[vars]` |
-| integer        | `39`         | xterm 256-color palette index (0–255)   |
-| string `""`    | `""`        | Terminal's default foreground/background |
+### Legacy key aliases
 
-A string that matches a `[vars]` key is resolved through that variable — so
-`"blue"` in `[colors]` looks up the `blue` key in `[vars]`. Hex values are
-distinguished by the `#` prefix. Variable references can chain: `a = "b"`,
-`b = "#00ff00"` is valid. Circular references are detected and rejected.
+Older camelCase names still resolve (e.g. `userMessageBg` →
+`user_message_bg`, `mdHeading` → `md_heading_h1`, `toolDiffAdded` →
+`diff_insert_fg`). Prefer snake_case slots for new themes.
 
-## Token Reference
+## Token-to-component mapping
 
-### Layer 1 — Core UI
+| Component | Primary slots |
+|-----------|----------------|
+| Timeline | role accents, `user_message_*`, `tool_*`, `thinking_text`, markdown slots |
+| Agent strip | `accent`, `warning`, `success`, `error`, `dim`, `border` / `border_muted` |
+| Editor | `text`, `prompt_border` / `prompt_border_active` |
+| Lists / palette | `accent`, `bg_selected`, `dim`, `border` / `border_muted` |
+| Bottom bar | `muted`, `dim` |
+| Notifications | `info`, `warning`, `error` |
+| Diff / diagnostics | `diff_*` |
 
-These tokens are actively used by all components.
+## File locations
 
-| Token          | Purpose                                              |
-|---------------|------------------------------------------------------|
-| `text`        | Default body text                                    |
-| `dim`         | Tertiary / very dim text (details, placeholders)      |
-| `muted`       | Secondary / muted text (descriptions, metadata)       |
-| `accent`      | Primary accent: selected items, active marks, links — **not** chrome borders |
-| `accentAlt`   | Secondary accent (session labels, alternate states)   |
-| `success`     | Success states (completed, assistant label)           |
-| `error`       | Error states (failed tools, error labels)             |
-| `warning`     | Warning states (running tools, warning notifications) |
-| `info`        | Info states (system messages, info notifications)     |
-| `border`      | Panel / focused frame chrome                          |
-| `borderMuted` | Subtle / unfocused frame chrome                       |
+| Priority | Location | Scope |
+|----------|----------|-------|
+| low | built-in `dark` / `light` | shipped |
+| mid | `~/.piko/themes/*.toml` | user |
+| high | `.piko/themes/*.toml` | project |
 
-### Layer 2 — Extended
-
-These tokens are parsed and reserved for planned features (markdown rendering,
-syntax highlighting, tool diffs).
-
-| Token group   | Count | Tokens                                                                 |
-|---------------|-------|------------------------------------------------------------------------|
-| Markdown      | 10    | `mdHeading`, `mdLink`, `mdLinkUrl`, `mdCode`, `mdCodeBlock`, `mdCodeBlockBorder`, `mdQuote`, `mdQuoteBorder`, `mdHr`, `mdListBullet` |
-| Syntax        | 9     | `syntaxComment`, `syntaxKeyword`, `syntaxFunction`, `syntaxVariable`, `syntaxString`, `syntaxNumber`, `syntaxType`, `syntaxOperator`, `syntaxPunctuation` |
-| Tool diffs    | 3     | `toolDiffAdded`, `toolDiffRemoved`, `toolDiffContext`                  |
-| Thinking      | 6     | `thinkingOff`, `thinkingMinimal`, `thinkingLow`, `thinkingMedium`, `thinkingHigh`, `thinkingXhigh` |
-| Other         | 3     | `thinkingText`, `bashMode`, `toolOutput`                               |
-
-### Layer 3 — Backgrounds
-
-Optional background tokens. When unset, the terminal default background is used.
-
-| Token              | Purpose                           |
-|--------------------|-----------------------------------|
-| `selectedBg`       | Selected list item background      |
-| `userMessageBg`    | User message card background       |
-| `customMessageBg`  | Extension message background       |
-| `toolPendingBg`    | Tool box (pending)                 |
-| `toolSuccessBg`    | Tool box (success)                 |
-| `toolErrorBg`      | Tool box (error)                   |
-| `userMessageText`  | User message text color            |
-| `customMessageText` | Extension message text color      |
-| `customMessageLabel` | Extension message label color    |
-| `toolTitle`        | Tool box title color               |
-
-### Token-to-Component Mapping
-
-Where each token is used:
-
-| Component            | Tokens used                                              |
-|----------------------|----------------------------------------------------------|
-| Timeline             | `text`, `dim`, `accent` (system), `accentAlt` (session), `success` (assistant), `error`, `warning` (tool running), `border`, `userMessageBg`, `toolPendingBg`, `toolSuccessBg`, `toolErrorBg` |
-| AgentPanel           | `accent` for markers when active, `warning` / `text` / `dim`; chrome: `border` / `borderMuted` |
-| Editor               | `text`, `borderMuted` (chrome) |
-| NotificationRow      | `info`, `warning`, `error` (by notification level)        |
-| BottomBar            | `muted` (body text), `dim` (separator dots)               |
-| FilterableList / Pane | `accent` (selected row), `dim` (detail); frame: `border` / `borderMuted` |
-| Suggestions          | `accent` (selected), `dim` (detail); frame: `border`      |
-| ApprovalPanel        | `warning` (prompt text); frame: `border`                  |
-| StatusPanel          | `accent` (key labels), `warning` (preview); frame: `border` |
-| HelpPanel            | `text`, `dim`; frame: `border`                            |
-
-## File Locations
-
-Themes are discovered from the following locations, in priority order (higher
-priority overrides lower):
-
-| Priority | Location             | Scope   | Example path                  |
-|----------|---------------------|---------|-------------------------------|
-| 1 (low)  | Built-in            | shipped | `dark`, `light`               |
-| 2        | Global user themes  | user    | `~/.piko/themes/*.toml`       |
-| 3 (high) | Project themes      | project | `.piko/themes/*.toml`         |
-
-### Name Resolution
-
-Theme names come from the `name` field inside `[theme]` (not the filename).
-Two files with the same `name` cause the higher-priority location to shadow the
-lower one. A project-level theme overrides a global theme with the same name.
-
-### Custom Themes
-
-Custom themes follow the same TOML format. Create a file like
-`~/.piko/themes/catppuccin.toml`:
-
-```toml
-[theme]
-name = "catppuccin"
-
-[vars]
-rosewater = "#f5e0dc"
-mauve = "#cba6f7"
-# ...
-
-[colors]
-accent = "mauve"
-border = "mauve"
-# ...
-```
-
-The theme then appears in the `/settings` selector alongside built-in themes.
+Names come from `[theme].name`, not the filename. Higher priority shadows the same name.
 
 ## Configuration
-
-### Selecting a Theme
-
-Users set the active theme in `settings.toml`:
 
 ```toml
 [tui.theme]
 name = "dark"
 ```
 
-Or through the `/settings` panel in the TUI.
+Flow:
 
-### Settings Flow
+1. Read `tui.theme.name` from hostd at startup.
+2. If unset, auto-detect terminal background → built-in `dark` or `light`.
+3. Invalid / missing theme falls back to `dark` with a notification.
+4. Custom theme files may hot-reload on save.
 
-1. TUI reads `tui.theme.name` from hostd settings at startup.
-2. If unset, piko auto-detects terminal background (dark/light) and picks the
-   corresponding built-in theme.
-3. The resolved theme is loaded and used by all rendering functions.
-4. If the theme file is missing or invalid, piko falls back to built-in `dark`
-   and emits a notification.
-
-### Hot Reload
-
-When the active theme is a custom file (not built-in), piko watches the file
-for changes. Saving the file triggers an immediate reload. If the file becomes
-invalid while being edited, the last valid state is kept and an error
-notification is shown.
-
-## Built-in Themes
-
-Authoritative definitions live under `packages/tui/resources/themes/`. Missing
-tokens on custom themes are filled from the dark defaults.
+## Built-in themes
 
 ### `dark`
 
-Optimized for dark terminal backgrounds. Brand accent is `#5f87ff` for
-selection and highlights only. Panel chrome uses neutral `border` / `borderMuted`
-— never the accent color.
-
-```toml
-[theme]
-name = "dark"
-
-[vars]
-accent_blue = "#5f87ff"
-cyan = "#00d7ff"
-# … full palette in resources/themes/dark.toml
-
-[colors]
-accent = "accent_blue"
-accentAlt = "cyan"
-border = "gray"
-borderMuted = "dark_gray"
-# …
-```
+Neutral gray base (GrokNight-style ramp) with selection accent `#5f87ff`.
+Role accents use magenta assistant / thinking, gray tools, blue system.
+Full assignment: `resources/themes/dark.toml`.
 
 ### `light`
 
-Optimized for light terminal backgrounds. Same token model; accent stays on
-selection, borders stay neutral gray.
+Light gray base (GrokDay-style ramp) with deepened accents for contrast.
+Full assignment: `resources/themes/light.toml`.
 
-See `resources/themes/light.toml` for the full assignment table.
+## Extending the catalog
+
+Adding a slot requires:
+
+1. Field on `Theme` in `src/theme/slots.rs` and entry in the `theme_slots!` list.
+2. Assignment in both built-in TOML files.
+3. Doc row in this PRD.
+4. `Theme::SLOT_COUNT` / tests update.
+
+Do not introduce one-off RGB in feature code.

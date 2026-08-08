@@ -86,9 +86,9 @@ pub fn placeholder_style(theme: &Theme) -> Style {
     Style::default().fg(theme.dim)
 }
 
-/// Optional selected-row background when the theme defines `selectedBg`.
+/// Optional selected-row background when the theme paints `bg_selected`.
 pub fn selected_bg(theme: &Theme) -> Option<Color> {
-    let c = theme.get("selectedBg");
+    let c = theme.bg_selected;
     if matches!(c, Color::Reset) {
         None
     } else {

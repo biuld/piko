@@ -50,11 +50,6 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                     if !current_line.is_empty() {
                         flush_line(&mut current_line, &mut lines);
                     }
-                    let heading_style = Style::default()
-                        .fg(theme.get("mdHeading"))
-                        .add_modifier(Modifier::BOLD);
-                    style_stack.push(heading_style);
-
                     let heading_level_num = match level {
                         pulldown_cmark::HeadingLevel::H1 => 1,
                         pulldown_cmark::HeadingLevel::H2 => 2,
@@ -63,7 +58,12 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                         pulldown_cmark::HeadingLevel::H5 => 5,
                         pulldown_cmark::HeadingLevel::H6 => 6,
                     };
-                    let prefix = "#".repeat(heading_level_num) + " ";
+                    let heading_style = Style::default()
+                        .fg(theme.md_heading(heading_level_num))
+                        .add_modifier(Modifier::BOLD);
+                    style_stack.push(heading_style);
+
+                    let prefix = "#".repeat(heading_level_num as usize) + " ";
                     current_line.push(Span::styled(prefix, heading_style));
                 }
                 Tag::BlockQuote(_) => {
@@ -105,7 +105,7 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                         current_line.push(Span::from("  ".repeat(indent_depth)));
                     }
 
-                    let marker_color = theme.get("mdListBullet");
+                    let marker_color = theme.md_list_bullet;
                     if let Some(list_type) = list_stack.last_mut() {
                         if let Some(num) = list_type {
                             current_line.push(Span::styled(
@@ -133,7 +133,7 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                 Tag::Link { .. } => {
                     style_stack.push(
                         Style::default()
-                            .fg(theme.get("mdLink"))
+                            .fg(theme.md_link)
                             .add_modifier(Modifier::UNDERLINED),
                     );
                 }
@@ -175,11 +175,11 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                 } else {
                     let mut style = get_current_style(&style_stack);
                     if in_blockquote {
-                        style = style.fg(theme.get("mdQuote"));
+                        style = style.fg(theme.md_quote);
                         if current_line.is_empty() {
                             current_line.push(Span::styled(
                                 " > ",
-                                Style::default().fg(theme.get("mdQuoteBorder")),
+                                Style::default().fg(theme.md_quote_border),
                             ));
                         }
                     }
@@ -187,7 +187,7 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                 }
             }
             Event::Code(code) => {
-                let code_style = Style::default().fg(theme.get("mdCode"));
+                let code_style = Style::default().fg(theme.md_code);
                 current_line.push(Span::styled(code.to_string(), code_style));
             }
             Event::SoftBreak => {

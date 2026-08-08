@@ -1,17 +1,21 @@
-//! Theme system: TOML-based semantic color tokens.
+//! Theme system: typed semantic color slots + TOML loading.
 //!
-//! Built-in themes are embedded via `include_str!` from `resources/themes/`.
-//! Custom themes are loaded from `~/.piko/themes/` and `.piko/themes/`.
-//!
-//! Architecture:
-//! 1. ThemeToml deserialized from TOML
-//! 2. Var references resolved ([vars] → [colors])
-//! 3. Color values converted to ratatui `Color`
-//! 4. Missing tokens filled from built-in dark defaults
+//! Architecture (Grok-style flat `Theme` slots + piko TOML authoring):
+//! 1. [`Theme`] — every render-facing color is a named field ([`Theme::SLOT_COUNT`] slots).
+//! 2. Built-in themes ship as TOML; custom themes live in `~/.piko/themes/`.
+//! 3. Missing slots on custom files fall back to built-in `dark`.
+//! 4. Legacy camelCase keys are accepted via slot aliases.
+
+mod resolve;
+mod slots;
+
+#[cfg(test)]
+mod tests;
+
+pub use slots::Theme;
 
 use std::collections::HashMap;
 
-use ratatui::style::Color;
 use serde::Deserialize;
 
 // ── TOML shapes ──────────────────────────────────────────────────────────────
@@ -45,36 +49,9 @@ enum ColorValue {
 // ── Embedded built-in themes ─────────────────────────────────────────────────
 
 const DARK_TOML: &str = include_str!("../../resources/themes/dark.toml");
+const LIGHT_TOML: &str = include_str!("../../resources/themes/light.toml");
 
-// ── Theme ────────────────────────────────────────────────────────────────────
-
-/// Resolved theme: all Layer-1 tokens are ratatui `Color` values, ready for
-/// direct use in rendering.
-#[derive(Clone, Debug)]
-pub struct Theme {
-    pub name: String,
-
-    // ── Layer 1: Core UI (actively used in rendering) ──
-    pub text: Color,
-    pub dim: Color,
-    pub muted: Color,
-    pub accent: Color,
-    pub accent_alt: Color,
-    pub success: Color,
-    pub error: Color,
-    pub warning: Color,
-    pub info: Color,
-    pub border: Color,
-    pub border_muted: Color,
-
-    // All resolved tokens (Layer 1 + Layer 2 + Layer 3), keyed by token name.
-    // Layer-1 fields above are convenience accessors into this map.
-    all: HashMap<String, Color>,
-}
-
-mod resolve;
-#[cfg(test)]
-mod tests;
+// ── Errors ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 pub enum ThemeError {
@@ -101,4 +78,48 @@ impl std::fmt::Display for ThemeError {
 
 impl std::error::Error for ThemeError {}
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ── Public constructors (on Theme) ───────────────────────────────────────────
+
+impl Theme {
+    /// Load the built-in dark theme.
+    pub fn dark() -> Self {
+        Self::from_toml_str(DARK_TOML).expect("built-in dark.toml must be valid")
+    }
+
+    /// Load the built-in light theme.
+    pub fn light() -> Self {
+        Self::from_toml_str(LIGHT_TOML).expect("built-in light.toml must be valid")
+    }
+
+    /// Resolve a theme by name (built-ins today; unknown → dark).
+    pub fn load(name: &str) -> Self {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "light" => Self::light(),
+            // "dark" and anything unknown fall back to the complete dark catalog.
+            _ => Self::dark(),
+        }
+    }
+
+    /// Parse and resolve a TOML theme string.
+    pub fn from_toml_str(toml_str: &str) -> Result<Self, ThemeError> {
+        let raw: ThemeToml =
+            toml::from_str(toml_str).map_err(|e| ThemeError::Parse(e.to_string()))?;
+
+        if raw.theme.name.contains('/') {
+            return Err(ThemeError::InvalidName(raw.theme.name));
+        }
+
+        let vars = resolve::resolve_vars(&raw.vars)?;
+        let resolved = resolve::resolve_colors(&raw.colors, &vars)?;
+
+        // Built-in dark is the complete baseline; never recurse through dark()
+        // when parsing dark itself (would loop). Completeness is guaranteed
+        // by resources/themes/dark.toml asserting all slots.
+        if raw.theme.name == "dark" {
+            Ok(resolve::theme_from_complete_map(raw.theme.name, &resolved)?)
+        } else {
+            let base = Self::dark();
+            Ok(Self::with_overrides(&base, raw.theme.name, &resolved))
+        }
+    }
+}

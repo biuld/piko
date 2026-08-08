@@ -288,20 +288,10 @@ fn message_preview(message: &Message) -> String {
 fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme) -> Line<'a> {
     let style = match kind {
         DiagnosticsKind::Diff if line.starts_with('+') && !line.starts_with("+++") => {
-            let c = theme.get("toolDiffAdded");
-            if matches!(c, ratatui::style::Color::Reset) {
-                Style::default().fg(theme.success)
-            } else {
-                Style::default().fg(c)
-            }
+            Style::default().fg(theme.diff_insert_fg)
         }
         DiagnosticsKind::Diff if line.starts_with('-') && !line.starts_with("---") => {
-            let c = theme.get("toolDiffRemoved");
-            if matches!(c, ratatui::style::Color::Reset) {
-                Style::default().fg(theme.error)
-            } else {
-                Style::default().fg(c)
-            }
+            Style::default().fg(theme.diff_delete_fg)
         }
         DiagnosticsKind::Diff if line.starts_with("@@") => Style::default().fg(theme.info),
         _ if line.starts_with("──") => Style::default().fg(theme.muted),

@@ -22,9 +22,10 @@ use provider::AutoCompleteProvider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellStyle {
+    /// Primary column: `text` idle, `accent` when the row is selected.
     Default,
+    /// Secondary / description column.
     Dim,
-    Accent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,19 +206,6 @@ impl AutoComplete {
                             theme,
                         ),
                         CellStyle::Dim => Style::default().fg(theme.dim),
-                        CellStyle::Accent => {
-                            if is_selected {
-                                with_selected_bg(
-                                    Style::default()
-                                        .fg(theme.accent)
-                                        .add_modifier(Modifier::BOLD),
-                                    true,
-                                    theme,
-                                )
-                            } else {
-                                Style::default().fg(theme.accent)
-                            }
-                        }
                     };
 
                     cells.push(Cell::from(Line::from(Span::styled(

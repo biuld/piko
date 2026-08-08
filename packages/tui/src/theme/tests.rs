@@ -1,12 +1,12 @@
-use super::resolve::*;
-
 use super::*;
+use ratatui::style::Color;
 
 #[test]
 fn test_dark_theme_loads() {
     let theme = Theme::dark();
     assert_eq!(theme.name, "dark");
-    // Layer 1 tokens should be non-Reset
+    assert_eq!(Theme::SLOT_NAMES.len(), Theme::SLOT_COUNT);
+    // Core tokens present
     assert_ne!(theme.accent, Color::Reset);
     assert_ne!(theme.text, Color::Reset);
     assert_ne!(theme.border, Color::Reset);
@@ -18,23 +18,35 @@ fn test_dark_theme_loads() {
 
 #[test]
 fn test_light_theme_loads() {
-    let light = include_str!("../../resources/themes/light.toml");
-    let theme = Theme::from_toml_str(light).expect("built-in light.toml must be valid");
+    let theme = Theme::light();
     assert_eq!(theme.name, "light");
     assert_ne!(theme.accent, Color::Reset);
+    assert_eq!(theme.bg_base, Color::Rgb(0xee, 0xee, 0xee));
 }
 
 #[test]
-fn test_all_tokens_present() {
+fn test_all_slots_present_on_dark() {
     let theme = Theme::dark();
-    // All 40+ tokens should be resolvable via get()
-    for key in dark_default_colors().keys() {
+    for key in Theme::SLOT_NAMES {
         let color = theme.get(key);
-        assert!(
-            color != Color::Reset || key == "text",
-            "Token '{key}' should not be Reset"
+        // Only empty-string tokens may be Reset; built-in dark paints every slot.
+        assert_ne!(
+            color,
+            Color::Reset,
+            "slot '{key}' should not be Reset on dark"
         );
     }
+}
+
+#[test]
+fn test_legacy_aliases_resolve() {
+    let theme = Theme::dark();
+    assert_eq!(theme.get("userMessageBg"), theme.user_message_bg);
+    assert_eq!(theme.get("selectedBg"), theme.bg_selected);
+    assert_eq!(theme.get("mdHeading"), theme.md_heading_h1);
+    assert_eq!(theme.get("toolDiffAdded"), theme.diff_insert_fg);
+    assert_eq!(theme.get("borderMuted"), theme.border_muted);
+    assert_eq!(theme.get("accentAlt"), theme.accent_alt);
 }
 
 #[test]
@@ -112,10 +124,9 @@ fn test_missing_tokens_fall_back_to_dark() {
             text = ""
         "##;
     let theme = Theme::from_toml_str(toml).unwrap();
-    // accent is set, others fall back to dark
     assert_eq!(theme.accent, Color::Rgb(255, 0, 0));
-    assert_ne!(theme.border, Color::Reset); // from dark defaults
-    assert_ne!(theme.dim, Color::Reset); // from dark defaults
+    assert_ne!(theme.border, Color::Reset);
+    assert_ne!(theme.dim, Color::Reset);
 }
 
 #[test]
@@ -132,4 +143,20 @@ fn test_circular_var_detected() {
         "#;
     let err = Theme::from_toml_str(toml).unwrap_err();
     assert!(matches!(err, ThemeError::CircularVar(_)));
+}
+
+#[test]
+fn test_role_accents_distinct() {
+    let theme = Theme::dark();
+    assert_ne!(theme.accent_user, theme.accent_assistant);
+    assert_ne!(theme.accent_tool, theme.accent_system);
+}
+
+#[test]
+fn test_md_heading_levels() {
+    let theme = Theme::dark();
+    assert_eq!(theme.md_heading(1), theme.md_heading_h1);
+    assert_eq!(theme.md_heading(6), theme.md_heading_h6);
+    assert_eq!(theme.md_heading(0), theme.md_heading_h1);
+    assert_eq!(theme.md_heading(99), theme.md_heading_h6);
 }

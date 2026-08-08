@@ -284,8 +284,7 @@ impl AppState {
                         .and_then(|t| t.get("name"))
                         .and_then(|n| n.as_str())
                     {
-                        // Theme file resolution may happen elsewhere; keep mirror name.
-                        self.theme.name = name.to_string();
+                        self.theme = crate::theme::Theme::load(name);
                     }
                 } else if namespace == "host" {
                     self.host_settings.apply_host_json(&value);

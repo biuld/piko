@@ -57,7 +57,7 @@ impl AppState {
             notifications: NotificationCenter::default(),
             tui_config: TuiConfig::default(),
             host_settings: HostRuntimeSettings::default(),
-            theme: Theme::dark(),
+            theme: Theme::load(&TuiConfig::default().theme.name),
         }
     }
 
@@ -240,8 +240,8 @@ impl AppState {
             SettingsAction::CompactionKeep(n) => self.host_settings.compaction_keep = *n,
             SettingsAction::CompactionReserve(n) => self.host_settings.compaction_reserve = *n,
             SettingsAction::Theme(name) => {
-                // Theme reload rides host ConfigEntry for tui; name tracked for summary.
-                self.theme.name = (*name).to_string();
+                self.theme = Theme::load(name);
+                self.tui_config.theme.name = name.to_string();
             }
             SettingsAction::Transport(t) => {
                 self.host_settings.transport = Some((*t).to_string());
