@@ -60,7 +60,7 @@ impl ApprovalPanel {
     }
 
     /// Build the single-question approval workflow for the front request.
-    fn workflow(&self) -> Option<InteractiveWorkflow> {
+    pub(crate) fn workflow(&self) -> Option<InteractiveWorkflow> {
         let approval = self.pending.front()?;
         Some(
             InteractiveWorkflow::new(

@@ -3,10 +3,10 @@
 //! Intent split (z-stack only — plane is never rebuilt for a surface):
 //! - **Browse** → [`ModalPlacement::CoverBody`]
 //! - **Select** → [`ModalPlacement::ComposerBand`]
-//! - **Decide** → [`ModalPlacement::Centered`]
+//! - **Dock** → [`ModalPlacement::ComposerBand`] (approval and tool
+//!   interaction replace the composer)
 
-use piko_tui_layout::{ModalLayer, ModalPlacement, cells_from_percent, leaf};
-use ratatui::layout::Rect;
+use piko_tui_layout::{ModalLayer, ModalPlacement, leaf};
 
 use super::Region;
 
@@ -32,12 +32,13 @@ pub enum SurfaceId {
 /// How a surface is intended to mount (product policy).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SurfaceIntent {
-    /// Explore / configure: covers the body above chrome.
+    /// Explore / configure / blocking decision: covers the body above chrome.
     Browse,
     /// Pick a value near the composer.
     Select,
-    /// Blocking decision over a dimmed workspace.
-    Decide,
+    /// Blocking prompt that replaces the composer dock (approval, tool
+    /// interaction).
+    Dock,
 }
 
 impl SurfaceId {
@@ -47,8 +48,7 @@ impl SurfaceId {
             | Self::Tree
             | Self::Status
             | Self::Diagnostics
-            | Self::SummaryPrompt
-            | Self::Settings => SurfaceIntent::Browse,
+            | Self::SummaryPrompt => SurfaceIntent::Browse,
 
             // Session agent picker (viewed-agent switch) sits near the composer,
             // same as Models / Thinking / Auth.
@@ -56,28 +56,24 @@ impl SurfaceId {
                 SurfaceIntent::Select
             }
 
-            Self::Approval | Self::ToolInteraction => SurfaceIntent::Decide,
+            Self::Approval | Self::ToolInteraction | Self::Settings => SurfaceIntent::Dock,
         }
     }
 
-    pub fn modal_placement(self, body: Rect) -> ModalPlacement {
+    pub fn modal_placement(self) -> ModalPlacement {
         match self.intent() {
             SurfaceIntent::Browse => ModalPlacement::CoverBody,
-            SurfaceIntent::Select => ModalPlacement::ComposerBand,
-            SurfaceIntent::Decide => ModalPlacement::Centered {
-                max_width: cells_from_percent(body.width, 88).max(40),
-                max_height: cells_from_percent(body.height, 70).max(8),
-            },
+            SurfaceIntent::Select | SurfaceIntent::Dock => ModalPlacement::ComposerBand,
         }
     }
 
     /// Build a single-leaf modal layer for this surface.
     ///
-    /// `composer_band_height` applies only to [`SurfaceIntent::Select`].
+    /// `composer_band_height` applies to ComposerBand surfaces (Select / Dock).
     /// Height is computed from feature **content-row** budgets (see
     /// [`crate::navigation::SelectBandBudget`]), not a fixed body percent.
-    pub fn modal_layer(self, body: Rect, composer_band_height: u16) -> ModalLayer<Region> {
-        let placement = self.modal_placement(body);
+    pub fn modal_layer(self, composer_band_height: u16) -> ModalLayer<Region> {
+        let placement = self.modal_placement();
         let host_band_height = match placement {
             ModalPlacement::ComposerBand => composer_band_height,
             _ => 0,

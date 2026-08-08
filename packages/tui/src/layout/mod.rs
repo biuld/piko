@@ -48,7 +48,10 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
 /// Feature-declared content-row budget for Select / ComposerBand only.
 fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBudget> {
     use crate::navigation::SurfaceIntent;
-    if surface.intent() != SurfaceIntent::Select {
+    if !matches!(
+        surface.intent(),
+        SurfaceIntent::Select | SurfaceIntent::Dock
+    ) {
         return None;
     }
     Some(match surface {
@@ -57,6 +60,25 @@ fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBu
         SurfaceId::Agents => app.agent_panel.select_band_budget(),
         SurfaceId::AuthSelector => app.auth_selector.select_band_budget(),
         SurfaceId::Mcp => app.mcp.select_band_budget(),
+        // Tool interaction replaces the composer: the dock is the workflow
+        // body + Standard pane chrome.
+        SurfaceId::ToolInteraction => {
+            let rows = app
+                .interactions
+                .front()
+                .map(|i| i.workflow.dock_content_rows(&app.theme))
+                .unwrap_or(3);
+            SelectBandBudget::standard_info(rows)
+        }
+        SurfaceId::Approval => {
+            let rows = app
+                .approvals
+                .workflow()
+                .map(|w| w.dock_content_rows(&app.theme))
+                .unwrap_or(7);
+            SelectBandBudget::standard_info(rows)
+        }
+        SurfaceId::Settings => app.settings.select_band_budget(),
         _ => SelectBandBudget::minimal_stacked_list(0),
     })
 }
@@ -66,7 +88,7 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
     let modal_surface = resolve_modal_surface(app);
     let metrics = plane_metrics(app, shell.body);
     let plane = compose_plane(metrics);
-    let modals = compose_modals(modal_surface, metrics, shell.body);
+    let modals = compose_modals(modal_surface, metrics);
     let plan = solve(shell.body, &plane, &modals);
     ProductFrame {
         modal_surface,
@@ -227,6 +249,40 @@ mod tests {
             .expect("surface default cell");
         assert_eq!(bottom.region, Region::Surface(SurfaceId::Approval));
         assert_eq!(bottom.element, None);
+    }
+
+    #[test]
+    fn approval_dock_height_follows_workflow_content() {
+        use crate::features::approval::PendingApproval;
+
+        let mut app = app_state();
+        app.session.id = Some("s1".into());
+        app.approvals.push(PendingApproval {
+            id: "a1".into(),
+            agent_instance_id: "agent-1".into(),
+            tool_name: "bash".into(),
+            args: serde_json::json!({ "command": "cargo test" }),
+            prompt: None,
+        });
+        app.push_surface(SurfaceId::Approval);
+
+        let terminal = Rect::new(0, 0, 80, 24);
+        let composed = compose_frame(&app, terminal);
+        let host = composed
+            .plan
+            .layers
+            .first()
+            .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Approval)))
+            .copied()
+            .expect("approval layer host");
+        let rows = app
+            .approvals
+            .workflow()
+            .unwrap()
+            .dock_content_rows(&app.theme);
+        // Dock = workflow rows + Standard pane chrome (5), bottom-anchored.
+        assert_eq!(host.height, rows + 5);
+        assert_eq!(host.y + host.height, 23);
     }
 
     #[test]

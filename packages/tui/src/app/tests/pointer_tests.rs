@@ -18,6 +18,7 @@ use crate::input::pointer::route_pointer;
 use crate::layout::compose_frame;
 use crate::navigation::Region;
 use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
+use crate::ui::components::pane::PaneSpec;
 
 fn app() -> AppState {
     AppState::new(
@@ -329,4 +330,55 @@ fn suggestion_click_accepts_that_row() {
         [Action::Editor(EditorAction::AcceptSuggestion)]
     ));
     assert_eq!(app.editor.auto_complete.list.selected, 0);
+}
+
+#[test]
+fn workflow_inline_input_cursor_tracks_caret() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.interactions = ToolInteractionPanel::new();
+    app.interactions
+        .push("i1".into(), "agent-1".into(), None, Vec::new(), false, true);
+    let workflow = InteractiveWorkflow::new(
+        vec![Question::new(
+            "Go",
+            "continue?",
+            vec![ChoiceOption {
+                label: "custom".into(),
+                has_input: true,
+                input_prompt: "value".into(),
+            }],
+        )],
+        false,
+    );
+    app.interactions.front_mut().expect("front").workflow = workflow;
+    app.push_surface(SurfaceId::ToolInteraction);
+    {
+        let interaction = app.interactions.front_mut().unwrap();
+        interaction.workflow.set_input_active(true);
+        interaction.workflow.questions[0]
+            .input_value
+            .insert_char('a');
+        interaction.workflow.questions[0]
+            .input_value
+            .insert_char('b');
+    }
+
+    let host = workflow_host(&app);
+    let position = app
+        .interactions
+        .front()
+        .unwrap()
+        .workflow
+        .input_cursor(host)
+        .expect("inline input cursor");
+    let help = app.interactions.front().unwrap().workflow.help_text();
+    let content = PaneSpec::new("")
+        .hints(&help)
+        .content_rect(host)
+        .expect("content rect");
+    // Single-question layout: choice row is content.y + 2 (prompt, blank).
+    assert_eq!(position.y, content.y + 2);
+    // x = content.x + prefix(2) + "1. "(3) + "custom"(6) + ": "(2) + "ab"(2).
+    assert_eq!(position.x, content.x + 2 + 3 + 6 + 2 + 2);
 }

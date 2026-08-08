@@ -7,12 +7,11 @@
 ## Overview
 
 The TUI shows one modal surface at a time over a stable workspace plane.
-Surfaces are mounted by intent (Browse covers the body, Select sits above the
-composer, Decide is centered), and the modal that is **drawn** must be the
-surface that owns **focus and input**. Layout is solved once per frame into a
-single rect map; that map is the only geometry authority and is the source for
-future pointer hit-testing, so mouse support can be added later without
-reworking layout.
+Surfaces are mounted by intent (Browse covers the body, Select and Decide sit
+in the composer dock, replacing it while active), and the modal that is
+**drawn** must be the surface that owns **focus and input**. Layout is solved
+once per frame into a single rect map; that map is the only geometry authority
+and is the source for pointer hit-testing.
 
 ## Problem
 
@@ -31,25 +30,25 @@ surface, making the visible prompt unanswerable until focus pops back.
 Two further gaps block a clean modal model:
 
 - Decide surfaces paint without clearing or filling their host rect, so the
-  centered dialog is transparent: background stream/composer cells and stale
-  glyphs are visible inside the dialog area.
+  dock can leak: background stream/composer cells and stale glyphs are visible
+  inside the dock area.
 - Geometry is solved into rects but never exposed for hit-testing; adding
   mouse interaction later would require reworking the layout contract unless
   the pointer-ready shape is fixed now.
 
 ## User journeys
 
-1. A tool requests approval while the user is reading the stream. The centered
-   Approval dialog appears, focus moves to it, and every key is captured until
-   the user accepts or declines. Pressing a global surface shortcut such as F4
-   does **not** move focus to a hidden surface.
+1. A tool requests approval while the user is reading the stream. Approval
+   replaces the composer dock above the stream, focus moves to it, and every
+   key is captured until the user accepts or declines. Pressing a global
+   surface shortcut such as F4 does **not** move focus to a hidden surface.
 2. A tool asks a multi-question workflow. The user tabs between questions,
    edits an inline value, reaches the Submit step, and confirms. Esc at any
    step cancels and the turn continues with the cancelled response.
 3. (Future) The user clicks a choice row in a workflow or a tab in a
    multi-question dialog, and the click resolves the same element that
-   keyboard focus would have. Clicks outside a centered Decide dialog are
-   ignored because the dialog is blocking.
+   keyboard focus would have. Clicks outside the Decide dock are ignored
+   because the prompt is blocking.
 
 ## In scope
 
@@ -83,12 +82,12 @@ frame
   → modal (exactly one, by intent)
        Browse  → CoverBody      (plane not painted)
        Select  → ComposerBand   (height from content-row budget)
-       Decide  → Centered       (max 88% width / 70% height)
+       Decide  → ComposerBand   (workflow content rows + pane chrome)
   → solve → FramePlan { plane rects, ordered layer rects }
   → paint: chrome → plane (unless Browse) → layers (top-down)
 ```
 
-Decide dialogs render on an opaque backdrop inside their host rect; no stream,
+Decide docks render on an opaque backdrop in the composer slot; no stream,
 composer, or stale glyphs show through.
 
 ## Behavior / interactions
@@ -148,8 +147,8 @@ the existing `Keymap` system; pointer input adds no settings.
 
 - This feature does not implement mouse input.
 - It does not allow multiple simultaneous modals or nested dialogs.
-- It does not make Decide dialogs dismissible by clicking outside; the dialog
-  is blocking and requires an explicit accept/decline/cancel.
+- It does not make Decide docks dismissible by clicking outside; the prompt is
+  blocking and requires an explicit accept/decline/cancel.
 
 ## Acceptance criteria
 
@@ -157,8 +156,8 @@ the existing `Keymap` system; pointer input adds no settings.
       the focused surface; the drawn modal and the focus owner always agree
       (`AppState::modal_surface` + push guard + F4 guard, covered by
       `app/tests/modal_tests.rs`).
-- [x] Decide dialogs are opaque: `InteractiveWorkflow` clears and fills its
-      host rect with the theme background before painting.
+- [x] Decide docks are opaque: `InteractiveWorkflow` clears and fills its host
+      rect with the theme background before painting.
 - [x] Every cell maps to at most one region via the frame plan;
       `FramePlan::hit_test` / `HitMap::hit_test` return the top-most owner
       (engine unit tests with dummy enums + product z-order integration test).
@@ -210,7 +209,7 @@ Remaining follow-ups (tracked by the goal):
 
 | Question | Decision | Rationale |
 |---|---|---|
-| Clicks outside a centered Decide dialog | Ignored (no dismiss) | Dialog is blocking; dismissal only via explicit cancel. Revisit in the pointer-input PRD. |
+| Clicks outside the Decide dock | Ignored (no dismiss) | Prompt is blocking; dismissal only via explicit cancel. Revisit in the pointer-input PRD. |
 | Decide backdrop | Opaque theme-background fill; dim overlay deferred | Simpler, no double-buffer cost; dim is visual polish, not a contract. |
 | Sub-region granularity for hitmaps | Row-level for lists/choices, element-level for tabs/buttons | Enough for click targets; cell-level is overkill for terminal text. |
 | Where hit-test geometry lives | Derived from the solved `FramePlan`; sub-regions declared by each surface | Single source of truth; painting and hit-testing cannot drift. |

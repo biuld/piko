@@ -42,6 +42,21 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     for layer in &plan.layers {
         paint_regions(frame, app, &layer.rects);
     }
+
+    // Real terminal caret while inline-editing a tool-interaction workflow.
+    // Ratatui hides the cursor on any frame that does not call
+    // `set_cursor_position`, so non-editing frames stay caret-free.
+    if app.mode == AppMode::Surface(SurfaceId::ToolInteraction)
+        && let Some(area) = plan
+            .layers
+            .first()
+            .and_then(|l| l.rects.get(&Region::Surface(SurfaceId::ToolInteraction)))
+            .copied()
+        && let Some(interaction) = app.interactions.front()
+        && let Some(position) = interaction.workflow.input_cursor(area)
+    {
+        frame.set_cursor_position(position);
+    }
 }
 
 fn paint_regions(

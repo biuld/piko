@@ -137,7 +137,7 @@ Landed as designed:
   tab / submit clicks, wheel zones, composer cursor, notice clear, suggestion
   accept, and hover tracking.
 
-### Pane integration for Decide modals
+### Pane integration for Decide docks
 
 `InteractiveWorkflow` renders standalone modals through `render_pane`:
 

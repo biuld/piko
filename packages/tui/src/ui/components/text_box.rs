@@ -1,4 +1,8 @@
-use ratatui::text::{Line, Span};
+use ratatui::{
+    layout::Position,
+    text::{Line, Span},
+};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextBox {
@@ -40,6 +44,24 @@ impl TextBox {
 
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
+    }
+
+    /// Display width of the field content before the caret (mask-aware).
+    pub fn width_before_cursor(&self) -> usize {
+        if let Some(mask) = self.mask_char {
+            self.text[..self.cursor.min(self.text.len())]
+                .chars()
+                .count()
+                * mask.len_utf8()
+        } else {
+            UnicodeWidthStr::width(&self.text[..self.cursor.min(self.text.len())])
+        }
+    }
+
+    /// Absolute terminal position of the caret when this field starts at
+    /// `origin`. The input component owns caret geometry.
+    pub fn caret_position(&self, origin: Position) -> Position {
+        Position::new(origin.x + self.width_before_cursor() as u16, origin.y)
     }
 
     pub fn insert_char(&mut self, ch: char) {

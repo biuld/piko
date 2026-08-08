@@ -12,7 +12,7 @@ use piko_tui_layout::{Component, SurfacePanel};
 
 use crate::{
     app::HitId,
-    navigation::SurfaceId,
+    navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::{
         feedback::{settings_apply_hints, settings_open_hints},
@@ -61,6 +61,12 @@ impl SettingsPanel {
         self.filter.clear();
         self.stack
             .open("settings", MenuRowLayout::SettingsRow, build_catalog(snap));
+    }
+
+    /// ComposerBand content budget: current menu rows + Standard search chrome.
+    pub fn select_band_budget(&self) -> SelectBandBudget {
+        let count = self.stack.current().map(|f| f.items.len()).unwrap_or(0);
+        SelectBandBudget::standard_search_list(count)
     }
 
     pub fn pop(&mut self) -> bool {

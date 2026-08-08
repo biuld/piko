@@ -8,11 +8,12 @@ use crate::ui::components::{
 };
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Position, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -257,6 +258,46 @@ impl InteractiveWorkflow {
             ));
         }
         out
+    }
+
+    /// Content rows the composer dock needs (body lines, no chrome). The dock
+    /// height = these rows + Standard pane chrome (borders 2 + padding 2 +
+    /// hint footer 1).
+    pub(crate) fn dock_content_rows(&self, theme: &Theme) -> u16 {
+        self.body_lines(theme).len() as u16
+    }
+
+    /// Terminal caret position while inline input is active. The workflow
+    /// only reports where its input field starts (its own row layout); caret
+    /// geometry is owned by the [`TextBox`] input component.
+    pub fn input_cursor(&self, area: Rect) -> Option<Position> {
+        let origin = self.input_field_origin(area)?;
+        let q = &self.questions[self.active_question_idx];
+        Some(q.input_value.caret_position(origin))
+    }
+
+    /// Where the inline input field starts inside the active choice row.
+    fn input_field_origin(&self, area: Rect) -> Option<Position> {
+        if self.questions.is_empty() {
+            return None;
+        }
+        let q = &self.questions[self.active_question_idx];
+        if !q.is_input_active {
+            return None;
+        }
+        let choice = q.selected_idx;
+        let inner = self.modal_content_area(area);
+        let rows = self.rows_in(inner);
+        let y = *rows.choice_y.get(choice)?;
+        let label = &q.choices.get(choice)?.label;
+        let num = format!("{}. ", choice + 1);
+        let x = inner
+            .x
+            .saturating_add(2) // selection prefix "❯ " / "  "
+            .saturating_add(UnicodeWidthStr::width(num.as_str()) as u16)
+            .saturating_add(UnicodeWidthStr::width(label.as_str()) as u16)
+            .saturating_add(2); // ": "
+        Some(Position::new(x, y))
     }
 
     /// The state-derived help line (or the approval shortcut override).
