@@ -137,6 +137,18 @@ impl AppState {
                 self.push_surface(SurfaceId::Settings);
                 self.status = "thinking level".to_string();
             }
+            SurfaceAction::OpenAgents => {
+                self.agent_panel.prepare_for_switch();
+                self.push_surface(SurfaceId::Agents);
+                let n = self.agent_panel.agents.len();
+                self.status = if self.agent_panel.is_loading() {
+                    "loading agents".to_string()
+                } else if n == 0 {
+                    "no agents in session".to_string()
+                } else {
+                    format!("{n} agent(s) — Enter to view")
+                };
+            }
             SurfaceAction::Close => self.close_surface(),
             SurfaceAction::SelectNext => self.select_surface_next(),
             SurfaceAction::SelectPrev => self.select_surface_prev(),
@@ -182,18 +194,6 @@ impl AppState {
     pub(super) fn dispatch_model_action(&mut self, action: ModelAction) -> Vec<Effect> {
         match action {
             ModelAction::RequestList => self.request_models(),
-        }
-    }
-
-    pub(super) fn dispatch_agent_list_action(&mut self, action: AgentAction) -> Vec<Effect> {
-        match action {
-            AgentAction::RequestList => {
-                self.agents.loading = true;
-                self.push_surface(SurfaceId::AgentList);
-                vec![Effect::send(Command::AgentSpecList {
-                    command_id: command_id(),
-                })]
-            }
         }
     }
 

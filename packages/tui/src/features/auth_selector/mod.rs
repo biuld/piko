@@ -1,6 +1,7 @@
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
+    navigation::SelectBandBudget,
     theme::Theme,
     ui::components::{
         hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
@@ -120,6 +121,19 @@ impl AuthSelector {
         self.menu.open(root);
     }
 
+    /// ComposerBand content-row budget (stacked menu or fixed form).
+    pub fn select_band_budget(&self) -> SelectBandBudget {
+        match &self.state {
+            AuthSelectorState::Menu => {
+                SelectBandBudget::minimal_stacked_list(self.menu.filtered_item_count(&self.filter))
+            }
+            AuthSelectorState::ApiKeyInput { .. } => {
+                // input line + blank + note (matches render body)
+                SelectBandBudget::minimal_form(3)
+            }
+        }
+    }
+
     pub fn select_next(&mut self) {
         if let AuthSelectorState::Menu = self.state {
             self.menu.select_next(&self.filter);
@@ -166,23 +180,18 @@ impl AuthSelector {
                     .render(frame, area, &self.filter, |_action| false, theme);
             }
             AuthSelectorState::ApiKeyInput { provider, input } => {
-                use crate::ui::components::frame_border_style;
+                use crate::ui::components::pane::{PaneSpec, render_pane};
                 use ratatui::style::Style;
                 use ratatui::text::{Line, Span};
-                use ratatui::widgets::{Block, Borders, Paragraph};
+                use ratatui::widgets::Paragraph;
 
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(frame_border_style(true, theme))
-                    .title(format!(" Configure {} API Key ", provider));
-                frame.render_widget(block, area);
-
-                let inner_area = Rect::new(
-                    area.x + 2,
-                    area.y + 2,
-                    area.width.saturating_sub(4),
-                    area.height.saturating_sub(4),
-                );
+                let title = format!("Configure {provider} API Key");
+                let spec = PaneSpec::minimal(&title)
+                    .hints("Enter save · Esc back")
+                    .focused(true);
+                let Some(areas) = render_pane(frame, area, &spec, theme) else {
+                    return;
+                };
 
                 let mut first_line_spans = vec![Span::styled(
                     "Enter API key: ",
@@ -195,12 +204,12 @@ impl AuthSelector {
                     Line::from(first_line_spans),
                     Line::default(),
                     Line::from(Span::styled(
-                        "Press Enter to save · Esc to go back",
-                        Style::default().fg(theme.muted),
+                        "Key is stored via hostd auth settings.",
+                        Style::default().fg(theme.dim),
                     )),
                 ];
 
-                frame.render_widget(Paragraph::new(lines), inner_area);
+                frame.render_widget(Paragraph::new(lines), areas.content);
             }
         }
     }

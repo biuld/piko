@@ -5,7 +5,7 @@
 //! Layout: title · search · content · tip · footer (hints or reserved interactive).
 
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneFooter, PaneSearch, PaneSpec, render_pane};
+use crate::ui::components::pane::{PaneFooter, PaneSearch, PaneSpec, PaneTitleAffix, render_pane};
 use crate::ui::components::{row_primary_style, with_selected_bg};
 use ratatui::{
     Frame,
@@ -37,11 +37,11 @@ pub enum TableBody<'a> {
     Message(Paragraph<'a>),
 }
 
-/// A high-level container for searchable list/table overlays (session list, tree, agents).
+/// A high-level container for searchable list/table overlays (session list, tree).
 pub struct TablePanel<'a> {
     pub left_title: String,
-    pub mode_indicator: String,
-    pub counter: String,
+    /// Right-title chips (scope/mode · selection · …). Owned by Pane.
+    pub affixes: Vec<PaneTitleAffix>,
     /// Muted tip under content (secondary bindings / mode copy).
     pub help_text: &'a str,
     pub search_line: Line<'a>,
@@ -55,8 +55,6 @@ pub struct TablePanel<'a> {
 
 impl<'a> TablePanel<'a> {
     pub fn render(self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let right_title = format!("{}  {}", self.mode_indicator, self.counter);
-
         let (footer, interactive) = match self.action_prompt {
             ActionPrompt::Legend(txt) => (PaneFooter::Hints(txt), None),
             ActionPrompt::Interactive { height, render } => {
@@ -71,7 +69,8 @@ impl<'a> TablePanel<'a> {
         };
 
         let spec = PaneSpec::new(&self.left_title)
-            .title_right(Some(right_title.as_str()))
+            .mode(crate::ui::components::pane::PaneMode::Standard)
+            .title_affixes(self.affixes)
             .search(PaneSearch::Custom(self.search_line))
             .tip(tip)
             .footer(footer)

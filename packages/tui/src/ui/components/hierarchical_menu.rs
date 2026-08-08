@@ -4,7 +4,7 @@ use crate::{
     theme::Theme,
     ui::components::{
         GROUP_DRILL,
-        filterable_list::{FilterableItem, FilterableList, render_filterable_list},
+        filterable_list::{FilterableItem, FilterableList, render_filterable_list_minimal},
     },
 };
 
@@ -110,6 +110,20 @@ impl<T: Clone> HierarchicalMenu<T> {
         }
     }
 
+    /// Filtered item count at the current stack frame (for Select band budgets).
+    pub fn filtered_item_count(&self, filter: &str) -> usize {
+        let Some(frame) = self.stack.last() else {
+            return 0;
+        };
+        frame
+            .list
+            .filtered_indices(filter, |item| {
+                item.title().to_lowercase().contains(filter)
+                    || item.detail().to_lowercase().contains(filter)
+            })
+            .len()
+    }
+
     /// Confirm the currently selected option.
     pub fn confirm(&mut self, filter_text: &mut String) -> MenuConfirmResult<T> {
         let Some(frame) = self.stack.last() else {
@@ -181,8 +195,8 @@ impl<T: Clone> HierarchicalMenu<T> {
             })
             .collect();
 
-        // Hierarchical menus are always the focus owner while open.
-        render_filterable_list(
+        // Quick multi-level pick → minimal chrome.
+        render_filterable_list_minimal(
             frame,
             area,
             &current_frame.title,

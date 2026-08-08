@@ -1,7 +1,7 @@
 //! BottomBar — always-visible status row at the bottom of the TUI (shell chrome).
 //!
 //! Compact session projection: agent · model · cwd · context · cost.
-//! Read-only. Full agent tree is a Browse surface (F4), not a plane strip.
+//! Read-only. Full agent tree is a Select surface (F4 / `/agents`), not a plane strip.
 
 use std::path::Path;
 
@@ -13,13 +13,18 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::{config::bottom_bar::BottomBarItem, theme::Theme, ui::components::spinner_glyph};
+use crate::{
+    config::bottom_bar::BottomBarItem,
+    layout::{DEFAULT_HORIZONTAL_INSET, inset_horizontal},
+    theme::Theme,
+    ui::components::spinner_glyph,
+};
 
 pub struct BottomBar;
 
 pub struct BottomBarView<'a> {
     pub items: &'a [BottomBarItem],
-    /// Compact agent label, e.g. `main`, `main ⠋`, `·3`.
+    /// Compact agent label, e.g. `main`, `⠋ main` when busy.
     pub agent: Option<&'a str>,
     pub agent_busy: bool,
     pub spinner_frame: usize,
@@ -34,6 +39,12 @@ pub struct BottomBarView<'a> {
 
 impl BottomBar {
     pub fn render(frame: &mut Frame<'_>, area: Rect, view: BottomBarView<'_>) {
+        // Align agent chip / chrome with Stream left content (one-cell gutter).
+        let area = inset_horizontal(area, DEFAULT_HORIZONTAL_INSET);
+        if area.width == 0 {
+            return;
+        }
+
         let items: Vec<Span<'_>> = view
             .items
             .iter()
@@ -84,7 +95,7 @@ fn render_agent(
         None => Span::styled("—", Style::default().fg(theme.dim)),
         Some(name) if busy => {
             let spin = spinner_glyph(spinner_frame);
-            Span::styled(format!("{name} {spin}"), Style::default().fg(theme.accent))
+            Span::styled(format!("{spin} {name}"), Style::default().fg(theme.accent))
         }
         Some(name) => Span::raw(name.to_string()),
     }

@@ -3,9 +3,10 @@
 //! Workspace plane = Stream + optional Notice/Suggest + Composer.
 //! Surfaces = modal z-stack (Browse / Select / Decide).
 
-use piko_tui_layout::{FlexItem, ModalLayer, Node, cells_from_percent, flex_column, leaf};
+use piko_tui_layout::{FlexItem, ModalLayer, Node, flex_column, leaf};
 use ratatui::layout::Rect;
 
+use super::select_band::SelectBandBudget;
 use super::{Region, SurfaceId, SurfaceIntent};
 
 /// Per-frame sizes from feature state.
@@ -16,6 +17,8 @@ pub struct PlaneMetrics {
     pub suggestion_count: usize,
     pub composer_height: u16,
     pub body_height: u16,
+    /// When the active modal is Select: content-row budget for ComposerBand.
+    pub select_band: Option<SelectBandBudget>,
 }
 
 /// Stable workspace plane (always composed).
@@ -51,13 +54,16 @@ fn select_band_height(surface: SurfaceId, m: PlaneMetrics) -> u16 {
     if surface.intent() != SurfaceIntent::Select {
         return 0;
     }
-    let target = m.composer_height.max(cells_from_percent(m.body_height, 40));
-    let max = m.body_height.saturating_sub(4);
-    target.min(max).max(m.composer_height.min(m.body_height))
+    let budget = m
+        .select_band
+        .unwrap_or_else(|| SelectBandBudget::minimal_stacked_list(0));
+    budget.resolve_band_rows(m.body_height)
 }
 
 fn suggestion_height(count: usize) -> u16 {
-    (count as u16 + 2).min(8)
+    // Minimal pane: top/bottom borders + content rows (empty → 1) + footer hints.
+    let rows = (count.max(1) as u16).min(6);
+    (rows + 3).min(10)
 }
 
 #[cfg(test)]
@@ -72,6 +78,14 @@ mod tests {
             suggestion_count: 0,
             composer_height: 5,
             body_height: 30,
+            select_band: None,
+        }
+    }
+
+    fn metrics_with_budget(budget: SelectBandBudget) -> PlaneMetrics {
+        PlaneMetrics {
+            select_band: Some(budget),
+            ..metrics()
         }
     }
 
@@ -90,7 +104,7 @@ mod tests {
         let plan = solve(
             body,
             &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Agents), metrics(), body),
+            &compose_modals(Some(SurfaceId::Sessions), metrics(), body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -126,5 +140,38 @@ mod tests {
             plan.layers[0].placement,
             ModalPlacement::ComposerBand
         ));
+    }
+
+    #[test]
+    fn select_band_height_follows_content_rows() {
+        let body = Rect::new(0, 0, 80, 30);
+        let budget = SelectBandBudget::minimal_stacked_list(3);
+        let expected = budget.resolve_band_rows(30);
+        let plan = solve(
+            body,
+            &compose_plane(metrics_with_budget(budget)),
+            &compose_modals(Some(SurfaceId::Models), metrics_with_budget(budget), body),
+        );
+        let layer = &plan.layers[0];
+        assert!(matches!(layer.placement, ModalPlacement::ComposerBand));
+        let surface_h = layer.rects.values().map(|r| r.height).max().unwrap_or(0);
+        assert_eq!(surface_h, expected);
+        // Prefer content budget over legacy ~40% body (would be 12+).
+        assert_eq!(expected, 10); // 4 chrome + 3×2 content
+    }
+
+    #[test]
+    fn agents_uses_composer_band() {
+        let body = Rect::new(0, 0, 80, 30);
+        let plan = solve(
+            body,
+            &compose_plane(metrics()),
+            &compose_modals(Some(SurfaceId::Agents), metrics(), body),
+        );
+        assert!(matches!(
+            plan.layers[0].placement,
+            ModalPlacement::ComposerBand
+        ));
+        assert!(plan.rects.contains_key(&Region::Stream));
     }
 }

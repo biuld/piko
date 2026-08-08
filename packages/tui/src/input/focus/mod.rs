@@ -17,9 +17,8 @@ use crate::{
     app::{
         AppMode, AppState, SurfaceId,
         command::{
-            Action, AgentPanelAction, AppAction, ApprovalAction, EditorAction, ModelAction,
-            NotificationAction, SessionAction, SurfaceAction, TimelineAction,
-            ToolInteractionAction, TreeAction,
+            Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
+            SessionAction, SurfaceAction, TimelineAction, ToolInteractionAction, TreeAction,
         },
     },
     input::keymap::{KeyAction, Keymap},

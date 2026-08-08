@@ -59,7 +59,11 @@ impl AutoCompleteProvider for CommandPaletteProvider {
             .collect()
     }
 
-    fn title(&self, selected: usize, total: usize) -> String {
-        format!("command palette [{selected}/{total}] | Tab cycle | Enter execute")
+    fn label(&self) -> &'static str {
+        "command palette"
+    }
+
+    fn hints(&self) -> &'static str {
+        "Tab cycle | Enter execute"
     }
 }

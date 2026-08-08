@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 
 use crate::features::approval::ApprovalPanel;
@@ -12,6 +12,7 @@ use crate::{
     app::{QueueStatus, ToolStatus},
     features::notifications::NotificationCenter,
     theme::Theme,
+    ui::components::pane::{PaneSpec, render_pane},
 };
 
 use super::centered_rect;
@@ -36,7 +37,6 @@ impl StatusPanel {
         approvals: &ApprovalPanel,
     ) {
         let popup = centered_rect(76, 58, area);
-        frame.render_widget(Clear, popup);
 
         let running = timeline
             .tool_calls
@@ -94,15 +94,10 @@ impl StatusPanel {
             lines.push(Line::from(preview.as_str()));
         }
 
-        let widget = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(crate::ui::components::frame_border_style(true, view.theme))
-                    .title("status"),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(widget, popup);
+        let spec = PaneSpec::new("status").hints("Esc close").focused(true);
+        if let Some(areas) = render_pane(frame, popup, &spec, view.theme) {
+            frame.render_widget(Paragraph::new(lines), areas.content);
+        }
     }
 }
 

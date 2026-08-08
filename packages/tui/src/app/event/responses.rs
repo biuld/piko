@@ -223,7 +223,7 @@ impl AppState {
                 );
             }
             Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }) => {
-                self.agents.load(agents);
+                self.status = format!("{} agent specs available", agents.len());
             }
             Ok(piko_protocol::CommandResult::AgentListed {
                 session_id, agents, ..

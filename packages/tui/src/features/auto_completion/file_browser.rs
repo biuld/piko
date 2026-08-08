@@ -106,8 +106,12 @@ impl AutoCompleteProvider for FileBrowserProvider {
         }
     }
 
-    fn title(&self, selected: usize, total: usize) -> String {
-        format!("file browser [{selected}/{total}] | Tab cycle | Enter accept")
+    fn label(&self) -> &'static str {
+        "file browser"
+    }
+
+    fn hints(&self) -> &'static str {
+        "Tab cycle | Enter accept"
     }
 }
 

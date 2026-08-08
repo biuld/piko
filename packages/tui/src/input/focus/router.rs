@@ -23,45 +23,13 @@ impl InputRouter {
             return Some(action);
         }
 
-        // ── P1.5: Global keybindings that open browse surfaces ──
+        // ── P1.5: Global keybindings that open select surfaces ──
         if ka == Some(KeyAction::AgentPanel) {
-            app.push_surface(SurfaceId::Agents);
-            return None;
+            return Some(SurfaceAction::OpenAgents.into());
         }
 
         // ── P2: Focus Owner ═══
         let active = app.focus_manager.active_mode();
-        // Agents surface: ↑↓ select, Enter subscribe, Esc close (P1 may also Close).
-        if active.is_surface(SurfaceId::Agents) {
-            match ka {
-                Some(KeyAction::SelectNext) => {
-                    app.agent_panel.select_next();
-                    return None;
-                }
-                Some(KeyAction::SelectPrev) => {
-                    app.agent_panel.select_prev();
-                    return None;
-                }
-                Some(KeyAction::Confirm) | Some(KeyAction::Submit) => {
-                    if let Some(agent) = app.agent_panel.selected_agent().cloned() {
-                        app.clear_focus();
-                        return Some(
-                            AgentPanelAction::Subscribe {
-                                agent_instance_id: agent.agent_instance_id,
-                                agent_id: agent.agent_id,
-                            }
-                            .into(),
-                        );
-                    }
-                    return None;
-                }
-                _ => {}
-            }
-            // Capture remaining keys so editor does not type under the surface.
-            if key.code != KeyCode::Esc && ka != Some(KeyAction::Cancel) {
-                return None;
-            }
-        }
         if active != AppMode::Chat {
             // Check if SummaryPrompt overrides
             if active.is_surface(SurfaceId::SummaryPrompt) {
@@ -259,7 +227,7 @@ impl InputRouter {
             Some(
                 surface @ (SurfaceId::Tree
                 | SurfaceId::Sessions
-                | SurfaceId::AgentList
+                | SurfaceId::Agents
                 | SurfaceId::Settings
                 | SurfaceId::Models
                 | SurfaceId::AuthSelector),
@@ -358,12 +326,9 @@ impl InputRouter {
                 _ => None,
             },
             // Handled above; fall through if focus somehow reached here.
-            Some(
-                SurfaceId::Approval
-                | SurfaceId::ToolInteraction
-                | SurfaceId::SummaryPrompt
-                | SurfaceId::Agents,
-            ) => None,
+            Some(SurfaceId::Approval | SurfaceId::ToolInteraction | SurfaceId::SummaryPrompt) => {
+                None
+            }
             // Editor chrome never reaches filter routing via this path.
             None => None,
         }

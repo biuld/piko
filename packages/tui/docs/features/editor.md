@@ -112,7 +112,7 @@ Typing `@` followed by characters activates the **File Browser** auto-completion
 
 ### Completion UI
 
-Suggestions appear in a dedicated area **above** the Editor (Slot D'). The header dynamically updates to display `command palette` or `file browser` depending on the active trigger. Column outputs (such as command descriptions or file sizes) are vertically left-aligned.
+Suggestions appear in workspace `Region::Suggest` (directly above the Editor), with Minimal pane chrome. The header uses the provider label (`command palette` / `file browser`); selection counter is a title affix. Column outputs (command descriptions or file sizes) align consistently.
 
 ### Completion navigation and acceptance
 

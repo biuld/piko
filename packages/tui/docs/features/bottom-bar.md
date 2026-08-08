@@ -14,13 +14,13 @@ agent · model_id thinking · ~/project · 12.2k/200k · $0.42
 
 ### Agent chip
 
-Compact projection of the viewed / primary agent instance:
+Compact projection of the **viewed** agent instance:
 
-- Name of active agent (or first agent)
-- Busy → name + spinner (accent)
-- Multi-agent → `name·N`
+- Name of the active / viewed agent (or first agent if none selected)
+- Busy → spinner + name (accent), e.g. `⠋ main`
 - Loading → `…`; empty → `—`
-- Full tree UI is Browse surface `Agents` (F4 / keymap AgentPanel), not chrome
+- No session-wide agent count in chrome (roster is `/agents` / F4)
+- Full switcher: Select surface `Agents` (F4 / `/agents`, ComposerBand)
 
 
 ## Items

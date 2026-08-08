@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::theme::Theme;
 use crate::ui::components::filterable_list::FilterableList;
+use crate::ui::components::pane::PaneTitleAffix;
 use crate::ui::components::table_panel::{ActionPrompt, TableBody, TablePanel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,9 +170,9 @@ impl SessionList {
         let filter = self.filter.as_str();
         let scope_title = "Resume Session".to_string();
 
-        let scope_indicator = match self.scope {
-            SessionScope::CurrentFolder => "[Current] | All",
-            SessionScope::All => "Current | [All]",
+        let scope_active = match self.scope {
+            SessionScope::CurrentFolder => 0,
+            SessionScope::All => 1,
         };
 
         let filtered: Vec<(usize, &SessionSummary)> = if self.loading || self.error.is_some() {
@@ -195,11 +196,12 @@ impl SessionList {
                 .min(filtered.len().saturating_sub(1))
         };
 
-        let counter = if filtered.is_empty() {
-            "0/0".to_string()
+        let counter_at = if filtered.is_empty() {
+            0
         } else {
-            format!("{}/{}", selected_filtered_idx + 1, filtered.len())
+            selected_filtered_idx + 1
         };
+        let counter_of = filtered.len();
 
         let search_line = Line::from(vec![
             Span::raw("Search: "),
@@ -349,8 +351,10 @@ impl SessionList {
 
         let panel = TablePanel {
             left_title: scope_title,
-            mode_indicator: scope_indicator.to_string(),
-            counter,
+            affixes: vec![
+                PaneTitleAffix::mode_strip_static(&["Current", "All"], scope_active),
+                PaneTitleAffix::selection(counter_at, counter_of),
+            ],
             help_text: "Tab scope · Ctrl+N named · path",
             search_line,
             body,

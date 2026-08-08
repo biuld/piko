@@ -3,9 +3,9 @@ use piko_protocol::Command;
 use crate::app::{
     AppMode, AppState, SurfaceId,
     command::{
-        Action, AgentAction, AppAction, ApprovalAction, EditorAction, ModelAction,
-        NotificationAction, SessionAction, SlashAction, SurfaceAction, TimelineAction,
-        ToolInteractionAction, TreeAction,
+        Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
+        SessionAction, SlashAction, SurfaceAction, TimelineAction, ToolInteractionAction,
+        TreeAction,
     },
     command_id,
     effect::Effect,
@@ -28,7 +28,6 @@ impl AppState {
             Action::Surface(action) => self.dispatch_surface_action(action),
             Action::Session(action) => self.dispatch_session_action(action),
             Action::Model(action) => self.dispatch_model_action(action),
-            Action::AgentList(action) => self.dispatch_agent_list_action(action),
             Action::Tree(action) => self.dispatch_tree_action(action),
             Action::Approval(action) => self.dispatch_approval_action(action),
             Action::ToolInteraction(action) => self.dispatch_tool_interaction_action(action),

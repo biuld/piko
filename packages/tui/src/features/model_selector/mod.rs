@@ -1,6 +1,7 @@
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
+    navigation::SelectBandBudget,
     theme::Theme,
     ui::components::hierarchical_menu::{HierarchicalMenu, MenuConfirmResult, MenuNode},
 };
@@ -63,6 +64,11 @@ impl ModelSelector {
             .last()
             .map(|frame| frame.list.items.len())
             .unwrap_or(0)
+    }
+
+    /// ComposerBand content-row budget (Stacked rows × capped visible items).
+    pub fn select_band_budget(&self) -> SelectBandBudget {
+        SelectBandBudget::minimal_stacked_list(self.menu.filtered_item_count(&self.filter))
     }
 
     pub fn reset(&mut self) {

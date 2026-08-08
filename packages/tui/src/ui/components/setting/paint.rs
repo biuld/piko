@@ -62,14 +62,15 @@ pub(super) fn paint_frame<T: Clone>(
         }
     };
 
-    // Product chrome: plain title + [x], search rule, no [n/total] counter.
+    // Product chrome: standard complexity, plain title + close affix, search rule.
     let mut spec = PaneSpec::new(title)
+        .mode(crate::ui::components::pane::PaneMode::Standard)
         .search_filter(filter)
         .search_rule(true)
         .hints(hints)
         .focused(true);
     if at_root {
-        spec = spec.title_right(Some("[x]"));
+        spec = spec.affix(crate::ui::components::pane::PaneTitleAffix::Close);
     }
 
     render_filterable_list_with_pane(frame, area, spec, &items, nav.list.selected, filter, theme);

@@ -34,18 +34,23 @@ Terminal
         · Decide  Centered
 ```
 
-**Agents** are a Browse surface (`SurfaceId::Agents`, F4) — not a permanent strip.
-Chrome shows a compact agent summary only.
+**Agents** are a Select surface (`SurfaceId::Agents`, F4 / `/agents`) on
+ComposerBand — switch the viewed session agent. Chrome shows a compact agent
+summary only.
 
 ## Surface intent
 
 | Intent | Placement | Surfaces |
 |--------|-----------|----------|
-| Browse | `CoverBody` | Agents, AgentList, Sessions, Tree, Settings, Help, Status, Diagnostics, SummaryPrompt |
-| Select | `ComposerBand` | Models, Mcp, AuthSelector |
+| Browse | `CoverBody` | Sessions, Tree, Settings, Help, Status, Diagnostics, SummaryPrompt |
+| Select | `ComposerBand` | Agents, Models, Mcp, AuthSelector |
 | Decide | `Centered` | Approval, ToolInteraction |
 
 Define via `SurfaceId::intent()` / `modal_layer(body, band_h)`.
+
+Select band height comes from feature **content-row** budgets
+(`SelectBandBudget` in `navigation/select_band.rs`), not a fixed body fraction.
+Overflow list items scroll.
 
 ## Layers ownership
 

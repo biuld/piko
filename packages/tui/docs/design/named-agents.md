@@ -27,11 +27,17 @@ This gives the LLM the delegated-task template IDs at tool-call time. `main` is 
 
 ## 3. TUI View (`tui` & `protocol`)
 
-The TUI provides a read-only view of available agent specs. Runtime task instances are shown separately in the agent panel through `AgentList`, where rows are keyed by `task_id` and labeled by `agent_id` / spec name.
+Session **runtime agents** are the primary UX: `/agents` (and F4) open the
+Select / ComposerBand picker over the current session’s agent instances so
+the user can switch the viewed agent.
 
-1. **Protocol**: `AgentSpecList` returns `Vec<AgentSpec>`.
+Static **agent specs** remain host-owned templates (`AgentSpecList`). Spec discovery
+for the model is injected into spawn tool schemas (see §2); the TUI no longer
+exposes a dedicated agent-spec panel via `/agents`.
+
+1. **Protocol**: `AgentSpecList` returns `Vec<AgentSpec>` (templates).
 2. **Hostd**: The command handler returns the loaded built-in/workspace spec set.
-3. **TUI**: `/agents` or a dedicated panel displays agent specs, descriptions, roles, and configured tools.
+3. **TUI**: Runtime instances use `SurfaceId::Agents` (viewed-agent switch).
 
 ## Non-Goals
 - TUI-based editing of agent specs.

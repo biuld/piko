@@ -106,7 +106,6 @@ pub struct AppState {
     pub last_turn_diff: Option<piko_protocol::TurnDiffEvent>,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
-    pub agents: crate::features::agent_list::AgentList,
     pub models: ModelSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,

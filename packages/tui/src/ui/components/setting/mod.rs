@@ -1,7 +1,8 @@
 //! Settings kit — value-aware settings navigation and choice lists.
 //!
 //! Product: `docs/features/settings.md`
-//! Paint: thin map onto [`FilterableItem`] + [`render_filterable_list_with_hints`](crate::ui::components::filterable_list::render_filterable_list_with_hints)
+//! Paint: thin map onto [`FilterableItem`] + [`render_filterable_list_with_pane`](crate::ui::components::filterable_list::render_filterable_list_with_pane)
+//! (Standard [`PaneSpec`](crate::ui::components::pane::PaneSpec)).
 //! (via `paint`); chrome from shared Pane.
 //! Feedback: Selected (bg + accent on Settings rows) ≠ Active (`●`); effect badges use `warning`.
 

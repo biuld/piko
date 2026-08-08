@@ -47,7 +47,6 @@ impl AppState {
             last_turn_diff: None,
             interactions: ToolInteractionPanel::new(),
             sessions: SessionList::new(),
-            agents: crate::features::agent_list::AgentList::new(),
             models: ModelSelector::new(),
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
@@ -179,7 +178,7 @@ impl AppState {
     pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {
         match mode {
             AppMode::Surface(SurfaceId::Sessions) => self.sessions.filter.clear(),
-            AppMode::Surface(SurfaceId::AgentList) => self.agents.filter.clear(),
+            AppMode::Surface(SurfaceId::Agents) => self.agent_panel.filter.clear(),
             AppMode::Surface(SurfaceId::Tree) => self.tree.filter.clear(),
             AppMode::Surface(SurfaceId::Models) => self.models.filter.clear(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.filter.clear(),
@@ -190,6 +189,7 @@ impl AppState {
 
     pub(crate) fn clear_all_filters(&mut self) {
         self.sessions.filter.clear();
+        self.agent_panel.filter.clear();
         self.tree.filter.clear();
         self.models.filter.clear();
         self.settings.filter.clear();
@@ -199,7 +199,7 @@ impl AppState {
     pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
         match self.mode {
             AppMode::Surface(SurfaceId::Sessions) => Some(&mut self.sessions.filter),
-            AppMode::Surface(SurfaceId::AgentList) => Some(&mut self.agents.filter),
+            AppMode::Surface(SurfaceId::Agents) => Some(&mut self.agent_panel.filter),
             AppMode::Surface(SurfaceId::Tree) => Some(&mut self.tree.filter),
             AppMode::Surface(SurfaceId::Models) => Some(&mut self.models.filter),
             AppMode::Surface(SurfaceId::Settings) => Some(&mut self.settings.filter),

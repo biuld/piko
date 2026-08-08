@@ -9,11 +9,11 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
 };
 
 use crate::theme::Theme;
-use crate::ui::components::frame_border_style;
+use crate::ui::components::pane::{PaneSpec, render_pane};
 
 use super::centered_rect;
 
@@ -87,31 +87,12 @@ impl DiagnosticsPanel {
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let popup = centered_rect(82, 70, area);
-        frame.render_widget(Clear, popup);
-
-        let block = Block::default()
-            .title(format!(" {} ", self.title))
-            .borders(Borders::ALL)
-            .border_style(frame_border_style(true, theme));
-        let inner = block.inner(popup);
-        frame.render_widget(block, popup);
-
-        if inner.height == 0 {
+        let title = self.title.as_str();
+        let spec = PaneSpec::new(title)
+            .hints("↑/↓ scroll · Esc close")
+            .focused(true);
+        let Some(areas) = render_pane(frame, popup, &spec, theme) else {
             return;
-        }
-
-        let body_height = inner.height.saturating_sub(1);
-        let body_area = Rect {
-            x: inner.x,
-            y: inner.y,
-            width: inner.width,
-            height: body_height,
-        };
-        let hint_area = Rect {
-            x: inner.x,
-            y: inner.y + body_height,
-            width: inner.width,
-            height: 1,
         };
 
         let styled: Vec<Line<'_>> = self
@@ -123,15 +104,7 @@ impl DiagnosticsPanel {
         let paragraph = Paragraph::new(styled)
             .wrap(Wrap { trim: false })
             .scroll((self.scroll, 0));
-        frame.render_widget(paragraph, body_area);
-
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                " ↑/↓ scroll · Esc close",
-                Style::default().fg(theme.dim),
-            ))),
-            hint_area,
-        );
+        frame.render_widget(paragraph, areas.content);
     }
 }
 

@@ -9,8 +9,8 @@ use ratatui::{
 };
 
 use crate::theme::Theme;
-use crate::ui::components::feedback::{default_list_hints, empty_line, list_title};
-use crate::ui::components::pane::{PaneSpec, render_pane};
+use crate::ui::components::feedback::{default_list_hints, empty_line};
+use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
 
 mod rows;
 
@@ -180,9 +180,12 @@ impl<T> FilterableList<T> {
     }
 }
 
-/// Renders a filterable list with component-feedback selection language.
+/// Filterable list with **minimal** pane chrome (quick pick: agent switch, model, auth).
+///
+/// Complex browse surfaces should build a [`PaneSpec`] with
+/// [`PaneMode::Standard`] and call [`render_filterable_list_with_pane`].
 #[allow(clippy::too_many_arguments)]
-pub fn render_filterable_list(
+pub fn render_filterable_list_minimal(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
@@ -192,7 +195,7 @@ pub fn render_filterable_list(
     focused: bool,
     theme: &Theme,
 ) {
-    render_filterable_list_with_hints(
+    render_filterable_list_with_mode(
         frame,
         area,
         title,
@@ -202,12 +205,12 @@ pub fn render_filterable_list(
         focused,
         theme,
         default_list_hints(),
+        PaneMode::Minimal,
     );
 }
 
-/// Like [`render_filterable_list`] with a custom footer hint line.
 #[allow(clippy::too_many_arguments)]
-pub fn render_filterable_list_with_hints(
+fn render_filterable_list_with_mode(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
@@ -217,6 +220,7 @@ pub fn render_filterable_list_with_hints(
     focused: bool,
     theme: &Theme,
     hints: &str,
+    mode: PaneMode,
 ) {
     let filtered_count = items
         .iter()
@@ -230,11 +234,23 @@ pub fn render_filterable_list_with_hints(
         .map(|i| i + 1)
         .unwrap_or(0);
 
-    let full_title = list_title(title, filter, selected_one, filtered_count);
-    let spec = PaneSpec::new(&full_title)
-        .search_filter(filter)
-        .hints(hints)
-        .focused(focused);
+    let full_title = title; // counter lives in title_affixes, not left title
+    // Complexity defaults + explicit override path (padding / borders).
+    let mut spec = match mode {
+        PaneMode::Minimal => PaneSpec::minimal(full_title)
+            .padding(PaneMode::Minimal.padding())
+            .borders(PaneMode::Minimal.borders())
+            .search_rule(false),
+        PaneMode::Standard => PaneSpec::new(full_title)
+            .padding(PaneMode::Standard.padding())
+            .borders(PaneMode::Standard.borders()),
+    };
+    if filtered_count > 0 {
+        spec = spec.affix(PaneTitleAffix::selection(selected_one, filtered_count));
+    } else {
+        spec = spec.affix(PaneTitleAffix::selection(0, 0));
+    }
+    spec = spec.search_filter(filter).hints(hints).focused(focused);
 
     paint_list_body(frame, area, &spec, items, selected, filter, theme);
 }

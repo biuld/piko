@@ -77,13 +77,14 @@ Workspace + shell chrome (not A–E slots):
 └──────────────────────────────────────────────────────────────┘
 
 Z-modals (intent):
-  Browse  CoverBody   — sessions, tree, settings, agents, help…
-  Select  ComposerBand — models, MCP, auth…
+  Browse  CoverBody   — sessions, tree, settings, help…
+  Select  ComposerBand — agents (viewed switch), models, MCP, auth…
   Decide  Centered     — approval, tool workflow
 ```
 
-Agents are not a permanent strip: F4 opens Browse surface `Agents`. Chrome shows
-a compact agent chip only.
+Agents are not a permanent strip: F4 or `/agents` opens Select surface `Agents`
+(ComposerBand) to switch the viewed session agent. Chrome shows a compact agent
+chip only.
 
 ## Global interaction grammar
 
@@ -436,7 +437,7 @@ Each palette/slash entry **must** expose:
 | `/thinking` | Thinking selector | Apply level; BottomBar thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
 | `/status` | Status panel | Session/turn/queue/tools/approvals snapshot |
-| `/agents` | Agents list | Named agent specs / capabilities |
+| `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
 | `/tools` | Toggle tool detail density | Timeline tool cards fold/expand |
 | `/clear` | Clear notifications | Notification row empties |
 | `/quit` | Exit | Process exits (not Esc) |

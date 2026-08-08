@@ -10,7 +10,7 @@ impl AppState {
             Some(SurfaceId::Tree) => self.tree.select_next_filtered(),
             Some(SurfaceId::Settings) => self.settings.select_next(),
             Some(SurfaceId::Sessions) => self.sessions.select_next(),
-            Some(SurfaceId::AgentList) => self.agents.move_down(),
+            Some(SurfaceId::Agents) => self.agent_panel.select_next(),
             Some(SurfaceId::Models) => self.models.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
@@ -23,7 +23,7 @@ impl AppState {
             Some(SurfaceId::Tree) => self.tree.select_prev_filtered(),
             Some(SurfaceId::Settings) => self.settings.select_prev(),
             Some(SurfaceId::Sessions) => self.sessions.select_prev(),
-            Some(SurfaceId::AgentList) => self.agents.move_up(),
+            Some(SurfaceId::Agents) => self.agent_panel.select_prev(),
             Some(SurfaceId::Models) => self.models.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
@@ -168,7 +168,7 @@ impl AppState {
                 self.tree.rebuild_visible_for_filter();
             }
             AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
-            AppMode::Surface(SurfaceId::AgentList) => self.agents.list.selected = 0,
+            AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => {
@@ -195,7 +195,7 @@ impl AppState {
                 self.tree.rebuild_visible_for_filter();
             }
             AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
-            AppMode::Surface(SurfaceId::AgentList) => self.agents.list.selected = 0,
+            AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => {
@@ -241,10 +241,7 @@ impl AppState {
         match self.mode.as_surface() {
             Some(SurfaceId::Tree) => self.confirm_tree_entry(),
             Some(SurfaceId::Sessions) => self.open_selected_session(),
-            Some(SurfaceId::AgentList) => {
-                self.pop_focus(); // Just close the view
-                Vec::new()
-            }
+            Some(SurfaceId::Agents) => self.apply_selected_agent_view(),
             Some(SurfaceId::Models) => self.apply_selected_model(),
             Some(SurfaceId::Settings) => self.apply_selected_setting(),
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
@@ -255,11 +252,25 @@ impl AppState {
                 | SurfaceId::Help
                 | SurfaceId::Approval
                 | SurfaceId::ToolInteraction
-                | SurfaceId::SummaryPrompt
-                | SurfaceId::Agents,
+                | SurfaceId::SummaryPrompt,
             )
             | None => Vec::new(),
         }
+    }
+
+    pub(super) fn apply_selected_agent_view(&mut self) -> Vec<Effect> {
+        if self.agent_panel.is_loading() {
+            self.status = "agents still loading".to_string();
+            return Vec::new();
+        }
+        let Some(agent) = self.agent_panel.selected_agent().cloned() else {
+            self.status = "no agent selected".to_string();
+            return Vec::new();
+        };
+        self.dispatch_agent_panel_action(crate::app::command::AgentPanelAction::Subscribe {
+            agent_instance_id: agent.agent_instance_id,
+            agent_id: agent.agent_id,
+        })
     }
 
     pub(super) fn reset_overlay_selection(&mut self) {
@@ -283,6 +294,7 @@ impl AppState {
                     Some(id) => id,
                     None => return vec![],
                 };
+                self.clear_focus();
                 self.status = format!("switching to agent {agent_id}");
                 vec![Effect::send(Command::AgentSubscribe {
                     command_id: command_id(),

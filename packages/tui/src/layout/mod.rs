@@ -2,7 +2,7 @@
 
 use crate::{
     app::AppState,
-    navigation::{FocusManagerExt, compose_modals, compose_plane},
+    navigation::{FocusManagerExt, SelectBandBudget, compose_modals, compose_plane},
 };
 use piko_tui_layout::{FramePlan, ShellChrome, ShellSplit, solve, split_shell};
 
@@ -47,7 +47,23 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
             .editor
             .visible_height(&app.tui_config.editor, body.width),
         body_height: body.height,
+        select_band: modal.and_then(|s| select_band_budget(app, s)),
     }
+}
+
+/// Feature-declared content-row budget for Select / ComposerBand only.
+fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBudget> {
+    use crate::navigation::SurfaceIntent;
+    if surface.intent() != SurfaceIntent::Select {
+        return None;
+    }
+    Some(match surface {
+        SurfaceId::Models => app.models.select_band_budget(),
+        SurfaceId::Agents => app.agent_panel.select_band_budget(),
+        SurfaceId::AuthSelector => app.auth_selector.select_band_budget(),
+        SurfaceId::Mcp => app.mcp.select_band_budget(),
+        _ => SelectBandBudget::minimal_stacked_list(0),
+    })
 }
 
 pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> ProductFrame {
@@ -94,11 +110,13 @@ mod tests {
     }
 
     #[test]
-    fn agents_surface_covers_body() {
+    fn agents_surface_uses_composer_band() {
         let mut app = app_state();
         app.push_surface(SurfaceId::Agents);
         let frame = compose_frame(&app, Rect::new(0, 0, 80, 24));
         assert_eq!(frame.modal_surface, Some(SurfaceId::Agents));
         assert_eq!(frame.plan.layers.len(), 1);
+        // Stream remains visible under the select band (not CoverBody).
+        assert!(frame.plan.rects.contains_key(&Region::Stream));
     }
 }

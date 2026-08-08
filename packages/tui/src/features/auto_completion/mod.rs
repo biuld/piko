@@ -3,14 +3,12 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row, Table, TableState},
 };
 use std::path::Path;
 
 use crate::app::command::TuiCommandEntry;
-use crate::ui::components::{
-    NO_MATCHES, frame_border_style, row_primary_style, selection_prefix, with_selected_bg,
-};
+use crate::ui::components::{NO_MATCHES, row_primary_style, selection_prefix, with_selected_bg};
 
 pub mod command_palette;
 pub mod file_browser;
@@ -132,25 +130,37 @@ impl AutoComplete {
         self.selected = self.selected.min(self.items.len().saturating_sub(1));
     }
 
-    /// Renders the completions list in the allocated area.
+    /// Renders the completions list in the allocated area (Minimal pane, no search).
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
-        // Suggestions capture navigation while open → focused frame.
-        let border = frame_border_style(true, theme);
+        use crate::ui::components::pane::{PaneSpec, PaneTitleAffix, render_pane};
+
+        let (label, hints) = if let Some(idx) = self.active_provider_idx {
+            (self.providers[idx].label(), self.providers[idx].hints())
+        } else {
+            ("suggestions", "Esc cancel")
+        };
+
+        let total = self.items.len();
+        let selected_one = if total == 0 { 0 } else { self.selected + 1 };
+        let spec = PaneSpec::minimal(label)
+            .no_search()
+            .affix(PaneTitleAffix::selection(selected_one, total))
+            .hints(hints)
+            .focused(true); // suggestions capture nav while open
+
+        let Some(areas) = render_pane(frame, area, &spec, theme) else {
+            return;
+        };
+        let content = areas.content;
+
         if self.items.is_empty() {
-            let table = Table::new(
-                vec![Row::new(vec![Cell::from(Line::from(vec![Span::styled(
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![Span::styled(
                     format!("  {NO_MATCHES}"),
                     Style::default().fg(theme.dim),
-                )]))])],
-                [ratatui::layout::Constraint::Fill(1)],
-            )
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(border)
-                    .title("suggestions [0/0]"),
+                )])),
+                content,
             );
-            frame.render_widget(table, area);
             return;
         }
 
@@ -217,28 +227,15 @@ impl AutoComplete {
             })
             .collect();
 
-        let title = if let Some(idx) = self.active_provider_idx {
-            self.providers[idx].title(self.selected + 1, self.items.len())
-        } else {
-            format!("suggestions [{}/{}]", self.selected + 1, self.items.len())
-        };
-
-        let table = Table::new(rows, widths)
-            .row_highlight_style(with_selected_bg(
-                row_primary_style(true, theme),
-                true,
-                theme,
-            ))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(border)
-                    .title(title),
-            );
+        let table = Table::new(rows, widths).row_highlight_style(with_selected_bg(
+            row_primary_style(true, theme),
+            true,
+            theme,
+        ));
 
         let mut state = TableState::default();
         state.select(Some(self.selected));
-        frame.render_stateful_widget(table, area, &mut state);
+        frame.render_stateful_widget(table, content, &mut state);
     }
 }
 

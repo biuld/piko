@@ -1,22 +1,18 @@
-//! Agent instances panel — Browse surface (`SurfaceId::Agents`).
+//! Session agent instances — Select surface (`SurfaceId::Agents`, ComposerBand).
 //!
-//! Compact agent status also projects into BottomBar chrome; this module
-//! paints the full selectable tree when the surface is open.
+//! Lists agents in the current session and switches the viewed agent (timeline
+//! target). Compact status also projects into BottomBar chrome.
 
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
-};
+use ratatui::{Frame, layout::Rect};
 
 use crate::{
     app::QueueStatus,
-    layout::{DEFAULT_HORIZONTAL_INSET, inset_horizontal},
+    navigation::SelectBandBudget,
     theme::Theme,
     ui::components::{
-        ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH, selection_prefix, spinner_glyph,
+        ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH,
+        filterable_list::{FilterableItem, render_filterable_list_minimal},
+        spinner_glyph,
     },
 };
 
@@ -40,6 +36,7 @@ pub struct AgentPanelState {
     pub selected_idx: usize,
     pub active_agent_instance_id: Option<String>,
     pub focus: bool,
+    pub filter: String,
     /// Set only after an authoritative agent projection (reconcile / AgentList).
     pub agents_hydrated: bool,
 }
@@ -66,85 +63,110 @@ impl AgentPanelState {
         self.agents.clear();
         self.active_agent_instance_id = None;
         self.selected_idx = 0;
+        self.filter.clear();
         self.agents_hydrated = false;
     }
 
+    /// ComposerBand content-row budget (dense KeyValue rows).
+    pub fn select_band_budget(&self) -> SelectBandBudget {
+        if self.is_loading() {
+            return SelectBandBudget::minimal_dense_list(1);
+        }
+        SelectBandBudget::minimal_dense_list(self.filtered_indices(&self.filter).len())
+    }
+
+    /// Align keyboard selection with the currently viewed agent before open.
+    pub fn prepare_for_switch(&mut self) {
+        self.filter.clear();
+        if let Some(active) = self.active_agent_instance_id.as_deref()
+            && let Some(idx) = self
+                .agents
+                .iter()
+                .position(|a| a.agent_instance_id == active)
+        {
+            self.selected_idx = idx;
+        } else if self.selected_idx >= self.agents.len() {
+            self.selected_idx = 0;
+        }
+    }
+
     pub fn render(frame: &mut Frame<'_>, area: Rect, view: AgentPanelView<'_>) {
-        let agent_count = view.state.agents.len();
-        let has_queue = view.queue.steer_count > 0
-            || view.queue.follow_up_count > 0
-            || view.queue.next_turn_count > 0;
-        let any_busy = view.foreground.iter().any(|fg| fg.is_busy());
-
-        let mut lines = Vec::new();
-
         if view.state.is_loading() {
-            lines.push(crate::ui::components::feedback::loading_line(
-                view.spinner_frame,
+            // Match Models-band chrome under filterable list while reusing feedback loading copy.
+            let line =
+                crate::ui::components::feedback::loading_line(view.spinner_frame, view.theme);
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            // Single-line list chrome; loading may keep a short detail but stays KeyValue dense.
+            let items =
+                vec![FilterableItem::new(text, "waiting for session agent list").key_value()];
+            render_filterable_list_minimal(
+                frame,
+                area,
+                "agents",
+                &items,
+                0,
+                &view.state.filter,
+                view.state.focus,
                 view.theme,
-            ));
-        } else if agent_count == 0 {
-            lines.push(render_empty_agent_row(view.theme.dim));
-        } else {
-            let prefixes = build_tree_prefixes(&view.state.agents);
-
-            for (i, agent) in view.state.agents.iter().enumerate() {
-                let is_selected = view.state.focus && i == view.state.selected_idx;
-                let is_active = view.state.active_agent_instance_id.as_deref()
-                    == Some(&agent.agent_instance_id);
-                let foreground = view
-                    .foreground
-                    .get(i)
-                    .copied()
-                    .unwrap_or(piko_protocol::AgentForeground::Idle);
-
-                let prefix = prefixes[i].as_str();
-                lines.push(render_agent_row(
-                    agent,
-                    prefix,
-                    is_selected,
-                    is_active,
-                    foreground,
-                    view.spinner_frame,
-                    view.theme,
-                ));
-            }
-
-            if !any_busy && has_queue {
-                let total_queue = view.queue.steer_count
-                    + view.queue.follow_up_count
-                    + view.queue.next_turn_count;
-                lines.push(Line::from(vec![Span::styled(
-                    format!("  {} queued", total_queue),
-                    Style::default().fg(view.theme.dim),
-                )]));
-            }
+            );
+            return;
         }
 
-        // Focused strip uses panel border; passive uses muted (Selected ≠ Focused).
-        let border_color = if view.state.focus {
-            view.theme.border
-        } else {
-            view.theme.border_muted
-        };
-
-        // Top rule stays edge-flush; only agent rows get horizontal inset.
-        let border = Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_color));
-        let content_area = inset_horizontal(border.inner(area), DEFAULT_HORIZONTAL_INSET);
-        frame.render_widget(border, area);
-        frame.render_widget(Paragraph::new(lines), content_area);
+        let items = build_filterable_items(&view);
+        render_filterable_list_minimal(
+            frame,
+            area,
+            "agents",
+            &items,
+            view.state.selected_idx,
+            &view.state.filter,
+            view.state.focus,
+            view.theme,
+        );
     }
 
     pub fn select_next(&mut self) {
-        if !self.agents.is_empty() {
-            self.selected_idx = (self.selected_idx + 1).min(self.agents.len() - 1);
+        if self.agents.is_empty() {
+            return;
+        }
+        let filter = self.filter.clone();
+        let filtered = self.filtered_indices(&filter);
+        if filtered.is_empty() {
+            return;
+        }
+        let pos = filtered
+            .iter()
+            .position(|&i| i == self.selected_idx)
+            .unwrap_or(0);
+        let next = (pos + 1).min(filtered.len() - 1);
+        if let Some(&idx) = filtered.get(next) {
+            self.selected_idx = idx;
         }
     }
 
     pub fn select_prev(&mut self) {
-        self.selected_idx = self.selected_idx.saturating_sub(1);
+        if self.agents.is_empty() {
+            return;
+        }
+        let filter = self.filter.clone();
+        let filtered = self.filtered_indices(&filter);
+        if filtered.is_empty() {
+            return;
+        }
+        let pos = filtered
+            .iter()
+            .position(|&i| i == self.selected_idx)
+            .unwrap_or(0);
+        let prev = pos.saturating_sub(1);
+        if let Some(&idx) = filtered.get(prev) {
+            self.selected_idx = idx;
+        }
+    }
+
+    pub fn reset_selection(&mut self) {
+        let filter = self.filter.clone();
+        let filtered = self.filtered_indices(&filter);
+        self.selected_idx = filtered.first().copied().unwrap_or(0);
     }
 
     pub fn selected_agent(&self) -> Option<&AgentEntry> {
@@ -170,15 +192,130 @@ impl AgentPanelState {
             self.agents.push(agent);
         }
     }
+
+    fn filtered_indices(&self, filter: &str) -> Vec<usize> {
+        self.agents
+            .iter()
+            .enumerate()
+            .filter(|(_, agent)| agent_matches(agent, filter))
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+}
+
+fn agent_matches(agent: &AgentEntry, filter: &str) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let q = filter.to_lowercase();
+    agent.name.to_lowercase().contains(&q)
+        || agent.agent_id.to_lowercase().contains(&q)
+        || agent.agent_instance_id.to_lowercase().contains(&q)
+}
+
+fn build_filterable_items(view: &AgentPanelView<'_>) -> Vec<FilterableItem> {
+    if view.state.agents.is_empty() {
+        return Vec::new();
+    }
+
+    let prefixes = build_tree_prefixes(&view.state.agents);
+    let queue_note = queue_detail(view.queue, view.foreground);
+
+    view.state
+        .agents
+        .iter()
+        .enumerate()
+        .map(|(i, agent)| {
+            let is_active =
+                view.state.active_agent_instance_id.as_deref() == Some(&agent.agent_instance_id);
+            let foreground = view
+                .foreground
+                .get(i)
+                .copied()
+                .unwrap_or(piko_protocol::AgentForeground::Idle);
+            let (glyph, status_label) =
+                status_label(agent, is_active, foreground, view.spinner_frame);
+            // Tree indent + status glyph + name; status text as right-hand detail (single line).
+            let primary = format!("{}{glyph} {}", prefixes[i], agent.name);
+            let mut detail = status_label;
+            if !queue_note.is_empty() && is_active {
+                detail = if detail.is_empty() {
+                    queue_note.clone()
+                } else {
+                    format!("{detail} · {queue_note}")
+                };
+            }
+            FilterableItem::new(primary, detail)
+                .active(is_active)
+                .key_value()
+        })
+        .collect()
+}
+
+fn status_label(
+    agent: &AgentEntry,
+    is_active: bool,
+    foreground: piko_protocol::AgentForeground,
+    frame_idx: usize,
+) -> (&'static str, String) {
+    let (glyph, mut parts) = match foreground {
+        piko_protocol::AgentForeground::Running | piko_protocol::AgentForeground::Cancelling => {
+            (spinner_glyph(frame_idx), vec!["running".into()])
+        }
+        piko_protocol::AgentForeground::RequiresAction => {
+            (ACTIVE_MARKER, vec!["needs action".into()])
+        }
+        piko_protocol::AgentForeground::Queued => (IDLE_MARKER, vec!["queued".into()]),
+        piko_protocol::AgentForeground::Idle => match agent.status {
+            piko_protocol::AgentStatus::Running => (ACTIVE_MARKER, vec!["busy".into()]),
+            piko_protocol::AgentStatus::Completed => (SUCCESS_GLYPH, vec!["done".into()]),
+            piko_protocol::AgentStatus::Failed => (FAIL_GLYPH, vec!["failed".into()]),
+            piko_protocol::AgentStatus::Cancelled => (FAIL_GLYPH, vec!["cancelled".into()]),
+            piko_protocol::AgentStatus::Closed => (FAIL_GLYPH, vec!["closed".into()]),
+            _ if is_active => (ACTIVE_MARKER, vec!["current".into()]),
+            _ => (IDLE_MARKER, Vec::new()),
+        },
+    };
+
+    match agent.lifecycle {
+        piko_protocol::AgentInstanceLifecycle::Open => {}
+        piko_protocol::AgentInstanceLifecycle::Closed => parts.push("lifecycle closed".into()),
+        piko_protocol::AgentInstanceLifecycle::Terminated => {
+            parts.push("lifecycle terminated".into())
+        }
+        piko_protocol::AgentInstanceLifecycle::Unavailable => {
+            parts.push("lifecycle unavailable".into())
+        }
+    }
+    if agent.unread_report_count > 0 {
+        parts.push(format!("+{} report", agent.unread_report_count));
+    }
+    if !agent.agent_id.is_empty() && agent.agent_id != agent.name {
+        parts.push(agent.agent_id.clone());
+    }
+
+    (glyph, parts.join(" · "))
+}
+
+fn queue_detail(queue: &QueueStatus, foreground: &[piko_protocol::AgentForeground]) -> String {
+    let any_busy = foreground.iter().any(|fg| fg.is_busy());
+    if any_busy {
+        return String::new();
+    }
+    let total = queue.steer_count + queue.follow_up_count + queue.next_turn_count;
+    if total == 0 {
+        String::new()
+    } else {
+        format!("{total} queued")
+    }
 }
 
 // ── tree prefix builder ──────────────────────────────────────────────────────
 
 /// Build tree connector prefix for each agent.
 ///
-/// Root agents get no prefix (spinner at left margin).
-/// Children get "├─ " or "└─ " with "│ " continuation lines for
-/// ancestors that have more descendants coming.
+/// Root agents get no prefix. Children get "├─ " or "└─ " with "│ "
+/// continuation lines for ancestors that have more descendants coming.
 fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
     let n = agents.len();
     let mut prefixes = Vec::with_capacity(n);
@@ -190,7 +327,6 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
             continue;
         };
 
-        // Collect ancestors from innermost to outermost
         let mut ancestor_ids: Vec<String> = Vec::new();
         let mut current = Some(parent_id.to_string());
         while let Some(id) = current.take() {
@@ -201,7 +337,6 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
                 .and_then(|a| a.parent_agent_instance_id.clone());
         }
 
-        // Build indentation from outermost to innermost
         let mut s = String::new();
         for anc_id in ancestor_ids.iter().rev() {
             let continues = agents[i + 1..]
@@ -214,7 +349,6 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
             }
         }
 
-        // Connector for this agent
         let is_last = !agents[i + 1..]
             .iter()
             .any(|a| a.parent_agent_instance_id.as_deref() == Some(parent_id));
@@ -228,85 +362,6 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
     }
 
     prefixes
-}
-
-// ── rendering ────────────────────────────────────────────────────────────────
-
-fn render_agent_row(
-    agent: &AgentEntry,
-    indent: &str,
-    is_selected: bool,
-    is_active: bool,
-    foreground: piko_protocol::AgentForeground,
-    frame_idx: usize,
-    theme: &Theme,
-) -> Line<'static> {
-    let (status_char, status_color) = match foreground {
-        piko_protocol::AgentForeground::Running | piko_protocol::AgentForeground::Cancelling => {
-            (spinner_glyph(frame_idx), theme.warning)
-        }
-        piko_protocol::AgentForeground::RequiresAction => (ACTIVE_MARKER, theme.warning),
-        piko_protocol::AgentForeground::Queued => (IDLE_MARKER, theme.muted),
-        piko_protocol::AgentForeground::Idle => match agent.status {
-            piko_protocol::AgentStatus::Running => (ACTIVE_MARKER, theme.warning),
-            piko_protocol::AgentStatus::Completed => (SUCCESS_GLYPH, theme.success),
-            piko_protocol::AgentStatus::Failed | piko_protocol::AgentStatus::Cancelled => {
-                (FAIL_GLYPH, theme.error)
-            }
-            piko_protocol::AgentStatus::Closed => (FAIL_GLYPH, theme.error),
-            _ if is_active => (ACTIVE_MARKER, theme.accent),
-            _ => (IDLE_MARKER, theme.dim),
-        },
-    };
-
-    // Selected ≠ Active: selection uses ❯ + accent text; active uses status glyph.
-    let name_style = if is_selected {
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD)
-    } else if is_active {
-        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.text)
-    };
-
-    let lifecycle = match agent.lifecycle {
-        piko_protocol::AgentInstanceLifecycle::Open => String::new(),
-        piko_protocol::AgentInstanceLifecycle::Closed => " closed".into(),
-        piko_protocol::AgentInstanceLifecycle::Terminated => " terminated".into(),
-        piko_protocol::AgentInstanceLifecycle::Unavailable => " unavailable".into(),
-    };
-    let unread = if agent.unread_report_count > 0 {
-        format!(" +{}", agent.unread_report_count)
-    } else {
-        String::new()
-    };
-
-    let mut spans = vec![
-        Span::styled(
-            selection_prefix(is_selected),
-            if is_selected {
-                Style::default().fg(theme.accent)
-            } else {
-                Style::default()
-            },
-        ),
-        Span::raw(indent.to_string()),
-        Span::styled(status_char.to_string(), Style::default().fg(status_color)),
-        Span::raw(" "),
-        Span::styled(agent.name.clone(), name_style),
-        Span::styled(lifecycle, Style::default().fg(theme.dim)),
-        Span::styled(unread, Style::default().fg(theme.warning)),
-    ];
-    if is_active && !is_selected {
-        // Quiet "current view" cue without stealing selection style.
-        spans.push(Span::styled(" current", Style::default().fg(theme.muted)));
-    }
-    Line::from(spans)
-}
-
-fn render_empty_agent_row(dim: Color) -> Line<'static> {
-    Line::from(vec![Span::styled("No agents", Style::default().fg(dim))])
 }
 
 #[cfg(test)]
@@ -328,13 +383,71 @@ mod tests {
     }
 
     #[test]
-    fn hydrated_empty_shows_explicit_empty_not_main() {
+    fn prepare_for_switch_selects_active_agent() {
         let mut state = AgentPanelState::default();
         state.mark_hydrated();
-        assert!(!state.is_loading());
+        state.agents = vec![
+            AgentEntry {
+                agent_id: "main".into(),
+                agent_instance_id: "a-root".into(),
+                name: "main".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                status: piko_protocol::AgentStatus::Idle,
+            },
+            AgentEntry {
+                agent_id: "coder".into(),
+                agent_instance_id: "a-child".into(),
+                name: "coder".into(),
+                parent_agent_instance_id: Some("a-root".into()),
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                status: piko_protocol::AgentStatus::Idle,
+            },
+        ];
+        state.active_agent_instance_id = Some("a-child".into());
+        state.selected_idx = 0;
+        state.prepare_for_switch();
+        assert_eq!(state.selected_idx, 1);
+        assert_eq!(
+            state.selected_agent().map(|a| a.agent_instance_id.as_str()),
+            Some("a-child")
+        );
+    }
 
-        let line = render_empty_agent_row(Theme::dark().dim);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "No agents");
+    #[test]
+    fn filter_select_next_stays_in_matches() {
+        let mut state = AgentPanelState::default();
+        state.mark_hydrated();
+        state.agents = vec![
+            AgentEntry {
+                agent_id: "main".into(),
+                agent_instance_id: "a1".into(),
+                name: "main".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                status: piko_protocol::AgentStatus::Idle,
+            },
+            AgentEntry {
+                agent_id: "coder".into(),
+                agent_instance_id: "a2".into(),
+                name: "coder".into(),
+                parent_agent_instance_id: None,
+                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+                activity: piko_protocol::AgentActivity::Idle,
+                unread_report_count: 0,
+                status: piko_protocol::AgentStatus::Idle,
+            },
+        ];
+        state.filter = "cod".into();
+        state.reset_selection();
+        assert_eq!(state.selected_idx, 1);
+        state.select_next();
+        assert_eq!(state.selected_idx, 1);
     }
 }

@@ -13,10 +13,8 @@ use super::Region;
 /// Overlay surfaces (focus identity + modal content).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SurfaceId {
-    /// Runtime agent instance tree (switch viewed agent).
+    /// Session agent list — switch viewed agent (Select / ComposerBand).
     Agents,
-    /// Agent *spec* catalog (spawnable kinds).
-    AgentList,
     Sessions,
     Tree,
     Models,
@@ -45,9 +43,7 @@ pub enum SurfaceIntent {
 impl SurfaceId {
     pub fn intent(self) -> SurfaceIntent {
         match self {
-            Self::Agents
-            | Self::AgentList
-            | Self::Sessions
+            Self::Sessions
             | Self::Tree
             | Self::Status
             | Self::Diagnostics
@@ -55,7 +51,9 @@ impl SurfaceId {
             | Self::SummaryPrompt
             | Self::Settings => SurfaceIntent::Browse,
 
-            Self::Mcp | Self::Models | Self::AuthSelector => SurfaceIntent::Select,
+            // Session agent picker (viewed-agent switch) sits near the composer,
+            // same as Models / Auth.
+            Self::Agents | Self::Mcp | Self::Models | Self::AuthSelector => SurfaceIntent::Select,
 
             Self::Approval | Self::ToolInteraction => SurfaceIntent::Decide,
         }
@@ -75,6 +73,8 @@ impl SurfaceId {
     /// Build a single-leaf modal layer for this surface.
     ///
     /// `composer_band_height` applies only to [`SurfaceIntent::Select`].
+    /// Height is computed from feature **content-row** budgets (see
+    /// [`crate::navigation::SelectBandBudget`]), not a fixed body percent.
     pub fn modal_layer(self, body: Rect, composer_band_height: u16) -> ModalLayer<Region> {
         let placement = self.modal_placement(body);
         let host_band_height = match placement {

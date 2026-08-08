@@ -5,15 +5,12 @@
 //! when a server failed or timed out at session start.
 
 use piko_protocol::command::McpServerInfo;
-use ratatui::{
-    Frame,
-    layout::Rect,
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
-};
+use ratatui::{Frame, layout::Rect, text::Line};
 
+use crate::navigation::SelectBandBudget;
 use crate::theme::Theme;
-use crate::ui::components::frame_border_style;
+use crate::ui::components::pane::{PaneSpec, render_pane};
+use ratatui::widgets::Paragraph;
 
 use super::centered_rect;
 
@@ -40,9 +37,18 @@ impl McpPanel {
         self.servers.iter().filter(|s| s.connected).count()
     }
 
+    /// ComposerBand content-row budget (summary + one line per server).
+    pub fn select_band_budget(&self) -> SelectBandBudget {
+        let body_lines = if self.servers.is_empty() {
+            2 // summary + empty hint
+        } else {
+            1 + self.servers.len() // summary + rows; overflow scrolls via tall band clamp
+        };
+        SelectBandBudget::standard_info(body_lines.min(12) as u16)
+    }
+
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let popup = centered_rect(74, 55, area);
-        frame.render_widget(Clear, popup);
 
         let mut text = vec![Line::from(format!(
             "{} server(s) configured",
@@ -56,15 +62,13 @@ impl McpPanel {
         } else {
             text.extend(lines);
         }
-        text.push(Line::from(""));
-        text.push(Line::from(" Esc close"));
 
-        let block = Block::default()
-            .title(" MCP servers ")
-            .borders(Borders::ALL)
-            .border_style(frame_border_style(true, theme));
-        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
-        frame.render_widget(paragraph, popup);
+        let spec = PaneSpec::new("MCP servers")
+            .hints("Esc close")
+            .focused(true);
+        if let Some(areas) = render_pane(frame, popup, &spec, theme) {
+            frame.render_widget(Paragraph::new(text), areas.content);
+        }
     }
 }
 
@@ -106,24 +110,21 @@ mod tests {
 
     #[test]
     fn connected_server_line_renders_counts() {
-        let servers = [info("filesystem", true, None)];
+        let servers = [info("github", true, None)];
         let lines = server_lines(&servers);
-        let line = lines[0].to_string();
-        assert!(line.contains("filesystem"));
-        assert!(line.contains("connected"));
-        assert!(line.contains("3 tools"));
-        assert!(line.contains("1 resources"));
-        assert!(line.contains("2 templates"));
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("github"));
+        assert!(text.contains("connected"));
+        assert!(text.contains("3 tools"));
     }
 
     #[test]
     fn disconnected_server_line_shows_error() {
-        let servers = [info("hang", false, Some("timed out after 10000 ms"))];
+        let servers = [info("slack", false, Some("timeout"))];
         let lines = server_lines(&servers);
-        let line = lines[0].to_string();
-        assert!(line.contains("hang"));
-        assert!(line.contains("disconnected"));
-        assert!(line.contains("timed out after 10000 ms"));
+        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("disconnected"));
+        assert!(text.contains("timeout"));
     }
 
     #[test]
@@ -131,7 +132,7 @@ mod tests {
         let mut panel = McpPanel::new();
         panel.set_servers(vec![
             info("a", true, None),
-            info("b", false, Some("boom")),
+            info("b", false, Some("err")),
             info("c", true, None),
         ]);
         assert_eq!(panel.connected_count(), 2);

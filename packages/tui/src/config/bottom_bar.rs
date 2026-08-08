@@ -28,7 +28,7 @@ fn default_items() -> Vec<BottomBarItem> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BottomBarItem {
-    /// Compact agent summary (active / busy / count). Open full tree via F4.
+    /// Compact viewed-agent name (+ spinner when busy). Switch via F4 / `/agents`.
     Agent,
     /// Model provider + model ID + thinking level.
     Model,

@@ -96,6 +96,9 @@ fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
 }
 
 /// Compact agent projection for shell chrome (not the full tree UI).
+///
+/// Only the viewed agent name — multi-agent roster lives on `/agents` / F4.
+/// Busy work is signalled by the adjacent spinner, not a session count.
 fn agent_chrome_label(app: &AppState) -> Option<String> {
     if app.agent_panel.is_loading() {
         return Some("…".to_string());
@@ -110,12 +113,11 @@ fn agent_chrome_label(app: &AppState) -> Option<String> {
         .as_ref()
         .and_then(|id| agents.iter().find(|a| &a.agent_instance_id == id))
         .or_else(|| agents.first());
-    let name = active.map(|a| a.name.as_str()).unwrap_or("agent");
-    if agents.len() > 1 {
-        Some(format!("{name}·{}", agents.len()))
-    } else {
-        Some(name.to_string())
-    }
+    Some(
+        active
+            .map(|a| a.name.clone())
+            .unwrap_or_else(|| "agent".into()),
+    )
 }
 
 fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: SurfaceId) {
@@ -143,7 +145,6 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
         SurfaceId::Sessions => app
             .sessions
             .render(frame, area, app.session_id(), &app.theme),
-        SurfaceId::AgentList => app.agents.render(frame, area, &app.theme),
         SurfaceId::Tree => app
             .tree
             .render(frame, area, &app.tree.filter, None, &app.theme),

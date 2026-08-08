@@ -8,38 +8,41 @@ Auto-completion is a highly self-contained feature designed to plug into input c
 
 ## Layout
 
-The Auto-completion UI is rendered in Slot D' (directly above the Editor) in the Chat layout.
+Auto-completion paints in workspace `Region::Suggest` (directly above
+`Region::Composer`), with **Minimal** [`Pane`](./pane-chrome.md) chrome.
+Filter typing lives in the editor — the pane uses **`.no_search()`**.
 
 ### Command Palette Layout
 ```
-┌─────────────────────────────────────────────────────┐
-│ command palette [1/15] | Tab cycle | Enter execute  │
-│ > /help               Show help and shortcuts       │
-│   /models             List and set default model    │
-│   /resume             List and open sessions        │
-└─────────────────────────────────────────────────────┘
+─ command palette ──────────────────── [1/15] ─
+❯ /help               Show help and shortcuts
+  /models             List and set default model
+  /resume             List and open sessions
+Tab cycle | Enter execute
+──────────────────────────────────────────────
 ```
 
 ### File Browser Layout
 ```
-┌─────────────────────────────────────────────────────┐
-│ file browser [2/4] | Tab cycle | Enter accept       │
-│   @packages/tui/src/main.rs       file (1.2 KB)     │
-│ > @src/main.rs                    file (4.5 KB)     │
-│   @src/theme.rs                   file (8.1 KB)     │
-└─────────────────────────────────────────────────────┘
+─ file browser ──────────────────────── [2/4] ─
+  @packages/tui/src/main.rs       file (1.2 KB)
+❯ @src/main.rs                    file (4.5 KB)
+  @src/theme.rs                   file (8.1 KB)
+Tab cycle | Enter accept
+──────────────────────────────────────────────
 ```
 
-- **Height**: Dynamically matches the number of completions, up to 8 lines.
-- **Borders**: Rendered using the active theme's muted borders.
-- **Alignment**: Items are rendered as a table: the left column lists completion labels (commands or paths), and the right column lists details (descriptions or file sizes). The columns align consistently across all rows.
+- **Height**: content rows (capped) + Minimal top/bottom + footer hints.
+- **Title**: provider label; selection counter is a Pane title affix.
+- **Borders**: Minimal pane (top + bottom).
+- **Alignment**: table columns — left labels (commands or paths), right details.
 
 ## Behavior / interactions
 
 ### Triggers and Initialization
 - **`/` (Command Palette)**: Triggered when the user types `/` as the first character in the Editor or presses `Ctrl-K`.
 - **`@` (File Browser)**: Triggered when the user types `@` within the Editor.
-- When a trigger is detected, the Auto-completion system activates, fetches initial data, and begins rendering in Slot D'.
+- When a trigger is detected, the Auto-completion system activates, fetches initial data, and begins rendering in `Region::Suggest`.
 
 ### Filtering and Selection (Fuzzy Search)
 - **Command Palette (`/`)**: Filters command names and descriptions. Only the primary (first) alias of each command is shown to prevent duplication.

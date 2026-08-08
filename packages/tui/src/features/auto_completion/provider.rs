@@ -16,6 +16,9 @@ pub trait AutoCompleteProvider {
         cursor: usize,
     ) -> Vec<CompletionRow>;
 
-    /// Title displayed in the Suggestions block header.
-    fn title(&self, selected: usize, total: usize) -> String;
+    /// Short left title for [`Pane`] chrome (selection counter is a title affix).
+    fn label(&self) -> &'static str;
+
+    /// Footer key hints for the suggest dock pane.
+    fn hints(&self) -> &'static str;
 }

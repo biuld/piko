@@ -149,12 +149,6 @@ pub fn settings_apply_hints() -> &'static str {
     "↑/↓ nav | Enter apply | Esc back"
 }
 
-/// Title line for filterable lists: product title + counter.
-/// Filter is shown separately on the Pane search row (not duplicated here).
-pub fn list_title(title: &str, _filter: &str, selected_one_based: usize, total: usize) -> String {
-    format!("{title} [{selected_one_based}/{total}]")
-}
-
 /// Hint spans for embedding under a list (dim).
 pub fn hint_line(text: &str, theme: &Theme) -> Line<'static> {
     Line::from(Span::styled(text.to_string(), hint_style(theme)))

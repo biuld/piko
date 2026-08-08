@@ -10,7 +10,6 @@ pub enum Action {
     Surface(SurfaceAction),
     Session(SessionAction),
     Model(ModelAction),
-    AgentList(AgentAction),
     Tree(TreeAction),
     Approval(ApprovalAction),
     ToolInteraction(ToolInteractionAction),
@@ -62,6 +61,8 @@ pub enum SurfaceAction {
     OpenStatus,
     OpenTree,
     OpenThinking,
+    /// Session agent list → switch viewed agent (ComposerBand).
+    OpenAgents,
     Close,
     SelectNext,
     SelectPrev,
@@ -80,11 +81,6 @@ pub enum SessionAction {
 
 #[derive(Debug)]
 pub enum ModelAction {
-    RequestList,
-}
-
-#[derive(Debug)]
-pub enum AgentAction {
     RequestList,
 }
 
@@ -184,12 +180,6 @@ impl From<SessionAction> for Action {
 impl From<ModelAction> for Action {
     fn from(action: ModelAction) -> Self {
         Self::Model(action)
-    }
-}
-
-impl From<AgentAction> for Action {
-    fn from(action: AgentAction) -> Self {
-        Self::AgentList(action)
     }
 }
 
@@ -333,7 +323,7 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "/agents",
         LocalCommandId::Agents,
         "Agents",
-        "List available named agents and their capabilities",
+        "List agents in the current session and switch the viewed agent",
     ),
     (
         "/diff",
@@ -413,7 +403,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Help => SurfaceAction::OpenHelp.into(),
         LocalCommandId::Sessions => SessionAction::RequestList.into(),
         LocalCommandId::Models => ModelAction::RequestList.into(),
-        LocalCommandId::Agents => AgentAction::RequestList.into(),
+        LocalCommandId::Agents => SurfaceAction::OpenAgents.into(),
         LocalCommandId::Thinking => SurfaceAction::OpenThinking.into(),
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),

@@ -1,25 +1,37 @@
-//! Pane — reusable framed chrome for overlay surfaces.
+//! Pane — reusable framed chrome for product surfaces.
 //!
-//! Matches product overlay language (Settings / lists):
+//! Feature logic lives outside Pane. Pane owns frame + vertical zones and
+//! exposes a **complexity mode** plus field overrides. Mode describes how
+//! rich the *pane chrome* should be for that surface’s job — not layout
+//! placement (`CoverBody` / `ComposerBand` live in navigation).
 //!
+//! Standard (default surfaces: settings, sessions, long-form info):
 //! ```text
 //! ┌─ Title                                 [x] ─┐
 //! │ / to search                                 │
-//! │ ─────────────────────────────────────────── │  ← rule under search
+//! │ ─────────────────────────────────────────── │
 //! │ Content…                                    │
 //! │ Tip · …                                     │
 //! │ ↑/↓ nav | Enter open | Esc close            │
 //! └─────────────────────────────────────────────┘
 //! ```
 //!
-//! Surface feature logic lives outside Pane; Pane owns frame + vertical zones.
+//! Minimal (quick pickers / simple prompts — fewer zones by default):
+//! ```text
+//! ─ agents ────────────────────────── 1/3 ─
+//! / filter…
+//! ❯ ○ main                    current ●
+//!   ○ coder                   idle
+//! ↑/↓ | Enter switch | Esc
+//! ────────────────────────────────────────
+//! ```
 
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::theme::Theme;
@@ -27,6 +39,69 @@ use crate::ui::components::feedback::{frame_border_style, hint_line};
 
 /// Default search placeholder (product convention: type to filter).
 pub const SEARCH_PLACEHOLDER: &str = "to search";
+
+/// Pane chrome **complexity** for a surface’s job.
+///
+/// This is product/chrome density, not modal placement. A full session browser
+/// and a full-screen help panel both use [`Standard`]; a viewed-agent switcher or
+/// model picker uses [`Minimal`] because the interaction is a short pick.
+///
+/// Applying a mode via [`PaneSpec::mode`] sets padding / borders / search-rule
+/// defaults; subsequent builders (`.padding`, `.borders`, `.search_rule`, …)
+/// override field-by-field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PaneMode {
+    /// Default chrome: full frame, roomy pad, search hairline when search is on.
+    #[default]
+    Standard,
+    /// Sparse chrome: top/bottom frame, tight vertical pad, no search hairline.
+    Minimal,
+}
+
+/// Inner content inset inside the block border (cells).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanePadding {
+    pub horizontal: u16,
+    pub vertical: u16,
+}
+
+impl PanePadding {
+    pub const fn new(horizontal: u16, vertical: u16) -> Self {
+        Self {
+            horizontal,
+            vertical,
+        }
+    }
+
+    pub const UNIFORM_1: Self = Self::new(1, 1);
+}
+
+impl PaneMode {
+    /// Default inner padding for this complexity.
+    pub const fn padding(self) -> PanePadding {
+        match self {
+            Self::Standard => PanePadding::UNIFORM_1,
+            // Horizontal gutters only — keep list rows dense.
+            Self::Minimal => PanePadding::new(1, 0),
+        }
+    }
+
+    /// Default outer border set for this complexity.
+    pub const fn borders(self) -> Borders {
+        match self {
+            Self::Standard => Borders::ALL,
+            Self::Minimal => Borders::TOP.union(Borders::BOTTOM),
+        }
+    }
+
+    /// Default: hairline under the search row.
+    pub const fn search_rule(self) -> bool {
+        match self {
+            Self::Standard => true,
+            Self::Minimal => false,
+        }
+    }
+}
 
 /// Whether the pane reserves a search line under the title.
 #[derive(Clone, Debug, Default)]
@@ -55,12 +130,116 @@ pub enum PaneFooter<'a> {
     Reserved { height: u16 },
 }
 
+/// One mutually-exclusive **mode strip** in the title (scope, filter, …).
+///
+/// Feature owns *which* option is active; Pane owns paint:
+/// `Default | [NoTools] | User | …` (active option in brackets, ` | ` between).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneModeStrip {
+    pub options: Vec<String>,
+    /// Index into [`options`]; clamped when painted if out of range.
+    pub active: usize,
+}
+
+impl PaneModeStrip {
+    pub fn new(options: impl IntoIterator<Item = impl Into<String>>, active: usize) -> Self {
+        let options: Vec<String> = options.into_iter().map(Into::into).collect();
+        Self { options, active }
+    }
+
+    fn clamped_active(&self) -> usize {
+        if self.options.is_empty() {
+            0
+        } else {
+            self.active.min(self.options.len() - 1)
+        }
+    }
+
+    /// Product string for this strip alone.
+    pub fn display(&self) -> String {
+        if self.options.is_empty() {
+            return String::new();
+        }
+        let active = self.clamped_active();
+        self.options
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                if i == active {
+                    format!("[{label}]")
+                } else {
+                    label.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+}
+
+/// Semantic chips on the **right side of the title bar**.
+///
+/// Callers declare meaning; Pane owns formatting and spacing (affixes are
+/// painted left → right within the right-aligned cluster).
+///
+/// ```text
+/// ┌─ Title          Current | [All]  [3/12]  [x] ─┐
+///                   └─ ModeStrip ─┘  └─ sel ─┘  Close
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PaneTitleAffix {
+    /// Esc-close affordance → `[x]`.
+    Close,
+    /// List/table selection counter → `[at/of]` (1-based `at`).
+    Selection { at: usize, of: usize },
+    /// Mutually-exclusive options; Pane highlights the active one.
+    ModeStrip(PaneModeStrip),
+}
+
+impl PaneTitleAffix {
+    pub fn mode_strip(options: impl IntoIterator<Item = impl Into<String>>, active: usize) -> Self {
+        Self::ModeStrip(PaneModeStrip::new(options, active))
+    }
+
+    pub fn mode_strip_static(options: &[&'static str], active: usize) -> Self {
+        Self::mode_strip(options.iter().copied(), active)
+    }
+
+    pub fn selection(at_one_based: usize, of: usize) -> Self {
+        Self::Selection {
+            at: at_one_based,
+            of,
+        }
+    }
+
+    /// Product string for this affix alone.
+    pub fn display(&self) -> String {
+        match self {
+            Self::Close => "[x]".to_string(),
+            Self::Selection { at, of } => format!("[{at}/{of}]"),
+            Self::ModeStrip(strip) => strip.display(),
+        }
+    }
+}
+
+/// Join title affixes for the right title segment (double-space separation).
+pub fn format_title_affixes(affixes: &[PaneTitleAffix]) -> String {
+    affixes
+        .iter()
+        .map(PaneTitleAffix::display)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
 /// Spec for chrome paint. Content is filled by the caller after layout.
 #[derive(Clone, Debug)]
 pub struct PaneSpec<'a> {
     pub title: &'a str,
-    /// Right-aligned title affix (e.g. `[x]`, `3/9`).
-    pub title_right: Option<&'a str>,
+    /// Right-aligned title chips (mode · selection · close, …).
+    pub title_affixes: Vec<PaneTitleAffix>,
+    pub mode: PaneMode,
+    pub padding: PanePadding,
+    pub borders: Borders,
     pub search: PaneSearch<'a>,
     /// Hairline rule under the search row (on when search is visible, unless cleared).
     pub search_rule: bool,
@@ -71,20 +250,56 @@ pub struct PaneSpec<'a> {
 }
 
 impl<'a> PaneSpec<'a> {
+    /// Standard-complexity pane with product defaults.
     pub fn new(title: &'a str) -> Self {
         Self {
             title,
-            title_right: None,
+            title_affixes: Vec::new(),
+            mode: PaneMode::Standard,
+            padding: PaneMode::Standard.padding(),
+            borders: PaneMode::Standard.borders(),
             search: PaneSearch::Hidden,
-            search_rule: true,
+            search_rule: PaneMode::Standard.search_rule(),
             footer: PaneFooter::None,
             tip: None,
             focused: true,
         }
     }
 
-    pub fn title_right(mut self, right: impl Into<Option<&'a str>>) -> Self {
-        self.title_right = right.into();
+    /// Minimal-complexity defaults (quick pickers / short prompts).
+    pub fn minimal(title: &'a str) -> Self {
+        Self::new(title).mode(PaneMode::Minimal)
+    }
+
+    /// Apply a complexity preset. Resets mode-owned defaults (padding, borders,
+    /// search_rule); other fields stay; callers re-apply overrides after.
+    pub fn mode(mut self, mode: PaneMode) -> Self {
+        self.mode = mode;
+        self.padding = mode.padding();
+        self.borders = mode.borders();
+        self.search_rule = mode.search_rule();
+        self
+    }
+
+    pub fn padding(mut self, padding: PanePadding) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    pub fn borders(mut self, borders: Borders) -> Self {
+        self.borders = borders;
+        self
+    }
+
+    /// Replace the full right-title affix list (left → right within the cluster).
+    pub fn title_affixes(mut self, affixes: impl IntoIterator<Item = PaneTitleAffix>) -> Self {
+        self.title_affixes = affixes.into_iter().collect();
+        self
+    }
+
+    /// Append one affix (e.g. counter then close).
+    pub fn affix(mut self, affix: PaneTitleAffix) -> Self {
+        self.title_affixes.push(affix);
         self
     }
 
@@ -98,6 +313,14 @@ impl<'a> PaneSpec<'a> {
 
     pub fn search(mut self, search: PaneSearch<'a>) -> Self {
         self.search = search;
+        self
+    }
+
+    /// Feature opts out of the search zone (filter lives elsewhere, e.g. editor
+    /// token for command palette / file browser).
+    pub fn no_search(mut self) -> Self {
+        self.search = PaneSearch::Hidden;
+        self.search_rule = false;
         self
     }
 
@@ -155,7 +378,7 @@ pub fn render_pane(
     frame.render_widget(Clear, area);
 
     let mut block = Block::default()
-        .borders(Borders::ALL)
+        .borders(spec.borders)
         .border_style(frame_border_style(spec.focused, theme))
         .title(
             Line::from(Span::styled(
@@ -164,21 +387,23 @@ pub fn render_pane(
             ))
             .alignment(Alignment::Left),
         );
-    if let Some(right) = spec.title_right {
-        block = block.title(
-            Line::from(Span::styled(
-                format!(" {right} "),
-                Style::default().fg(theme.dim),
-            ))
-            .alignment(Alignment::Right),
-        );
+    if !spec.title_affixes.is_empty() {
+        let right = format_title_affixes(&spec.title_affixes);
+        if !right.is_empty() {
+            block = block.title(
+                Line::from(Span::styled(
+                    format!(" {right} "),
+                    Style::default().fg(theme.dim),
+                ))
+                .alignment(Alignment::Right),
+            );
+        }
     }
 
     let bordered = block.inner(area);
     frame.render_widget(block, area);
 
-    // 1-cell inset so text doesn't sit flush against the border.
-    let inner = inset(bordered, PANE_PADDING);
+    let inner = inset_xy(bordered, spec.padding);
     if inner.width == 0 || inner.height == 0 {
         return None;
     }
@@ -264,20 +489,33 @@ pub fn render_pane(
     })
 }
 
-/// Inner padding (cells) between border and chrome zones.
-const PANE_PADDING: u16 = 1;
+/// Paint a read-only text body into a fully specified pane (Help / MCP / …).
+pub fn render_text_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    spec: &PaneSpec<'_>,
+    text: impl Into<String>,
+    theme: &Theme,
+) {
+    let Some(areas) = render_pane(frame, area, spec, theme) else {
+        return;
+    };
+    frame.render_widget(
+        Paragraph::new(text.into())
+            .style(Style::default().fg(theme.text))
+            .wrap(Wrap { trim: false }),
+        areas.content,
+    );
+}
 
-fn inset(area: Rect, pad: u16) -> Rect {
-    if pad == 0 {
-        return area;
-    }
-    let pad_x = pad.min(area.width.saturating_sub(1) / 2);
-    let pad_y = pad.min(area.height.saturating_sub(1) / 2);
+fn inset_xy(area: Rect, pad: PanePadding) -> Rect {
+    let hx = pad.horizontal.min(area.width.saturating_sub(1) / 2);
+    let vy = pad.vertical.min(area.height.saturating_sub(1) / 2);
     Rect {
-        x: area.x.saturating_add(pad_x),
-        y: area.y.saturating_add(pad_y),
-        width: area.width.saturating_sub(pad_x.saturating_mul(2)),
-        height: area.height.saturating_sub(pad_y.saturating_mul(2)),
+        x: area.x.saturating_add(hx),
+        y: area.y.saturating_add(vy),
+        width: area.width.saturating_sub(hx.saturating_mul(2)),
+        height: area.height.saturating_sub(vy.saturating_mul(2)),
     }
 }
 
@@ -411,7 +649,7 @@ mod tests {
     #[test]
     fn pane_spec_builder() {
         let s = PaneSpec::new("Settings")
-            .title_right(Some("[x]"))
+            .affix(PaneTitleAffix::Close)
             .search_filter("")
             .hints("Esc close")
             .focused(true);
@@ -419,6 +657,63 @@ mod tests {
         assert!(matches!(s.search, PaneSearch::Shown { filter: "", .. }));
         assert!(matches!(s.footer, PaneFooter::Hints("Esc close")));
         assert!(s.search_rule);
+        assert_eq!(s.mode, PaneMode::Standard);
+        assert_eq!(s.padding, PanePadding::UNIFORM_1);
+        assert_eq!(s.title_affixes, vec![PaneTitleAffix::Close]);
+    }
+
+    #[test]
+    fn title_affixes_paint_semantics() {
+        assert_eq!(PaneTitleAffix::Close.display(), "[x]");
+        assert_eq!(PaneTitleAffix::selection(2, 9).display(), "[2/9]");
+        assert_eq!(
+            PaneModeStrip::new(["Current", "All"], 1).display(),
+            "Current | [All]"
+        );
+        assert_eq!(
+            PaneModeStrip::new(["Default", "NoTools", "User", "Labeled", "All"], 1).display(),
+            "Default | [NoTools] | User | Labeled | All"
+        );
+        assert_eq!(
+            format_title_affixes(&[
+                PaneTitleAffix::mode_strip(["Current", "All"], 0),
+                PaneTitleAffix::selection(1, 3),
+                PaneTitleAffix::Close,
+            ]),
+            "[Current] | All  [1/3]  [x]"
+        );
+    }
+
+    #[test]
+    fn mode_strip_clamps_active() {
+        let strip = PaneModeStrip::new(["A", "B"], 99);
+        assert_eq!(strip.display(), "A | [B]");
+        assert_eq!(PaneModeStrip::new(Vec::<String>::new(), 0).display(), "");
+    }
+
+    #[test]
+    fn minimal_mode_defaults_sparse_chrome() {
+        let s = PaneSpec::minimal("agents").search_filter("").hints("Esc");
+        assert_eq!(s.mode, PaneMode::Minimal);
+        assert_eq!(s.padding, PanePadding::new(1, 0));
+        assert!(!s.search_rule);
+        assert_eq!(s.borders, Borders::TOP.union(Borders::BOTTOM));
+        // Explicit override wins after mode.
+        let s = s.search_rule(true).padding(PanePadding::new(0, 0));
+        assert!(s.search_rule);
+        assert_eq!(s.padding, PanePadding::new(0, 0));
+        let s = s.borders(Borders::ALL);
+        assert_eq!(s.borders, Borders::ALL);
+    }
+
+    #[test]
+    fn no_search_hides_filter_zone() {
+        let s = PaneSpec::minimal("command palette")
+            .search_filter("query")
+            .no_search()
+            .hints("Tab");
+        assert!(matches!(s.search, PaneSearch::Hidden));
+        assert!(!s.search_rule);
     }
 
     #[test]

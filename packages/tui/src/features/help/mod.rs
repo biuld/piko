@@ -1,19 +1,14 @@
-use ratatui::{
-    Frame,
-    layout::Rect,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
-};
+use ratatui::{Frame, layout::Rect};
 
 use crate::app::command::TuiCommandEntry;
 use crate::theme::Theme;
-use crate::ui::components::frame_border_style;
+use crate::ui::components::pane::{PaneSpec, render_text_pane};
 
 /// Help panel: static keybinding reference.
 pub struct HelpPanel;
 
 impl HelpPanel {
     pub fn render(frame: &mut Frame<'_>, area: Rect, theme: &Theme, commands: &[TuiCommandEntry]) {
-        frame.render_widget(Clear, area);
         let mut lines = vec![
             "Core",
             "  Enter              submit input",
@@ -58,21 +53,14 @@ impl HelpPanel {
                 "  Ctrl-W             accept current request for workspace",
                 "  Ctrl-D             decline current request",
                 "  Ctrl-L             clear notifications",
-                "",
-                "Press Esc, Enter, or q to close this panel.",
             ]
             .into_iter()
             .map(str::to_string),
         );
         let text = lines.join("\n");
-        let widget = Paragraph::new(text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(frame_border_style(true, theme))
-                    .title("help"),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(widget, area);
+        let spec = PaneSpec::new("help")
+            .hints("Esc | Enter | q close")
+            .focused(true);
+        render_text_pane(frame, area, &spec, text, theme);
     }
 }

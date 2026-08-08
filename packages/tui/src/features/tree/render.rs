@@ -9,6 +9,7 @@ use ratatui::{
 use super::{ConnectorKind, TreeFilterMode, TreePanel, visible};
 use crate::theme::Theme;
 use crate::ui::components::interactive_workflow::InteractiveWorkflow;
+use crate::ui::components::pane::PaneTitleAffix;
 use crate::ui::components::table_panel::{ActionPrompt, TableBody, TablePanel};
 
 impl TreePanel {
@@ -25,23 +26,22 @@ impl TreePanel {
             left_title.push_str(" [+time]");
         }
 
-        let mode_indicator = match self.filter_mode {
-            TreeFilterMode::Default => "[Default] | NoTools | User | Labeled | All",
-            TreeFilterMode::NoTools => "Default | [NoTools] | User | Labeled | All",
-            TreeFilterMode::UserOnly => "Default | NoTools | [User] | Labeled | All",
-            TreeFilterMode::LabeledOnly => "Default | NoTools | User | [Labeled] | All",
-            TreeFilterMode::All => "Default | NoTools | User | Labeled | [All]",
+        let mode_active = match self.filter_mode {
+            TreeFilterMode::Default => 0,
+            TreeFilterMode::NoTools => 1,
+            TreeFilterMode::UserOnly => 2,
+            TreeFilterMode::LabeledOnly => 3,
+            TreeFilterMode::All => 4,
         };
 
-        let counter = if self.visible.rows.is_empty() {
-            "0/0".to_string()
+        let (sel_at, sel_of) = if self.visible.rows.is_empty() {
+            (0, 0)
         } else {
-            format!(
-                "{}/{}",
+            (
                 self.selected_idx
                     .saturating_add(1)
                     .min(self.visible.rows.len()),
-                self.visible.rows.len()
+                self.visible.rows.len(),
             )
         };
 
@@ -98,8 +98,13 @@ impl TreePanel {
 
         let panel = TablePanel {
             left_title,
-            mode_indicator: mode_indicator.to_string(),
-            counter,
+            affixes: vec![
+                PaneTitleAffix::mode_strip_static(
+                    &["Default", "NoTools", "User", "Labeled", "All"],
+                    mode_active,
+                ),
+                PaneTitleAffix::selection(sel_at, sel_of),
+            ],
             help_text,
             search_line,
             body,
