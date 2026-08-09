@@ -107,7 +107,6 @@ pub struct SettingsSnapshot {
     pub host: HostRuntimeSettings,
     pub thinking_level: Option<String>,
     pub thinking_visible: bool,
-    pub tools_expanded: bool,
     pub theme_name: String,
     pub no_tools: bool,
 }

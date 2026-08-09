@@ -5,16 +5,18 @@ use piko_protocol::ApprovalDecision;
 use ratatui::layout::Rect;
 
 use crate::app::{
-    AppState, InitialOptions, SurfaceId,
+    AppState, InitialOptions, SurfaceId, ToolStatus,
     command::{
-        Action, ApprovalAction, EditorAction, NotificationAction, TimelineAction,
+        Action, ApprovalAction, EditorAction, NotificationAction, SurfaceAction, TimelineAction,
         ToolInteractionAction,
     },
 };
 use crate::features::approval::PendingApproval;
 use crate::features::notifications::NotificationLevel;
+use crate::features::timeline::{TimelineEntry, ToolEntry};
 use crate::features::tool_interaction::ToolInteractionPanel;
 use crate::input::pointer::route_pointer;
+use crate::layout::build_surface_hitmap;
 use crate::layout::compose_frame;
 use crate::navigation::Region;
 use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
@@ -36,6 +38,16 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         row,
         modifiers: KeyModifiers::NONE,
     }
+}
+
+fn element_point(app: &AppState, surface: SurfaceId, element: crate::app::HitId) -> (u16, u16) {
+    let map = build_surface_hitmap(app, Rect::new(0, 0, 80, 24));
+    let hit = map
+        .hits
+        .iter()
+        .find(|hit| hit.region == Region::Surface(surface) && hit.element == Some(element))
+        .expect("surface element hit");
+    (hit.rect.x, hit.rect.y)
 }
 
 fn push_approval(app: &mut AppState) {
@@ -108,6 +120,61 @@ fn approval_background_click_is_ignored() {
         ),
     );
     assert!(actions.is_empty());
+}
+
+#[test]
+fn blocking_dock_outside_click_does_not_fall_through_or_close() {
+    let mut app = app();
+    push_approval(&mut app);
+
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), 1, 1),
+    );
+
+    assert!(actions.is_empty());
+    assert_eq!(app.modal_surface(), Some(SurfaceId::Approval));
+}
+
+#[test]
+fn dismissible_modal_outside_click_maps_to_keyboard_close() {
+    let mut app = app();
+    app.push_surface(SurfaceId::Settings);
+    let host = compose_frame(&app, Rect::new(0, 0, 80, 24))
+        .plan
+        .layers
+        .first()
+        .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Settings)))
+        .copied()
+        .expect("settings host");
+    let outside_x = host.x.saturating_sub(1);
+
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), outside_x, host.y),
+    );
+
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Surface(SurfaceAction::Close)]
+    ));
+}
+
+#[test]
+fn hover_outside_modal_does_not_expose_lower_layer_target() {
+    let mut app = app();
+    app.push_surface(SurfaceId::Settings);
+
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Moved, 1, 1),
+    );
+
+    assert!(actions.is_empty());
+    assert_eq!(app.hovered, None);
 }
 
 fn push_workflow(app: &mut AppState) {
@@ -236,6 +303,46 @@ fn wheel_outside_stream_is_ignored() {
         mouse(MouseEventKind::ScrollUp, 40, 23), // chrome row
     );
     assert!(actions.is_empty());
+}
+
+#[test]
+fn timeline_tool_block_hit_wins_over_stream_and_toggles_that_block() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.timeline.push(TimelineEntry::Tool(ToolEntry::new(
+        "tool-1".into(),
+        "bash".into(),
+        ToolStatus::Completed,
+        r#"{"cmd":"true"}"#.into(),
+        Some("done".into()),
+        None,
+    )));
+    let terminal = Rect::new(0, 0, 80, 24);
+    let map = build_surface_hitmap(&app, terminal);
+    let tool = map
+        .hits
+        .iter()
+        .find(|hit| hit.element == Some(crate::app::HitId::TimelineTool(0)))
+        .expect("timeline tool hit");
+    let x = tool.rect.x;
+    let y = tool.rect.y;
+
+    let hover = route_pointer(&mut app, terminal, mouse(MouseEventKind::Moved, x, y));
+    assert!(hover.is_empty());
+    assert_eq!(
+        app.hovered,
+        Some((Region::Stream, Some(crate::app::HitId::TimelineTool(0))))
+    );
+
+    let actions = route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Timeline(TimelineAction::ToggleTool(0))]
+    ));
 }
 
 #[test]
@@ -381,4 +488,121 @@ fn workflow_inline_input_cursor_tracks_caret() {
     assert_eq!(position.y, content.y + 2);
     // x = content.x + prefix(2) + "1. "(3) + "custom"(6) + ": "(2) + "ab"(2).
     assert_eq!(position.x, content.x + 2 + 3 + 6 + 2 + 2);
+
+    let (x, y) = element_point(
+        &app,
+        SurfaceId::ToolInteraction,
+        crate::app::HitId::TextInput,
+    );
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert!(actions.is_empty());
+    assert_eq!(
+        app.interactions.front().unwrap().workflow.questions[0]
+            .input_value
+            .width_before_cursor(),
+        0
+    );
+}
+
+#[test]
+fn model_row_click_selects_and_uses_confirm_action() {
+    use crate::features::model_selector::ModelOption;
+    let mut app = app();
+    app.models.load(vec![
+        ModelOption {
+            provider: "one".into(),
+            id: "a".into(),
+            name: "A".into(),
+            has_auth: true,
+        },
+        ModelOption {
+            provider: "two".into(),
+            id: "b".into(),
+            name: "B".into(),
+            has_auth: true,
+        },
+    ]);
+    app.push_surface(SurfaceId::Models);
+    let (x, y) = element_point(&app, SurfaceId::Models, crate::app::HitId::Row(1));
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert_eq!(app.models.list.selected, 1);
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Surface(SurfaceAction::Confirm)]
+    ));
+}
+
+#[test]
+fn mcp_row_click_only_moves_read_only_selection() {
+    use piko_protocol::command::McpServerInfo;
+    let mut app = app();
+    let server = |name: &str| McpServerInfo {
+        name: name.into(),
+        connected: true,
+        tool_count: 0,
+        resource_count: 0,
+        template_count: 0,
+        error: None,
+    };
+    app.mcp.set_servers(vec![server("one"), server("two")]);
+    app.push_surface(SurfaceId::Mcp);
+    let (x, y) = element_point(&app, SurfaceId::Mcp, crate::app::HitId::Row(1));
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert!(actions.is_empty());
+    assert_eq!(app.mcp.selected_index(), 1);
+}
+
+#[test]
+fn summary_prompt_choice_click_uses_embedded_workflow() {
+    let mut app = app();
+    app.summary_prompt = Some(InteractiveWorkflow::new(
+        vec![Question::new(
+            "Summary",
+            "choose",
+            vec![
+                ChoiceOption {
+                    label: "one".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+                ChoiceOption {
+                    label: "two".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+            ],
+        )],
+        false,
+    ));
+    app.push_surface(SurfaceId::SummaryPrompt);
+    let target = crate::app::HitId::Choice {
+        question: 0,
+        choice: 1,
+    };
+    let (x, y) = element_point(&app, SurfaceId::SummaryPrompt, target);
+    let actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert_eq!(
+        app.summary_prompt.as_ref().unwrap().questions[0].selected_idx,
+        1
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Surface(SurfaceAction::Confirm)]
+    ));
 }

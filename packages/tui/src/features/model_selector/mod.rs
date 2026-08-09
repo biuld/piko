@@ -1,14 +1,16 @@
 use ratatui::{Frame, layout::Rect};
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
-    app::HitId,
+    app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::selectable_list::{
-        ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
+        ColumnCell, SelectableItem, SelectableList, minimal_row_regions, paint_row_hover,
+        render_selectable_list_minimal,
     },
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
 };
 
 /// Render context for the model selector surface.
@@ -29,14 +31,61 @@ impl Component<HitId, ModelCtx<'_>> for ModelSelector {
         );
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &ModelCtx<'_>,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(
+            frame,
+            area,
+            ctx.active_model_id,
+            ctx.active_provider,
+            ctx.theme,
+        );
+        let items = self.display_items(ctx.active_model_id, ctx.active_provider);
+        let regions = minimal_row_regions(area, "models", &items, self.list.selected, &self.filter);
+        paint_row_hover(frame, &regions, interaction, self.list.selected, ctx.theme);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let items = self.display_items(None, None);
+        minimal_row_regions(area, "models", &items, self.list.selected, &self.filter)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect()
     }
 }
 
 impl SurfacePanel<SurfaceId, HitId, ModelCtx<'_>> for ModelSelector {
     fn region(&self) -> SurfaceId {
         SurfaceId::Models
+    }
+}
+
+impl PointerComponent<HitId> for ModelSelector {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i))) if i < self.list.len() => {
+                self.list.selected = i;
+                vec![SurfaceAction::Confirm.into()]
+            }
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -62,6 +111,26 @@ pub struct ModelSelector {
 }
 
 impl ModelSelector {
+    fn display_items(
+        &self,
+        active_model_id: Option<&str>,
+        active_provider: Option<&str>,
+    ) -> Vec<SelectableItem> {
+        self.list
+            .items
+            .iter()
+            .map(|action| {
+                let is_active = model_is_active(action, active_model_id, active_provider);
+                let auth = if action.has_auth { "auth" } else { "no auth" };
+                SelectableItem::columns([
+                    ColumnCell::primary(action.full_id()),
+                    ColumnCell::secondary(action.name.clone()),
+                    ColumnCell::secondary(auth),
+                ])
+                .active(is_active)
+            })
+            .collect()
+    }
     pub fn new() -> Self {
         Self {
             list: SelectableList::new(Vec::new()),
@@ -131,21 +200,7 @@ impl ModelSelector {
         active_provider: Option<&str>,
         theme: &Theme,
     ) {
-        let items: Vec<SelectableItem> = self
-            .list
-            .items
-            .iter()
-            .map(|action| {
-                let is_active = model_is_active(action, active_model_id, active_provider);
-                let auth = if action.has_auth { "auth" } else { "no auth" };
-                SelectableItem::columns([
-                    ColumnCell::primary(action.full_id()),
-                    ColumnCell::secondary(action.name.clone()),
-                    ColumnCell::secondary(auth),
-                ])
-                .active(is_active)
-            })
-            .collect();
+        let items = self.display_items(active_model_id, active_provider);
 
         render_selectable_list_minimal(
             frame,

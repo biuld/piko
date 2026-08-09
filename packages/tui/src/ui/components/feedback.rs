@@ -104,6 +104,13 @@ pub fn selected_bg(theme: &Theme) -> Option<Color> {
     }
 }
 
+/// Optional hover background. `Reset` means the theme deliberately leaves
+/// hover rows unpainted.
+pub fn hover_bg(theme: &Theme) -> Option<Color> {
+    let color = theme.bg_hover;
+    (!matches!(color, Color::Reset)).then_some(color)
+}
+
 /// Apply optional selected background onto a style.
 pub fn with_selected_bg(style: Style, selected: bool, theme: &Theme) -> Style {
     if selected && let Some(bg) = selected_bg(theme) {
@@ -176,6 +183,7 @@ mod tests {
                 .any(|s| s.content.contains("loading"))
         );
         assert_eq!(EMPTY_LIST, "No items");
+        assert_eq!(hover_bg(&theme), Some(theme.bg_hover));
     }
 
     #[test]

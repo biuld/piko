@@ -1,5 +1,6 @@
 use piko_protocol::{SessionListScope, SessionSummary};
-use piko_tui_layout::{Component, SurfacePanel};
+mod pointer;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -8,34 +9,17 @@ use ratatui::{
 };
 
 use crate::app::HitId;
-use crate::navigation::SurfaceId;
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneSpec, PaneTitleAffix};
+use crate::ui::components::pane::{PaneAffixHit, PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{
     ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
-    paint_selectable_panel,
+    paint_selectable_panel, selectable_row_regions,
 };
 
 /// Render context for the sessions surface.
 pub struct SessionListCtx<'a> {
     pub active_session_id: Option<&'a str>,
     pub theme: &'a Theme,
-}
-
-impl Component<HitId, SessionListCtx<'_>> for SessionList {
-    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &SessionListCtx<'_>) {
-        self.render(frame, area, ctx.active_session_id, ctx.theme);
-    }
-
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
-    }
-}
-
-impl SurfacePanel<SurfaceId, HitId, SessionListCtx<'_>> for SessionList {
-    fn region(&self) -> SurfaceId {
-        SurfaceId::Sessions
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +49,77 @@ pub struct SessionList {
 }
 
 impl SessionList {
+    fn title_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let active = usize::from(self.scope == SessionScope::All);
+        let sources: Vec<_> = self
+            .list
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| self.filter_matches(item, &self.filter))
+            .map(|(index, _)| index)
+            .collect();
+        let at = sources
+            .iter()
+            .position(|&index| index == self.list.selected)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        PaneSpec::new("Resume Session")
+            .title_affixes([
+                PaneTitleAffix::mode_strip_static(&["Current", "All"], active),
+                PaneTitleAffix::selection(at, sources.len()),
+            ])
+            .title_affix_regions(area)
+            .into_iter()
+            .filter_map(|(rect, hit)| match hit {
+                PaneAffixHit::ModeOption(i) => Some((rect, HitId::Mode(i))),
+                PaneAffixHit::Close => None,
+            })
+            .collect()
+    }
+
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        if self.loading || self.error.is_some() {
+            return Vec::new();
+        }
+        let sources: Vec<usize> = self
+            .list
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| self.filter_matches(item, &self.filter))
+            .map(|(i, _)| i)
+            .collect();
+        let show_path_col = self.show_path || self.scope == SessionScope::All;
+        let items: Vec<SelectableItem> = sources
+            .iter()
+            .map(|&i| session_row(&self.list.items[i], None, self.show_path, show_path_col))
+            .collect();
+        let selected = sources
+            .iter()
+            .position(|&i| i == self.list.selected)
+            .unwrap_or(0);
+        let scope_active = usize::from(self.scope == SessionScope::All);
+        let spec = PaneSpec::new("Resume Session")
+            .mode(crate::ui::components::pane::PaneMode::Standard)
+            .title_affixes([
+                PaneTitleAffix::mode_strip_static(&["Current", "All"], scope_active),
+                PaneTitleAffix::selection(
+                    if items.is_empty() { 0 } else { selected + 1 },
+                    items.len(),
+                ),
+            ])
+            .search_filter(&self.filter)
+            .tip("Tab scope · Ctrl+N named · path")
+            .hints("Enter resume · Esc close")
+            .focused(true);
+        selectable_row_regions(area, &spec, &items, selected, "")
+            .into_iter()
+            .filter_map(|(rect, display)| {
+                sources.get(display).copied().map(|source| (rect, source))
+            })
+            .collect()
+    }
     pub fn new() -> Self {
         Self {
             list: SelectableList::new(Vec::new()),
@@ -406,5 +461,17 @@ mod tests {
         );
         let row = session_row(&summary("s1"), Some("s2"), false, false);
         assert!(!row.is_active);
+    }
+
+    #[test]
+    fn all_rows_in_full_searchable_viewport_have_pointer_regions() {
+        let mut sessions = SessionList::new();
+        sessions.load((0..12).map(|i| summary(&format!("s{i:02}"))).collect());
+
+        let regions = sessions.row_regions(Rect::new(0, 0, 80, 20));
+
+        assert_eq!(regions.len(), 12);
+        assert_eq!(regions.first().map(|(rect, _)| rect.y), Some(4));
+        assert_eq!(regions.last().map(|(rect, _)| rect.y), Some(15));
     }
 }

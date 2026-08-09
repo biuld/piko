@@ -1,3 +1,4 @@
+use piko_tui_layout::InteractionState;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -7,11 +8,16 @@ use ratatui::{
 };
 use std::path::Path;
 
-use crate::app::command::TuiCommandEntry;
+use crate::app::{
+    HitId,
+    command::{EditorAction, TuiCommandEntry},
+};
 use crate::ui::components::selectable_list::{
-    ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_selectable_panel,
+    ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_index_hover,
+    paint_selectable_panel, selectable_row_regions,
 };
 use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
+use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 pub mod file_browser;
 pub mod provider;
@@ -68,26 +74,16 @@ impl AutoComplete {
     }
 
     pub fn select_next(&mut self) {
-        if !self.list.is_empty() {
-            self.list.selected = (self.list.selected + 1) % self.list.len();
-        }
+        self.list.select_next_wrapped();
     }
 
     pub fn select_prev(&mut self) {
-        if !self.list.is_empty() {
-            self.list.selected = self
-                .list
-                .selected
-                .checked_sub(1)
-                .unwrap_or(self.list.len() - 1);
-        }
+        self.list.select_prev_wrapped();
     }
 
     /// Select the suggestion at `idx` (pointer clicks), clamped to the list.
     pub fn select_index(&mut self, idx: usize) {
-        if idx < self.list.len() {
-            self.list.selected = idx;
-        }
+        self.list.select_index(idx);
     }
 
     /// Accepts the currently selected completion item.
@@ -104,6 +100,47 @@ impl AutoComplete {
         self.active = false;
         self.list.clear();
         self.active_provider_idx = None;
+    }
+
+    fn pane_spec(&self) -> PaneSpec<'static> {
+        let (label, hints) = if let Some(idx) = self.active_provider_idx {
+            (self.providers[idx].label(), self.providers[idx].hints())
+        } else {
+            ("suggestions", "Esc cancel")
+        };
+        let total = self.list.len();
+        let selected_one = usize::from(total > 0).saturating_mul(self.list.selected + 1);
+        PaneSpec::minimal(label)
+            .no_search()
+            .affix(PaneTitleAffix::selection(selected_one, total))
+            .hints(hints)
+            .focused(true)
+    }
+
+    fn display_items(&self) -> Vec<SelectableItem> {
+        self.list
+            .items
+            .iter()
+            .map(|row| SelectableItem::columns(row.cells.clone()))
+            .collect()
+    }
+
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        selectable_row_regions(
+            area,
+            &self.pane_spec(),
+            &self.display_items(),
+            self.list.selected,
+            "",
+        )
+    }
+
+    /// Paint-aligned pointer rows using stable source indices from the shared list viewport.
+    pub(crate) fn pointer_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.row_regions(area)
+            .into_iter()
+            .map(|(rect, index)| (rect, HitId::Suggest(index)))
+            .collect()
     }
 
     /// Updates completions state based on current editor text and cursor.
@@ -131,31 +168,15 @@ impl AutoComplete {
     }
 
     /// Renders the completions list in the allocated area (Minimal pane, no search).
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &crate::theme::Theme) {
-        let (label, hints) = if let Some(idx) = self.active_provider_idx {
-            (self.providers[idx].label(), self.providers[idx].hints())
-        } else {
-            ("suggestions", "Esc cancel")
-        };
-
-        let total = self.list.len();
-        let selected_one = if total == 0 {
-            0
-        } else {
-            self.list.selected + 1
-        };
-        let spec = PaneSpec::minimal(label)
-            .no_search()
-            .affix(PaneTitleAffix::selection(selected_one, total))
-            .hints(hints)
-            .focused(true);
-
-        let items: Vec<SelectableItem> = self
-            .list
-            .items
-            .iter()
-            .map(|row| SelectableItem::columns(row.cells.clone()))
-            .collect();
+    pub fn render(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &crate::theme::Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        let spec = self.pane_spec();
+        let items = self.display_items();
 
         let body = if items.is_empty() {
             SelectablePanelBody::Message(Paragraph::new(Line::from(vec![Span::styled(
@@ -171,6 +192,41 @@ impl AutoComplete {
         };
 
         let _ = paint_selectable_panel(frame, area, theme, &spec, body);
+        let hovered = match interaction.hovered {
+            Some(HitId::Suggest(index)) => Some(index),
+            _ => None,
+        };
+        paint_index_hover(
+            frame,
+            &self.row_regions(area),
+            hovered,
+            self.list.selected,
+            theme,
+        );
+    }
+}
+
+impl PointerComponent<HitId> for AutoComplete {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Suggest(index))) if index < self.list.len() => {
+                self.select_index(index);
+                vec![EditorAction::AcceptSuggestion.into()]
+            }
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -179,6 +235,19 @@ mod tests {
     use super::*;
     use crate::app::command::{CommandTarget, LocalCommandId};
     use piko_protocol::HostCommandInvoke;
+
+    fn rows(count: usize) -> Vec<CompletionRow> {
+        (0..count)
+            .map(|index| CompletionRow {
+                replacement: format!("item-{index}"),
+                start: 0,
+                end: 0,
+                cells: vec![ColumnCell::primary(format!("item-{index}"))],
+                keep_active: true,
+                submit_on_accept: false,
+            })
+            .collect()
+    }
 
     fn commands() -> Vec<TuiCommandEntry> {
         vec![TuiCommandEntry {
@@ -219,5 +288,40 @@ mod tests {
         let mut ac = AutoComplete::new();
         ac.update(Path::new("."), &commands(), "/resume now", 8);
         assert!(!ac.active);
+    }
+
+    #[test]
+    fn pointer_regions_follow_selected_row_beyond_first_viewport() {
+        let mut ac = AutoComplete::new();
+        ac.list = SelectableList::new(rows(10));
+        ac.list.selected = 8;
+
+        let indices: Vec<_> = ac
+            .pointer_regions(Rect::new(0, 0, 40, 9))
+            .into_iter()
+            .filter_map(|(_, hit)| match hit {
+                HitId::Suggest(index) => Some(index),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(indices, vec![3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn wheel_moves_selection_without_accepting_suggestion() {
+        let mut ac = AutoComplete::new();
+        ac.list = SelectableList::new(rows(3));
+        let hit = ComponentHit {
+            element: Some(HitId::Suggest(0)),
+            rect: Rect::new(0, 0, 40, 1),
+            x: 0,
+            y: 0,
+        };
+
+        assert!(ac.pointer_event(hit, PointerGesture::ScrollDown).is_empty());
+        assert_eq!(ac.list.selected, 1);
+        assert!(ac.pointer_event(hit, PointerGesture::ScrollUp).is_empty());
+        assert_eq!(ac.list.selected, 0);
     }
 }

@@ -533,7 +533,7 @@ product decision rather than a missing-surface repair:
 
 | Component | Focusable | Primary interactions | Feedback |
 |-----------|-----------|----------------------|----------|
-| Timeline viewport | Scroll only (no row focus required in v1) | Page/line scroll, jump latest, tool expand | Pin/unpin, new-content hint |
+| Timeline viewport | Scroll only (no row focus required in v1) | Page/line scroll, jump latest; click a tool to toggle that block | Pin/unpin, new-content hint, tool disclosure hover |
 | Agent strip | Yes when navigating agents | ↑/↓ select, Enter activate | Selection + active markers, spinner |
 | Editor | Default | Type, history, submit, newline | Caret; submit clears accepted text only after accept path |
 | Suggestions | Transient | ↑/↓, Tab/Enter complete, Esc dismiss | Highlighted candidate |
@@ -606,7 +606,7 @@ how existing and future settings surface:
 | `tui.bottomBar.items` | Order/visibility of status items |
 | Theme tokens | All state colors |
 | Keybindings | Actions named in feature PRDs; grammar above stays stable |
-| Timeline presentation | Thinking visibility, tool expand defaults (when persisted) |
+| Timeline presentation | Thinking visibility; tool expansion stays per session and per block |
 
 ## Acceptance criteria
 

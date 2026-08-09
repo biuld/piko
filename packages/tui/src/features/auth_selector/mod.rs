@@ -1,15 +1,17 @@
 use ratatui::{Frame, layout::Rect};
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
-    app::HitId,
+    app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::{
         menu::{MenuConfirmResult, MenuRow, MenuRowKind, MenuRowLayout, MenuStack},
+        selectable_list::{minimal_row_regions, paint_row_hover},
         text_box::TextBox,
     },
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
 };
 
 impl Component<HitId, Theme> for AuthSelector {
@@ -17,8 +19,82 @@ impl Component<HitId, Theme> for AuthSelector {
         self.render(frame, area, ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx);
+        match self.state {
+            AuthSelectorState::Menu => {
+                let regions = self.menu_row_regions(area);
+                paint_row_hover(
+                    frame,
+                    &regions,
+                    interaction,
+                    self.menu.selected_index(),
+                    ctx,
+                );
+            }
+            AuthSelectorState::ApiKeyInput { .. } => {
+                if interaction.hovered == Some(HitId::TextInput)
+                    && let Some(bg) = crate::ui::components::hover_bg(ctx)
+                    && let Some(rect) = self.input_rect(area)
+                {
+                    frame
+                        .buffer_mut()
+                        .set_style(rect, ratatui::style::Style::default().bg(bg));
+                }
+            }
+        }
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        match self.state {
+            AuthSelectorState::Menu => self
+                .menu_row_regions(area)
+                .into_iter()
+                .map(|(r, i)| (r, HitId::Row(i)))
+                .collect(),
+            AuthSelectorState::ApiKeyInput { .. } => self
+                .input_rect(area)
+                .map(|r| vec![(r, HitId::TextInput)])
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl PointerComponent<HitId> for AuthSelector {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i)))
+                if matches!(self.state, AuthSelectorState::Menu) =>
+            {
+                self.menu.select_index(i);
+                vec![SurfaceAction::Confirm.into()]
+            }
+            (PointerGesture::Activate, Some(HitId::TextInput)) => {
+                if let AuthSelectorState::ApiKeyInput { input, .. } = &mut self.state {
+                    input.move_to_column(hit.local_x());
+                }
+                Vec::new()
+            }
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -53,6 +129,38 @@ pub struct AuthSelector {
 }
 
 impl AuthSelector {
+    fn menu_row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        let title = self
+            .menu
+            .current()
+            .map(|f| f.title.as_str())
+            .unwrap_or("authentication");
+        minimal_row_regions(
+            area,
+            title,
+            &self.menu.display_items(),
+            self.menu.selected_index(),
+            &self.filter,
+        )
+    }
+
+    fn input_rect(&self, area: Rect) -> Option<Rect> {
+        let AuthSelectorState::ApiKeyInput { provider, .. } = &self.state else {
+            return None;
+        };
+        let title = format!("Configure {provider} API Key");
+        let spec = crate::ui::components::pane::PaneSpec::minimal(&title)
+            .hints("Enter save · Esc back")
+            .focused(true);
+        let content = spec.content_rect(area)?;
+        let label_width = "Enter API key: ".chars().count() as u16;
+        Some(Rect::new(
+            content.x.saturating_add(label_width),
+            content.y,
+            content.width.saturating_sub(label_width),
+            1,
+        ))
+    }
     pub fn new(available_providers: &[String], authenticated: &[String]) -> Self {
         let rows = Self::build_menu_tree(available_providers, authenticated);
         let mut menu = MenuStack::new();

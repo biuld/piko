@@ -37,6 +37,8 @@ Session, Approval, …).
 | `engine` | `solve`, `solve_flex`, `FramePlan`, `LayerPlan` |
 | `modal` | `ModalLayer`, `ModalPlacement` |
 | `focus` | `FocusManager<T>` |
+| `hitmap` | `Component`, `SurfacePanel`, `HitMap`, top-layer hit queries |
+| `interaction` | `ComponentHit`, `PointerGesture`, `InteractionState` |
 | `shell` | `split_shell`, `ShellChrome`, `ShellSplit` |
 | `util` | `inset_horizontal` |
 
@@ -68,7 +70,8 @@ focus.push(MyFocus::Dialog);
 |---------------------|----------------------------|
 | `Region`, `SurfaceId`, `AppMode` | Flex / modal / generic focus |
 | `compose_plane` / `compose_modals` | `solve`, placement host rect math |
-| Widget paint into `FramePlan` rects | Shell split |
+| Product Action mapping and outside-click policy | Generic hit depth and interaction vocabulary |
+| Theme-specific hover paint | Component-scoped `InteractionState<E>` |
 
 ## Test policy
 

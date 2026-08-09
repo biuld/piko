@@ -205,11 +205,19 @@ pub struct TimelineRenderBlock {
     background: Option<Color>,
     top_spacing: u16,
     bottom_spacing: u16,
+    interaction: Option<TimelineBlockInteraction>,
 }
 ```
 
-Render blocks are measured and clipped before ratatui rendering. This makes
-Timeline scroll by rendered lines rather than by entry count.
+Render blocks are flattened into one `TimelineRenderPlan`. The plan retains
+each component's source index and line range, then derives viewport-clipped
+screen rectangles after scrolling. Paint and hit testing consume the same plan,
+so a partially visible tool card cannot drift from its pointer region.
+
+Only blocks with a distinct action emit a hit region. In the current contract,
+tool blocks emit `HitId::TimelineTool(source_index)` and toggle their own
+expansion state. User/assistant messages, notices, errors, and spacing remain
+read-only and retain only the Stream-level wheel target.
 
 ## Message Components
 
@@ -277,6 +285,7 @@ State:
 - partial result
 - final result
 - status: pending, running, completed, failed, cancelled
+- local `expanded` presentation state, initialized collapsed
 
 Updates:
 
@@ -296,6 +305,8 @@ Rendering:
   error output
 
 Tool updates must not append duplicate entries for the same tool call id.
+Upserts preserve the existing block's `expanded` value while replacing runtime
+tool data. Snapshot rebuild creates fresh collapsed blocks.
 
 ### NoticeComponent
 
@@ -452,18 +463,9 @@ conversation while the user is inspecting older Timeline content.
 
 ## Presentation State
 
-Initial presentation state can stay local to the TUI:
-
-```rust
-pub struct TimelinePresentation {
-    tools_expanded: bool,
-    thinking_visible: bool,
-    output_padding: u16,
-}
-```
-
-Promotion to `[tui]` config should happen only when a setting is clearly a
-cross-session user preference.
+Thinking visibility may remain a Timeline-wide presentation preference. Tool
+expansion does not belong in `TimelinePresentation` or `[tui]` config: it is a
+field on each `ToolExecutionComponent`, scoped by the owning session Timeline.
 
 ## Ownership Boundaries
 
@@ -546,6 +548,9 @@ Render tests:
 - user message background
 - assistant text versus thinking presentation
 - tool collapsed and expanded states
+- independent tool expansion, preservation across tool upserts, and reset on
+  Timeline rebuild
+- block hit rectangles after viewport scrolling and clipping
 - error styling
 - variable-height clipping
 

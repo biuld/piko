@@ -17,6 +17,7 @@ use crate::app::HitId;
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 use crate::ui::components::pane::{PaneSpec, render_pane};
+use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 use super::centered_rect;
 
@@ -25,7 +26,30 @@ impl Component<HitId, Theme> for DiagnosticsPanel {
         self.render(frame, area, ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let popup = centered_rect(82, 70, area);
+        let spec = PaneSpec::new(self.title.as_str())
+            .hints("↑/↓ scroll · Esc close")
+            .focused(true);
+        spec.content_rect(popup)
+            .map(|rect| vec![(rect, HitId::Content)])
+            .unwrap_or_default()
+    }
+}
+
+impl PointerComponent<HitId> for DiagnosticsPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        if hit.element == Some(HitId::Content) {
+            match gesture {
+                PointerGesture::ScrollUp => self.scroll_up(3),
+                PointerGesture::ScrollDown => self.scroll_down(3),
+                PointerGesture::Activate => {}
+            }
+        }
         Vec::new()
     }
 }
@@ -241,5 +265,27 @@ mod tests {
         let lines = format_diff(&diff);
         assert!(lines.iter().any(|l| l.contains("a.rs")));
         assert!(lines.iter().any(|l| l == "+new"));
+    }
+
+    #[test]
+    fn wheel_scrolls_only_diagnostic_content() {
+        let mut panel = DiagnosticsPanel::new();
+        panel.lines = (0..10).map(|i| i.to_string()).collect();
+        let hit = ComponentHit {
+            element: Some(HitId::Content),
+            rect: Rect::new(0, 0, 10, 5),
+            x: 1,
+            y: 1,
+        };
+        panel.pointer_event(hit, PointerGesture::ScrollDown);
+        assert_eq!(panel.scroll, 3);
+        panel.pointer_event(
+            ComponentHit {
+                element: None,
+                ..hit
+            },
+            PointerGesture::ScrollDown,
+        );
+        assert_eq!(panel.scroll, 3);
     }
 }

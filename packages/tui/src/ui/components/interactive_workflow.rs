@@ -6,14 +6,16 @@ use crate::ui::components::{
     pane::{PaneSpec, PaneTitleAffix, render_pane},
     selection_prefix,
 };
+use piko_tui_layout::InteractionState;
 use ratatui::{
     Frame,
-    layout::{Position, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
 };
-use unicode_width::UnicodeWidthStr;
+
+mod pointer;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -237,67 +239,11 @@ impl InteractiveWorkflow {
             .unwrap_or(area)
     }
 
-    /// Interactive sub-regions for pointer hit-testing on the modal chrome.
-    pub fn component_regions_modal(&self, area: Rect) -> Vec<(Rect, HitId)> {
-        let inner = self.modal_content_area(area);
-        let rows = self.rows_in(inner);
-        let mut out = Vec::new();
-        if let Some(y) = rows.submit_y {
-            out.push((row_rect(inner, y), HitId::Submit));
-        }
-        for (question, rect) in rows.tab_rects {
-            out.push((clamp_rect(rect, area), HitId::Tab(question)));
-        }
-        for (choice, y) in rows.choice_y.iter().enumerate() {
-            out.push((
-                row_rect(inner, *y),
-                HitId::Choice {
-                    question: self.active_question_idx,
-                    choice,
-                },
-            ));
-        }
-        out
-    }
-
     /// Content rows the composer dock needs (body lines, no chrome). The dock
     /// height = these rows + Standard pane chrome (borders 2 + padding 2 +
     /// hint footer 1).
     pub(crate) fn dock_content_rows(&self, theme: &Theme) -> u16 {
         self.body_lines(theme).len() as u16
-    }
-
-    /// Terminal caret position while inline input is active. The workflow
-    /// only reports where its input field starts (its own row layout); caret
-    /// geometry is owned by the [`TextBox`] input component.
-    pub fn input_cursor(&self, area: Rect) -> Option<Position> {
-        let origin = self.input_field_origin(area)?;
-        let q = &self.questions[self.active_question_idx];
-        Some(q.input_value.caret_position(origin))
-    }
-
-    /// Where the inline input field starts inside the active choice row.
-    fn input_field_origin(&self, area: Rect) -> Option<Position> {
-        if self.questions.is_empty() {
-            return None;
-        }
-        let q = &self.questions[self.active_question_idx];
-        if !q.is_input_active {
-            return None;
-        }
-        let choice = q.selected_idx;
-        let inner = self.modal_content_area(area);
-        let rows = self.rows_in(inner);
-        let y = *rows.choice_y.get(choice)?;
-        let label = &q.choices.get(choice)?.label;
-        let num = format!("{}. ", choice + 1);
-        let x = inner
-            .x
-            .saturating_add(2) // selection prefix "❯ " / "  "
-            .saturating_add(UnicodeWidthStr::width(num.as_str()) as u16)
-            .saturating_add(UnicodeWidthStr::width(label.as_str()) as u16)
-            .saturating_add(2); // ": "
-        Some(Position::new(x, y))
     }
 
     /// The state-derived help line (or the approval shortcut override).
@@ -440,6 +386,7 @@ impl InteractiveWorkflow {
         theme: &Theme,
         title: &str,
         affixes: Vec<PaneTitleAffix>,
+        interaction: InteractionState<HitId>,
     ) {
         let help = self.help_text();
         let spec = PaneSpec::new(title)
@@ -450,6 +397,7 @@ impl InteractiveWorkflow {
         if let Some(areas) = render_pane(frame, area, &spec, theme) {
             let lines = self.body_lines(theme);
             frame.render_widget(Paragraph::new(lines), areas.content);
+            self.render_hover(frame, area, theme, interaction);
         }
     }
 

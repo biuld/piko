@@ -73,6 +73,7 @@ impl AppState {
             TimelineAction::ScrollUp(n) => self.timeline.scroll_up(n),
             TimelineAction::ScrollDown(n) => self.timeline.scroll_down(n),
             TimelineAction::JumpLatest => self.timeline.jump_latest(),
+            TimelineAction::ToggleTool(index) => self.timeline.toggle_tool(index),
         }
         Vec::new()
     }

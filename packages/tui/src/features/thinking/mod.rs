@@ -7,15 +7,17 @@
 
 use ratatui::{Frame, layout::Rect};
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
-    app::HitId,
+    app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::selectable_list::{
-        ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
+        ColumnCell, SelectableItem, SelectableList, minimal_row_regions, paint_row_hover,
+        render_selectable_list_minimal,
     },
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
 };
 
 /// Render context for the thinking-level surface.
@@ -29,8 +31,50 @@ impl Component<HitId, ThinkingCtx<'_>> for ThinkingSelector {
         self.render(frame, area, ctx.active_level, ctx.theme);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &ThinkingCtx<'_>,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx.active_level, ctx.theme);
+        let items = self.display_items(ctx.active_level);
+        let regions =
+            minimal_row_regions(area, "thinking", &items, self.list.selected, &self.filter);
+        paint_row_hover(frame, &regions, interaction, self.list.selected, ctx.theme);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let items = self.display_items(None);
+        minimal_row_regions(area, "thinking", &items, self.list.selected, &self.filter)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect()
+    }
+}
+
+impl PointerComponent<HitId> for ThinkingSelector {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i))) if i < self.list.len() => {
+                self.list.selected = i;
+                vec![SurfaceAction::Confirm.into()]
+            }
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -58,6 +102,19 @@ pub struct ThinkingSelector {
 }
 
 impl ThinkingSelector {
+    fn display_items(&self, active_level: Option<&str>) -> Vec<SelectableItem> {
+        self.list
+            .items
+            .iter()
+            .map(|option| {
+                SelectableItem::columns([
+                    ColumnCell::primary(option.level),
+                    ColumnCell::secondary(option.detail),
+                ])
+                .active(active_level == Some(option.level))
+            })
+            .collect()
+    }
     pub fn new() -> Self {
         Self {
             list: SelectableList::new(Vec::new()),
@@ -132,18 +189,7 @@ impl ThinkingSelector {
         active_level: Option<&str>,
         theme: &Theme,
     ) {
-        let items: Vec<SelectableItem> = self
-            .list
-            .items
-            .iter()
-            .map(|option| {
-                SelectableItem::columns([
-                    ColumnCell::primary(option.level),
-                    ColumnCell::secondary(option.detail),
-                ])
-                .active(active_level == Some(option.level))
-            })
-            .collect();
+        let items = self.display_items(active_level);
 
         render_selectable_list_minimal(
             frame,

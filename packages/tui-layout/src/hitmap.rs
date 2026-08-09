@@ -13,6 +13,7 @@ use std::hash::Hash;
 use ratatui::{Frame, layout::Rect};
 
 use crate::engine::FramePlan;
+use crate::interaction::InteractionState;
 
 /// Region-stamped interactive region produced by a [`SurfacePanel`].
 ///
@@ -33,6 +34,18 @@ pub struct HitRegion<R, E> {
 /// recursive point-query.
 pub trait Component<E, C: ?Sized> {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &C);
+
+    /// Paint with component-scoped interaction state. Non-interactive
+    /// components inherit the stateless paint path.
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &C,
+        _interaction: InteractionState<E>,
+    ) {
+        self.render(frame, area, ctx);
+    }
 
     /// Interactive sub-regions inside `area`, using the same geometry as
     /// [`Self::render`]. `Vec::new()` = not interactive.
@@ -106,6 +119,24 @@ impl<R: Copy + Eq + Hash, E: Copy + Eq + Hash> HitMap<R, E> {
             .iter()
             .filter(|h| h.contains(x, y))
             .max_by_key(|h| (h.z, h.element.is_some()))
+    }
+
+    /// Highest modal layer represented in this map.
+    pub fn top_layer(&self) -> Option<usize> {
+        self.hits.iter().filter_map(|hit| hit.layer).max()
+    }
+
+    /// Whether `hit` belongs to the highest modal layer in this map.
+    pub fn is_top_layer_hit(&self, hit: Option<&Hit<R, E>>) -> bool {
+        let top_layer = self.top_layer();
+        top_layer.is_some() && hit.and_then(|entry| entry.layer) == top_layer
+    }
+
+    /// Resolve the coordinate only when its top-most owner is on the highest
+    /// modal layer. A lower-layer result is treated as outside the top modal.
+    pub fn hit_test_top_layer(&self, x: u16, y: u16) -> Option<&Hit<R, E>> {
+        let hit = self.hit_test(x, y);
+        self.is_top_layer_hit(hit).then_some(hit).flatten()
     }
 }
 
@@ -209,6 +240,9 @@ mod tests {
         assert_eq!(hit.layer, Some(0));
         // The row entry and the surface default overlap; element wins at same z.
         assert_eq!(hit.element, Some(E::Row(0)));
+        assert_eq!(map.top_layer(), Some(0));
+        assert!(map.is_top_layer_hit(Some(hit)));
+        assert_eq!(map.hit_test_top_layer(40, 10), Some(hit));
     }
 
     #[test]
@@ -231,6 +265,8 @@ mod tests {
         assert_eq!(hit.region, R::Plane);
         assert_eq!(hit.z, 0);
         assert_eq!(hit.layer, None);
+        assert!(!map.is_top_layer_hit(Some(hit)));
+        assert_eq!(map.hit_test_top_layer(1, 1), None);
     }
 
     #[test]

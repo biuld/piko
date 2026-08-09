@@ -50,6 +50,7 @@ pub enum TimelineAction {
     ScrollUp(usize),
     ScrollDown(usize),
     JumpLatest,
+    ToggleTool(usize),
 }
 
 #[derive(Debug)]

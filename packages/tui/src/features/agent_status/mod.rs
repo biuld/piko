@@ -3,9 +3,11 @@
 //! Lists agents in the current session and switches the viewed agent (timeline
 //! target). Compact status also projects into BottomBar chrome.
 
+mod pointer;
+
 use ratatui::{Frame, layout::Rect};
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
     app::{HitId, QueueStatus},
@@ -14,7 +16,8 @@ use crate::{
     ui::components::{
         ACTIVE_MARKER, FAIL_GLYPH, IDLE_MARKER, SUCCESS_GLYPH,
         selectable_list::{
-            ColumnCell, SelectableItem, SelectableList, render_selectable_list_minimal,
+            ColumnCell, SelectableItem, SelectableList, minimal_row_regions, paint_row_hover,
+            render_selectable_list_minimal,
         },
         spinner_glyph,
     },
@@ -59,8 +62,31 @@ impl Component<HitId, AgentPanelView<'_>> for AgentPanelState {
         AgentPanelState::render(frame, area, *ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &AgentPanelView<'_>,
+        interaction: InteractionState<HitId>,
+    ) {
+        AgentPanelState::render(frame, area, *ctx);
+        if !self.is_loading() {
+            let items = self.hit_items();
+            let regions =
+                minimal_row_regions(area, "agents", &items, self.list.selected, &self.filter);
+            paint_row_hover(frame, &regions, interaction, self.list.selected, ctx.theme);
+        }
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        if self.is_loading() {
+            return Vec::new();
+        }
+        let items = self.hit_items();
+        minimal_row_regions(area, "agents", &items, self.list.selected, &self.filter)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect()
     }
 }
 
@@ -71,6 +97,21 @@ impl SurfacePanel<SurfaceId, HitId, AgentPanelView<'_>> for AgentPanelState {
 }
 
 impl AgentPanelState {
+    fn hit_items(&self) -> Vec<SelectableItem> {
+        self.list
+            .items
+            .iter()
+            .map(|agent| {
+                SelectableItem::columns([
+                    ColumnCell::primary(format!(
+                        "{} {} {}",
+                        agent.name, agent.agent_id, agent.agent_instance_id
+                    )),
+                    ColumnCell::secondary(""),
+                ])
+            })
+            .collect()
+    }
     pub fn agents(&self) -> &[AgentEntry] {
         &self.list.items
     }

@@ -5,7 +5,6 @@ impl Timeline {
         Self {
             components: VecDeque::new(),
             viewport: ScrollViewport::default(),
-            tools_expanded: false,
             thinking_visible: true,
             tool_calls: Vec::new(),
             live_assistant: None,
@@ -350,6 +349,18 @@ impl Timeline {
         self.viewport.jump_latest();
     }
 
+    pub fn toggle_tool(&mut self, source_index: usize) {
+        let Some(TimelineComponent::Tool(tool)) = self.components.get_mut(source_index) else {
+            return;
+        };
+        tool.expanded = !tool.expanded;
+        let id = tool.id.clone();
+        let expanded = tool.expanded;
+        if let Some(registry) = self.tool_calls.iter_mut().find(|tool| tool.id == id) {
+            registry.expanded = expanded;
+        }
+    }
+
     pub fn clear(&mut self) {
         self.components.clear();
         self.tool_calls.clear();
@@ -365,6 +376,7 @@ impl Timeline {
     pub fn upsert_tool(&mut self, mut tool: ToolEntry) -> bool {
         tool.component_id = ComponentId::ToolCallId(tool.id.clone());
         if let Some(existing) = self.tool_calls.iter_mut().find(|t| t.id == tool.id) {
+            tool.expanded = existing.expanded;
             *existing = tool.clone();
         } else {
             self.tool_calls.push(tool.clone());

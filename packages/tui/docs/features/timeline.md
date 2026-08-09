@@ -81,6 +81,14 @@ Tool details:
 - Collapsed mode shows the tool name, status, short id, and a concise preview.
 - Expanded mode shows additional details such as arguments, parent message, and
   results when available.
+- Each tool block owns its expansion state independently. Activating a visible
+  tool block toggles only that block.
+- Expansion state belongs to the in-memory Timeline for the current session.
+  It is retained while switching between that session's agent timelines, but
+  is discarded when the session projection is cleared or rebuilt.
+- Tool blocks expose block-aware hover and click regions derived from the same
+  measured render plan used for paint and viewport clipping. Read-only message,
+  notice, error, and inter-block spacing rows do not expose actionable hits.
 
 Thinking content:
 
@@ -90,12 +98,13 @@ Thinking content:
 
 ## Configuration
 
-Initial Timeline behavior uses local TUI state for transient presentation, such
-as whether tool details are expanded.
+Timeline tool expansion is transient per-session, per-tool presentation state.
+It is not a global preference and is not stored under `[tui]` settings.
 
 Settings that users expect to persist across sessions may later live under the
 TUI configuration namespace. Candidate preferences include thinking visibility,
-output padding, and richer tool-output display options.
+output padding, and richer tool-output display options that do not replace
+individual tool-block state.
 
 Timeline key bindings use the existing timeline action namespace:
 

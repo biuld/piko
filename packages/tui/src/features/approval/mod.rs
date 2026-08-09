@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_protocol::ApprovalDecision;
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 use ratatui::{Frame, layout::Rect};
 
-use crate::app::HitId;
+use crate::app::{HitId, command::ApprovalAction};
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
 use crate::ui::components::pane::PaneTitleAffix;
+use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 use crate::text::compact_json;
 use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
@@ -105,20 +107,43 @@ impl ApprovalPanel {
     }
 
     /// Render the approval popup if there is a pending request.
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
         if let Some(workflow) = self.workflow() {
             let affix = self
                 .pending
                 .front()
                 .map(|a| PaneTitleAffix::label(format!("tool: {}", a.tool_name)));
-            workflow.render_modal(frame, area, theme, "Approval", affix.into_iter().collect());
+            workflow.render_modal(
+                frame,
+                area,
+                theme,
+                "Approval",
+                affix.into_iter().collect(),
+                interaction,
+            );
         }
     }
 }
 
 impl Component<HitId, Theme> for ApprovalPanel {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
-        self.render(frame, area, ctx);
+        self.render(frame, area, ctx, InteractionState::default());
+    }
+
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx, interaction);
     }
 
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
@@ -131,6 +156,32 @@ impl Component<HitId, Theme> for ApprovalPanel {
 impl SurfacePanel<SurfaceId, HitId, Theme> for ApprovalPanel {
     fn region(&self) -> SurfaceId {
         SurfaceId::Approval
+    }
+}
+
+impl PointerComponent<HitId> for ApprovalPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        if gesture != PointerGesture::Activate {
+            return Vec::new();
+        }
+        let Some(HitId::Choice { choice, .. }) = hit.element else {
+            return Vec::new();
+        };
+        vec![ApprovalAction::Respond(approval_decision(choice)).into()]
+    }
+}
+
+fn approval_decision(choice: usize) -> ApprovalDecision {
+    match choice {
+        0 => ApprovalDecision::Accept,
+        1 => ApprovalDecision::AcceptSession,
+        2 => ApprovalDecision::AcceptWorkspace,
+        3 => ApprovalDecision::AcceptPermanent,
+        _ => ApprovalDecision::Decline,
     }
 }
 

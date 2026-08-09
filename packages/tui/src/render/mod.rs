@@ -22,7 +22,10 @@ use crate::{
     },
     layout::{Region, SurfaceId, compose_frame},
 };
-use piko_tui_layout::Component;
+use piko_tui_layout::{Component, InteractionState};
+
+#[cfg(test)]
+mod tests;
 
 pub fn render(frame: &mut Frame<'_>, app: &AppState) {
     let composed = compose_frame(app, frame.area());
@@ -65,16 +68,26 @@ fn paint_regions(
     rects: &std::collections::HashMap<Region, Rect>,
 ) {
     if let Some(area) = rects.get(&Region::Stream).copied() {
-        app.timeline.render(frame, area, &app.theme);
+        app.timeline.render_with_state(
+            frame,
+            area,
+            &app.theme,
+            interaction_state(app, Region::Stream),
+        );
     }
     if let Some(area) = rects.get(&Region::Notice).copied() {
-        render_notification_row(frame, area, app);
+        render_notification_row(frame, area, app, interaction_state(app, Region::Notice));
     }
     if let Some(area) = rects.get(&Region::Suggest).copied() {
-        app.editor.auto_complete.render(frame, area, &app.theme);
+        app.editor.auto_complete.render(
+            frame,
+            area,
+            &app.theme,
+            interaction_state(app, Region::Suggest),
+        );
     }
     if let Some(area) = rects.get(&Region::Composer).copied() {
-        render_editor(frame, app, area);
+        render_editor(frame, app, area, interaction_state(app, Region::Composer));
     }
 
     for (region, area) in rects {
@@ -141,15 +154,21 @@ fn agent_chrome_label(app: &AppState) -> Option<String> {
 
 /// Thin dispatch: call a surface panel's unified render via the
 /// [`Component`] trait, letting the compiler infer the context type.
-fn render_panel<P, C>(panel: &P, frame: &mut Frame<'_>, area: Rect, ctx: &C)
-where
+fn render_panel<P, C>(
+    panel: &P,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    ctx: &C,
+    interaction: InteractionState<HitId>,
+) where
     P: Component<HitId, C>,
     C: ?Sized,
 {
-    Component::<HitId, C>::render(panel, frame, area, ctx);
+    Component::<HitId, C>::render_with_state(panel, frame, area, ctx, interaction);
 }
 
 fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: SurfaceId) {
+    let interaction = interaction_state(app, Region::Surface(surface));
     match surface {
         SurfaceId::Agents => {
             let foreground: Vec<_> = app
@@ -165,14 +184,14 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 spinner_frame: app.spinner_frame,
                 theme: &app.theme,
             };
-            render_panel(&app.agent_panel, frame, area, &view);
+            render_panel(&app.agent_panel, frame, area, &view, interaction);
         }
         SurfaceId::Sessions => {
             let ctx = SessionListCtx {
                 active_session_id: app.session_id(),
                 theme: &app.theme,
             };
-            render_panel(&app.sessions, frame, area, &ctx);
+            render_panel(&app.sessions, frame, area, &ctx, interaction);
         }
         SurfaceId::Tree => {
             let ctx = TreeCtx {
@@ -180,7 +199,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 summary_prompt: None,
                 theme: &app.theme,
             };
-            render_panel(&app.tree, frame, area, &ctx);
+            render_panel(&app.tree, frame, area, &ctx, interaction);
         }
         SurfaceId::SummaryPrompt => {
             let ctx = TreeCtx {
@@ -188,7 +207,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 summary_prompt: app.summary_prompt.as_ref(),
                 theme: &app.theme,
             };
-            render_panel(&app.tree, frame, area, &ctx);
+            render_panel(&app.tree, frame, area, &ctx, interaction);
         }
         SurfaceId::Status => {
             let view = StatusPanelView {
@@ -203,41 +222,69 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 timeline: &app.timeline,
                 approvals: &app.approvals,
             };
-            render_panel(&StatusPanel, frame, area, &ctx);
+            render_panel(&StatusPanel, frame, area, &ctx, interaction);
         }
-        SurfaceId::Diagnostics => render_panel(&app.diagnostics, frame, area, &app.theme),
-        SurfaceId::Settings => render_panel(&app.settings, frame, area, &app.theme),
+        SurfaceId::Diagnostics => {
+            render_panel(&app.diagnostics, frame, area, &app.theme, interaction)
+        }
+        SurfaceId::Settings => render_panel(&app.settings, frame, area, &app.theme, interaction),
         SurfaceId::Models => {
             let ctx = ModelCtx {
                 active_model_id: app.model.active_model_id.as_deref(),
                 active_provider: app.model.active_provider.as_deref(),
                 theme: &app.theme,
             };
-            render_panel(&app.models, frame, area, &ctx);
+            render_panel(&app.models, frame, area, &ctx, interaction);
         }
         SurfaceId::Thinking => {
             let ctx = ThinkingCtx {
                 active_level: app.model.active_thinking_level.as_deref(),
                 theme: &app.theme,
             };
-            render_panel(&app.thinking, frame, area, &ctx);
+            render_panel(&app.thinking, frame, area, &ctx, interaction);
         }
-        SurfaceId::Approval => render_panel(&app.approvals, frame, area, &app.theme),
-        SurfaceId::ToolInteraction => render_panel(&app.interactions, frame, area, &app.theme),
-        SurfaceId::AuthSelector => render_panel(&app.auth_selector, frame, area, &app.theme),
-        SurfaceId::Mcp => render_panel(&app.mcp, frame, area, &app.theme),
-        SurfaceId::Processes => render_panel(&app.processes, frame, area, &app.theme),
+        SurfaceId::Approval => render_panel(&app.approvals, frame, area, &app.theme, interaction),
+        SurfaceId::ToolInteraction => {
+            render_panel(&app.interactions, frame, area, &app.theme, interaction)
+        }
+        SurfaceId::AuthSelector => {
+            render_panel(&app.auth_selector, frame, area, &app.theme, interaction)
+        }
+        SurfaceId::Mcp => render_panel(&app.mcp, frame, area, &app.theme, interaction),
+        SurfaceId::Processes => render_panel(&app.processes, frame, area, &app.theme, interaction),
     }
 }
 
-fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
-    let border_color = app.theme.border_muted;
+fn interaction_state(app: &AppState, region: Region) -> InteractionState<HitId> {
+    let plane_is_blocked = !matches!(region, Region::Surface(_)) && app.modal_surface().is_some();
+    let hovered = (!plane_is_blocked)
+        .then_some(app.hovered)
+        .flatten()
+        .and_then(|(hovered_region, element)| (hovered_region == region).then_some(element))
+        .flatten();
+    InteractionState { hovered }
+}
+
+fn render_editor(
+    frame: &mut Frame<'_>,
+    app: &AppState,
+    area: Rect,
+    _interaction: InteractionState<HitId>,
+) {
+    let focused = app.mode == AppMode::Chat;
+    let border_color = if focused {
+        app.theme.prompt_border_active
+    } else {
+        app.theme.prompt_border
+    };
+    let background = app.theme.bg_elevated;
     let block = Block::default()
         .borders(Borders::TOP | Borders::BOTTOM)
-        .border_style(Style::default().fg(border_color));
+        .style(Style::default().bg(background))
+        .border_style(Style::default().fg(border_color).bg(background));
     app.editor.render(frame, area, block);
 
-    if app.mode == AppMode::Chat {
+    if focused {
         let visible_rows = area.height.saturating_sub(2).max(1);
         let (row, col) = app.editor.cursor_line_col(area.width, visible_rows);
         let cursor_x = area.x + col.min(area.width.saturating_sub(1));
@@ -246,7 +293,12 @@ fn render_editor(frame: &mut Frame<'_>, app: &AppState, area: Rect) {
     }
 }
 
-fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
+fn render_notification_row(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &AppState,
+    interaction: InteractionState<HitId>,
+) {
     let Some(notification) = app.notifications.visible() else {
         return;
     };
@@ -259,5 +311,11 @@ fn render_notification_row(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
         Span::raw(" "),
         Span::styled(&notification.message, Style::default().fg(color)),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    let mut paragraph = Paragraph::new(line);
+    if interaction.hovered == Some(HitId::Notice)
+        && let Some(background) = crate::ui::components::hover_bg(&app.theme)
+    {
+        paragraph = paragraph.style(Style::default().bg(background));
+    }
+    frame.render_widget(paragraph, area);
 }

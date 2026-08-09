@@ -55,6 +55,18 @@ pub enum HitId {
     Notice,
     /// One completion suggestion row (click → accept it).
     Suggest(usize),
+    /// One visible Timeline tool component (click → toggle this block only).
+    TimelineTool(usize),
+    /// One source row owned by a selectable surface.
+    Row(usize),
+    /// An editable field owned by a surface.
+    TextInput,
+    /// A scrollable content viewport owned by a surface.
+    Content,
+    /// A pane close affordance.
+    Close,
+    /// One option in a pane title mode strip.
+    Mode(usize),
     /// A question tab in a multi-question workflow.
     Tab(usize),
     /// One choice row of the active question.
@@ -105,7 +117,7 @@ pub struct AppState {
     pub quit: bool,
     pub last_tick: Instant,
     /// Last pointer hover target (region + element), resolved from the hit
-    /// map on `Moved`. No visual effect yet.
+    /// map on `Moved` and consumed by product rendering as soft feedback.
     pub hovered: Option<(Region, Option<HitId>)>,
 
     // core input
@@ -283,12 +295,6 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
             // TUI-only presentation; lives under `[tui]`.
             serde_json::json!({
                 "tui": { "hide_thinking_block": value }
-            })
-        }
-        SettingsAction::ToolDetails(value) => {
-            // TUI-only presentation; lives under `[tui]`.
-            serde_json::json!({
-                "tui": { "tools_expanded": value }
             })
         }
         SettingsAction::Compaction(value) => {

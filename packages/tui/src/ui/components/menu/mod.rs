@@ -179,6 +179,35 @@ impl<T: Clone> MenuStack<T> {
         }
     }
 
+    pub fn selected_index(&self) -> usize {
+        self.frames
+            .last()
+            .map(|frame| frame.items.selected)
+            .unwrap_or(0)
+    }
+
+    pub fn select_index(&mut self, index: usize) {
+        if let Some(frame) = self.frames.last_mut()
+            && index < frame.items.len()
+        {
+            frame.items.selected = index;
+        }
+    }
+
+    pub fn display_items(&self) -> Vec<SelectableItem> {
+        self.frames
+            .last()
+            .map(|current| {
+                current
+                    .items
+                    .items
+                    .iter()
+                    .map(|row| row.to_item(current.layout))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Filtered item count at the current frame (for Select band budgets).
     pub fn filtered_item_count(&self, filter: &str) -> usize {
         self.frames
@@ -235,12 +264,7 @@ impl<T: Clone> MenuStack<T> {
         let Some(current) = self.frames.last() else {
             return;
         };
-        let items: Vec<SelectableItem> = current
-            .items
-            .items
-            .iter()
-            .map(|r| r.to_item(current.layout))
-            .collect();
+        let items = self.display_items();
         render_selectable_list_minimal(
             frame,
             area,

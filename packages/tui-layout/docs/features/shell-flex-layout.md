@@ -12,7 +12,9 @@ This crate owns a **product-agnostic** terminal layout and focus stack:
 1. **Shell chrome split** — reserve a strip (typically bottom), return **body** rect.
 2. **Layout engine** — planar **flex** (column/row), optional **z-axis modal** layers,
    solve into rect maps. Region ids and focus targets are **generic**.
-3. **Downstream** — declares flex trees + modal stacks, paints widgets into rects,
+3. **Component interaction primitives** — resolved component hits, normalized
+   pointer gestures, scoped interaction state, and top-layer hit queries.
+4. **Downstream** — declares flex trees + modal stacks, paints widgets into rects,
    maps focus targets to key routing.
 
 The crate **does not know** product meanings: no sessions, no “settings panel”,
@@ -104,16 +106,22 @@ Rules:
   plane.
 - `HitMap::hit_test(x, y)` returns the top-most entry; within one `z` an
   element beats its surface-default entry.
-- Both are pure functions of solved rects; no product types, no input state.
+- `HitMap::top_layer`, `is_top_layer_hit`, and `hit_test_top_layer` expose
+  generic modal-depth facts without assigning dismiss/block policy.
+- Hit resolution remains a pure function of solved rects; it has no product
+  types or business actions.
 - Clients may declare per-surface sub-regions (rows, tabs, buttons) relative
   to a surface rect via `SurfacePanel::hit_regions`; the engine does not model
   sub-regions.
 
 The **component contract** also lives here: a generic `Component<E, C>` base
-trait (`render` + `component_regions` + `focusable`) shared by every
+trait (`render` / `render_with_state` + `component_regions` + `focusable`)
+shared by every
 drawable/hittable piece, plus `SurfacePanel<R, E, C>: Component<E, C>`
 stamping region ids on top of it. `R`/`E` are product region/element ids, `C`
-is a product render context; the crate references no product types.
+is a product render context; `InteractionState<E>` carries component-scoped
+hover identity. `ComponentHit<E>` and `PointerGesture` are product-neutral
+input vocabulary. The crate references no product types or actions.
 
 No app-level facade type: the crate stays pure functions + data (`solve`,
 `FramePlan`, `build_hitmap`, `HitMap`, `hit_test`, `FocusManager<T>`) and the
@@ -121,7 +129,8 @@ client's `AppState` is the composition root calling them each frame.
 Composition policy (which plane/modal, metrics, push guards) stays in the
 client.
 
-Mouse input itself is out of scope for this crate. Product design:
+Terminal event capture, Region dispatch, and business response remain out of
+scope for this crate. Product design:
 [`../../../tui/docs/design/modal-hitmap-architecture.md`](../../../tui/docs/design/modal-hitmap-architecture.md).
 
 ## Non-goals
@@ -130,7 +139,7 @@ Mouse input itself is out of scope for this crate. Product design:
 - SPA routing  
 - Full CSS flexbox  
 - Free absolute drawing outside solved rects  
-- Mouse input handling (pointer readiness is geometry-only)
+- Terminal input adapters and product pointer behavior
 
 ## Acceptance
 
@@ -140,3 +149,5 @@ Mouse input itself is out of scope for this crate. Product design:
 - [ ] Tests use local dummy enums, not product ids  
 - [x] `FramePlan::hit_test` and `HitMap::hit_test` covered by unit tests
       (layer priority, surface default, edges, no-hit)
+- [x] Top-layer hit queries and product-neutral interaction primitives are
+      covered by local dummy-type tests

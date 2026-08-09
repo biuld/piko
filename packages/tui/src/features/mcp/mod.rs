@@ -5,17 +5,21 @@
 //! when a server failed or timed out at session start.
 
 use piko_protocol::command::McpServerInfo;
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 use ratatui::{Frame, layout::Rect};
 
 use crate::app::HitId;
 use crate::navigation::{SelectBandBudget, SurfaceId};
 use crate::theme::Theme;
-use crate::ui::components::{
-    pane::PaneSpec,
-    selectable_list::{
-        ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_selectable_panel,
+use crate::ui::{
+    components::{
+        pane::PaneSpec,
+        selectable_list::{
+            ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_row_hover,
+            paint_selectable_panel, selectable_row_regions,
+        },
     },
+    interaction::{ComponentHit, PointerComponent, PointerGesture},
 };
 
 impl Component<HitId, Theme> for McpPanel {
@@ -23,7 +27,40 @@ impl Component<HitId, Theme> for McpPanel {
         self.render(frame, area, ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx);
+        let regions = self.row_regions(area);
+        paint_row_hover(frame, &regions, interaction, self.servers.selected, ctx);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.row_regions(area)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect()
+    }
+}
+
+impl PointerComponent<HitId> for McpPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i))) if i < self.servers.len() => {
+                self.servers.selected = i;
+            }
+            (PointerGesture::ScrollUp, _) => self.select_prev(),
+            (PointerGesture::ScrollDown, _) => self.select_next(),
+            _ => {}
+        }
         Vec::new()
     }
 }
@@ -41,6 +78,13 @@ pub struct McpPanel {
 }
 
 impl McpPanel {
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        let items = server_items(&self.servers.items);
+        let spec = PaneSpec::new("MCP servers")
+            .hints("↑/↓ browse · Esc close")
+            .focused(true);
+        selectable_row_regions(area, &spec, &items, self.servers.selected, "")
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -51,6 +95,11 @@ impl McpPanel {
 
     pub fn connected_count(&self) -> usize {
         self.servers.items.iter().filter(|s| s.connected).count()
+    }
+
+    #[cfg(test)]
+    pub fn selected_index(&self) -> usize {
+        self.servers.selected
     }
 
     pub fn select_band_budget(&self) -> SelectBandBudget {

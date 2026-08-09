@@ -1,17 +1,20 @@
 use piko_protocol::command::ProcessInfo;
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 use ratatui::{Frame, layout::Rect};
 
 use crate::{
-    app::HitId,
+    app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
-    ui::components::{
-        pane::PaneSpec,
-        selectable_list::{
-            ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
-            paint_selectable_panel,
+    ui::{
+        components::{
+            pane::PaneSpec,
+            selectable_list::{
+                ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
+                paint_row_hover, paint_selectable_panel, selectable_row_regions,
+            },
         },
+        interaction::{ComponentHit, PointerComponent, PointerGesture},
     },
 };
 
@@ -29,6 +32,56 @@ pub enum ProcessConfirm {
 }
 
 impl ProcessPanel {
+    fn display_items(&self) -> Vec<SelectableItem> {
+        self.processes
+            .items
+            .iter()
+            .map(|process| {
+                let state = if process.exited {
+                    process
+                        .exit_code
+                        .map(|code| format!("exit {code}"))
+                        .or_else(|| process.signal.map(|signal| format!("signal {signal}")))
+                        .unwrap_or_else(|| "exited".into())
+                } else {
+                    "running".into()
+                };
+                let item = SelectableItem::columns([
+                    ColumnCell::primary(process.process_id.clone()),
+                    ColumnCell::secondary(process.pid.to_string()).align(ColumnAlign::Right),
+                    ColumnCell::secondary(process.command.clone()),
+                    ColumnCell::secondary(state),
+                    ColumnCell::secondary(process.cwd.clone()),
+                ]);
+                if self.confirming_process_id.as_deref() == Some(process.process_id.as_str()) {
+                    item.badge("confirm stop")
+                } else {
+                    item
+                }
+            })
+            .collect()
+    }
+
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        let title = self
+            .confirming_process_id
+            .as_ref()
+            .map(|id| format!("stop {id}?"));
+        let title = title.as_deref().unwrap_or("processes");
+        let hints = if self.confirming_process_id.is_some() {
+            "Enter confirm stop · Esc cancel"
+        } else {
+            "↑/↓ browse · Enter stop · Esc close"
+        };
+        let spec = PaneSpec::new(title).no_search().hints(hints).focused(true);
+        selectable_row_regions(
+            area,
+            &spec,
+            &self.display_items(),
+            self.processes.selected,
+            "",
+        )
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -95,34 +148,7 @@ impl ProcessPanel {
             "↑/↓ browse · Enter stop · Esc close"
         };
         let spec = PaneSpec::new(&title).no_search().hints(hints).focused(true);
-        let items: Vec<SelectableItem> = self
-            .processes
-            .items
-            .iter()
-            .map(|process| {
-                let state = if process.exited {
-                    process
-                        .exit_code
-                        .map(|code| format!("exit {code}"))
-                        .or_else(|| process.signal.map(|signal| format!("signal {signal}")))
-                        .unwrap_or_else(|| "exited".into())
-                } else {
-                    "running".into()
-                };
-                let item = SelectableItem::columns([
-                    ColumnCell::primary(process.process_id.clone()),
-                    ColumnCell::secondary(process.pid.to_string()).align(ColumnAlign::Right),
-                    ColumnCell::secondary(process.command.clone()),
-                    ColumnCell::secondary(state),
-                    ColumnCell::secondary(process.cwd.clone()),
-                ]);
-                if self.confirming_process_id.as_deref() == Some(process.process_id.as_str()) {
-                    item.badge("confirm stop")
-                } else {
-                    item
-                }
-            })
-            .collect();
+        let items = self.display_items();
         let body = if items.is_empty() {
             SelectablePanelBody::Message(ratatui::widgets::Paragraph::new(
                 "No external processes are running.",
@@ -143,8 +169,50 @@ impl Component<HitId, Theme> for ProcessPanel {
         self.render(frame, area, ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx);
+        let regions = self.row_regions(area);
+        paint_row_hover(frame, &regions, interaction, self.processes.selected, ctx);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.row_regions(area)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect()
+    }
+}
+
+impl PointerComponent<HitId> for ProcessPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i))) if i < self.processes.len() => {
+                if self.processes.selected != i {
+                    self.confirming_process_id = None;
+                }
+                self.processes.selected = i;
+                vec![SurfaceAction::Confirm.into()]
+            }
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -192,5 +260,29 @@ mod tests {
             panel.confirm_stop(),
             ProcessConfirm::Confirmed(id) if id == "one"
         ));
+    }
+
+    #[test]
+    fn pointer_click_preserves_two_stage_stop_confirmation() {
+        let mut panel = ProcessPanel::new();
+        panel.set_processes(vec![process("one", 1), process("two", 2)]);
+        let hit = ComponentHit {
+            element: Some(HitId::Row(1)),
+            rect: Rect::new(0, 0, 10, 1),
+            x: 0,
+            y: 0,
+        };
+        let first = panel.pointer_event(hit, PointerGesture::Activate);
+        assert!(matches!(
+            first.as_slice(),
+            [crate::app::command::Action::Surface(SurfaceAction::Confirm)]
+        ));
+        assert!(matches!(panel.confirm_stop(), ProcessConfirm::Armed(id) if id == "two"));
+        let second = panel.pointer_event(hit, PointerGesture::Activate);
+        assert!(matches!(
+            second.as_slice(),
+            [crate::app::command::Action::Surface(SurfaceAction::Confirm)]
+        ));
+        assert!(matches!(panel.confirm_stop(), ProcessConfirm::Confirmed(id) if id == "two"));
     }
 }

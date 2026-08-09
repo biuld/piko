@@ -22,6 +22,8 @@ closes, the Editor reappears with its content preserved.
 
 - Fixed height (default 3 rows: 1 content line + top border + bottom border)
 - Top and bottom borders only, no left/right border
+- The body uses the elevated-surface background. Pointer hover is visually
+  inert; focus and caret already communicate the input state.
 - Border uses the muted chrome color from the active theme
 - Terminal cursor tracks the text cursor position, clamped within the visible area
 

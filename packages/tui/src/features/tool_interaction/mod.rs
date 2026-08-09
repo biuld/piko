@@ -3,12 +3,13 @@ use std::collections::VecDeque;
 use piko_protocol::{
     InteractionAnswer, InteractionId, InteractionQuestion, UserInteractionResponse,
 };
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 use ratatui::{Frame, layout::Rect};
 
-use crate::app::HitId;
+use crate::app::{HitId, command::ToolInteractionAction};
 use crate::navigation::SurfaceId;
 use crate::ui::components::pane::PaneTitleAffix;
+use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 use crate::{
     theme::Theme,
     ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question},
@@ -105,7 +106,13 @@ impl ToolInteractionPanel {
         self.pending.is_empty()
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &Theme,
+        interaction_state: InteractionState<HitId>,
+    ) {
         let Some(interaction) = self.pending.front() else {
             return;
         };
@@ -114,9 +121,14 @@ impl ToolInteractionPanel {
         } else {
             Vec::new()
         };
-        interaction
-            .workflow
-            .render_modal(frame, area, theme, "Tool Interaction", affixes);
+        interaction.workflow.render_modal(
+            frame,
+            area,
+            theme,
+            "Tool Interaction",
+            affixes,
+            interaction_state,
+        );
     }
 
     pub fn submit_response(&mut self) -> Option<(InteractionId, UserInteractionResponse)> {
@@ -160,7 +172,17 @@ impl ToolInteractionPanel {
 
 impl Component<HitId, Theme> for ToolInteractionPanel {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
-        self.render(frame, area, ctx);
+        self.render(frame, area, ctx, InteractionState::default());
+    }
+
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx, interaction);
     }
 
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
@@ -174,5 +196,34 @@ impl Component<HitId, Theme> for ToolInteractionPanel {
 impl SurfacePanel<SurfaceId, HitId, Theme> for ToolInteractionPanel {
     fn region(&self) -> SurfaceId {
         SurfaceId::ToolInteraction
+    }
+}
+
+impl PointerComponent<HitId> for ToolInteractionPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        if gesture != PointerGesture::Activate {
+            return Vec::new();
+        }
+        match hit.element {
+            Some(HitId::TextInput) => {
+                if let Some(interaction) = self.pending.front_mut() {
+                    interaction
+                        .workflow
+                        .move_active_input_to_column(hit.local_x());
+                }
+                Vec::new()
+            }
+            Some(HitId::Choice { choice, .. }) => vec![
+                ToolInteractionAction::Choice(choice).into(),
+                ToolInteractionAction::Submit.into(),
+            ],
+            Some(HitId::Tab(step)) => vec![ToolInteractionAction::GotoStep(step).into()],
+            Some(HitId::Submit) => vec![ToolInteractionAction::Submit.into()],
+            _ => Vec::new(),
+        }
     }
 }

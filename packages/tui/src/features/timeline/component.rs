@@ -123,6 +123,8 @@ pub struct ToolEntry {
     pub args: String,
     pub result: Option<String>,
     pub parent_message_id: Option<String>,
+    /// Transient presentation state owned by this session's Timeline.
+    pub expanded: bool,
 }
 
 impl ToolEntry {
@@ -142,6 +144,7 @@ impl ToolEntry {
             args,
             result,
             parent_message_id,
+            expanded: false,
         }
     }
 }

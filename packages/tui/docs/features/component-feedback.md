@@ -123,7 +123,8 @@ Motion **stops** when the encoded state ends.
 
 ### 7. Keyboard is the product; pointer is optional
 
-All feedback must be complete without mouse. If pointer is supported later:
+All feedback must be complete without mouse. When pointer is supported (see
+[component-interaction.md](component-interaction.md)):
 
 - Hover may preview selection **only** when the surface is already focused
 - Click maps to the same action as the keyboard confirm for that target
@@ -204,8 +205,8 @@ Every interactive component supports a subset of these **visual states**.
 
 | State | Visual |
 |-------|--------|
-| Blurred | Muted border; no caret emphasis |
-| Focused | Accent border; terminal caret at insertion point |
+| Blurred | `bg_elevated` body, `prompt_border`; no caret emphasis |
+| Focused | `bg_elevated` body, `prompt_border_active`; terminal caret at insertion point |
 | Placeholder | `dim` placeholder; disappears on first character |
 | Invalid (forms) | `error` border or inline error line under field |
 | Read-only display | No caret; body uses normal text tokens |

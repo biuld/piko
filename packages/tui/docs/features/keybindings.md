@@ -76,7 +76,6 @@ Global or editor-level shortcuts that open overlays, manage sessions, or interru
 | `app.model.cycleForward` | `ctrl+p` | Cycle forward to the next model in active list |
 | `app.model.cycleBackward` | `shift+ctrl+p` | Cycle backward to the previous model in active list |
 | `app.model.select` | `ctrl+l` (or `f3`) | Open the model selector overlay |
-| `app.tools.expand` | `ctrl+o` | Toggle tools details expansion |
 | `app.thinking.toggle` | `ctrl+t` | Toggle visibility of thinking/reasoning blocks |
 | `app.session.toggleNamedFilter` | `ctrl+n` | Cycle through named session filters in Session list |
 | `app.editor.external` | `ctrl+g` | Open active editor text in an external editor |

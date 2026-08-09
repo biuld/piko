@@ -212,7 +212,7 @@ border = "gray"
 |-----------|----------------|
 | Timeline | role accents, `user_message_*`, `tool_*`, `thinking_text`, markdown slots |
 | Agent strip | `accent`, `warning`, `success`, `error`, `dim`, `border` / `border_muted` |
-| Editor | `text`, `prompt_border` / `prompt_border_active` |
+| Editor | `text`, `bg_elevated`, `prompt_border` / `prompt_border_active` |
 | Lists / palette | `accent`, `bg_selected`, `dim`, `border` / `border_muted` |
 | Bottom bar | `muted`, `dim` |
 | Notifications | `info`, `warning`, `error` |

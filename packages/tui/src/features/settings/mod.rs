@@ -8,18 +8,22 @@ pub use mirror::{HostRuntimeSettings, SettingsSnapshot};
 
 use ratatui::{Frame, layout::Rect};
 
-use piko_tui_layout::{Component, SurfacePanel};
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
-    app::HitId,
+    app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
     theme::Theme,
     ui::components::{
         feedback::{settings_apply_hints, settings_open_hints},
         menu::{MenuConfirmResult, MenuRowLayout, MenuStack},
-        pane::{PaneMode, PaneSpec, PaneTitleAffix},
-        selectable_list::{SelectableItem, render_selectable_list_with_pane},
+        pane::{PaneAffixHit, PaneMode, PaneSpec, PaneTitleAffix},
+        selectable_list::{
+            SelectableItem, paint_row_hover, render_selectable_list_with_pane,
+            selectable_row_regions,
+        },
     },
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture, paint_element_hover},
 };
 
 impl Component<HitId, Theme> for SettingsPanel {
@@ -27,8 +31,58 @@ impl Component<HitId, Theme> for SettingsPanel {
         self.render(frame, area, ctx);
     }
 
-    fn component_regions(&self, _area: Rect) -> Vec<(Rect, HitId)> {
-        Vec::new()
+    fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        ctx: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        self.render(frame, area, ctx);
+        let regions = self.row_regions(area);
+        paint_row_hover(
+            frame,
+            &regions,
+            interaction,
+            self.stack.selected_index(),
+            ctx,
+        );
+        paint_element_hover(frame, &self.close_region(area), interaction, None, ctx);
+    }
+
+    fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        let mut regions: Vec<_> = self
+            .row_regions(area)
+            .into_iter()
+            .map(|(rect, i)| (rect, HitId::Row(i)))
+            .collect();
+        regions.extend(self.close_region(area));
+        regions
+    }
+}
+
+impl PointerComponent<HitId> for SettingsPanel {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        match (gesture, hit.element) {
+            (PointerGesture::Activate, Some(HitId::Row(i))) => {
+                self.stack.select_index(i);
+                vec![SurfaceAction::Confirm.into()]
+            }
+            (PointerGesture::Activate, Some(HitId::Close)) => vec![SurfaceAction::Close.into()],
+            (PointerGesture::ScrollUp, _) => {
+                self.select_prev();
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, _) => {
+                self.select_next();
+                Vec::new()
+            }
+            _ => Vec::new(),
+        }
     }
 }
 
@@ -50,6 +104,45 @@ pub struct SettingsPanel {
 }
 
 impl SettingsPanel {
+    fn close_region(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        if !self.stack.at_root() {
+            return Vec::new();
+        }
+        PaneSpec::new("Settings")
+            .affix(PaneTitleAffix::Close)
+            .title_affix_regions(area)
+            .into_iter()
+            .filter_map(|(rect, hit)| (hit == PaneAffixHit::Close).then_some((rect, HitId::Close)))
+            .collect()
+    }
+
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
+        let Some(current) = self.stack.current() else {
+            return Vec::new();
+        };
+        let at_root = self.stack.at_root();
+        let title = if at_root { "Settings" } else { &current.title };
+        let hints = match current.layout {
+            MenuRowLayout::SettingsOption => settings_apply_hints(),
+            _ => settings_open_hints(at_root),
+        };
+        let mut spec = PaneSpec::new(title)
+            .mode(PaneMode::Standard)
+            .search_filter(&self.filter)
+            .search_rule(true)
+            .hints(hints)
+            .focused(true);
+        if at_root {
+            spec = spec.affix(PaneTitleAffix::Close);
+        }
+        selectable_row_regions(
+            area,
+            &spec,
+            &self.stack.display_items(),
+            self.stack.selected_index(),
+            &self.filter,
+        )
+    }
     pub fn new() -> Self {
         Self {
             stack: MenuStack::new(),

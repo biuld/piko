@@ -6,22 +6,13 @@
 //! stream; composer clicks place the text cursor; hover is tracked.
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use piko_protocol::ApprovalDecision;
 use piko_tui_layout::HitMap;
 use ratatui::layout::Rect;
 
-use crate::app::{
-    AppState, HitId,
-    command::{
-        Action, ApprovalAction, EditorAction, NotificationAction, TimelineAction,
-        ToolInteractionAction,
-    },
-};
+use crate::app::{AppState, HitId, command::Action};
 use crate::layout::build_surface_hitmap;
-use crate::navigation::{Region, SurfaceId};
-
-/// Wheel step in rows.
-const WHEEL_STEP: usize = 3;
+use crate::navigation::{OutsideClickPolicy, Region, SurfaceId};
+use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 /// Route one mouse event to keyboard-equivalent actions (plus direct state
 /// updates for cursor placement and hover tracking).
@@ -29,85 +20,115 @@ pub fn route_pointer(app: &mut AppState, terminal: Rect, event: MouseEvent) -> V
     let map = build_surface_hitmap(app, terminal);
     let (x, y) = (event.column, event.row);
     match event.kind {
-        MouseEventKind::Down(MouseButton::Left) => click(app, &map, x, y),
+        MouseEventKind::Down(MouseButton::Left) => {
+            route_component(app, &map, x, y, PointerGesture::Activate)
+        }
         MouseEventKind::Moved => {
-            app.hovered = map.hit_test(x, y).map(|h| (h.region, h.element));
+            app.hovered = top_modal_hit(app, &map, x, y).map(|h| (h.region, h.element));
             Vec::new()
         }
-        MouseEventKind::ScrollUp => wheel(&map, x, y, true),
-        MouseEventKind::ScrollDown => wheel(&map, x, y, false),
+        MouseEventKind::ScrollUp => route_component(app, &map, x, y, PointerGesture::ScrollUp),
+        MouseEventKind::ScrollDown => route_component(app, &map, x, y, PointerGesture::ScrollDown),
         _ => Vec::new(),
     }
 }
 
-fn click(app: &mut AppState, map: &HitMap<Region, HitId>, x: u16, y: u16) -> Vec<Action> {
-    let Some(hit) = map.hit_test(x, y) else {
+fn route_component(
+    app: &mut AppState,
+    map: &HitMap<Region, HitId>,
+    x: u16,
+    y: u16,
+    gesture: PointerGesture,
+) -> Vec<Action> {
+    let hit = map.hit_test(x, y).copied();
+    if let Some(surface) = app.modal_surface()
+        && !map.is_top_layer_hit(hit.as_ref())
+    {
+        return match (gesture, surface.outside_click_policy()) {
+            (PointerGesture::Activate, OutsideClickPolicy::Dismiss) => {
+                vec![crate::app::command::SurfaceAction::Close.into()]
+            }
+            _ => Vec::new(),
+        };
+    }
+
+    let Some(hit) = hit else {
         return Vec::new();
+    };
+    let component_hit = ComponentHit {
+        element: hit.element,
+        rect: hit.rect,
+        x,
+        y,
     };
     match hit.region {
-        Region::Surface(SurfaceId::Approval) => match hit.element {
-            Some(HitId::Choice { choice, .. }) => vec![Action::Approval(ApprovalAction::Respond(
-                approval_decision(choice),
-            ))],
-            // Dialog background / border: blocking modal, no-op.
-            _ => Vec::new(),
-        },
-        Region::Surface(SurfaceId::ToolInteraction) => match hit.element {
-            Some(HitId::Choice { choice, .. }) => vec![
-                Action::ToolInteraction(ToolInteractionAction::Choice(choice)),
-                Action::ToolInteraction(ToolInteractionAction::Submit),
-            ],
-            Some(HitId::Tab(step)) => vec![Action::ToolInteraction(
-                ToolInteractionAction::GotoStep(step),
-            )],
-            Some(HitId::Submit) => {
-                vec![Action::ToolInteraction(ToolInteractionAction::Submit)]
-            }
-            _ => Vec::new(),
-        },
-        Region::Notice => vec![Action::Notifications(NotificationAction::Clear)],
-        Region::Suggest => match hit.element {
-            Some(HitId::Suggest(idx)) => {
-                app.editor.auto_complete.select_index(idx);
-                vec![Action::Editor(EditorAction::AcceptSuggestion)]
-            }
-            _ => Vec::new(),
-        },
-        Region::Composer => {
-            // The composer is an input target only when no modal owns focus.
-            if app.modal_surface().is_none() {
-                let col = x.saturating_sub(hit.rect.x);
-                app.editor.move_to_column(hit.rect.width, col);
-            }
-            Vec::new()
+        Region::Surface(SurfaceId::Approval) => app.approvals.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::ToolInteraction) => {
+            app.interactions.pointer_event(component_hit, gesture)
         }
-        // Stream click is a no-op; other surfaces have no element actions yet.
+        Region::Surface(SurfaceId::Agents) => app.agent_panel.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::Sessions) => app.sessions.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::Models) => app.models.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::Thinking) => app.thinking.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::Settings) => app.settings.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::AuthSelector) => {
+            app.auth_selector.pointer_event(component_hit, gesture)
+        }
+        Region::Surface(SurfaceId::Mcp) => app.mcp.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::Processes) => {
+            app.processes.pointer_event(component_hit, gesture)
+        }
+        Region::Surface(SurfaceId::Diagnostics) => {
+            app.diagnostics.pointer_event(component_hit, gesture)
+        }
+        Region::Surface(SurfaceId::Tree) => app.tree.pointer_event(component_hit, gesture),
+        Region::Surface(SurfaceId::SummaryPrompt) => {
+            if gesture != PointerGesture::Activate {
+                return Vec::new();
+            }
+            let Some(workflow) = app.summary_prompt.as_mut() else {
+                return Vec::new();
+            };
+            match component_hit.element {
+                Some(HitId::Choice { choice, .. }) => {
+                    workflow.select_choice(choice);
+                    vec![crate::app::command::SurfaceAction::Confirm.into()]
+                }
+                Some(HitId::Tab(step)) => {
+                    workflow.goto_step(step);
+                    Vec::new()
+                }
+                Some(HitId::Submit) => vec![crate::app::command::SurfaceAction::Confirm.into()],
+                Some(HitId::TextInput) => {
+                    workflow.move_active_input_to_column(component_hit.local_x());
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            }
+        }
+        Region::Notice => app.notifications.pointer_event(component_hit, gesture),
+        Region::Suggest => app
+            .editor
+            .auto_complete
+            .pointer_event(component_hit, gesture),
+        Region::Composer => app.editor.pointer_event(component_hit, gesture),
+        Region::Stream => app.timeline.pointer_event(component_hit, gesture),
+        // Components without stable element actions consume their surface but
+        // intentionally expose no pointer behavior yet.
         _ => Vec::new(),
     }
 }
 
-fn wheel(map: &HitMap<Region, HitId>, x: u16, y: u16, up: bool) -> Vec<Action> {
-    let Some(hit) = map.hit_test(x, y) else {
-        return Vec::new();
-    };
-    if hit.region == Region::Stream {
-        vec![Action::Timeline(if up {
-            TimelineAction::ScrollUp(WHEEL_STEP)
-        } else {
-            TimelineAction::ScrollDown(WHEEL_STEP)
-        })]
+fn top_modal_hit<'a>(
+    app: &AppState,
+    map: &'a HitMap<Region, HitId>,
+    x: u16,
+    y: u16,
+) -> Option<&'a piko_tui_layout::Hit<Region, HitId>> {
+    let hit = map.hit_test(x, y);
+    if app.modal_surface().is_some() {
+        map.hit_test_top_layer(x, y)
     } else {
-        Vec::new()
-    }
-}
-
-/// Approval workflow choices are fixed-order decisions.
-fn approval_decision(choice: usize) -> ApprovalDecision {
-    match choice {
-        0 => ApprovalDecision::Accept,
-        1 => ApprovalDecision::AcceptSession,
-        2 => ApprovalDecision::AcceptWorkspace,
-        3 => ApprovalDecision::AcceptPermanent,
-        _ => ApprovalDecision::Decline,
+        hit
     }
 }

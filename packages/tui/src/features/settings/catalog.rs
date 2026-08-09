@@ -15,7 +15,6 @@ use crate::ui::components::menu::{MenuRow, MenuRowKind};
 pub enum SettingsAction {
     Thinking(&'static str),
     HideThinking(bool),
-    ToolDetails(bool),
     Compaction(bool),
     CompactionKeep(u64),
     CompactionReserve(u64),
@@ -372,24 +371,6 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>> {
                     snap.theme_name == "light",
                 ),
             ],
-        ),
-        section_choice(
-            "Tool details",
-            if snap.tools_expanded {
-                "expanded".into()
-            } else {
-                "folded".into()
-            },
-            None,
-            Some(GROUP_APPEARANCE),
-            "Tool details",
-            binary_options(
-                snap.tools_expanded,
-                "Show expanded tool results by default",
-                "Fold tool results by default",
-                SettingsAction::ToolDetails(true),
-                SettingsAction::ToolDetails(false),
-            ),
         ),
         // ── Advanced ──────────────────────────────────────────────────────
         section_choice(

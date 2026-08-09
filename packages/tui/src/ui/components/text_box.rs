@@ -78,6 +78,25 @@ impl TextBox {
         self.cursor += clean.len();
     }
 
+    /// Move the caret to the nearest character boundary at a display column.
+    pub fn move_to_column(&mut self, column: u16) {
+        let target = usize::from(column);
+        let mut width = 0usize;
+        self.cursor = self.text.len();
+        for (byte, ch) in self.text.char_indices() {
+            let char_width = if self.mask_char.is_some() {
+                1
+            } else {
+                unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+            };
+            if width.saturating_add(char_width) > target {
+                self.cursor = byte;
+                break;
+            }
+            width = width.saturating_add(char_width);
+        }
+    }
+
     pub fn backspace(&mut self) -> bool {
         let Some(prev) = self.prev_char_boundary(self.cursor) else {
             return false;

@@ -7,20 +7,25 @@
 //! **Body** is either multi-line List (`Stacked` / Settings…) or multi-column
 //! Table (`Columns`) — same interaction contract, different paint.
 
+use crate::theme::Theme;
+use crate::ui::components::feedback::{default_list_hints, empty_line};
+use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
 use ratatui::{
     Frame,
     layout::Rect,
     widgets::{List, ListItem, Paragraph},
 };
 
-use crate::theme::Theme;
-use crate::ui::components::feedback::{default_list_hints, empty_line};
-use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
-
 mod columns;
+mod interaction;
+mod kernel;
 mod panel;
 mod rows;
 
+pub use interaction::{
+    minimal_row_regions, paint_index_hover, paint_row_hover, selectable_row_regions,
+};
+pub use kernel::SelectableList;
 pub use panel::{SelectablePanelBody, paint_selectable_panel};
 
 /// How a selectable row lays out primary vs detail / value / columns.
@@ -219,98 +224,6 @@ impl SelectableItem {
             cells.push(ColumnCell::secondary(self.detail.clone()));
         }
         cells
-    }
-}
-
-/// Selection state for a list of items (shared by menus, sessions, settings).
-pub struct SelectableList<T> {
-    pub items: Vec<T>,
-    pub selected: usize,
-}
-
-impl<T> Default for SelectableList<T> {
-    fn default() -> Self {
-        Self::new(Vec::new())
-    }
-}
-
-impl<T> SelectableList<T> {
-    pub fn new(items: Vec<T>) -> Self {
-        Self { items, selected: 0 }
-    }
-
-    pub fn clear(&mut self) {
-        self.items.clear();
-        self.selected = 0;
-    }
-
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
-    /// Select first match under `filter` (or 0 if none).
-    pub fn reset_selection<F>(&mut self, filter: &str, f: F)
-    where
-        F: FnMut(&T) -> bool,
-    {
-        let filtered = self.filtered_indices(filter, f);
-        self.selected = filtered.first().copied().unwrap_or(0);
-    }
-
-    pub fn filtered_indices<F>(&self, filter: &str, mut f: F) -> Vec<usize>
-    where
-        F: FnMut(&T) -> bool,
-    {
-        self.items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| if filter.is_empty() { true } else { f(item) })
-            .map(|(idx, _)| idx)
-            .collect()
-    }
-
-    pub fn select_next<F>(&mut self, filter: &str, f: F)
-    where
-        F: FnMut(&T) -> bool,
-    {
-        let filtered = self.filtered_indices(filter, f);
-        if filtered.is_empty() {
-            return;
-        }
-        let current_filtered_pos = filtered
-            .iter()
-            .position(|&orig_idx| orig_idx == self.selected)
-            .unwrap_or(0);
-        let next_filtered_pos = (current_filtered_pos + 1).min(filtered.len() - 1);
-        if let Some(&orig_idx) = filtered.get(next_filtered_pos) {
-            self.selected = orig_idx;
-        }
-    }
-
-    pub fn select_prev<F>(&mut self, filter: &str, f: F)
-    where
-        F: FnMut(&T) -> bool,
-    {
-        let filtered = self.filtered_indices(filter, f);
-        if filtered.is_empty() {
-            return;
-        }
-        let current_filtered_pos = filtered
-            .iter()
-            .position(|&orig_idx| orig_idx == self.selected)
-            .unwrap_or(0);
-        let prev_filtered_pos = current_filtered_pos.saturating_sub(1);
-        if let Some(&orig_idx) = filtered.get(prev_filtered_pos) {
-            self.selected = orig_idx;
-        }
-    }
-
-    pub fn selected_item(&self) -> Option<&T> {
-        self.items.get(self.selected)
     }
 }
 

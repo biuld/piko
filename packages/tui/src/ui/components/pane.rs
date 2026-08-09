@@ -200,6 +200,12 @@ pub enum PaneTitleAffix {
     ModeStrip(PaneModeStrip),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneAffixHit {
+    Close,
+    ModeOption(usize),
+}
+
 impl PaneTitleAffix {
     pub fn label(label: impl Into<String>) -> Self {
         Self::Label(label.into())
@@ -398,10 +404,88 @@ impl<'a> PaneSpec<'a> {
         }
         Some(Rect::new(
             inner.x,
-            inner.y,
+            inner
+                .y
+                .saturating_add(u16::from(show_search))
+                .saturating_add(u16::from(show_rule)),
             inner.width,
             inner.height - chrome,
         ))
+    }
+
+    /// Reserved footer geometry, derived without painting.
+    pub fn footer_rect(&self, area: Rect) -> Option<Rect> {
+        let PaneFooter::Reserved { .. } = self.footer else {
+            return None;
+        };
+        let bordered = Block::default().borders(self.borders).inner(area);
+        let inner = inset_xy(bordered, self.padding);
+        let height = footer_height(self.footer).min(inner.height);
+        (height > 0).then_some(Rect::new(
+            inner.x,
+            inner.y.saturating_add(inner.height.saturating_sub(height)),
+            inner.width,
+            height,
+        ))
+    }
+
+    /// Search/custom-input row geometry, derived without painting.
+    pub fn search_rect(&self, area: Rect) -> Option<Rect> {
+        if matches!(self.search, PaneSearch::Hidden) {
+            return None;
+        }
+        let bordered = Block::default().borders(self.borders).inner(area);
+        let inner = inset_xy(bordered, self.padding);
+        (inner.width > 0 && inner.height > 0).then_some(Rect::new(inner.x, inner.y, inner.width, 1))
+    }
+
+    /// Clickable title-affix geometry. Selection counters and labels remain
+    /// informational; close and mode options expose semantic targets.
+    pub fn title_affix_regions(&self, area: Rect) -> Vec<(Rect, PaneAffixHit)> {
+        if self.title_affixes.is_empty() || area.width < 3 || area.height == 0 {
+            return Vec::new();
+        }
+        let displays: Vec<String> = self
+            .title_affixes
+            .iter()
+            .map(PaneTitleAffix::display)
+            .collect();
+        let cluster = displays.join("  ");
+        let line_width = cluster.chars().count() as u16 + 2;
+        let start = area
+            .x
+            .saturating_add(area.width.saturating_sub(1).saturating_sub(line_width));
+        let mut x = start.saturating_add(1);
+        let mut out = Vec::new();
+        for (affix, display) in self.title_affixes.iter().zip(displays) {
+            match affix {
+                PaneTitleAffix::Close => out.push((
+                    Rect::new(x, area.y, display.chars().count() as u16, 1),
+                    PaneAffixHit::Close,
+                )),
+                PaneTitleAffix::ModeStrip(strip) => {
+                    let mut option_x = x;
+                    for (index, option) in strip.options.iter().enumerate() {
+                        let width = option.chars().count() as u16
+                            + if index == strip.clamped_active() {
+                                2
+                            } else {
+                                0
+                            };
+                        out.push((
+                            Rect::new(option_x, area.y, width, 1),
+                            PaneAffixHit::ModeOption(index),
+                        ));
+                        option_x = option_x.saturating_add(width).saturating_add(3); // " | "
+                    }
+                }
+                PaneTitleAffix::Label(_) | PaneTitleAffix::Selection { .. } => {}
+            }
+            x = x
+                .saturating_add(display.chars().count() as u16)
+                .saturating_add(2);
+        }
+        out
     }
 
     pub fn focused(mut self, focused: bool) -> Self {
@@ -740,12 +824,13 @@ mod tests {
         let spec = PaneSpec::new("t").hints("help");
         assert_eq!(spec.content_rect(area), Some(Rect::new(2, 2, 56, 7)));
 
-        // Standard + search + rule + tip + reserved footer: chrome = 5.
+        // Standard + search + rule + tip + reserved footer: content starts
+        // below the first two zones and chrome consumes 5 rows in total.
         let spec = PaneSpec::new("t")
             .search_filter("x")
             .tip("tip")
             .footer(PaneFooter::Reserved { height: 2 });
-        assert_eq!(spec.content_rect(area), Some(Rect::new(2, 2, 56, 3)));
+        assert_eq!(spec.content_rect(area), Some(Rect::new(2, 4, 56, 3)));
 
         // Too small for any chrome: no content.
         assert_eq!(

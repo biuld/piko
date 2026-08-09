@@ -1,6 +1,6 @@
 # Design: Pointer Input (click / hover / wheel)
 
-> Status: draft
+> Status: accepted
 >
 > PRD: [`../features/pointer-input.md`](../features/pointer-input.md)
 
@@ -8,8 +8,7 @@
 
 Consume the per-frame hit map with real mouse events: clicks resolve to the
 same actions as the keyboard, wheel scrolls the stream, composer clicks place
-the text cursor, and hover becomes observable state. No drag, no hover
-styling.
+the text cursor, and hover gives soft feedback on actionable targets. No drag.
 
 ## Architecture
 
@@ -29,9 +28,31 @@ CrosstermEvent::Mouse(event)          (main.rs)
   → app.update(Msg::Action(a)) + run_effects
 ```
 
-`route_pointer` may mutate `AppState` directly where no action exists
-(composer cursor placement, suggestion selection, hover state); everything
-else returns `Action`s so effects flow through the normal pipeline.
+`route_pointer` owns terminal-event normalization, modal-layer authority, and
+Region-to-component delegation. Each component interprets its element through
+the product-layer `PointerComponent` contract, may mutate state it owns, and
+returns keyboard-equivalent `Action`s for the normal effect pipeline. See
+[component-interaction.md](component-interaction.md).
+
+### Hover paint
+
+Hover identity remains product state as `(Region, Option<HitId>)`. Composition
+filters it into layout-provided `InteractionState<HitId>` for the region being
+painted. The owning workflow, suggestion, notice, or editor renderer applies
+its semantic theme token in its normal paint path. This keeps geometry and the
+generic render-state contract in `piko-tui-layout`, while selection/hover
+precedence stays with the component that owns the business state.
+
+- Choice, tab, submit, suggestion, and notice targets receive `bg_hover`.
+- Composer does not paint hover feedback. It keeps its normal `bg_elevated`
+  body and focus-owned prompt border; click still places the caret.
+- Stream, surface defaults, stale targets, and plane targets hidden by a modal
+  receive no feedback.
+- A target that is also keyboard-selected keeps its selected styling; hover
+  does not mutate `selected_idx`.
+
+No visual state is added to `piko-tui-layout`, and the generic `Component`
+contract does not change.
 
 ### Plane hit specs
 
@@ -39,13 +60,15 @@ else returns `Action`s so effects flow through the normal pipeline.
 
 | Region | Element | Geometry |
 |---|---|---|
-| Stream | `HitId::Stream` | whole stream rect |
+| Stream | `HitId::Stream` | whole stream rect (wheel fallback) |
+| Timeline tool | `HitId::TimelineTool(i)` | render-plan block rect clipped to viewport |
 | Notice | `HitId::Notice` | whole notice rect |
-| Suggest | `HitId::Suggest(i)` | content rows `area.y + 1 + i` |
+| Suggest | `HitId::Suggest(i)` | shared selectable viewport rows, preserving source index |
 | Composer | `HitId::Composer` | whole composer rect |
 
-Plane entries are `z = 0`; modal surfaces (already in the map) win any
-overlap, so a Decide host is a pointer barrier by construction.
+Plane entries are `z = 0`; modal surfaces (already in the map) win overlap.
+The router also compares a hit's layer with the active top modal layer, so
+clicks outside a partial modal cannot fall through to the plane.
 
 ### HitId extensions
 
@@ -55,26 +78,39 @@ pub enum HitId {
     Composer,
     Notice,
     Suggest(usize),
+    TimelineTool(usize), // visible Timeline component source index
+    Row(usize),          // owning component's stable source-row index
+    TextInput,           // owning component's editable field
+    Content,             // scrollable read-only viewport
+    Close,               // pane close affordance
+    Mode(usize),         // pane title mode-strip option
     Tab(usize),          // existing
     Choice { .. },       // existing
     Submit,              // existing
 }
 ```
 
-### Element → action mapping
+### Component-owned element mapping
 
-| Hit | Action(s) |
-|---|---|
-| Approval `Choice { choice: i }` | `ApprovalAction::Respond(decision(i))` — fixed order Accept / AcceptSession / AcceptWorkspace / AcceptPermanent / Decline |
-| ToolInteraction `Choice` | `ToolInteractionAction::Choice(i)` then `Submit` (Enter semantics) |
-| ToolInteraction `Tab(q)` | `ToolInteractionAction::GotoStep(q)` (new; Submit sentinel = questions.len()) |
-| ToolInteraction `Submit` | `ToolInteractionAction::Submit` |
-| Surface default (`element: None`) | none |
-| `Notice` | `NotificationAction::Clear` |
-| `Suggest(i)` | select index `i` (new `AutoComplete::select_index`) then `EditorAction::AcceptSuggestion` |
-| `Composer` (no modal) | `Editor::move_to_column(width, col)` (new) |
-| `Stream` click | none |
-| wheel over `Stream` | `TimelineAction::ScrollUp/Down(3)` |
+| Owner | Hit | Result |
+|---|---|---|
+| Approval | `Choice { choice: i }` | `ApprovalAction::Respond(decision(i))` |
+| ToolInteraction | `Choice` / `Tab` / `Submit` | Matching workflow action(s) |
+| NotificationCenter | `Notice` | `NotificationAction::Clear` |
+| AutoComplete | `Suggest(i)` | Click selects then accepts; wheel only moves selection |
+| Editor | `Composer` | Move cursor from local hit coordinate |
+| Timeline | wheel over `Stream` or tool | `TimelineAction::ScrollUp/Down(3)` |
+| Timeline | click `TimelineTool(i)` | `TimelineAction::ToggleTool(i)` |
+| Select/active Browse owner | `Row(i)` | Select source row, then `SurfaceAction::Confirm` |
+| MCP | `Row(i)` | Select only; no host effect |
+| Processes | `Row(i)` | Select + `Confirm`, preserving arm/confirm state |
+| Diagnostics | wheel on surface | `SurfaceAction::SelectPrev/Next` |
+| SummaryPrompt | workflow element | Select/goto + `SurfaceAction::Confirm` |
+| Auth API-key form | `TextInput` | Place the `TextBox` cursor |
+| Settings | `Close` | `SurfaceAction::Close` |
+| Sessions / Tree | `Mode(i)` | Apply that surface's scope/filter mode |
+
+Surface-default hits are delegated but current components treat them as no-op.
 
 ### New APIs
 
@@ -88,9 +124,8 @@ impl InteractiveWorkflow {
 impl Editor {
     pub fn move_to_column(&mut self, width: u16, col: u16); // display col → byte cursor
 }
-impl AutoComplete {
-    pub fn select_index(&mut self, idx: usize);
-}
+`AutoComplete` delegates row selection and viewport geometry to
+`SelectableList`; it owns only provider data and the accept-suggestion action.
 impl AppState {
     pub hovered: Option<(Region, Option<HitId>)>; // updated on Moved
 }
@@ -103,10 +138,16 @@ Unit tests in `app/tests/pointer_tests.rs`:
 1. Approval choice click → matching decision; background click → no action.
 2. Tool interaction choice click → `Choice` + `Submit`; tab click →
    `GotoStep`; submit click → `Submit`.
-3. Wheel over Stream → timeline scroll action; wheel elsewhere → no action.
+3. Wheel over Stream → timeline scroll action; wheel over selectable surfaces
+   and Suggest → selection movement; unsupported regions → no action.
 4. Composer click (no modal) → editor cursor moves to the column.
-5. Notice click → clear; Suggest row click → accept that suggestion.
+5. Notice click → clear; Suggest row click → accept that suggestion; a
+   viewport-shifted Suggest hit retains its source candidate index.
 6. `Moved` updates `AppState::hovered` without actions.
+7. Actionable hovered rects use semantic hover tokens; selected targets keep
+   selected paint, and non-actionable hits remain unchanged.
+8. Timeline tool block click toggles only that block; viewport clipping and
+   inter-component gaps remain exact.
 
 Run:
 
@@ -119,8 +160,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Non-goals (this design)
 
-- Drag handling, hover styling, right/middle buttons, touch.
-- Per-element actions for Browse/Select surfaces.
+- Drag handling, right/middle buttons, touch.
+- Double-click and pointer-specific business commands; components reuse the
+  existing keyboard action vocabulary.
 
 ## Implementation status
 
@@ -133,6 +175,16 @@ Landed as designed:
   in `main.rs`.
 - New APIs: `GotoStep`, `goto_step`, `move_to_column`, `select_index`,
   `AppState::hovered`.
+- Component-local hover paint: workflow, autocomplete, notice, and editor
+  consume `InteractionState<HitId>`; selected and non-actionable targets paint
+  no hover override.
+- `piko-tui-layout`: `ComponentHit`, `PointerGesture`, `InteractionState`, and
+  top-layer hit APIs. `ui/interaction.rs` retains only the Action-producing
+  `PointerComponent` product contract.
+- `SurfaceId::outside_click_policy`: dismissible surfaces map outside clicks
+  to keyboard Close; blocking Dock surfaces consume them.
+- Shared selectable row geometry covers filtered, grouped, and viewport-shifted
+  rows; title close/mode affordances use Pane-derived geometry.
 - `app/tests/pointer_tests.rs` covers approval decisions, workflow choice /
   tab / submit clicks, wheel zones, composer cursor, notice clear, suggestion
   accept, and hover tracking.

@@ -46,6 +46,15 @@ pub enum SurfaceIntent {
     Modal,
 }
 
+/// Pointer policy when a click resolves below the active modal layer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum OutsideClickPolicy {
+    /// Close or step back exactly like the surface's keyboard cancel action.
+    Dismiss,
+    /// Consume the click without closing or reaching a lower layer.
+    Block,
+}
+
 impl SurfaceId {
     pub fn intent(self) -> SurfaceIntent {
         match self {
@@ -108,5 +117,14 @@ impl SurfaceId {
 
     pub fn covers_body(self) -> bool {
         matches!(self.intent(), SurfaceIntent::Browse)
+    }
+
+    pub fn outside_click_policy(self) -> OutsideClickPolicy {
+        match self.intent() {
+            SurfaceIntent::Dock => OutsideClickPolicy::Block,
+            SurfaceIntent::Browse | SurfaceIntent::Select | SurfaceIntent::Modal => {
+                OutsideClickPolicy::Dismiss
+            }
+        }
     }
 }

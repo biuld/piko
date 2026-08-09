@@ -1,3 +1,4 @@
+use piko_tui_layout::InteractionState;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -7,9 +8,8 @@ use ratatui::{
 };
 
 use crate::{
-    app::ToolStatus,
+    app::{HitId, ToolStatus},
     features::{preview_text, short_id},
-    layout::DEFAULT_HORIZONTAL_INSET,
     theme::Theme,
 };
 
@@ -19,35 +19,24 @@ use super::{
 };
 
 impl Timeline {
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        // Layout: [left inset][content][scrollbar]. The scrollbar column is the
-        // right gutter — do not inset again inside the content band.
-        let content_band = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width.saturating_sub(1).max(1),
-            height: area.height,
+    pub fn render_with_state(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        theme: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        let hovered_tool = match interaction.hovered {
+            Some(HitId::TimelineTool(index)) => Some(index),
+            _ => None,
         };
-        let left = DEFAULT_HORIZONTAL_INSET.min(content_band.width.saturating_sub(1));
-        let content_area = Rect {
-            x: content_band.x.saturating_add(left),
-            y: content_band.y,
-            width: content_band.width.saturating_sub(left),
-            height: content_band.height,
-        };
-        let mut lines = self.render_lines(theme, content_area.width);
-        if lines.is_empty() {
-            lines.push(Line::from(Span::styled(
+        let mut plan = self.render_plan(area, theme, hovered_tool);
+        if plan.lines.is_empty() {
+            plan.lines.push(Line::from(Span::styled(
                 "Type a prompt and press Enter.",
                 Style::default().fg(theme.dim),
             )));
         }
-
-        let has_pending = self.viewport.pending_new_items() > 0;
-        let visible_height =
-            usize::from(content_area.height.saturating_sub(u16::from(has_pending))).max(1);
-        self.viewport.set_metrics(lines.len(), visible_height);
-        let top_offset = self.viewport.top_offset();
 
         let block = if self.viewport.pending_new_items() > 0 {
             Block::default()
@@ -59,10 +48,10 @@ impl Timeline {
             Block::default().borders(Borders::empty())
         };
         frame.render_widget(
-            Paragraph::new(std::mem::take(&mut lines))
-                .scroll((top_offset.min(usize::from(u16::MAX)) as u16, 0))
+            Paragraph::new(std::mem::take(&mut plan.lines))
+                .scroll((plan.top_offset.min(usize::from(u16::MAX)) as u16, 0))
                 .block(block),
-            content_area,
+            plan.content_area,
         );
         if self.viewport.max_scroll() > 0 {
             let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height())
@@ -80,19 +69,14 @@ impl Timeline {
         }
     }
 
+    #[cfg(test)]
     fn render_lines(&self, theme: &Theme, width: u16) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         // Zero-height components (e.g. tool_use-only assistant with empty body)
         // stay in the timeline for transcript fidelity but must not contribute
         // inter-component gap rows.
         for component in &self.components {
-            let body = component_lines(
-                component,
-                self.tools_expanded,
-                self.thinking_visible,
-                theme,
-                width,
-            );
+            let body = component_lines(component, self.thinking_visible, false, theme, width);
             if body.is_empty() {
                 continue;
             }
@@ -105,10 +89,10 @@ impl Timeline {
     }
 }
 
-fn component_lines(
+pub(super) fn component_lines(
     component: &TimelineComponent,
-    tools_expanded: bool,
     thinking_visible: bool,
+    hovered: bool,
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
@@ -117,7 +101,7 @@ fn component_lines(
         TimelineComponent::Assistant(component) => {
             assistant_lines(component, thinking_visible, theme)
         }
-        TimelineComponent::Tool(tool) => tool_lines(tool, tools_expanded, theme, width),
+        TimelineComponent::Tool(tool) => tool_lines(tool, hovered, theme, width),
         TimelineComponent::Notice(component) => {
             let color = match component.color {
                 NoticeColor::System => theme.accent,
@@ -257,28 +241,31 @@ fn assistant_lines(
     lines
 }
 
-fn tool_lines(
-    tool: &ToolEntry,
-    tools_expanded: bool,
-    theme: &Theme,
-    width: u16,
-) -> Vec<Line<'static>> {
+fn tool_lines(tool: &ToolEntry, hovered: bool, theme: &Theme, width: u16) -> Vec<Line<'static>> {
     let bg = match tool.status {
         ToolStatus::Running => theme.tool_pending_bg,
         ToolStatus::Completed => theme.tool_success_bg,
         ToolStatus::Failed => theme.tool_error_bg,
     };
     let title_style = Style::default()
-        .fg(theme.tool_title)
+        .fg(if hovered {
+            theme.accent
+        } else {
+            theme.tool_title
+        })
         .add_modifier(Modifier::BOLD)
         .bg(bg);
     let output_style = Style::default().fg(theme.tool_output).bg(bg);
     let muted_style = Style::default().fg(theme.dim).bg(bg);
     let mut lines = vec![
         filled_line("", output_style, width),
-        filled_line(format!(" {}", tool.name), title_style, width),
+        filled_line(
+            format!(" {} {}", if tool.expanded { "▾" } else { "▸" }, tool.name),
+            title_style,
+            width,
+        ),
     ];
-    if tools_expanded {
+    if tool.expanded {
         if let Some(parent) = &tool.parent_message_id {
             lines.push(filled_line(
                 format!(" parent message {}", short_id(parent)),
@@ -358,6 +345,7 @@ fn text_lines(text: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::component_lines;
     use crate::app::ToolStatus;
     use crate::features::timeline::{
         AssistantMessageComponent, ComponentId, ContentBlock, Timeline, TimelineComponent,
@@ -424,5 +412,27 @@ mod tests {
             }),
             "second tool missing: {lines:?}"
         );
+    }
+
+    #[test]
+    fn tool_disclosure_and_hover_preserve_status_card_semantics() {
+        let theme = Theme::dark();
+        let mut tool = tool_entry("c1", "bash");
+        let collapsed = component_lines(
+            &TimelineComponent::Tool(tool.clone()),
+            true,
+            true,
+            &theme,
+            40,
+        );
+        let title = &collapsed[1].spans[0];
+        assert!(title.content.contains('▸'));
+        assert_eq!(title.style.fg, Some(theme.accent));
+        assert_eq!(title.style.bg, Some(theme.tool_success_bg));
+
+        tool.expanded = true;
+        let expanded = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 40);
+        assert!(expanded[1].spans[0].content.contains('▾'));
+        assert!(expanded.len() > collapsed.len());
     }
 }

@@ -148,26 +148,38 @@ pub fn build_surface_hitmap(
             .collect()
     };
     build_hitmap(&composed.plan, |region, rect| match region {
-        Region::Stream => vec![HitRegion {
-            region: Region::Stream,
-            rect,
-            element: Some(HitId::Stream),
-        }],
+        Region::Stream => {
+            let mut hits = vec![HitRegion {
+                region: Region::Stream,
+                rect,
+                element: Some(HitId::Stream),
+            }];
+            hits.extend(
+                app.timeline
+                    .pointer_regions(rect, &app.theme)
+                    .into_iter()
+                    .map(|(rect, element)| HitRegion {
+                        region: Region::Stream,
+                        rect,
+                        element: Some(element),
+                    }),
+            );
+            hits
+        }
         Region::Notice => vec![HitRegion {
             region: Region::Notice,
             rect,
             element: Some(HitId::Notice),
         }],
-        Region::Suggest => (0..app.editor.auto_complete.len().min(6))
-            .map(|i| HitRegion {
+        Region::Suggest => app
+            .editor
+            .auto_complete
+            .pointer_regions(rect)
+            .into_iter()
+            .map(|(row_rect, element)| HitRegion {
                 region: Region::Suggest,
-                rect: ratatui::layout::Rect::new(
-                    rect.x,
-                    rect.y.saturating_add(1).saturating_add(i as u16),
-                    rect.width,
-                    1,
-                ),
-                element: Some(HitId::Suggest(i)),
+                rect: row_rect,
+                element: Some(element),
             })
             .collect(),
         Region::Composer => vec![HitRegion {
@@ -177,8 +189,31 @@ pub fn build_surface_hitmap(
         }],
         Region::Surface(SurfaceId::Agents) => stamp(app.agent_panel.hit_regions(rect)),
         Region::Surface(SurfaceId::Sessions) => stamp(app.sessions.hit_regions(rect)),
-        Region::Surface(SurfaceId::Tree) | Region::Surface(SurfaceId::SummaryPrompt) => {
-            stamp(app.tree.hit_regions(rect))
+        Region::Surface(SurfaceId::Tree) => stamp(app.tree.hit_regions(rect)),
+        Region::Surface(SurfaceId::SummaryPrompt) => {
+            let mut hits: Vec<_> = app
+                .summary_prompt
+                .as_ref()
+                .and_then(|workflow| {
+                    app.tree.summary_footer_rect(rect).map(|footer| {
+                        workflow
+                            .component_regions_embedded(footer)
+                            .into_iter()
+                            .map(|(rect, element)| HitRegion {
+                                region: Region::Surface(SurfaceId::SummaryPrompt),
+                                rect,
+                                element: Some(element),
+                            })
+                            .collect()
+                    })
+                })
+                .unwrap_or_default();
+            hits.push(HitRegion {
+                region: Region::Surface(SurfaceId::SummaryPrompt),
+                rect,
+                element: None,
+            });
+            hits
         }
         Region::Surface(SurfaceId::Status) => {
             stamp(<crate::features::status::StatusPanel as SurfacePanel<

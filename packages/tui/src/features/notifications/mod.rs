@@ -1,5 +1,10 @@
 use std::collections::VecDeque;
 
+use crate::{
+    app::{HitId, command::NotificationAction},
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
+};
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum NotificationLevel {
     Info,
@@ -52,5 +57,19 @@ impl NotificationCenter {
             .iter()
             .rev()
             .find(|n| n.level != NotificationLevel::Info)
+    }
+}
+
+impl PointerComponent<HitId> for NotificationCenter {
+    fn pointer_event(
+        &mut self,
+        hit: ComponentHit<HitId>,
+        gesture: PointerGesture,
+    ) -> Vec<crate::app::command::Action> {
+        if gesture == PointerGesture::Activate && hit.element == Some(HitId::Notice) {
+            vec![NotificationAction::Clear.into()]
+        } else {
+            Vec::new()
+        }
     }
 }
