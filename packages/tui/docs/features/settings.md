@@ -1,9 +1,8 @@
 # Settings surface
 
-> Status: implemented (value visibility + shared MenuStack; draft→reviewed pending
-> product walkthrough)
+> Status: implementation in progress (expanded host + TUI catalog)
 >
-> Parent: [ui-ux.md](./ui-ux.md) (full overlay, slash/palette openers)
+> Parent: [ui-ux.md](./ui-ux.md) (modal surface, slash/palette openers)
 > Feedback language: [component-feedback.md](./component-feedback.md)
 > (Selected ≠ Active; new Settings components listed there)
 > Persistence transport: hostd `ConfigGet` / `ConfigUpdate` (JSON merge patch;
@@ -12,8 +11,8 @@
 ## Overview
 
 The Settings surface lets the user inspect and change runtime configuration
-while staying in the chat session. It opens as a **full overlay** (replaces
-zones A–D above BottomBar), same placement family as Sessions / Tree.
+while staying in the chat session. It opens as a centered, viewport-driven
+modal above the workspace.
 
 Settings are **not** a free-form editor and **not** a wall of Enable/Disable
 commands. They are a **value-first catalog** of named settings: at every level
@@ -68,6 +67,10 @@ Today the menu fails basic “settings list” jobs:
 - Apply via `ConfigUpdate`; mirror updates optimistically so reopen is honest.
 - **Restart hostd** (and similar) effect classes are disclosed by components
   designed for that field — not buried only in docs.
+- Cover every existing host/TUI setting that can be represented safely as a
+  boolean, enum, dynamic closed choice, or bounded numeric preset. Settings
+  with open-ended text or collection values remain file-managed until the
+  corresponding editor component exists.
 
 ## Non-goals
 
@@ -76,7 +79,9 @@ Today the menu fails basic “settings list” jobs:
   file-based but **must still display** in value summaries.
 - Multi-column property sheets, tabs, or mouse-first forms.
 - Live re-init of OTel inside a running hostd (Settings only discloses).
-- Editing every hostd key — only the catalog in this PRD.
+- Free-form editing of paths, commands, MCP server definitions, approval
+  templates, model/provider ids, or arbitrary tool-name lists. Those values
+  remain visible through their owning surfaces or configuration files.
 - Replacing the shell List selection language (Settings components **extend**
   List/chromelets; they do not invent private carets or focus borders).
 - Reintroducing a separate settings navigation stack: `MenuStack` is the one
@@ -89,7 +94,7 @@ drill-down component with value-aware rows. Names are product contracts;
 rust module names may differ as long as the boundaries stay clear.
 
 ```text
-Settings surface (full overlay)
+Settings surface (centered modal)
 └─ MenuStack<SettingsAction>  # shared drill-down (also Auth); depth, title,
    │                          # Esc pop, filter scoped to current frame
    ├─ root frame              # SettingsRow layout: catalog sections
@@ -205,8 +210,10 @@ duplicate long Enable/Disable titles as the primary labels.
 **Enum / preset specialization:** short primary (level name, theme name,
 endpoint preset title); detail = consequence or full URL.
 
-Used by: Thinking Level, Theme, On/Off keys, OTLP endpoint presets, tools
-mode, compaction size leaves.
+Used by: Thinking Level, Theme, prompt-cache policy, permission-profile
+selection, feature gates, On/Off keys, OTLP endpoint presets, tools mode,
+compaction/retry/approval/guardian/transcript size leaves, and TUI editor/tree
+presets.
 
 Thinking picker reuses **this** list shape for levels — not a one-off menu.
 
@@ -258,9 +265,14 @@ Reserved so we do not overload ChoiceList later.
 
 ## Layout
 
-Settings is a **full overlay** (replaces content above BottomBar; BottomBar
-may remain for orientation). The catalog uses full terminal height for value
-lists and nested options.
+Settings is a stable **centered modal**. Its width is 88% of the workspace body,
+clamped to 60–120 columns. Its height is 80% of the body, with an 18-row
+preferred minimum and one row of backdrop preserved above and below. Small
+terminals clamp both dimensions to the available body.
+
+The frame does not resize when the user filters or drills into a choice. Menu
+content scrolls inside the viewport, so root and nested pages keep the same
+visual proportions.
 
 Root catalog is **domain-chunked**: non-selectable group captions group related
 rows (Thinking · Context · Tools · Diagnostics · Appearance · Advanced). Section
@@ -358,9 +370,16 @@ Each catalog entry is tagged in product language with one class:
 
 | Class | Meaning | UI duty |
 |-------|---------|---------|
-| **Live** | Host or TUI applies without process restart | No restart copy |
+| **Live** | Host or TUI applies before the next affected operation | No restart copy |
 | **Presentation** | Client-only (e.g. hide thinking, theme) once TuiConfig is applied | No host restart |
 | **Restart hostd** | Value is durably stored but runtime exporters/log stack take effect on next hostd process | Always disclose in group detail + apply toast |
+
+Hostd rebuilds the orchd runner when runner-frozen execution policy changes
+(retry, approvals, guardian, safety, permissions, features, sandbox, MCP, or
+transcript policy). The new value therefore applies to subsequent runs; an
+already executing run keeps its frozen configuration. Transport, session
+storage root, and observability exporter construction remain process-start
+settings and carry the restart badge.
 
 Observability OTLP enable + endpoint are **Restart hostd** today. If hostd
 later hot-reloads OTel, this PRD’s disclosure rule still holds until that
@@ -376,10 +395,20 @@ Root (and intermediate) group **detail** is derived from the client mirror:
 | Thinking · Blocks | `shown` / `hidden` |
 | Context · Compaction | `On · reserve 16k · keep 20k` or `Off` |
 | Context · API Retries | `On` / `Off` |
+| Context · Transcript | `tool output 24k` |
+| Trust · Approvals | `120s` |
+| Trust · Guardian | `Off` or `On · 30s · trip 3` |
+| Trust · Safe Writes | `On` / `Off` |
 | Tools · Sandbox | `On` / `Off` |
 | Tools · Active Tools | `all` / `none` |
+| Tools · Feature Gates | `9/9 on` (+ managed count when present) |
+| Tools · Permission Profile | profile name |
+| Tools · MCP Connect | `10s` |
+| Model · Prompt Cache | policy name |
 | Diagnostics · Observability | `On · http://127.0.0.1:4318` or `Off` (+ EffectBadge) |
 | Appearance · Theme | `dark` / `light` |
+| Appearance · Editor | multiline/resize/max-lines/history presets |
+| Appearance · Tree Filter | filter mode |
 | Advanced · Transport | `stdio` (or actual value) |
 
 Summaries stay one short line; use compact numbers (`16k`) not full phrases.
@@ -397,6 +426,11 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Transport Preference | presets as product allows (e.g. stdio) | host transport (as today) |
 | Compaction reserve / keep | closed token sizes | host `[compaction]` (Live on next compaction evaluation) |
 | OTLP Endpoint | closed presets (`127.0.0.1:4318`, `localhost:4318`, …) | host `[observability].otel-endpoint` (**Restart hostd**) |
+| Prompt Cache | disabled, provider-default, ephemeral, extended | host `[prompt].cache-policy` |
+| Permission Profile | built-in default + configured profile names | host `[permissions].profile` |
+| Numeric policies | documented bounded presets for compaction, transcript, retry, approvals, guardian, and MCP | corresponding host section |
+| Tree Filter | default, no-tools, user-only, labeled-only, all | `tui.tree.filter_mode` |
+| Editor limits | bounded presets | `tui.editor.*` |
 
 ### Booleans → binary choice frame
 
@@ -408,6 +442,10 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Tool Sandbox | `[sandbox].enabled` | Live |
 | Observability (OTLP export) | `[observability].enabled` | **Restart hostd** |
 | Active Tools Mode | enable-all vs empty list via active-tool-names | Live |
+| Guardian review | `[guardian].enabled` | Live on subsequent runs |
+| Safe workspace writes | `[safety].auto-approve-workspace-writes` | Live on subsequent runs |
+| Canonical unmanaged feature gate | `[features].<key>` | Live on subsequent runs |
+| Editor multiline / auto resize | `tui.editor.*` | Presentation |
 
 Each maps to a binary **choice frame**, not a pair of parallel command
 menu actions. Labels: short **On** / **Off** (or Hide / Show for thinking
@@ -473,11 +511,15 @@ export **Off**, otel endpoint `http://127.0.0.1:4318`).
 - [ ] Existing openers (`/settings`, palette, thinking open-at-branch) still
       work under MenuStack.
 
-## Out of catalog (this PRD)
+## File-managed residue
 
-Approvals, guardian, MCP server lists, permission profiles, features pins,
-guardian models, log levels — not editable in this Settings tree unless a
-later PRD adds them with the same value-summary + Active rules.
+The catalog edits approval timeouts, guardian enable/limits, MCP connect
+timeout, permission-profile selection, and unmanaged feature gates. It does
+not edit MCP server definitions/templates, permission-profile definitions and
+role maps, managed feature pins, guardian model/provider, sandbox policy/path,
+session directory, arbitrary active-tool lists, agent specs, or log filters.
+These are open-ended collections or text/path values and remain file-managed
+until `SettingTextField` / `SettingMultiToggle` has its own accepted slice.
 
 ## Open questions (resolve before or during design)
 

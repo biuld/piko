@@ -85,15 +85,19 @@ impl AppState {
                 self.settings.open_root(&snap);
                 self.push_surface(SurfaceId::Settings);
                 self.status = "settings".to_string();
-                let command_id = super::command_id();
-                self.session.pending.track(
-                    command_id.clone(),
-                    crate::app::pending::PendingCommandKind::BootstrapConfig,
-                );
-                return vec![Effect::send(Command::ConfigGet {
-                    command_id,
-                    namespace: "host".to_string(),
-                })];
+                let mut effects = Vec::new();
+                for namespace in ["host", "tui"] {
+                    let command_id = super::command_id();
+                    self.session.pending.track(
+                        command_id.clone(),
+                        crate::app::pending::PendingCommandKind::BootstrapConfig,
+                    );
+                    effects.push(Effect::send(Command::ConfigGet {
+                        command_id,
+                        namespace: namespace.to_string(),
+                    }));
+                }
+                return effects;
             }
             SurfaceAction::OpenStatus => {
                 self.push_surface(SurfaceId::Status);

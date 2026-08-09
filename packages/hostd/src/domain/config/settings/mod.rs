@@ -143,6 +143,7 @@ impl HostSettings {
             "default-provider": self.default_provider,
             "default-model": self.default_model,
             "default-thinking-level": self.default_thinking_level,
+            "transport": self.transport,
             "compaction": self.compaction,
             "transcript": self.transcript,
             "retry": self.retry,
@@ -156,6 +157,7 @@ impl HostSettings {
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
             "mcp-servers": self.mcp_servers,
+            "mcp": self.mcp,
             "prompt": self.prompt,
         })
     }
@@ -298,15 +300,43 @@ pub struct PermissionProfileSettings {
 /// per key across layers, override wins per key); `managed` pins features
 /// to a fixed value that is the final authority over `enabled` in every
 /// layer (a conflicting explicit value logs a warning and the pin wins).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct FeaturesSettings {
     /// Explicit per-key enablement.
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub enabled: HashMap<String, bool>,
     /// Operator pins; final authority over `enabled` in every layer.
     #[serde(default)]
     pub managed: HashMap<String, bool>,
+}
+
+impl<'de> Deserialize<'de> for FeaturesSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct Wire {
+            /// Legacy shape: `[features.enabled]`.
+            #[serde(default)]
+            enabled: HashMap<String, bool>,
+            #[serde(default)]
+            managed: HashMap<String, bool>,
+            /// Current shape: booleans directly under `[features]`.
+            #[serde(default, flatten)]
+            flat: HashMap<String, bool>,
+        }
+
+        let Wire {
+            mut enabled,
+            managed,
+            flat,
+        } = Wire::deserialize(deserializer)?;
+        enabled.extend(flat);
+        Ok(Self { enabled, managed })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

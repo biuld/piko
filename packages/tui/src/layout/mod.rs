@@ -66,13 +66,14 @@ fn status_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u1
     (width, height)
 }
 
-/// Centered size for the settings dialog: width 88% of the body, height from
-/// the menu content budget, capped below the body so it never fills the frame.
-fn settings_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
-    let budget = app.settings.select_band_budget();
-    let width = cells_from_percent(body.width, 88).max(40).min(body.width);
-    let height = budget
-        .preferred_band_rows()
+/// Viewport-driven size for the settings dialog. Its frame stays stable while
+/// navigating or filtering; menu content scrolls inside the available body.
+fn settings_centered_size(_app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let width = cells_from_percent(body.width, 88)
+        .clamp(60, 120)
+        .min(body.width);
+    let height = cells_from_percent(body.height, 80)
+        .max(18)
         .min(body.height.saturating_sub(2));
     (width, height)
 }
@@ -382,5 +383,34 @@ mod tests {
             .get(&Region::Surface(SurfaceId::Status))
             .expect("status rect");
         assert_eq!((status.width, status.height), (76, 11));
+    }
+
+    #[test]
+    fn settings_surface_uses_stable_viewport_sized_modal() {
+        let mut app = app_state();
+        app.push_surface(SurfaceId::Settings);
+
+        let frame = compose_frame(&app, Rect::new(0, 0, 100, 40));
+        let layer = frame.plan.layers.first().expect("settings layer");
+        assert!(matches!(
+            layer.placement,
+            piko_tui_layout::ModalPlacement::Centered {
+                max_width: 88,
+                max_height: 31
+            }
+        ));
+        let settings = layer
+            .rects
+            .get(&Region::Surface(SurfaceId::Settings))
+            .expect("settings rect");
+        assert_eq!((settings.width, settings.height), (88, 31));
+
+        // Small terminals preserve one row of backdrop above and below.
+        let compact = compose_frame(&app, Rect::new(0, 0, 50, 16));
+        let settings = compact.plan.layers[0]
+            .rects
+            .get(&Region::Surface(SurfaceId::Settings))
+            .expect("compact settings rect");
+        assert_eq!((settings.width, settings.height), (50, 13));
     }
 }

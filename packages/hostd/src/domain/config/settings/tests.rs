@@ -203,6 +203,44 @@ fn features_settings_merge_per_key() {
 }
 
 #[test]
+fn feature_settings_use_documented_flat_toml_shape() {
+    let settings: HostSettings = toml::from_str(
+        r#"
+[features]
+process = false
+mcp = true
+
+[features.managed]
+mcp = false
+"#,
+    )
+    .unwrap();
+    let features = settings.features.expect("features section present");
+    assert_eq!(features.enabled.get("process"), Some(&false));
+    assert_eq!(features.enabled.get("mcp"), Some(&true));
+    assert_eq!(features.managed.get("mcp"), Some(&false));
+}
+
+#[test]
+fn feature_settings_accept_legacy_enabled_table() {
+    let settings: HostSettings = toml::from_str(
+        r#"
+[features.enabled]
+process = false
+bash = true
+
+[features.managed]
+process = true
+"#,
+    )
+    .unwrap();
+    let features = settings.features.expect("features section present");
+    assert_eq!(features.enabled.get("process"), Some(&false));
+    assert_eq!(features.enabled.get("bash"), Some(&true));
+    assert_eq!(features.managed.get("process"), Some(&true));
+}
+
+#[test]
 fn safety_settings_merge_field_by_field() {
     let base = HostSettings {
         safety: Some(SafetySettings {

@@ -250,6 +250,7 @@ impl AppState {
     pub(crate) fn settings_snapshot(&self) -> crate::features::settings::SettingsSnapshot {
         crate::features::settings::SettingsSnapshot {
             host: self.host_settings.clone(),
+            tui: self.tui_config.clone(),
             thinking_level: self
                 .model
                 .active_thinking_level
@@ -278,6 +279,12 @@ impl AppState {
             SettingsAction::Compaction(v) => self.host_settings.compaction_enabled = *v,
             SettingsAction::CompactionKeep(n) => self.host_settings.compaction_keep = *n,
             SettingsAction::CompactionReserve(n) => self.host_settings.compaction_reserve = *n,
+            SettingsAction::CompactionMinGrowthFraction(n) => {
+                self.host_settings.compaction_min_growth_fraction = *n;
+            }
+            SettingsAction::TranscriptMaxToolOutput(n) => {
+                self.host_settings.transcript_max_tool_output_tokens = *n;
+            }
             SettingsAction::Theme(name) => {
                 self.theme = Theme::load(name);
                 self.tui_config.theme.name = name.to_string();
@@ -287,9 +294,64 @@ impl AppState {
             }
             SettingsAction::Sandbox(v) => self.host_settings.sandbox_enabled = *v,
             SettingsAction::Retry(v) => self.host_settings.retry_enabled = *v,
+            SettingsAction::RetryMaxRetries(n) => self.host_settings.retry_max_retries = *n,
+            SettingsAction::RetryBaseDelay(n) => self.host_settings.retry_base_delay_ms = *n,
+            SettingsAction::RetryMaxDelay(n) => self.host_settings.retry_max_delay_ms = *n,
+            SettingsAction::RetryBudget(n) => self.host_settings.retry_budget_ms = *n,
+            SettingsAction::ApprovalTimeout(n) => self.host_settings.approval_timeout_secs = *n,
+            SettingsAction::Guardian(v) => self.host_settings.guardian_enabled = *v,
+            SettingsAction::GuardianTimeout(n) => self.host_settings.guardian_timeout_secs = *n,
+            SettingsAction::GuardianMaxDenials(n) => {
+                self.host_settings.guardian_max_consecutive_denials = *n;
+            }
+            SettingsAction::SafeWorkspaceWrites(v) => {
+                self.host_settings.safe_workspace_writes = *v;
+            }
+            SettingsAction::PermissionProfile(profile) => {
+                self.host_settings.permission_profile = profile.clone();
+            }
+            SettingsAction::Feature(key, enabled) => {
+                self.host_settings.features.insert((*key).into(), *enabled);
+            }
+            SettingsAction::McpConnectTimeout(n) => {
+                self.host_settings.mcp_connect_timeout_ms = *n;
+            }
+            SettingsAction::PromptCache(policy) => {
+                self.host_settings.prompt_cache_policy = (*policy).into();
+            }
             SettingsAction::Observability(v) => self.host_settings.observability_enabled = *v,
             SettingsAction::ObservabilityEndpoint(ep) => {
                 self.host_settings.otel_endpoint = (*ep).to_string();
+            }
+            SettingsAction::EditorMultiline(value) => {
+                self.tui_config.editor.multiline = *value;
+            }
+            SettingsAction::EditorAutoResize(value) => {
+                self.tui_config.editor.auto_resize = *value;
+            }
+            SettingsAction::EditorMaxLines(value) => {
+                self.tui_config.editor.max_lines = *value;
+            }
+            SettingsAction::EditorHistoryLimit(value) => {
+                self.tui_config.editor.history_limit = *value;
+            }
+            SettingsAction::TreeFilter(value) => {
+                self.tui_config.tree.filter_mode = match *value {
+                    "no_tools" => crate::config::TreeFilterMode::NoTools,
+                    "user_only" => crate::config::TreeFilterMode::UserOnly,
+                    "labeled_only" => crate::config::TreeFilterMode::LabeledOnly,
+                    "all" => crate::config::TreeFilterMode::All,
+                    _ => crate::config::TreeFilterMode::Default,
+                };
+                self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
+            }
+            SettingsAction::BottomBarPreset(preset) => {
+                use crate::config::bottom_bar::BottomBarItem::*;
+                self.tui_config.bottom_bar.items = match *preset {
+                    "compact" => vec![Agent, Model, Context],
+                    "minimal" => vec![Agent, Model],
+                    _ => vec![Agent, Model, Cwd, Context, Cost],
+                };
             }
             SettingsAction::EnableAllTools => {
                 self.host_settings.all_tools = true;
@@ -300,5 +362,6 @@ impl AppState {
                 self.initial_options.no_tools = true;
             }
         }
+        self.editor.configure(&self.tui_config.editor);
     }
 }

@@ -133,6 +133,22 @@ fn host_namespace_excludes_frontend_blobs() {
 }
 
 #[test]
+fn host_namespace_includes_catalogued_startup_settings() {
+    let settings = HostSettings {
+        transport: Some("stdio".into()),
+        mcp: Some(piko_hostd::domain::config::McpSettings {
+            connect_timeout_ms: Some(4_000),
+            approval_templates: Default::default(),
+        }),
+        ..HostSettings::default()
+    };
+
+    let host = settings.namespace_value("host");
+    assert_eq!(host["transport"], "stdio");
+    assert_eq!(host["mcp"]["connect-timeout-ms"], 4_000);
+}
+
+#[test]
 fn unknown_top_level_keys_are_ignored_on_load() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("settings.toml");

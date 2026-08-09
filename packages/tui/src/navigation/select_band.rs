@@ -15,10 +15,6 @@ pub const MINIMAL_FORM_CHROME_ROWS: u16 = 3;
 /// all borders · vertical pad 1×2 · footer.
 pub const STANDARD_INFO_CHROME_ROWS: u16 = 5;
 
-/// Chrome for a Standard pane with search + rule + hints footer
-/// (Settings-style): borders 2 · vertical pad 2 · search 1 · rule 1 · footer 1.
-pub const STANDARD_SEARCH_CHROME_ROWS: u16 = 7;
-
 /// Default cap: full items shown before list scrolling.
 pub const DEFAULT_MAX_VISIBLE_ITEMS: u16 = 6;
 
@@ -74,16 +70,6 @@ impl SelectBandBudget {
         Self::Fixed {
             content_rows: content_rows.max(1),
             chrome_rows: STANDARD_INFO_CHROME_ROWS,
-        }
-    }
-
-    /// Standard searchable list on ComposerBand — Settings menus.
-    pub fn standard_search_list(item_count: usize) -> Self {
-        Self::List {
-            item_count,
-            row_lines: 2,
-            max_visible_items: 8,
-            chrome_rows: STANDARD_SEARCH_CHROME_ROWS,
         }
     }
 

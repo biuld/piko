@@ -128,7 +128,7 @@ impl AppState {
                 effects.push(Effect::send(config_command_for_setting(action.clone())));
                 self.clear_focus();
                 self.status = if restart {
-                    "setting saved — restart hostd for OTLP export".to_string()
+                    "setting saved — restart hostd to apply".to_string()
                 } else {
                     "setting applied".to_string()
                 };

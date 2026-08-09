@@ -1,12 +1,26 @@
 # Design Doc: Unified JSON-based Config Update & Hook Architecture
 
-> Status: implemented
+> Status: implemented; expanded settings catalog wiring in progress
 
 ## Implemented Architecture
 
 The previous TUI configuration path used a strongly typed `Command::ConfigSet` with one optional field per setting. That coupled TUI settings actions to the protocol schema and required cross-crate changes for every new setting.
 
 The implemented path uses a generic `Command::ConfigUpdate` containing a JSON Merge Patch (RFC 7386). The host daemon applies the patch to its settings, validates the result, persists it, and runs business-logic hooks that emit downstream events such as `Event::ModelConfigChanged` or `Event::ConfigEntry`.
+
+The expanded Settings catalog keeps the protocol generic. Each closed-choice
+action owns only its minimal merge patch; hostd remains authoritative for
+validation and applies one of three effect classes:
+
+- presentation fields are returned in the `tui` namespace;
+- runner-frozen fields rebuild the orchd runner for subsequent runs;
+- process-start fields are persisted and reported as restart-required by the
+  TUI.
+
+`ConfigGet { namespace: "host" }` must expose every non-secret field used by
+the catalog, including transport and MCP runtime settings. The TUI mirror
+accepts absent fields using the same defaults as hostd and rebuilds an open
+root catalog after a refresh.
 
 ## Protocol Changes
 

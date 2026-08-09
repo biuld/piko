@@ -117,6 +117,7 @@ mod modal_tests;
 mod pointer_tests;
 mod prompt_tests;
 mod session_tests;
+mod settings_tests;
 mod snapshot_tests;
 mod timeline_tests;
 mod tree_tests;

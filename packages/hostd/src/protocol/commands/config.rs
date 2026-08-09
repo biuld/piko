@@ -24,7 +24,7 @@ trait ConfigObserver: Send + Sync {
     ) -> Result<Vec<ServerMessage>, ProtocolError>;
 }
 
-/// Observer responsible for rebuilding the LLM orchestration turn runner when model parameters change.
+/// Rebuilds the LLM/orchestrator runner when a runner-frozen setting changes.
 struct ModelRunnerObserver;
 
 #[async_trait]
@@ -35,9 +35,7 @@ impl ConfigObserver for ModelRunnerObserver {
         old: &HostSettings,
         new: &HostSettings,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let changed = new.default_model != old.default_model
-            || new.default_provider != old.default_provider
-            || new.default_thinking_level != old.default_thinking_level;
+        let changed = runner_settings_changed(old, new);
 
         if changed {
             // settings already updated on the server before observers run
@@ -72,6 +70,22 @@ impl ConfigObserver for ModelRunnerObserver {
             },
         )])
     }
+}
+
+fn runner_settings_changed(old: &HostSettings, new: &HostSettings) -> bool {
+    new.default_model != old.default_model
+        || new.default_provider != old.default_provider
+        || new.default_thinking_level != old.default_thinking_level
+        || new.retry != old.retry
+        || new.approvals != old.approvals
+        || new.guardian != old.guardian
+        || new.safety != old.safety
+        || new.permissions != old.permissions
+        || new.features != old.features
+        || new.sandbox != old.sandbox
+        || new.mcp_servers != old.mcp_servers
+        || new.mcp != old.mcp
+        || new.transcript != old.transcript
 }
 
 /// Observer responsible for logging configuration metadata changes inside active session JSONL files.
@@ -276,5 +290,27 @@ fn merge_json(base: &mut serde_json::Value, patch: &serde_json::Value) {
         (base, patch) => {
             *base = patch.clone();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runner_rebuild_predicate_covers_frozen_policy_but_not_host_only_settings() {
+        let old = HostSettings::default();
+        let mut runtime = old.clone();
+        runtime.safety = Some(crate::domain::config::SafetySettings {
+            auto_approve_workspace_writes: Some(false),
+        });
+        assert!(runner_settings_changed(&old, &runtime));
+
+        let mut host_only = old.clone();
+        host_only.observability = Some(crate::domain::config::ObservabilitySettings {
+            enabled: Some(true),
+            ..Default::default()
+        });
+        assert!(!runner_settings_changed(&old, &host_only));
     }
 }

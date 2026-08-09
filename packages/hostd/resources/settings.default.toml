@@ -13,6 +13,13 @@
 # Stdio framing transport protocol ("stdio")
 # transport = "stdio"
 
+# Optional session storage root (defaults to ~/.piko/sessions)
+# session-dir = "/path/to/sessions"
+
+# Optional exact tool-name allowlist. Omit for every discovered tool; use an
+# empty list to disable all tools. Feature-family gates below are preferred.
+# active-tool-names = []
+
 # Presentation preferences (theme, hide-thinking-block, etc.) are NOT host
 # fields. They belong to the frontend-owned [tui] table below — see
 # `packages/hostd/src/domain/config/settings.rs`. hostd persists these tables
@@ -31,6 +38,17 @@ enabled = true
 reserve-tokens = 16384
 # Number of recent tokens to preserve in full detail
 keep-recent-tokens = 20000
+# Minimum growth before a second automatic compaction. An explicit token
+# value wins over the model-relative fraction.
+# min-growth-tokens = 16384
+# min-growth-fraction = 0.125
+# Optional summarizer override; failure falls back to the default model.
+# summarizer-model = "fast-model"
+# summarizer-provider = "provider"
+
+[transcript]
+# Maximum estimated tokens retained from one tool result in model context.
+max-tool-output-tokens = 24000
 
 [retry]
 # Enable automatic retries on LLM API connection failures
@@ -39,6 +57,9 @@ enabled = true
 max-retries = 3
 # Base backoff delay in milliseconds
 base-delay-ms = 2000
+# Maximum delay for one retry and total retry-time budget.
+max-delay-ms = 30000
+budget-ms = 60000
 
 [approvals]
 # How long a pending tool approval waits for a user decision before it
@@ -124,6 +145,10 @@ auto-approve-workspace-writes = true
 # command = "npx"
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 # timeout-ms = 5000
+
+[prompt]
+# disabled | provider-default | ephemeral | extended
+cache-policy = "provider-default"
 
 [features]
 # Managed feature gating (F-18): named tool-family features resolved once per

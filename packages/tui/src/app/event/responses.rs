@@ -252,6 +252,7 @@ impl AppState {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);
                     self.timeline.thinking_visible = !self.tui_config.hide_thinking_block;
+                    self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                     if let Some(name) = value
                         .get("theme")
                         .and_then(|t| t.get("name"))
