@@ -6,7 +6,7 @@ use crate::{
         flatten_models, get_active_branch_entries,
     },
     config::TuiConfig,
-    features::notifications::{NoticeLifetime, NoticeScope, NoticeSubject, NotificationLevel},
+    features::notifications::{NoticePolicy, NoticeScope, NoticeSubject, NotificationLevel},
     features::{
         approval::PendingApproval,
         timeline::{TimelineEntry, ToolEntry},

@@ -301,9 +301,10 @@ usage; once provided, BottomBar must display them.
 Transient information may appear only when no actionable notice is pending.
 The row is dismissible by mouse or the configured keyboard binding.
 
-**Must not** permanently list full history. The bounded in-memory NoticeCenter
-is an attention queue, not a durable event log; durable session facts belong in
-typed Timeline components projected from hostd state.
+**Must not** permanently list full history in the row. The process-local
+NoticeCenter retains all notice history for `/noti` until the TUI exits, but is
+not a durable event log; durable session facts belong in typed Timeline
+components projected from hostd state.
 
 ### Approval panel
 

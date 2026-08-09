@@ -42,16 +42,18 @@ to other sessions. Clicking the title affix or pressing Tab changes scope.
 
 ## Behavior / interactions
 
-- Notices are kept only in TUI memory and have stable local ids.
+- Notices are append-only for the lifetime of the TUI process and have stable
+  local ids. No severity or lifecycle is capacity-evicted.
 - A notice is global, session-scoped, or agent-scoped. Only notices applicable
   to the viewed session/agent are eligible for display.
-- Informational notices expire automatically and never evict unresolved
-  warning/error notices.
-- Dismissible notices remain until dismissed. State-derived notices may also
-  be resolved by a stable subject such as an approval id.
-- Resolving an approval or interaction removes its associated notice.
-- Clicking the row or pressing the dismiss binding removes only the currently
-  visible notice; older applicable notices may then become visible.
+- Informational notices stop appearing in the Notice Row after a short display
+  window, but remain in the in-memory queue and `/noti` for the lifetime of the
+  TUI process.
+- Dismissible notices remain in the row until dismissed. State-derived notices
+  remain in the row until resolved by a stable subject such as an approval id.
+- Dismiss and resolve update presentation state; they never delete the notice
+  record. Older applicable active notices may then become visible in the row.
+- `/noti` shows active, elapsed, dismissed, and resolved records.
 - Applying an authoritative snapshot may recreate state-derived notices from
   pending host state. The notice queue itself is never persisted.
 - `/noti` does not dismiss or resolve items. Up/Down, PageUp/PageDown, and the
@@ -65,8 +67,8 @@ to other sessions. Clicking the title affix or pressing Tab changes scope.
 
 `/noti` is an always-available TUI-local presentation command.
 
-The informational expiry duration and queue limits are implementation
-constants, not user settings.
+The informational row-display duration is an implementation constant, not a
+user setting. The entire queue is destroyed when the TUI process exits.
 
 ## Non-goals
 

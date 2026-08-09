@@ -36,7 +36,8 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
     };
 
     PlaneMetrics {
-        notice: app.notifications.has_visible_for(
+        notice: app.notifications.has_row_visible_for(
+            app.last_tick,
             app.session.id.as_deref(),
             app.agent_panel.active_agent_instance_id.as_deref(),
         ),

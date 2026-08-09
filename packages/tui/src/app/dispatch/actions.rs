@@ -271,6 +271,7 @@ impl AppState {
     ) -> Vec<Effect> {
         match action {
             NotificationAction::DismissVisible => self.notifications.dismiss_visible(
+                self.last_tick,
                 self.session.id.as_deref(),
                 self.agent_panel.active_agent_instance_id.as_deref(),
             ),

@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use super::{
-    NoticeLifetime, NoticeScope, Notification, NotificationCenter, NotificationLevel,
+    NoticePolicy, NoticeScope, NoticeStatus, Notification, NotificationCenter, NotificationLevel,
     NotificationViewScope,
 };
 use crate::{
@@ -23,6 +23,7 @@ use crate::{
 
 pub struct NotificationPanelCtx<'a> {
     pub session_id: Option<&'a str>,
+    pub now: Instant,
     pub theme: &'a Theme,
 }
 
@@ -66,7 +67,7 @@ impl Component<HitId, NotificationPanelCtx<'_>> for NotificationCenter {
         }
         let lines = items
             .into_iter()
-            .map(|notice| notification_line(notice, ctx.theme))
+            .map(|notice| notification_line(notice, ctx.now, ctx.theme))
             .collect::<Vec<_>>();
         let max_scroll = lines
             .len()
@@ -111,7 +112,7 @@ impl SurfacePanel<SurfaceId, HitId, NotificationPanelCtx<'_>> for NotificationCe
     }
 }
 
-fn notification_line(notification: &Notification, theme: &Theme) -> Line<'static> {
+fn notification_line(notification: &Notification, now: Instant, theme: &Theme) -> Line<'static> {
     let (level, color) = match notification.level {
         NotificationLevel::Info => ("info", theme.info),
         NotificationLevel::Warning => ("warning", theme.warning),
@@ -123,18 +124,28 @@ fn notification_line(notification: &Notification, theme: &Theme) -> Line<'static
             format!("session:{}", session_id.chars().take(8).collect::<String>())
         }
     };
-    let lifetime = match notification.lifetime {
-        NoticeLifetime::Transient { .. } => "transient",
-        NoticeLifetime::Dismissible => "dismissible",
-        NoticeLifetime::UntilResolved(_) => "pending",
+    let policy = match notification.policy {
+        NoticePolicy::Transient { .. } => "transient",
+        NoticePolicy::Dismissible => "dismissible",
+        NoticePolicy::UntilResolved(_) => "pending",
+    };
+    let status = match notification.status {
+        NoticeStatus::Active if matches!(notification.policy, NoticePolicy::Transient { visible_until } if visible_until <= now) => {
+            "elapsed"
+        }
+        NoticeStatus::Active => "active",
+        NoticeStatus::Dismissed => "dismissed",
+        NoticeStatus::Resolved => "resolved",
     };
     Line::from(vec![
         Span::styled(format!("● {level:<7}"), Style::default().fg(color)),
         Span::styled(format!(" {scope:<17}"), Style::default().fg(theme.dim)),
-        Span::styled(format!(" {lifetime:<11}"), Style::default().fg(theme.muted)),
+        Span::styled(format!(" {policy:<11}"), Style::default().fg(theme.muted)),
+        Span::styled(format!(" {status:<10}"), Style::default().fg(theme.dim)),
         Span::styled(
             notification.message.clone(),
             Style::default().fg(theme.text),
         ),
     ])
 }
+use std::time::Instant;

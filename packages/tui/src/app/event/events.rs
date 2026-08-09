@@ -180,7 +180,7 @@ impl AppState {
                     self.notifications.push_with(
                         NoticeScope::Session(session_id.clone()),
                         NotificationLevel::Warning,
-                        NoticeLifetime::UntilResolved(NoticeSubject::Interaction(
+                        NoticePolicy::UntilResolved(NoticeSubject::Interaction(
                             interaction_id.clone(),
                         )),
                         title

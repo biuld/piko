@@ -227,6 +227,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
         SurfaceId::Notifications => {
             let ctx = NotificationPanelCtx {
                 session_id: app.session_id(),
+                now: app.last_tick,
                 theme: &app.theme,
             };
             render_panel(&app.notifications, frame, area, &ctx, interaction);
@@ -306,7 +307,8 @@ fn render_notification_row(
     app: &AppState,
     interaction: InteractionState<HitId>,
 ) {
-    let Some(notification) = app.notifications.visible_for(
+    let Some(notification) = app.notifications.row_visible_for(
+        app.last_tick,
         app.session.id.as_deref(),
         app.agent_panel.active_agent_instance_id.as_deref(),
     ) else {

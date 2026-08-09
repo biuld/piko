@@ -6,15 +6,16 @@ This design implements [notice-row.md](../features/notice-row.md).
 
 ## Ownership
 
-`AppState` owns a `NoticeCenter`. The center owns lifecycle and selection; the
-Notice Row renderer paints the selected item, and pointer/key routing emits a
-dismiss-visible action. Protocol and hostd do not store this queue.
+`AppState` owns a `NoticeCenter`. The center owns append-only records,
+presentation state, and selection; the Notice Row renderer paints the selected
+item, and pointer/key routing emits a dismiss-visible action. Protocol and
+hostd do not store this queue.
 
 ```text
 typed host event/snapshot ──→ AppState reducer ──→ NoticeCenter
 local command/runtime error ┘                         │
-                                                     ├─ visible_for(view scope)
-Tick ──→ expire(now)                                 └─ dismiss / resolve
+                                                     ├─ row_visible_for(now, scope)
+Tick ──→ row projection clock                        └─ mark dismissed / resolved
 ```
 
 The same center backs a `SurfaceId::Notifications` centered modal. Modal-local
@@ -23,26 +24,35 @@ to Current/zero whenever `/noti` opens.
 
 ## Model
 
-Each notice has a local id, severity, scope, lifecycle, message, and optional
-stable subject. Severity controls presentation. Lifecycle independently
-controls expiry and resolution.
+Each notice has a local id, severity, scope, policy, status, message, and
+optional stable subject. Severity controls presentation. Policy controls when
+an active record is eligible for the Notice Row. Status is `Active`,
+`Dismissed`, or `Resolved`.
 
-- `Transient`: expires at a monotonic deadline.
-- `Dismissible`: remains until the user dismisses it.
-- `UntilResolved`: remains until its subject is resolved or the user dismisses
-  it.
+- `Transient`: remains in memory, but is eligible for Notice Row projection
+  only until a monotonic deadline.
+- `Dismissible`: remains in the row until the user dismisses it.
+- `UntilResolved`: remains in the row until its subject is resolved or the
+  user dismisses it.
 
-Transient and attention notices have separate capacity limits so routine info
-feedback cannot evict unresolved warnings/errors. When any attention notice is
-applicable it wins over newer transient notices.
+Records are never removed or capacity-evicted. Dismiss, resolution, and an
+elapsed transient deadline only change row eligibility or status. When any
+active attention notice is applicable it wins over newer transient notices.
+
+Snapshot reconciliation marks active state-derived records resolved, then
+reactivates matching authoritative pending subjects in place. This preserves
+append-only history without duplicating the same pending approval or
+interaction every time a snapshot is applied.
 
 ## Modal Projection
 
 The modal uses `PaneTitleAffix::ModeStrip(["Current", "All"])`. Current
 projects `Global + Session(active_session_id)`; All projects every in-memory
-item and prints each item's scope. Items are newest-first and use one display
-row each so the stored scroll offset maps directly to rows. Pane title-affix
-regions provide pointer switching; Tab provides the keyboard-equivalent action.
+item and prints each item's scope, policy, and current status (`active`,
+`elapsed`, `dismissed`, or `resolved`). Items are newest-first and use one
+display row each so the stored scroll offset maps directly to rows. Pane
+title-affix regions provide pointer switching; Tab provides the
+keyboard-equivalent action.
 
 `/noti` is merged through the TUI-local command catalog and never appears in
 hostd's neutral command catalog.
@@ -77,9 +87,10 @@ entry is intentionally not introduced.
 
 ## Verification
 
-- Transient notices expire without evicting attention notices.
-- Resolving a subject removes its notice.
-- Dismiss removes only the visible notice.
+- Elapsed transient notices leave the Notice Row but remain in `/noti` memory.
+- Resolving a subject marks its notice resolved without deleting it.
+- Dismiss marks only the visible notice dismissed without deleting it.
+- More than 32 attention notices remain available in append-only history.
 - Session-scoped notices do not leak across session views.
 - Snapshot metadata does not produce empty or navigation-id notices.
 - Summaries and visible custom messages retain dedicated component kinds.

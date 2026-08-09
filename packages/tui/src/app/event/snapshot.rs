@@ -149,10 +149,10 @@ impl AppState {
                 approval.tool_name
             };
             let approval_id = approval.approval_id;
-            self.notifications.push_with(
+            self.notifications.restore_with(
                 NoticeScope::Session(snapshot_session_id.clone()),
                 NotificationLevel::Warning,
-                NoticeLifetime::UntilResolved(NoticeSubject::Approval(approval_id.clone())),
+                NoticePolicy::UntilResolved(NoticeSubject::Approval(approval_id.clone())),
                 format!("approval requested for {tool_name}"),
             );
             self.approvals.push(PendingApproval {
@@ -168,12 +168,10 @@ impl AppState {
             let interaction_id = interaction.interaction_id;
             let title = interaction.title;
             if interaction.auto_resolution_ms.is_none() {
-                self.notifications.push_with(
+                self.notifications.restore_with(
                     NoticeScope::Session(snapshot_session_id.clone()),
                     NotificationLevel::Warning,
-                    NoticeLifetime::UntilResolved(NoticeSubject::Interaction(
-                        interaction_id.clone(),
-                    )),
+                    NoticePolicy::UntilResolved(NoticeSubject::Interaction(interaction_id.clone())),
                     title
                         .as_deref()
                         .unwrap_or("tool input requested")

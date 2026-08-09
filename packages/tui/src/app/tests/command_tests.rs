@@ -362,7 +362,10 @@ fn direct_command_errors_are_visible() {
         result: Err("failed visibly".into()),
     });
     assert_eq!(app.status, "failed visibly");
-    assert!(app.notifications.has_visible_for(None, None));
+    assert!(
+        app.notifications
+            .has_row_visible_for(app.last_tick, None, None)
+    );
 }
 
 #[test]

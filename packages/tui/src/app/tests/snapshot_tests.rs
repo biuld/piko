@@ -12,7 +12,10 @@ fn approval_notice_resolves_with_authoritative_event() {
         tool_args: serde_json::json!({}),
         prompt: None,
     }));
-    assert!(app.notifications.has_visible_for(Some("session-1"), None));
+    assert!(
+        app.notifications
+            .has_row_visible_for(app.last_tick, Some("session-1"), None)
+    );
 
     app.apply_event(Event::Approval(piko_protocol::ApprovalEvent::Resolved {
         session_id: "session-1".into(),
@@ -20,7 +23,10 @@ fn approval_notice_resolves_with_authoritative_event() {
         decision: piko_protocol::ApprovalDecision::Decline,
     }));
 
-    assert!(!app.notifications.has_visible_for(Some("session-1"), None));
+    assert!(
+        !app.notifications
+            .has_row_visible_for(app.last_tick, Some("session-1"), None)
+    );
 }
 
 #[test]

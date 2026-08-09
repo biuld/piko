@@ -148,7 +148,7 @@ impl AppState {
                 self.notifications.push_with(
                     crate::features::notifications::NoticeScope::Session(session_id.clone()),
                     NotificationLevel::Warning,
-                    crate::features::notifications::NoticeLifetime::UntilResolved(
+                    crate::features::notifications::NoticePolicy::UntilResolved(
                         crate::features::notifications::NoticeSubject::Approval(
                             approval_id.clone(),
                         ),
@@ -258,7 +258,7 @@ impl AppState {
                 self.notifications.push_with(
                     NoticeScope::Global,
                     NotificationLevel::Warning,
-                    NoticeLifetime::UntilResolved(NoticeSubject::Auth(provider.clone())),
+                    NoticePolicy::UntilResolved(NoticeSubject::Auth(provider.clone())),
                     format!("{provider} login: open {verification_uri} and enter {user_code}"),
                 );
             }

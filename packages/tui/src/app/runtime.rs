@@ -14,7 +14,6 @@ impl AppState {
             effect::Msg::HostLine(line) => self.handle_host_line(line),
             effect::Msg::Tick => {
                 self.last_tick = std::time::Instant::now();
-                self.notifications.expire(self.last_tick);
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 self.timeline.viewport.apply_metrics();
                 Vec::new()
