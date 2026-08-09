@@ -3,6 +3,11 @@ use std::collections::HashMap;
 use piko_protocol::{ContentBlock, Message, MessageContent};
 use serde_json::{Value, json};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ChatContinuation {
+    tool_call_ids: Vec<String>,
+}
+
 use crate::gateway::{
     ErrorClass, GatewayError, ItemIdentity, ModelEvent, ModelOutputMetadata, ModelRequest,
     ModelResult, SemanticItem, TerminalStatus,
@@ -235,8 +240,13 @@ fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, Ga
 
 fn output_metadata(tool_call_ids: Vec<String>) -> ModelOutputMetadata {
     ModelOutputMetadata {
-        continuation: (!tool_call_ids.is_empty())
-            .then_some(piko_protocol::ModelContinuation::ChatCompletions { tool_call_ids }),
+        continuation: (!tool_call_ids.is_empty()).then(|| piko_protocol::ModelContinuation {
+            adapter: crate::modeling::ProtocolKind::ChatCompletions
+                .adapter_id()
+                .into(),
+            state: serde_json::to_value(ChatContinuation { tool_call_ids })
+                .expect("Chat continuation contains only serializable values"),
+        }),
     }
 }
 

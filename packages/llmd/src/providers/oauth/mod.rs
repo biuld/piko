@@ -7,7 +7,7 @@ use crate::auth::{AuthCredential, AuthError};
 pub mod openai;
 mod resolver;
 
-pub use resolver::{RuntimeAuthResolver, StoredAuthResolver, StoredOAuthResolver};
+pub use resolver::{RuntimeAuthResolver, StoredAuthResolver};
 
 // ============================================================================
 // OAuthFlow trait

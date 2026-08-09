@@ -152,8 +152,8 @@ pub struct ModelRuntimeLimits {
 
 // ---- Model catalog ----
 
-/// Per-model metadata. Provider-level info (id, base_url, adapter_kind)
-/// is on the Provider trait.
+/// Presentation and capability metadata for one provider-scoped model.
+/// The enclosing `ProviderInfo` supplies its provider identity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSummary {

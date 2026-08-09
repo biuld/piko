@@ -14,25 +14,6 @@ use super::agents::AgentSpec;
 use super::model::ModelRunSettings;
 use super::runtime::OrchestratorRuntimeConfig;
 
-// ---- Provider configuration ----
-
-/// OpenAI-family inference wire protocol selected for a model target.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelProtocol {
-    Responses,
-    ChatCompletions,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponsesContinuationPolicy {
-    #[default]
-    PreviousResponseId,
-    EncryptedReasoning,
-    StatelessReplay,
-}
-
 // ---- Model reference ----
 
 /// Lightweight reference to a model within a configured provider.

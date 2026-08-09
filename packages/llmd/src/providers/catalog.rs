@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use piko_protocol::model::{ModelSummary, ProviderAuthMethod};
+use piko_protocol::model::ModelSummary;
 
 use super::oauth::OAuthFlow;
 use super::provider::Provider;
@@ -31,15 +31,19 @@ impl ModelCatalog {
     pub fn list_providers(&self) -> Vec<piko_protocol::model::ProviderInfo> {
         self.registry
             .iter()
-            .map(|p| piko_protocol::model::ProviderInfo {
-                provider: p.id().to_string(),
-                models: p.list_models(),
-                has_auth: false, // ModelCatalog doesn't know auth; set by hostd ModelRegistry
-                auth_methods: if self.registry.get_oauth(p.id()).is_some() {
-                    vec![ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth]
-                } else {
-                    vec![ProviderAuthMethod::ApiKey]
-                },
+            .map(|p| {
+                let mut auth_methods = p.auth_methods();
+                if self.registry.get_oauth(p.id()).is_none() {
+                    auth_methods.retain(|method| {
+                        *method != piko_protocol::model::ProviderAuthMethod::OAuth
+                    });
+                }
+                piko_protocol::model::ProviderInfo {
+                    provider: p.id().to_string(),
+                    models: p.list_models(),
+                    has_auth: false, // Hostd overlays durable auth status.
+                    auth_methods,
+                }
             })
             .collect()
     }
@@ -52,9 +56,14 @@ impl ModelCatalog {
             }
             None
         } else {
-            self.registry
-                .iter()
-                .find_map(|p| p.list_models().into_iter().find(|m| m.id == model_id))
+            let mut matches = self.registry.iter().filter_map(|provider| {
+                provider
+                    .list_models()
+                    .into_iter()
+                    .find(|model| model.id == model_id)
+            });
+            let model = matches.next()?;
+            matches.next().is_none().then_some(model)
         }
     }
 

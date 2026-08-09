@@ -13,6 +13,7 @@ use crate::protocols::{
     ProtocolAdapter, ProtocolStream, input_text, instructions, text_from_content,
 };
 use crate::target::ModelTarget;
+use support::decode_continuation;
 
 pub(crate) struct ResponsesAdapter;
 
@@ -28,24 +29,31 @@ impl ProtocolAdapter for ResponsesAdapter {
         stream: bool,
     ) -> Result<Value, GatewayError> {
         self.validate(request, target)?;
-        let (previous_response_id, input, store, include_encrypted) = match target
-            .responses_continuation
-        {
-            piko_protocol::config::ResponsesContinuationPolicy::PreviousResponseId => {
-                let (previous_response_id, transcript) = continuation_suffix(&request.transcript);
+        let continuation = target.responses_continuation().ok_or_else(|| {
+            GatewayError::new(
+                crate::gateway::ErrorClass::Protocol,
+                &target.id,
+                "encode",
+                "Responses adapter received a non-Responses target",
+            )
+        })?;
+        let (previous_response_id, input, store, include_encrypted) = match continuation {
+            crate::modeling::ResponsesContinuationPolicy::PreviousResponseId => {
+                let (previous_response_id, transcript) =
+                    continuation_suffix(&request.transcript, target)?;
                 let input = transcript
                     .iter()
                     .map(|message| encode_message(message, target, false))
                     .collect::<Result<Vec<_>, _>>()?;
                 (previous_response_id, input, Some(true), false)
             }
-            piko_protocol::config::ResponsesContinuationPolicy::EncryptedReasoning => (
+            crate::modeling::ResponsesContinuationPolicy::EncryptedReasoning => (
                 None,
                 encrypted_replay_input(&request.transcript, target)?,
                 Some(false),
                 true,
             ),
-            piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay => (
+            crate::modeling::ResponsesContinuationPolicy::StatelessReplay => (
                 None,
                 plaintext_replay_input(&request.transcript, target)?,
                 None,
@@ -123,24 +131,21 @@ fn plaintext_replay_input(
     Ok(input)
 }
 
-fn continuation_suffix(transcript: &[Message]) -> (Option<String>, &[Message]) {
-    transcript
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, message)| match message {
-            Message::Assistant {
-                continuation: Some(continuation),
-                ..
-            } => match continuation.as_ref() {
-                piko_protocol::ModelContinuation::Responses { response_id, .. } => {
-                    Some((Some(response_id.clone()), &transcript[index + 1..]))
-                }
-                piko_protocol::ModelContinuation::ChatCompletions { .. } => None,
-            },
-            _ => None,
-        })
-        .unwrap_or((None, transcript))
+fn continuation_suffix<'a>(
+    transcript: &'a [Message],
+    target: &ModelTarget,
+) -> Result<(Option<String>, &'a [Message]), GatewayError> {
+    for (index, message) in transcript.iter().enumerate().rev() {
+        if let Message::Assistant {
+            continuation: Some(envelope),
+            ..
+        } = message
+            && let Some(continuation) = decode_continuation(envelope, target)?
+        {
+            return Ok((Some(continuation.response_id), &transcript[index + 1..]));
+        }
+    }
+    Ok((None, transcript))
 }
 
 fn encrypted_replay_input(
@@ -153,14 +158,10 @@ fn encrypted_replay_input(
             Message::Assistant {
                 continuation: Some(continuation),
                 ..
-            } => match continuation.as_ref() {
-                piko_protocol::ModelContinuation::Responses {
-                    encrypted_reasoning,
-                    ..
-                } => encrypted_reasoning.as_slice(),
-                piko_protocol::ModelContinuation::ChatCompletions { .. } => &[],
-            },
-            _ => &[],
+            } => decode_continuation(continuation, target)?
+                .map(|state| state.encrypted_reasoning)
+                .unwrap_or_default(),
+            _ => Vec::new(),
         };
         input.extend(encrypted.iter().map(|item| {
             json!({

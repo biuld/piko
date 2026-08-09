@@ -265,28 +265,28 @@ fn executor(addr: SocketAddr, streaming_fallback: Option<bool>) -> LlmdExecutor 
     executor_for_protocol(
         addr,
         streaming_fallback,
-        piko_protocol::config::ModelProtocol::ChatCompletions,
+        piko_llmd::modeling::ProtocolProfile::ChatCompletions,
     )
 }
 
 fn executor_for_protocol(
     addr: SocketAddr,
     streaming_fallback: Option<bool>,
-    protocol: piko_protocol::config::ModelProtocol,
+    protocol: piko_llmd::modeling::ProtocolProfile,
 ) -> LlmdExecutor {
-    let mut providers = HashMap::new();
-    let config = ModelTargetConfig {
+    let mut targets = HashMap::new();
+    let mut config = ModelTargetConfig::new(
+        "openai/gpt-test@platform",
+        "platform",
+        piko_protocol::model::ProviderAuthMethod::ApiKey,
         protocol,
-        capabilities: None,
-        base_url: Some(format!("http://{addr}")),
-        endpoint: None,
-        responses_continuation: Default::default(),
-        headers: None,
-        streaming_fallback: streaming_fallback.unwrap_or(true),
-    };
-    providers.insert("openai/gpt-test".to_string(), config.clone());
-    providers.insert("openai/gpt-4o".to_string(), config);
-    LlmdExecutor::from_providers(providers).with_retry(retry_config())
+    );
+    config.base_url = Some(format!("http://{addr}"));
+    config.streaming_fallback = streaming_fallback.unwrap_or(true);
+    targets.insert("openai/gpt-test".to_string(), config.clone());
+    config.target_id = "openai/gpt-4o@platform".into();
+    targets.insert("openai/gpt-4o".to_string(), config);
+    LlmdExecutor::from_targets(targets).with_retry(retry_config())
 }
 
 fn request() -> ModelRequest {
@@ -366,20 +366,16 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
         steps: vec![Step::Status(503), Step::StreamSuccess],
     })
     .await;
-    let mut providers = HashMap::new();
-    providers.insert(
-        "openai/gpt-test".to_string(),
-        ModelTargetConfig {
-            protocol: piko_protocol::config::ModelProtocol::ChatCompletions,
-            capabilities: None,
-            base_url: Some(format!("http://{}", stub.addr)),
-            endpoint: None,
-            responses_continuation: Default::default(),
-            headers: None,
-            streaming_fallback: true,
-        },
+    let mut targets = HashMap::new();
+    let mut target = ModelTargetConfig::new(
+        "openai/gpt-test@platform",
+        "platform",
+        piko_protocol::model::ProviderAuthMethod::ApiKey,
+        piko_llmd::modeling::ProtocolProfile::ChatCompletions,
     );
-    let exec = piko_llmd::build_gateway(providers, retry_config());
+    target.base_url = Some(format!("http://{}", stub.addr));
+    targets.insert("openai/gpt-test".to_string(), target);
+    let exec = piko_llmd::build_gateway(targets, retry_config());
     let mut req = request();
     req.run_id = "run-otel".to_string();
     let stream = exec

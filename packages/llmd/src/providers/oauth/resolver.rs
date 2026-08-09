@@ -5,12 +5,17 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use crate::auth::{AuthCredential, AuthStorage};
+use piko_protocol::model::ProviderAuthMethod;
 
 use super::{OAuthFlow, ProviderRequestAuth};
 
 #[async_trait]
 pub trait RuntimeAuthResolver: Send + Sync {
-    async fn resolve(&self, provider: &str) -> Result<Option<ProviderRequestAuth>, String>;
+    async fn resolve(
+        &self,
+        provider: &str,
+        auth_method: ProviderAuthMethod,
+    ) -> Result<Option<ProviderRequestAuth>, String>;
 }
 
 pub struct StoredAuthResolver {
@@ -29,10 +34,18 @@ impl StoredAuthResolver {
 
 #[async_trait]
 impl RuntimeAuthResolver for StoredAuthResolver {
-    async fn resolve(&self, provider: &str) -> Result<Option<ProviderRequestAuth>, String> {
+    async fn resolve(
+        &self,
+        provider: &str,
+        auth_method: ProviderAuthMethod,
+    ) -> Result<Option<ProviderRequestAuth>, String> {
         let mut storage = self.storage.lock().await;
         let credential = storage
-            .resolve_credential(provider, self.flows.get(provider).map(AsRef::as_ref))
+            .resolve_credential(
+                provider,
+                auth_method,
+                self.flows.get(provider).map(AsRef::as_ref),
+            )
             .await
             .map_err(|error| error.to_string())?;
         match credential {
@@ -52,9 +65,6 @@ impl RuntimeAuthResolver for StoredAuthResolver {
         }
     }
 }
-
-/// Compatibility alias for callers compiled against the OAuth-only name.
-pub type StoredOAuthResolver = StoredAuthResolver;
 
 #[cfg(test)]
 mod tests {
@@ -118,7 +128,7 @@ mod tests {
 
         assert_eq!(
             resolver
-                .resolve("example")
+                .resolve("example", ProviderAuthMethod::OAuth)
                 .await
                 .unwrap()
                 .unwrap()
@@ -129,7 +139,7 @@ mod tests {
         );
         assert_eq!(
             resolver
-                .resolve("example")
+                .resolve("example", ProviderAuthMethod::OAuth)
                 .await
                 .unwrap()
                 .unwrap()
@@ -152,7 +162,11 @@ mod tests {
             )])),
             HashMap::new(),
         );
-        let auth = resolver.resolve("example").await.unwrap().unwrap();
+        let auth = resolver
+            .resolve("example", ProviderAuthMethod::ApiKey)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             auth.headers.get("Authorization").map(String::as_str),
             Some("Bearer secret")

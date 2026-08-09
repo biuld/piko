@@ -3,6 +3,7 @@
 > Status: accepted
 > Date: 2026-08-10
 > Supersedes: the endpoint/adapter ownership portion of ADR-007
+> Catalog shape and compatibility policy superseded by ADR-009
 
 ## Context
 
@@ -27,8 +28,8 @@ orchd receives semantic model identity and run settings, not credentials or
 transport configuration.
 
 Runtime target lookup uses a target ID. A provider ID remains a separate auth
-and presentation identity. Provider-equals-target lookup is retained only as a
-configuration migration alias.
+and presentation identity. ADR-009 removes provider-equals-target lookup and
+defines the first-class API-surface catalog.
 
 ## Consequences
 

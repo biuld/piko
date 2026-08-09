@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use piko_protocol::config::{ModelProtocol, ResponsesContinuationPolicy};
+use piko_protocol::model::ProviderAuthMethod;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::gateway::{ErrorClass, GatewayError, ModelRequest};
+use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
@@ -16,13 +17,36 @@ pub struct ModelCapabilities {
 
 #[derive(Debug, Clone)]
 pub struct ModelTargetConfig {
-    pub protocol: ModelProtocol,
+    pub target_id: String,
+    pub api_surface: String,
+    pub auth_method: ProviderAuthMethod,
+    pub protocol: ProtocolProfile,
     pub capabilities: Option<ModelCapabilities>,
     pub base_url: Option<String>,
     pub endpoint: Option<String>,
-    pub responses_continuation: ResponsesContinuationPolicy,
     pub headers: Option<HashMap<String, String>>,
     pub streaming_fallback: bool,
+}
+
+impl ModelTargetConfig {
+    pub fn new(
+        target_id: impl Into<String>,
+        api_surface: impl Into<String>,
+        auth_method: ProviderAuthMethod,
+        protocol: ProtocolProfile,
+    ) -> Self {
+        Self {
+            target_id: target_id.into(),
+            api_surface: api_surface.into(),
+            auth_method,
+            protocol,
+            capabilities: None,
+            base_url: None,
+            endpoint: None,
+            headers: None,
+            streaming_fallback: true,
+        }
+    }
 }
 
 impl Default for ModelCapabilities {
@@ -40,13 +64,14 @@ impl Default for ModelCapabilities {
 #[derive(Debug, Clone)]
 pub struct ModelTarget {
     pub id: String,
-    pub protocol: ModelProtocol,
+    pub api_surface: String,
+    pub auth_method: ProviderAuthMethod,
+    pub protocol: ProtocolProfile,
     pub endpoint: reqwest::Url,
     pub model: String,
     pub headers: HeaderMap,
     pub capabilities: ModelCapabilities,
     pub streaming_fallback: bool,
-    pub responses_continuation: piko_protocol::config::ResponsesContinuationPolicy,
 }
 
 impl ModelTarget {
@@ -67,10 +92,14 @@ impl ModelTarget {
                 )
             })?
         } else {
-            let base = config
-                .base_url
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1/");
+            let base = config.base_url.as_deref().ok_or_else(|| {
+                GatewayError::new(
+                    ErrorClass::Target,
+                    id,
+                    "resolve_target",
+                    "target has neither an endpoint nor an API-surface base URL",
+                )
+            })?;
             let mut base_url = reqwest::Url::parse(base).map_err(|error| {
                 GatewayError::new(
                     ErrorClass::Target,
@@ -83,10 +112,7 @@ impl ModelTarget {
                 let path = format!("{}/", base_url.path());
                 base_url.set_path(&path);
             }
-            let operation = match protocol {
-                ModelProtocol::Responses => "responses",
-                ModelProtocol::ChatCompletions => "chat/completions",
-            };
+            let operation = protocol.operation();
             base_url.join(operation).map_err(|error| {
                 GatewayError::new(
                     ErrorClass::Target,
@@ -124,7 +150,9 @@ impl ModelTarget {
         }
 
         Ok(Self {
-            id: id.into(),
+            id: config.target_id.clone(),
+            api_surface: config.api_surface.clone(),
+            auth_method: config.auth_method,
             protocol,
             endpoint,
             model: model.into(),
@@ -141,7 +169,6 @@ impl ModelTarget {
                 })
                 .unwrap_or_default(),
             streaming_fallback: config.streaming_fallback,
-            responses_continuation: config.responses_continuation,
         })
     }
 
@@ -202,28 +229,23 @@ impl ModelTarget {
                 continuation: Some(continuation),
                 ..
             } = message
+                && continuation.adapter != self.protocol.kind().adapter_id()
             {
-                let matches = matches!(
-                    (self.protocol, continuation.as_ref()),
-                    (
-                        ModelProtocol::Responses,
-                        piko_protocol::ModelContinuation::Responses { .. }
-                    ) | (
-                        ModelProtocol::ChatCompletions,
-                        piko_protocol::ModelContinuation::ChatCompletions { .. }
-                    )
-                );
-                if !matches {
-                    return Err(GatewayError::new(
-                        ErrorClass::UnsupportedCapability,
-                        &self.id,
-                        "validate",
-                        "transcript continuation belongs to a different protocol",
-                    ));
-                }
+                return Err(GatewayError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "transcript continuation belongs to a different protocol",
+                ));
             }
         }
         Ok(())
+    }
+}
+
+impl ModelTarget {
+    pub fn responses_continuation(&self) -> Option<ResponsesContinuationPolicy> {
+        self.protocol.responses_continuation()
     }
 }
 
@@ -257,16 +279,15 @@ fn insert_header(
 mod tests {
     use super::*;
 
-    fn config(protocol: ModelProtocol) -> ModelTargetConfig {
-        ModelTargetConfig {
+    fn config(protocol: ProtocolProfile) -> ModelTargetConfig {
+        let mut config = ModelTargetConfig::new(
+            "custom/model@platform",
+            "platform",
+            ProviderAuthMethod::ApiKey,
             protocol,
-            capabilities: None,
-            base_url: Some("https://example.test/v1".into()),
-            endpoint: None,
-            responses_continuation: Default::default(),
-            headers: None,
-            streaming_fallback: true,
-        }
+        );
+        config.base_url = Some("https://example.test/v1".into());
+        config
     }
 
     #[test]
@@ -274,14 +295,16 @@ mod tests {
         let responses = ModelTarget::resolve(
             "custom",
             "same-model",
-            &config(ModelProtocol::Responses),
+            &config(ProtocolProfile::Responses {
+                continuation: Default::default(),
+            }),
             None,
         )
         .unwrap();
         let chat = ModelTarget::resolve(
             "custom",
             "same-model",
-            &config(ModelProtocol::ChatCompletions),
+            &config(ProtocolProfile::ChatCompletions),
             None,
         )
         .unwrap();
@@ -297,7 +320,9 @@ mod tests {
 
     #[test]
     fn explicit_endpoint_is_not_rewritten() {
-        let mut config = config(ModelProtocol::Responses);
+        let mut config = config(ProtocolProfile::Responses {
+            continuation: Default::default(),
+        });
         config.endpoint = Some("https://example.test/custom/inference".into());
         let target = ModelTarget::resolve("custom/model", "gpt", &config, None).unwrap();
         assert_eq!(
@@ -308,14 +333,18 @@ mod tests {
 
     #[test]
     fn custom_headers_cannot_override_auth() {
-        let mut config = config(ModelProtocol::Responses);
+        let mut config = config(ProtocolProfile::Responses {
+            continuation: Default::default(),
+        });
         config.headers = Some(HashMap::from([("Authorization".into(), "stolen".into())]));
         assert!(ModelTarget::resolve("custom", "gpt", &config, None).is_err());
     }
 
     #[test]
     fn capabilities_fail_before_dispatch() {
-        let mut unsupported = config(ModelProtocol::Responses);
+        let mut unsupported = config(ProtocolProfile::Responses {
+            continuation: Default::default(),
+        });
         unsupported.capabilities = Some(ModelCapabilities {
             tools: false,
             ..Default::default()
@@ -323,6 +352,34 @@ mod tests {
         let target = ModelTarget::resolve("custom", "gpt", &unsupported, None).unwrap();
         let mut request = crate::protocols::tests_support::semantic_request();
         request.provider = "custom".into();
+        assert_eq!(
+            target.validate(&request).unwrap_err().class,
+            ErrorClass::UnsupportedCapability
+        );
+    }
+
+    #[test]
+    fn continuation_for_another_adapter_fails_before_dispatch() {
+        let target = ModelTarget::resolve(
+            "custom",
+            "gpt",
+            &config(ProtocolProfile::Responses {
+                continuation: Default::default(),
+            }),
+            None,
+        )
+        .unwrap();
+        let mut request = crate::protocols::tests_support::semantic_request();
+        let piko_protocol::Message::Assistant { continuation, .. } = &mut request.transcript[1]
+        else {
+            panic!("fixture assistant missing");
+        };
+        *continuation = Some(Box::new(piko_protocol::ModelContinuation {
+            adapter: crate::modeling::ProtocolKind::ChatCompletions
+                .adapter_id()
+                .into(),
+            state: serde_json::json!({}),
+        }));
         assert_eq!(
             target.validate(&request).unwrap_err().class,
             ErrorClass::UnsupportedCapability

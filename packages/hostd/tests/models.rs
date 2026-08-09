@@ -36,12 +36,14 @@ fn resolves_default_model_without_copying_auth_material() {
     assert_eq!(resolved.model.id, "gpt-4o");
     assert_eq!(resolved.model.name, "GPT-4o");
     assert_eq!(
-        resolved.provider_config.protocol,
-        Some(piko_protocol::config::ModelProtocol::Responses)
+        resolved.target.as_ref().unwrap().protocol,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default()
+        }
     );
     assert_eq!(
-        resolved.provider_config.base_url.as_deref(),
-        Some("https://api.openai.com/v1")
+        resolved.target.as_ref().unwrap().base_url,
+        "https://api.openai.com/v1"
     );
 }
 
@@ -61,12 +63,14 @@ fn oauth_selects_catalog_subscription_target_without_exposing_token() {
     );
     let resolved = registry.resolve(Some("gpt-4o"), Some("openai")).unwrap();
     assert_eq!(
-        resolved.provider_config.base_url.as_deref(),
-        Some("https://chatgpt.com/backend-api/codex/")
+        resolved.target.as_ref().unwrap().base_url,
+        "https://chatgpt.com/backend-api/codex/"
     );
     assert_eq!(
-        resolved.provider_config.responses_continuation,
-        piko_protocol::config::ResponsesContinuationPolicy::EncryptedReasoning
+        resolved.target.as_ref().unwrap().protocol,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::EncryptedReasoning
+        }
     );
 }
 
@@ -77,20 +81,18 @@ fn deepseek_resolves_model_specific_responses_target() {
         .resolve(Some("deepseek-v4-flash"), Some("deepseek"))
         .unwrap();
     assert_eq!(
-        flash.provider_config.protocol,
-        Some(piko_protocol::config::ModelProtocol::Responses)
-    );
-    assert_eq!(
-        flash.provider_config.responses_continuation,
-        piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay
+        flash.target.as_ref().unwrap().protocol,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::StatelessReplay
+        }
     );
 
     let pro = registry
         .resolve(Some("deepseek-v4-pro"), Some("deepseek"))
         .unwrap();
     assert_eq!(
-        pro.provider_config.protocol,
-        Some(piko_protocol::config::ModelProtocol::ChatCompletions)
+        pro.target.as_ref().unwrap().protocol,
+        piko_llmd::modeling::ProtocolProfile::ChatCompletions
     );
 }
 
@@ -114,11 +116,55 @@ fn advertises_registered_authentication_methods() {
 }
 
 #[test]
-fn falls_back_to_matching_model_when_provider_does_not_match() {
+fn explicit_provider_model_identity_fails_closed() {
     let registry = registry_with_openai_key();
-    let resolved = registry.resolve(Some("gpt-4o"), Some("anthropic")).unwrap();
+    assert!(
+        registry
+            .resolve(Some("gpt-4o"), Some("anthropic"))
+            .is_none()
+    );
+}
 
-    assert_eq!(resolved.model.id, "gpt-4o");
+#[test]
+fn bare_duplicate_model_identity_is_ambiguous() {
+    fn manifest(provider: &str) -> String {
+        format!(
+            r#"
+[provider]
+id = "{provider}"
+[api_surfaces.platform]
+base_url = "https://{provider}.example/v1"
+auth_methods = ["api_key"]
+[default_targets.platform]
+protocol = "chat_completions"
+[models.shared-model]
+name = "Shared"
+reasoning = false
+input = ["text"]
+context_window = 32000
+max_tokens = 4096
+"#
+        )
+    }
+
+    let mut providers = ProviderRegistry::new();
+    providers.register(Box::new(
+        piko_llmd::providers::TomlProvider::from_toml_str(&manifest("cloud-a")).unwrap(),
+    ));
+    providers.register(Box::new(
+        piko_llmd::providers::TomlProvider::from_toml_str(&manifest("cloud-b")).unwrap(),
+    ));
+    let registry =
+        ModelRegistry::with_registry(AuthStorage::in_memory(HashMap::new()), vec![], providers);
+
+    assert!(registry.resolve(Some("shared-model"), None).is_none());
+    assert_eq!(
+        registry
+            .resolve(Some("shared-model"), Some("cloud-a"))
+            .unwrap()
+            .provider,
+        "cloud-a"
+    );
 }
 
 #[test]
@@ -130,8 +176,13 @@ fn supports_custom_provider_registration() {
         r#"
 [provider]
 id = "mycloud"
-protocol = "chat_completions"
+
+[api_surfaces.platform]
 base_url = "https://api.mycloud.example/v1"
+auth_methods = ["api_key"]
+
+[default_targets.platform]
+protocol = "chat_completions"
 
 [models.mycloud-fast]
 name = "MyCloud Fast"
@@ -154,8 +205,8 @@ max_tokens = 4096
     assert_eq!(resolved.model.id, "mycloud-fast");
     assert_eq!(resolved.provider, "mycloud");
     assert_eq!(
-        resolved.provider_config.base_url.as_deref(),
-        Some("https://api.mycloud.example/v1")
+        resolved.target.as_ref().unwrap().base_url,
+        "https://api.mycloud.example/v1"
     );
 }
 

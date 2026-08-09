@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::support::{output_metadata, protocol, string};
+use super::support::{EncryptedReasoningItem, output_metadata, protocol, string};
 use crate::gateway::{
     ErrorClass, GatewayError, ItemIdentity, ModelEvent, ModelOutputMetadata, ModelResult,
     SemanticItem, TerminalStatus,
@@ -47,7 +47,7 @@ pub(super) fn decode_complete(
                     let item_id = identity.item_id.clone().ok_or_else(|| {
                         protocol(target, "encrypted reasoning item is missing id")
                     })?;
-                    encrypted_reasoning.push(piko_protocol::EncryptedReasoningItem {
+                    encrypted_reasoning.push(EncryptedReasoningItem {
                         item_id,
                         encrypted_content,
                     });
@@ -196,7 +196,7 @@ pub(super) struct ResponsesStream {
     items: HashMap<u32, StreamItem>,
     terminal: bool,
     observable: bool,
-    encrypted_reasoning: Vec<piko_protocol::EncryptedReasoningItem>,
+    encrypted_reasoning: Vec<EncryptedReasoningItem>,
 }
 
 impl ResponsesStream {
@@ -245,7 +245,7 @@ impl ResponsesStream {
         Ok(identity)
     }
 
-    fn retain_encrypted_reasoning(&mut self, item: piko_protocol::EncryptedReasoningItem) {
+    fn retain_encrypted_reasoning(&mut self, item: EncryptedReasoningItem) {
         if let Some(existing) = self
             .encrypted_reasoning
             .iter_mut()
@@ -348,7 +348,7 @@ impl ProtocolStream for ResponsesStream {
                 {
                     let item_id = string(item, "id")
                         .ok_or_else(|| self.error("encrypted reasoning item is missing id"))?;
-                    self.retain_encrypted_reasoning(piko_protocol::EncryptedReasoningItem {
+                    self.retain_encrypted_reasoning(EncryptedReasoningItem {
                         item_id,
                         encrypted_content,
                     });
@@ -455,7 +455,7 @@ impl ProtocolStream for ResponsesStream {
                 {
                     let item_id = string(item, "id")
                         .ok_or_else(|| self.error("encrypted reasoning item is missing id"))?;
-                    self.retain_encrypted_reasoning(piko_protocol::EncryptedReasoningItem {
+                    self.retain_encrypted_reasoning(EncryptedReasoningItem {
                         item_id,
                         encrypted_content,
                     });

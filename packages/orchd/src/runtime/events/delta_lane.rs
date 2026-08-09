@@ -204,8 +204,8 @@ mod tests {
     fn llmd_output_metadata_is_persisted_without_interpretation() {
         let mut state = AssistantMessageState::new();
         let continuation = serde_json::from_value(serde_json::json!({
-            "protocol": "chat_completions",
-            "tool_call_ids": ["call_1"]
+            "adapter": "opaque-test-adapter",
+            "state": { "private": ["call_1"] }
         }))
         .unwrap();
         let metadata = ModelOutputMetadata {

@@ -3,12 +3,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use piko_protocol::model::ProviderAuthMethod;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Default)]
-pub struct AuthStore {
-    pub providers: HashMap<String, String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -80,6 +76,12 @@ pub enum AuthError {
     Expired { provider: String },
     #[error("provider {provider} authentication failed: {message}")]
     Provider { provider: String, message: String },
+    #[error("provider {provider} has {actual:?} credentials but target requires {expected:?}")]
+    MethodMismatch {
+        provider: String,
+        expected: ProviderAuthMethod,
+        actual: ProviderAuthMethod,
+    },
 }
 
 impl AuthStorage {
@@ -159,18 +161,18 @@ impl AuthStorage {
     }
 
     pub fn get_auth_status(&self, provider: &str) -> AuthStatus {
-        if self.data.contains_key(provider) {
-            return AuthStatus {
-                configured: true,
-                source: Some(AuthSource::Stored),
-                label: None,
-            };
-        }
         if self.runtime_overrides.contains_key(provider) {
             return AuthStatus {
                 configured: false,
                 source: Some(AuthSource::Runtime),
                 label: Some("--api-key".to_string()),
+            };
+        }
+        if self.data.contains_key(provider) {
+            return AuthStatus {
+                configured: true,
+                source: Some(AuthSource::Stored),
+                label: None,
             };
         }
         if env_api_key(provider).is_some() {
@@ -202,17 +204,40 @@ impl AuthStorage {
         }
     }
 
+    /// Authentication route selected from the active credential precedence.
+    pub fn active_method(&self, provider: &str) -> Option<ProviderAuthMethod> {
+        if self.runtime_overrides.contains_key(provider) {
+            return Some(ProviderAuthMethod::ApiKey);
+        }
+        match self.data.get(provider) {
+            Some(AuthCredential::ApiKey { .. }) => Some(ProviderAuthMethod::ApiKey),
+            Some(AuthCredential::OAuth { .. }) => Some(ProviderAuthMethod::OAuth),
+            None => env_api_key(provider).map(|_| ProviderAuthMethod::ApiKey),
+        }
+    }
+
     pub async fn resolve_credential(
         &mut self,
         provider: &str,
+        expected_method: ProviderAuthMethod,
         oauth: Option<&dyn crate::providers::OAuthFlow>,
     ) -> Result<Option<AuthCredential>, AuthError> {
         if let Some(key) = self.runtime_overrides.get(provider) {
-            return Ok(Some(AuthCredential::ApiKey { key: key.clone() }));
+            return credential_for_method(
+                provider,
+                expected_method,
+                AuthCredential::ApiKey { key: key.clone() },
+            )
+            .map(Some);
         }
         let Some(credential) = self.data.get(provider).cloned() else {
-            return Ok(env_api_key(provider).map(|key| AuthCredential::ApiKey { key }));
+            return env_api_key(provider)
+                .map(|key| {
+                    credential_for_method(provider, expected_method, AuthCredential::ApiKey { key })
+                })
+                .transpose();
         };
+        credential_for_method(provider, expected_method, credential.clone())?;
         let AuthCredential::OAuth {
             refresh,
             expires,
@@ -222,7 +247,7 @@ impl AuthStorage {
         else {
             return Ok(Some(credential));
         };
-        if expires.is_some_and(|expires| now_ms() < expires) {
+        if expires.is_none_or(|expires| now_ms() < expires) {
             return Ok(Some(credential));
         }
         let flow = oauth.ok_or_else(|| AuthError::Expired {
@@ -243,6 +268,25 @@ impl AuthStorage {
         self.set(provider, refreshed.clone())?;
         Ok(Some(refreshed))
     }
+}
+
+fn credential_for_method(
+    provider: &str,
+    expected: ProviderAuthMethod,
+    credential: AuthCredential,
+) -> Result<AuthCredential, AuthError> {
+    let actual = match &credential {
+        AuthCredential::ApiKey { .. } => ProviderAuthMethod::ApiKey,
+        AuthCredential::OAuth { .. } => ProviderAuthMethod::OAuth,
+    };
+    if actual != expected {
+        return Err(AuthError::MethodMismatch {
+            provider: provider.to_string(),
+            expected,
+            actual,
+        });
+    }
+    Ok(credential)
 }
 
 impl AuthCredential {

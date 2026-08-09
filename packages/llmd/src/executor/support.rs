@@ -1,23 +1,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use piko_protocol::config::{ModelProtocol, RetryConfig};
+use piko_protocol::config::RetryConfig;
 use tokio_util::sync::CancellationToken;
 
 use crate::gateway::{
     ErrorClass, GatewayError, ModelEvent, ModelRequest, ModelResult, SemanticItem,
 };
 use crate::middleware::{GatewayContext, LlmdMiddleware};
+use crate::modeling::ProtocolKind;
 use crate::protocols::ProtocolAdapter;
 use crate::protocols::chat_completions::ChatCompletionsAdapter;
 use crate::protocols::responses::ResponsesAdapter;
 use crate::retry::{RetryPolicy, RetryState};
 use crate::target::ModelTarget;
 
-pub(super) fn adapter(protocol: ModelProtocol) -> Box<dyn ProtocolAdapter> {
+pub(super) fn adapter(protocol: ProtocolKind) -> Box<dyn ProtocolAdapter> {
     match protocol {
-        ModelProtocol::Responses => Box::new(ResponsesAdapter),
-        ModelProtocol::ChatCompletions => Box::new(ChatCompletionsAdapter),
+        ProtocolKind::Responses => Box::new(ResponsesAdapter),
+        ProtocolKind::ChatCompletions => Box::new(ChatCompletionsAdapter),
     }
 }
 
@@ -27,7 +28,7 @@ pub(super) async fn execute_fallback(
     target: &ModelTarget,
     cancel: &CancellationToken,
 ) -> Result<ModelResult, GatewayError> {
-    let adapter = adapter(target.protocol);
+    let adapter = adapter(target.protocol.kind());
     let body = adapter.encode(request, target, false)?;
     let response = crate::transport::send(client, target, &body, false, cancel).await?;
     let value = crate::transport::json(response, target, cancel).await?;

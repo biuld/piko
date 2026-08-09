@@ -17,3 +17,4 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-006](ADR-006-shared-tui-single-line-dock.md) | Share the TUI single-line dock primitive | accepted |
 | [ADR-007](ADR-007-typed-provider-authentication.md) | Preserve typed provider authentication | accepted; partially superseded |
 | [ADR-008](ADR-008-separate-model-targets-from-auth-material.md) | Separate model targets from authentication material | accepted |
+| [ADR-009](ADR-009-first-class-model-targets.md) | Model targets join models, API surfaces, auth routes, and protocols | accepted |

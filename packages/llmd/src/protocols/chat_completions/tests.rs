@@ -1,22 +1,24 @@
 use super::*;
 use crate::gateway::{ModelEvent, TerminalStatus};
+use crate::modeling::ProtocolProfile;
 use crate::protocols::{ProtocolAdapter, ProtocolStream};
 use crate::target::{ModelTarget, ModelTargetConfig};
-use piko_protocol::config::ModelProtocol;
+use piko_protocol::model::ProviderAuthMethod;
 use serde_json::json;
 
 fn target() -> ModelTarget {
     ModelTarget::resolve(
         "fixture",
         "gpt",
-        &ModelTargetConfig {
-            protocol: ModelProtocol::ChatCompletions,
-            capabilities: None,
-            base_url: Some("https://example.test/v1".into()),
-            endpoint: None,
-            responses_continuation: Default::default(),
-            headers: None,
-            streaming_fallback: true,
+        &{
+            let mut config = ModelTargetConfig::new(
+                "fixture/gpt@platform",
+                "platform",
+                ProviderAuthMethod::ApiKey,
+                ProtocolProfile::ChatCompletions,
+            );
+            config.base_url = Some("https://example.test/v1".into());
+            config
         },
         None,
     )
@@ -73,9 +75,13 @@ fn non_streaming_preserves_refusal_finish_usage_and_parallel_calls() {
         matches!(result.status, TerminalStatus::Completed { ref reason } if reason == "tool_calls")
     );
     assert_eq!(result.usage.unwrap().cache_read, 2);
-    assert!(
-        matches!(result.output_metadata.continuation, Some(piko_protocol::ModelContinuation::ChatCompletions { ref tool_call_ids }) if tool_call_ids == &["call_1", "call_2"])
+    let continuation = result.output_metadata.continuation.unwrap();
+    assert_eq!(
+        continuation.adapter,
+        crate::modeling::ProtocolKind::ChatCompletions.adapter_id()
     );
+    assert_eq!(continuation.state["tool_call_ids"][0], "call_1");
+    assert_eq!(continuation.state["tool_call_ids"][1], "call_2");
 }
 
 #[test]

@@ -97,11 +97,27 @@ async fn oauth_resolve_returns_access_token_if_not_expired() {
         },
     );
     let mut storage = AuthStorage::in_memory(data);
-    let resolved = storage.resolve_credential("anthropic", None).await.unwrap();
+    let resolved = storage
+        .resolve_credential("anthropic", piko_protocol::ProviderAuthMethod::OAuth, None)
+        .await
+        .unwrap();
     assert_eq!(
         resolved.as_ref().map(AuthCredential::secret),
         Some("valid-token")
     );
+}
+
+#[tokio::test]
+async fn frozen_auth_route_rejects_a_different_credential_kind() {
+    let mut storage = AuthStorage::in_memory(HashMap::from([(
+        "example".into(),
+        AuthCredential::ApiKey { key: "key".into() },
+    )]));
+    let error = storage
+        .resolve_credential("example", piko_protocol::ProviderAuthMethod::OAuth, None)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("target requires OAuth"));
 }
 
 #[tokio::test]
@@ -118,7 +134,11 @@ async fn oauth_resolve_rejects_expired_token_without_registered_flow() {
     );
     let mut storage = AuthStorage::in_memory(data);
     let error = storage
-        .resolve_credential("unknown-provider", None)
+        .resolve_credential(
+            "unknown-provider",
+            piko_protocol::ProviderAuthMethod::OAuth,
+            None,
+        )
         .await
         .unwrap_err();
     assert!(error.to_string().contains("expired"));
@@ -160,7 +180,11 @@ async fn oauth_refresh_is_delegated_to_registered_flow() {
     );
     let mut storage = AuthStorage::in_memory(data);
     let refreshed = storage
-        .resolve_credential("example", Some(&ExampleOAuthFlow))
+        .resolve_credential(
+            "example",
+            piko_protocol::ProviderAuthMethod::OAuth,
+            Some(&ExampleOAuthFlow),
+        )
         .await
         .unwrap()
         .unwrap();

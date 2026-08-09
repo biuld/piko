@@ -16,6 +16,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 rg -n "genai" Cargo.toml Cargo.lock packages/llmd packages/orchd packages/hostd packages/protocol
 rg -n "ProtocolKind|ModelProtocol|ResponsesReasoningEncrypted|ResponseStarted|ModelContinuation::|EncryptedReasoningItem|output_item_ids|response_id" packages/orchd/src --glob '*.rs'
 rg -n '\b(GatewayEvent|GatewayRequest|chat_stream|supports_semantic_execute|ProviderConfig|ModelProviderConfig)\b|Into<ModelEvent>|api: String|api ==' packages/llmd packages/orchd packages/hostd packages/protocol --glob '*.rs'
+rg -n "StoredOAuthResolver|AuthStore\\b|from_providers|ProviderTarget|oauth_target|provider_config" packages --glob '*.rs' --glob '*.toml'
 ```
 
 All commands pass. The dependency, orchd protocol-knowledge, and removed
@@ -40,11 +41,11 @@ gateway compatibility scans return no matches.
   and persists llmd-produced continuation state without importing either
   adapter's private wire DTOs or branching on its protocol.
 - Each llmd adapter now assembles one `ModelOutputMetadata` value before its
-  terminal event. orchd copies its continuation into the assistant message
-  without seeing a protocol kind, interpreting native
-  identities, collecting encrypted reasoning, or constructing a continuation
-  variant. Adding another adapter therefore does not require a protocol branch
-  in orchd's event lane.
+  terminal event. The shared transcript carries only an opaque adapter/state
+  continuation envelope. Responses IDs, encrypted reasoning, and Chat tool
+  continuation structs are private to llmd; orchd copies the envelope without
+  interpreting it. Adding another adapter therefore does not require a
+  protocol branch in orchd's event lane.
 - The old `GatewayEvent`, `GatewayRequest`, `chat_stream`, conversion adapters,
   missing-metadata default, and `Message::Assistant.api` field are absent.
   Test gateways implement `execute` and emit semantic output metadata just like
@@ -57,16 +58,19 @@ gateway compatibility scans return no matches.
 
 ## Target, auth, and failure evidence
 
-- Target construction requires a protocol and selects `/v1/responses` or
-  `/v1/chat/completions` from that value alone. Exact `provider/model` lookup
-  is required; there is no provider alias or missing-protocol default.
+- Provider catalogs declare named API surfaces and model target profiles.
+  Target construction selects `/responses` or `/chat/completions` from a
+  closed protocol profile. Exact `provider/model` lookup is required; an
+  explicit provider mismatch and an unscoped duplicate model ID both fail
+  closed. There is no provider alias or missing-protocol/base-URL default.
 - Target configuration and capabilities live in llmd. `OrchdConfig` has no
   provider-target map, inline API key, protocol field, or transport headers.
   Catalog TOML uses the exact `responses` or `chat_completions` protocol names;
   old adapter-name aliases are rejected.
 - OpenAI API-key and OAuth credentials pass through the same host-owned
   runtime resolver and materialize authorization headers independently of
-  target selection. Raw credentials are absent from orchd configuration.
+  target selection. The resolver must match the auth method frozen into the
+  target. Raw credentials are absent from orchd configuration.
   Custom headers cannot replace protected auth or transport headers, and
   telemetry snapshots contain the semantic request body rather than
   credentials.
@@ -84,6 +88,10 @@ gateway compatibility scans return no matches.
   duplicate terminal events fail with typed errors. Successful and error
   bodies are bounded, and upstream diagnostics pass through central
   redaction.
+- Catalog tests reject unknown API-surface references and target sets with two
+  candidates for one authentication method. Host tests prove explicit
+  provider/model mismatch, unscoped duplicate model IDs, and frozen-target
+  auth-method mismatch all fail closed.
 - Middleware receives typed semantic events directly. Cost annotation runs
   before usage telemetry, verified by positive-cost ordering assertions.
 
@@ -94,9 +102,9 @@ gateway compatibility scans return no matches.
 - The bundled provider registry advertises only the implemented OpenAI-family
   native surface. Custom catalogs remain available when they explicitly map
   to Responses or Chat Completions.
-- Bundled OpenAI targets select their catalog-declared protocol. OpenAI OAuth
-  targets select Responses in hostd while auth resolution supplies headers
-  only.
+- Bundled OpenAI targets use separate `platform`/API-key and
+  `subscription`/OAuth API surfaces. Both select catalog-declared Responses
+  profiles while auth resolution supplies headers only.
 - The restored DeepSeek catalog resolves `deepseek-v4-flash` to Responses with
   stateless full-history/plaintext-reasoning replay. Other bundled DeepSeek
   models resolve to Chat Completions. Fixtures verify that DeepSeek's profile

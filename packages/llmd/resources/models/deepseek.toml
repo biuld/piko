@@ -2,8 +2,13 @@
 
 [provider]
 id = "deepseek"
-protocol = "chat_completions"
+
+[api_surfaces.platform]
 base_url = "https://api.deepseek.com"
+auth_methods = ["api_key"]
+
+[default_targets.platform]
+protocol = "chat_completions"
 
 # ---- V4 ----
 
@@ -27,6 +32,8 @@ reasoning = true
 input = ["text"]
 context_window = 1000000
 max_tokens = 384000
+
+[models."deepseek-v4-flash".targets.platform]
 protocol = "responses"
 continuation = "stateless_replay"
 

@@ -8,17 +8,21 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use piko_protocol::model::{InputModality, ModelSummary, ThinkingLevel};
+use piko_protocol::model::{InputModality, ModelSummary, ProviderAuthMethod, ThinkingLevel};
 use serde::Deserialize;
 
 use super::TomlProvider;
-use crate::providers::provider::ProviderTarget;
+use crate::modeling::{
+    ApiSurface, ModelTargetProfile, ProtocolProfile, ResponsesContinuationPolicy,
+};
 
 // ---- TOML structures ----
 
 #[derive(Debug, Deserialize)]
 struct ProviderToml {
     provider: ProviderHeader,
+    api_surfaces: HashMap<String, ApiSurfaceToml>,
+    default_targets: HashMap<String, TargetToml>,
     #[serde(default)]
     models: HashMap<String, ModelToml>,
 }
@@ -26,19 +30,19 @@ struct ProviderToml {
 #[derive(Debug, Deserialize)]
 struct ProviderHeader {
     id: String,
-    protocol: String,
-    #[serde(default)]
-    base_url: Option<String>,
-    #[serde(default)]
-    oauth_target: Option<TargetToml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiSurfaceToml {
+    base_url: String,
+    auth_methods: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TargetToml {
     protocol: String,
-    base_url: String,
     #[serde(default)]
-    continuation: piko_protocol::config::ResponsesContinuationPolicy,
+    continuation: ResponsesContinuationPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,9 +53,7 @@ struct ModelToml {
     context_window: u64,
     max_tokens: u64,
     #[serde(default)]
-    protocol: Option<String>,
-    #[serde(default)]
-    continuation: Option<piko_protocol::config::ResponsesContinuationPolicy>,
+    targets: HashMap<String, TargetToml>,
     #[serde(default)]
     thinking_level_map: Option<HashMap<String, String>>,
 }
@@ -65,10 +67,20 @@ const BUILTIN_PROVIDERS: &[(&str, &str)] = &[("openai", OPENAI_TOML), ("deepseek
 
 // ---- Adapter kind mapping ----
 
-fn parse_protocol(s: &str) -> Option<piko_protocol::config::ModelProtocol> {
-    match s {
-        "chat_completions" => Some(piko_protocol::config::ModelProtocol::ChatCompletions),
-        "responses" => Some(piko_protocol::config::ModelProtocol::Responses),
+fn parse_protocol(target: &TargetToml) -> Option<ProtocolProfile> {
+    match target.protocol.as_str() {
+        "chat_completions" => Some(ProtocolProfile::ChatCompletions),
+        "responses" => Some(ProtocolProfile::Responses {
+            continuation: target.continuation,
+        }),
+        _ => None,
+    }
+}
+
+fn parse_auth_method(value: &str) -> Option<ProviderAuthMethod> {
+    match value {
+        "api_key" => Some(ProviderAuthMethod::ApiKey),
+        "oauth" => Some(ProviderAuthMethod::OAuth),
         _ => None,
     }
 }
@@ -128,52 +140,111 @@ fn parse_provider_toml(toml_str: &str) -> Result<ProviderToml, String> {
     toml::from_str(toml_str).map_err(|e| format!("Failed to parse provider TOML: {e}"))
 }
 
-fn build_provider(parsed: ProviderToml, api_key: Option<String>) -> Result<TomlProvider, String> {
-    let protocol = parse_protocol(&parsed.provider.protocol)
-        .ok_or_else(|| format!("Unknown protocol: {}", parsed.provider.protocol))?;
-
-    let model_targets = parsed
-        .models
+fn build_profiles(
+    owner: &str,
+    targets: &HashMap<String, TargetToml>,
+    surfaces: &HashMap<String, ApiSurface>,
+) -> Result<HashMap<String, ModelTargetProfile>, String> {
+    targets
         .iter()
-        .filter_map(|(model_id, model)| {
-            model.protocol.as_deref().map(|value| {
-                let protocol = parse_protocol(value)
-                    .ok_or_else(|| format!("Unknown protocol for {model_id}: {value}"))?;
-                Ok((
-                    model_id.clone(),
-                    ProviderTarget {
-                        protocol,
-                        base_url: parsed.provider.base_url.clone(),
-                        responses_continuation: model.continuation.unwrap_or_default(),
-                    },
-                ))
+        .map(|(surface_id, target)| {
+            if !surfaces.contains_key(surface_id) {
+                return Err(format!(
+                    "Target {owner}/{surface_id} references an unknown API surface"
+                ));
+            }
+            let protocol = parse_protocol(target).ok_or_else(|| {
+                format!(
+                    "Unknown protocol for target {owner}/{surface_id}: {}",
+                    target.protocol
+                )
+            })?;
+            Ok((
+                surface_id.clone(),
+                ModelTargetProfile {
+                    api_surface: surface_id.clone(),
+                    protocol,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn validate_unambiguous(
+    owner: &str,
+    targets: &HashMap<String, ModelTargetProfile>,
+    surfaces: &HashMap<String, ApiSurface>,
+) -> Result<(), String> {
+    for auth_method in [ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth] {
+        let count = targets
+            .values()
+            .filter(|target| {
+                surfaces
+                    .get(&target.api_surface)
+                    .is_some_and(|surface| surface.auth_methods.contains(&auth_method))
             })
+            .count();
+        if count > 1 {
+            return Err(format!(
+                "Target set {owner} is ambiguous for {auth_method:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
+    let surfaces = parsed
+        .api_surfaces
+        .into_iter()
+        .map(|(id, surface)| {
+            let auth_methods = surface
+                .auth_methods
+                .iter()
+                .map(|method| {
+                    parse_auth_method(method).ok_or_else(|| {
+                        format!("Unknown auth method for API surface {id}: {method}")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if auth_methods.is_empty() {
+                return Err(format!("API surface {id} has no authentication method"));
+            }
+            Ok((
+                id.clone(),
+                ApiSurface {
+                    id,
+                    base_url: surface.base_url,
+                    auth_methods,
+                },
+            ))
         })
         .collect::<Result<HashMap<_, _>, String>>()?;
+    if surfaces.is_empty() {
+        return Err("Provider has no API surfaces".into());
+    }
+    let defaults = build_profiles("default", &parsed.default_targets, &surfaces)?;
+    validate_unambiguous("default", &defaults, &surfaces)?;
 
+    let mut model_targets = HashMap::new();
+    for (model_id, model) in &parsed.models {
+        if model.targets.is_empty() {
+            if defaults.is_empty() {
+                return Err(format!("Model {model_id} has no target profile"));
+            }
+            continue;
+        }
+        let targets = build_profiles(model_id, &model.targets, &surfaces)?;
+        validate_unambiguous(model_id, &targets, &surfaces)?;
+        model_targets.insert(model_id.clone(), targets);
+    }
     let models = parse_models(parsed.models);
 
-    let mut provider = TomlProvider::new(&parsed.provider.id, protocol)
+    Ok(TomlProvider::new(&parsed.provider.id)
+        .with_api_surfaces(surfaces)
+        .with_default_targets(defaults)
         .with_models(models)
-        .with_model_targets(model_targets);
-
-    if let Some(base_url) = parsed.provider.base_url {
-        provider = provider.with_base_url(base_url);
-    }
-    if let Some(target) = parsed.provider.oauth_target {
-        let protocol = parse_protocol(&target.protocol)
-            .ok_or_else(|| format!("Unknown OAuth target protocol: {}", target.protocol))?;
-        provider = provider.with_oauth_target(ProviderTarget {
-            protocol,
-            base_url: Some(target.base_url),
-            responses_continuation: target.continuation,
-        });
-    }
-    if let Some(key) = api_key {
-        provider = provider.with_api_key(key);
-    }
-
-    Ok(provider)
+        .with_model_targets(model_targets))
 }
 
 // ---- Public API ----
@@ -185,7 +256,7 @@ pub fn load_builtin_providers() -> Vec<TomlProvider> {
         .filter_map(|(id, toml)| {
             parse_provider_toml(toml)
                 .ok()
-                .and_then(|parsed| build_provider(parsed, None).ok())
+                .and_then(|parsed| build_provider(parsed).ok())
                 .or_else(|| {
                     tracing::warn!("Failed to load built-in provider: {id}");
                     None
@@ -204,7 +275,7 @@ pub fn load_provider_from_path(path: &Path) -> Result<TomlProvider, String> {
 /// Load a provider from a TOML string.
 pub fn load_provider_from_toml(toml_str: &str) -> Result<TomlProvider, String> {
     let parsed = parse_provider_toml(toml_str)?;
-    build_provider(parsed, None)
+    build_provider(parsed)
 }
 
 #[cfg(test)]
@@ -221,25 +292,30 @@ mod tests {
             .map(|(_, toml)| *toml)
             .ok_or_else(|| format!("No built-in provider: {provider_id}"))?;
         let parsed = parse_provider_toml(toml_str)?;
-        build_provider(parsed, None)
+        build_provider(parsed)
     }
 
     #[test]
     fn openai_catalog_owns_platform_and_subscription_targets() {
         let provider = load_builtin_provider("openai").unwrap();
-        let platform = provider.target(ProviderAuthMethod::ApiKey).unwrap();
+        let platform = provider
+            .target_for_model(ProviderAuthMethod::ApiKey, "gpt-5.5")
+            .unwrap();
+        assert_eq!(platform.api_surface, "platform");
+        assert_eq!(platform.base_url, "https://api.openai.com/v1");
+        let subscription = provider
+            .target_for_model(ProviderAuthMethod::OAuth, "gpt-5.5")
+            .unwrap();
+        assert_eq!(subscription.api_surface, "subscription");
         assert_eq!(
-            platform.base_url.as_deref(),
-            Some("https://api.openai.com/v1")
-        );
-        let subscription = provider.target(ProviderAuthMethod::OAuth).unwrap();
-        assert_eq!(
-            subscription.base_url.as_deref(),
-            Some("https://chatgpt.com/backend-api/codex/")
+            subscription.base_url,
+            "https://chatgpt.com/backend-api/codex/"
         );
         assert_eq!(
             subscription.protocol,
-            piko_protocol::config::ModelProtocol::Responses
+            ProtocolProfile::Responses {
+                continuation: ResponsesContinuationPolicy::EncryptedReasoning
+            }
         );
     }
 
@@ -265,19 +341,37 @@ mod tests {
             .unwrap();
         assert_eq!(
             flash.protocol,
-            piko_protocol::config::ModelProtocol::Responses
-        );
-        assert_eq!(
-            flash.responses_continuation,
-            piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay
+            ProtocolProfile::Responses {
+                continuation: ResponsesContinuationPolicy::StatelessReplay
+            }
         );
         assert_eq!(
             provider
                 .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-pro")
                 .unwrap()
                 .protocol,
-            piko_protocol::config::ModelProtocol::ChatCompletions
+            ProtocolProfile::ChatCompletions
         );
+    }
+
+    #[test]
+    fn ambiguous_auth_routes_are_rejected() {
+        let manifest = r#"
+[provider]
+id = "ambiguous"
+[api_surfaces.one]
+base_url = "https://one.example"
+auth_methods = ["api_key"]
+[api_surfaces.two]
+base_url = "https://two.example"
+auth_methods = ["api_key"]
+[default_targets.one]
+protocol = "responses"
+[default_targets.two]
+protocol = "chat_completions"
+"#;
+        let error = load_provider_from_toml(manifest).err().unwrap();
+        assert!(error.contains("ambiguous for ApiKey"));
     }
 
     #[test]

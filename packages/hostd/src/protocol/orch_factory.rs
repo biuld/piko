@@ -32,16 +32,20 @@ pub(crate) async fn build_orch_turn_runner(
     if !auth.has_auth(provider) {
         return Err(format!("no auth configured for provider {provider}"));
     }
-    let protocol = resolved
-        .provider_config
-        .protocol
+    let target = resolved
+        .target
+        .as_ref()
         .ok_or_else(|| format!("no compatible target configured for provider {provider}"))?;
-    let target_id = format!("{}/{}", resolved.provider, resolved.model.id);
-    let mut providers = std::collections::HashMap::new();
-    providers.insert(
-        target_id,
+    let lookup_id =
+        piko_llmd::modeling::ModelKey::new(&resolved.provider, &resolved.model.id).lookup_id();
+    let mut targets = std::collections::HashMap::new();
+    targets.insert(
+        lookup_id,
         piko_llmd::target::ModelTargetConfig {
-            protocol,
+            target_id: target.id.clone(),
+            api_surface: target.api_surface.clone(),
+            auth_method: target.auth_method,
+            protocol: target.protocol,
             capabilities: Some(piko_llmd::target::ModelCapabilities {
                 text: resolved
                     .model
@@ -55,10 +59,9 @@ pub(crate) async fn build_orch_turn_runner(
                 reasoning: resolved.model.reasoning,
                 refusals: true,
             }),
-            base_url: resolved.provider_config.base_url.clone(),
-            endpoint: resolved.provider_config.endpoint.clone(),
-            responses_continuation: resolved.provider_config.responses_continuation,
-            headers: resolved.provider_config.headers.clone(),
+            base_url: Some(target.base_url.clone()),
+            endpoint: None,
+            headers: None,
             streaming_fallback: true,
         },
     );
@@ -90,10 +93,7 @@ pub(crate) async fn build_orch_turn_runner(
             .unwrap_or(60_000),
     };
     let mut oauth_flows = std::collections::HashMap::new();
-    if matches!(
-        auth.get(provider),
-        Some(piko_llmd::auth::AuthCredential::OAuth { .. })
-    ) {
+    if target.auth_method == piko_protocol::model::ProviderAuthMethod::OAuth {
         let flow = oauth_flow
             .ok_or_else(|| format!("no OAuth implementation registered for provider {provider}"))?;
         oauth_flows.insert(provider.clone(), flow);
@@ -103,7 +103,7 @@ pub(crate) async fn build_orch_turn_runner(
         oauth_flows,
     ));
     let executor = piko_llmd::build_gateway_with_auth(
-        providers,
+        targets,
         retry_config,
         crate::telemetry::handle(),
         auth_resolver,

@@ -4,19 +4,10 @@ use piko_llmd::auth::AuthStorage;
 use piko_llmd::providers::{ModelCatalog, ProviderRegistry};
 
 #[derive(Debug, Clone)]
-pub struct ResolvedTargetConfig {
-    pub protocol: Option<piko_protocol::config::ModelProtocol>,
-    pub headers: Option<std::collections::HashMap<String, String>>,
-    pub base_url: Option<String>,
-    pub endpoint: Option<String>,
-    pub responses_continuation: piko_protocol::config::ResponsesContinuationPolicy,
-}
-
-#[derive(Debug, Clone)]
 pub struct ResolvedModel {
     pub provider: String,
     pub model: ModelSummary,
-    pub provider_config: ResolvedTargetConfig,
+    pub target: Option<piko_llmd::modeling::ResolvedModelTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +83,7 @@ impl ModelRegistry {
                 .unwrap_or((pattern.as_str(), None));
 
             for model in &all_models {
-                let model_provider = self.find_provider_for_model(&model.id);
+                let model_provider = self.find_unique_provider_for_model(&model.id);
                 let provider_match = provider_filter.is_empty()
                     || model_provider.is_some_and(|p| p.eq_ignore_ascii_case(provider_filter));
                 let model_match = model_filter
@@ -108,13 +99,14 @@ impl ModelRegistry {
         matching
     }
 
-    fn find_provider_for_model(&self, model_id: &str) -> Option<String> {
-        for info in self.catalog.list_providers() {
-            if info.models.iter().any(|m| m.id == model_id) {
-                return Some(info.provider.clone());
-            }
-        }
-        None
+    fn find_unique_provider_for_model(&self, model_id: &str) -> Option<String> {
+        let mut matches = self
+            .catalog
+            .list_providers()
+            .into_iter()
+            .filter(|info| info.models.iter().any(|model| model.id == model_id));
+        let provider = matches.next()?.provider;
+        matches.next().is_none().then_some(provider)
     }
 
     /// Resolve a model by id + optional provider hint.
@@ -123,20 +115,17 @@ impl ModelRegistry {
         model_id: Option<&str>,
         provider_name: Option<&str>,
     ) -> Option<ResolvedModel> {
-        // Priority 1: exact provider + model match
-        if let (Some(mid), Some(provider)) = (model_id, provider_name)
-            && let Some(model) = self.find_in_provider(provider, mid)
-        {
-            return Some(self.to_resolved(model, provider));
+        // An explicit composite identity is fail-closed.
+        if let (Some(mid), Some(provider)) = (model_id, provider_name) {
+            return self
+                .find_in_provider(provider, mid)
+                .map(|model| self.to_resolved(model, provider));
         }
 
-        // Priority 2: model_id match across all providers (ignore provider hint)
-        if let Some(mid) = model_id
-            && let Some(model) = self.catalog.resolve(mid, None)
-        {
-            let provider = self
-                .find_provider_for_model(&model.id)
-                .unwrap_or_else(|| "unknown".into());
+        // A bare model ID resolves only when its provider is unique.
+        if let Some(mid) = model_id {
+            let provider = self.find_unique_provider_for_model(mid)?;
+            let model = self.find_in_provider(&provider, mid)?;
             return Some(self.to_resolved(model, &provider));
         }
 
@@ -160,11 +149,11 @@ impl ModelRegistry {
         }
 
         // Absolute last resort
-        self.list_models().into_iter().next().map(|model| {
-            let provider = self
-                .find_provider_for_model(&model.id)
-                .unwrap_or_else(|| "unknown".into());
-            self.to_resolved(model, &provider)
+        self.catalog.list_providers().into_iter().find_map(|info| {
+            info.models
+                .first()
+                .cloned()
+                .map(|model| self.to_resolved(model, &info.provider))
         })
     }
 
@@ -198,31 +187,16 @@ impl ModelRegistry {
 
     fn to_resolved(&self, model: ModelSummary, provider: &str) -> ResolvedModel {
         let catalog_provider = self.catalog.provider(provider);
-        let auth_method = if self.auth_storage.get_api_key(provider).is_some() {
-            ProviderAuthMethod::ApiKey
-        } else if matches!(
-            self.auth_storage.get(provider),
-            Some(piko_llmd::auth::AuthCredential::OAuth { .. })
-        ) {
-            ProviderAuthMethod::OAuth
-        } else {
-            ProviderAuthMethod::ApiKey
-        };
+        let auth_method = self
+            .auth_storage
+            .active_method(provider)
+            .unwrap_or(ProviderAuthMethod::ApiKey);
         let target =
             catalog_provider.and_then(|provider| provider.target_for_model(auth_method, &model.id));
         ResolvedModel {
             provider: provider.to_string(),
             model,
-            provider_config: ResolvedTargetConfig {
-                protocol: target.as_ref().map(|target| target.protocol),
-                base_url: target.as_ref().and_then(|target| target.base_url.clone()),
-                endpoint: None,
-                responses_continuation: target
-                    .as_ref()
-                    .map(|target| target.responses_continuation)
-                    .unwrap_or_default(),
-                headers: None,
-            },
+            target,
         }
     }
 }

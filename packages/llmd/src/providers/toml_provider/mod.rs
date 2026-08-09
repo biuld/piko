@@ -1,7 +1,8 @@
 use piko_protocol::model::{ModelSummary, ProviderAuthMethod};
 use std::collections::HashMap;
 
-use super::provider::{Provider, ProviderTarget};
+use super::provider::Provider;
+use crate::modeling::{ApiSurface, ModelKey, ModelTargetProfile, ResolvedModelTarget};
 
 pub(crate) mod loader;
 
@@ -13,39 +14,25 @@ pub(crate) mod loader;
 /// (shipped via include_str!) and user-configured custom endpoints.
 pub struct TomlProvider {
     id: String,
-    protocol: piko_protocol::config::ModelProtocol,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    oauth_target: Option<ProviderTarget>,
-    model_targets: HashMap<String, ProviderTarget>,
+    api_surfaces: HashMap<String, ApiSurface>,
+    default_targets: HashMap<String, ModelTargetProfile>,
+    model_targets: HashMap<String, HashMap<String, ModelTargetProfile>>,
     models: Vec<ModelSummary>,
 }
 
 impl TomlProvider {
-    pub fn new(id: impl Into<String>, protocol: piko_protocol::config::ModelProtocol) -> Self {
+    pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            protocol,
-            api_key: None,
-            base_url: None,
-            oauth_target: None,
+            api_surfaces: HashMap::new(),
+            default_targets: HashMap::new(),
             model_targets: HashMap::new(),
             models: Vec::new(),
         }
     }
 
-    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
-        self.api_key = Some(key.into());
-        self
-    }
-
-    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
-        self.base_url = Some(url.into());
-        self
-    }
-
-    pub fn with_oauth_target(mut self, target: ProviderTarget) -> Self {
-        self.oauth_target = Some(target);
+    pub fn with_api_surfaces(mut self, surfaces: HashMap<String, ApiSurface>) -> Self {
+        self.api_surfaces = surfaces;
         self
     }
 
@@ -54,7 +41,15 @@ impl TomlProvider {
         self
     }
 
-    pub fn with_model_targets(mut self, targets: HashMap<String, ProviderTarget>) -> Self {
+    pub fn with_default_targets(mut self, targets: HashMap<String, ModelTargetProfile>) -> Self {
+        self.default_targets = targets;
+        self
+    }
+
+    pub fn with_model_targets(
+        mut self,
+        targets: HashMap<String, HashMap<String, ModelTargetProfile>>,
+    ) -> Self {
         self.model_targets = targets;
         self
     }
@@ -75,45 +70,52 @@ impl Provider for TomlProvider {
         &self.id
     }
 
-    fn protocol(&self) -> piko_protocol::config::ModelProtocol {
-        self.protocol
-    }
-
-    fn base_url(&self) -> Option<&str> {
-        self.base_url.as_deref()
-    }
-
-    fn target(&self, auth_method: ProviderAuthMethod) -> Option<ProviderTarget> {
-        match auth_method {
-            ProviderAuthMethod::ApiKey => Some(ProviderTarget {
-                protocol: self.protocol,
-                base_url: self.base_url.clone(),
-                responses_continuation: Default::default(),
-            }),
-            ProviderAuthMethod::OAuth => self.oauth_target.clone(),
-        }
-    }
-
     fn target_for_model(
         &self,
         auth_method: ProviderAuthMethod,
         model_id: &str,
-    ) -> Option<ProviderTarget> {
-        match auth_method {
-            ProviderAuthMethod::ApiKey => self
-                .model_targets
-                .get(model_id)
-                .cloned()
-                .or_else(|| self.target(auth_method)),
-            ProviderAuthMethod::OAuth => self.target(auth_method),
+    ) -> Option<ResolvedModelTarget> {
+        let profiles = self
+            .model_targets
+            .get(model_id)
+            .unwrap_or(&self.default_targets);
+        let profile = profiles.values().find(|profile| {
+            self.api_surfaces
+                .get(&profile.api_surface)
+                .is_some_and(|surface| surface.auth_methods.contains(&auth_method))
+        })?;
+        let surface = self.api_surfaces.get(&profile.api_surface)?;
+        let model = ModelKey::new(&self.id, model_id);
+        Some(ResolvedModelTarget {
+            id: format!("{model}@{}", surface.id),
+            model,
+            api_surface: surface.id.clone(),
+            auth_method,
+            base_url: surface.base_url.clone(),
+            protocol: profile.protocol,
+        })
+    }
+
+    fn auth_methods(&self) -> Vec<ProviderAuthMethod> {
+        let mut methods = Vec::new();
+        for method in [ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth] {
+            let profiles = self.default_targets.values().chain(
+                self.model_targets
+                    .values()
+                    .flat_map(|targets| targets.values()),
+            );
+            if profiles.into_iter().any(|profile| {
+                self.api_surfaces
+                    .get(&profile.api_surface)
+                    .is_some_and(|surface| surface.auth_methods.contains(&method))
+            }) {
+                methods.push(method);
+            }
         }
+        methods
     }
 
     fn list_models(&self) -> Vec<ModelSummary> {
         self.models.clone()
-    }
-
-    fn api_key(&self) -> Option<&str> {
-        self.api_key.as_deref()
     }
 }

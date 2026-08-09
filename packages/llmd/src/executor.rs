@@ -22,7 +22,7 @@ use support::*;
 
 struct ExecState {
     client: reqwest::Client,
-    providers: HashMap<String, ModelTargetConfig>,
+    targets: HashMap<String, ModelTargetConfig>,
     auth_resolver: Option<Arc<dyn crate::providers::RuntimeAuthResolver>>,
 }
 
@@ -41,10 +41,10 @@ impl Default for LlmdExecutor {
 
 impl LlmdExecutor {
     pub fn new() -> Self {
-        Self::from_providers(HashMap::new())
+        Self::from_targets(HashMap::new())
     }
 
-    pub fn from_providers(providers: HashMap<String, ModelTargetConfig>) -> Self {
+    pub fn from_targets(targets: HashMap<String, ModelTargetConfig>) -> Self {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(30))
             .timeout(Duration::from_secs(10 * 60))
@@ -53,7 +53,7 @@ impl LlmdExecutor {
         Self {
             state: Arc::new(ExecState {
                 client,
-                providers,
+                targets,
                 auth_resolver: None,
             }),
             middlewares: Vec::new(),
@@ -91,18 +91,19 @@ impl LlmdExecutor {
     }
 
     async fn target(&self, request: &ModelRequest) -> Result<ModelTarget, GatewayError> {
-        let target_id = format!("{}/{}", request.provider, request.model);
-        let config = self.state.providers.get(&target_id).ok_or_else(|| {
+        let model_key = crate::modeling::ModelKey::new(&request.provider, &request.model);
+        let lookup_id = model_key.lookup_id();
+        let config = self.state.targets.get(&lookup_id).ok_or_else(|| {
             GatewayError::new(
                 ErrorClass::Target,
-                &target_id,
+                &lookup_id,
                 "resolve_target",
                 "model target is not configured",
             )
         })?;
         let auth = if let Some(resolver) = &self.state.auth_resolver {
             resolver
-                .resolve(&request.provider)
+                .resolve(&request.provider, config.auth_method)
                 .await
                 .map_err(|message| {
                     GatewayError::new(
@@ -116,7 +117,7 @@ impl LlmdExecutor {
             None
         };
         ModelTarget::resolve(
-            &target_id,
+            &lookup_id,
             &request.model,
             config,
             auth.as_ref().map(|value| &value.headers),
@@ -156,7 +157,7 @@ impl LlmGateway for LlmdExecutor {
                     GatewayError::new(ErrorClass::Target, &target.id, "middleware", message)
                 })?;
         }
-        let protocol_adapter = adapter(target.protocol);
+        let protocol_adapter = adapter(target.protocol.kind());
         let body = protocol_adapter.encode(&request, &target, true)?;
         self.telemetry
             .record_model_input(piko_protocol::ModelInputDebugSnapshot {
@@ -168,7 +169,7 @@ impl LlmGateway for LlmdExecutor {
                 model: request.model.clone(),
                 request: body.clone(),
                 options: serde_json::json!({
-                    "protocol": target.protocol,
+                    "protocol": target.protocol.kind(),
                     "streamingFallback": target.streaming_fallback
                 }),
             });
@@ -179,7 +180,7 @@ impl LlmGateway for LlmdExecutor {
             step_id = %request.step_id,
             model = %request.model,
             provider = %request.provider,
-            protocol = ?target.protocol,
+            protocol = ?target.protocol.kind(),
             streaming = true,
         );
         let state = Arc::clone(&self.state);
@@ -229,7 +230,7 @@ impl LlmGateway for LlmdExecutor {
         let output = stream! {
             let started = Instant::now();
             let mut context = context;
-            let mut protocol_stream = adapter(target.protocol).new_stream(&target);
+            let mut protocol_stream = adapter(target.protocol.kind()).new_stream(&target);
             let mut first_output = false;
             let mut pending_events = Vec::new();
             if let Some(result) = fallback {

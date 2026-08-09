@@ -1,27 +1,49 @@
 use super::*;
 use crate::gateway::{ModelEvent, TerminalStatus};
+use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy};
 use crate::protocols::{ProtocolAdapter, ProtocolStream};
 use crate::target::{ModelTarget, ModelTargetConfig};
-use piko_protocol::config::ModelProtocol;
+use piko_protocol::model::ProviderAuthMethod;
 use piko_protocol::{ContentBlock, Message, ModelContinuation};
 use serde_json::json;
 
-fn target() -> ModelTarget {
+fn continuation(
+    response_id: &str,
+    encrypted_reasoning: Vec<super::support::EncryptedReasoningItem>,
+) -> ModelContinuation {
+    ModelContinuation {
+        adapter: crate::modeling::ProtocolKind::Responses.adapter_id().into(),
+        state: serde_json::to_value(super::support::ResponsesContinuation {
+            response_id: response_id.into(),
+            output_item_ids: vec!["msg_previous".into()],
+            call_ids: vec!["call_a".into(), "call_b".into()],
+            encrypted_reasoning,
+        })
+        .unwrap(),
+    }
+}
+
+fn target_with_policy(continuation: ResponsesContinuationPolicy) -> ModelTarget {
     ModelTarget::resolve(
         "fixture",
         "gpt",
-        &ModelTargetConfig {
-            protocol: ModelProtocol::Responses,
-            capabilities: None,
-            base_url: Some("https://example.test/v1".into()),
-            endpoint: None,
-            responses_continuation: Default::default(),
-            headers: None,
-            streaming_fallback: true,
+        &{
+            let mut config = ModelTargetConfig::new(
+                "fixture/gpt@platform",
+                "platform",
+                ProviderAuthMethod::ApiKey,
+                ProtocolProfile::Responses { continuation },
+            );
+            config.base_url = Some("https://example.test/v1".into());
+            config
         },
         None,
     )
     .unwrap()
+}
+
+fn target() -> ModelTarget {
+    target_with_policy(ResponsesContinuationPolicy::PreviousResponseId)
 }
 
 #[test]
@@ -59,12 +81,7 @@ fn retained_response_continuation_sends_only_the_transcript_suffix() {
     let Message::Assistant { continuation, .. } = &mut request.transcript[1] else {
         panic!("fixture assistant missing");
     };
-    *continuation = Some(Box::new(ModelContinuation::Responses {
-        response_id: "resp_previous".into(),
-        output_item_ids: vec!["msg_previous".into()],
-        call_ids: vec!["call_a".into(), "call_b".into()],
-        encrypted_reasoning: Vec::new(),
-    }));
+    *continuation = Some(Box::new(self::continuation("resp_previous", Vec::new())));
 
     let body = ResponsesAdapter.encode(&request, &target(), true).unwrap();
     assert_eq!(body["previous_response_id"], "resp_previous");
@@ -108,18 +125,14 @@ fn encrypted_reasoning_policy_replays_opaque_state_without_server_storage() {
             thinking_signature: None,
         },
     );
-    *continuation = Some(Box::new(ModelContinuation::Responses {
-        response_id: "resp_previous".into(),
-        output_item_ids: vec!["rs_previous".into()],
-        call_ids: Vec::new(),
-        encrypted_reasoning: vec![piko_protocol::EncryptedReasoningItem {
+    *continuation = Some(Box::new(self::continuation(
+        "resp_previous",
+        vec![super::support::EncryptedReasoningItem {
             item_id: "rs_previous".into(),
             encrypted_content: "opaque".into(),
         }],
-    }));
-    let mut target = target();
-    target.responses_continuation =
-        piko_protocol::config::ResponsesContinuationPolicy::EncryptedReasoning;
+    )));
+    let target = target_with_policy(ResponsesContinuationPolicy::EncryptedReasoning);
 
     let body = ResponsesAdapter.encode(&request, &target, true).unwrap();
     assert_eq!(body["store"], false);
@@ -147,9 +160,7 @@ fn stateless_policy_replays_full_history_and_plaintext_reasoning() {
             thinking_signature: None,
         },
     );
-    let mut target = target();
-    target.responses_continuation =
-        piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay;
+    let target = target_with_policy(ResponsesContinuationPolicy::StatelessReplay);
 
     let body = ResponsesAdapter.encode(&request, &target, true).unwrap();
     assert!(body.get("store").is_none());
@@ -222,9 +233,14 @@ fn non_streaming_preserves_response_item_and_call_identity() {
         ],"usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":2}}
     }), &target()).unwrap();
     assert_eq!(result.usage.unwrap().cache_read, 2);
-    assert!(
-        matches!(result.output_metadata.continuation, Some(ModelContinuation::Responses { ref response_id, ref call_ids, .. }) if response_id == "resp_1" && call_ids == &["call_1", "call_2"])
-    );
+    let continuation = super::support::decode_continuation(
+        result.output_metadata.continuation.as_ref().unwrap(),
+        &target(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(continuation.response_id, "resp_1");
+    assert_eq!(continuation.call_ids, ["call_1", "call_2"]);
 }
 
 #[test]
@@ -269,16 +285,23 @@ fn streaming_and_non_streaming_fixtures_are_semantically_equivalent() {
     }
     stream.finish().unwrap();
     assert!(events.iter().any(|event| matches!(event, ModelEvent::ReasoningDelta { delta, identity } if delta == "why" && identity.item_id.as_deref() == Some("rs_1"))));
-    assert!(events.iter().any(|event| matches!(event,
-        ModelEvent::OutputMetadata(metadata)
-            if matches!(metadata.continuation.as_ref(), Some(ModelContinuation::Responses {
-                encrypted_reasoning,
-                ..
-            }) if encrypted_reasoning == &[piko_protocol::EncryptedReasoningItem {
-                item_id: "rs_1".into(),
-                encrypted_content: "opaque".into(),
-            }])
-    )));
+    assert!(events.iter().any(|event| {
+        let ModelEvent::OutputMetadata(metadata) = event else {
+            return false;
+        };
+        metadata.continuation.as_ref().is_some_and(|envelope| {
+            super::support::decode_continuation(envelope, &target())
+                .ok()
+                .flatten()
+                .is_some_and(|state| {
+                    state.encrypted_reasoning
+                        == [super::support::EncryptedReasoningItem {
+                            item_id: "rs_1".into(),
+                            encrypted_content: "opaque".into(),
+                        }]
+                })
+        })
+    }));
     assert!(events.iter().any(|event| matches!(event, ModelEvent::FunctionCallDelta { name, arguments_delta, identity } if name == "read" && arguments_delta == "{}" && identity.call_id.as_deref() == Some("call_1"))));
     assert!(events.iter().any(|event| matches!(event, ModelEvent::TextDelta { delta, identity } if delta == "done" && identity.item_id.as_deref() == Some("msg_1") && identity.content_index == Some(0))));
     assert!(events.iter().any(|event| matches!(event, ModelEvent::Usage(usage) if usage == complete.usage.as_ref().unwrap())));

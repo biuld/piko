@@ -10,7 +10,9 @@ async fn responses_uses_native_stream_and_non_streaming_contracts() {
     let executor = executor_for_protocol(
         streaming.addr,
         None,
-        piko_protocol::config::ModelProtocol::Responses,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default(),
+        },
     );
     let events = executor
         .execute(request(), tokio_util::sync::CancellationToken::new())
@@ -32,7 +34,9 @@ async fn responses_uses_native_stream_and_non_streaming_contracts() {
     let result = executor_for_protocol(
         once.addr,
         None,
-        piko_protocol::config::ModelProtocol::Responses,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default(),
+        },
     )
     .execute_once(request(), tokio_util::sync::CancellationToken::new())
     .await
@@ -41,9 +45,12 @@ async fn responses_uses_native_stream_and_non_streaming_contracts() {
         matches!(&result.items[0], SemanticItem::Text { text, identity }
         if text == "native" && identity.item_id.as_deref() == Some("msg_1"))
     );
-    assert!(
-        matches!(result.output_metadata.continuation, Some(piko_protocol::ModelContinuation::Responses { response_id, .. }) if response_id == "resp_1")
+    let continuation = result.output_metadata.continuation.unwrap();
+    assert_eq!(
+        continuation.adapter,
+        piko_llmd::modeling::ProtocolKind::Responses.adapter_id()
     );
+    assert_eq!(continuation.state["response_id"], "resp_1");
 }
 
 #[tokio::test]
@@ -83,7 +90,9 @@ async fn responses_falls_back_only_to_responses_non_streaming() {
     let events = executor_for_protocol(
         stub.addr,
         None,
-        piko_protocol::config::ModelProtocol::Responses,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default(),
+        },
     )
     .execute(request(), tokio_util::sync::CancellationToken::new())
     .await
@@ -99,8 +108,10 @@ async fn responses_falls_back_only_to_responses_non_streaming() {
 async fn cancellation_is_typed_before_dispatch_for_both_protocols() {
     use piko_llmd::gateway::ErrorClass;
     for protocol in [
-        piko_protocol::config::ModelProtocol::Responses,
-        piko_protocol::config::ModelProtocol::ChatCompletions,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default(),
+        },
+        piko_llmd::modeling::ProtocolProfile::ChatCompletions,
     ] {
         let cancel = tokio_util::sync::CancellationToken::new();
         cancel.cancel();
@@ -152,12 +163,14 @@ async fn usage_and_cost_middleware_process_both_protocols() {
 
     for (protocol, step, expected_input) in [
         (
-            piko_protocol::config::ModelProtocol::Responses,
+            piko_llmd::modeling::ProtocolProfile::Responses {
+                continuation: Default::default(),
+            },
             Step::ResponsesStreamSuccess,
             4,
         ),
         (
-            piko_protocol::config::ModelProtocol::ChatCompletions,
+            piko_llmd::modeling::ProtocolProfile::ChatCompletions,
             Step::StreamSuccess,
             3,
         ),
@@ -185,8 +198,10 @@ async fn usage_and_cost_middleware_process_both_protocols() {
 async fn malformed_json_fails_deterministically_for_both_protocols() {
     use piko_llmd::gateway::ErrorClass;
     for protocol in [
-        piko_protocol::config::ModelProtocol::Responses,
-        piko_protocol::config::ModelProtocol::ChatCompletions,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: Default::default(),
+        },
+        piko_llmd::modeling::ProtocolProfile::ChatCompletions,
     ] {
         let stub = Stub::start(Script {
             steps: vec![Step::MalformedJson],

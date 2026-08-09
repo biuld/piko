@@ -161,8 +161,13 @@ async fn window_fraction_guard_scales_retrigger_to_resolved_model() {
         providers_dir.join("test.toml"),
         r#"[provider]
 id = "test-provider"
-protocol = "chat_completions"
+
+[api_surfaces.platform]
 base_url = "https://example.test/v1"
+auth_methods = ["api_key"]
+
+[default_targets.platform]
+protocol = "chat_completions"
 
 [models.small-model]
 name = "Small Model"

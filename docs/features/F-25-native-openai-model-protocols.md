@@ -160,6 +160,18 @@ successful completion.
 
 ## Acceptance criteria
 
+- [x] Provider catalogs model named API surfaces separately from providers,
+      models, credentials, and wire protocols.
+- [x] A model target is selected from `(provider, model, auth method)`; explicit
+      provider/model lookup fails closed and unscoped duplicate model IDs are
+      rejected as ambiguous.
+- [x] Protocol profiles are a closed llmd-owned type, so a Chat Completions
+      target cannot carry a Responses continuation policy.
+- [x] Runtime credential resolution must match the auth method frozen into the
+      selected target and can only contribute request headers.
+- [x] OpenAI API-key/OAuth routing and DeepSeek per-model protocol routing use
+      the same API-surface/target selection algorithm.
+
 - [x] A Responses fixture covering instructions, input items, reasoning,
       parallel function calls, tool outputs, usage, and completion round-trips
       through the semantic contract without losing required identity.
@@ -197,9 +209,10 @@ successful completion.
 - [x] A provider catalog may select different explicit protocols per model.
       DeepSeek `deepseek-v4-flash` uses stateless Responses replay, while its
       models not documented for Responses remain Chat Completions targets.
-- [x] Authentication material changes request headers only. Credential kind
-      cannot select protocol, endpoint, model, or capabilities, and raw
-      credentials are not copied into orchd configuration.
+- [x] Hostd may use the selected auth method to choose a compatible catalog
+      target, but authentication material changes request headers only and
+      cannot mutate the frozen protocol, endpoint, model, or capabilities.
+      Raw credentials are not copied into orchd configuration.
 - [x] Production targets derive declared capabilities from catalog metadata;
       retry disablement also disables fallback.
 - [x] Retryable stream-open failures before the first observable semantic

@@ -2,6 +2,55 @@
 
 > Status: implemented
 > Implements: [F-25](../features/F-25-native-openai-model-protocols.md)
+> Core target modeling amended by ADR-009
+
+## First-class target model
+
+The catalog is not a `Provider -> Protocol` map. llmd owns five stable
+entities and one resolution result:
+
+```text
+Provider -> ApiSurface[]
+Provider -> Model[]
+Model + ApiSurface -> ModelTargetProfile
+ModelTargetProfile + AuthMethod -> ResolvedModelTarget
+Credential + frozen AuthMethod -> request headers
+```
+
+`ModelKey(provider_id, model_id)` is the only model identity used for target
+lookup. `ProtocolProfile` is a closed enum: Responses carries its continuation
+policy, while Chat Completions has no Responses fields. A resolved target owns
+the target ID, API-surface ID, auth method, base URL/endpoint, and protocol
+profile. The executable gateway target is built from that frozen value before
+credentials are materialized.
+
+Provider manifests use this non-legacy shape:
+
+```toml
+[provider]
+id = "example"
+
+[api_surfaces.platform]
+base_url = "https://api.example.com/v1"
+auth_methods = ["api_key"]
+
+[default_targets.platform]
+protocol = "responses"
+
+[models."model-id"]
+name = "Model"
+# capabilities omitted
+
+[models."model-id".targets.platform]
+protocol = "chat_completions" # replaces defaults for this model
+```
+
+Catalog validation rejects a missing surface reference and more than one
+target compatible with the same auth method. Model-specific target maps
+replace, rather than merge with, provider defaults so selection is explicit.
+OpenAI declares separate Platform/API-key and Subscription/OAuth surfaces.
+DeepSeek declares one API-key surface; its default target is Chat Completions
+and `deepseek-v4-flash` replaces that target with stateless Responses.
 > Decisions: none; create an ADR before implementation if the semantic/wire
 > split becomes a cross-feature public extension point
 
@@ -107,17 +156,19 @@ Provider identity is replaced in the execution path by a resolved target:
 ```rust
 struct ModelTarget {
     id: String,
-    protocol: ProtocolKind,
-    base_url: Url,
+    api_surface: String,
+    auth_method: ProviderAuthMethod,
+    protocol: ProtocolProfile,
+    endpoint: Url,
     model: String,
     headers: HeaderMap,
     capabilities: ModelCapabilities,
     streaming_fallback: bool,
 }
 
-enum ProtocolKind {
-    OpenAiResponses,
-    OpenAiChatCompletions,
+enum ProtocolProfile {
+    Responses { continuation: ResponsesContinuationPolicy },
+    ChatCompletions,
 }
 ```
 
@@ -126,7 +177,8 @@ presentation and auth lookup. Runtime dispatch uses `protocol`, never the
 provider ID or model name. URL construction joins a validated base URL with a
 fixed operation path unless the target declares an explicit full endpoint.
 
-The executable lookup key is the exact `provider/model` target ID. The target
+The executable lookup key is the exact composite `provider/model` model key;
+the resolved target identity is `provider/model@api-surface`. The target
 configuration type lives in `piko-llmd`, not the shared wire crate or orchd.
 Provider identity remains available for authentication and product
 presentation but is not an alias in the target registry. A missing target or
