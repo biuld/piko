@@ -304,8 +304,7 @@ Footer hints may distinguish **open** (catalog/branch) vs **apply**
 
 ### Opening
 
-- Open via `/settings`, command palette **Settings**, or any surface action
-  defined as Open Settings.
+- Open via `/settings` or any surface action defined as Open Settings.
 - Opening **refreshes** the client’s host/tui mirror used by the tree when a
   refresh channel exists (`ConfigGet` for relevant namespaces). Stale disk
   from an external editor is not a hard guarantee if the user never reopens;

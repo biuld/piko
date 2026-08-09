@@ -8,7 +8,7 @@ This document records the architecture, layout, and UX flow of the interactive l
 
 Previously, typing `/login` immediately launched an OAuth flow for `anthropic`, which failed because Anthropic OAuth is unsupported. The implemented flow presents a keyboard-navigable menu instead:
 
-1. **Invoke `/login`**: The user types `/login` (without arguments) or selects "Login" from the Command Palette.
+1. **Invoke `/login`**: The user types `/login` without arguments.
 2. **Auth Type Selection**: An overlay panel appears, displaying two top-level options:
    * **Use a subscription (OAuth)**
    * **Use an API key**

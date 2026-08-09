@@ -62,6 +62,7 @@ impl AutoCompleteProvider for FileBrowserProvider {
                             ColumnCell::secondary(detail),
                         ],
                         keep_active: false,
+                        submit_on_accept: false,
                     }
                 })
                 .collect::<Vec<_>>();
@@ -85,6 +86,7 @@ impl AutoCompleteProvider for FileBrowserProvider {
                             ColumnCell::secondary(format!("file ({})", format_size(size))),
                         ],
                         keep_active: false,
+                        submit_on_accept: false,
                     }
                 })
                 .collect::<Vec<_>>();

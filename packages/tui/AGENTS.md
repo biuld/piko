@@ -43,10 +43,10 @@ summary only.
 
 | Intent | Placement | Surfaces |
 |--------|-----------|----------|
-| Browse | `CoverBody` | Sessions, Tree, Help, Status, Diagnostics, SummaryPrompt |
-| Select | `ComposerBand` | Agents, Models, Mcp, AuthSelector |
+| Browse | `CoverBody` | Sessions, Tree, Help, Diagnostics, SummaryPrompt |
+| Select | `ComposerBand` | Agents, Models, AuthSelector, MCP, Processes |
 | Dock | `ComposerBand` | Approval, ToolInteraction |
-| Modal | `Centered` | Settings |
+| Modal | `Centered` | Settings, Status |
 
 Define via `SurfaceId::intent()` / `modal_layer(body, band_h)`.
 

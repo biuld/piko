@@ -43,7 +43,7 @@ list) and **beside** the shell UI/UX contract:
 Product panels **compose** these primitives; they must not invent a private
 selection or focus language that contradicts this document.
 
-**Settings vs menu:** a command palette is an action tree; Settings is a
+**Settings vs action menu:** an action menu is an action tree; Settings is a
 **value catalog**. One `MenuStack` serves both, so the difference lives in the
 row payload: Settings rows carry ValueSummary / exclusive Active / effect-class
 badges, while still using this document’s Selected / Active /
@@ -297,7 +297,7 @@ Same as List, plus:
 - Enter on group drills in; Esc/left drills out (bindings per keybindings feature)
 - Breadcrumb or panel title always shows depth context
 
-Fit: command palettes, simple navigational trees, one-shot action menus, and
+Fit: simple navigational trees, one-shot action menus, and
 Settings (with value-aware row payloads).
 
 ### Settings on MenuStack

@@ -226,6 +226,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
         SurfaceId::ToolInteraction => render_panel(&app.interactions, frame, area, &app.theme),
         SurfaceId::AuthSelector => render_panel(&app.auth_selector, frame, area, &app.theme),
         SurfaceId::Mcp => render_panel(&app.mcp, frame, area, &app.theme),
+        SurfaceId::Processes => render_panel(&app.processes, frame, area, &app.theme),
     }
 }
 

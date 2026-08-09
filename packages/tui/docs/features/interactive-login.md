@@ -21,7 +21,7 @@ The selector opens as a `ComposerBand` modal over the workspace plane
 
 ## Behavior / Interactions
 
-- **Opening**: The overlay is opened by running the `/login` slash command (without arguments) or selecting `Login` from the command palette.
+- **Opening**: The overlay is opened by running the `/login` slash command without arguments.
 - **Menu Navigation**:
   - `Up` / `Down` arrows move the selection.
   - `Enter` confirms the selection, entering sub-menus or confirming the action.

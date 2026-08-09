@@ -77,9 +77,10 @@ Workspace + shell chrome (not A–E slots):
 └──────────────────────────────────────────────────────────────┘
 
 Z-modals (intent):
-  Browse  CoverBody   — sessions, tree, settings…
-  Select  ComposerBand — agents (viewed switch), models, MCP, auth…
-  Decide  Centered     — approval, tool workflow
+  Browse  CoverBody    — sessions, tree, diagnostics…
+  Select  ComposerBand — agents, models, auth, MCP, processes…
+  Dock    ComposerBand — approval, tool workflow
+  Modal   Centered     — settings, status
 ```
 
 Agents are not a permanent strip: F4 or `/agents` opens Select surface `Agents`
@@ -102,7 +103,7 @@ explicitly narrows them.
 
 ### List surfaces (filterable lists, menus, selectors)
 
-Shared behavior for command palette, model selector, session list, thinking
+Shared behavior for model selector, session list, thinking
 selector, settings lists, hierarchical menus:
 
 | Interaction | Behavior |
@@ -346,7 +347,7 @@ Detail ownership: [tool-interactive-workflow.md](./tool-interactive-workflow.md)
 Detail ownership: [resume-session.md](./resume-session.md),
 [session-tree.md](./session-tree.md).
 
-### Model selector / thinking selector / settings / command palette
+### Model selector / thinking selector / settings
 
 **Must show**
 
@@ -385,17 +386,17 @@ Wire protocol design stays in system/feature design docs.
 
 | Layer | Owner | Purpose |
 |-------|--------|---------|
-| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Agents, start a new session (`/clear`), Quit. Never sent as host catalog ids. |
+| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
 | **Host product commands** | hostd catalog + wire | Session/auth/runtime/model intents (`session.new`, `auth.login`, `session.compact`, `process.list`, …). Frontends map stable dotted ids to wire calls and local slash names. |
 
 Rules:
 
 1. **Slash names are TUI-local** (e.g. `/new` → `session.new`). Host catalog
    never ships slash strings or “open panel” semantics.
-2. **Palette lists the merged catalog**: local presentation rows plus
+2. **Slash suggestions list the merged catalog**: local presentation rows plus
    host-advertised product rows (with TUI slash aliases when mapped).
 3. **Every listed row must do something visible**: open a surface, send a host
-   intent, or show a structured result. Dead palette rows are a defect.
+   intent, or show a structured result. Dead rows are a defect.
 4. **Do not add a new wire command** if session snapshot, push events, or an
    existing host command already carry the data (example: context/cost on
    BottomBar come from session/turn usage projection, not a new “get usage”
@@ -403,7 +404,7 @@ Rules:
 
 ### User-visible command content (must/should)
 
-Each palette/slash entry **must** expose:
+Each slash entry **must** expose:
 
 | Field | Rule |
 |-------|------|
@@ -415,7 +416,7 @@ Each palette/slash entry **must** expose:
 **Argument UX** when invoke needs input:
 
 - Prefer a **focused form or filterable picker** over silent failure.
-- Slash text args are allowed for power users (`/rename …`, `/kill …`) but
+- Slash text args are allowed for power users (`/rename …`, `/import …`) but
   must show a clear usage string when required args are missing.
 - Confirm-class commands (`/delete`) require an explicit confirmation step;
   a bare slash must not destroy data.
@@ -429,9 +430,10 @@ Each palette/slash entry **must** expose:
 | `/models` | Model selector | Apply model; BottomBar model text updates |
 | `/thinking` | Thinking selector (ComposerBand) | Apply level; BottomBar thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
-| `/status` | Status panel | Session/turn/queue/tools/approvals snapshot |
+| `/status` | Centered Status modal | Session/turn/queue/tools/approvals snapshot |
 | `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
-| `/clear` | Start a new session | New empty session; timeline clears |
+| `/diff` | Shared Diagnostics surface (diff mode) | Last or active turn workspace diff |
+| `/prompt-debug` | Shared Diagnostics surface (prompt mode) | Prompt assembly diagnostics |
 | `/quit` | Exit | Process exits (not Esc) |
 
 ### Current host product commands (content + result)
@@ -443,17 +445,15 @@ Each palette/slash entry **must** expose:
 | `session.rename` | `/rename` | Name updates in session list / title surfaces |
 | `session.delete` | `/delete` | After confirm, session gone; empty or previous view |
 | `session.import` | `/import` | Imported session openable |
-| `session.export` | `/export` | Path or location message (not a fake download UI) |
 | `auth.login` / `auth.logout` | `/login`, `/logout` | Login flow / signed-out confirmation |
 | `session.compact` | `/compact` | Compaction progress/result via host events; Timeline keeps live rules |
-| `process.list` | `/ps` | Process table or structured status list |
-| `process.stop` | `/kill` | Stopped confirmation or error |
-| `mcp.status` | `/mcp` | Per-server connected flag, tool/resource counts, errors |
+| `process.list` / `process.stop` | `/top` | Selectable process table in ComposerBand; Enter arms stop, second Enter confirms |
+| `mcp.status` | `/mcp` | ComposerBand with per-server state, counts, and errors |
 | `model.set` / `thinking.set` | (via selectors or future slash) | BottomBar + settings reflect new defaults |
 
 Background/internal wire commands (`ChatSubmit`, `TurnCancel`,
 `ApprovalRespond`, `StateSnapshot`, `AgentList`/`Subscribe`, `ConfigGet`,
-`ModelList`, `CommandCatalogGet`, …) are **not** palette rows. They power
+`ModelList`, `CommandCatalogGet`, …) are **not** slash rows. They power
 surfaces above; the user meets them as chat, Esc cancel, approval panels, and
 hydration—not as slash spam.
 
@@ -496,12 +496,12 @@ this PRD’s P0):
 
 ### When to add a **new** presentation (local) command
 
-Add a local slash/palette row when:
+Add a local slash row when:
 
 1. The action is open/toggle/quit/navigate chrome, or
 2. It is a thin launcher over an existing host getter (debug/diff/status
    subsections), and
-3. The palette can describe it with title, detail, and result surface.
+3. Slash suggestions can describe it with title, detail, and result surface.
 
 Local commands **must not** invent host authority (e.g. claiming to change
 model without going through host config/model APIs).
@@ -520,27 +520,13 @@ model without going through host config/model APIs).
 **Must not:** dump large diagnostic blobs into the durable Timeline as fake
 assistant messages.
 
-### Recommended command roadmap (UX only)
+### Remaining command roadmap (UX only)
 
-**P0 — no new wire commands**
-
-- BottomBar usage projection
-- Ensure every *already mapped* slash shows a real result (ps, mcp, kill, …)
-
-**P1 — local presentation + existing wire**
-
-- `/diff` → `TurnDiffGet` / last turn diff panel
-- `/prompt-debug` → `PromptDebugGet` panel
-- Optional catalog advertisement for debug ids if other frontends need
-  discovery (still frontend-neutral titles; slash stays local)
-
-**P2 — product decision**
+The current command inventory has a visible result path. Future work is a
+product decision rather than a missing-surface repair:
 
 - Queue steer user entry (only if steerable queue is a first-class UX)
 - Richer `/status` subsections linking the above
-
-**P3 — only if product requires**
-
 - New host wire commands for net-new host capabilities
 
 ## Component-level interaction catalog

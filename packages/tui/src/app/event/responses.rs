@@ -8,7 +8,11 @@ impl AppState {
     ) -> Vec<Effect> {
         let mut effects = Vec::new();
         match result {
-            Ok(piko_protocol::CommandResult::Empty) | Err(_) => {}
+            Ok(piko_protocol::CommandResult::Empty) => {}
+            Err(error) => {
+                self.status = error.clone();
+                self.notify(NotificationLevel::Error, error);
+            }
             Ok(piko_protocol::CommandResult::PromptDebugged { snapshot, .. }) => {
                 self.diagnostics.set_prompt_debug(&snapshot);
                 self.push_surface(SurfaceId::Diagnostics);
@@ -150,33 +154,14 @@ impl AppState {
                 self.finish_bootstrap_command(&response_command_id);
             }
             Ok(piko_protocol::CommandResult::ProcessListed { processes, .. }) => {
-                if processes.is_empty() {
-                    self.notify(NotificationLevel::Info, "no processes running");
-                    self.status = "no processes running".to_string();
+                let count = processes.len();
+                self.processes.set_processes(processes);
+                self.push_surface(SurfaceId::Processes);
+                self.status = if count == 0 {
+                    "no processes running".to_string()
                 } else {
-                    let lines: Vec<String> = processes
-                        .iter()
-                        .map(|p| {
-                            let state = if p.exited {
-                                p.exit_code
-                                    .map(|code| format!(" exit={code}"))
-                                    .unwrap_or_else(|| {
-                                        p.signal
-                                            .map(|sig| format!(" signal={sig}"))
-                                            .unwrap_or_else(|| " exited".to_string())
-                                    })
-                            } else {
-                                String::new()
-                            };
-                            format!(
-                                "{}  pid {}  {}{}  ({})",
-                                p.process_id, p.pid, p.command, state, p.cwd
-                            )
-                        })
-                        .collect();
-                    self.notify(NotificationLevel::Info, lines.join("\n"));
-                    self.status = format!("{} process(es) running", processes.len());
-                }
+                    format!("{count} process(es) running")
+                };
             }
             Ok(piko_protocol::CommandResult::ProcessStopped {
                 process_id,
@@ -186,6 +171,7 @@ impl AppState {
                 ..
             }) => {
                 if stopped {
+                    self.processes.remove(&process_id);
                     let detail = exit_code
                         .map(|code| format!(" (exit {code})"))
                         .or_else(|| signal.map(|sig| format!(" (signal {sig})")))
@@ -207,22 +193,7 @@ impl AppState {
                 self.mcp.set_servers(servers);
                 self.push_surface(SurfaceId::Mcp);
                 let connected = self.mcp.connected_count();
-                let names: Vec<String> = self
-                    .mcp
-                    .servers()
-                    .iter()
-                    .filter(|s| s.connected)
-                    .map(|s| s.name.clone())
-                    .collect();
                 self.status = format!("{connected} MCP server(s) connected");
-                self.notify(
-                    NotificationLevel::Info,
-                    if names.is_empty() {
-                        "no MCP servers connected".to_string()
-                    } else {
-                        format!("MCP servers: {}", names.join(", "))
-                    },
-                );
             }
             Ok(piko_protocol::CommandResult::AgentSpecListed { agents, .. }) => {
                 self.status = format!("{} agent specs available", agents.len());

@@ -15,7 +15,7 @@ next to the editor — the same placement family as Models / Agents. It displays
 
 ## Behavior / Interactions
 
-- **Opening**: The selector is opened by running the `/thinking` slash command, or selecting the `Thinking level` command from the command palette.
+- **Opening**: The selector is opened by running the `/thinking` slash command.
 - **Filtering**: Typing character keys dynamically filters the thinking levels list by their label or description.
 - **Navigation**:
   - `Up` / `Down` arrows select the previous/next visible option.

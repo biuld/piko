@@ -330,7 +330,7 @@ impl<'a> PaneSpec<'a> {
     }
 
     /// Feature opts out of the search zone (filter lives elsewhere, e.g. editor
-    /// token for command palette / file browser).
+    /// token for slash suggestions / file browser).
     pub fn no_search(mut self) -> Self {
         self.search = PaneSearch::Hidden;
         self.search_rule = false;
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn no_search_hides_filter_zone() {
-        let s = PaneSpec::minimal("command palette")
+        let s = PaneSpec::minimal("slash suggestions")
             .search_filter("query")
             .no_search()
             .hints("Tab");

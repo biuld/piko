@@ -1,4 +1,4 @@
-use piko_protocol::{ApprovalDecision, HostCommandDescriptor};
+use piko_protocol::{ApprovalDecision, HostCommandDescriptor, HostCommandInvoke};
 
 /// Root user intent. This is intentionally only a router over smaller intent
 /// domains; feature-specific behavior should live in the nested action types.
@@ -43,7 +43,6 @@ pub enum EditorAction {
     AcceptAndSubmitSuggestion,
     SuggestionSelectNext,
     SuggestionSelectPrev,
-    OpenCommands,
 }
 
 #[derive(Debug)]
@@ -126,7 +125,6 @@ pub enum SlashAction {
     Logout(Option<String>),
     Compact,
     ListProcesses,
-    KillProcess(String),
     ListMcpStatus,
     RequestDiff,
     RequestPromptDebug,
@@ -230,7 +228,6 @@ pub enum LocalCommandId {
     Sessions,
     Models,
     Thinking,
-    Clear,
     Agents,
     /// Open last/active turn workspace diff.
     Diff,
@@ -254,6 +251,7 @@ pub struct TuiCommandEntry {
     pub slash: String,
     pub title: String,
     pub detail: String,
+    pub invoke: HostCommandInvoke,
     pub target: CommandTarget,
 }
 
@@ -297,12 +295,6 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "List and set default thinking/reasoning level",
     ),
     (
-        "/clear",
-        LocalCommandId::Clear,
-        "Clear session",
-        "Start a new session and clear the timeline",
-    ),
-    (
         "/agents",
         LocalCommandId::Agents,
         "Agents",
@@ -331,13 +323,11 @@ const HOST_SLASH_TABLE: &[(&str, &str)] = &[
     ("/clone", "session.clone"),
     ("/rename", "session.rename"),
     ("/import", "session.import"),
-    ("/export", "session.export"),
     ("/delete", "session.delete"),
     ("/login", "auth.login"),
     ("/logout", "auth.logout"),
     ("/compact", "session.compact"),
-    ("/ps", "process.list"),
-    ("/kill", "process.stop"),
+    ("/top", "process.list"),
     ("/mcp", "mcp.status"),
 ];
 
@@ -350,6 +340,7 @@ pub fn merge_command_catalog(host: &[HostCommandDescriptor]) -> Vec<TuiCommandEn
             slash: slash.to_string(),
             title: title.to_string(),
             detail: detail.to_string(),
+            invoke: HostCommandInvoke::Immediate,
             target: CommandTarget::Local(*id),
         })
         .collect();
@@ -359,6 +350,7 @@ pub fn merge_command_catalog(host: &[HostCommandDescriptor]) -> Vec<TuiCommandEn
                 slash: slash.to_string(),
                 title: descriptor.title.clone(),
                 detail: descriptor.detail.clone(),
+                invoke: descriptor.invoke.clone(),
                 target: CommandTarget::Host(descriptor.id.clone()),
             });
         }
@@ -384,7 +376,6 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
         LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
-        LocalCommandId::Clear => SlashAction::New.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
         LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),
         LocalCommandId::Quit => AppAction::Quit.into(),
@@ -393,7 +384,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
 
 /// Mapping for neutral host ids that need no dedicated argument parsing
 /// beyond `HostCommandArgs`. Ids with bespoke text parsing (rename, import,
-/// delete-confirm, export) are handled directly in `slash.rs`.
+/// delete-confirm) are handled directly in `slash.rs`.
 pub fn action_for_host_command(id: &str, args: HostCommandArgs) -> Option<Action> {
     Some(match id {
         "session.new" => SlashAction::New.into(),

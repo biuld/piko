@@ -323,7 +323,9 @@ impl InputRouter {
                 Self::handle_selectable_surface(key, ka)
             }
             // Info panels
-            Some(SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Diagnostics) => match ka {
+            Some(
+                SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Processes | SurfaceId::Diagnostics,
+            ) => match ka {
                 Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
                 Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
@@ -404,7 +406,6 @@ impl InputRouter {
             Some(KeyAction::NewLine) => Some(EditorAction::InsertNewline.into()),
             Some(KeyAction::Sessions) => Some(SessionAction::RequestList.into()),
             Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
-            Some(KeyAction::Commands) => Some(EditorAction::OpenCommands.into()),
             Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
             Some(KeyAction::Status) => Some(SurfaceAction::OpenStatus.into()),
             Some(KeyAction::ClearNotifications) => Some(NotificationAction::Clear.into()),

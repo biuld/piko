@@ -13,13 +13,13 @@ use crate::ui::components::selectable_list::{
 };
 use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
 
-pub mod command_palette;
 pub mod file_browser;
 pub mod provider;
+pub mod slash_commands;
 
-use command_palette::CommandPaletteProvider;
 use file_browser::FileBrowserProvider;
 use provider::AutoCompleteProvider;
+use slash_commands::SlashCommandProvider;
 
 /// One completion suggestion (domain payload + column cells for paint).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,8 @@ pub struct CompletionRow {
     pub end: usize,
     pub cells: Vec<ColumnCell>,
     pub keep_active: bool,
+    /// Enter executes the accepted editor text instead of only inserting it.
+    pub submit_on_accept: bool,
 }
 
 pub struct AutoComplete {
@@ -51,7 +53,7 @@ impl AutoComplete {
             list: SelectableList::new(Vec::new()),
             active_provider_idx: None,
             providers: vec![
-                Box::new(CommandPaletteProvider),
+                Box::new(SlashCommandProvider),
                 Box::new(FileBrowserProvider),
             ],
         }
@@ -66,11 +68,19 @@ impl AutoComplete {
     }
 
     pub fn select_next(&mut self) {
-        self.list.select_next("", |_| true);
+        if !self.list.is_empty() {
+            self.list.selected = (self.list.selected + 1) % self.list.len();
+        }
     }
 
     pub fn select_prev(&mut self) {
-        self.list.select_prev("", |_| true);
+        if !self.list.is_empty() {
+            self.list.selected = self
+                .list
+                .selected
+                .checked_sub(1)
+                .unwrap_or(self.list.len() - 1);
+        }
     }
 
     /// Select the suggestion at `idx` (pointer clicks), clamped to the list.
@@ -168,12 +178,14 @@ impl AutoComplete {
 mod tests {
     use super::*;
     use crate::app::command::{CommandTarget, LocalCommandId};
+    use piko_protocol::HostCommandInvoke;
 
     fn commands() -> Vec<TuiCommandEntry> {
         vec![TuiCommandEntry {
             slash: "/resume".to_string(),
             title: "Sessions".to_string(),
             detail: "list and open sessions".to_string(),
+            invoke: HostCommandInvoke::Immediate,
             target: CommandTarget::Local(LocalCommandId::Sessions),
         }]
     }

@@ -19,8 +19,6 @@ use crate::{
     ui::components::pane::{PaneSpec, render_pane},
 };
 
-use super::centered_rect;
-
 /// Status panel: read-only diagnostic panel.
 pub struct StatusPanel;
 
@@ -64,8 +62,6 @@ impl StatusPanel {
         timeline: &Timeline,
         approvals: &ApprovalPanel,
     ) {
-        let popup = centered_rect(76, 58, area);
-
         let running = timeline
             .tool_calls
             .iter()
@@ -123,7 +119,7 @@ impl StatusPanel {
         }
 
         let spec = PaneSpec::new("status").hints("Esc close").focused(true);
-        if let Some(areas) = render_pane(frame, popup, &spec, view.theme) {
+        if let Some(areas) = render_pane(frame, area, &spec, view.theme) {
             frame.render_widget(Paragraph::new(lines), areas.content);
         }
     }

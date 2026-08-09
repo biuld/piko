@@ -122,6 +122,7 @@ pub struct AppState {
     pub agent_timelines: HashMap<String, Timeline>,
     pub approvals: ApprovalPanel,
     pub mcp: crate::features::mcp::McpPanel,
+    pub processes: crate::features::processes::ProcessPanel,
     pub diagnostics: crate::features::diagnostics::DiagnosticsPanel,
     /// Last known turn id for `/diff` when no turn is actively running.
     pub last_turn_id: Option<String>,
@@ -135,6 +136,8 @@ pub struct AppState {
     pub tree: TreePanel,
     pub summary_prompt: Option<InteractiveWorkflow>,
     pub auth_selector: AuthSelector,
+    /// True while the Tree surface is choosing a branch point for `/fork`.
+    pub tree_fork_mode: bool,
 
     // agent panel (multi-agent switching)
     pub agent_panel: AgentPanelState,

@@ -8,7 +8,6 @@ pub enum KeyAction {
     NewLine,
     Sessions,
     SessionTree,
-    Commands,
     Settings,
     Status,
     ApprovalAccept,
@@ -369,7 +368,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "tui.timeline.jumpLatest" => KeyAction::TimelineLatest,
 
         "app.session.tree" => KeyAction::SessionTree,
-        "app.commands" => KeyAction::Commands,
         "app.settings" => KeyAction::Settings,
         "app.status" => KeyAction::Status,
         "app.notifications.clear" => KeyAction::ClearNotifications,

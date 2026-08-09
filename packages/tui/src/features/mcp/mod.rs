@@ -6,15 +6,17 @@
 
 use piko_protocol::command::McpServerInfo;
 use piko_tui_layout::{Component, SurfacePanel};
-use ratatui::{Frame, layout::Rect, text::Line};
+use ratatui::{Frame, layout::Rect};
 
 use crate::app::HitId;
 use crate::navigation::{SelectBandBudget, SurfaceId};
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneSpec, render_pane};
-use ratatui::widgets::Paragraph;
-
-use super::centered_rect;
+use crate::ui::components::{
+    pane::PaneSpec,
+    selectable_list::{
+        ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_selectable_panel,
+    },
+};
 
 impl Component<HitId, Theme> for McpPanel {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
@@ -35,7 +37,7 @@ impl SurfacePanel<SurfaceId, HitId, Theme> for McpPanel {
 /// Read-only MCP status panel.
 #[derive(Default)]
 pub struct McpPanel {
-    servers: Vec<McpServerInfo>,
+    servers: SelectableList<McpServerInfo>,
 }
 
 impl McpPanel {
@@ -44,68 +46,74 @@ impl McpPanel {
     }
 
     pub fn set_servers(&mut self, servers: Vec<McpServerInfo>) {
-        self.servers = servers;
-    }
-
-    pub fn servers(&self) -> &[McpServerInfo] {
-        &self.servers
+        self.servers = SelectableList::new(servers);
     }
 
     pub fn connected_count(&self) -> usize {
-        self.servers.iter().filter(|s| s.connected).count()
+        self.servers.items.iter().filter(|s| s.connected).count()
     }
 
-    /// ComposerBand content-row budget (summary + one line per server).
     pub fn select_band_budget(&self) -> SelectBandBudget {
-        let body_lines = if self.servers.is_empty() {
-            2 // summary + empty hint
+        let content_rows = if self.servers.is_empty() {
+            2
         } else {
-            1 + self.servers.len() // summary + rows; overflow scrolls via tall band clamp
+            self.servers.len().min(10) as u16
         };
-        SelectBandBudget::standard_info(body_lines.min(12) as u16)
+        SelectBandBudget::standard_info(content_rows)
+    }
+
+    pub fn select_next(&mut self) {
+        self.servers.select_next("", |_| true);
+    }
+
+    pub fn select_prev(&mut self) {
+        self.servers.select_prev("", |_| true);
     }
 
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let popup = centered_rect(74, 55, area);
-
-        let mut text = vec![Line::from(format!(
-            "{} server(s) configured",
-            self.servers.len()
-        ))];
-        let lines = server_lines(&self.servers);
-        if lines.is_empty() {
-            text.push(Line::from(
-                "  (no MCP servers configured — see [[mcp-servers]] in settings)",
-            ));
+        let items = server_items(&self.servers.items);
+        let body = if items.is_empty() {
+            SelectablePanelBody::Message(ratatui::widgets::Paragraph::new(
+                "No MCP servers configured — see [[mcp-servers]] in settings.",
+            ))
         } else {
-            text.extend(lines);
-        }
-
+            SelectablePanelBody::Columns {
+                items: &items,
+                selected: self.servers.selected,
+                widths: None,
+            }
+        };
         let spec = PaneSpec::new("MCP servers")
-            .hints("Esc close")
+            .hints("↑/↓ browse · Esc close")
             .focused(true);
-        if let Some(areas) = render_pane(frame, popup, &spec, theme) {
-            frame.render_widget(Paragraph::new(text), areas.content);
-        }
+        let _ = paint_selectable_panel(frame, area, theme, &spec, body);
     }
 }
 
 /// Build one display line per server; separated for unit testing.
-fn server_lines(servers: &[McpServerInfo]) -> Vec<Line<'_>> {
+fn server_items(servers: &[McpServerInfo]) -> Vec<SelectableItem> {
     servers
         .iter()
         .map(|server| {
             if server.connected {
-                Line::from(format!(
-                    "  {}  connected  {} tools · {} resources · {} templates",
-                    server.name, server.tool_count, server.resource_count, server.template_count
-                ))
+                SelectableItem::columns([
+                    ColumnCell::primary(server.name.clone()),
+                    ColumnCell::secondary("connected"),
+                    ColumnCell::secondary(format!("{} tools", server.tool_count)),
+                    ColumnCell::secondary(format!("{} resources", server.resource_count)),
+                    ColumnCell::secondary(format!("{} templates", server.template_count)),
+                ])
             } else {
-                Line::from(format!(
-                    "  {}  disconnected: {}",
-                    server.name,
-                    server.error.as_deref().unwrap_or("unknown error")
-                ))
+                SelectableItem::columns([
+                    ColumnCell::primary(server.name.clone()),
+                    ColumnCell::secondary("disconnected"),
+                    ColumnCell::secondary(
+                        server
+                            .error
+                            .clone()
+                            .unwrap_or_else(|| "unknown error".into()),
+                    ),
+                ])
             }
         })
         .collect()
@@ -129,8 +137,8 @@ mod tests {
     #[test]
     fn connected_server_line_renders_counts() {
         let servers = [info("github", true, None)];
-        let lines = server_lines(&servers);
-        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let lines = server_items(&servers);
+        let text = format!("{} {}", lines[0].primary, lines[0].detail);
         assert!(text.contains("github"));
         assert!(text.contains("connected"));
         assert!(text.contains("3 tools"));
@@ -139,8 +147,8 @@ mod tests {
     #[test]
     fn disconnected_server_line_shows_error() {
         let servers = [info("slack", false, Some("timeout"))];
-        let lines = server_lines(&servers);
-        let text: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let lines = server_items(&servers);
+        let text = format!("{} {}", lines[0].primary, lines[0].detail);
         assert!(text.contains("disconnected"));
         assert!(text.contains("timeout"));
     }
@@ -154,6 +162,9 @@ mod tests {
             info("c", true, None),
         ]);
         assert_eq!(panel.connected_count(), 2);
-        assert_eq!(panel.servers().len(), 3);
+        panel.select_next();
+        assert_eq!(panel.servers.selected, 1);
+        panel.select_prev();
+        assert_eq!(panel.servers.selected, 0);
     }
 }

@@ -78,10 +78,9 @@ This keeps root `dispatch` as a delegator. Domain handlers may still call shared
 helpers when behavior crosses panels, but new feature behavior should not grow a
 flat `Action::Everything` list.
 
-Command catalog entries are translated through
-`action_for_command_catalog(...)` before dispatch. Palette and slash command
-handling should reuse that translation table and only keep source-specific
-argument parsing or palette-only behavior locally.
+Command catalog entries are translated before dispatch. Slash command handling
+keeps only text-specific argument parsing locally and reuses the shared action
+mapping for activation.
 
 ## Effects
 

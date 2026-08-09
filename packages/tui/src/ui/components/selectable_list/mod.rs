@@ -29,7 +29,7 @@ pub enum SelectableRowLayout {
     /// Primary line + detail line underneath (menus, long descriptions).
     #[default]
     Stacked,
-    /// Multi-column single line (command palette, model picker, file browser).
+    /// Multi-column single line (slash suggestions, model picker, file browser).
     Columns,
     /// Settings catalog row: `▸ key …… value [badge] >` (selected via bg, no caret).
     SettingsRow,

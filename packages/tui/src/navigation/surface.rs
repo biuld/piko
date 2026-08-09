@@ -24,6 +24,7 @@ pub enum SurfaceId {
     Settings,
     Status,
     Mcp,
+    Processes,
     Diagnostics,
     Approval,
     ToolInteraction,
@@ -41,28 +42,29 @@ pub enum SurfaceIntent {
     /// Blocking prompt that replaces the composer dock (approval, tool
     /// interaction).
     Dock,
-    /// Centered dialog (settings).
+    /// Centered dialog.
     Modal,
 }
 
 impl SurfaceId {
     pub fn intent(self) -> SurfaceIntent {
         match self {
-            Self::Sessions
-            | Self::Tree
-            | Self::Status
-            | Self::Diagnostics
-            | Self::SummaryPrompt => SurfaceIntent::Browse,
+            Self::Sessions | Self::Tree | Self::Diagnostics | Self::SummaryPrompt => {
+                SurfaceIntent::Browse
+            }
 
             // Session agent picker (viewed-agent switch) sits near the composer,
             // same as Models / Thinking / Auth.
-            Self::Agents | Self::Mcp | Self::Models | Self::Thinking | Self::AuthSelector => {
-                SurfaceIntent::Select
-            }
+            Self::Agents
+            | Self::Models
+            | Self::Thinking
+            | Self::AuthSelector
+            | Self::Mcp
+            | Self::Processes => SurfaceIntent::Select,
 
             Self::Approval | Self::ToolInteraction => SurfaceIntent::Dock,
 
-            Self::Settings => SurfaceIntent::Modal,
+            Self::Settings | Self::Status => SurfaceIntent::Modal,
         }
     }
 

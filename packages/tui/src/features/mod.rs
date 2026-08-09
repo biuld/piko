@@ -8,6 +8,7 @@ pub mod editor;
 pub mod mcp;
 pub mod model_selector;
 pub mod notifications;
+pub mod processes;
 pub mod session_list;
 pub mod settings;
 pub mod status;

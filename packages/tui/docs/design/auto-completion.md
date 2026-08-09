@@ -29,7 +29,7 @@ This design establishes:
                          │                │
                          ▼                ▼
              ┌───────────────────┐┌───────────────────┐
-             │  CommandPalette   ││    FileBrowser    │
+             │  SlashCommands    ││    FileBrowser    │
              │    (Slash /)      ││     (File @)      │
              └───────────────────┘└───────────────────┘
 ```
@@ -44,7 +44,7 @@ This design establishes:
 We organize code under `packages/tui/src/features/auto_completion/`:
 * `mod.rs`: Defines the `AutoComplete` controller, `CompletionRow`, `CompletionCell`, and integration logic.
 * `provider.rs`: Defines the `AutoCompleteProvider` trait and enum result types.
-* `command_palette.rs`: Implements `AutoCompleteProvider` for slash commands.
+* `slash_commands.rs`: Implements `AutoCompleteProvider` for slash commands.
 * `file_browser.rs`: Implements `AutoCompleteProvider` for local file system browsing.
 
 ## Types and Trait Specifications

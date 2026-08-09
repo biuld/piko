@@ -7,7 +7,7 @@ slash commands, and trigger autocompletions. It sits in the lower portion of the
 Chat layout, between the AgentPanel/NotificationRow and the BottomBar.
 
 The Editor is the **default focus owner**: when no overlay panel is active, all
-keystrokes flow here. Partial overlays (model selector, command palette, etc.)
+keystrokes flow here. Partial overlays (model selector, auth selector, etc.)
 temporarily replace the Editor's slot — the Editor is not hidden behind a
 panel, it is structurally absent during overlay sessions. When the overlay
 closes, the Editor reappears with its content preserved.
@@ -101,7 +101,9 @@ while typing.
 
 ### Slash command completion (`/`)
 
-Typing `/` followed by one or more characters activates the **Command Palette** auto-completion. This lists matching slash commands retrieved from `hostd`.
+Typing `/` followed by one or more characters activates **slash suggestions**.
+This is the sole command-discovery entry point and lists matching commands
+from the merged local and host-advertised catalog.
 
 ### File path completion (`@`)
 
@@ -112,7 +114,7 @@ Typing `@` followed by characters activates the **File Browser** auto-completion
 
 ### Completion UI
 
-Suggestions appear in workspace `Region::Suggest` (directly above the Editor), with Minimal pane chrome. The header uses the provider label (`command palette` / `file browser`); selection counter is a title affix. Column outputs (command descriptions or file sizes) align consistently.
+Suggestions appear in workspace `Region::Suggest` (directly above the Editor), with Minimal pane chrome. The header uses the provider label (`slash commands` / `file browser`); selection counter is a title affix. Column outputs (command descriptions or file sizes) align consistently.
 
 ### Completion navigation and acceptance
 
@@ -148,7 +150,6 @@ Editor has focus (no overlay active):
 | Ctrl+E | Next history entry |
 | F2 | Open session tree |
 | F3 | Open model selector |
-| Ctrl+K | Open command palette |
 
 ### Quit
 
@@ -204,7 +205,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 
 ## Behavior when overlays are active
 
-- **Partial overlay** (Model Selector, Command Palette, etc.): the
+- **Partial overlay** (Model Selector, Auth Selector, etc.): the
   Editor is replaced by the overlay. Keystrokes go to the overlay, not the
   Editor. Editor content is preserved and restored when the overlay closes.
 - **Full overlay** (Session List, Tree, Status): the Editor is replaced

@@ -63,13 +63,6 @@ pub fn command_catalog() -> Vec<HostCommandDescriptor> {
             },
             HostCommandGroup::Session,
         ),
-        item(
-            "session.export",
-            "Export session",
-            "Get the file path of the current session",
-            Immediate,
-            HostCommandGroup::Session,
-        ),
         // ── Auth ─────────────────────────────────────────────────────────
         item(
             "auth.login",
@@ -231,5 +224,6 @@ mod tests {
         assert!(catalog.iter().any(|c| c.id == "mcp.status"));
         assert!(catalog.iter().any(|c| c.id == "process.list"));
         assert!(catalog.iter().any(|c| c.id == "process.stop"));
+        assert!(!catalog.iter().any(|c| c.id == "session.export"));
     }
 }

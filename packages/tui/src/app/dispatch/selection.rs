@@ -15,6 +15,8 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
+            Some(SurfaceId::Mcp) => self.mcp.select_next(),
+            Some(SurfaceId::Processes) => self.processes.select_next(),
             _ => {}
         }
     }
@@ -29,6 +31,8 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
+            Some(SurfaceId::Mcp) => self.mcp.select_prev(),
+            Some(SurfaceId::Processes) => self.processes.select_prev(),
             _ => {}
         }
     }
@@ -95,6 +99,10 @@ impl AppState {
             AppMode::Surface(SurfaceId::Tree) if self.tree.label_editor.is_some() => {
                 self.tree.cancel_label_edit();
             }
+            AppMode::Surface(SurfaceId::Tree) if self.tree_fork_mode => {
+                self.tree_fork_mode = false;
+                self.pop_focus();
+            }
             AppMode::Surface(SurfaceId::ToolInteraction) => {
                 if let Some(interaction) = self.interactions.front_mut()
                     && interaction.workflow.input_active()
@@ -106,6 +114,11 @@ impl AppState {
             }
             AppMode::Surface(SurfaceId::Settings) => {
                 if !self.settings.pop() {
+                    self.pop_focus();
+                }
+            }
+            AppMode::Surface(SurfaceId::Processes) => {
+                if !self.processes.cancel_confirmation() {
                     self.pop_focus();
                 }
             }
@@ -214,6 +227,11 @@ impl AppState {
         }
 
         match self.mode.as_surface() {
+            Some(SurfaceId::Tree) if self.tree_fork_mode => {
+                let entry_id = self.tree.selected_filtered_entry_id();
+                self.tree_fork_mode = false;
+                self.fork_session(entry_id)
+            }
             Some(SurfaceId::Tree) => self.confirm_tree_entry(),
             Some(SurfaceId::Sessions) => self.open_selected_session(),
             Some(SurfaceId::Agents) => self.apply_selected_agent_view(),
@@ -221,6 +239,7 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.apply_selected_thinking(),
             Some(SurfaceId::Settings) => self.apply_selected_setting(),
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
+            Some(SurfaceId::Processes) => self.confirm_process_stop(),
             Some(
                 SurfaceId::Status
                 | SurfaceId::Mcp
@@ -230,6 +249,31 @@ impl AppState {
                 | SurfaceId::SummaryPrompt,
             )
             | None => Vec::new(),
+        }
+    }
+
+    fn confirm_process_stop(&mut self) -> Vec<Effect> {
+        use crate::features::processes::ProcessConfirm;
+        match self.processes.confirm_stop() {
+            ProcessConfirm::None => {
+                self.status = "no process selected".to_string();
+                Vec::new()
+            }
+            ProcessConfirm::Armed(process_id) => {
+                self.status = format!("confirm stopping {process_id}");
+                Vec::new()
+            }
+            ProcessConfirm::Confirmed(process_id) => {
+                self.status = format!("stopping {process_id}");
+                vec![Effect::send(Command::ProcessStop {
+                    command_id: command_id(),
+                    process_id,
+                })]
+            }
+            ProcessConfirm::NotRunning(process_id) => {
+                self.status = format!("process already exited: {process_id}");
+                Vec::new()
+            }
         }
     }
 

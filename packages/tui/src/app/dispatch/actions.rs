@@ -51,29 +51,19 @@ impl AppState {
             EditorAction::HistoryNext => self.history_next(),
             EditorAction::AcceptSuggestion => self.accept_suggestion(),
             EditorAction::AcceptAndSubmitSuggestion => {
-                let keep_active = self
+                let submit_on_accept = self
                     .editor
                     .auto_complete
                     .list
                     .selected_item()
-                    .is_some_and(|item| item.keep_active);
+                    .is_some_and(|item| item.submit_on_accept);
                 self.accept_suggestion();
-                if !keep_active {
+                if submit_on_accept {
                     effects.extend(self.submit());
                 }
             }
             EditorAction::SuggestionSelectNext => self.select_suggestion_next(),
             EditorAction::SuggestionSelectPrev => self.select_suggestion_prev(),
-            EditorAction::OpenCommands => {
-                self.focus_manager.clear_to_chat();
-                self.mode = AppMode::Chat;
-                let text = self.editor.text();
-                if !text.starts_with('/') {
-                    self.editor.insert_char('/');
-                    self.refresh_suggestions();
-                }
-                self.status = "commands".to_string();
-            }
         }
         effects
     }

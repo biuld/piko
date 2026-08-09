@@ -82,7 +82,7 @@ If no overlay is visible, keys are routed to the Editor:
 - Standard character keys (plain text input).
 - Text editing & movement shortcuts (e.g. `ctrl+a` to move cursor to line start, `ctrl+e` to move cursor to line end).
 - Submission (`Enter`).
-- Global panel triggers (e.g., `ctrl+r` or `f2` to open sessions list, `f3` to open model selector, `ctrl+k` to open command palette).
+- Global panel triggers (e.g., `ctrl+r` or `f2` to open sessions list and `f3` to open model selector).
 
 ## Keymap Code Mapping Updates
 

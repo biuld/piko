@@ -171,6 +171,26 @@ mod tests {
     }
 
     #[test]
+    fn status_is_centered_modal() {
+        let body = Rect::new(0, 0, 80, 30);
+        let mut metrics = metrics();
+        metrics.centered_size = Some((60, 11));
+        let plan = solve(
+            body,
+            &compose_plane(metrics),
+            &compose_modals(Some(SurfaceId::Status), metrics, body),
+        );
+        assert!(matches!(
+            plan.layers[0].placement,
+            ModalPlacement::Centered {
+                max_width: 60,
+                max_height: 11
+            }
+        ));
+        assert!(plan.rects.contains_key(&Region::Stream));
+    }
+
+    #[test]
     fn select_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
         let plan = solve(
@@ -229,5 +249,23 @@ mod tests {
             plan.layers[0].placement,
             ModalPlacement::ComposerBand
         ));
+    }
+
+    #[test]
+    fn command_result_lists_use_composer_band() {
+        let body = Rect::new(0, 0, 80, 30);
+        for surface in [SurfaceId::Mcp, SurfaceId::Processes] {
+            let metrics = metrics_with_budget(SelectBandBudget::standard_info(4));
+            let plan = solve(
+                body,
+                &compose_plane(metrics),
+                &compose_modals(Some(surface), metrics, body),
+            );
+            assert!(matches!(
+                plan.layers[0].placement,
+                ModalPlacement::ComposerBand
+            ));
+            assert!(plan.rects.contains_key(&Region::Stream));
+        }
     }
 }

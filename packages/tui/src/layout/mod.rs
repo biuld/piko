@@ -30,6 +30,7 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
     let suggest = has_visible_suggestions(app) && modal.is_none();
     let centered_size = match modal {
         Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
+        Some(SurfaceId::Status) => Some(status_centered_size(app, body)),
         _ => None,
     };
 
@@ -48,6 +49,21 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
         select_band: modal.and_then(|s| select_band_budget(app, s)),
         centered_size,
     }
+}
+
+/// Centered size for the compact read-only status dialog.
+fn status_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let preview_rows = u16::from(app.queue_status.steer_preview.is_some())
+        .saturating_add(u16::from(app.queue_status.follow_up_preview.is_some()))
+        .saturating_mul(3);
+    let content_rows = 6u16.saturating_add(preview_rows);
+    let width = cells_from_percent(body.width, 76)
+        .clamp(40, 96)
+        .min(body.width);
+    let height = content_rows
+        .saturating_add(5)
+        .min(body.height.saturating_sub(2));
+    (width, height)
 }
 
 /// Centered size for the settings dialog: width 88% of the body, height from
@@ -72,10 +88,11 @@ fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBu
     }
     Some(match surface {
         SurfaceId::Models => app.models.select_band_budget(),
+        SurfaceId::Mcp => app.mcp.select_band_budget(),
+        SurfaceId::Processes => app.processes.select_band_budget(),
         SurfaceId::Thinking => app.thinking.select_band_budget(),
         SurfaceId::Agents => app.agent_panel.select_band_budget(),
         SurfaceId::AuthSelector => app.auth_selector.select_band_budget(),
-        SurfaceId::Mcp => app.mcp.select_band_budget(),
         // Tool interaction replaces the composer: the dock is the workflow
         // body + Standard pane chrome.
         SurfaceId::ToolInteraction => {
@@ -180,6 +197,7 @@ pub fn build_surface_hitmap(
         Region::Surface(SurfaceId::ToolInteraction) => stamp(app.interactions.hit_regions(rect)),
         Region::Surface(SurfaceId::AuthSelector) => stamp(app.auth_selector.hit_regions(rect)),
         Region::Surface(SurfaceId::Mcp) => stamp(app.mcp.hit_regions(rect)),
+        Region::Surface(SurfaceId::Processes) => stamp(app.processes.hit_regions(rect)),
     })
 }
 
@@ -309,5 +327,25 @@ mod tests {
         assert_eq!(frame.plan.layers.len(), 1);
         // Stream remains visible under the select band (not CoverBody).
         assert!(frame.plan.rects.contains_key(&Region::Stream));
+    }
+
+    #[test]
+    fn status_surface_uses_content_sized_centered_modal() {
+        let mut app = app_state();
+        app.push_surface(SurfaceId::Status);
+        let frame = compose_frame(&app, Rect::new(0, 0, 100, 30));
+        let layer = frame.plan.layers.first().expect("status layer");
+        assert!(matches!(
+            layer.placement,
+            piko_tui_layout::ModalPlacement::Centered {
+                max_width: 76,
+                max_height: 11
+            }
+        ));
+        let status = layer
+            .rects
+            .get(&Region::Surface(SurfaceId::Status))
+            .expect("status rect");
+        assert_eq!((status.width, status.height), (76, 11));
     }
 }

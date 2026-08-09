@@ -65,9 +65,11 @@ impl AppState {
                 }
             }
             SlashAction::Logout(provider_opt) => {
-                let provider = provider_opt
-                    .or_else(|| self.model.active_provider.clone())
-                    .unwrap_or_else(|| "anthropic".to_string());
+                let Some(provider) = provider_opt.or_else(|| self.model.active_provider.clone())
+                else {
+                    self.status = "usage: /logout <provider>".to_string();
+                    return effects;
+                };
                 effects.push(Effect::send(Command::AuthLogout {
                     command_id: command_id(),
                     provider: provider.clone(),
@@ -110,14 +112,6 @@ impl AppState {
             }
             SlashAction::RequestDiff => effects.extend(self.request_turn_diff()),
             SlashAction::RequestPromptDebug => effects.extend(self.request_prompt_debug()),
-            SlashAction::KillProcess(process_id) => {
-                effects.push(Effect::send(Command::ProcessStop {
-                    command_id: command_id(),
-                    process_id,
-                }));
-                self.clear_focus();
-                self.status = "stop requested".to_string();
-            }
         }
         effects
     }

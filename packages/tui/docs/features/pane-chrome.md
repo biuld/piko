@@ -70,7 +70,7 @@ Placement (Browse CoverBody vs Select ComposerBand) is **orthogonal**.
 |---------|------|-----|
 | Agents, Models, Auth menu | Minimal | Quick pick, low chrome |
 | Auth API-key form | Minimal | Short form prompt |
-| Command palette / file browser (Suggest) | Minimal + **no search** | Filter is editor token (`/` / `@`) |
+| Slash suggestions / file browser (Suggest) | Minimal + **no search** | Filter is editor token (`/` / `@`) |
 | Settings | Standard | Nested catalog + search rule + hints |
 | Sessions, Tree | Standard | Browse table / many affordances |
 | Status, MCP, Diagnostics | Standard | Read-heavy info panels |

@@ -4,9 +4,11 @@ use super::*;
 fn completion_acceptance_replaces_range() {
     let mut app = app();
     app.editor.restore_text("/res");
+    app.refresh_suggestions();
     app.dispatch(EditorAction::AcceptSuggestion.into());
-    assert_eq!(app.editor.text(), "/res");
+    assert_eq!(app.editor.text(), "/resume ");
 
+    app.editor.restore_text("/res");
     app.apply_event(Event::CommandResponse {
         result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
             commands: test_command_catalog(),
@@ -32,8 +34,8 @@ fn test_completion_cycling_fills_editor() {
         command_id: "test".into(),
     });
 
-    // Type "/q"
-    app.editor.restore_text("/q");
+    // Type a prefix that uniquely matches /quit.
+    app.editor.restore_text("/qui");
     app.refresh_suggestions();
 
     // Check suggestions: should match /quit
@@ -65,6 +67,7 @@ fn test_file_completion_inserted_as_placeholder_block() {
                 end: 2,
                 cells: vec![],
                 keep_active: false,
+                submit_on_accept: false,
             },
         ]);
 
@@ -95,6 +98,7 @@ fn test_file_completion_inserted_as_placeholder_block() {
                 end: 0,
                 cells: vec![],
                 keep_active: false,
+                submit_on_accept: false,
             },
         ]);
     app.dispatch(EditorAction::AcceptSuggestion.into());
@@ -103,6 +107,49 @@ fn test_file_completion_inserted_as_placeholder_block() {
     // Get raw text (which expands references and takes the text)
     let submitted = app.editor.take_trimmed().unwrap();
     assert_eq!(submitted, "@src/main.rs");
+}
+
+#[test]
+fn enter_accepts_file_without_submitting_chat() {
+    let mut app = live_app();
+    app.editor.auto_complete.active = true;
+    app.editor.auto_complete.list =
+        crate::ui::components::selectable_list::SelectableList::new(vec![
+            crate::features::auto_completion::CompletionRow {
+                replacement: "@src/main.rs ".to_string(),
+                start: 0,
+                end: 0,
+                cells: vec![],
+                keep_active: false,
+                submit_on_accept: false,
+            },
+        ]);
+    let effects = app.dispatch(EditorAction::AcceptAndSubmitSuggestion.into());
+    assert!(effects.is_empty());
+    assert_eq!(app.editor.text(), "[@src/main.rs] ");
+}
+
+#[test]
+fn enter_completes_argument_command_without_running_it() {
+    let mut app = live_app();
+    app.apply_event(Event::CommandResponse {
+        result: Ok(piko_protocol::CommandResult::CommandCatalogListed {
+            commands: vec![HostCommandDescriptor {
+                id: "session.rename".into(),
+                title: "Rename session".into(),
+                detail: "Set a new name".into(),
+                invoke: HostCommandInvoke::Args { schema: Vec::new() },
+                group: Some(HostCommandGroup::Session),
+            }],
+            timestamp: 0,
+        }),
+        command_id: "catalog".into(),
+    });
+    app.editor.restore_text("/rena");
+    app.refresh_suggestions();
+    let effects = app.dispatch(EditorAction::AcceptAndSubmitSuggestion.into());
+    assert!(effects.is_empty());
+    assert_eq!(app.editor.text(), "/rename ");
 }
 
 #[test]
