@@ -1,4 +1,4 @@
-// ---- FauxProvider — mock LlmGateway for tests ----
+// ---- FauxProvider — mock InferenceGateway for tests ----
 //
 // Mirrors the TS FauxProvider pattern. Returns canned responses without
 // requiring real API keys or network access.
@@ -10,9 +10,10 @@ use tokio::sync::Mutex;
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
-use piko_protocol::messages::{Message, Model, ToolCall, Usage};
-use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
+use piko_protocol::messages::{ToolCall, Usage};
 
 /// A canned response that the FauxProvider will emit.
 #[derive(Clone, Default)]
@@ -55,14 +56,14 @@ impl CannedResponse {
     }
 }
 
-/// A mock `LlmGateway` that returns pre-configured canned responses.
+/// A mock `InferenceGateway` that returns pre-configured canned responses.
 ///
 /// Responses are consumed from an internal queue — you push them before
 /// the test and they're returned in order.
 pub struct FauxProvider {
     responses: Arc<Mutex<Vec<CannedResponse>>>,
     call_count: Arc<Mutex<u32>>,
-    requests: Arc<Mutex<Vec<ModelRequest>>>,
+    requests: Arc<Mutex<Vec<InferenceRequest>>>,
 }
 
 impl FauxProvider {
@@ -90,7 +91,7 @@ impl FauxProvider {
         *self.call_count.lock().await
     }
 
-    pub async fn requests(&self) -> Vec<ModelRequest> {
+    pub async fn requests(&self) -> Vec<InferenceRequest> {
         self.requests.lock().await.clone()
     }
 }
@@ -102,15 +103,15 @@ impl Default for FauxProvider {
 }
 
 #[async_trait]
-impl LlmGateway for FauxProvider {
-    async fn execute(
+impl InferenceGateway for FauxProvider {
+    async fn start(
         &self,
-        req: ModelRequest,
+        req: InferenceRequest,
         cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
+    ) -> Result<InferenceExecution, InferenceError> {
         // Check cancellation
         if cancel.is_cancelled() {
-            return Err(GatewayError::cancelled("faux"));
+            return Err(InferenceError::cancelled("faux"));
         }
 
         // Increment call count
@@ -131,19 +132,19 @@ impl LlmGateway for FauxProvider {
         };
         if canned.wait_for_cancel {
             cancel.cancelled().await;
-            return Err(GatewayError::cancelled("faux"));
+            return Err(InferenceError::cancelled("faux"));
         }
 
         // Build the sequence of gateway events from the canned response
-        let events: Vec<ModelEvent> = {
+        let events: Vec<InferenceEvent> = {
             let mut evs = Vec::new();
 
             // Content delta for text
             if !canned.text.is_empty() {
-                evs.push(ModelEvent::text(canned.text.clone()));
+                evs.push(InferenceEvent::text(canned.text.clone()));
             }
             for call in &canned.tool_calls {
-                evs.push(ModelEvent::function_call(
+                evs.push(InferenceEvent::function_call(
                     call.id.clone(),
                     call.name.clone(),
                     serde_json::to_string(&call.arguments).unwrap_or_default(),
@@ -151,44 +152,18 @@ impl LlmGateway for FauxProvider {
             }
 
             // Usage (empty for faux)
-            evs.push(ModelEvent::Usage(Usage::empty()));
-            evs.push(ModelEvent::output_metadata());
-
+            evs.push(InferenceEvent::Usage(Usage::empty()));
             // Done
             let stop = canned.stop_reason.clone().unwrap_or_else(|| "stop".into());
-            evs.push(ModelEvent::completed(stop));
+            evs.push(InferenceEvent::completed(stop));
 
             evs
         };
 
         let stream = iter(events);
-        Ok(Box::pin(stream))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
-        let canned = {
-            let mut responses = self.responses.lock().await;
-            if responses.is_empty() {
-                CannedResponse::text("No responses queued".to_string())
-            } else {
-                responses.remove(0)
-            }
-        };
-        Ok(canned.text)
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities {
-            supports_tools: false,
-            supports_sandbox: false,
-            supports_mcp: false,
-            tools: Vec::new(),
-        }
+        Ok(InferenceExecution {
+            events: Box::pin(stream),
+            handle: None,
+        })
     }
 }

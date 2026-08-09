@@ -12,7 +12,7 @@ use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::adapters::tools::workspace_provider::WorkspaceToolProvider;
 use crate::domain::model::step::ModelConfig;
-use crate::ports::model_gateway::LlmGateway;
+use crate::ports::model_gateway::InferenceGateway;
 use crate::runtime::utils::{load_role_sandbox_policies, load_sandbox_policy};
 use piko_orchd_api::telemetry::RuntimeTelemetry;
 
@@ -20,7 +20,10 @@ use super::AgentExecutionRuntime;
 
 impl AgentExecutionRuntime {
     /// Build an Execution runtime with workspace/todo tools and configured agents.
-    pub async fn bootstrap(model_executor: Arc<dyn LlmGateway>, config: OrchdConfig) -> Arc<Self> {
+    pub async fn bootstrap(
+        model_executor: Arc<dyn InferenceGateway>,
+        config: OrchdConfig,
+    ) -> Arc<Self> {
         Self::bootstrap_with_telemetry(
             model_executor,
             config,
@@ -31,7 +34,7 @@ impl AgentExecutionRuntime {
 
     /// Like [`bootstrap`], with a hostd-provided telemetry sink for metrics.
     pub async fn bootstrap_with_telemetry(
-        model_executor: Arc<dyn LlmGateway>,
+        model_executor: Arc<dyn InferenceGateway>,
         config: OrchdConfig,
         telemetry: Arc<dyn RuntimeTelemetry>,
     ) -> Arc<Self> {
@@ -46,12 +49,10 @@ impl AgentExecutionRuntime {
                 id: config.default_model.model_id.clone(),
                 name: config.default_model.model_id.clone(),
                 provider: config.default_model.provider.clone(),
-                base_url: None,
             };
             Some(OrchModelConfig {
                 model,
                 settings: config.default_settings.clone(),
-                thinking_level_map: config.thinking_level_map.clone(),
             })
         };
 
@@ -64,7 +65,6 @@ impl AgentExecutionRuntime {
                         provider: c.model.provider.clone(),
                     },
                     settings: c.settings,
-                    thinking_level_map: c.thinking_level_map,
                     context_window: config.default_model.context_window,
                     max_output_tokens: config.default_model.max_output_tokens,
                     max_tool_output_tokens: config.transcript_max_tool_output_tokens,

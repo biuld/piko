@@ -5,27 +5,13 @@ async fn new_context_window_mode_rewrites_without_calling_the_model() {
     struct PanicGateway;
 
     #[async_trait]
-    impl LlmGateway for PanicGateway {
-        async fn execute(
+    impl InferenceGateway for PanicGateway {
+        async fn start(
             &self,
-            _req: ModelRequest,
+            _req: InferenceRequest,
             _cancel: CancellationToken,
-        ) -> Result<ModelEventStream, GatewayError> {
-            Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "panic", "execute", "not used"))
-        }
-
-        async fn llm_call(
-            &self,
-            _model: Model,
-            _system_prompt: Option<String>,
-            _messages: Vec<Message>,
-            _settings: ModelRunSettings,
-        ) -> Result<String, String> {
+        ) -> Result<InferenceExecution, InferenceError> {
             panic!("new-context-window compaction must not call the model")
-        }
-
-        fn capabilities(&self) -> ModelCapabilities {
-            ModelCapabilities::default()
         }
     }
 

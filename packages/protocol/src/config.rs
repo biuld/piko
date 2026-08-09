@@ -154,14 +154,6 @@ pub struct OrchdConfig {
     #[serde(default)]
     pub runtime: OrchestratorRuntimeConfig,
 
-    /// Per-model thinking level mapping (from model catalog).
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "thinkingLevelMap"
-    )]
-    pub thinking_level_map: super::model::ThinkingLevelMap,
-
     /// Sandbox policy configuration.
     #[serde(default)]
     pub sandbox: SandboxConfig,
@@ -198,7 +190,6 @@ impl Default for OrchdConfig {
             },
             default_settings: ModelRunSettings::default(),
             runtime: OrchestratorRuntimeConfig::default(),
-            thinking_level_map: None,
             sandbox: SandboxConfig::default(),
             transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
             features: None,

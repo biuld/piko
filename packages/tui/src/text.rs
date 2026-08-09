@@ -28,6 +28,7 @@ fn assistant_content_block_to_text(block: &ContentBlock) -> Option<String> {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
         ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
+        other => Some(other.text_projection()),
     }
 }
 
@@ -59,5 +60,6 @@ fn content_block_to_text(block: &ContentBlock) -> Option<String> {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(format!("[thinking] {thinking}")),
         ContentBlock::Image { mime_type, .. } => Some(format!("[image {mime_type}]")),
+        other => Some(other.text_projection()),
     }
 }

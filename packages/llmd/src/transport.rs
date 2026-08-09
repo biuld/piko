@@ -5,7 +5,7 @@ use futures::{Stream, StreamExt};
 use reqwest::{Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
-use crate::gateway::{ErrorClass, GatewayError};
+use crate::gateway::{ErrorClass, InferenceError};
 use crate::target::ModelTarget;
 
 const MAX_ERROR_BODY: usize = 16 * 1024;
@@ -24,7 +24,7 @@ pub async fn send(
     body: &serde_json::Value,
     stream: bool,
     cancel: &CancellationToken,
-) -> Result<Response, GatewayError> {
+) -> Result<Response, InferenceError> {
     let request = client
         .post(target.endpoint.clone())
         .headers(target.headers.clone())
@@ -39,7 +39,7 @@ pub async fn send(
         )
         .json(body);
     let response = tokio::select! {
-        _ = cancel.cancelled() => return Err(GatewayError::cancelled(&target.id)),
+        _ = cancel.cancelled() => return Err(InferenceError::cancelled(&target.id)),
         result = request.send() => result.map_err(|error| transport_error(target, error))?,
     };
     if response.status().is_success() {
@@ -52,10 +52,10 @@ pub async fn json(
     response: Response,
     target: &ModelTarget,
     cancel: &CancellationToken,
-) -> Result<serde_json::Value, GatewayError> {
+) -> Result<serde_json::Value, InferenceError> {
     let bytes = read_bounded(response, MAX_JSON_BODY, target, cancel).await?;
     serde_json::from_slice(&bytes).map_err(|error| {
-        GatewayError::new(
+        InferenceError::new(
             ErrorClass::Protocol,
             &target.id,
             "decode_json",
@@ -68,14 +68,14 @@ pub fn sse(
     response: Response,
     target: String,
     cancel: CancellationToken,
-) -> Pin<Box<dyn Stream<Item = Result<SseMessage, GatewayError>> + Send>> {
+) -> Pin<Box<dyn Stream<Item = Result<SseMessage, InferenceError>> + Send>> {
     Box::pin(stream! {
         let mut source = response.bytes_stream();
         let mut decoder = SseDecoder::new(target.clone());
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => {
-                    yield Err(GatewayError::cancelled(&target));
+                    yield Err(InferenceError::cancelled(&target));
                     return;
                 }
                 next = source.next() => next,
@@ -119,7 +119,7 @@ impl SseDecoder {
         }
     }
 
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseMessage>, GatewayError> {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<SseMessage>, InferenceError> {
         self.bytes.extend_from_slice(bytes);
         if self.bytes.len() > MAX_SSE_EVENT {
             return Err(self.error("SSE event exceeds size limit"));
@@ -140,7 +140,7 @@ impl SseDecoder {
         Ok(messages)
     }
 
-    fn line(&mut self, line: &str) -> Result<Option<SseMessage>, GatewayError> {
+    fn line(&mut self, line: &str) -> Result<Option<SseMessage>, InferenceError> {
         if line.is_empty() {
             if self.data.is_empty() {
                 return Ok(None);
@@ -168,7 +168,7 @@ impl SseDecoder {
         Ok(None)
     }
 
-    fn finish(&mut self) -> Result<Vec<SseMessage>, GatewayError> {
+    fn finish(&mut self) -> Result<Vec<SseMessage>, InferenceError> {
         let mut messages = Vec::new();
         if !self.bytes.is_empty() {
             let line = String::from_utf8(std::mem::take(&mut self.bytes))
@@ -188,22 +188,22 @@ impl SseDecoder {
         Ok(messages)
     }
 
-    fn error(&self, message: impl Into<String>) -> GatewayError {
-        GatewayError::new(ErrorClass::Sse, &self.target, "decode_sse", message)
+    fn error(&self, message: impl Into<String>) -> InferenceError {
+        InferenceError::new(ErrorClass::Sse, &self.target, "decode_sse", message)
     }
 }
 
-fn transport_error(target: &ModelTarget, error: reqwest::Error) -> GatewayError {
+fn transport_error(target: &ModelTarget, error: reqwest::Error) -> InferenceError {
     transport_error_for(&target.id, error)
 }
 
-fn transport_error_for(target: &str, error: reqwest::Error) -> GatewayError {
+fn transport_error_for(target: &str, error: reqwest::Error) -> InferenceError {
     let class = if error.is_timeout() {
         ErrorClass::Timeout
     } else {
         ErrorClass::Transport
     };
-    GatewayError::new(class, target, "http", error.to_string())
+    InferenceError::new(class, target, "http", error.to_string())
 }
 
 async fn read_bounded(
@@ -211,18 +211,18 @@ async fn read_bounded(
     limit: usize,
     target: &ModelTarget,
     cancel: &CancellationToken,
-) -> Result<Vec<u8>, GatewayError> {
+) -> Result<Vec<u8>, InferenceError> {
     let mut source = response.bytes_stream();
     let mut bytes = Vec::new();
     loop {
         let next = tokio::select! {
-            _ = cancel.cancelled() => return Err(GatewayError::cancelled(&target.id)),
+            _ = cancel.cancelled() => return Err(InferenceError::cancelled(&target.id)),
             next = source.next() => next,
         };
         match next {
             Some(Ok(chunk)) => {
                 if bytes.len().saturating_add(chunk.len()) > limit {
-                    return Err(GatewayError::new(
+                    return Err(InferenceError::new(
                         ErrorClass::Protocol,
                         &target.id,
                         "read_body",
@@ -241,7 +241,7 @@ async fn upstream_error(
     target: &ModelTarget,
     response: Response,
     cancel: &CancellationToken,
-) -> GatewayError {
+) -> InferenceError {
     let status = response.status();
     let request_id = response
         .headers()
@@ -278,7 +278,7 @@ async fn upstream_error(
         StatusCode::TOO_MANY_REQUESTS => ErrorClass::RateLimit,
         _ => ErrorClass::Upstream,
     };
-    let mut error = GatewayError::new(class, &target.id, "http", message);
+    let mut error = InferenceError::new(class, &target.id, "http", message);
     error.status = Some(status.as_u16());
     error.request_id = request_id;
     error.retry_after_ms = retry_after_ms;

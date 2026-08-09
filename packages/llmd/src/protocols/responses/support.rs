@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::gateway::{ErrorClass, GatewayError, ModelOutputMetadata};
-use crate::modeling::ProtocolKind;
+use crate::checkpoint::AdapterCheckpoint;
+use crate::gateway::{ErrorClass, InferenceError, InferenceRequest};
 use crate::target::ModelTarget;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,15 +20,17 @@ pub(super) struct ResponsesContinuation {
     pub encrypted_reasoning: Vec<EncryptedReasoningItem>,
 }
 
+pub(super) struct ResponsesCheckpointOutput {
+    pub continuation: ResponsesContinuation,
+    pub assistant_reasoning: String,
+    pub assistant_text: String,
+}
+
 pub(super) fn decode_continuation(
-    envelope: &piko_protocol::ModelContinuation,
+    checkpoint: &AdapterCheckpoint,
     target: &ModelTarget,
-) -> Result<Option<ResponsesContinuation>, GatewayError> {
-    if envelope.adapter != ProtocolKind::Responses.adapter_id() {
-        return Ok(None);
-    }
-    serde_json::from_value(envelope.state.clone())
-        .map(Some)
+) -> Result<ResponsesContinuation, InferenceError> {
+    serde_json::from_value(checkpoint.payload.clone())
         .map_err(|error| protocol(target, format!("invalid Responses continuation: {error}")))
 }
 
@@ -36,8 +38,25 @@ pub(super) fn string(value: &Value, field: &str) -> Option<String> {
     value.get(field).and_then(Value::as_str).map(str::to_owned)
 }
 
-pub(super) fn protocol(target: &ModelTarget, message: impl Into<String>) -> GatewayError {
-    GatewayError::new(
+pub(super) fn decode_usage(value: &Value) -> piko_protocol::Usage {
+    crate::protocols::usage(
+        value
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        value
+            .get("output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        value
+            .pointer("/input_tokens_details/cached_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    )
+}
+
+pub(super) fn protocol(target: &ModelTarget, message: impl Into<String>) -> InferenceError {
+    InferenceError::new(
         ErrorClass::Protocol,
         &target.id,
         "decode_responses",
@@ -45,23 +64,20 @@ pub(super) fn protocol(target: &ModelTarget, message: impl Into<String>) -> Gate
     )
 }
 
-pub(super) fn output_metadata(
-    response_id: String,
-    output_item_ids: Vec<String>,
-    call_ids: Vec<String>,
-    encrypted_reasoning: Vec<EncryptedReasoningItem>,
-) -> ModelOutputMetadata {
-    let state = serde_json::to_value(ResponsesContinuation {
-        response_id,
-        output_item_ids,
-        call_ids,
-        encrypted_reasoning,
-    })
-    .expect("Responses continuation contains only serializable values");
-    ModelOutputMetadata {
-        continuation: Some(piko_protocol::ModelContinuation {
-            adapter: ProtocolKind::Responses.adapter_id().into(),
-            state,
-        }),
-    }
+pub(super) fn output_checkpoint(
+    request: &InferenceRequest,
+    target: &ModelTarget,
+    output: ResponsesCheckpointOutput,
+) -> Result<piko_protocol::OpaqueModelCheckpoint, InferenceError> {
+    let state = serde_json::to_value(output.continuation)
+        .expect("Responses continuation contains only serializable values");
+    crate::checkpoint::encode(
+        target,
+        &request.conversation,
+        crate::checkpoint::assistant_output_digest(
+            &output.assistant_reasoning,
+            &output.assistant_text,
+        ),
+        state,
+    )
 }

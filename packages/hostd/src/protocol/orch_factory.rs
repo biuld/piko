@@ -5,7 +5,7 @@ use crate::domain::config::{HostSettings, ModelRegistry};
 use crate::domain::sessions::SessionModelRef;
 use crate::ports::AgentRunRunner;
 use piko_llmd::auth::AuthStorage;
-use piko_llmd::gateway::LlmGateway;
+use piko_llmd::gateway::InferenceGateway;
 
 /// Build an OrchAgentRunRunner and return both the runner and the model executor (if available).
 pub(crate) async fn build_orch_turn_runner(
@@ -13,7 +13,7 @@ pub(crate) async fn build_orch_turn_runner(
 ) -> Result<
     (
         Arc<dyn AgentRunRunner>,
-        Option<Arc<dyn LlmGateway>>,
+        Option<Arc<dyn InferenceGateway>>,
         Option<SessionModelRef>,
     ),
     String,
@@ -55,14 +55,36 @@ pub(crate) async fn build_orch_turn_runner(
                     .model
                     .input
                     .contains(&piko_protocol::model::InputModality::Image),
-                tools: true,
+                tools: resolved
+                    .model
+                    .tool_execution_loci
+                    .contains(&piko_protocol::model::ToolExecutionLocus::Caller),
                 reasoning: resolved.model.reasoning,
+                reasoning_efforts: resolved.model.reasoning_efforts.iter().cloned().collect(),
                 refusals: true,
+                hosted_tools: Default::default(),
+                hybrid_tools: resolved
+                    .model
+                    .tool_execution_loci
+                    .contains(&piko_protocol::model::ToolExecutionLocus::Hybrid),
+                parallel_tools: resolved.model.parallel_tool_calls,
+                structured_json_schema: resolved.model.structured_output,
+                streaming_delivery: resolved
+                    .model
+                    .delivery_modes
+                    .contains(&piko_protocol::model::InferenceDeliveryMode::Streaming),
+                assembled_delivery: resolved
+                    .model
+                    .delivery_modes
+                    .contains(&piko_protocol::model::InferenceDeliveryMode::Assembled),
+                max_output_tokens: Some(resolved.model.max_tokens.min(u32::MAX as u64) as u32),
+                ..Default::default()
             }),
             base_url: Some(target.base_url.clone()),
             endpoint: None,
             headers: None,
             streaming_fallback: true,
+            reasoning_effort_map: target.reasoning_effort_map.clone(),
         },
     );
     let retry_config = piko_protocol::config::RetryConfig {
@@ -109,14 +131,12 @@ pub(crate) async fn build_orch_turn_runner(
         auth_resolver,
     );
     let thinking = settings.default_thinking_level.clone();
-    let thinking_map = resolved.model.thinking_level_map.clone();
     let runner = Arc::new(
         OrchAgentRunRunner::new_with_mcp(
             executor.clone(),
             &resolved.provider,
             &resolved.model.id,
             thinking,
-            thinking_map,
             resolved.model.context_window,
             resolved.model.max_tokens,
             &settings.mcp_servers,

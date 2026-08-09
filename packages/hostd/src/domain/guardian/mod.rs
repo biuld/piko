@@ -12,7 +12,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use piko_llmd::gateway::LlmGateway;
+use piko_llmd::gateway::{
+    InferenceGateway, InferenceItem, InferenceRequest, InvocationContext, ModelRef,
+    collect_execution,
+};
 use piko_protocol::messages::Message;
 
 use crate::api::SessionTreeEntry;
@@ -171,7 +174,7 @@ pub type GuardianReviewCallback = Arc<
 /// Run the bounded guardian model call (compaction-summarizer pattern).
 /// Returns the raw model text; the caller parses it with `parse_decision`.
 pub async fn run_review(
-    model_executor: Arc<dyn LlmGateway>,
+    model_executor: Arc<dyn InferenceGateway>,
     model: piko_protocol::messages::Model,
     context: String,
     tool_name: &str,
@@ -186,14 +189,33 @@ pub async fn run_review(
         content: piko_protocol::messages::MessageContent::String(request),
         timestamp: None,
     }];
-    model_executor
-        .llm_call(
-            model,
-            Some(REVIEW_PROMPT.to_string()),
-            messages,
-            piko_protocol::model::ModelRunSettings::default(),
-        )
+    let request = InferenceRequest::text_task(
+        ModelRef::new(model.provider, model.id),
+        REVIEW_PROMPT,
+        messages,
+        InvocationContext {
+            session_id: "guardian".into(),
+            agent_instance_id: "guardian".into(),
+            run_id: "guardian".into(),
+            step_id: "review".into(),
+        },
+    );
+    let execution = model_executor
+        .start(request, tokio_util::sync::CancellationToken::new())
         .await
+        .map_err(|error| error.to_string())?;
+    let result = collect_execution(execution)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(result
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            InferenceItem::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 #[cfg(test)]

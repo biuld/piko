@@ -12,7 +12,7 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
     let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
         config,
     )
     .await;
@@ -100,11 +100,12 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
 
     // Request 2 carries the get_context_remaining result with a real estimate.
     let remaining_result = requests[1]
-        .transcript
+        .conversation
+        .items
         .iter()
-        .find_map(|message| match message {
-            Message::ToolResult {
-                tool_name: Some(name),
+        .find_map(|item| match &item.kind {
+            piko_llmd::gateway::ConversationItemKind::ToolResult {
+                name: Some(name),
                 content,
                 ..
             } if name == "get_context_remaining" => Some(content),
@@ -133,21 +134,20 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
     let last = requests.last().unwrap();
     assert!(
         matches!(
-            last.transcript.first(),
-            Some(Message::User {
+            last.conversation.items.first().map(|item| &item.kind),
+            Some(piko_llmd::gateway::ConversationItemKind::User {
                 content: MessageContent::String(text),
-                ..
             }) if text == "run"
         ),
         "fresh-window run must keep the latest user message first"
     );
     assert!(
-        last.transcript
+        last.conversation.items
             .iter()
-            .any(|message| matches!(
-                message,
-                Message::ToolResult {
-                    tool_name: Some(name),
+            .any(|item| matches!(
+                &item.kind,
+                piko_llmd::gateway::ConversationItemKind::ToolResult {
+                    name: Some(name),
                     ..
                 } if name == "new_context_window"
             )),

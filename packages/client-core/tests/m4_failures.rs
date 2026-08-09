@@ -139,7 +139,7 @@ fn m4_stale_realtime_delta_seq_ignored() {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "final".into(),
                 }],
-                continuation: None,
+                checkpoint: None,
                 provider: "test".into(),
                 model: "m".into(),
                 usage: None,

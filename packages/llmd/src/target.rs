@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use piko_protocol::model::ProviderAuthMethod;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
-use crate::gateway::{ErrorClass, GatewayError, ModelRequest};
+use crate::gateway::{ErrorClass, InferenceError, InferenceRequest};
 use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +12,23 @@ pub struct ModelCapabilities {
     pub images: bool,
     pub tools: bool,
     pub reasoning: bool,
+    pub reasoning_efforts: std::collections::BTreeSet<piko_protocol::model::ThinkingLevel>,
     pub refusals: bool,
+    pub hosted_tools: std::collections::BTreeSet<crate::capabilities::HostedToolKind>,
+    pub hybrid_tools: bool,
+    /// Internal adapter support gate, distinct from catalog discovery.
+    pub hosted_dispatch: bool,
+    pub parallel_tools: bool,
+    pub required_tool_choice: bool,
+    pub specific_tool_choice: bool,
+    pub structured_json_schema: bool,
+    pub strict_structured_output: bool,
+    pub streaming_delivery: bool,
+    pub assembled_delivery: bool,
+    pub max_output_tokens: Option<u32>,
+    /// Whether the complete semantic conversation is sufficient when no
+    /// compatible provider checkpoint can be used.
+    pub replay_safe: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +42,8 @@ pub struct ModelTargetConfig {
     pub endpoint: Option<String>,
     pub headers: Option<HashMap<String, String>>,
     pub streaming_fallback: bool,
+    pub reasoning_effort_map:
+        std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
 }
 
 impl ModelTargetConfig {
@@ -45,6 +63,7 @@ impl ModelTargetConfig {
             endpoint: None,
             headers: None,
             streaming_fallback: true,
+            reasoning_effort_map: Default::default(),
         }
     }
 }
@@ -56,7 +75,28 @@ impl Default for ModelCapabilities {
             images: true,
             tools: true,
             reasoning: true,
+            reasoning_efforts: [
+                piko_protocol::model::ThinkingLevel::Minimal,
+                piko_protocol::model::ThinkingLevel::Low,
+                piko_protocol::model::ThinkingLevel::Medium,
+                piko_protocol::model::ThinkingLevel::High,
+                piko_protocol::model::ThinkingLevel::XHigh,
+            ]
+            .into_iter()
+            .collect(),
             refusals: true,
+            hosted_tools: Default::default(),
+            hybrid_tools: false,
+            hosted_dispatch: false,
+            parallel_tools: true,
+            required_tool_choice: true,
+            specific_tool_choice: true,
+            structured_json_schema: false,
+            strict_structured_output: false,
+            streaming_delivery: true,
+            assembled_delivery: true,
+            max_output_tokens: None,
+            replay_safe: true,
         }
     }
 }
@@ -72,6 +112,8 @@ pub struct ModelTarget {
     pub headers: HeaderMap,
     pub capabilities: ModelCapabilities,
     pub streaming_fallback: bool,
+    pub reasoning_effort_map:
+        std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
 }
 
 impl ModelTarget {
@@ -80,11 +122,11 @@ impl ModelTarget {
         model: &str,
         config: &ModelTargetConfig,
         auth_headers: Option<&HashMap<String, String>>,
-    ) -> Result<Self, GatewayError> {
+    ) -> Result<Self, InferenceError> {
         let protocol = config.protocol;
         let endpoint = if let Some(endpoint) = config.endpoint.as_deref() {
             reqwest::Url::parse(endpoint).map_err(|error| {
-                GatewayError::new(
+                InferenceError::new(
                     ErrorClass::Target,
                     id,
                     "resolve_target",
@@ -93,7 +135,7 @@ impl ModelTarget {
             })?
         } else {
             let base = config.base_url.as_deref().ok_or_else(|| {
-                GatewayError::new(
+                InferenceError::new(
                     ErrorClass::Target,
                     id,
                     "resolve_target",
@@ -101,7 +143,7 @@ impl ModelTarget {
                 )
             })?;
             let mut base_url = reqwest::Url::parse(base).map_err(|error| {
-                GatewayError::new(
+                InferenceError::new(
                     ErrorClass::Target,
                     id,
                     "resolve_target",
@@ -114,7 +156,7 @@ impl ModelTarget {
             }
             let operation = protocol.operation();
             base_url.join(operation).map_err(|error| {
-                GatewayError::new(
+                InferenceError::new(
                     ErrorClass::Target,
                     id,
                     "resolve_target",
@@ -131,7 +173,7 @@ impl ModelTarget {
                     lower.as_str(),
                     "authorization" | "content-length" | "accept" | "content-type"
                 ) {
-                    return Err(GatewayError::new(
+                    return Err(InferenceError::new(
                         ErrorClass::Target,
                         id,
                         "resolve_target",
@@ -165,79 +207,229 @@ impl ModelTarget {
                     images: capabilities.images,
                     tools: capabilities.tools,
                     reasoning: capabilities.reasoning,
+                    reasoning_efforts: capabilities.reasoning_efforts.clone(),
                     refusals: capabilities.refusals,
+                    hosted_tools: capabilities.hosted_tools.clone(),
+                    hybrid_tools: capabilities.hybrid_tools,
+                    hosted_dispatch: capabilities.hosted_dispatch,
+                    parallel_tools: capabilities.parallel_tools,
+                    required_tool_choice: capabilities.required_tool_choice,
+                    specific_tool_choice: capabilities.specific_tool_choice,
+                    structured_json_schema: capabilities.structured_json_schema,
+                    strict_structured_output: capabilities.strict_structured_output,
+                    streaming_delivery: capabilities.streaming_delivery,
+                    assembled_delivery: capabilities.assembled_delivery,
+                    max_output_tokens: capabilities.max_output_tokens,
+                    replay_safe: capabilities.replay_safe,
                 })
                 .unwrap_or_default(),
             streaming_fallback: config.streaming_fallback,
+            reasoning_effort_map: config.reasoning_effort_map.clone(),
         })
     }
 
-    pub fn validate(&self, request: &ModelRequest) -> Result<(), GatewayError> {
+    pub fn validate(&self, request: &InferenceRequest) -> Result<(), InferenceError> {
         if !self.capabilities.text {
-            return Err(GatewayError::new(
+            return Err(InferenceError::new(
                 ErrorClass::UnsupportedCapability,
                 &self.id,
                 "validate",
                 "text output is not supported by this target",
             ));
         }
-        if !request.tools.is_empty() && !self.capabilities.tools {
-            return Err(GatewayError::new(
+        if request.tools.iter().any(|tool| {
+            matches!(
+                tool,
+                crate::tools::InferenceTool::Caller(_) | crate::tools::InferenceTool::Hybrid { .. }
+            )
+        }) && !self.capabilities.tools
+        {
+            return Err(InferenceError::new(
                 ErrorClass::UnsupportedCapability,
                 &self.id,
                 "validate",
                 "tools are not supported by this target",
             ));
         }
-        if request
-            .thinking
-            .as_deref()
-            .is_some_and(|thinking| thinking != "none")
-            && !self.capabilities.reasoning
-        {
-            return Err(GatewayError::new(
+        for tool in &request.tools {
+            if matches!(
+                tool,
+                crate::tools::InferenceTool::Hosted(_) | crate::tools::InferenceTool::Hybrid { .. }
+            ) && !self.capabilities.hosted_dispatch
+            {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "provider-hosted tool dispatch is not enabled for this target",
+                ));
+            }
+            if matches!(tool, crate::tools::InferenceTool::Hybrid { .. })
+                && !self.capabilities.hybrid_tools
+            {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "hybrid tool execution is not supported by this target",
+                ));
+            }
+            if let Some(kind) = tool.hosted_kind()
+                && !self.capabilities.hosted_tools.contains(&kind)
+            {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    format!("hosted tool {kind:?} is not supported by this target"),
+                ));
+            }
+            if matches!(
+                tool,
+                crate::tools::InferenceTool::Hosted(_) | crate::tools::InferenceTool::Hybrid { .. }
+            ) {
+                let authorized = match tool {
+                    crate::tools::InferenceTool::Hosted(definition)
+                    | crate::tools::InferenceTool::Hybrid {
+                        hosted: definition, ..
+                    } => definition.authorization.is_some(),
+                    crate::tools::InferenceTool::Caller(_) => true,
+                };
+                if !authorized {
+                    return Err(InferenceError::new(
+                        ErrorClass::UnsupportedCapability,
+                        &self.id,
+                        "validate",
+                        "provider-hosted execution requires host authorization",
+                    ));
+                }
+            }
+        }
+        match &request.options.tool_choice {
+            crate::gateway::ToolChoice::Auto | crate::gateway::ToolChoice::None => {}
+            crate::gateway::ToolChoice::Required if request.tools.is_empty() => {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "required tool choice needs at least one tool definition",
+                ));
+            }
+            crate::gateway::ToolChoice::Required if !self.capabilities.required_tool_choice => {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "required tool choice is not supported by this target",
+                ));
+            }
+            crate::gateway::ToolChoice::Specific(name) => {
+                if !self.capabilities.specific_tool_choice {
+                    return Err(InferenceError::new(
+                        ErrorClass::UnsupportedCapability,
+                        &self.id,
+                        "validate",
+                        "specific tool choice is not supported by this target",
+                    ));
+                }
+                if !request.tools.iter().any(|tool| tool.name() == name) {
+                    return Err(InferenceError::new(
+                        ErrorClass::UnsupportedCapability,
+                        &self.id,
+                        "validate",
+                        format!("requested tool {name} is not defined"),
+                    ));
+                }
+            }
+            crate::gateway::ToolChoice::Required => {}
+        }
+        if request.options.parallel_tools == Some(true) && !self.capabilities.parallel_tools {
+            return Err(InferenceError::new(
                 ErrorClass::UnsupportedCapability,
                 &self.id,
                 "validate",
-                "reasoning is not supported by this target",
+                "parallel tool calls are not supported by this target",
             ));
         }
-        let has_images = request.transcript.iter().any(|message| match message {
-            piko_protocol::Message::Context { content, .. }
-            | piko_protocol::Message::User { content, .. } => match content {
-                piko_protocol::MessageContent::String(_) => false,
-                piko_protocol::MessageContent::Blocks(blocks) => blocks
+        if let Some(intent) = &request.options.structured_output
+            && (!self.capabilities.structured_json_schema
+                || (intent.strict && !self.capabilities.strict_structured_output))
+        {
+            return Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &self.id,
+                "validate",
+                "requested structured output is not supported by this target",
+            ));
+        }
+        let delivery_supported = match request.options.delivery {
+            crate::gateway::DeliveryMode::Streaming => self.capabilities.streaming_delivery,
+            crate::gateway::DeliveryMode::Assembled => self.capabilities.assembled_delivery,
+        };
+        if !delivery_supported {
+            return Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &self.id,
+                "validate",
+                "requested delivery mode is not supported by this target",
+            ));
+        }
+        if let (Some(requested), Some(limit)) = (
+            request.options.max_output_tokens,
+            self.capabilities.max_output_tokens,
+        ) && requested > limit
+        {
+            return Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &self.id,
+                "validate",
+                format!("requested output token limit {requested} exceeds target limit {limit}"),
+            ));
+        }
+        if let Some(effort) = request.options.reasoning_effort.as_ref()
+            && *effort != piko_protocol::model::ThinkingLevel::Off
+            && (!self.capabilities.reasoning
+                || !self.capabilities.reasoning_efforts.contains(effort))
+        {
+            return Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &self.id,
+                "validate",
+                format!(
+                    "reasoning effort {} is not supported by this target",
+                    effort.as_str()
+                ),
+            ));
+        }
+        let has_images = request
+            .conversation
+            .items
+            .iter()
+            .any(|item| match &item.kind {
+                crate::gateway::ConversationItemKind::Context { content, .. }
+                | crate::gateway::ConversationItemKind::User { content } => match content {
+                    piko_protocol::MessageContent::String(_) => false,
+                    piko_protocol::MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .any(|block| matches!(block, piko_protocol::ContentBlock::Image { .. })),
+                },
+                crate::gateway::ConversationItemKind::Assistant { content }
+                | crate::gateway::ConversationItemKind::ToolResult { content, .. } => content
                     .iter()
                     .any(|block| matches!(block, piko_protocol::ContentBlock::Image { .. })),
-            },
-            piko_protocol::Message::Assistant { content, .. }
-            | piko_protocol::Message::ToolResult { content, .. } => content
-                .iter()
-                .any(|block| matches!(block, piko_protocol::ContentBlock::Image { .. })),
-            piko_protocol::Message::ToolCall { .. } => false,
-        });
+                crate::gateway::ConversationItemKind::ToolCall { .. }
+                | crate::gateway::ConversationItemKind::HostedActivity(_)
+                | crate::gateway::ConversationItemKind::Source(_)
+                | crate::gateway::ConversationItemKind::Citation(_)
+                | crate::gateway::ConversationItemKind::Artifact(_) => false,
+            });
         if has_images && !self.capabilities.images {
-            return Err(GatewayError::new(
+            return Err(InferenceError::new(
                 ErrorClass::UnsupportedCapability,
                 &self.id,
                 "validate",
                 "image input is not supported by this target",
             ));
-        }
-        for message in &request.transcript {
-            if let piko_protocol::Message::Assistant {
-                continuation: Some(continuation),
-                ..
-            } = message
-                && continuation.adapter != self.protocol.kind().adapter_id()
-            {
-                return Err(GatewayError::new(
-                    ErrorClass::UnsupportedCapability,
-                    &self.id,
-                    "validate",
-                    "transcript continuation belongs to a different protocol",
-                ));
-            }
         }
         Ok(())
     }
@@ -247,6 +439,12 @@ impl ModelTarget {
     pub fn responses_continuation(&self) -> Option<ResponsesContinuationPolicy> {
         self.protocol.responses_continuation()
     }
+
+    pub fn reasoning_effort(&self, effort: &piko_protocol::model::ThinkingLevel) -> Option<String> {
+        self.reasoning_effort_map.get(effort).cloned().or_else(|| {
+            (*effort != piko_protocol::model::ThinkingLevel::Off).then(|| effort.as_str().into())
+        })
+    }
 }
 
 fn insert_header(
@@ -254,9 +452,9 @@ fn insert_header(
     name: &str,
     value: &str,
     target: &str,
-) -> Result<(), GatewayError> {
+) -> Result<(), InferenceError> {
     let name = HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
-        GatewayError::new(
+        InferenceError::new(
             ErrorClass::Target,
             target,
             "resolve_target",
@@ -264,7 +462,7 @@ fn insert_header(
         )
     })?;
     let value = HeaderValue::from_str(value).map_err(|error| {
-        GatewayError::new(
+        InferenceError::new(
             ErrorClass::Target,
             target,
             "resolve_target",
@@ -276,113 +474,5 @@ fn insert_header(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config(protocol: ProtocolProfile) -> ModelTargetConfig {
-        let mut config = ModelTargetConfig::new(
-            "custom/model@platform",
-            "platform",
-            ProviderAuthMethod::ApiKey,
-            protocol,
-        );
-        config.base_url = Some("https://example.test/v1".into());
-        config
-    }
-
-    #[test]
-    fn protocol_alone_selects_operation_path() {
-        let responses = ModelTarget::resolve(
-            "custom",
-            "same-model",
-            &config(ProtocolProfile::Responses {
-                continuation: Default::default(),
-            }),
-            None,
-        )
-        .unwrap();
-        let chat = ModelTarget::resolve(
-            "custom",
-            "same-model",
-            &config(ProtocolProfile::ChatCompletions),
-            None,
-        )
-        .unwrap();
-        assert_eq!(
-            responses.endpoint.as_str(),
-            "https://example.test/v1/responses"
-        );
-        assert_eq!(
-            chat.endpoint.as_str(),
-            "https://example.test/v1/chat/completions"
-        );
-    }
-
-    #[test]
-    fn explicit_endpoint_is_not_rewritten() {
-        let mut config = config(ProtocolProfile::Responses {
-            continuation: Default::default(),
-        });
-        config.endpoint = Some("https://example.test/custom/inference".into());
-        let target = ModelTarget::resolve("custom/model", "gpt", &config, None).unwrap();
-        assert_eq!(
-            target.endpoint.as_str(),
-            "https://example.test/custom/inference"
-        );
-    }
-
-    #[test]
-    fn custom_headers_cannot_override_auth() {
-        let mut config = config(ProtocolProfile::Responses {
-            continuation: Default::default(),
-        });
-        config.headers = Some(HashMap::from([("Authorization".into(), "stolen".into())]));
-        assert!(ModelTarget::resolve("custom", "gpt", &config, None).is_err());
-    }
-
-    #[test]
-    fn capabilities_fail_before_dispatch() {
-        let mut unsupported = config(ProtocolProfile::Responses {
-            continuation: Default::default(),
-        });
-        unsupported.capabilities = Some(ModelCapabilities {
-            tools: false,
-            ..Default::default()
-        });
-        let target = ModelTarget::resolve("custom", "gpt", &unsupported, None).unwrap();
-        let mut request = crate::protocols::tests_support::semantic_request();
-        request.provider = "custom".into();
-        assert_eq!(
-            target.validate(&request).unwrap_err().class,
-            ErrorClass::UnsupportedCapability
-        );
-    }
-
-    #[test]
-    fn continuation_for_another_adapter_fails_before_dispatch() {
-        let target = ModelTarget::resolve(
-            "custom",
-            "gpt",
-            &config(ProtocolProfile::Responses {
-                continuation: Default::default(),
-            }),
-            None,
-        )
-        .unwrap();
-        let mut request = crate::protocols::tests_support::semantic_request();
-        let piko_protocol::Message::Assistant { continuation, .. } = &mut request.transcript[1]
-        else {
-            panic!("fixture assistant missing");
-        };
-        *continuation = Some(Box::new(piko_protocol::ModelContinuation {
-            adapter: crate::modeling::ProtocolKind::ChatCompletions
-                .adapter_id()
-                .into(),
-            state: serde_json::json!({}),
-        }));
-        assert_eq!(
-            target.validate(&request).unwrap_err().class,
-            ErrorClass::UnsupportedCapability
-        );
-    }
-}
+#[path = "target_tests.rs"]
+mod tests;

@@ -367,6 +367,7 @@ fn protocol_blocks_to_text(blocks: &[piko_protocol::ContentBlock]) -> String {
             piko_protocol::ContentBlock::Text { text } => text.clone(),
             piko_protocol::ContentBlock::Thinking { thinking, .. } => thinking.clone(),
             piko_protocol::ContentBlock::Image { mime_type, .. } => format!("[image: {mime_type}]"),
+            other => other.text_projection(),
         })
         .collect::<Vec<_>>()
         .join("\n")

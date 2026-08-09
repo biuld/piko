@@ -72,7 +72,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("first").await;
     model.push_text("second").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());

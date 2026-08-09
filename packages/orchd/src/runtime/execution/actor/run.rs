@@ -243,19 +243,11 @@ impl ExecutionActor {
             .as_ref()
             .map(|config| config.model.clone())
             .unwrap_or_else(|| self.resolve_fallback_model(&agent));
-        let thinking = if let Some(level) = agent.thinking_level.as_ref() {
-            model_config.as_ref().and_then(|config| {
-                config
-                    .thinking_level_map
-                    .as_ref()
-                    .and_then(|map| map.get(level).cloned())
-                    .unwrap_or_else(|| Some(level.as_str().to_string()))
-            })
-        } else {
+        let thinking = agent.thinking_level.clone().or_else(|| {
             model_config
                 .as_ref()
-                .and_then(|config| config.resolve_thinking())
-        };
+                .and_then(|config| config.settings.thinking_level.clone())
+        });
         let (tools, routes) = if self.request.config.allow_tool_calls {
             (self.tools.clone(), self.routes.clone())
         } else {
@@ -275,7 +267,13 @@ impl ExecutionActor {
         span.record("step_id", format!("step_{step_count}"));
         span.record("model", &model.id);
         span.record("provider", &model.provider);
-        span.record("thinking", thinking.as_deref().unwrap_or("none"));
+        span.record(
+            "thinking",
+            thinking
+                .as_ref()
+                .map(|value| value.as_str())
+                .unwrap_or("none"),
+        );
         span.record("tools", tools.len());
         span.record("transcript_messages", transcript.len());
         span.record("transcript_tokens", snapshot.total_tokens());
@@ -294,27 +292,57 @@ impl ExecutionActor {
             context_remaining = Some(estimate.context_remaining);
         }
 
-        let request = ModelRequest {
-            session_id: self.identity.session_id.clone(),
-            agent_instance_id: self.identity.agent_instance_id.clone(),
-            run_id: self.identity.execution_id.clone(),
-            step_id: format!("step_{step_count}"),
-            transcript,
-            run_prompt: self.request.run_prompt.clone(),
-            model: model.id.clone(),
-            provider: model.provider.clone(),
-            tools,
-            thinking,
+        let request = InferenceRequest {
+            model: piko_llmd::gateway::ModelRef::new(&model.provider, &model.id),
+            conversation: piko_llmd::gateway::Conversation::from_messages(
+                self.request.run_prompt.clone(),
+                transcript,
+            ),
+            tools: tools.into_iter().map(Into::into).collect(),
+            options: piko_llmd::gateway::InferenceOptions {
+                reasoning_effort: thinking,
+                tool_choice: model_config
+                    .as_ref()
+                    .and_then(|config| config.settings.tool_choice.as_ref())
+                    .map(|choice| match choice {
+                        piko_protocol::model::ModelToolChoice::Auto => {
+                            piko_llmd::gateway::ToolChoice::Auto
+                        }
+                        piko_protocol::model::ModelToolChoice::None => {
+                            piko_llmd::gateway::ToolChoice::None
+                        }
+                        piko_protocol::model::ModelToolChoice::Required => {
+                            piko_llmd::gateway::ToolChoice::Required
+                        }
+                        piko_protocol::model::ModelToolChoice::Specific { name } => {
+                            piko_llmd::gateway::ToolChoice::Specific(name.clone())
+                        }
+                    })
+                    .unwrap_or_default(),
+                parallel_tools: model_config
+                    .as_ref()
+                    .and_then(|config| config.settings.parallel_tools),
+                max_output_tokens: model_config
+                    .as_ref()
+                    .and_then(|config| config.settings.max_tokens),
+                ..Default::default()
+            },
+            context: piko_llmd::gateway::InvocationContext {
+                session_id: self.identity.session_id.clone(),
+                agent_instance_id: self.identity.agent_instance_id.clone(),
+                run_id: self.identity.execution_id.clone(),
+                step_id: format!("step_{step_count}"),
+            },
         };
         tracing::debug!(
             execution_id = %self.identity.execution_id,
-            step_id = %request.step_id,
-            prompt_assembly_version = request.run_prompt.assembly_version,
-            prompt_source_digest = %request.run_prompt.source_digest,
-            prompt_prefix_digest = %request.run_prompt.cache_plan.semantic_prefix_digest,
-            prompt_blocks = request.run_prompt.blocks.len(),
+            step_id = %request.context.step_id,
+            prompt_assembly_version = request.conversation.instructions.assembly_version,
+            prompt_source_digest = %request.conversation.instructions.source_digest,
+            prompt_prefix_digest = %request.conversation.instructions.cache_plan.semantic_prefix_digest,
+            prompt_blocks = request.conversation.instructions.blocks.len(),
             tools = request.tools.len(),
-            transcript_messages = request.transcript.len(),
+            transcript_messages = request.conversation.items.len(),
             "dispatching semantic model request"
         );
 
@@ -330,7 +358,7 @@ impl ExecutionActor {
         let result = match self
             .services
             .model_executor()
-            .execute(request, self.cancel.clone())
+            .start(request, self.cancel.clone())
             .await
         {
             Ok(llm) => {
@@ -339,7 +367,7 @@ impl ExecutionActor {
                     message_id.clone(),
                     source_turn_id.clone(),
                     model.clone(),
-                    llm,
+                    llm.events,
                 );
                 Ok(dispatch
                     .dispatch_step(self.ports.ports().realtime.clone())

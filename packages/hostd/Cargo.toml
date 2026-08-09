@@ -22,6 +22,7 @@ piko-orchd = { path = "../orchd" }
 piko-orchd-api = { path = "../orchd-api" }
 piko-comms = { path = "../comms" }
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 futures-core = "0.3"
 tokio-stream = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -44,5 +45,4 @@ piko-protocol = { version = "0.1.0", path = "../protocol" }
 
 [dev-dependencies]
 tempfile = "3"
-tokio-util = "0.7"
 opentelemetry_sdk = { version = "0.31", features = ["testing", "trace", "metrics", "logs", "rt-tokio"] }

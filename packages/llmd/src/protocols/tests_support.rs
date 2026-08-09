@@ -1,4 +1,6 @@
-use crate::gateway::ModelRequest;
+use crate::gateway::{
+    Conversation, InferenceOptions, InferenceRequest, InvocationContext, ModelRef,
+};
 use piko_protocol::tools::{ToolDef, ToolExecutorRef};
 use piko_protocol::{
     CacheScope, ContentBlock, ContentTrust, InstructionAuthority, Message, MessageContent,
@@ -6,7 +8,7 @@ use piko_protocol::{
 };
 use serde_json::json;
 
-pub(crate) fn semantic_request() -> ModelRequest {
+pub(crate) fn semantic_request() -> InferenceRequest {
     let transcript = vec![
         Message::User {
             content: MessageContent::String("question".into()),
@@ -16,7 +18,7 @@ pub(crate) fn semantic_request() -> ModelRequest {
             content: vec![ContentBlock::Text {
                 text: "calling".into(),
             }],
-            continuation: None,
+            checkpoint: None,
             provider: "fixture".into(),
             model: "gpt".into(),
             usage: None,
@@ -68,32 +70,38 @@ pub(crate) fn semantic_request() -> ModelRequest {
         content_digest: String::new(),
         cache_scope: CacheScope::NoCache,
     });
-    ModelRequest {
-        session_id: "session".into(),
-        agent_instance_id: "root".into(),
-        provider: "fixture".into(),
-        model: "gpt".into(),
-        run_prompt,
-        transcript,
-        tools: vec![ToolDef {
-            name: "read".into(),
-            version: "1".into(),
-            provenance: PromptSource::new("fixture", "read"),
-            description: "read a path".into(),
-            input_schema: json!({"type":"object"}),
-            executor: ToolExecutorRef {
-                kind: "native".into(),
-                target: "read".into(),
-                extra: None,
-            },
-            execution_mode: None,
-            exposure: None,
-            capabilities: None,
-            approval: None,
-            metadata: None,
-        }],
-        run_id: "run".into(),
-        step_id: "step".into(),
-        thinking: Some("high".into()),
+    InferenceRequest {
+        model: ModelRef::new("fixture", "gpt"),
+        conversation: Conversation::from_messages(run_prompt, transcript),
+        tools: vec![
+            ToolDef {
+                name: "read".into(),
+                version: "1".into(),
+                provenance: PromptSource::new("fixture", "read"),
+                description: "read a path".into(),
+                input_schema: json!({"type":"object"}),
+                executor: ToolExecutorRef {
+                    kind: "native".into(),
+                    target: "read".into(),
+                    extra: None,
+                },
+                execution_mode: None,
+                exposure: None,
+                capabilities: None,
+                approval: None,
+                metadata: None,
+            }
+            .into(),
+        ],
+        options: InferenceOptions {
+            reasoning_effort: Some(piko_protocol::model::ThinkingLevel::High),
+            ..Default::default()
+        },
+        context: InvocationContext {
+            session_id: "session".into(),
+            agent_instance_id: "root".into(),
+            run_id: "run".into(),
+            step_id: "step".into(),
+        },
     }
 }

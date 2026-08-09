@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::{GatewayError, ModelEventStream, ModelRequest};
+use piko_llmd::gateway::{InferenceError, InferenceExecution, InferenceRequest};
 use piko_protocol::execution::{CommitAck, CommitError, StartExecutionRequest};
 
 use super::*;
@@ -93,27 +93,16 @@ fn context_budget_accounts_snapshot_and_reports_context_remaining() {
 struct NoopGateway;
 
 #[async_trait]
-impl LlmGateway for NoopGateway {
-    async fn execute(
+impl InferenceGateway for NoopGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        _req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Ok(Box::pin(tokio_stream::empty()))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: piko_protocol::Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<piko_protocol::Message>,
-        _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    fn capabilities(&self) -> piko_protocol::model::ModelCapabilities {
-        piko_protocol::model::ModelCapabilities::default()
+    ) -> Result<InferenceExecution, InferenceError> {
+        Ok(InferenceExecution {
+            events: Box::pin(tokio_stream::empty()),
+            handle: None,
+        })
     }
 }
 

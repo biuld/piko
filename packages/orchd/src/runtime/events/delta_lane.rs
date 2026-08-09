@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use piko_llmd::gateway::{ModelEvent, ModelOutputMetadata, TerminalStatus};
+use piko_llmd::gateway::{FinishReason, InferenceEvent};
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::transcript::{ContentBlock, MessageUsage};
@@ -18,7 +18,8 @@ pub(crate) struct AssistantMessageState {
     pub(crate) usage: Option<MessageUsage>,
     pub(crate) stop_reason: String,
     pub(crate) error_message: Option<String>,
-    pub(crate) output_metadata: Option<ModelOutputMetadata>,
+    pub(crate) checkpoint: Option<piko_protocol::OpaqueModelCheckpoint>,
+    pub(crate) semantic_blocks: Vec<ContentBlock>,
 }
 
 impl AssistantMessageState {
@@ -29,54 +30,125 @@ impl AssistantMessageState {
             usage: None,
             stop_reason: "stop".into(),
             error_message: None,
-            output_metadata: None,
+            checkpoint: None,
+            semantic_blocks: Vec::new(),
         }
     }
 
-    pub(crate) fn apply_gateway_event(&mut self, event: &ModelEvent) {
+    pub(crate) fn apply_gateway_event(&mut self, event: &InferenceEvent) {
         match event {
-            ModelEvent::TextDelta { delta, .. } | ModelEvent::RefusalDelta { delta, .. } => {
+            InferenceEvent::Cursor(_) => {}
+            InferenceEvent::TextDelta { delta, .. }
+            | InferenceEvent::RefusalDelta { delta, .. } => {
                 self.text.push_str(delta);
             }
-            ModelEvent::ReasoningDelta { delta, .. } => {
+            InferenceEvent::ReasoningDelta { delta, .. } => {
                 self.reasoning.push_str(delta);
             }
-            ModelEvent::Usage(usage) => self.usage = Some(usage.clone()),
-            ModelEvent::Completed(status) => {
-                if matches!(
-                    status,
-                    TerminalStatus::Completed { .. } | TerminalStatus::Incomplete { .. }
-                ) && self.output_metadata.is_none()
-                {
-                    self.stop_reason = "error".into();
-                    self.error_message =
-                        Some("model stream completed without output metadata".into());
-                    return;
+            InferenceEvent::Usage(usage) => self.usage = Some(usage.clone()),
+            InferenceEvent::Completed(status) => {
+                if !matches!(status, FinishReason::Completed { .. }) {
+                    self.checkpoint = None;
                 }
                 self.stop_reason = match status {
-                    TerminalStatus::Completed { reason } => reason.clone(),
-                    TerminalStatus::Incomplete { reason } => {
+                    FinishReason::Completed { reason } => reason.clone(),
+                    FinishReason::Incomplete { reason } => {
                         reason.clone().unwrap_or_else(|| "incomplete".into())
                     }
-                    TerminalStatus::Failed { message } => {
+                    FinishReason::Failed { message } => {
                         self.error_message = Some(message.clone());
                         "error".into()
                     }
-                    TerminalStatus::Cancelled => "abort".into(),
+                    FinishReason::Cancelled => "abort".into(),
                 };
             }
-            ModelEvent::Error(error) => {
+            InferenceEvent::Error(error) => {
                 tracing::error!("Stream error: {error}");
+                self.checkpoint = None;
                 self.stop_reason = "error".into();
                 self.error_message = Some(error.to_string());
             }
-            ModelEvent::OutputMetadata(metadata) => self.output_metadata = Some(metadata.clone()),
-            ModelEvent::FunctionCallDelta { .. } => {}
+            InferenceEvent::Checkpoint(checkpoint) => self.checkpoint = Some(checkpoint.clone()),
+            InferenceEvent::ToolCallDelta { .. } => {}
+            InferenceEvent::HostedActivity(activity) => {
+                self.semantic_blocks.push(ContentBlock::HostedToolActivity {
+                    activity_id: activity.activity_id.clone(),
+                    tool_name: activity.tool_name.clone(),
+                    kind: match activity.kind {
+                        piko_llmd::capabilities::HostedToolKind::Search => {
+                            piko_protocol::messages::HostedToolKind::Search
+                        }
+                        piko_llmd::capabilities::HostedToolKind::Retrieval => {
+                            piko_protocol::messages::HostedToolKind::Retrieval
+                        }
+                        piko_llmd::capabilities::HostedToolKind::RemoteMcp => {
+                            piko_protocol::messages::HostedToolKind::RemoteMcp
+                        }
+                        piko_llmd::capabilities::HostedToolKind::Shell => {
+                            piko_protocol::messages::HostedToolKind::Shell
+                        }
+                        piko_llmd::capabilities::HostedToolKind::Computer => {
+                            piko_protocol::messages::HostedToolKind::Computer
+                        }
+                        piko_llmd::capabilities::HostedToolKind::ImageGeneration => {
+                            piko_protocol::messages::HostedToolKind::ImageGeneration
+                        }
+                        piko_llmd::capabilities::HostedToolKind::DeferredDiscovery => {
+                            piko_protocol::messages::HostedToolKind::DeferredDiscovery
+                        }
+                        piko_llmd::capabilities::HostedToolKind::ProgrammaticExecution => {
+                            piko_protocol::messages::HostedToolKind::ProgrammaticExecution
+                        }
+                    },
+                    status: match activity.status {
+                        piko_llmd::tools::HostedActivityStatus::Started => {
+                            piko_protocol::messages::HostedActivityStatus::Started
+                        }
+                        piko_llmd::tools::HostedActivityStatus::InProgress => {
+                            piko_protocol::messages::HostedActivityStatus::InProgress
+                        }
+                        piko_llmd::tools::HostedActivityStatus::Completed => {
+                            piko_protocol::messages::HostedActivityStatus::Completed
+                        }
+                        piko_llmd::tools::HostedActivityStatus::Failed => {
+                            piko_protocol::messages::HostedActivityStatus::Failed
+                        }
+                    },
+                });
+            }
+            InferenceEvent::ApprovalRequired(approval) => {
+                self.semantic_blocks.push(ContentBlock::HostedToolApproval {
+                    approval_id: approval.approval_id.clone(),
+                    tool_name: approval.tool_name.clone(),
+                    summary: approval.summary.clone(),
+                });
+            }
+            InferenceEvent::Source(source) => self.semantic_blocks.push(ContentBlock::Source {
+                source_id: source.source_id.clone(),
+                title: source.title.clone(),
+                uri: source.uri.clone(),
+            }),
+            InferenceEvent::Citation(citation) => {
+                self.semantic_blocks.push(ContentBlock::Citation {
+                    source_id: citation.source_id.clone(),
+                    output_item_id: citation.output_item_id.0.clone(),
+                    start: citation.start,
+                    end: citation.end,
+                });
+            }
+            InferenceEvent::Artifact(artifact) => {
+                self.semantic_blocks.push(ContentBlock::Artifact {
+                    artifact_id: artifact.artifact_id.clone(),
+                    media_type: artifact.media_type.clone(),
+                    namespace: artifact.resource.namespace.clone(),
+                    resource: artifact.resource.resource.clone(),
+                });
+            }
         }
     }
 
     pub(crate) fn build_message(&self, model: &ModelSpec) -> Message {
-        let mut blocks = Vec::new();
+        let mut blocks = self.semantic_blocks.clone();
         if !self.reasoning.is_empty() {
             blocks.push(ContentBlock::Thinking {
                 thinking: self.reasoning.clone(),
@@ -95,11 +167,7 @@ impl AssistantMessageState {
         }
         Message::Assistant {
             content: blocks,
-            continuation: self
-                .output_metadata
-                .as_ref()
-                .and_then(|metadata| metadata.continuation.clone())
-                .map(Box::new),
+            checkpoint: self.checkpoint.clone().map(Box::new),
             provider: model.provider.clone(),
             model: model.id.clone(),
             usage: self.usage.clone(),
@@ -135,10 +203,11 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
         ));
     }
 
-    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
+    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &InferenceEvent) {
         self.state.apply_gateway_event(event);
         match event {
-            ModelEvent::TextDelta { delta, .. } | ModelEvent::RefusalDelta { delta, .. } => {
+            InferenceEvent::TextDelta { delta, .. }
+            | InferenceEvent::RefusalDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
                     ctx.execution_id.clone(),
@@ -152,7 +221,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     },
                 ));
             }
-            ModelEvent::ReasoningDelta { delta, .. } => {
+            InferenceEvent::ReasoningDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
                     ctx.execution_id.clone(),
@@ -195,23 +264,22 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
 
 #[cfg(test)]
 mod tests {
-    use piko_llmd::gateway::{ModelEvent, ModelOutputMetadata};
+    use piko_llmd::capabilities::HostedToolKind;
+    use piko_llmd::gateway::{
+        GeneratedArtifact, HostedApprovalRequest, HostedToolActivity, InferenceCitation,
+        InferenceEvent, InferenceSource, OutputItemId, SemanticResourceRef,
+    };
+    use piko_llmd::tools::HostedActivityStatus;
     use piko_protocol::Message;
 
     use super::*;
 
     #[test]
-    fn llmd_output_metadata_is_persisted_without_interpretation() {
+    fn llmd_checkpoint_is_persisted_without_interpretation() {
         let mut state = AssistantMessageState::new();
-        let continuation = serde_json::from_value(serde_json::json!({
-            "adapter": "opaque-test-adapter",
-            "state": { "private": ["call_1"] }
-        }))
-        .unwrap();
-        let metadata = ModelOutputMetadata {
-            continuation: Some(continuation),
-        };
-        state.apply_gateway_event(&ModelEvent::OutputMetadata(metadata.clone()));
+        let checkpoint: piko_protocol::OpaqueModelCheckpoint =
+            serde_json::from_value(serde_json::json!("opaque-token")).unwrap();
+        state.apply_gateway_event(&InferenceEvent::Checkpoint(checkpoint.clone()));
 
         let message = state.build_message(&ModelSpec {
             id: "gpt-test".into(),
@@ -222,16 +290,16 @@ mod tests {
         assert!(matches!(
             message,
             Message::Assistant {
-                continuation: Some(continuation),
+                checkpoint: Some(persisted),
                 ..
-            } if Some(continuation.as_ref()) == metadata.continuation.as_ref()
+            } if persisted.as_ref() == &checkpoint
         ));
     }
 
     #[test]
-    fn successful_terminal_without_metadata_fails_closed() {
+    fn stateless_terminal_requires_no_checkpoint() {
         let mut state = AssistantMessageState::new();
-        state.apply_gateway_event(&ModelEvent::completed("stop"));
+        state.apply_gateway_event(&InferenceEvent::completed("stop"));
 
         let message = state.build_message(&ModelSpec {
             id: "gpt-test".into(),
@@ -241,11 +309,77 @@ mod tests {
         assert!(matches!(
             message,
             Message::Assistant {
-                continuation: None,
+                checkpoint: None,
                 stop_reason: Some(reason),
-                error_message: Some(error),
+                error_message: None,
                 ..
-            } if reason == "error" && error == "model stream completed without output metadata"
+            } if reason == "stop"
+        ));
+    }
+
+    #[test]
+    fn incomplete_terminal_discards_a_pending_checkpoint() {
+        let mut state = AssistantMessageState::new();
+        let checkpoint = serde_json::from_value(serde_json::json!("opaque-token")).unwrap();
+        state.apply_gateway_event(&InferenceEvent::Checkpoint(checkpoint));
+        state.apply_gateway_event(&InferenceEvent::Completed(FinishReason::Cancelled));
+        let message = state.build_message(&ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "openai".into(),
+        });
+        assert!(matches!(
+            message,
+            Message::Assistant {
+                checkpoint: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn hosted_observations_are_projected_without_orchd_policy_decisions() {
+        let mut state = AssistantMessageState::new();
+        for event in [
+            InferenceEvent::HostedActivity(HostedToolActivity {
+                activity_id: "activity-1".into(),
+                tool_name: "search".into(),
+                kind: HostedToolKind::Search,
+                status: HostedActivityStatus::InProgress,
+            }),
+            InferenceEvent::ApprovalRequired(HostedApprovalRequest {
+                approval_id: "approval-1".into(),
+                tool_name: "search".into(),
+                summary: "search the web".into(),
+            }),
+            InferenceEvent::Source(InferenceSource {
+                source_id: "source-1".into(),
+                title: Some("Source".into()),
+                uri: Some("https://example.test".into()),
+            }),
+            InferenceEvent::Citation(InferenceCitation {
+                source_id: "source-1".into(),
+                output_item_id: OutputItemId("out_semantic".into()),
+                start: Some(0),
+                end: Some(4),
+            }),
+            InferenceEvent::Artifact(GeneratedArtifact {
+                artifact_id: "artifact-1".into(),
+                media_type: "image/png".into(),
+                resource: SemanticResourceRef {
+                    namespace: "session".into(),
+                    resource: "artifact-1".into(),
+                },
+            }),
+        ] {
+            state.apply_gateway_event(&event);
+        }
+
+        assert_eq!(state.semantic_blocks.len(), 5);
+        assert!(state.error_message.is_none());
+        assert!(matches!(
+            &state.semantic_blocks[1],
+            ContentBlock::HostedToolApproval { approval_id, .. } if approval_id == "approval-1"
         ));
     }
 }

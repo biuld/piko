@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use piko_llmd::gateway::LlmGateway;
+use piko_llmd::gateway::{
+    InferenceGateway, InferenceItem, InferenceRequest, InvocationContext, ModelRef,
+    collect_execution,
+};
 
 pub const SUMMARIZATION_PROMPT: &str = r#"The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
@@ -76,7 +79,7 @@ Use this EXACT format:
 Keep each section concise. Preserve exact file paths, function names, and error messages."#;
 
 pub async fn summarize_history(
-    model_executor: Arc<dyn LlmGateway>,
+    model_executor: Arc<dyn InferenceGateway>,
     model: piko_protocol::messages::Model,
     entries_to_summarize: &[crate::api::SessionTreeEntry],
     previous_summary: Option<&str>,
@@ -109,12 +112,31 @@ pub async fn summarize_history(
         timestamp: None,
     }];
 
-    model_executor
-        .llm_call(
-            model,
-            Some(system_prompt),
-            messages,
-            piko_protocol::model::ModelRunSettings::default(),
-        )
+    let request = InferenceRequest::text_task(
+        ModelRef::new(model.provider, model.id),
+        system_prompt,
+        messages,
+        InvocationContext {
+            session_id: "compaction".into(),
+            agent_instance_id: "compaction".into(),
+            run_id: "compaction".into(),
+            step_id: "summary".into(),
+        },
+    );
+    let execution = model_executor
+        .start(request, tokio_util::sync::CancellationToken::new())
         .await
+        .map_err(|error| error.to_string())?;
+    let result = collect_execution(execution)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(result
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            InferenceItem::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }

@@ -1,8 +1,11 @@
-use piko_protocol::{ContentBlock, Message, MessageContent};
+use piko_protocol::{ContentBlock, MessageContent};
 use serde_json::{Value, json};
 
-use crate::gateway::{ErrorClass, GatewayError, ModelRequest, ModelResult};
+use crate::checkpoint::ConversationPlan;
+use crate::gateway::{ConversationItem, ConversationItemKind};
+use crate::gateway::{ErrorClass, InferenceError, InferenceRequest, InferenceResult};
 mod decode;
+mod decode_items;
 mod support;
 
 use decode::{ResponsesStream, decode_complete};
@@ -18,51 +21,63 @@ use support::decode_continuation;
 pub(crate) struct ResponsesAdapter;
 
 impl ProtocolAdapter for ResponsesAdapter {
-    fn validate(&self, request: &ModelRequest, target: &ModelTarget) -> Result<(), GatewayError> {
+    fn validate(
+        &self,
+        request: &InferenceRequest,
+        target: &ModelTarget,
+    ) -> Result<(), InferenceError> {
         target.validate(request)
     }
 
     fn encode(
         &self,
-        request: &ModelRequest,
+        request: &InferenceRequest,
         target: &ModelTarget,
+        plan: &ConversationPlan<'_>,
         stream: bool,
-    ) -> Result<Value, GatewayError> {
+    ) -> Result<Value, InferenceError> {
         self.validate(request, target)?;
         let continuation = target.responses_continuation().ok_or_else(|| {
-            GatewayError::new(
+            InferenceError::new(
                 crate::gateway::ErrorClass::Protocol,
                 &target.id,
                 "encode",
                 "Responses adapter received a non-Responses target",
             )
         })?;
-        let (previous_response_id, input, store, include_encrypted) = match continuation {
-            crate::modeling::ResponsesContinuationPolicy::PreviousResponseId => {
-                let (previous_response_id, transcript) =
-                    continuation_suffix(&request.transcript, target)?;
-                let input = transcript
+        let (previous_response_id, input, store, include_encrypted) = match plan {
+            ConversationPlan::Resume { checkpoint, suffix } => {
+                let continuation = decode_continuation(checkpoint, target)?;
+                let input = suffix
                     .iter()
-                    .map(|message| encode_message(message, target, false))
+                    .map(|item| encode_message(&item.kind, target, false))
                     .collect::<Result<Vec<_>, _>>()?;
-                (previous_response_id, input, Some(true), false)
+                (Some(continuation.response_id), input, Some(true), false)
             }
-            crate::modeling::ResponsesContinuationPolicy::EncryptedReasoning => (
+            ConversationPlan::OpaqueReplay { checkpoint, items } => {
+                let continuation = decode_continuation(checkpoint, target)?;
+                (
+                    None,
+                    encrypted_replay_input(items, &continuation, target)?,
+                    Some(false),
+                    true,
+                )
+            }
+            ConversationPlan::FullReplay { items } => (
                 None,
-                encrypted_replay_input(&request.transcript, target)?,
-                Some(false),
-                true,
-            ),
-            crate::modeling::ResponsesContinuationPolicy::StatelessReplay => (
-                None,
-                plaintext_replay_input(&request.transcript, target)?,
-                None,
+                plaintext_replay_input(items, target)?,
+                matches!(
+                    continuation,
+                    crate::modeling::ResponsesContinuationPolicy::PreviousResponseId
+                )
+                .then_some(true),
                 false,
             ),
         };
         let tools = request
             .tools
             .iter()
+            .filter_map(crate::tools::InferenceTool::caller)
             .map(|tool| {
                 json!({
                     "type": "function",
@@ -90,10 +105,33 @@ impl ProtocolAdapter for ResponsesAdapter {
         }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
-            body["parallel_tool_calls"] = Value::Bool(true);
         }
-        if let Some(effort) = request.thinking.as_deref().filter(|value| *value != "none") {
+        if let Some(parallel) = request.options.parallel_tools {
+            body["parallel_tool_calls"] = Value::Bool(parallel);
+        }
+        match &request.options.tool_choice {
+            crate::gateway::ToolChoice::Auto => {}
+            crate::gateway::ToolChoice::None => body["tool_choice"] = json!("none"),
+            crate::gateway::ToolChoice::Required => body["tool_choice"] = json!("required"),
+            crate::gateway::ToolChoice::Specific(name) => {
+                body["tool_choice"] = json!({"type":"function","name":name});
+            }
+        }
+        if let Some(effort) = &request.options.reasoning_effort
+            && let Some(effort) = target.reasoning_effort(effort)
+        {
             body["reasoning"] = json!({ "effort": effort, "summary": "auto" });
+        }
+        if let Some(max_tokens) = request.options.max_output_tokens {
+            body["max_output_tokens"] = Value::Number(max_tokens.into());
+        }
+        if let Some(intent) = &request.options.structured_output {
+            body["text"] = json!({"format":{
+                "type":"json_schema",
+                "name":"piko_output",
+                "strict":intent.strict,
+                "schema":intent.schema
+            }});
         }
         Ok(body)
     }
@@ -102,22 +140,27 @@ impl ProtocolAdapter for ResponsesAdapter {
         &self,
         value: Value,
         target: &ModelTarget,
-    ) -> Result<ModelResult, GatewayError> {
-        decode_complete(value, target)
+        request: &InferenceRequest,
+    ) -> Result<InferenceResult, InferenceError> {
+        decode_complete(value, target, request)
     }
 
-    fn new_stream(&self, target: &ModelTarget) -> Box<dyn ProtocolStream> {
-        Box::new(ResponsesStream::new(target.id.clone()))
+    fn new_stream(
+        &self,
+        target: &ModelTarget,
+        request: &InferenceRequest,
+    ) -> Box<dyn ProtocolStream> {
+        Box::new(ResponsesStream::new(target.clone(), request.clone()))
     }
 }
 
 fn plaintext_replay_input(
-    transcript: &[Message],
+    transcript: &[ConversationItem],
     target: &ModelTarget,
-) -> Result<Vec<Value>, GatewayError> {
+) -> Result<Vec<Value>, InferenceError> {
     let mut input = Vec::new();
-    for message in transcript {
-        if let Message::Assistant { content, .. } = message {
+    for item in transcript {
+        if let ConversationItemKind::Assistant { content } = &item.kind {
             input.extend(content.iter().filter_map(|block| match block {
                 ContentBlock::Thinking { thinking, .. } => Some(json!({
                     "type": "reasoning",
@@ -126,67 +169,41 @@ fn plaintext_replay_input(
                 _ => None,
             }));
         }
-        input.push(encode_message(message, target, true)?);
+        input.push(encode_message(&item.kind, target, true)?);
     }
     Ok(input)
 }
 
-fn continuation_suffix<'a>(
-    transcript: &'a [Message],
-    target: &ModelTarget,
-) -> Result<(Option<String>, &'a [Message]), GatewayError> {
-    for (index, message) in transcript.iter().enumerate().rev() {
-        if let Message::Assistant {
-            continuation: Some(envelope),
-            ..
-        } = message
-            && let Some(continuation) = decode_continuation(envelope, target)?
-        {
-            return Ok((Some(continuation.response_id), &transcript[index + 1..]));
-        }
-    }
-    Ok((None, transcript))
-}
-
 fn encrypted_replay_input(
-    transcript: &[Message],
+    transcript: &[ConversationItem],
+    continuation: &support::ResponsesContinuation,
     target: &ModelTarget,
-) -> Result<Vec<Value>, GatewayError> {
+) -> Result<Vec<Value>, InferenceError> {
     let mut input = Vec::new();
-    for message in transcript {
-        let encrypted = match message {
-            Message::Assistant {
-                continuation: Some(continuation),
-                ..
-            } => decode_continuation(continuation, target)?
-                .map(|state| state.encrypted_reasoning)
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
-        input.extend(encrypted.iter().map(|item| {
-            json!({
-                "type": "reasoning",
-                "id": item.item_id,
-                "encrypted_content": item.encrypted_content,
-                "summary": []
-            })
-        }));
-        input.push(encode_message(message, target, !encrypted.is_empty())?);
+    input.extend(continuation.encrypted_reasoning.iter().map(|item| {
+        json!({
+            "type": "reasoning",
+            "id": item.item_id,
+            "encrypted_content": item.encrypted_content,
+            "summary": []
+        })
+    }));
+    for item in transcript {
+        input.push(encode_message(&item.kind, target, true)?);
     }
     Ok(input)
 }
 
 fn encode_message(
-    message: &Message,
+    message: &ConversationItemKind,
     target: &ModelTarget,
     allow_encrypted_reasoning: bool,
-) -> Result<Value, GatewayError> {
+) -> Result<Value, InferenceError> {
     Ok(match message {
-        Message::Context {
+        ConversationItemKind::Context {
             content,
             trust,
             source,
-            ..
         } => json!({
             "role": "user",
             "content": [{
@@ -197,17 +214,17 @@ fn encode_message(
                 )
             }]
         }),
-        Message::User { content, .. } => json!({
+        ConversationItemKind::User { content } => json!({
             "role": "user",
             "content": encode_content(content)
         }),
-        Message::Assistant { content, .. } => {
+        ConversationItemKind::Assistant { content } => {
             if !allow_encrypted_reasoning
                 && content
                     .iter()
                     .any(|block| matches!(block, ContentBlock::Thinking { .. }))
             {
-                return Err(GatewayError::new(
+                return Err(InferenceError::new(
                     ErrorClass::UnsupportedCapability,
                     &target.id,
                     "encode_responses",
@@ -222,28 +239,38 @@ fn encode_message(
                         "type": "input_image", "image_url": format!("data:{mime_type};base64,{data}")
                     })),
                     ContentBlock::Thinking { .. } => None,
+                    other => Some(json!({ "type": "input_text", "text": other.text_projection() })),
                 }).collect::<Vec<_>>()
             })
         }
-        Message::ToolCall {
-            id,
+        ConversationItemKind::ToolCall {
+            call_id,
             name,
             arguments,
-            ..
         } => json!({
             "type": "function_call",
-            "call_id": id,
+            "call_id": call_id.0,
             "name": name,
             "arguments": serde_json::to_string(arguments).unwrap_or_else(|_| "{}".into())
         }),
-        Message::ToolResult {
-            tool_call_id,
-            content,
-            ..
+        ConversationItemKind::ToolResult {
+            call_id, content, ..
         } => json!({
             "type": "function_call_output",
-            "call_id": tool_call_id,
+            "call_id": call_id.0,
             "output": text_from_content(content)
+        }),
+        ConversationItemKind::HostedActivity(activity) => json!({
+            "role":"assistant","content":[{"type":"input_text","text":format!("[hosted tool activity: {activity:?}]")}]
+        }),
+        ConversationItemKind::Source(source) => json!({
+            "role":"assistant","content":[{"type":"input_text","text":format!("[source: {source:?}]")}]
+        }),
+        ConversationItemKind::Citation(citation) => json!({
+            "role":"assistant","content":[{"type":"input_text","text":format!("[citation: {citation:?}]")}]
+        }),
+        ConversationItemKind::Artifact(artifact) => json!({
+            "role":"assistant","content":[{"type":"input_text","text":format!("[generated artifact: {artifact:?}]")}]
         }),
     })
 }
@@ -259,6 +286,7 @@ fn encode_content(content: &MessageContent) -> Vec<Value> {
                     "type": "input_image", "image_url": format!("data:{mime_type};base64,{data}")
                 })),
                 ContentBlock::Thinking { .. } => None,
+                other => Some(json!({ "type": "input_text", "text": other.text_projection() })),
             })
             .collect(),
     }

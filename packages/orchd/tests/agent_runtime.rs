@@ -93,9 +93,10 @@ fn test_prompt_block(content: impl Into<String>) -> piko_protocol::PromptBlock {
     }
 }
 
-fn gateway_prompt_text(request: &piko_llmd::gateway::ModelRequest) -> String {
+fn gateway_prompt_text(request: &piko_llmd::gateway::InferenceRequest) -> String {
     request
-        .run_prompt
+        .conversation
+        .instructions
         .blocks
         .iter()
         .map(|block| block.content.as_str())
@@ -149,27 +150,13 @@ impl AgentCommitPort for StrictCreateCommitPort {
 }
 
 #[async_trait]
-impl piko_llmd::gateway::LlmGateway for PanicGateway {
-    async fn execute(
+impl piko_llmd::gateway::InferenceGateway for PanicGateway {
+    async fn start(
         &self,
-        _req: piko_llmd::gateway::ModelRequest,
+        _req: piko_llmd::gateway::InferenceRequest,
         _cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<piko_llmd::gateway::ModelEventStream, piko_llmd::gateway::GatewayError> {
+    ) -> Result<piko_llmd::gateway::InferenceExecution, piko_llmd::gateway::InferenceError> {
         panic!("injected gateway panic")
-    }
-
-    async fn llm_call(
-        &self,
-        _model: piko_protocol::Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<piko_protocol::Message>,
-        _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Result<String, String> {
-        panic!("injected gateway panic")
-    }
-
-    fn capabilities(&self) -> piko_protocol::model::ModelCapabilities {
-        piko_protocol::model::ModelCapabilities::default()
     }
 }
 
@@ -343,7 +330,7 @@ async fn attached_runtime_ports() -> (
     Arc<FauxProvider>,
 ) {
     let model = Arc::new(FauxProvider::new());
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let mut coder = test_agent();
     coder.id = "coder".into();

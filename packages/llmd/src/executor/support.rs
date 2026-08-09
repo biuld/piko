@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use piko_protocol::config::RetryConfig;
 use tokio_util::sync::CancellationToken;
 
 use crate::gateway::{
-    ErrorClass, GatewayError, ModelEvent, ModelRequest, ModelResult, SemanticItem,
+    ErrorClass, InferenceError, InferenceEvent, InferenceItem, InferenceRequest, InferenceResult,
 };
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 use crate::modeling::ProtocolKind;
@@ -24,46 +23,22 @@ pub(super) fn adapter(protocol: ProtocolKind) -> Box<dyn ProtocolAdapter> {
 
 pub(super) async fn execute_fallback(
     client: &reqwest::Client,
-    request: &ModelRequest,
+    request: &InferenceRequest,
     target: &ModelTarget,
     cancel: &CancellationToken,
-) -> Result<ModelResult, GatewayError> {
+) -> Result<InferenceResult, InferenceError> {
     let adapter = adapter(target.protocol.kind());
-    let body = adapter.encode(request, target, false)?;
+    let plan = crate::checkpoint::plan(target, &request.conversation)?;
+    let body = adapter.encode(request, target, &plan, false)?;
     let response = crate::transport::send(client, target, &body, false, cancel).await?;
     let value = crate::transport::json(response, target, cancel).await?;
-    adapter.decode_response(value, target)
-}
-
-pub(super) async fn execute_once_with_retry(
-    client: &reqwest::Client,
-    request: &ModelRequest,
-    target: &ModelTarget,
-    cancel: &CancellationToken,
-    retry: &RetryConfig,
-    telemetry: &Arc<dyn crate::telemetry::GatewayTelemetry>,
-) -> Result<ModelResult, GatewayError> {
-    let policy = RetryPolicy::from_config(retry);
-    let mut state = RetryState::default();
-    loop {
-        match execute_fallback(client, request, target, cancel).await {
-            Ok(result) => return Ok(result),
-            Err(error) => {
-                if !retry_or_sleep(&policy, &mut state, &error, cancel, telemetry, target).await {
-                    if cancel.is_cancelled() {
-                        return Err(GatewayError::cancelled(&target.id));
-                    }
-                    return Err(error);
-                }
-            }
-        }
-    }
+    adapter.decode_response(value, target, request)
 }
 
 pub(super) async fn retry_or_sleep(
     policy: &RetryPolicy,
     state: &mut RetryState,
-    error: &GatewayError,
+    error: &InferenceError,
     cancel: &CancellationToken,
     telemetry: &Arc<dyn crate::telemetry::GatewayTelemetry>,
     target: &ModelTarget,
@@ -109,6 +84,8 @@ fn error_class(class: ErrorClass) -> &'static str {
     match class {
         ErrorClass::Target => "target",
         ErrorClass::UnsupportedCapability => "unsupported_capability",
+        ErrorClass::CheckpointRejected => "checkpoint_rejected",
+        ErrorClass::ContinuationUnavailable => "continuation_unavailable",
         ErrorClass::Authentication => "authentication",
         ErrorClass::Transport => "transport",
         ErrorClass::Timeout => "timeout",
@@ -121,14 +98,14 @@ fn error_class(class: ErrorClass) -> &'static str {
 }
 
 pub(super) async fn apply_middleware(
-    event: ModelEvent,
+    event: InferenceEvent,
     middlewares: &[Arc<dyn LlmdMiddleware>],
     context: &mut GatewayContext,
-) -> ModelEvent {
+) -> InferenceEvent {
     let mut event = event;
     for middleware in middlewares {
         if let Err(message) = middleware.on_stream_event(context, &mut event).await {
-            return ModelEvent::Error(GatewayError::new(
+            return InferenceEvent::Error(InferenceError::new(
                 ErrorClass::Upstream,
                 &context.provider,
                 "middleware",
@@ -139,49 +116,62 @@ pub(super) async fn apply_middleware(
     event
 }
 
-pub(super) fn is_observable(event: &ModelEvent) -> bool {
+pub(super) fn is_observable(event: &InferenceEvent) -> bool {
     matches!(
         event,
-        ModelEvent::TextDelta { .. }
-            | ModelEvent::RefusalDelta { .. }
-            | ModelEvent::ReasoningDelta { .. }
-            | ModelEvent::FunctionCallDelta { .. }
+        InferenceEvent::TextDelta { .. }
+            | InferenceEvent::RefusalDelta { .. }
+            | InferenceEvent::ReasoningDelta { .. }
+            | InferenceEvent::ToolCallDelta { .. }
     )
 }
 
-pub(super) fn result_events(result: ModelResult) -> Vec<ModelEvent> {
+pub(super) fn result_events(result: InferenceResult) -> Vec<InferenceEvent> {
     let mut events = Vec::new();
     for item in result.items {
         events.push(match item {
-            SemanticItem::Text { text, identity } => ModelEvent::TextDelta {
+            InferenceItem::Text { text, id } => InferenceEvent::TextDelta {
                 delta: text,
-                identity,
+                item_id: id,
             },
-            SemanticItem::Refusal { text, identity } => ModelEvent::RefusalDelta {
+            InferenceItem::Refusal { text, id } => InferenceEvent::RefusalDelta {
                 delta: text,
-                identity,
+                item_id: id,
             },
-            SemanticItem::Reasoning { text, identity } => ModelEvent::ReasoningDelta {
+            InferenceItem::Reasoning { text, id } => InferenceEvent::ReasoningDelta {
                 delta: text,
-                identity,
+                item_id: id,
             },
-            SemanticItem::FunctionCall {
+            InferenceItem::ToolCall {
                 name,
                 arguments,
-                identity,
-            } => ModelEvent::FunctionCallDelta {
+                call_id,
+            } => InferenceEvent::ToolCallDelta {
                 name,
                 arguments_delta: arguments,
-                identity,
+                call_id,
             },
-            SemanticItem::FunctionResult { .. } => continue,
+            InferenceItem::ToolResult { .. } => continue,
         });
     }
+    events.extend(result.auxiliary.into_iter().map(|item| match item {
+        crate::tools::InferenceAuxiliary::HostedActivity(value) => {
+            InferenceEvent::HostedActivity(value)
+        }
+        crate::tools::InferenceAuxiliary::ApprovalRequired(value) => {
+            InferenceEvent::ApprovalRequired(value)
+        }
+        crate::tools::InferenceAuxiliary::Source(value) => InferenceEvent::Source(value),
+        crate::tools::InferenceAuxiliary::Citation(value) => InferenceEvent::Citation(value),
+        crate::tools::InferenceAuxiliary::Artifact(value) => InferenceEvent::Artifact(value),
+    }));
     if let Some(usage) = result.usage {
-        events.push(ModelEvent::Usage(usage));
+        events.push(InferenceEvent::Usage(usage));
     }
-    events.push(ModelEvent::OutputMetadata(result.output_metadata));
-    events.push(ModelEvent::Completed(result.status));
+    if let Some(checkpoint) = result.checkpoint {
+        events.push(InferenceEvent::Checkpoint(checkpoint));
+    }
+    events.push(InferenceEvent::Completed(result.finish_reason));
     events
 }
 

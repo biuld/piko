@@ -128,6 +128,7 @@ fn custom_message_lines(component: &CustomMessageComponent, theme: &Theme) -> Ve
                 piko_protocol::ContentBlock::Image { mime_type, .. } => {
                     format!("[image: {mime_type}]")
                 }
+                other => other.text_projection(),
             })
             .collect::<Vec<_>>()
             .join("\n"),

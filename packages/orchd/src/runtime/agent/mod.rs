@@ -28,7 +28,7 @@ use uuid::Uuid;
 use self::actor::AgentActor;
 use self::mailbox::{AgentCommand, AgentHandle};
 use super::execution::AgentExecutionRuntime;
-use crate::ports::model_gateway::LlmGateway;
+use crate::ports::model_gateway::InferenceGateway;
 use crate::runtime::reliability::RunCancellation;
 
 /// Mandatory facade and Actor supervisor for multi-agent runtime operations.

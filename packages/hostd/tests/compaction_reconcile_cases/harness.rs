@@ -3,27 +3,13 @@
 struct SummaryGateway;
 
 #[async_trait]
-impl LlmGateway for SummaryGateway {
-    async fn execute(
+impl InferenceGateway for SummaryGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        _req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok("## Goal\n- test compact\n".into())
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
+    ) -> Result<InferenceExecution, InferenceError> {
+        Ok(text_execution("## Goal\n- test compact\n"))
     }
 }
 
@@ -43,35 +29,26 @@ impl FailingOnceGateway {
 }
 
 #[async_trait]
-impl LlmGateway for FailingOnceGateway {
-    async fn execute(
+impl InferenceGateway for FailingOnceGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
-    }
-
-    async fn llm_call(
-        &self,
-        model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
-        self.calls.lock().unwrap().push(model.id.clone());
+    ) -> Result<InferenceExecution, InferenceError> {
+        self.calls.lock().unwrap().push(req.model.model.clone());
         if !self
             .failed_once
             .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
-            Err("transient summarizer failure".into())
+            Err(InferenceError::new(
+                piko_llmd::gateway::ErrorClass::Upstream,
+                "summary",
+                "start",
+                "transient summarizer failure",
+            ))
         } else {
-            Ok("## Goal\n- fallback summary\n".into())
+            Ok(text_execution("## Goal\n- fallback summary\n"))
         }
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
     }
 }
 
@@ -94,22 +71,12 @@ impl BlockingGateway {
 }
 
 #[async_trait]
-impl LlmGateway for BlockingGateway {
-    async fn execute(
+impl InferenceGateway for BlockingGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        _req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
+    ) -> Result<InferenceExecution, InferenceError> {
         if let Some(started) = self.started.lock().await.take() {
             let _ = started.send(());
         }
@@ -120,11 +87,7 @@ impl LlmGateway for BlockingGateway {
             .take()
             .expect("release receiver available once");
         let _ = receiver.await;
-        Ok("## Goal\n- released\n".into())
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
+        Ok(text_execution("## Goal\n- released\n"))
     }
 }
 
@@ -174,7 +137,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
                         }],
-                        continuation: None,
+                        checkpoint: None,
                         provider: "test-provider".into(),
                         model: "test-model".into(),
                         usage: None,
@@ -289,7 +252,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
                         }],
-                        continuation: None,
+                        checkpoint: None,
                         provider: "test-provider".into(),
                         model: "test-model".into(),
                         usage: None,

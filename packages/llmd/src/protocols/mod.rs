@@ -4,28 +4,104 @@ pub(crate) mod responses;
 #[cfg(test)]
 pub(crate) mod tests_support;
 
-use crate::gateway::{GatewayError, ModelEvent, ModelRequest, ModelResult};
+use crate::checkpoint::ConversationPlan;
+use crate::gateway::{
+    ConversationItem, InferenceError, InferenceEvent, InferenceRequest, InferenceResult,
+    OutputItemId, ToolCallId,
+};
 use crate::target::ModelTarget;
 
 pub(crate) trait ProtocolAdapter: Send + Sync {
-    fn validate(&self, request: &ModelRequest, target: &ModelTarget) -> Result<(), GatewayError>;
+    fn validate(
+        &self,
+        request: &InferenceRequest,
+        target: &ModelTarget,
+    ) -> Result<(), InferenceError>;
     fn encode(
         &self,
-        request: &ModelRequest,
+        request: &InferenceRequest,
         target: &ModelTarget,
+        plan: &ConversationPlan<'_>,
         stream: bool,
-    ) -> Result<serde_json::Value, GatewayError>;
+    ) -> Result<serde_json::Value, InferenceError>;
     fn decode_response(
         &self,
         value: serde_json::Value,
         target: &ModelTarget,
-    ) -> Result<ModelResult, GatewayError>;
-    fn new_stream(&self, target: &ModelTarget) -> Box<dyn ProtocolStream>;
+        request: &InferenceRequest,
+    ) -> Result<InferenceResult, InferenceError>;
+    fn new_stream(
+        &self,
+        target: &ModelTarget,
+        request: &InferenceRequest,
+    ) -> Box<dyn ProtocolStream>;
+}
+
+/// Provider coordinates used only while decoding one adapter response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdapterItemIdentity {
+    pub response_id: Option<String>,
+    pub item_id: Option<String>,
+    pub call_id: Option<String>,
+    pub output_index: Option<u32>,
+    pub content_index: Option<u32>,
+}
+
+impl AdapterItemIdentity {
+    pub(crate) fn semantic_item_id(&self, request: &InferenceRequest, kind: &str) -> OutputItemId {
+        OutputItemId(format!(
+            "out_{}",
+            semantic_digest(
+                request,
+                kind,
+                self.output_index.unwrap_or_default(),
+                self.content_index.unwrap_or_default(),
+            )
+        ))
+    }
+
+    pub(crate) fn semantic_call_id(&self, request: &InferenceRequest) -> ToolCallId {
+        self.call_id.clone().map(ToolCallId).unwrap_or_else(|| {
+            ToolCallId(format!(
+                "call_{}",
+                semantic_digest(
+                    request,
+                    "tool_call",
+                    self.output_index.unwrap_or_default(),
+                    self.content_index.unwrap_or_default(),
+                )
+            ))
+        })
+    }
+}
+
+fn semantic_digest(
+    request: &InferenceRequest,
+    kind: &str,
+    item_ordinal: u32,
+    part_ordinal: u32,
+) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut digest = Sha256::new();
+    for value in [
+        request.context.session_id.as_str(),
+        request.context.agent_instance_id.as_str(),
+        request.context.run_id.as_str(),
+        request.context.step_id.as_str(),
+        kind,
+    ] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    digest.update(item_ordinal.to_be_bytes());
+    digest.update(part_ordinal.to_be_bytes());
+    format!("{:x}", digest.finalize())[..24].to_string()
 }
 
 pub(crate) trait ProtocolStream: Send {
-    fn push(&mut self, value: serde_json::Value) -> Result<Vec<ModelEvent>, GatewayError>;
-    fn finish(&mut self) -> Result<Vec<ModelEvent>, GatewayError>;
+    fn push(&mut self, value: serde_json::Value) -> Result<Vec<InferenceEvent>, InferenceError>;
+    fn finish(&mut self) -> Result<Vec<InferenceEvent>, InferenceError>;
     fn has_observable_output(&self) -> bool;
 }
 
@@ -47,9 +123,10 @@ pub(crate) fn input_text(content: &piko_protocol::MessageContent) -> String {
     }
 }
 
-pub(crate) fn instructions(request: &ModelRequest) -> String {
+pub(crate) fn instructions(request: &InferenceRequest) -> String {
     request
-        .run_prompt
+        .conversation
+        .instructions
         .blocks
         .iter()
         .map(|block| {
@@ -60,6 +137,15 @@ pub(crate) fn instructions(request: &ModelRequest) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+pub(crate) fn all_items<'a>(plan: &'a ConversationPlan<'a>) -> &'a [ConversationItem] {
+    match plan {
+        ConversationPlan::FullReplay { items } | ConversationPlan::OpaqueReplay { items, .. } => {
+            items
+        }
+        ConversationPlan::Resume { suffix, .. } => suffix,
+    }
 }
 
 pub(crate) fn usage(input: u64, output: u64, cache_read: u64) -> piko_protocol::Usage {

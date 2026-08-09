@@ -1,13 +1,11 @@
 // ---- Protocol: model — public model config / capability types ----
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 // ---- ThinkingLevel ----
 
-/// User-facing thinking level. Maps to provider-specific values via ModelSummary.thinkingLevelMap.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+/// User-facing semantic reasoning effort.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ThinkingLevel {
     #[serde(rename = "off")]
@@ -35,12 +33,6 @@ impl ThinkingLevel {
     }
 }
 
-/// Per-model mapping from ThinkingLevel → provider-specific API value.
-/// None on the outer Option = no mapping (use defaults).
-/// None in the inner Option = explicitly unsupported level.
-/// Some("value") = mapped to this provider value.
-pub type ThinkingLevelMap = Option<HashMap<ThinkingLevel, Option<String>>>;
-
 // ---- InputModality ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -48,6 +40,29 @@ pub type ThinkingLevelMap = Option<HashMap<ThinkingLevel, Option<String>>>;
 pub enum InputModality {
     Text,
     Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputModality {
+    Text,
+    Audio,
+    Image,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolExecutionLocus {
+    Caller,
+    Provider,
+    Hybrid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceDeliveryMode {
+    Streaming,
+    Assembled,
 }
 
 // ---- ToolInfo ----
@@ -94,13 +109,22 @@ pub struct ModelRunSettings {
     #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevel")]
     pub thinking_level: Option<ThinkingLevel>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "toolChoice")]
-    pub tool_choice: Option<String>,
+    pub tool_choice: Option<ModelToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "stopConditions")]
     pub stop_conditions: Option<StopConditions>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "runtimeLimits")]
     pub runtime_limits: Option<ModelRuntimeLimits>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "maxTokens")]
     pub max_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelToolChoice {
+    Auto,
+    None,
+    Required,
+    Specific { name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -165,10 +189,19 @@ pub struct ModelSummary {
     pub context_window: u64,
     #[serde(rename = "maxTokens")]
     pub max_tokens: u64,
-    /// Maps ThinkingLevel → provider-specific value. None = level not listed.
-    /// Some(None) = explicitly unsupported. Some(Some("xhigh")) = mapped.
-    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingLevelMap")]
-    pub thinking_level_map: ThinkingLevelMap,
+    /// Closed semantic effort values supported by this model.
+    #[serde(default, rename = "reasoningEfforts")]
+    pub reasoning_efforts: Vec<ThinkingLevel>,
+    #[serde(default)]
+    pub output: Vec<OutputModality>,
+    #[serde(default, rename = "toolExecutionLoci")]
+    pub tool_execution_loci: Vec<ToolExecutionLocus>,
+    #[serde(default, rename = "parallelToolCalls")]
+    pub parallel_tool_calls: bool,
+    #[serde(default, rename = "structuredOutput")]
+    pub structured_output: bool,
+    #[serde(default, rename = "deliveryModes")]
+    pub delivery_modes: Vec<InferenceDeliveryMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

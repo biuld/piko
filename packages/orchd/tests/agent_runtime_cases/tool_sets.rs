@@ -29,7 +29,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
     let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
         config,
     )
     .await;
@@ -93,7 +93,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
     let requests = model.requests().await;
     assert_eq!(requests.len(), 1);
     let names: std::collections::BTreeSet<_> =
-        requests[0].tools.iter().map(|tool| tool.name.as_str()).collect();
+        requests[0].tools.iter().map(|tool| tool.name()).collect();
     for expected in [
         "todo_write",
         "todo_read",
@@ -145,7 +145,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
     let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
         config,
     )
     .await;
@@ -190,7 +190,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
 
     let requests = model.requests().await;
     let names: std::collections::BTreeSet<_> =
-        requests[0].tools.iter().map(|tool| tool.name.as_str()).collect();
+        requests[0].tools.iter().map(|tool| tool.name()).collect();
     assert_eq!(
         names,
         ["todo_read", "todo_write"].into_iter().collect()

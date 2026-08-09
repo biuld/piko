@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 
-use crate::gateway::ModelEvent;
+use crate::gateway::InferenceEvent;
 
 #[derive(Default)]
 pub struct TokenUsageMiddleware {
@@ -23,9 +23,9 @@ impl LlmdMiddleware for TokenUsageMiddleware {
     async fn on_stream_event(
         &self,
         ctx: &mut GatewayContext,
-        event: &mut ModelEvent,
+        event: &mut InferenceEvent,
     ) -> Result<(), String> {
-        if let ModelEvent::Usage(usage) = event {
+        if let InferenceEvent::Usage(usage) = event {
             // Add to the global atomic counters
             let current_in = self.total_input.fetch_add(usage.input, Ordering::SeqCst);
             let current_out = self.total_output.fetch_add(usage.output, Ordering::SeqCst);

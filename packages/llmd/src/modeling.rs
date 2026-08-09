@@ -114,4 +114,7 @@ pub struct ResolvedModelTarget {
     pub auth_method: ProviderAuthMethod,
     pub base_url: String,
     pub protocol: ProtocolProfile,
+    /// Private wire mapping for closed semantic reasoning efforts.
+    pub reasoning_effort_map:
+        std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
 }

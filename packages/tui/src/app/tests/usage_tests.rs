@@ -125,7 +125,12 @@ fn model_catalog_resolves_context_window() {
             input: vec![],
             context_window: 128_000,
             max_tokens: 16_384,
-            thinking_level_map: None,
+            reasoning_efforts: Vec::new(),
+            output: vec![piko_protocol::model::OutputModality::Text],
+            tool_execution_loci: Vec::new(),
+            parallel_tool_calls: false,
+            structured_output: false,
+            delivery_modes: vec![piko_protocol::model::InferenceDeliveryMode::Streaming],
         }],
     }];
 

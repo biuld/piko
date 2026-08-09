@@ -1,7 +1,7 @@
 use super::*;
 
 impl AgentRuntime {
-    pub fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
+    pub fn new(model_executor: Arc<dyn InferenceGateway>) -> Self {
         Self {
             execution: Arc::new(AgentExecutionRuntime::new(model_executor)),
             sessions: RwLock::new(HashMap::new()),
@@ -39,7 +39,7 @@ impl AgentRuntime {
     }
 
     pub async fn bootstrap(
-        model_executor: Arc<dyn LlmGateway>,
+        model_executor: Arc<dyn InferenceGateway>,
         config: piko_protocol::config::OrchdConfig,
     ) -> Arc<Self> {
         Self::bootstrap_with_telemetry(
@@ -52,7 +52,7 @@ impl AgentRuntime {
 
     /// Like [`bootstrap`], with a hostd-provided telemetry sink for metrics.
     pub async fn bootstrap_with_telemetry(
-        model_executor: Arc<dyn LlmGateway>,
+        model_executor: Arc<dyn InferenceGateway>,
         config: piko_protocol::config::OrchdConfig,
         telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Arc<Self> {

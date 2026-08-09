@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures_core::Stream;
-use piko_llmd::gateway::ModelEvent;
+use piko_llmd::gateway::InferenceEvent;
 use piko_orchd_api::RealtimeDeltaSink;
 
 use crate::domain::model::step::ModelSpec;
@@ -47,7 +47,7 @@ impl StepDispatch {
         message_id: MessageId,
         source_turn_id: String,
         model: ModelSpec,
-        events: Pin<Box<dyn Stream<Item = ModelEvent> + Send>>,
+        events: Pin<Box<dyn Stream<Item = InferenceEvent> + Send>>,
     ) -> Self {
         Self {
             source: StepDispatchSource::StepStream(StepDispatchInput {

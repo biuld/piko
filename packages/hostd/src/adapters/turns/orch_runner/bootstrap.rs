@@ -1,4 +1,4 @@
-use piko_llmd::gateway::LlmGateway;
+use piko_llmd::gateway::InferenceGateway;
 
 use crate::domain::config::{
     ApprovalSettings, ExecutionSettings, FeaturesSettings, GuardianSettings, McpServerConfig,
@@ -9,12 +9,15 @@ use crate::domain::permissions::ResolvedPermissions;
 use super::*;
 
 impl OrchAgentRunRunner {
-    pub async fn new(model_executor: Arc<dyn LlmGateway>, provider: &str, model_id: &str) -> Self {
+    pub async fn new(
+        model_executor: Arc<dyn InferenceGateway>,
+        provider: &str,
+        model_id: &str,
+    ) -> Self {
         Self::new_with_mcp(
             model_executor,
             provider,
             model_id,
-            None,
             None,
             128_000,
             4_096,
@@ -34,11 +37,10 @@ impl OrchAgentRunRunner {
 
     #[allow(clippy::too_many_arguments)]
     pub async fn new_with_mcp(
-        model_executor: Arc<dyn LlmGateway>,
+        model_executor: Arc<dyn InferenceGateway>,
         provider: &str,
         model_id: &str,
         thinking_level: Option<piko_protocol::model::ThinkingLevel>,
-        thinking_level_map: piko_protocol::model::ThinkingLevelMap,
         context_window: u64,
         max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
@@ -140,7 +142,6 @@ impl OrchAgentRunRunner {
             },
             default_settings,
             runtime: Default::default(),
-            thinking_level_map,
             sandbox,
             transcript_max_tool_output_tokens: transcript
                 .and_then(|settings| settings.max_tool_output_tokens)

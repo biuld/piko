@@ -86,7 +86,7 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
     let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
         config,
     )
     .await;
@@ -160,10 +160,11 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
     assert!(requests.len() >= 2, "expected at least two model requests");
     let second = &requests[1];
     let marker = second
-        .transcript
+        .conversation
+        .items
         .iter()
-        .find_map(|message| match message {
-            Message::ToolResult { content, .. } => content.iter().find_map(|block| match block {
+        .find_map(|item| match &item.kind {
+            piko_llmd::gateway::ConversationItemKind::ToolResult { content, .. } => content.iter().find_map(|block| match block {
                 ContentBlock::Text { text } if text.contains("Tool output truncated") => {
                     Some(text.clone())
                 }

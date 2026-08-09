@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
 use tokio_stream::{StreamExt, iter};
 use tokio_util::sync::CancellationToken;
 
@@ -27,7 +29,7 @@ struct FailingAgentCommitPort;
 struct DirectInputGateway;
 
 async fn guardian_runner(
-    model_executor: Arc<dyn LlmGateway>,
+    model_executor: Arc<dyn InferenceGateway>,
     review: GuardianReviewCallback,
     max_consecutive_denials: u32,
 ) -> super::OrchAgentRunRunner {
@@ -35,7 +37,6 @@ async fn guardian_runner(
         model_executor,
         "test",
         "model",
-        None,
         None,
         128_000,
         4_096,
@@ -67,7 +68,6 @@ async fn safety_runner(safety: Option<&SafetySettings>) -> super::OrchAgentRunRu
         "test",
         "model",
         None,
-        None,
         128_000,
         4_096,
         &[],
@@ -98,7 +98,6 @@ async fn mcp_template_runner(
         Arc::new(DirectInputGateway),
         "test",
         "model",
-        None,
         None,
         128_000,
         4_096,
@@ -144,32 +143,20 @@ fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApproval
 }
 
 #[async_trait]
-impl LlmGateway for DirectInputGateway {
-    async fn execute(
+impl InferenceGateway for DirectInputGateway {
+    async fn start(
         &self,
-        _: ModelRequest,
+        _: InferenceRequest,
         _: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Ok(Box::pin(iter(vec![
-            ModelEvent::text("child reply"),
-            ModelEvent::Usage(piko_protocol::Usage::empty()),
-            ModelEvent::output_metadata(),
-            ModelEvent::completed("stop"),
-        ])))
-    }
-
-    async fn llm_call(
-        &self,
-        _: piko_protocol::Model,
-        _: Option<String>,
-        _: Vec<piko_protocol::Message>,
-        _: piko_protocol::ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok("child reply".into())
-    }
-
-    fn capabilities(&self) -> piko_protocol::ModelCapabilities {
-        piko_protocol::ModelCapabilities::default()
+    ) -> Result<InferenceExecution, InferenceError> {
+        Ok(InferenceExecution {
+            events: Box::pin(iter(vec![
+                InferenceEvent::text("child reply"),
+                InferenceEvent::Usage(piko_protocol::Usage::empty()),
+                InferenceEvent::completed("stop"),
+            ])),
+            handle: None,
+        })
     }
 }
 

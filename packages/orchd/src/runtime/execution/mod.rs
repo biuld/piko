@@ -33,7 +33,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
-use crate::ports::model_gateway::LlmGateway;
+use crate::ports::model_gateway::InferenceGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::reliability::TerminalSelector;
 use piko_protocol::agents::AgentSpec;

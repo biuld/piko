@@ -103,7 +103,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
     model
         .push_response(faux_provider::CannedResponse::waiting_for_cancel())
         .await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -197,7 +197,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
 async fn startup_cancel_commits_a_durable_abort_marker() {
     let model = Arc::new(FauxProvider::new());
     let runtime = Arc::new(AgentRuntime::new(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>
     ));
     runtime.register_agent(test_agent()).await;
     let collected = Arc::new(CollectingAgentCommitPort::default());
@@ -321,9 +321,9 @@ async fn agent_reuses_private_transcript_across_executions() {
     let requests = model.requests().await;
     assert_eq!(requests.len(), 2);
     assert!(
-        requests[1].transcript.iter().any(|message| matches!(
-            message,
-            piko_protocol::Message::Assistant { content, .. }
+        requests[1].conversation.items.iter().any(|item| matches!(
+            &item.kind,
+            piko_llmd::gateway::ConversationItemKind::Assistant { content }
                 if content.iter().any(|block| matches!(
                     block,
                     piko_protocol::ContentBlock::Text { text } if text == "first answer"
@@ -337,4 +337,3 @@ async fn agent_reuses_private_transcript_across_executions() {
             if report.summary == "second answer"
     )));
 }
-

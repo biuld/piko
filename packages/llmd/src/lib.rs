@@ -1,4 +1,8 @@
 pub mod auth;
+pub mod capabilities;
+mod checkpoint;
+mod collector;
+mod execution;
 pub mod executor;
 pub mod gateway;
 pub mod middleware;
@@ -9,6 +13,7 @@ mod redaction;
 pub mod retry;
 pub mod target;
 pub mod telemetry;
+pub mod tools;
 mod transport;
 
 use std::collections::HashMap;
@@ -21,7 +26,7 @@ use piko_protocol::config::RetryConfig;
 pub fn build_gateway(
     targets: HashMap<String, target::ModelTargetConfig>,
     retry: RetryConfig,
-) -> Arc<dyn crate::gateway::LlmGateway> {
+) -> Arc<dyn crate::gateway::InferenceGateway> {
     build_gateway_with_telemetry(targets, retry, Arc::new(telemetry::NoopGatewayTelemetry))
 }
 
@@ -30,7 +35,7 @@ pub fn build_gateway_with_telemetry(
     targets: HashMap<String, target::ModelTargetConfig>,
     retry: RetryConfig,
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
-) -> Arc<dyn crate::gateway::LlmGateway> {
+) -> Arc<dyn crate::gateway::InferenceGateway> {
     let exec = executor::LlmdExecutor::from_targets(targets)
         .with_retry(retry)
         .with_telemetry(telemetry)
@@ -49,7 +54,7 @@ pub fn build_gateway_with_auth(
     retry: RetryConfig,
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
     auth_resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
-) -> Arc<dyn crate::gateway::LlmGateway> {
+) -> Arc<dyn crate::gateway::InferenceGateway> {
     let exec = executor::LlmdExecutor::from_targets(targets)
         .with_auth_resolver(auth_resolver)
         .with_retry(retry)

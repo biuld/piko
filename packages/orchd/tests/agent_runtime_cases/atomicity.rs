@@ -87,7 +87,7 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
 async fn cancellation_during_durable_start_converges_without_model_call() {
     let model = Arc::new(FauxProvider::new());
     let runtime = Arc::new(AgentRuntime::new(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>
     ));
     runtime.register_agent(test_agent()).await;
     let collected = Arc::new(CollectingAgentCommitPort::default());
@@ -397,7 +397,7 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
 async fn failed_message_commit_never_advances_reusable_agent_transcript() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("must not become durable context").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     runtime

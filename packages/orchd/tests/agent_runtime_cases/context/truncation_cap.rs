@@ -14,7 +14,7 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
     config.transcript_max_tool_output_tokens = 100;
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
-        model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
         config,
     )
     .await;
@@ -88,10 +88,11 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
     let requests = model.requests().await;
     let second = &requests[1];
     let marker = second
-        .transcript
+        .conversation
+        .items
         .iter()
-        .find_map(|message| match message {
-            Message::ToolResult { content, .. } => content.iter().find_map(|block| match block {
+        .find_map(|item| match &item.kind {
+            piko_llmd::gateway::ConversationItemKind::ToolResult { content, .. } => content.iter().find_map(|block| match block {
                 ContentBlock::Text { text } if text.contains("Tool output truncated") => {
                     Some(text.clone())
                 }

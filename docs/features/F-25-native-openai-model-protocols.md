@@ -6,6 +6,10 @@
 > Completions API contracts;
 > [DeepSeek Responses API contract](https://api-docs.deepseek.com/api/create-response)
 
+> Public inference semantics, identity, and continuation exposure are refined
+> by [F-26](F-26-protocol-neutral-inference.md). This feature remains
+> authoritative for native wire-adapter behavior.
+
 ## Summary
 
 piko owns the model-call contract used by its agent runtime and supports two

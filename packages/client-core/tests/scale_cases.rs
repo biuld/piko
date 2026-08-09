@@ -106,7 +106,7 @@ fn scale_rapid_realtime_then_commit() {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "x".repeat(RAPID_DELTAS as usize),
                 }],
-                continuation: None,
+                checkpoint: None,
                 provider: "test".into(),
                 model: "m".into(),
                 usage: None,

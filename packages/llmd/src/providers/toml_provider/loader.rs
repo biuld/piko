@@ -8,7 +8,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use piko_protocol::model::{InputModality, ModelSummary, ProviderAuthMethod, ThinkingLevel};
+use piko_protocol::model::{
+    InferenceDeliveryMode, InputModality, ModelSummary, OutputModality, ProviderAuthMethod,
+    ThinkingLevel, ToolExecutionLocus,
+};
 use serde::Deserialize;
 
 use super::TomlProvider;
@@ -113,15 +116,7 @@ fn parse_models(models_toml: HashMap<String, ModelToml>) -> Vec<ModelSummary> {
                 })
                 .collect();
 
-            let thinking_level_map = m.thinking_level_map.map(|map| {
-                map.into_iter()
-                    .filter_map(|(level_str, value)| {
-                        let level = parse_thinking_level(&level_str)?;
-                        let mapped = if value.is_empty() { None } else { Some(value) };
-                        Some((level, mapped))
-                    })
-                    .collect()
-            });
+            let reasoning_efforts = semantic_reasoning_efforts(&m);
 
             ModelSummary {
                 id,
@@ -130,8 +125,53 @@ fn parse_models(models_toml: HashMap<String, ModelToml>) -> Vec<ModelSummary> {
                 input,
                 context_window: m.context_window,
                 max_tokens: m.max_tokens,
-                thinking_level_map,
+                reasoning_efforts,
+                output: vec![OutputModality::Text],
+                tool_execution_loci: vec![ToolExecutionLocus::Caller],
+                parallel_tool_calls: true,
+                structured_output: false,
+                delivery_modes: vec![
+                    InferenceDeliveryMode::Streaming,
+                    InferenceDeliveryMode::Assembled,
+                ],
             }
+        })
+        .collect()
+}
+
+fn semantic_reasoning_efforts(model: &ModelToml) -> Vec<ThinkingLevel> {
+    if !model.reasoning {
+        return Vec::new();
+    }
+    [
+        ThinkingLevel::Off,
+        ThinkingLevel::Minimal,
+        ThinkingLevel::Low,
+        ThinkingLevel::Medium,
+        ThinkingLevel::High,
+        ThinkingLevel::XHigh,
+    ]
+    .into_iter()
+    .filter(|level| {
+        model
+            .thinking_level_map
+            .as_ref()
+            .and_then(|map| map.get(level.as_str()))
+            .is_none_or(|wire_value| !wire_value.is_empty())
+    })
+    .collect()
+}
+
+fn private_reasoning_map(model: &ModelToml) -> std::collections::BTreeMap<ThinkingLevel, String> {
+    model
+        .thinking_level_map
+        .as_ref()
+        .into_iter()
+        .flat_map(|map| map.iter())
+        .filter_map(|(level, wire_value)| {
+            (!wire_value.is_empty())
+                .then(|| parse_thinking_level(level).map(|level| (level, wire_value.clone())))
+                .flatten()
         })
         .collect()
 }
@@ -238,12 +278,18 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
         validate_unambiguous(model_id, &targets, &surfaces)?;
         model_targets.insert(model_id.clone(), targets);
     }
+    let reasoning_effort_maps = parsed
+        .models
+        .iter()
+        .map(|(id, model)| (id.clone(), private_reasoning_map(model)))
+        .collect();
     let models = parse_models(parsed.models);
 
     Ok(TomlProvider::new(&parsed.provider.id)
         .with_api_surfaces(surfaces)
         .with_default_targets(defaults)
         .with_models(models)
+        .with_reasoning_effort_maps(reasoning_effort_maps)
         .with_model_targets(model_targets))
 }
 
@@ -344,6 +390,13 @@ mod tests {
             ProtocolProfile::Responses {
                 continuation: ResponsesContinuationPolicy::StatelessReplay
             }
+        );
+        assert_eq!(
+            flash
+                .reasoning_effort_map
+                .get(&ThinkingLevel::XHigh)
+                .map(String::as_str),
+            Some("max")
         );
         assert_eq!(
             provider

@@ -253,6 +253,27 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
                 && reconciled.agents[0].agent_instance_id == "task-main"
                 && reconciled.agents[1].agent_instance_id == "task-child"
     ));
+    let Event::SessionReconciled(reopened) = &opened[1] else {
+        unreachable!()
+    };
+    let restored_checkpoint = reopened
+        .snapshot
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            SessionTreeEntry::Message(message) => match &message.message {
+                Message::Assistant {
+                    checkpoint: Some(checkpoint),
+                    ..
+                } => Some(checkpoint.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        });
+    assert_eq!(
+        serde_json::to_value(restored_checkpoint.expect("assistant checkpoint restored")).unwrap(),
+        serde_json::json!("opaque-session-checkpoint")
+    );
 
     let listed_agents = reopened_server
         .handle_command(Command::AgentList {

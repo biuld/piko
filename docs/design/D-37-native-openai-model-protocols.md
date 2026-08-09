@@ -4,6 +4,11 @@
 > Implements: [F-25](../features/F-25-native-openai-model-protocols.md)
 > Core target modeling amended by ADR-009
 
+> The public gateway, semantic identity, and continuation-envelope portions
+> are superseded by
+> [D-38](D-38-protocol-neutral-inference.md). This design remains
+> authoritative for native adapter and transport behavior.
+
 ## First-class target model
 
 The catalog is not a `Provider -> Protocol` map. llmd owns five stable

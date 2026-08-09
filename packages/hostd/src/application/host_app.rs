@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use piko_llmd::auth::AuthStorage;
-use piko_llmd::gateway::LlmGateway;
+use piko_llmd::gateway::InferenceGateway;
 use tokio::sync::Mutex;
 
 use crate::domain::config::{HostSettings, ModelRegistry};
@@ -35,7 +35,7 @@ pub struct HostApp {
     pub(crate) storage: Option<Arc<dyn SessionRepositoryPort>>,
     pub(crate) session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
     pub(crate) turn_runner: Arc<Mutex<Arc<dyn AgentRunRunner>>>,
-    pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn LlmGateway>>>>,
+    pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn InferenceGateway>>>>,
     pub(crate) settings: Arc<Mutex<HostSettings>>,
     pub(crate) model_registry: Arc<Mutex<ModelRegistry>>,
     /// The resolved provider+model the current turn runner executes with.
@@ -159,7 +159,7 @@ impl HostApp {
     }
 
     /// Set the model executor (used for compaction and other host-level LLM calls).
-    pub async fn set_model_executor(&self, executor: Arc<dyn LlmGateway>) {
+    pub async fn set_model_executor(&self, executor: Arc<dyn InferenceGateway>) {
         *self.model_executor.lock().await = Some(executor);
     }
 

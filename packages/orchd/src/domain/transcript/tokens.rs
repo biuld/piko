@@ -49,6 +49,7 @@ pub fn blocks_tokens(blocks: &[ContentBlock]) -> u64 {
                 .len()
                 .saturating_add(mime_type.len())
                 .saturating_add(512) as u64,
+            other => text_tokens(&other.text_projection()),
         })
         .sum()
 }

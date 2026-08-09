@@ -169,7 +169,9 @@ impl AgentRunRunner for AgentPersistRunner {
                 content: vec![ContentBlock::Text {
                     text: "hello from child".into(),
                 }],
-                continuation: None,
+                checkpoint: Some(Box::new(
+                    serde_json::from_value(serde_json::json!("opaque-session-checkpoint")).unwrap(),
+                )),
                 provider: "test".into(),
                 model: "test".into(),
                 usage: None,

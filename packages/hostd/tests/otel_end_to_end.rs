@@ -15,12 +15,18 @@ use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::protocol::HostServer;
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
-use piko_protocol::Model;
-use piko_protocol::messages::Message;
-use piko_protocol::model::ModelRunSettings;
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
+
+fn execution(events: Vec<InferenceEvent>) -> InferenceExecution {
+    InferenceExecution {
+        events: Box::pin(iter(events)),
+        handle: None,
+    }
+}
 
 /// Step 1 emits a tool call for the built-in `todo_write` tool; every later
 /// step emits a plain text reply so the run terminates.
@@ -37,46 +43,30 @@ impl ScriptedGateway {
 }
 
 #[async_trait]
-impl LlmGateway for ScriptedGateway {
-    async fn execute(
+impl InferenceGateway for ScriptedGateway {
+    async fn start(
         &self,
-        _request: ModelRequest,
+        _request: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
+    ) -> Result<InferenceExecution, InferenceError> {
         let step = self.step.fetch_add(1, Ordering::SeqCst);
         if step == 0 {
-            Ok(Box::pin(iter(vec![
-                ModelEvent::function_call(
+            Ok(execution(vec![
+                InferenceEvent::function_call(
                     "call-todo",
                     "todo_write",
                     r#"{"todos":[{"id":1,"status":"pending","content":"plan"}]}"#,
                 ),
-                ModelEvent::Usage(piko_protocol::Usage::empty()),
-                ModelEvent::output_metadata(),
-                ModelEvent::completed("tool_use"),
-            ])))
+                InferenceEvent::Usage(piko_protocol::Usage::empty()),
+                InferenceEvent::completed("tool_use"),
+            ]))
         } else {
-            Ok(Box::pin(iter(vec![
-                ModelEvent::text("done"),
-                ModelEvent::Usage(piko_protocol::Usage::empty()),
-                ModelEvent::output_metadata(),
-                ModelEvent::completed("stop"),
-            ])))
+            Ok(execution(vec![
+                InferenceEvent::text("done"),
+                InferenceEvent::Usage(piko_protocol::Usage::empty()),
+                InferenceEvent::completed("stop"),
+            ]))
         }
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok("done".into())
-    }
-
-    fn capabilities(&self) -> piko_protocol::model::ModelCapabilities {
-        piko_protocol::model::ModelCapabilities::default()
     }
 }
 

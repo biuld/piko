@@ -100,6 +100,7 @@ impl From<ProtocolContentBlock> for ContentBlock {
             ProtocolContentBlock::Text { text } => Self::Text(text),
             ProtocolContentBlock::Thinking { thinking, .. } => Self::Thinking(thinking),
             ProtocolContentBlock::Image { mime_type, .. } => Self::Image { mime_type },
+            other => Self::Text(other.text_projection()),
         }
     }
 }

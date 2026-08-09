@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::ModelEvent;
+use piko_llmd::gateway::InferenceEvent;
 
 use crate::domain::RealtimeFrame;
 use crate::domain::tools::call::ToolCallItem;
@@ -40,17 +40,13 @@ impl ToolCallAggregator {
         Self::default()
     }
 
-    pub fn on_gateway_event(&mut self, event: &ModelEvent) -> Option<ToolCallChunkUpdate> {
+    pub fn on_gateway_event(&mut self, event: &InferenceEvent) -> Option<ToolCallChunkUpdate> {
         match event {
-            ModelEvent::FunctionCallDelta {
+            InferenceEvent::ToolCallDelta {
                 name,
                 arguments_delta,
-                identity,
-            } => self.on_correlated_chunk(
-                identity.call_id.clone().unwrap_or_default(),
-                name.clone(),
-                arguments_delta.clone(),
-            ),
+                call_id,
+            } => self.on_correlated_chunk(call_id.0.clone(), name.clone(), arguments_delta.clone()),
             _ => None,
         }
     }
@@ -211,7 +207,7 @@ impl ToolCallDispatchConsumer {
 
 #[async_trait]
 impl StepEventConsumer for ToolCallDispatchConsumer {
-    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
+    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &InferenceEvent) {
         let Some(update) = self.aggregator.on_gateway_event(event) else {
             return;
         };

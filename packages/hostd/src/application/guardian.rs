@@ -65,7 +65,6 @@ impl HostApp {
             id: model_id.clone(),
             name: model_id,
             provider,
-            base_url: None,
         };
 
         let text = run_review(

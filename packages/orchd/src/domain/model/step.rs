@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use piko_protocol::model::{ModelRunSettings, ThinkingLevelMap};
+pub use piko_protocol::model::ModelRunSettings;
 
 /// Lightweight model reference (not the full pi-ai Model).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,10 +17,6 @@ pub struct ModelSpec {
 pub struct ModelConfig {
     pub model: ModelSpec,
     pub settings: ModelRunSettings,
-    /// Per-model thinking level mapping (from model catalog).
-    /// None = use defaults (level.as_str()).
-    #[allow(clippy::type_complexity)]
-    pub thinking_level_map: ThinkingLevelMap,
     pub context_window: u64,
     pub max_output_tokens: u64,
     /// Per-run transcript policy: max estimated tokens for a single tool
@@ -28,27 +24,9 @@ pub struct ModelConfig {
     pub max_tool_output_tokens: u64,
 }
 
-impl ModelConfig {
-    /// Resolve the thinking level through the model's thinking_level_map.
-    /// Returns the provider-specific value to use in API requests.
-    pub fn resolve_thinking(&self) -> Option<String> {
-        let level = self.settings.thinking_level.as_ref()?;
-
-        if let Some(ref map) = self.thinking_level_map {
-            match map.get(level) {
-                Some(Some(value)) => return Some(value.clone()),
-                Some(None) => return None,
-                None => {}
-            }
-        }
-
-        Some(level.as_str().to_string())
-    }
-}
-
 /// Continuation state passed between model steps (extracted from engine_state).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelContinuationState {
+pub struct AgentLoopState {
     pub version: u32,
     pub kind: String,
     pub counters: ModelRuntimeCounters,
@@ -67,7 +45,7 @@ pub struct ModelRuntimeCounters {
     pub started_at: i64,
 }
 
-impl ModelContinuationState {
+impl AgentLoopState {
     pub fn extract(raw: Option<&serde_json::Value>) -> Option<Self> {
         raw.and_then(|v| serde_json::from_value(v.clone()).ok())
     }

@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
 use futures_core::Stream;
-use piko_llmd::gateway::ModelEvent;
+use piko_llmd::gateway::InferenceEvent;
 
 use crate::domain::model::step::ModelSpec;
 use crate::runtime::events::identity::DispatchIdentity;
@@ -34,7 +34,7 @@ pub(crate) struct StepDispatchInput {
     pub(crate) message_id: MessageId,
     pub(crate) source_turn_id: String,
     pub(crate) model: ModelSpec,
-    pub(crate) events: Pin<Box<dyn Stream<Item = ModelEvent> + Send>>,
+    pub(crate) events: Pin<Box<dyn Stream<Item = InferenceEvent> + Send>>,
 }
 
 pub(crate) struct StepFailureInput {

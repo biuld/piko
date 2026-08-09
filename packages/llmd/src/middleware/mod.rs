@@ -40,7 +40,7 @@ impl GatewayContext {
     }
 }
 
-use crate::gateway::{ModelEvent, ModelRequest};
+use crate::gateway::{InferenceEvent, InferenceRequest};
 
 /// A filter chain / interceptor hook for LLM requests
 #[async_trait]
@@ -50,7 +50,7 @@ pub trait LlmdMiddleware: Send + Sync {
     async fn pre_execute(
         &self,
         _ctx: &mut GatewayContext,
-        _request: &mut ModelRequest,
+        _request: &mut InferenceRequest,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -59,7 +59,7 @@ pub trait LlmdMiddleware: Send + Sync {
     async fn on_stream_event(
         &self,
         _ctx: &mut GatewayContext,
-        _event: &mut ModelEvent,
+        _event: &mut InferenceEvent,
     ) -> Result<(), String> {
         Ok(())
     }

@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-38: Protocol-neutral inference boundary](D-38-protocol-neutral-inference.md)
+  implements F-26 and hides full-replay versus continuation planning behind a
+  general semantic request, event, capability, and opaque-checkpoint model
+  (implemented; V-38).
 - [D-37: Native OpenAI-family model protocols](D-37-native-openai-model-protocols.md)
   implements F-25 and replaces genai with piko-owned Responses and Chat
   Completions adapters (implemented; V-37).

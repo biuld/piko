@@ -8,7 +8,6 @@ async fn permission_runner(
         "test",
         "model",
         None,
-        None,
         128_000,
         4_096,
         &[],

@@ -18,6 +18,8 @@ pub struct TomlProvider {
     default_targets: HashMap<String, ModelTargetProfile>,
     model_targets: HashMap<String, HashMap<String, ModelTargetProfile>>,
     models: Vec<ModelSummary>,
+    reasoning_effort_maps:
+        HashMap<String, std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>>,
 }
 
 impl TomlProvider {
@@ -28,6 +30,7 @@ impl TomlProvider {
             default_targets: HashMap::new(),
             model_targets: HashMap::new(),
             models: Vec::new(),
+            reasoning_effort_maps: HashMap::new(),
         }
     }
 
@@ -38,6 +41,17 @@ impl TomlProvider {
 
     pub fn with_models(mut self, models: Vec<ModelSummary>) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_reasoning_effort_maps(
+        mut self,
+        maps: HashMap<
+            String,
+            std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
+        >,
+    ) -> Self {
+        self.reasoning_effort_maps = maps;
         self
     }
 
@@ -93,6 +107,11 @@ impl Provider for TomlProvider {
             auth_method,
             base_url: surface.base_url.clone(),
             protocol: profile.protocol,
+            reasoning_effort_map: self
+                .reasoning_effort_maps
+                .get(model_id)
+                .cloned()
+                .unwrap_or_default(),
         })
     }
 

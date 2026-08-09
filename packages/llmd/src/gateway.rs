@@ -1,61 +1,275 @@
 use std::pin::Pin;
 
-use async_trait::async_trait;
 use futures::Stream;
-use piko_protocol::messages::{Message, Model, Usage};
-use piko_protocol::model::ModelCapabilities;
-use piko_protocol::tools::ToolDef;
-use tokio_util::sync::CancellationToken;
+use piko_protocol::messages::{
+    ContentBlock, Message, MessageContent, OpaqueModelCheckpoint, Usage,
+};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
-pub struct ModelRequest {
-    pub session_id: String,
-    pub agent_instance_id: String,
+pub use crate::capabilities::{ModelCapabilities, ModelDescriptor, ModelLimits};
+pub use crate::collector::collect_execution;
+pub use crate::execution::{
+    InferenceExecution, InferenceGateway, InferenceStatus, OpaqueEventCursor, OpaqueExecutionHandle,
+};
+pub use crate::tools::{
+    GeneratedArtifact, HostedApprovalPolicy, HostedApprovalRequest, HostedExecutionAuthorization,
+    HostedToolActivity, HostedToolDefinition, InferenceAuxiliary, InferenceCitation,
+    InferenceSource, InferenceTool, SemanticResourceRef,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ModelRef {
     pub provider: String,
     pub model: String,
-    pub run_prompt: piko_protocol::SemanticRunPrompt,
-    pub transcript: Vec<Message>,
-    pub tools: Vec<ToolDef>,
+}
+
+impl ModelRef {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvocationContext {
+    pub session_id: String,
+    pub agent_instance_id: String,
     pub run_id: String,
     pub step_id: String,
-    pub thinking: Option<String>,
 }
 
-pub type ModelEventStream = Pin<Box<dyn Stream<Item = ModelEvent> + Send + 'static>>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ItemIdentity {
-    pub response_id: Option<String>,
-    pub item_id: Option<String>,
-    pub call_id: Option<String>,
-    pub output_index: Option<u32>,
-    pub content_index: Option<u32>,
+#[derive(Debug, Clone)]
+pub struct Conversation {
+    pub instructions: piko_protocol::SemanticRunPrompt,
+    pub items: Vec<ConversationItem>,
 }
 
-impl ItemIdentity {
-    pub fn none() -> Self {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConversationItem {
+    pub id: ConversationItemId,
+    pub kind: ConversationItemKind,
+    pub checkpoint: Option<OpaqueModelCheckpoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ConversationItemKind {
+    Context {
+        content: MessageContent,
+        trust: piko_protocol::ContentTrust,
+        source: piko_protocol::PromptSource,
+    },
+    User {
+        content: MessageContent,
+    },
+    Assistant {
+        content: Vec<ContentBlock>,
+    },
+    ToolCall {
+        call_id: ToolCallId,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolResult {
+        call_id: ToolCallId,
+        name: Option<String>,
+        content: Vec<ContentBlock>,
+        is_error: bool,
+    },
+    HostedActivity(HostedToolActivity),
+    Source(InferenceSource),
+    Citation(InferenceCitation),
+    Artifact(GeneratedArtifact),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+pub struct ConversationItemId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+pub struct OutputItemId(pub String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+pub struct ToolCallId(pub String);
+
+impl Conversation {
+    /// Project the durable protocol transcript into llmd's semantic model.
+    /// IDs are derived from the canonical prefix, so they remain stable after
+    /// persistence/restoration and distinguish duplicate adjacent items.
+    pub fn from_messages(
+        instructions: piko_protocol::SemanticRunPrompt,
+        messages: Vec<Message>,
+    ) -> Self {
+        use sha2::{Digest, Sha256};
+
+        let mut prefix = Sha256::new();
+        let mut items = Vec::with_capacity(messages.len());
+        for message in messages {
+            let (kind, checkpoint) = match message {
+                Message::Context {
+                    content,
+                    trust,
+                    source,
+                    ..
+                } => (
+                    ConversationItemKind::Context {
+                        content,
+                        trust,
+                        source,
+                    },
+                    None,
+                ),
+                Message::User { content, .. } => (ConversationItemKind::User { content }, None),
+                Message::Assistant {
+                    content,
+                    checkpoint,
+                    ..
+                } => (
+                    ConversationItemKind::Assistant { content },
+                    checkpoint.map(|value| *value),
+                ),
+                Message::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => (
+                    ConversationItemKind::ToolCall {
+                        call_id: ToolCallId(id),
+                        name,
+                        arguments,
+                    },
+                    None,
+                ),
+                Message::ToolResult {
+                    tool_call_id,
+                    tool_name,
+                    content,
+                    is_error,
+                    ..
+                } => (
+                    ConversationItemKind::ToolResult {
+                        call_id: ToolCallId(tool_call_id),
+                        name: tool_name,
+                        content,
+                        is_error: is_error.unwrap_or(false),
+                    },
+                    None,
+                ),
+            };
+            let canonical = serde_json::to_vec(&kind).unwrap_or_default();
+            prefix.update((canonical.len() as u64).to_be_bytes());
+            prefix.update(&canonical);
+            let id = ConversationItemId(format!("ci_{}", hex_digest(prefix.clone().finalize())));
+            items.push(ConversationItem {
+                id,
+                kind,
+                checkpoint,
+            });
+        }
         Self {
-            response_id: None,
-            item_id: None,
-            call_id: None,
-            output_index: None,
-            content_index: None,
+            instructions,
+            items,
         }
     }
+}
 
-    pub fn call(call_id: impl Into<String>) -> Self {
+fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryMode {
+    Streaming,
+    Assembled,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ToolChoice {
+    #[default]
+    Auto,
+    None,
+    Required,
+    Specific(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredOutputIntent {
+    pub schema: serde_json::Value,
+    pub strict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InferenceOptions {
+    pub reasoning_effort: Option<piko_protocol::model::ThinkingLevel>,
+    pub delivery: DeliveryMode,
+    pub tool_choice: ToolChoice,
+    pub parallel_tools: Option<bool>,
+    pub max_output_tokens: Option<u32>,
+    pub structured_output: Option<StructuredOutputIntent>,
+}
+
+impl Default for InferenceOptions {
+    fn default() -> Self {
         Self {
-            response_id: None,
-            item_id: None,
-            call_id: Some(call_id.into()),
-            output_index: None,
-            content_index: None,
+            reasoning_effort: None,
+            delivery: DeliveryMode::Streaming,
+            tool_choice: ToolChoice::Auto,
+            parallel_tools: None,
+            max_output_tokens: None,
+            structured_output: None,
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct InferenceRequest {
+    pub model: ModelRef,
+    pub conversation: Conversation,
+    pub tools: Vec<InferenceTool>,
+    pub options: InferenceOptions,
+    pub context: InvocationContext,
+}
+
+impl InferenceRequest {
+    pub fn text_task(
+        model: ModelRef,
+        system_prompt: impl Into<String>,
+        messages: Vec<Message>,
+        context: InvocationContext,
+    ) -> Self {
+        let mut instructions = piko_protocol::SemanticRunPrompt::default();
+        instructions.blocks.push(piko_protocol::PromptBlock {
+            id: "inference.text_task".into(),
+            kind: piko_protocol::PromptBlockKind::Instruction,
+            authority: piko_protocol::InstructionAuthority::Platform,
+            trust: piko_protocol::ContentTrust::Trusted,
+            source: piko_protocol::PromptSource::new("llmd", "text_task"),
+            content: system_prompt.into(),
+            content_digest: String::new(),
+            cache_scope: piko_protocol::CacheScope::NoCache,
+        });
+        Self {
+            model,
+            conversation: Conversation::from_messages(instructions, messages),
+            tools: Vec::new(),
+            options: InferenceOptions {
+                delivery: DeliveryMode::Assembled,
+                ..Default::default()
+            },
+            context,
+        }
+    }
+}
+
+pub type InferenceEventStream = Pin<Box<dyn Stream<Item = InferenceEvent> + Send + 'static>>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TerminalStatus {
+pub enum FinishReason {
     Completed { reason: String },
     Incomplete { reason: Option<String> },
     Failed { message: String },
@@ -63,88 +277,82 @@ pub enum TerminalStatus {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SemanticItem {
+pub enum InferenceItem {
     Text {
         text: String,
-        identity: ItemIdentity,
+        id: OutputItemId,
     },
     Refusal {
         text: String,
-        identity: ItemIdentity,
+        id: OutputItemId,
     },
     Reasoning {
         text: String,
-        identity: ItemIdentity,
+        id: OutputItemId,
     },
-    FunctionCall {
+    ToolCall {
         name: String,
         arguments: String,
-        identity: ItemIdentity,
+        call_id: ToolCallId,
     },
-    FunctionResult {
+    ToolResult {
         output: String,
-        identity: ItemIdentity,
+        call_id: ToolCallId,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelOutputMetadata {
-    /// Adapter-produced continuation. Runtime consumers carry this value
-    /// without interpreting or constructing protocol-specific state.
-    pub continuation: Option<piko_protocol::ModelContinuation>,
-}
-
-impl ModelOutputMetadata {
-    pub fn without_continuation() -> Self {
-        Self { continuation: None }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct ModelResult {
-    pub items: Vec<SemanticItem>,
+pub struct InferenceResult {
+    pub items: Vec<InferenceItem>,
     pub usage: Option<Usage>,
-    pub status: TerminalStatus,
-    pub output_metadata: ModelOutputMetadata,
+    pub finish_reason: FinishReason,
+    pub checkpoint: Option<OpaqueModelCheckpoint>,
+    pub auxiliary: Vec<InferenceAuxiliary>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ModelEvent {
-    OutputMetadata(ModelOutputMetadata),
+pub enum InferenceEvent {
+    Cursor(OpaqueEventCursor),
     TextDelta {
+        item_id: OutputItemId,
         delta: String,
-        identity: ItemIdentity,
     },
     RefusalDelta {
+        item_id: OutputItemId,
         delta: String,
-        identity: ItemIdentity,
     },
     ReasoningDelta {
+        item_id: OutputItemId,
         delta: String,
-        identity: ItemIdentity,
     },
-    FunctionCallDelta {
+    ToolCallDelta {
+        call_id: ToolCallId,
         name: String,
         arguments_delta: String,
-        identity: ItemIdentity,
     },
     Usage(Usage),
-    Completed(TerminalStatus),
-    Error(GatewayError),
+    Checkpoint(OpaqueModelCheckpoint),
+    HostedActivity(HostedToolActivity),
+    ApprovalRequired(HostedApprovalRequest),
+    Source(InferenceSource),
+    Citation(InferenceCitation),
+    Artifact(GeneratedArtifact),
+    Completed(FinishReason),
+    Error(InferenceError),
 }
 
-impl ModelEvent {
+impl InferenceEvent {
     pub fn text(delta: impl Into<String>) -> Self {
         Self::TextDelta {
+            item_id: OutputItemId("output_text".into()),
             delta: delta.into(),
-            identity: ItemIdentity::none(),
         }
     }
 
     pub fn reasoning(delta: impl Into<String>) -> Self {
         Self::ReasoningDelta {
+            item_id: OutputItemId("output_reasoning".into()),
             delta: delta.into(),
-            identity: ItemIdentity::none(),
         }
     }
 
@@ -153,19 +361,15 @@ impl ModelEvent {
         name: impl Into<String>,
         arguments_delta: impl Into<String>,
     ) -> Self {
-        Self::FunctionCallDelta {
+        Self::ToolCallDelta {
+            call_id: ToolCallId(id.into()),
             name: name.into(),
             arguments_delta: arguments_delta.into(),
-            identity: ItemIdentity::call(id),
         }
     }
 
-    pub fn output_metadata() -> Self {
-        Self::OutputMetadata(ModelOutputMetadata::without_continuation())
-    }
-
     pub fn completed(reason: impl Into<String>) -> Self {
-        Self::Completed(TerminalStatus::Completed {
+        Self::Completed(FinishReason::Completed {
             reason: reason.into(),
         })
     }
@@ -175,6 +379,8 @@ impl ModelEvent {
 pub enum ErrorClass {
     Target,
     UnsupportedCapability,
+    CheckpointRejected,
+    ContinuationUnavailable,
     Authentication,
     Transport,
     Timeout,
@@ -187,7 +393,7 @@ pub enum ErrorClass {
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error("{target} {operation}: {message}")]
-pub struct GatewayError {
+pub struct InferenceError {
     pub class: ErrorClass,
     pub target: String,
     pub operation: &'static str,
@@ -197,7 +403,7 @@ pub struct GatewayError {
     pub retry_after_ms: Option<u64>,
 }
 
-impl GatewayError {
+impl InferenceError {
     pub fn new(
         class: ErrorClass,
         target: impl Into<String>,
@@ -216,7 +422,7 @@ impl GatewayError {
     }
 
     pub fn cancelled(target: impl Into<String>) -> Self {
-        Self::new(ErrorClass::Cancelled, target, "execute", "cancelled")
+        Self::new(ErrorClass::Cancelled, target, "start", "cancelled")
     }
 
     pub fn is_retryable(&self) -> bool {
@@ -226,41 +432,5 @@ impl GatewayError {
         ) || self
             .status
             .is_some_and(|status| matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504))
-    }
-}
-
-#[async_trait]
-pub trait LlmGateway: Send + Sync {
-    async fn execute(
-        &self,
-        request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError>;
-
-    async fn execute_once(
-        &self,
-        _request: ModelRequest,
-        _cancel: CancellationToken,
-    ) -> Result<ModelResult, GatewayError> {
-        Err(GatewayError::new(
-            ErrorClass::UnsupportedCapability,
-            "gateway",
-            "execute_once",
-            "non-streaming execution is not implemented",
-        ))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Result<String, String> {
-        Err("stateless call is not implemented".into())
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
     }
 }

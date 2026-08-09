@@ -97,7 +97,6 @@ impl HostApp {
                         id: model_id.clone(),
                         name: model_id,
                         provider,
-                        base_url: None,
                     };
 
                     let previous_summary = abandoned.iter().rev().find_map(|e| {

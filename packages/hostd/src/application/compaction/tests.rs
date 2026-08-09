@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_llmd::auth::AuthStorage;
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEventStream, ModelRequest};
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
 use piko_llmd::providers::ProviderRegistry;
-use piko_protocol::messages::{Message, Model};
-use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
+use piko_protocol::messages::Message;
 use piko_protocol::{
     CommandResult, ContentBlock, MessageContent, MessageEntry, ServerMessage, SessionTreeEntry,
 };
@@ -26,32 +27,19 @@ const DERIVED_GUARD: u64 = 1_024;
 struct StubGateway;
 
 #[async_trait]
-impl LlmGateway for StubGateway {
-    async fn execute(
+impl InferenceGateway for StubGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        _req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Err(GatewayError::new(
-            piko_llmd::gateway::ErrorClass::Upstream,
-            "stub",
-            "execute",
-            "not used",
-        ))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok("## Goal\n- test compact".into())
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
+    ) -> Result<InferenceExecution, InferenceError> {
+        Ok(InferenceExecution {
+            events: Box::pin(tokio_stream::iter(vec![
+                InferenceEvent::text("## Goal\n- test compact"),
+                InferenceEvent::completed("stop"),
+            ])),
+            handle: None,
+        })
     }
 }
 
@@ -82,7 +70,7 @@ fn assistant_entry(id: &str, parent: Option<&str>, seq: u64, text: &str) -> Sess
         transcript_seq: seq,
         message: Message::Assistant {
             content: vec![ContentBlock::Text { text: text.into() }],
-            continuation: None,
+            checkpoint: None,
             provider: "test-provider".into(),
             model: "small-model".into(),
             usage: None,

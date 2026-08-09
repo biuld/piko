@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use piko_llmd::gateway::ModelEvent;
+use piko_llmd::gateway::InferenceEvent;
 
 use crate::runtime::events::collector::{SharedAssistantMessageCollector, SharedPersistCollector};
 use crate::runtime::events::identity::{AgentDispatchContext, StepEventConsumer};
@@ -29,7 +29,7 @@ impl AssistantPersistCollectingConsumer {
 
 #[async_trait]
 impl StepEventConsumer for AssistantPersistCollectingConsumer {
-    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
+    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &InferenceEvent) {
         self.state.apply_gateway_event(event);
     }
 

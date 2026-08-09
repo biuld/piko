@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
     let model = Arc::new(FauxProvider::new());
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -102,7 +102,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
 async fn recovered_child_restores_private_transcript_and_inbox() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("after recovery").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -165,7 +165,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                             content: vec![piko_protocol::ContentBlock::Text {
                                 text: "old answer".into(),
                             }],
-                            continuation: None,
+                            checkpoint: None,
                             provider: "test".into(),
                             model: "test".into(),
                             usage: None,
@@ -250,11 +250,12 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
         .unwrap();
     assert!(
         model.requests().await[0]
-            .transcript
+            .conversation
+            .items
             .iter()
-            .any(|message| matches!(
-                message,
-                piko_protocol::Message::Assistant { content, .. }
+            .any(|item| matches!(
+                &item.kind,
+                piko_llmd::gateway::ConversationItemKind::Assistant { content }
                     if content.iter().any(|block| matches!(
                         block,
                         piko_protocol::ContentBlock::Text { text } if text == "old answer"
@@ -271,7 +272,7 @@ fn recovered_execution_id(session_id: &str, agent_instance_id: &str, request_id:
 async fn recovered_durable_follow_up_starts_without_new_input() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("recovered follow-up").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     runtime.register_agent(test_agent()).await;
     let agents = Arc::new(CollectingAgentCommitPort::default());
     let executions = Arc::new(CollectingExecutionCommitPort::new());
@@ -349,7 +350,7 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
 async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
     let model = Arc::new(FauxProvider::new());
     model.push_text("with multi_agent tools").await;
-    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>);
+    let runtime = AgentRuntime::new(model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>);
     let runtime = Arc::new(runtime);
 
     let mut registered = test_agent();
@@ -430,7 +431,7 @@ async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
 
     let requests = model.requests().await;
     assert_eq!(requests.len(), 1);
-    let tool_names: Vec<_> = requests[0].tools.iter().map(|tool| tool.name.as_str()).collect();
+    let tool_names: Vec<_> = requests[0].tools.iter().map(|tool| tool.name()).collect();
     assert!(
         !tool_names.contains(&"spawn_agent"),
         "recovery must not replace the durable tool snapshot, got {tool_names:?}"

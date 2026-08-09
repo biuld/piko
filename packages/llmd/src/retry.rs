@@ -1,7 +1,7 @@
 use piko_protocol::config::RetryConfig;
 use rand::Rng;
 
-use crate::gateway::GatewayError;
+use crate::gateway::InferenceError;
 
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
@@ -48,7 +48,7 @@ impl RetryState {
     }
 }
 
-pub fn is_retryable(error: &GatewayError) -> bool {
+pub fn is_retryable(error: &InferenceError) -> bool {
     error.is_retryable()
 }
 
@@ -59,17 +59,17 @@ pub fn jitter() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gateway::{ErrorClass, GatewayError};
+    use crate::gateway::{ErrorClass, InferenceError};
 
     #[test]
     fn retryable_statuses_are_structural() {
         for status in [408, 409, 425, 429, 500, 502, 503, 504] {
-            let mut error = GatewayError::new(ErrorClass::Upstream, "t", "http", "safe");
+            let mut error = InferenceError::new(ErrorClass::Upstream, "t", "http", "safe");
             error.status = Some(status);
             assert!(is_retryable(&error), "status {status}");
         }
         for status in [400, 401, 403, 404, 422] {
-            let mut error = GatewayError::new(ErrorClass::Upstream, "t", "http", "safe");
+            let mut error = InferenceError::new(ErrorClass::Upstream, "t", "http", "safe");
             error.status = Some(status);
             assert!(!is_retryable(&error), "status {status}");
         }

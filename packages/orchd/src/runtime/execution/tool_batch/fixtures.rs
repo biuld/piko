@@ -6,13 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
 use piko_orchd_api::SessionExecutionPorts;
 use piko_orchd_api::tools::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use piko_protocol::execution::{ExecutionConfig, StartExecutionRequest};
-use piko_protocol::model::ModelCapabilities;
 use piko_protocol::tools::{ToolSet, ToolSetPolicy, ToolSetToolRef};
-use piko_protocol::{Message, MessageContent, Usage};
+use piko_protocol::{MessageContent, Usage};
 use tokio::sync::{Notify, Semaphore};
 use tokio_util::sync::CancellationToken;
 
@@ -29,7 +30,7 @@ use piko_protocol::agents::AgentSpec;
 /// Gateway that replays pre-queued event streams, one per model step.
 #[derive(Default)]
 pub(super) struct ToolCallingGateway {
-    responses: Mutex<VecDeque<Vec<ModelEvent>>>,
+    responses: Mutex<VecDeque<Vec<InferenceEvent>>>,
     call_count: AtomicU32,
 }
 
@@ -38,7 +39,7 @@ impl ToolCallingGateway {
         Self::default()
     }
 
-    pub(super) fn push_step(&self, events: Vec<ModelEvent>) {
+    pub(super) fn push_step(&self, events: Vec<InferenceEvent>) {
         self.responses.lock().unwrap().push_back(events);
     }
 
@@ -48,55 +49,42 @@ impl ToolCallingGateway {
 }
 
 #[async_trait]
-impl LlmGateway for ToolCallingGateway {
-    async fn execute(
+impl InferenceGateway for ToolCallingGateway {
+    async fn start(
         &self,
-        _req: ModelRequest,
+        _req: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
+    ) -> Result<InferenceExecution, InferenceError> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         let events = self
             .responses
             .lock()
             .unwrap()
             .pop_front()
-            .unwrap_or_else(|| vec![ModelEvent::output_metadata(), ModelEvent::completed("stop")]);
-        Ok(Box::pin(tokio_stream::iter(events)))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: piko_protocol::Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<Message>,
-        _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities::default()
+            .unwrap_or_else(|| vec![InferenceEvent::completed("stop")]);
+        Ok(InferenceExecution {
+            events: Box::pin(tokio_stream::iter(events)),
+            handle: None,
+        })
     }
 }
 
 /// One model step that emits the given tool calls and stops with `tool_use`.
-pub(super) fn tool_use_step(calls: &[(&str, &str)]) -> Vec<ModelEvent> {
-    let mut events = vec![ModelEvent::text(String::new())];
+pub(super) fn tool_use_step(calls: &[(&str, &str)]) -> Vec<InferenceEvent> {
+    let mut events = vec![InferenceEvent::text(String::new())];
     for (id, name) in calls {
-        events.push(ModelEvent::function_call(*id, *name, "{}"));
+        events.push(InferenceEvent::function_call(*id, *name, "{}"));
     }
-    events.push(ModelEvent::Usage(Usage::empty()));
-    events.push(ModelEvent::output_metadata());
-    events.push(ModelEvent::completed("tool_use"));
+    events.push(InferenceEvent::Usage(Usage::empty()));
+    events.push(InferenceEvent::completed("tool_use"));
     events
 }
 
-pub(super) fn text_step(text: &str) -> Vec<ModelEvent> {
+pub(super) fn text_step(text: &str) -> Vec<InferenceEvent> {
     vec![
-        ModelEvent::text(text),
-        ModelEvent::Usage(Usage::empty()),
-        ModelEvent::output_metadata(),
-        ModelEvent::completed("stop"),
+        InferenceEvent::text(text),
+        InferenceEvent::Usage(Usage::empty()),
+        InferenceEvent::completed("stop"),
     ]
 }
 
@@ -276,7 +264,9 @@ pub(super) async fn tool_batch_harness(
     gateway: Arc<ToolCallingGateway>,
     set_policy: Option<ToolSetPolicy>,
 ) -> ToolBatchHarness {
-    let runtime = Arc::new(AgentExecutionRuntime::new(gateway as Arc<dyn LlmGateway>));
+    let runtime = Arc::new(AgentExecutionRuntime::new(
+        gateway as Arc<dyn InferenceGateway>,
+    ));
     let provider = Arc::new(TimingToolProvider::new());
     runtime
         .register_tool_provider(Box::new((*provider).clone()))

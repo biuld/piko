@@ -261,7 +261,6 @@ impl HostApp {
                 id: model_id.clone(),
                 name: model_id,
                 provider,
-                base_url: None,
             };
             let summarizer = summarizer_model.map(|model_id| {
                 make_model(

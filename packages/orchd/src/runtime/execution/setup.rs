@@ -1,7 +1,7 @@
 use super::*;
 
 impl AgentExecutionRuntime {
-    pub fn new(model_executor: Arc<dyn LlmGateway>) -> Self {
+    pub fn new(model_executor: Arc<dyn InferenceGateway>) -> Self {
         Self::with_telemetry(
             model_executor,
             Arc::new(piko_orchd_api::telemetry::NoopRuntimeTelemetry),
@@ -9,7 +9,7 @@ impl AgentExecutionRuntime {
     }
 
     pub fn with_telemetry(
-        model_executor: Arc<dyn LlmGateway>,
+        model_executor: Arc<dyn InferenceGateway>,
         telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
         Self {

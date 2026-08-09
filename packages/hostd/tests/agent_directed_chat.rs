@@ -5,7 +5,9 @@ use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::protocol::HostServer;
-use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
+use piko_llmd::gateway::{
+    InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
+};
 use piko_orchd_api::AgentCommitPort;
 use piko_protocol::{
     AgentDurableCommand, AgentInstanceIdentity, AgentSpec, Message, MessageContent,
@@ -13,35 +15,27 @@ use piko_protocol::{
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
+fn execution(events: Vec<InferenceEvent>) -> InferenceExecution {
+    InferenceExecution {
+        events: Box::pin(iter(events)),
+        handle: None,
+    }
+}
+
 struct DirectChatGateway;
 
 #[async_trait]
-impl LlmGateway for DirectChatGateway {
-    async fn execute(
+impl InferenceGateway for DirectChatGateway {
+    async fn start(
         &self,
-        _request: ModelRequest,
+        _request: InferenceRequest,
         _cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
-        Ok(Box::pin(iter(vec![
-            ModelEvent::text("direct reply"),
-            ModelEvent::Usage(piko_protocol::Usage::empty()),
-            ModelEvent::output_metadata(),
-            ModelEvent::completed("stop"),
-        ])))
-    }
-
-    async fn llm_call(
-        &self,
-        _model: piko_protocol::Model,
-        _system_prompt: Option<String>,
-        _messages: Vec<piko_protocol::Message>,
-        _settings: piko_protocol::ModelRunSettings,
-    ) -> Result<String, String> {
-        Ok("direct reply".into())
-    }
-
-    fn capabilities(&self) -> piko_protocol::ModelCapabilities {
-        piko_protocol::ModelCapabilities::default()
+    ) -> Result<InferenceExecution, InferenceError> {
+        Ok(execution(vec![
+            InferenceEvent::text("direct reply"),
+            InferenceEvent::Usage(piko_protocol::Usage::empty()),
+            InferenceEvent::completed("stop"),
+        ]))
     }
 }
 

@@ -10,8 +10,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::gateway::{
-    ErrorClass, GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest, ModelResult,
-    SemanticItem, TerminalStatus,
+    ErrorClass, FinishReason, InferenceError, InferenceEvent, InferenceExecution, InferenceGateway,
+    InferenceRequest,
 };
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 use crate::retry::{RetryPolicy, RetryState};
@@ -90,11 +90,14 @@ impl LlmdExecutor {
         self
     }
 
-    async fn target(&self, request: &ModelRequest) -> Result<ModelTarget, GatewayError> {
-        let model_key = crate::modeling::ModelKey::new(&request.provider, &request.model);
+    async fn target_for(
+        &self,
+        model: &crate::gateway::ModelRef,
+    ) -> Result<ModelTarget, InferenceError> {
+        let model_key = crate::modeling::ModelKey::new(&model.provider, &model.model);
         let lookup_id = model_key.lookup_id();
         let config = self.state.targets.get(&lookup_id).ok_or_else(|| {
-            GatewayError::new(
+            InferenceError::new(
                 ErrorClass::Target,
                 &lookup_id,
                 "resolve_target",
@@ -103,12 +106,12 @@ impl LlmdExecutor {
         })?;
         let auth = if let Some(resolver) = &self.state.auth_resolver {
             resolver
-                .resolve(&request.provider, config.auth_method)
+                .resolve(&model.provider, config.auth_method)
                 .await
                 .map_err(|message| {
-                    GatewayError::new(
+                    InferenceError::new(
                         ErrorClass::Authentication,
-                        &request.provider,
+                        &model.provider,
                         "resolve_auth",
                         message,
                     )
@@ -118,18 +121,22 @@ impl LlmdExecutor {
         };
         ModelTarget::resolve(
             &lookup_id,
-            &request.model,
+            &model.model,
             config,
             auth.as_ref().map(|value| &value.headers),
         )
     }
 
-    fn context(&self, request: &ModelRequest) -> GatewayContext {
+    async fn target(&self, request: &InferenceRequest) -> Result<ModelTarget, InferenceError> {
+        self.target_for(&request.model).await
+    }
+
+    fn context(&self, request: &InferenceRequest) -> GatewayContext {
         GatewayContext {
-            run_id: request.run_id.clone(),
-            step_id: request.step_id.clone(),
-            model_id: request.model.clone(),
-            provider: request.provider.clone(),
+            run_id: request.context.run_id.clone(),
+            step_id: request.context.step_id.clone(),
+            model_id: request.model.model.clone(),
+            provider: request.model.provider.clone(),
             metadata: HashMap::new(),
             telemetry: Some(Arc::clone(&self.telemetry)),
         }
@@ -137,14 +144,21 @@ impl LlmdExecutor {
 }
 
 #[async_trait]
-impl LlmGateway for LlmdExecutor {
-    async fn execute(
+impl InferenceGateway for LlmdExecutor {
+    async fn describe(
         &self,
-        mut request: ModelRequest,
+        model: &crate::gateway::ModelRef,
+    ) -> Result<crate::gateway::ModelDescriptor, InferenceError> {
+        Ok(self.target_for(model).await?.descriptor(&model.provider))
+    }
+
+    async fn start(
+        &self,
+        mut request: InferenceRequest,
         cancel: CancellationToken,
-    ) -> Result<ModelEventStream, GatewayError> {
+    ) -> Result<InferenceExecution, InferenceError> {
         if cancel.is_cancelled() {
-            return Err(GatewayError::cancelled(&request.provider));
+            return Err(InferenceError::cancelled(&request.model.provider));
         }
         let target = self.target(&request).await?;
         target.validate(&request)?;
@@ -154,32 +168,30 @@ impl LlmGateway for LlmdExecutor {
                 .pre_execute(&mut context, &mut request)
                 .await
                 .map_err(|message| {
-                    GatewayError::new(ErrorClass::Target, &target.id, "middleware", message)
+                    InferenceError::new(ErrorClass::Target, &target.id, "middleware", message)
                 })?;
         }
         let protocol_adapter = adapter(target.protocol.kind());
-        let body = protocol_adapter.encode(&request, &target, true)?;
+        let plan = crate::checkpoint::plan(&target, &request.conversation)?;
+        let body = protocol_adapter.encode(&request, &target, &plan, true)?;
         self.telemetry
             .record_model_input(piko_protocol::ModelInputDebugSnapshot {
-                session_id: request.session_id.clone(),
-                agent_instance_id: request.agent_instance_id.clone(),
-                run_id: request.run_id.clone(),
-                step_id: request.step_id.clone(),
-                provider: request.provider.clone(),
-                model: request.model.clone(),
-                request: body.clone(),
-                options: serde_json::json!({
-                    "protocol": target.protocol.kind(),
-                    "streamingFallback": target.streaming_fallback
-                }),
+                session_id: request.context.session_id.clone(),
+                agent_instance_id: request.context.agent_instance_id.clone(),
+                run_id: request.context.run_id.clone(),
+                step_id: request.context.step_id.clone(),
+                provider: request.model.provider.clone(),
+                model: request.model.model.clone(),
+                request: crate::redaction::semantic_model_input(&request),
+                options: crate::redaction::semantic_inference_options(&request.options),
             });
 
         let span = tracing::info_span!(
             "llm.request",
-            run_id = %request.run_id,
-            step_id = %request.step_id,
-            model = %request.model,
-            provider = %request.provider,
+            run_id = %request.context.run_id,
+            step_id = %request.context.step_id,
+            model = %request.model.model,
+            provider = %request.model.provider,
             protocol = ?target.protocol.kind(),
             streaming = true,
         );
@@ -209,7 +221,7 @@ impl LlmGateway for LlmdExecutor {
                         continue;
                     }
                     if cancel.is_cancelled() {
-                        break Err(GatewayError::cancelled(&target.id));
+                        break Err(InferenceError::cancelled(&target.id));
                     }
                     break Err(error);
                 }
@@ -230,13 +242,13 @@ impl LlmGateway for LlmdExecutor {
         let output = stream! {
             let started = Instant::now();
             let mut context = context;
-            let mut protocol_stream = adapter(target.protocol.kind()).new_stream(&target);
+            let mut protocol_stream = adapter(target.protocol.kind()).new_stream(&target, &request);
             let mut first_output = false;
             let mut pending_events = Vec::new();
             if let Some(result) = fallback {
                 for event in result_events(result) {
                     let event = apply_middleware(event, &middlewares, &mut context).await;
-                    if matches!(event, ModelEvent::Completed(_)) {
+                    if matches!(event, InferenceEvent::Completed(_)) {
                         tracing::info!(target: "llm.stream_done", "llm.stream_done");
                     }
                     yield event;
@@ -255,12 +267,12 @@ impl LlmGateway for LlmdExecutor {
                                     match protocol_stream.finish() {
                                         Ok(events) => for event in events {
                                             let event = apply_middleware(event, &middlewares, &mut context).await;
-                                            if matches!(event, ModelEvent::Completed(_)) {
+                                            if matches!(event, InferenceEvent::Completed(_)) {
                                                 tracing::info!(target: "llm.stream_done", "llm.stream_done");
                                             }
                                             yield event;
                                         },
-                                        Err(error) => yield ModelEvent::Error(error),
+                                        Err(error) => yield InferenceEvent::Error(error),
                                     }
                                     return;
                                 }
@@ -268,7 +280,7 @@ impl LlmGateway for LlmdExecutor {
                                     let value = match serde_json::from_str(&message.data) {
                                         Ok(value) => value,
                                         Err(error) => {
-                                            yield ModelEvent::Error(GatewayError::new(
+                                            yield InferenceEvent::Error(InferenceError::new(
                                                 ErrorClass::Protocol, &target.id, "decode_stream_json",
                                                 format!("malformed stream JSON: {error}"),
                                             ));
@@ -298,7 +310,7 @@ impl LlmGateway for LlmdExecutor {
                                             }
                                             yield apply_middleware(event, &middlewares, &mut context).await;
                                         },
-                                        Err(error) => { yield ModelEvent::Error(error); return; }
+                                        Err(error) => { yield InferenceEvent::Error(error); return; }
                                     }
                                 }
                                 Err(error) => { stream_error = Some(error); break; }
@@ -311,7 +323,7 @@ impl LlmGateway for LlmdExecutor {
                                 }
                                 for event in events {
                                     let event = apply_middleware(event, &middlewares, &mut context).await;
-                                    if matches!(event, ModelEvent::Completed(_)) {
+                                    if matches!(event, InferenceEvent::Completed(_)) {
                                         tracing::info!(target: "llm.stream_done", "llm.stream_done");
                                     }
                                     yield event;
@@ -321,14 +333,14 @@ impl LlmGateway for LlmdExecutor {
                             Err(protocol_error) => {
                                 let retryable_stream_failure = stream_error
                                     .as_ref()
-                                    .is_some_and(GatewayError::is_retryable);
+                                    .is_some_and(InferenceError::is_retryable);
                                 let error = stream_error.unwrap_or(protocol_error);
                                 if error.class == ErrorClass::Cancelled {
-                                    yield ModelEvent::Completed(TerminalStatus::Cancelled);
+                                    yield InferenceEvent::Completed(FinishReason::Cancelled);
                                     return;
                                 }
                                 if protocol_stream.has_observable_output() {
-                                    yield ModelEvent::Error(error);
+                                    yield InferenceEvent::Error(error);
                                     return;
                                 }
                                 if policy.enabled
@@ -354,100 +366,20 @@ impl LlmGateway for LlmdExecutor {
                                                 .await;
                                             }
                                         }
-                                        Err(error) => yield ModelEvent::Error(error),
+                                        Err(error) => yield InferenceEvent::Error(error),
                                     }
                                     return;
                                 }
                                 // A protocol-level EOF or framing failure is
                                 // never silently restarted or reinterpreted.
-                                yield ModelEvent::Error(error);
+                                yield InferenceEvent::Error(error);
                                 return;
                             }
                         }
         };
-        Ok(Box::pin(InstrumentedStream::new(Box::pin(output), span)))
-    }
-
-    async fn execute_once(
-        &self,
-        mut request: ModelRequest,
-        cancel: CancellationToken,
-    ) -> Result<ModelResult, GatewayError> {
-        let target = self.target(&request).await?;
-        let mut context = self.context(&request);
-        for middleware in &self.middlewares {
-            middleware
-                .pre_execute(&mut context, &mut request)
-                .await
-                .map_err(|message| {
-                    GatewayError::new(ErrorClass::Target, &target.id, "middleware", message)
-                })?;
-        }
-        let mut result = execute_once_with_retry(
-            &self.state.client,
-            &request,
-            &target,
-            &cancel,
-            &self.retry,
-            &self.telemetry,
-        )
-        .await?;
-        if let Some(usage) = result.usage.take() {
-            let event =
-                apply_middleware(ModelEvent::Usage(usage), &self.middlewares, &mut context).await;
-            if let ModelEvent::Usage(usage) = event {
-                result.usage = Some(usage);
-            }
-        }
-        Ok(result)
-    }
-
-    async fn llm_call(
-        &self,
-        model: piko_protocol::Model,
-        system_prompt: Option<String>,
-        messages: Vec<piko_protocol::Message>,
-        _settings: piko_protocol::model::ModelRunSettings,
-    ) -> Result<String, String> {
-        let mut prompt = piko_protocol::SemanticRunPrompt::default();
-        if let Some(content) = system_prompt {
-            prompt.blocks.push(piko_protocol::PromptBlock {
-                id: "stateless.system".into(),
-                kind: piko_protocol::PromptBlockKind::Instruction,
-                authority: piko_protocol::InstructionAuthority::Platform,
-                trust: piko_protocol::ContentTrust::Trusted,
-                source: piko_protocol::PromptSource::new("stateless", "llm_call"),
-                content,
-                content_digest: String::new(),
-                cache_scope: piko_protocol::CacheScope::NoCache,
-            });
-        }
-        let result = self
-            .execute_once(
-                ModelRequest {
-                    session_id: "stateless".into(),
-                    agent_instance_id: "stateless".into(),
-                    provider: model.provider,
-                    model: model.id,
-                    run_prompt: prompt,
-                    transcript: messages,
-                    tools: Vec::new(),
-                    run_id: "stateless".into(),
-                    step_id: "stateless".into(),
-                    thinking: None,
-                },
-                CancellationToken::new(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        Ok(result
-            .items
-            .into_iter()
-            .filter_map(|item| match item {
-                SemanticItem::Text { text, .. } => Some(text),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Ok(InferenceExecution {
+            events: Box::pin(InstrumentedStream::new(Box::pin(output), span)),
+            handle: None,
+        })
     }
 }

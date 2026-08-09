@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use piko_llmd::executor::LlmdExecutor;
-use piko_llmd::gateway::{LlmGateway, ModelEvent, ModelRequest, TerminalStatus};
+use piko_llmd::gateway::{FinishReason, InferenceEvent, InferenceGateway, InferenceRequest};
 use piko_llmd::target::ModelTargetConfig;
 use piko_llmd::telemetry::GatewayTelemetry;
 use piko_protocol::config::RetryConfig;
@@ -36,7 +36,6 @@ enum Step {
     NonStreaming,
     ResponsesStreamSuccess,
     ResponsesNonStreaming,
-    MalformedJson,
 }
 
 #[derive(Debug, Clone)]
@@ -236,15 +235,6 @@ async fn write_response(stream: &mut TcpStream, step: Step) {
             let _ = stream.write_all(head.as_bytes()).await;
             let _ = stream.write_all(body.as_bytes()).await;
         }
-        Step::MalformedJson => {
-            let body = "{not-json";
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(head.as_bytes()).await;
-            let _ = stream.write_all(body.as_bytes()).await;
-        }
     }
     let _ = stream.flush().await;
 }
@@ -289,21 +279,24 @@ fn executor_for_protocol(
     LlmdExecutor::from_targets(targets).with_retry(retry_config())
 }
 
-fn request() -> ModelRequest {
-    ModelRequest {
-        session_id: "session-1".to_string(),
-        agent_instance_id: "agent-1".to_string(),
-        provider: "openai".to_string(),
-        model: "gpt-test".to_string(),
-        run_prompt: piko_protocol::SemanticRunPrompt::default(),
-        transcript: vec![piko_protocol::messages::Message::User {
-            content: piko_protocol::messages::MessageContent::String("hi".to_string()),
-            timestamp: None,
-        }],
+fn request() -> InferenceRequest {
+    InferenceRequest {
+        model: piko_llmd::gateway::ModelRef::new("openai", "gpt-test"),
+        conversation: piko_llmd::gateway::Conversation::from_messages(
+            piko_protocol::SemanticRunPrompt::default(),
+            vec![piko_protocol::messages::Message::User {
+                content: piko_protocol::messages::MessageContent::String("hi".to_string()),
+                timestamp: None,
+            }],
+        ),
         tools: vec![],
-        run_id: "run-1".to_string(),
-        step_id: "step-1".to_string(),
-        thinking: None,
+        options: Default::default(),
+        context: piko_llmd::gateway::InvocationContext {
+            session_id: "session-1".to_string(),
+            agent_instance_id: "agent-1".to_string(),
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+        },
     }
 }
 
@@ -321,19 +314,19 @@ impl GatewayTelemetry for PromptCapture {
     fn record_fallback(&self, _model: &str, _provider: &str) {}
 }
 
-async fn collect(exec: &LlmdExecutor, req: ModelRequest) -> Vec<ModelEvent> {
+async fn collect(exec: &LlmdExecutor, req: InferenceRequest) -> Vec<InferenceEvent> {
     let stream = exec
-        .execute(req, tokio_util::sync::CancellationToken::new())
+        .start(req, tokio_util::sync::CancellationToken::new())
         .await
         .expect("execute should return a stream");
-    stream.collect::<Vec<_>>().await
+    stream.events.collect::<Vec<_>>().await
 }
 
-fn text_events(events: &[ModelEvent]) -> Vec<String> {
+fn text_events(events: &[InferenceEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|e| match e {
-            ModelEvent::TextDelta { delta, .. } => Some(delta.clone()),
+            InferenceEvent::TextDelta { delta, .. } => Some(delta.clone()),
             _ => None,
         })
         .collect()
@@ -377,16 +370,16 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     targets.insert("openai/gpt-test".to_string(), target);
     let exec = piko_llmd::build_gateway(targets, retry_config());
     let mut req = request();
-    req.run_id = "run-otel".to_string();
+    req.context.run_id = "run-otel".to_string();
     let stream = exec
-        .execute(req, tokio_util::sync::CancellationToken::new())
+        .start(req, tokio_util::sync::CancellationToken::new())
         .await
         .expect("execute should return a stream");
-    let events = stream.collect::<Vec<_>>().await;
+    let events = stream.events.collect::<Vec<_>>().await;
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
+            .any(|e| matches!(e, InferenceEvent::Completed(FinishReason::Completed { reason }) if reason == "stop"))
     );
 
     tracer_provider.force_flush().unwrap();
@@ -446,12 +439,12 @@ async fn retries_transient_503_then_streams() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
+            .any(|e| matches!(e, InferenceEvent::Completed(FinishReason::Completed { reason }) if reason == "stop"))
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, ModelEvent::Usage(u) if u.input == 3 && u.output == 2))
+            .any(|e| matches!(e, InferenceEvent::Usage(u) if u.input == 3 && u.output == 2))
     );
     assert_eq!(
         stub.request_count(),
@@ -480,12 +473,12 @@ async fn falls_back_to_non_streaming_after_budget_exhausted() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
+            .any(|e| matches!(e, InferenceEvent::Completed(FinishReason::Completed { reason }) if reason == "stop"))
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, ModelEvent::Usage(u) if u.input == 10 && u.output == 5))
+            .any(|e| matches!(e, InferenceEvent::Usage(u) if u.input == 10 && u.output == 5))
     );
     assert_eq!(
         stub.streaming_count(),

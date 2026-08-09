@@ -2,18 +2,23 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::support::{EncryptedReasoningItem, output_metadata, protocol, string};
-use crate::gateway::{
-    ErrorClass, GatewayError, ItemIdentity, ModelEvent, ModelOutputMetadata, ModelResult,
-    SemanticItem, TerminalStatus,
+use super::decode_items::{StreamItem, StreamItemKind, decode_message_item};
+use super::support::{
+    EncryptedReasoningItem, ResponsesCheckpointOutput, ResponsesContinuation, decode_usage,
+    output_checkpoint, protocol, string,
 };
-use crate::protocols::{ProtocolStream, usage};
+use crate::gateway::{
+    ErrorClass, FinishReason, InferenceError, InferenceEvent, InferenceItem, InferenceRequest,
+    InferenceResult,
+};
+use crate::protocols::{AdapterItemIdentity, ProtocolStream};
 use crate::target::ModelTarget;
 
 pub(super) fn decode_complete(
     value: Value,
     target: &ModelTarget,
-) -> Result<ModelResult, GatewayError> {
+    request: &InferenceRequest,
+) -> Result<InferenceResult, InferenceError> {
     let response_id =
         string(&value, "id").ok_or_else(|| protocol(target, "response is missing id"))?;
     let status =
@@ -33,7 +38,7 @@ pub(super) fn decode_complete(
         if let Some(id) = &item_id {
             item_ids.push(id.clone());
         }
-        let identity = ItemIdentity {
+        let identity = AdapterItemIdentity {
             response_id: Some(response_id.clone()),
             item_id,
             call_id: string(item, "call_id"),
@@ -41,7 +46,7 @@ pub(super) fn decode_complete(
             content_index: None,
         };
         match kind.as_str() {
-            "message" => decode_message_item(item, &identity, &mut items, target)?,
+            "message" => decode_message_item(item, &identity, &mut items, target, request)?,
             "reasoning" => {
                 if let Some(encrypted_content) = string(item, "encrypted_content") {
                     let item_id = identity.item_id.clone().ok_or_else(|| {
@@ -63,7 +68,8 @@ pub(super) fn decode_complete(
                     .filter_map(|part| string(part, "text"))
                     .collect::<Vec<_>>()
                     .join("\n");
-                items.push(SemanticItem::Reasoning { text, identity });
+                let id = identity.semantic_item_id(request, "reasoning");
+                items.push(InferenceItem::Reasoning { text, id });
             }
             "function_call" => {
                 let call_id = string(item, "call_id")
@@ -71,16 +77,16 @@ pub(super) fn decode_complete(
                 call_ids.push(call_id.clone());
                 let mut identity = identity;
                 identity.call_id = Some(call_id);
-                items.push(SemanticItem::FunctionCall {
+                items.push(InferenceItem::ToolCall {
                     name: string(item, "name")
                         .ok_or_else(|| protocol(target, "function call is missing name"))?,
                     arguments: string(item, "arguments").unwrap_or_default(),
-                    identity,
+                    call_id: identity.semantic_call_id(request),
                 });
             }
-            "function_call_output" => items.push(SemanticItem::FunctionResult {
+            "function_call_output" => items.push(InferenceItem::ToolResult {
                 output: string(item, "output").unwrap_or_default(),
-                identity,
+                call_id: identity.semantic_call_id(request),
             }),
             other => {
                 return Err(protocol(
@@ -92,16 +98,16 @@ pub(super) fn decode_complete(
     }
     let usage = value.get("usage").map(decode_usage);
     let status = match status.as_str() {
-        "completed" => TerminalStatus::Completed {
+        "completed" => FinishReason::Completed {
             reason: "stop".into(),
         },
-        "incomplete" => TerminalStatus::Incomplete {
+        "incomplete" => FinishReason::Incomplete {
             reason: value
                 .pointer("/incomplete_details/reason")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         },
-        "failed" => TerminalStatus::Failed {
+        "failed" => FinishReason::Failed {
             message: value
                 .pointer("/error/message")
                 .and_then(Value::as_str)
@@ -115,106 +121,80 @@ pub(super) fn decode_complete(
             ));
         }
     };
-    Ok(ModelResult {
+    let checkpoint = matches!(&status, FinishReason::Completed { .. })
+        .then(|| {
+            let assistant_reasoning = items
+                .iter()
+                .filter_map(|item| match item {
+                    InferenceItem::Reasoning { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<String>();
+            let assistant_text = items
+                .iter()
+                .filter_map(|item| match item {
+                    InferenceItem::Text { text, .. } | InferenceItem::Refusal { text, .. } => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<String>();
+            output_checkpoint(
+                request,
+                target,
+                ResponsesCheckpointOutput {
+                    continuation: ResponsesContinuation {
+                        response_id,
+                        output_item_ids: item_ids,
+                        call_ids,
+                        encrypted_reasoning,
+                    },
+                    assistant_reasoning,
+                    assistant_text,
+                },
+            )
+        })
+        .transpose()?;
+    Ok(InferenceResult {
         items,
         usage,
-        status,
-        output_metadata: output_metadata(response_id, item_ids, call_ids, encrypted_reasoning),
+        finish_reason: status,
+        checkpoint,
+        auxiliary: Vec::new(),
     })
 }
 
-fn decode_message_item(
-    item: &Value,
-    identity: &ItemIdentity,
-    items: &mut Vec<SemanticItem>,
-    target: &ModelTarget,
-) -> Result<(), GatewayError> {
-    let content = item
-        .get("content")
-        .and_then(Value::as_array)
-        .ok_or_else(|| protocol(target, "message content is not an array"))?;
-    for (index, part) in content.iter().enumerate() {
-        let mut identity = identity.clone();
-        identity.content_index = Some(index as u32);
-        match string(part, "type").as_deref() {
-            Some("output_text") => items.push(SemanticItem::Text {
-                text: string(part, "text").unwrap_or_default(),
-                identity,
-            }),
-            Some("refusal") => items.push(SemanticItem::Refusal {
-                text: string(part, "refusal")
-                    .or_else(|| string(part, "text"))
-                    .unwrap_or_default(),
-                identity,
-            }),
-            Some(other) => {
-                return Err(protocol(
-                    target,
-                    format!("unsupported required content type {other}"),
-                ));
-            }
-            None => return Err(protocol(target, "content part is missing type")),
-        }
-    }
-    Ok(())
-}
-
-fn decode_usage(value: &Value) -> piko_protocol::Usage {
-    usage(
-        value
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        value
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        value
-            .pointer("/input_tokens_details/cached_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-    )
-}
-
-#[derive(Debug, Clone)]
-struct StreamItem {
-    identity: ItemIdentity,
-    name: String,
-    kind: StreamItemKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamItemKind {
-    Message,
-    Reasoning,
-    FunctionCall,
-}
-
 pub(super) struct ResponsesStream {
-    target: String,
+    target: ModelTarget,
+    request: InferenceRequest,
     response_id: Option<String>,
     items: HashMap<u32, StreamItem>,
     terminal: bool,
     observable: bool,
     encrypted_reasoning: Vec<EncryptedReasoningItem>,
+    assistant_text: String,
+    assistant_reasoning: String,
 }
 
 impl ResponsesStream {
-    pub(super) fn new(target: String) -> Self {
+    pub(super) fn new(target: ModelTarget, request: InferenceRequest) -> Self {
         Self {
             target,
+            request,
             response_id: None,
             items: HashMap::new(),
             terminal: false,
             observable: false,
             encrypted_reasoning: Vec::new(),
+            assistant_text: String::new(),
+            assistant_reasoning: String::new(),
         }
     }
 
-    fn error(&self, message: impl Into<String>) -> GatewayError {
-        GatewayError::new(
+    fn error(&self, message: impl Into<String>) -> InferenceError {
+        InferenceError::new(
             ErrorClass::Protocol,
-            &self.target,
+            &self.target.id,
             "decode_responses_stream",
             message,
         )
@@ -224,7 +204,7 @@ impl ResponsesStream {
         &self,
         event: &Value,
         expected: StreamItemKind,
-    ) -> Result<ItemIdentity, GatewayError> {
+    ) -> Result<AdapterItemIdentity, InferenceError> {
         let output_index = event
             .get("output_index")
             .and_then(Value::as_u64)
@@ -257,7 +237,7 @@ impl ResponsesStream {
         }
     }
 
-    fn output_metadata(&self) -> Result<ModelOutputMetadata, GatewayError> {
+    fn output_checkpoint(&self) -> Result<piko_protocol::OpaqueModelCheckpoint, InferenceError> {
         let response_id = self
             .response_id
             .clone()
@@ -272,17 +252,25 @@ impl ResponsesStream {
             .iter()
             .filter_map(|(_, item)| item.identity.call_id.clone())
             .collect();
-        Ok(output_metadata(
-            response_id,
-            output_item_ids,
-            call_ids,
-            self.encrypted_reasoning.clone(),
-        ))
+        output_checkpoint(
+            &self.request,
+            &self.target,
+            ResponsesCheckpointOutput {
+                continuation: ResponsesContinuation {
+                    response_id,
+                    output_item_ids,
+                    call_ids,
+                    encrypted_reasoning: self.encrypted_reasoning.clone(),
+                },
+                assistant_reasoning: self.assistant_reasoning.clone(),
+                assistant_text: self.assistant_text.clone(),
+            },
+        )
     }
 }
 
 impl ProtocolStream for ResponsesStream {
-    fn push(&mut self, value: Value) -> Result<Vec<ModelEvent>, GatewayError> {
+    fn push(&mut self, value: Value) -> Result<Vec<InferenceEvent>, InferenceError> {
         if self.terminal {
             return Err(self.error("event received after terminal event"));
         }
@@ -325,7 +313,7 @@ impl ProtocolStream for ResponsesStream {
                     }
                     None => return Err(self.error("output item is missing type")),
                 };
-                let identity = ItemIdentity {
+                let identity = AdapterItemIdentity {
                     response_id: self.response_id.clone(),
                     item_id: string(item, "id"),
                     call_id: string(item, "call_id"),
@@ -356,23 +344,32 @@ impl ProtocolStream for ResponsesStream {
             }
             "response.output_text.delta" => {
                 self.observable = true;
-                events.push(ModelEvent::TextDelta {
-                    delta: string(&value, "delta").unwrap_or_default(),
-                    identity: self.identity(&value, StreamItemKind::Message)?,
+                let identity = self.identity(&value, StreamItemKind::Message)?;
+                let delta = string(&value, "delta").unwrap_or_default();
+                self.assistant_text.push_str(&delta);
+                events.push(InferenceEvent::TextDelta {
+                    delta,
+                    item_id: identity.semantic_item_id(&self.request, "text"),
                 });
             }
             "response.refusal.delta" => {
                 self.observable = true;
-                events.push(ModelEvent::RefusalDelta {
-                    delta: string(&value, "delta").unwrap_or_default(),
-                    identity: self.identity(&value, StreamItemKind::Message)?,
+                let identity = self.identity(&value, StreamItemKind::Message)?;
+                let delta = string(&value, "delta").unwrap_or_default();
+                self.assistant_text.push_str(&delta);
+                events.push(InferenceEvent::RefusalDelta {
+                    delta,
+                    item_id: identity.semantic_item_id(&self.request, "refusal"),
                 });
             }
             "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
                 self.observable = true;
-                events.push(ModelEvent::ReasoningDelta {
-                    delta: string(&value, "delta").unwrap_or_default(),
-                    identity: self.identity(&value, StreamItemKind::Reasoning)?,
+                let identity = self.identity(&value, StreamItemKind::Reasoning)?;
+                let delta = string(&value, "delta").unwrap_or_default();
+                self.assistant_reasoning.push_str(&delta);
+                events.push(InferenceEvent::ReasoningDelta {
+                    delta,
+                    item_id: identity.semantic_item_id(&self.request, "reasoning"),
                 });
             }
             "response.function_call_arguments.delta" => {
@@ -383,10 +380,10 @@ impl ProtocolStream for ResponsesStream {
                     .and_then(|index| self.items.get(&index))
                     .map(|item| item.name.clone())
                     .unwrap_or_default();
-                events.push(ModelEvent::FunctionCallDelta {
+                events.push(InferenceEvent::ToolCallDelta {
                     name,
                     arguments_delta: string(&value, "delta").unwrap_or_default(),
-                    identity,
+                    call_id: identity.semantic_call_id(&self.request),
                 });
             }
             "response.completed" | "response.incomplete" | "response.failed" => {
@@ -400,19 +397,19 @@ impl ProtocolStream for ResponsesStream {
                     return Err(self.error("terminal response id does not match response.created"));
                 }
                 if let Some(usage_value) = response.get("usage") {
-                    events.push(ModelEvent::Usage(decode_usage(usage_value)));
+                    events.push(InferenceEvent::Usage(decode_usage(usage_value)));
                 }
                 let status = match kind.as_str() {
-                    "response.completed" => TerminalStatus::Completed {
+                    "response.completed" => FinishReason::Completed {
                         reason: "stop".into(),
                     },
-                    "response.incomplete" => TerminalStatus::Incomplete {
+                    "response.incomplete" => FinishReason::Incomplete {
                         reason: response
                             .pointer("/incomplete_details/reason")
                             .and_then(Value::as_str)
                             .map(str::to_owned),
                     },
-                    _ => TerminalStatus::Failed {
+                    _ => FinishReason::Failed {
                         message: response
                             .pointer("/error/message")
                             .and_then(Value::as_str)
@@ -420,8 +417,10 @@ impl ProtocolStream for ResponsesStream {
                             .unwrap_or_else(|| "upstream response failed".into()),
                     },
                 };
-                events.push(ModelEvent::OutputMetadata(self.output_metadata()?));
-                events.push(ModelEvent::Completed(status));
+                if matches!(&status, FinishReason::Completed { .. }) {
+                    events.push(InferenceEvent::Checkpoint(self.output_checkpoint()?));
+                }
+                events.push(InferenceEvent::Completed(status));
             }
             "response.output_item.done" => {
                 let index = value
@@ -479,7 +478,7 @@ impl ProtocolStream for ResponsesStream {
         Ok(events)
     }
 
-    fn finish(&mut self) -> Result<Vec<ModelEvent>, GatewayError> {
+    fn finish(&mut self) -> Result<Vec<InferenceEvent>, InferenceError> {
         if !self.terminal {
             return Err(self.error("stream ended before a terminal event"));
         }

@@ -111,7 +111,7 @@ async fn summarizer_failure_falls_back_to_default_model() {
     );
     let gateway = Arc::new(FailingOnceGateway::new());
     server
-        .set_model_executor(Arc::clone(&gateway) as Arc<dyn LlmGateway>)
+        .set_model_executor(Arc::clone(&gateway) as Arc<dyn InferenceGateway>)
         .await;
 
     let created = server

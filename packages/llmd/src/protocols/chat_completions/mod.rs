@@ -1,21 +1,18 @@
 use std::collections::HashMap;
 
-use piko_protocol::{ContentBlock, Message, MessageContent};
+use piko_protocol::{ContentBlock, MessageContent};
 use serde_json::{Value, json};
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct ChatContinuation {
-    tool_call_ids: Vec<String>,
-}
-
 use crate::gateway::{
-    ErrorClass, GatewayError, ItemIdentity, ModelEvent, ModelOutputMetadata, ModelRequest,
-    ModelResult, SemanticItem, TerminalStatus,
+    ErrorClass, FinishReason, InferenceError, InferenceEvent, InferenceItem, InferenceRequest,
+    InferenceResult,
 };
 use crate::protocols::{
-    ProtocolAdapter, ProtocolStream, input_text, instructions, text_from_content, usage,
+    AdapterItemIdentity, ProtocolAdapter, ProtocolStream, all_items, input_text, instructions,
+    text_from_content, usage,
 };
 use crate::target::ModelTarget;
+use crate::{checkpoint::ConversationPlan, gateway::ConversationItemKind};
 
 #[cfg(test)]
 mod tests;
@@ -23,24 +20,29 @@ mod tests;
 pub(crate) struct ChatCompletionsAdapter;
 
 impl ProtocolAdapter for ChatCompletionsAdapter {
-    fn validate(&self, request: &ModelRequest, target: &ModelTarget) -> Result<(), GatewayError> {
+    fn validate(
+        &self,
+        request: &InferenceRequest,
+        target: &ModelTarget,
+    ) -> Result<(), InferenceError> {
         target.validate(request)
     }
 
     fn encode(
         &self,
-        request: &ModelRequest,
+        request: &InferenceRequest,
         target: &ModelTarget,
+        plan: &ConversationPlan<'_>,
         stream: bool,
-    ) -> Result<Value, GatewayError> {
+    ) -> Result<Value, InferenceError> {
         self.validate(request, target)?;
-        let mut messages = Vec::with_capacity(request.transcript.len() + 1);
+        let mut messages = Vec::with_capacity(request.conversation.items.len() + 1);
         let system = instructions(request);
         if !system.is_empty() {
             messages.push(json!({"role":"system","content":system}));
         }
-        messages.extend(encode_messages(&request.transcript));
-        let tools = request.tools.iter().map(|tool| json!({
+        messages.extend(encode_messages(all_items(plan)));
+        let tools = request.tools.iter().filter_map(crate::tools::InferenceTool::caller).map(|tool| json!({
             "type":"function",
             "function":{"name":tool.name,"description":tool.description,"parameters":tool.input_schema,"strict":false}
         })).collect::<Vec<_>>();
@@ -50,10 +52,31 @@ impl ProtocolAdapter for ChatCompletionsAdapter {
         }
         if !tools.is_empty() {
             body["tools"] = Value::Array(tools);
-            body["parallel_tool_calls"] = Value::Bool(true);
         }
-        if let Some(effort) = &request.thinking {
-            body["reasoning_effort"] = Value::String(effort.clone());
+        if let Some(parallel) = request.options.parallel_tools {
+            body["parallel_tool_calls"] = Value::Bool(parallel);
+        }
+        match &request.options.tool_choice {
+            crate::gateway::ToolChoice::Auto => {}
+            crate::gateway::ToolChoice::None => body["tool_choice"] = json!("none"),
+            crate::gateway::ToolChoice::Required => body["tool_choice"] = json!("required"),
+            crate::gateway::ToolChoice::Specific(name) => {
+                body["tool_choice"] = json!({"type":"function","function":{"name":name}});
+            }
+        }
+        if let Some(effort) = &request.options.reasoning_effort
+            && let Some(effort) = target.reasoning_effort(effort)
+        {
+            body["reasoning_effort"] = Value::String(effort);
+        }
+        if let Some(max_tokens) = request.options.max_output_tokens {
+            body["max_completion_tokens"] = Value::Number(max_tokens.into());
+        }
+        if let Some(intent) = &request.options.structured_output {
+            body["response_format"] = json!({
+                "type":"json_schema",
+                "json_schema":{"name":"piko_output","strict":intent.strict,"schema":intent.schema}
+            });
         }
         Ok(body)
     }
@@ -62,67 +85,82 @@ impl ProtocolAdapter for ChatCompletionsAdapter {
         &self,
         value: Value,
         target: &ModelTarget,
-    ) -> Result<ModelResult, GatewayError> {
-        decode_complete(value, target)
+        request: &InferenceRequest,
+    ) -> Result<InferenceResult, InferenceError> {
+        decode_complete(value, target, request)
     }
 
-    fn new_stream(&self, target: &ModelTarget) -> Box<dyn ProtocolStream> {
-        Box::new(ChatStream::new(target.id.clone()))
+    fn new_stream(
+        &self,
+        target: &ModelTarget,
+        request: &InferenceRequest,
+    ) -> Box<dyn ProtocolStream> {
+        Box::new(ChatStream::new(target.id.clone(), request.clone()))
     }
 }
 
-fn encode_message(message: &Message) -> Value {
-    match message {
-        Message::Context {
+fn encode_message(item: &ConversationItemKind) -> Value {
+    match item {
+        ConversationItemKind::Context {
             content,
             trust,
             source,
-            ..
         } => json!({
             "role":"user",
             "content":format!("[piko data-only context; authority=None; trust={trust:?}; source={}:{}]\n{}", source.kind, source.locator, input_text(content))
         }),
-        Message::User { content, .. } => json!({"role":"user","content":encode_content(content)}),
-        Message::Assistant { content, .. } => {
+        ConversationItemKind::User { content } => {
+            json!({"role":"user","content":encode_content(content)})
+        }
+        ConversationItemKind::Assistant { content } => {
             json!({"role":"assistant","content":text_from_content(content)})
         }
-        Message::ToolCall {
-            id,
+        ConversationItemKind::ToolCall {
+            call_id,
             name,
             arguments,
-            ..
         } => json!({
             "role":"assistant","content":null,"tool_calls":[{
-                "id":id,"type":"function","function":{"name":name,"arguments":serde_json::to_string(arguments).unwrap_or_else(|_| "{}".into())}
+                "id":call_id.0,"type":"function","function":{"name":name,"arguments":serde_json::to_string(arguments).unwrap_or_else(|_| "{}".into())}
             }]
         }),
-        Message::ToolResult {
-            tool_call_id,
-            content,
-            ..
+        ConversationItemKind::ToolResult {
+            call_id, content, ..
         } => json!({
-            "role":"tool","tool_call_id":tool_call_id,"content":text_from_content(content)
+            "role":"tool","tool_call_id":call_id.0,"content":text_from_content(content)
+        }),
+        ConversationItemKind::HostedActivity(activity) => json!({
+            "role":"assistant","content":format!("[hosted tool activity: {activity:?}]")
+        }),
+        ConversationItemKind::Source(source) => json!({
+            "role":"assistant","content":format!("[source: {source:?}]")
+        }),
+        ConversationItemKind::Citation(citation) => json!({
+            "role":"assistant","content":format!("[citation: {citation:?}]")
+        }),
+        ConversationItemKind::Artifact(artifact) => json!({
+            "role":"assistant","content":format!("[generated artifact: {artifact:?}]")
         }),
     }
 }
 
-fn encode_messages(transcript: &[Message]) -> Vec<Value> {
+fn encode_messages(transcript: &[crate::gateway::ConversationItem]) -> Vec<Value> {
     let mut messages = Vec::new();
     let mut index = 0;
     while index < transcript.len() {
-        if let Message::Assistant { content, .. } = &transcript[index] {
+        if let ConversationItemKind::Assistant { content } = &transcript[index].kind {
             let mut tool_calls = Vec::new();
             let mut tool_results = Vec::new();
             index += 1;
-            while let Some(message) = transcript.get(index) {
-                match message {
-                    Message::ToolCall { id, name, arguments, .. } => tool_calls.push(json!({
-                        "id":id,"type":"function","function":{
+            while let Some(item) = transcript.get(index) {
+                match &item.kind {
+                    ConversationItemKind::ToolCall { call_id, name, arguments } => tool_calls.push(json!({
+                        "id":call_id.0,"type":"function","function":{
                             "name":name,
                             "arguments":serde_json::to_string(arguments).unwrap_or_else(|_| "{}".into())
                         }
                     })),
-                    Message::ToolResult { .. } => tool_results.push(encode_message(message)),
+                    ConversationItemKind::ToolResult { .. } => tool_results.push(encode_message(&item.kind)),
                     _ => break,
                 }
                 index += 1;
@@ -134,7 +172,7 @@ fn encode_messages(transcript: &[Message]) -> Vec<Value> {
             messages.push(assistant);
             messages.extend(tool_results);
         } else {
-            messages.push(encode_message(&transcript[index]));
+            messages.push(encode_message(&transcript[index].kind));
             index += 1;
         }
     }
@@ -150,11 +188,16 @@ fn encode_content(content: &MessageContent) -> Value {
                 "type":"image_url","image_url":{"url":format!("data:{mime_type};base64,{data}")}
             })),
             ContentBlock::Thinking { .. } => None,
+            other => Some(json!({"type":"text","text":other.text_projection()})),
         }).collect()),
     }
 }
 
-fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, GatewayError> {
+fn decode_complete(
+    value: Value,
+    target: &ModelTarget,
+    request: &InferenceRequest,
+) -> Result<InferenceResult, InferenceError> {
     let choices = value
         .get("choices")
         .and_then(Value::as_array)
@@ -174,7 +217,7 @@ fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, Ga
         .get("message")
         .ok_or_else(|| protocol(target, "choice is missing message"))?;
     let mut items = Vec::new();
-    let identity = ItemIdentity {
+    let identity = AdapterItemIdentity {
         response_id: None,
         item_id: None,
         call_id: None,
@@ -182,30 +225,28 @@ fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, Ga
         content_index: None,
     };
     if let Some(text) = message.get("content").and_then(Value::as_str) {
-        items.push(SemanticItem::Text {
+        items.push(InferenceItem::Text {
             text: text.into(),
-            identity: identity.clone(),
+            id: identity.semantic_item_id(request, "text"),
         });
     }
     if let Some(refusal) = message.get("refusal").and_then(Value::as_str) {
-        items.push(SemanticItem::Refusal {
+        items.push(InferenceItem::Refusal {
             text: refusal.into(),
-            identity: identity.clone(),
+            id: identity.semantic_item_id(request, "refusal"),
         });
     }
     if let Some(reasoning) = message.get("reasoning_content").and_then(Value::as_str) {
-        items.push(SemanticItem::Reasoning {
+        items.push(InferenceItem::Reasoning {
             text: reasoning.into(),
-            identity: identity.clone(),
+            id: identity.semantic_item_id(request, "reasoning"),
         });
     }
-    let mut call_ids = Vec::new();
     if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
         for (index, call) in calls.iter().enumerate() {
             let call_id =
                 string(call, "id").ok_or_else(|| protocol(target, "tool call is missing id"))?;
-            call_ids.push(call_id.clone());
-            items.push(SemanticItem::FunctionCall {
+            items.push(InferenceItem::ToolCall {
                 name: call
                     .pointer("/function/name")
                     .and_then(Value::as_str)
@@ -216,11 +257,12 @@ fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, Ga
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .into(),
-                identity: ItemIdentity {
+                call_id: AdapterItemIdentity {
                     call_id: Some(call_id),
                     content_index: Some(index as u32),
                     ..identity.clone()
-                },
+                }
+                .semantic_call_id(request),
             });
         }
     }
@@ -230,24 +272,13 @@ fn decode_complete(value: Value, target: &ModelTarget) -> Result<ModelResult, Ga
         .ok_or_else(|| protocol(target, "choice is missing finish_reason"))?
         .to_string();
     let usage = value.get("usage").map(decode_usage);
-    Ok(ModelResult {
+    Ok(InferenceResult {
         items,
         usage,
-        status: TerminalStatus::Completed { reason },
-        output_metadata: output_metadata(call_ids),
+        finish_reason: FinishReason::Completed { reason },
+        checkpoint: None,
+        auxiliary: Vec::new(),
     })
-}
-
-fn output_metadata(tool_call_ids: Vec<String>) -> ModelOutputMetadata {
-    ModelOutputMetadata {
-        continuation: (!tool_call_ids.is_empty()).then(|| piko_protocol::ModelContinuation {
-            adapter: crate::modeling::ProtocolKind::ChatCompletions
-                .adapter_id()
-                .into(),
-            state: serde_json::to_value(ChatContinuation { tool_call_ids })
-                .expect("Chat continuation contains only serializable values"),
-        }),
-    }
 }
 
 fn decode_usage(value: &Value) -> piko_protocol::Usage {
@@ -276,6 +307,7 @@ struct ToolState {
 
 pub(super) struct ChatStream {
     target: String,
+    request: InferenceRequest,
     finish_reason: Option<String>,
     tools: HashMap<u32, ToolState>,
     observable: bool,
@@ -284,9 +316,10 @@ pub(super) struct ChatStream {
 }
 
 impl ChatStream {
-    pub(super) fn new(target: String) -> Self {
+    pub(super) fn new(target: String, request: InferenceRequest) -> Self {
         Self {
             target,
+            request,
             finish_reason: None,
             tools: HashMap::new(),
             observable: false,
@@ -294,8 +327,8 @@ impl ChatStream {
             finished: false,
         }
     }
-    fn error(&self, message: impl Into<String>) -> GatewayError {
-        GatewayError::new(
+    fn error(&self, message: impl Into<String>) -> InferenceError {
+        InferenceError::new(
             ErrorClass::Protocol,
             &self.target,
             "decode_chat_stream",
@@ -305,7 +338,7 @@ impl ChatStream {
 }
 
 impl ProtocolStream for ChatStream {
-    fn push(&mut self, value: Value) -> Result<Vec<ModelEvent>, GatewayError> {
+    fn push(&mut self, value: Value) -> Result<Vec<InferenceEvent>, InferenceError> {
         if self.finished {
             return Err(self.error("chunk received after stream terminal"));
         }
@@ -315,7 +348,7 @@ impl ProtocolStream for ChatStream {
                 return Err(self.error("duplicate usage chunk"));
             }
             self.usage_seen = true;
-            events.push(ModelEvent::Usage(decode_usage(usage_value)));
+            events.push(InferenceEvent::Usage(decode_usage(usage_value)));
         }
         let choices = value
             .get("choices")
@@ -338,7 +371,7 @@ impl ProtocolStream for ChatStream {
             let Some(delta) = choice.get("delta") else {
                 continue;
             };
-            let identity = ItemIdentity {
+            let identity = AdapterItemIdentity {
                 response_id: None,
                 item_id: None,
                 call_id: None,
@@ -347,23 +380,23 @@ impl ProtocolStream for ChatStream {
             };
             if let Some(text) = delta.get("content").and_then(Value::as_str) {
                 self.observable = true;
-                events.push(ModelEvent::TextDelta {
+                events.push(InferenceEvent::TextDelta {
                     delta: text.into(),
-                    identity: identity.clone(),
+                    item_id: identity.semantic_item_id(&self.request, "text"),
                 });
             }
             if let Some(refusal) = delta.get("refusal").and_then(Value::as_str) {
                 self.observable = true;
-                events.push(ModelEvent::RefusalDelta {
+                events.push(InferenceEvent::RefusalDelta {
                     delta: refusal.into(),
-                    identity: identity.clone(),
+                    item_id: identity.semantic_item_id(&self.request, "refusal"),
                 });
             }
             if let Some(reasoning) = delta.get("reasoning_content").and_then(Value::as_str) {
                 self.observable = true;
-                events.push(ModelEvent::ReasoningDelta {
+                events.push(InferenceEvent::ReasoningDelta {
                     delta: reasoning.into(),
-                    identity: identity.clone(),
+                    item_id: identity.semantic_item_id(&self.request, "reasoning"),
                 });
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -399,14 +432,15 @@ impl ProtocolStream for ChatStream {
                         std::mem::take(&mut state.pending_arguments)
                     };
                     self.observable = true;
-                    events.push(ModelEvent::FunctionCallDelta {
+                    events.push(InferenceEvent::ToolCallDelta {
                         name: state.name.clone(),
                         arguments_delta,
-                        identity: ItemIdentity {
+                        call_id: AdapterItemIdentity {
                             call_id: state.id.clone(),
                             content_index: Some(call_index),
                             ..identity.clone()
-                        },
+                        }
+                        .semantic_call_id(&self.request),
                     });
                 }
             }
@@ -414,7 +448,7 @@ impl ProtocolStream for ChatStream {
         Ok(events)
     }
 
-    fn finish(&mut self) -> Result<Vec<ModelEvent>, GatewayError> {
+    fn finish(&mut self) -> Result<Vec<InferenceEvent>, InferenceError> {
         if self.finished {
             return Err(self.error("duplicate stream terminal"));
         }
@@ -433,18 +467,9 @@ impl ProtocolStream for ChatStream {
                 );
             }
         }
-        let mut calls = self
-            .tools
-            .iter()
-            .filter_map(|(index, state)| state.id.clone().map(|id| (*index, id)))
-            .collect::<Vec<_>>();
-        calls.sort_by_key(|(index, _)| *index);
-        Ok(vec![
-            ModelEvent::OutputMetadata(output_metadata(
-                calls.into_iter().map(|(_, id)| id).collect(),
-            )),
-            ModelEvent::Completed(TerminalStatus::Completed { reason }),
-        ])
+        Ok(vec![InferenceEvent::Completed(FinishReason::Completed {
+            reason,
+        })])
     }
 
     fn has_observable_output(&self) -> bool {
@@ -456,8 +481,8 @@ fn string(value: &Value, field: &str) -> Option<String> {
     value.get(field).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn protocol(target: &ModelTarget, message: impl Into<String>) -> GatewayError {
-    GatewayError::new(
+fn protocol(target: &ModelTarget, message: impl Into<String>) -> InferenceError {
+    InferenceError::new(
         ErrorClass::Protocol,
         &target.id,
         "decode_chat_completions",

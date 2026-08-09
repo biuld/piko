@@ -5,6 +5,39 @@ use serde::{Deserialize, Serialize};
 
 // ---- Content block (the only one — ToolCall extracted to ToolCall) ----
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedToolKind {
+    Search,
+    Retrieval,
+    RemoteMcp,
+    Shell,
+    Computer,
+    ImageGeneration,
+    DeferredDiscovery,
+    ProgrammaticExecution,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedActivityStatus {
+    Started,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl HostedActivityStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ContentBlock {
@@ -22,6 +55,60 @@ pub enum ContentBlock {
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
+    HostedToolActivity {
+        activity_id: String,
+        tool_name: String,
+        kind: HostedToolKind,
+        status: HostedActivityStatus,
+    },
+    HostedToolApproval {
+        approval_id: String,
+        tool_name: String,
+        summary: String,
+    },
+    Source {
+        source_id: String,
+        title: Option<String>,
+        uri: Option<String>,
+    },
+    Citation {
+        source_id: String,
+        output_item_id: String,
+        start: Option<u32>,
+        end: Option<u32>,
+    },
+    Artifact {
+        artifact_id: String,
+        media_type: String,
+        namespace: String,
+        resource: String,
+    },
+}
+
+impl ContentBlock {
+    pub fn text_projection(&self) -> String {
+        match self {
+            Self::Text { text } => text.clone(),
+            Self::Thinking { thinking, .. } => format!("[thinking] {thinking}"),
+            Self::Image { mime_type, .. } => format!("[image: {mime_type}]"),
+            Self::HostedToolActivity {
+                tool_name, status, ..
+            } => format!("[hosted tool: {tool_name} ({})]", status.as_str()),
+            Self::HostedToolApproval {
+                tool_name, summary, ..
+            } => format!("[hosted tool approval required: {tool_name}: {summary}]"),
+            Self::Source { title, uri, .. } => format!(
+                "[source: {}]",
+                title.as_deref().or(uri.as_deref()).unwrap_or("untitled")
+            ),
+            Self::Citation { source_id, .. } => format!("[citation: {source_id}]"),
+            Self::Artifact {
+                artifact_id,
+                media_type,
+                ..
+            } => format!("[artifact: {artifact_id} ({media_type})]"),
+        }
+    }
 }
 
 /// A parsed tool call — the standalone type for tool execution.
@@ -35,14 +122,49 @@ pub struct ToolCall {
     pub partial_json: Option<String>,
 }
 
-/// Opaque adapter continuation retained with an assistant model step.
-/// Runtime consumers persist and return this envelope without inspecting its
-/// adapter-private JSON state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelContinuation {
-    pub adapter: String,
-    pub state: serde_json::Value,
+/// Opaque llmd checkpoint retained with a completed assistant model step.
+///
+/// The serialized token is deliberately private. Protocol consumers can
+/// clone, compare, persist, and restore this value, but cannot branch on or
+/// rewrite llmd's checkpoint representation.
+#[derive(Clone, PartialEq, Eq)]
+pub struct OpaqueModelCheckpoint {
+    token: String,
+}
+
+const MAX_OPAQUE_CHECKPOINT_TOKEN_BYTES: usize = 128 * 1024;
+
+impl Serialize for OpaqueModelCheckpoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.token)
+    }
+}
+
+impl<'de> Deserialize<'de> for OpaqueModelCheckpoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let token = String::deserialize(deserializer)?;
+        if token.len() > MAX_OPAQUE_CHECKPOINT_TOKEN_BYTES {
+            return Err(serde::de::Error::custom(
+                "opaque checkpoint exceeds size limit",
+            ));
+        }
+        Ok(Self { token })
+    }
+}
+
+impl std::fmt::Debug for OpaqueModelCheckpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpaqueModelCheckpoint")
+            .field("token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 // ---- Usage / cost ----
@@ -76,8 +198,6 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub provider: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
 }
 
 // ---- Message enum ----
@@ -106,7 +226,7 @@ pub enum Message {
     Assistant {
         content: Vec<ContentBlock>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        continuation: Option<Box<ModelContinuation>>,
+        checkpoint: Option<Box<OpaqueModelCheckpoint>>,
         provider: String,
         model: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,5 +418,34 @@ mod tests {
         let json = serde_json::to_string(&tc).unwrap();
         let parsed: ToolCall = serde_json::from_str(&json).unwrap();
         assert_eq!(tc, parsed);
+    }
+
+    #[test]
+    fn assistant_checkpoint_round_trips_as_an_opaque_token() {
+        let checkpoint: OpaqueModelCheckpoint =
+            serde_json::from_value(serde_json::json!("opaque.checkpoint.token")).unwrap();
+        let message = Message::Assistant {
+            content: vec![ContentBlock::Text {
+                text: "done".into(),
+            }],
+            checkpoint: Some(Box::new(checkpoint.clone())),
+            provider: "fixture".into(),
+            model: "model".into(),
+            usage: None,
+            stop_reason: Some("stop".into()),
+            error_message: None,
+            timestamp: None,
+        };
+        let restored: Message =
+            serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap();
+        assert_eq!(restored, message);
+        assert!(!format!("{checkpoint:?}").contains("opaque.checkpoint.token"));
+    }
+
+    #[test]
+    fn oversized_checkpoint_carrier_is_rejected_during_restore() {
+        let encoded =
+            serde_json::to_string(&"x".repeat(MAX_OPAQUE_CHECKPOINT_TOKEN_BYTES + 1)).unwrap();
+        assert!(serde_json::from_str::<OpaqueModelCheckpoint>(&encoded).is_err());
     }
 }
