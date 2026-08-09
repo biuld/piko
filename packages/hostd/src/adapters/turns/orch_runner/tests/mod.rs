@@ -1,9 +1,7 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use tokio_stream::{StreamExt, iter};
 use tokio_util::sync::CancellationToken;
 
@@ -36,7 +34,6 @@ async fn guardian_runner(
     let runner = super::OrchAgentRunRunner::new_with_mcp(
         model_executor,
         "test",
-        "key",
         "model",
         None,
         None,
@@ -68,7 +65,6 @@ async fn safety_runner(safety: Option<&SafetySettings>) -> super::OrchAgentRunRu
     super::OrchAgentRunRunner::new_with_mcp(
         Arc::new(DirectInputGateway),
         "test",
-        "key",
         "model",
         None,
         None,
@@ -101,7 +97,6 @@ async fn mcp_template_runner(
     super::OrchAgentRunRunner::new_with_mcp(
         Arc::new(DirectInputGateway),
         "test",
-        "key",
         "model",
         None,
         None,
@@ -150,15 +145,16 @@ fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApproval
 
 #[async_trait]
 impl LlmGateway for DirectInputGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _: GatewayRequest,
-        _: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _: ModelRequest,
+        _: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         Ok(Box::pin(iter(vec![
-            GatewayEvent::ContentDelta("child reply".into()),
-            GatewayEvent::Usage(piko_protocol::Usage::empty()),
-            GatewayEvent::Done("stop".into()),
+            ModelEvent::text("child reply"),
+            ModelEvent::Usage(piko_protocol::Usage::empty()),
+            ModelEvent::output_metadata(),
+            ModelEvent::completed("stop"),
         ])))
     }
 

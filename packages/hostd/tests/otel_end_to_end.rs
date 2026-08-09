@@ -2,12 +2,10 @@
 //! turn.run → agent.run → model.step → tool.batch → tool.call with the
 //! expected correlation attributes, and turn metrics are recorded.
 
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::logs::{InMemoryLogExporterBuilder, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
@@ -17,7 +15,7 @@ use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::protocol::HostServer;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use piko_protocol::Model;
 use piko_protocol::messages::Message;
 use piko_protocol::model::ModelRunSettings;
@@ -40,28 +38,29 @@ impl ScriptedGateway {
 
 #[async_trait]
 impl LlmGateway for ScriptedGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _request: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _request: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         let step = self.step.fetch_add(1, Ordering::SeqCst);
         if step == 0 {
             Ok(Box::pin(iter(vec![
-                GatewayEvent::ToolCallChunk {
-                    id: "call-todo".into(),
-                    name: "todo_write".into(),
-                    args_delta: r#"{"todos":[{"id":1,"status":"pending","content":"plan"}]}"#
-                        .to_string(),
-                },
-                GatewayEvent::Usage(piko_protocol::Usage::empty()),
-                GatewayEvent::Done("tool_use".into()),
+                ModelEvent::function_call(
+                    "call-todo",
+                    "todo_write",
+                    r#"{"todos":[{"id":1,"status":"pending","content":"plan"}]}"#,
+                ),
+                ModelEvent::Usage(piko_protocol::Usage::empty()),
+                ModelEvent::output_metadata(),
+                ModelEvent::completed("tool_use"),
             ])))
         } else {
             Ok(Box::pin(iter(vec![
-                GatewayEvent::ContentDelta("done".into()),
-                GatewayEvent::Usage(piko_protocol::Usage::empty()),
-                GatewayEvent::Done("stop".into()),
+                ModelEvent::text("done"),
+                ModelEvent::Usage(piko_protocol::Usage::empty()),
+                ModelEvent::output_metadata(),
+                ModelEvent::completed("stop"),
             ])))
         }
     }
@@ -154,13 +153,7 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     let root_agent_instance_id = root.agent_instance_id.clone();
 
     let runner = Arc::new(
-        OrchAgentRunRunner::new(
-            Arc::new(ScriptedGateway::new()),
-            "test",
-            "test-key",
-            "test-model",
-        )
-        .await,
+        OrchAgentRunRunner::new(Arc::new(ScriptedGateway::new()), "test", "test-model").await,
     );
     let server =
         HostServer::with_storage_and_runner(JsonlSessionRepository::new(temp.path()), runner);

@@ -1,6 +1,6 @@
 # ADR-007: Preserve typed provider authentication
 
-> Status: accepted
+> Status: accepted; endpoint/adapter ownership superseded by ADR-008
 > Date: 2026-08-09
 
 ## Context

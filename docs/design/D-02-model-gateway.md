@@ -5,6 +5,10 @@
 > Decisions: product decisions live in the F-02 PRD (per-request budget, capped
 > jittered backoff, per-provider fallback opt-out, no mid-stream restart,
 > streaming usage capture)
+>
+> Transport and adapter mechanics are superseded by D-37. The bounded retry,
+> same-protocol fallback, usage, and no-mid-stream-restart behavior remains
+> normative through F-02.
 
 ## Goal
 
@@ -27,12 +31,12 @@ Close the F-02 M0 gaps in `piko-llmd`:
 
 - The gateway stays stateless per request: no session transport state, no
   prewarm, no sticky routing (later F-02 slice).
-- The frozen `GatewayRequest` is immutable during a request; a retry reuses
+- The frozen `ModelRequest` is immutable during a request; a retry reuses
   the same request, never re-assembles the prompt.
 - No mid-stream restart: callers (orchd) consume deltas incrementally and
   commit the assistant message at step end, so a gateway-side restart after
   content delivery would duplicate or corrupt committed text. Mid-stream
-  failures keep the existing `GatewayEvent::Error` semantics; step-level retry
+  failures keep the existing `ModelEvent::Error` semantics; step-level retry
   is the recovery path.
 - Fallback emits the same event contract as streaming; no new event kinds.
 - Middleware `pre_chat` hooks run once per request, not once per attempt.
@@ -83,7 +87,7 @@ New `packages/llmd/src/retry.rs` (pure, unit-testable):
   - otherwise fall back to the existing string classifier on `to_string()`.
 - `RetryState { retries_used, elapsed_ms }` accumulates across attempts.
 
-### C. Open phase with status peeking (`stream.rs`)
+### C. Open phase with status peeking (native protocol transport)
 
 `open_stream_with_retry` opens the stream and then polls the synthesized
 `Start` event plus the next event (`peek_open_events`). genai always
@@ -95,7 +99,7 @@ content is lost.
 Open failures are classified:
 
 ```text
-NonRetryable(msg)       -> chat_stream returns Err immediately
+NonRetryable(msg)       -> execute returns Err immediately
                            (auth, bad request, cancelled)
 BudgetExhausted(msg)    -> if provider.streaming_fallback:
                                one exec_chat with the same request+options
@@ -109,16 +113,14 @@ when the next delay would exceed the remaining budget.
 
 `resilient_stream` then maps provider chunks 1:1 to gateway events with the
 existing middleware chain (token usage + cost annotate `Usage`). A mid-stream
-`Err` or premature EOF yields `GatewayEvent::Error` and terminates without
-`Done`.
+`Err` or premature EOF yields `ModelEvent::Error` and terminates without
+`Completed`.
 
 ### D. Streaming usage capture
 
-`chat_stream` builds `ChatOptions` with `with_capture_usage(true)`, so
-streaming responses report usage when the provider supports it (OpenAI-family
-requests gain `stream_options.include_usage`; Anthropic/Gemini parse usage
-from their own stream events). `fallback_events` derives usage from the
-non-streaming `ChatResponse`.
+Each native adapter requests usage through its protocol's supported controls.
+Fallback decoding derives usage from the same protocol's non-streaming
+response.
 
 `llm_call` gets the same open-phase retry wrapper (already non-streaming, so no
 fallback and no peeking).
@@ -129,7 +131,7 @@ fallback and no peeking).
 |---|---|
 | `piko-protocol` | `RetryConfig` + `max_delay_ms`/`budget_ms`; `ProviderConfig` + `streaming_fallback` |
 | `piko-hostd` | `RetrySettings` + two keys; `merge_retry`; `default_settings`; `orch_factory` wiring |
-| `piko-llmd` | new `retry.rs`; new `stream.rs` (peek, open retry, fallback events, consume); `executor.rs` eager open + fallback + retried `llm_call`; per-provider fallback lookup |
+| `piko-llmd` | `retry.rs`; native transport/adapters (open retry, fallback events, consume); `executor.rs` eager open + fallback + retried `llm_call`; per-target fallback policy |
 | `piko-orchd` | none (gateway port unchanged) |
 | `piko-sandbox` | none |
 
@@ -144,8 +146,8 @@ No `island-rs` change required.
   exhaustion.
 - Non-retryable open failures (401/400/422) and cancellation fail immediately
   with no retries and no fallback.
-- Mid-stream failure or premature EOF yields `GatewayEvent::Error` and
-  terminates without `Done`; no silent restart.
+- Mid-stream failure or premature EOF yields `ModelEvent::Error` and
+  terminates without `Completed`; no silent restart.
 - Cancellation during backoff sleep uses `tokio::select!` on the token, so the
   request fails closed immediately instead of waiting out the delay.
 
@@ -156,11 +158,11 @@ No `island-rs` change required.
   classification (429/503 retryable, 400/401/422 not).
 - Integration tests in `packages/llmd/tests/gateway_retry.rs` against a local
   stub HTTP server (tokio `TcpListener`, no external network):
-  - streaming returns 503 twice then success: `chat_stream` succeeds after
+  - streaming returns 503 twice then success: `execute` succeeds after
     retries and the server saw the expected attempt count;
   - streaming always 503 + fallback enabled: response arrives as
-    `ContentDelta`/`Usage`/`Done` from the non-streaming endpoint;
-  - streaming always 503 + fallback disabled: `chat_stream` fails after the
+    `TextDelta`/`Usage`/`Completed` from the non-streaming endpoint;
+  - streaming always 503 + fallback disabled: `execute` fails after the
     retry budget with no non-streaming request;
   - a stream that emits a chunk then closes mid-way surfaces an error with no
     second request (no silent restart);

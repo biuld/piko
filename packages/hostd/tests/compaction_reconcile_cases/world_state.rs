@@ -33,12 +33,12 @@ async fn compaction_clears_world_state_baseline_and_next_run_reinjects_full() {
 
     #[async_trait]
     impl LlmGateway for PanicGateway {
-        async fn chat_stream(
+        async fn execute(
             &self,
-            _req: GatewayRequest,
-            _cancel: Option<CancellationToken>,
-        ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-            Err("not used".into())
+            _req: ModelRequest,
+            _cancel: CancellationToken,
+        ) -> Result<ModelEventStream, GatewayError> {
+            Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "panic", "execute", "not used"))
         }
 
         async fn llm_call(

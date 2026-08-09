@@ -2,10 +2,13 @@ pub mod auth;
 pub mod executor;
 pub mod gateway;
 pub mod middleware;
+mod protocols;
 pub mod providers;
+mod redaction;
 pub mod retry;
-pub mod stream;
+pub mod target;
 pub mod telemetry;
+mod transport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +18,7 @@ use piko_protocol::config::RetryConfig;
 /// Build a standard LLM Gateway executor with pre-configured settings.
 /// Automatically attaches the default middleware chain (e.g., CostTracker).
 pub fn build_gateway(
-    providers: HashMap<String, piko_protocol::config::ProviderConfig>,
+    providers: HashMap<String, target::ModelTargetConfig>,
     retry: RetryConfig,
 ) -> Arc<dyn crate::gateway::LlmGateway> {
     build_gateway_with_telemetry(providers, retry, Arc::new(telemetry::NoopGatewayTelemetry))
@@ -23,7 +26,7 @@ pub fn build_gateway(
 
 /// Like [`build_gateway`], with a hostd-provided telemetry sink for metrics.
 pub fn build_gateway_with_telemetry(
-    providers: HashMap<String, piko_protocol::config::ProviderConfig>,
+    providers: HashMap<String, target::ModelTargetConfig>,
     retry: RetryConfig,
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
 ) -> Arc<dyn crate::gateway::LlmGateway> {
@@ -31,17 +34,17 @@ pub fn build_gateway_with_telemetry(
         .with_retry(retry)
         .with_telemetry(telemetry)
         .add_middleware(Arc::new(
-            middleware::token_usage::TokenUsageMiddleware::new(),
+            middleware::cost_tracker::CostTrackerMiddleware::new(),
         ))
         .add_middleware(Arc::new(
-            middleware::cost_tracker::CostTrackerMiddleware::new(),
+            middleware::token_usage::TokenUsageMiddleware::new(),
         ));
 
     Arc::new(exec)
 }
 
 pub fn build_gateway_with_auth(
-    providers: HashMap<String, piko_protocol::config::ProviderConfig>,
+    providers: HashMap<String, target::ModelTargetConfig>,
     retry: RetryConfig,
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
     auth_resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
@@ -51,10 +54,10 @@ pub fn build_gateway_with_auth(
         .with_retry(retry)
         .with_telemetry(telemetry)
         .add_middleware(Arc::new(
-            middleware::token_usage::TokenUsageMiddleware::new(),
+            middleware::cost_tracker::CostTrackerMiddleware::new(),
         ))
         .add_middleware(Arc::new(
-            middleware::cost_tracker::CostTrackerMiddleware::new(),
+            middleware::token_usage::TokenUsageMiddleware::new(),
         ));
     Arc::new(exec)
 }

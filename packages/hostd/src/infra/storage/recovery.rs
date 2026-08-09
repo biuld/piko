@@ -105,7 +105,7 @@ mod tests {
                     timestamp: 2,
                     message: Message::Assistant {
                         content: vec![],
-                        api: "test".into(),
+                        continuation: None,
                         provider: "test".into(),
                         model: "test".into(),
                         usage: None,

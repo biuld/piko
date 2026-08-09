@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::messages::Message;
-use super::model::{ModelProviderConfig, ModelRunSettings};
+use super::model::ModelRunSettings;
 
 // ---- Model config passed by Host ----
 
@@ -11,7 +11,6 @@ use super::model::{ModelProviderConfig, ModelRunSettings};
 #[serde(rename_all = "camelCase")]
 pub struct OrchModelConfig {
     pub model: super::messages::Model,
-    pub provider: ModelProviderConfig,
     pub settings: ModelRunSettings,
     /// Per-model thinking level mapping (from model catalog).
     /// None = use defaults (level.as_str()).

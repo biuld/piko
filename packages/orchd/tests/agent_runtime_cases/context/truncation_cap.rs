@@ -9,7 +9,7 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
     agent.tool_set_ids = vec!["bloat".into()];
     agents.insert("main".into(), agent);
 
-    let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
+    let mut config = test_orchd_config();
     // Tiny cap: ~300 characters of retained text, far below the 24k default.
     config.transcript_max_tool_output_tokens = 100;
     config.agents = agents;

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use piko_protocol::model::{ModelProviderConfig, ModelRunSettings, ThinkingLevelMap};
+pub use piko_protocol::model::{ModelRunSettings, ThinkingLevelMap};
 
 /// Lightweight model reference (not the full pi-ai Model).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +16,6 @@ pub struct ModelSpec {
 #[derive(Debug, Clone)]
 pub struct ModelConfig {
     pub model: ModelSpec,
-    pub provider: ModelProviderConfig,
     pub settings: ModelRunSettings,
     /// Per-model thinking level mapping (from model catalog).
     /// None = use defaults (level.as_str()).

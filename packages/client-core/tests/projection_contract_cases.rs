@@ -144,7 +144,7 @@ fn c6_realtime_then_committed_replaces_draft() {
                 content: vec![piko_protocol::ContentBlock::Text {
                     text: "Hello world".into(),
                 }],
-                api: "api".into(),
+                continuation: None,
                 provider: "test".into(),
                 model: "test-model".into(),
                 usage: None,

@@ -16,35 +16,21 @@ use super::runtime::OrchestratorRuntimeConfig;
 
 // ---- Provider configuration ----
 
-/// Provider identifier (e.g. "openai", "anthropic").
-pub type ProviderId = String;
+/// OpenAI-family inference wire protocol selected for a model target.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProtocol {
+    Responses,
+    ChatCompletions,
+}
 
-/// Credentials + endpoint for one LLM provider.
-///
-/// The Host resolves API keys from its own auth storage before passing
-/// them here. orchd never reads env vars or keychains.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderConfig {
-    /// Provider kind: "openai", "anthropic", "openrouter", "gemini", etc.
-    pub kind: String,
-
-    /// Resolved API key (Host already decrypted / read from env).
-    pub api_key: String,
-
-    /// Custom base URL for OpenAI-compatible providers, local proxies, etc.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-
-    /// Extra HTTP headers (e.g. OpenRouter HTTP-Referer).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<HashMap<String, String>>,
-
-    /// Whether the gateway may fall back to a non-streaming completion when
-    /// streaming cannot be established within the retry budget.
-    /// `None` means fallback is enabled (default).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub streaming_fallback: Option<bool>,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesContinuationPolicy {
+    #[default]
+    PreviousResponseId,
+    EncryptedReasoning,
+    StatelessReplay,
 }
 
 // ---- Model reference ----
@@ -53,7 +39,7 @@ pub struct ProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelRef {
-    /// Must match a ProviderConfig.kind.
+    /// Product/authentication provider identifier.
     pub provider: String,
 
     /// Model ID string (e.g. "claude-sonnet-4-5-20250929").
@@ -173,9 +159,6 @@ impl Default for RetryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrchdConfig {
-    /// Available LLM providers with credentials.
-    pub providers: HashMap<ProviderId, ProviderConfig>,
-
     /// Agent definitions. "main" agent is required.
     pub agents: HashMap<String, AgentSpec>,
 
@@ -225,70 +208,10 @@ fn default_max_tool_output_tokens() -> u64 {
 impl Default for OrchdConfig {
     fn default() -> Self {
         Self {
-            providers: HashMap::new(),
             agents: HashMap::new(),
             default_model: ModelRef {
                 provider: "openai".into(),
                 model_id: "gpt-4o".into(),
-                context_window: default_context_window(),
-                max_output_tokens: default_max_output_tokens(),
-            },
-            default_settings: ModelRunSettings::default(),
-            runtime: OrchestratorRuntimeConfig::default(),
-            thinking_level_map: None,
-            sandbox: SandboxConfig::default(),
-            transcript_max_tool_output_tokens: default_max_tool_output_tokens(),
-            features: None,
-        }
-    }
-}
-
-impl OrchdConfig {
-    /// Minimal config with a single provider.
-    pub fn single_provider(
-        kind: impl Into<String>,
-        api_key: impl Into<String>,
-        model_id: impl Into<String>,
-    ) -> Self {
-        let kind_str: String = kind.into();
-        let model_id_str: String = model_id.into();
-        let provider_config = ProviderConfig {
-            kind: kind_str.clone(),
-            api_key: api_key.into(),
-            base_url: None,
-            headers: None,
-            streaming_fallback: None,
-        };
-        let mut providers = HashMap::new();
-        providers.insert(kind_str.clone(), provider_config);
-
-        let main_agent = AgentSpec {
-            id: "main".into(),
-            version: "1".into(),
-            provenance: crate::PromptSource::new("built-in", "agents/main"),
-            name: "Main".into(),
-            role: "assistant".into(),
-            description: Some("Default agent".into()),
-            base_instructions: String::new(),
-            model: Some(model_id_str.clone()),
-            tool_set_ids: vec![
-                "todo".into(),
-                "workspace".into(),
-                "user_interaction".into(),
-                "multi_agent".into(),
-            ],
-            active_tool_names: None,
-            thinking_level: None,
-        };
-        let mut agents = HashMap::new();
-        agents.insert("main".into(), main_agent);
-
-        Self {
-            providers,
-            agents,
-            default_model: ModelRef {
-                provider: kind_str,
-                model_id: model_id_str,
                 context_window: default_context_window(),
                 max_output_tokens: default_max_output_tokens(),
             },
@@ -388,34 +311,8 @@ mod tests {
     #[test]
     fn test_orchd_config_default() {
         let config = OrchdConfig::default();
-        assert!(config.providers.is_empty());
         assert!(config.agents.is_empty());
         assert_eq!(config.default_model.provider, "openai");
-    }
-
-    #[test]
-    fn test_orchd_config_single_provider() {
-        let config = OrchdConfig::single_provider("anthropic", "sk-key", "claude-sonnet");
-        assert_eq!(config.providers.len(), 1);
-        assert!(config.providers.contains_key("anthropic"));
-        assert_eq!(config.agents.len(), 1);
-        assert!(config.agents.contains_key("main"));
-    }
-
-    #[test]
-    fn test_provider_config_serde() {
-        let pc = ProviderConfig {
-            kind: "openai".into(),
-            api_key: "sk-123".into(),
-            base_url: Some("https://custom.api/v1".into()),
-            headers: None,
-            streaming_fallback: None,
-        };
-        let json = serde_json::to_string(&pc).unwrap();
-        let back: ProviderConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.kind, "openai");
-        assert_eq!(back.api_key, "sk-123");
-        assert_eq!(back.base_url, Some("https://custom.api/v1".into()));
     }
 
     #[test]

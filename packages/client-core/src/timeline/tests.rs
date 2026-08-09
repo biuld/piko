@@ -307,7 +307,7 @@ fn committed_message_rejects_late_content_correction() {
             content: vec![piko_protocol::ContentBlock::Text {
                 text: "final".into(),
             }],
-            api: "test".into(),
+            continuation: None,
             provider: "test".into(),
             model: "test".into(),
             usage: None,
@@ -353,7 +353,7 @@ fn mixed_session_facts_keep_branch_position_when_commits_reorder() {
         } else {
             piko_protocol::Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text { text: text.into() }],
-                api: "test".into(),
+                continuation: None,
                 provider: "test".into(),
                 model: "test".into(),
                 usage: None,

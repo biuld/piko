@@ -9,16 +9,10 @@ use crate::domain::permissions::ResolvedPermissions;
 use super::*;
 
 impl OrchAgentRunRunner {
-    pub async fn new(
-        model_executor: Arc<dyn LlmGateway>,
-        provider: &str,
-        api_key: &str,
-        model_id: &str,
-    ) -> Self {
+    pub async fn new(model_executor: Arc<dyn LlmGateway>, provider: &str, model_id: &str) -> Self {
         Self::new_with_mcp(
             model_executor,
             provider,
-            api_key,
             model_id,
             None,
             None,
@@ -42,7 +36,6 @@ impl OrchAgentRunRunner {
     pub async fn new_with_mcp(
         model_executor: Arc<dyn LlmGateway>,
         provider: &str,
-        api_key: &str,
         model_id: &str,
         thinking_level: Option<piko_protocol::model::ThinkingLevel>,
         thinking_level_map: piko_protocol::model::ThinkingLevelMap,
@@ -59,20 +52,8 @@ impl OrchAgentRunRunner {
         transcript: Option<&TranscriptSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
-        use piko_protocol::config::{ModelRef, OrchdConfig, ProviderConfig, SandboxConfig};
+        use piko_protocol::config::{ModelRef, OrchdConfig, SandboxConfig};
         use piko_protocol::model::ModelRunSettings;
-
-        let mut providers = std::collections::HashMap::new();
-        providers.insert(
-            provider.to_string(),
-            ProviderConfig {
-                kind: provider.to_string(),
-                api_key: api_key.to_string(),
-                base_url: None,
-                headers: None,
-                streaming_fallback: None,
-            },
-        );
 
         let default_settings = ModelRunSettings {
             thinking_level,
@@ -150,7 +131,6 @@ impl OrchAgentRunRunner {
         let agents = crate::adapters::prompts::agent_loader::load_agents(&cwd);
 
         let config = OrchdConfig {
-            providers,
             agents,
             default_model: ModelRef {
                 provider: provider.to_string(),

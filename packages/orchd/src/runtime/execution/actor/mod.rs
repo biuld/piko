@@ -29,7 +29,7 @@ use crate::runtime::reliability::{ActorCommandScope, MessageCommitScope};
 use crate::runtime::runtime_assistant_message_id;
 use crate::runtime::step::StepDispatch;
 use crate::runtime::tools::{build_tool_error, build_tool_result};
-use piko_llmd::gateway::GatewayRequest;
+use piko_llmd::gateway::ModelRequest;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionRunResult {

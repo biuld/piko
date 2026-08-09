@@ -9,7 +9,7 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
     agent.tool_set_ids = vec!["context".into()];
     agents.insert("main".into(), agent);
 
-    let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
+    let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
         model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
@@ -154,4 +154,3 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
         "fresh-window tool result must remain in the running transcript"
     );
 }
-

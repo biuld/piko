@@ -70,8 +70,8 @@ errors, but three behaviors are underspecified:
   catalogs, OAuth flows, auth resolution).
 - Streaming events: content, reasoning, tool-call chunks, usage, done, error
   (existing event contract).
-- Chat-completions wire format via the shared genai adapters (existing);
-  responses-format compatibility is limited to what genai adapters support.
+- The piko-owned semantic model contract and native Responses and Chat
+  Completions adapters specified by F-25.
 - Retry/backoff budget: retryable-error classification, capped exponential
   backoff with jitter, per-request retry count, and a total retry-time budget.
 - Open-phase status inspection: HTTP status failures the transport defers to
@@ -89,7 +89,7 @@ errors, but three behaviors are underspecified:
 - Prewarm and sticky routing (session-scoped transport state, warmup
   requests): tracked as a later F-02 slice; the gateway is stateless per
   request in this PRD.
-- WebSocket transport; piko's providers are HTTP-based (SSE) through genai, so
+- WebSocket transport; piko's native providers are HTTP-based (SSE), so
   transport fallback is adapted as stream → non-streaming (see Fusion
   decisions).
 - Mid-stream restart of a request that has already delivered content: deltas
@@ -105,21 +105,21 @@ errors, but three behaviors are underspecified:
 
 ### Request lifecycle
 
-`chat_stream` receives a `GatewayRequest` and returns a `Stream<GatewayEvent>`
-without performing any side effect at call time. Middleware `pre_chat` hooks
-run once per request, before any transport attempt. The request then passes
+`execute` receives a semantic `ModelRequest` and returns a
+`Stream<ModelEvent>`. Middleware pre-execution hooks run once per request,
+before any transport attempt. The request then passes
 through:
 
 1. **Open with retry.** The gateway opens a streaming request and inspects the
-   first events so HTTP status failures that the transport defers to the
-   stream (503, 429, 401, …) are classified as open-phase failures. On a
+   HTTP status before exposing a semantic stream. Failures such as 503, 429,
+   and 401 are classified as open-phase failures. On a
    retryable failure, it waits a capped, jittered backoff delay and retries
    until the attempt budget or the total retry-time budget is exhausted.
    Retryable failures are classified structurally (HTTP status codes,
-   transport errors, wrapped status errors) with string fallback.
-2. **Consume.** The stream is consumed and mapped 1:1 to `ContentDelta`,
-   `ReasoningDelta`, `ToolCallChunk`, `Usage`, and a final `Done`. A failure
-   or premature end mid-stream surfaces as `GatewayEvent::Error` with the
+   transport errors, and timeouts) using piko-owned typed errors.
+2. **Consume.** The stream is consumed and mapped 1:1 to `TextDelta`,
+   `ReasoningDelta`, `FunctionCallDelta`, `Usage`, and a final `Completed`. A failure
+   or premature end mid-stream surfaces as `ModelEvent::Error` with the
    existing semantics; the gateway never restarts a stream after content has
    been delivered.
 3. **Non-streaming fallback.** When the retry budget is exhausted on
@@ -161,13 +161,13 @@ are not retryable and fail immediately.
 
 ### Failure states
 
-- Retry budget exhausted in the open phase: `chat_stream` returns `Err`
+- Retry budget exhausted in the open phase: `execute` returns `Err`
   describing the last error; if fallback is enabled and the failure was
   retryable, one non-streaming completion is attempted first.
 - Non-retryable open failure (auth, bad request) or cancellation:
-  `chat_stream` returns `Err` immediately with no retries and no fallback.
-- Mid-stream failure or premature end without `Done`: `GatewayEvent::Error`
-  is yielded, followed by stream termination; no `Done` is emitted.
+  `execute` returns `Err` immediately with no retries and no fallback.
+- Mid-stream failure or premature end without `Completed`: `ModelEvent::Error`
+  is yielded, followed by stream termination; no `Completed` is emitted.
 - Cancelled during backoff: the request fails closed without waiting out the
   sleep; a cancelled consume yields the existing `Done("abort")` behavior.
 
@@ -244,7 +244,7 @@ already non-streaming.
 | When does fallback trigger? | Only after the retry budget is exhausted on retryable failures | Auth/bad-request failures and cancellation fail immediately; a fallback that repeats the same auth failure wastes a request |
 | Is fallback per-provider? | Yes, `streamingFallback` opt-out on `ProviderConfig`, default enabled | Providers differ in streaming reliability (digest: "per-provider streaming fallback") |
 | How are mid-stream breaks handled? | Surfaced as a stream error; no gateway-side restart after content delivery | Callers consume deltas incrementally and commit at step boundaries, so a silent restart would corrupt transcripts; step-level retry is the recovery path |
-| Are streaming responses asked to report usage? | Yes (genai `capture_usage`) | Completed turns need token/cost accounting; providers that do not report usage simply omit the event |
+| Are streaming responses asked to report usage? | Yes, using the selected protocol's native usage controls | Completed turns need token/cost accounting; providers that do not report usage simply omit the event |
 | Where is the executed model recorded? | Hostd `active_model` (resolved provider+id from runner build), recorded per session and durable in `session.json` | The record must match what actually executes, survive restarts, and stay hostd-authoritative |
 | When is a model change observable? | At turn submission, from the session record (previous != current) | One predicate drives the prompt fragment and the durable `ModelChange` marker; config writes only emit the live `ConfigChanged` event |
 | Is the timeline `ModelChange` written at config time? | No — it is appended when a turn actually executes with a different model | A settings change without an executing turn is not a session execution fact |
@@ -253,10 +253,10 @@ already non-streaming.
 
 | codex-rs behavior | Decision | piko landing / rationale |
 |---|---|---|
-| Retry loop with count + budget, restarting the sampling request from history | **kept (adapted)** | `piko-llmd` retries the same frozen `GatewayRequest` (prompt is immutable per step) with budget/backoff. Codex restarts mid-stream and rebuilds the prompt from history; piko does not restart mid-stream because callers commit deltas incrementally |
+| Retry loop with count + budget, restarting the sampling request from history | **kept (adapted)** | `piko-llmd` retries the same frozen `ModelRequest` (prompt is immutable per step) with budget/backoff. Codex restarts mid-stream and rebuilds the prompt from history; piko does not restart mid-stream because callers commit deltas incrementally |
 | WebSocket → HTTPS transport fallback after retry budget | **kept (adapted)** | piko has no WebSocket transport; the piko-native fallback is stream → non-streaming completion, surfaced as the same event stream |
 | Exponential backoff with jitter | **kept (adapted)** | Adds a configured per-attempt cap and total budget (codex caps implicitly via stream retry count); jitter range matches codex `[0.9, 1.1]` |
-| Server-provided retry delay (`Retry-After`) | **rejected for now** | genai does not expose response headers on errors; backoff is config-derived. Revisit if a consumer needs it |
+| Server-provided retry delay (`Retry-After`) | **kept (bounded)** | Native transport exposes response headers; the delay is honored only when it fits the request retry budget |
 | Prewarm and sticky session transport state | **rejected for this slice** | No WebSocket session to warm in piko; tracked as a later F-02 slice if a consumer appears |
 | `<model_switch>` fragment injected on model change | **kept (adapted)** | piko derives it from the durable session model record (`context.model-switch`, F-03); the world-state message is a separate retained transcript Context (F-04 slice 2); codex injects the fragment from session settings |
 | Per-thread previous-model bookkeeping | **kept (adapted)** | piko records provider+model per session in `session.json` and detects continuity at turn submission instead of diffing settings at write time |

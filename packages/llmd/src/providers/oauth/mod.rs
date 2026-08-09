@@ -7,7 +7,7 @@ use crate::auth::{AuthCredential, AuthError};
 pub mod openai;
 mod resolver;
 
-pub use resolver::{RuntimeAuthResolver, StoredOAuthResolver};
+pub use resolver::{RuntimeAuthResolver, StoredAuthResolver, StoredOAuthResolver};
 
 // ============================================================================
 // OAuthFlow trait
@@ -24,10 +24,8 @@ pub struct DeviceAuthInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderRequestAuth {
-    pub bearer_token: String,
-    pub adapter_kind: genai::adapter::AdapterKind,
-    pub base_url: String,
     pub headers: HashMap<String, String>,
+    pub expires_at: Option<std::time::SystemTime>,
 }
 
 #[async_trait]

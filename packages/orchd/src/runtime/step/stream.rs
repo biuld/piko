@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use piko_llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::{ErrorClass, GatewayError, ModelEvent};
 
 use super::source::{StepDispatchInput, StepFailureInput};
 use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
@@ -31,7 +31,7 @@ pub(crate) async fn dispatch_step_stream(
             consumer.on_gateway_event(&ctx, &event).await;
         }
 
-        if matches!(event, GatewayEvent::Done(_)) {
+        if matches!(event, ModelEvent::Completed(_)) {
             break;
         }
     }
@@ -78,7 +78,12 @@ pub(crate) async fn dispatch_step_failure(
         consumer.on_step_started(&ctx).await;
     }
 
-    let error_event = GatewayEvent::Error(input.error_message.clone());
+    let error_event = ModelEvent::Error(GatewayError::new(
+        ErrorClass::Upstream,
+        &input.model.provider,
+        "execute",
+        input.error_message.clone(),
+    ));
     for consumer in consumers.iter_mut() {
         consumer.on_gateway_event(&ctx, &error_event).await;
     }

@@ -1,12 +1,10 @@
 #[cfg(test)]
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use piko_llmd::auth::AuthStorage;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEventStream, ModelRequest};
 use piko_llmd::providers::ProviderRegistry;
 use piko_protocol::messages::{Message, Model};
 use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
@@ -29,12 +27,17 @@ struct StubGateway;
 
 #[async_trait]
 impl LlmGateway for StubGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-        Err("not used".into())
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
+        Err(GatewayError::new(
+            piko_llmd::gateway::ErrorClass::Upstream,
+            "stub",
+            "execute",
+            "not used",
+        ))
     }
 
     async fn llm_call(
@@ -79,7 +82,7 @@ fn assistant_entry(id: &str, parent: Option<&str>, seq: u64, text: &str) -> Sess
         transcript_seq: seq,
         message: Message::Assistant {
             content: vec![ContentBlock::Text { text: text.into() }],
-            api: "test".into(),
+            continuation: None,
             provider: "test-provider".into(),
             model: "small-model".into(),
             usage: None,
@@ -158,7 +161,7 @@ async fn window_fraction_guard_scales_retrigger_to_resolved_model() {
         providers_dir.join("test.toml"),
         r#"[provider]
 id = "test-provider"
-adapter = "openai"
+protocol = "chat_completions"
 base_url = "https://example.test/v1"
 
 [models.small-model]

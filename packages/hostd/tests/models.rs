@@ -16,14 +16,82 @@ fn registry_with_openai_key() -> ModelRegistry {
     ModelRegistry::new(AuthStorage::in_memory(auth), vec![])
 }
 
+fn registry_with_deepseek_key() -> ModelRegistry {
+    ModelRegistry::new(
+        AuthStorage::in_memory(HashMap::from([(
+            "deepseek".into(),
+            AuthCredential::ApiKey {
+                key: "deepseek-key".into(),
+            },
+        )])),
+        vec![],
+    )
+}
+
 #[test]
-fn resolves_default_model_with_auth_config() {
+fn resolves_default_model_without_copying_auth_material() {
     let registry = registry_with_openai_key();
     let resolved = registry.resolve(Some("gpt-4o"), Some("openai")).unwrap();
 
     assert_eq!(resolved.model.id, "gpt-4o");
     assert_eq!(resolved.model.name, "GPT-4o");
-    assert_eq!(resolved.provider_config.api_key, Some("openai-key".into()));
+    assert_eq!(
+        resolved.provider_config.protocol,
+        Some(piko_protocol::config::ModelProtocol::Responses)
+    );
+    assert_eq!(
+        resolved.provider_config.base_url.as_deref(),
+        Some("https://api.openai.com/v1")
+    );
+}
+
+#[test]
+fn oauth_selects_catalog_subscription_target_without_exposing_token() {
+    let registry = ModelRegistry::new(
+        AuthStorage::in_memory(HashMap::from([(
+            "openai".into(),
+            AuthCredential::OAuth {
+                access: "oauth-secret".into(),
+                refresh: Some("refresh-secret".into()),
+                expires: Some(u64::MAX),
+                extra: HashMap::new(),
+            },
+        )])),
+        vec![],
+    );
+    let resolved = registry.resolve(Some("gpt-4o"), Some("openai")).unwrap();
+    assert_eq!(
+        resolved.provider_config.base_url.as_deref(),
+        Some("https://chatgpt.com/backend-api/codex/")
+    );
+    assert_eq!(
+        resolved.provider_config.responses_continuation,
+        piko_protocol::config::ResponsesContinuationPolicy::EncryptedReasoning
+    );
+}
+
+#[test]
+fn deepseek_resolves_model_specific_responses_target() {
+    let registry = registry_with_deepseek_key();
+    let flash = registry
+        .resolve(Some("deepseek-v4-flash"), Some("deepseek"))
+        .unwrap();
+    assert_eq!(
+        flash.provider_config.protocol,
+        Some(piko_protocol::config::ModelProtocol::Responses)
+    );
+    assert_eq!(
+        flash.provider_config.responses_continuation,
+        piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay
+    );
+
+    let pro = registry
+        .resolve(Some("deepseek-v4-pro"), Some("deepseek"))
+        .unwrap();
+    assert_eq!(
+        pro.provider_config.protocol,
+        Some(piko_protocol::config::ModelProtocol::ChatCompletions)
+    );
 }
 
 #[test]
@@ -37,11 +105,12 @@ fn advertises_registered_authentication_methods() {
         openai.auth_methods,
         vec![ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth]
     );
-    let anthropic = providers
-        .iter()
-        .find(|provider| provider.provider == "anthropic")
-        .unwrap();
-    assert_eq!(anthropic.auth_methods, vec![ProviderAuthMethod::ApiKey]);
+    assert!(
+        providers
+            .iter()
+            .all(|provider| provider.provider != "anthropic"),
+        "unsupported native protocols must not be advertised as built-ins"
+    );
 }
 
 #[test]
@@ -61,7 +130,7 @@ fn supports_custom_provider_registration() {
         r#"
 [provider]
 id = "mycloud"
-adapter = "openai"
+protocol = "chat_completions"
 base_url = "https://api.mycloud.example/v1"
 
 [models.mycloud-fast]

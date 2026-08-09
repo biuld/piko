@@ -93,7 +93,7 @@ fn test_prompt_block(content: impl Into<String>) -> piko_protocol::PromptBlock {
     }
 }
 
-fn gateway_prompt_text(request: &piko_llmd::gateway::GatewayRequest) -> String {
+fn gateway_prompt_text(request: &piko_llmd::gateway::ModelRequest) -> String {
     request
         .run_prompt
         .blocks
@@ -150,16 +150,11 @@ impl AgentCommitPort for StrictCreateCommitPort {
 
 #[async_trait]
 impl piko_llmd::gateway::LlmGateway for PanicGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: piko_llmd::gateway::GatewayRequest,
-        _cancel: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<
-        std::pin::Pin<
-            Box<dyn futures_core::Stream<Item = piko_llmd::gateway::GatewayEvent> + Send + 'static>,
-        >,
-        String,
-    > {
+        _req: piko_llmd::gateway::ModelRequest,
+        _cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<piko_llmd::gateway::ModelEventStream, piko_llmd::gateway::GatewayError> {
         panic!("injected gateway panic")
     }
 
@@ -331,6 +326,14 @@ fn test_agent() -> AgentSpec {
         tool_set_ids: Vec::new(),
         active_tool_names: None,
     }
+}
+
+fn test_orchd_config() -> piko_protocol::config::OrchdConfig {
+    let mut config = piko_protocol::config::OrchdConfig::default();
+    config.default_model.provider = "faux".into();
+    config.default_model.model_id = "faux-1".into();
+    config.agents.insert("main".into(), test_agent());
+    config
 }
 
 async fn attached_runtime_ports() -> (

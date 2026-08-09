@@ -3,7 +3,7 @@ use tracing::info;
 
 use crate::middleware::{GatewayContext, LlmdMiddleware};
 
-use crate::gateway::GatewayEvent;
+use crate::gateway::ModelEvent;
 
 #[derive(Default)]
 pub struct CostTrackerMiddleware;
@@ -50,9 +50,9 @@ impl LlmdMiddleware for CostTrackerMiddleware {
     async fn on_stream_event(
         &self,
         ctx: &mut GatewayContext,
-        event: &mut GatewayEvent,
+        event: &mut ModelEvent,
     ) -> Result<(), String> {
-        if let GatewayEvent::Usage(usage) = event {
+        if let ModelEvent::Usage(usage) = event {
             let cost = Self::calculate_cost(&ctx.model_id, usage);
 
             usage.cost = cost;

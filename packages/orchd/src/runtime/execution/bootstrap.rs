@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use piko_protocol::config::OrchdConfig;
 use piko_protocol::messages::Model;
-use piko_protocol::model::ModelProviderConfig;
 use piko_protocol::runtime::OrchModelConfig;
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
@@ -49,22 +48,8 @@ impl AgentExecutionRuntime {
                 provider: config.default_model.provider.clone(),
                 base_url: None,
             };
-            let provider = config
-                .providers
-                .get(&config.default_model.provider)
-                .map(|p| ModelProviderConfig {
-                    api_key: Some(p.api_key.clone()),
-                    base_url: p.base_url.clone(),
-                    headers: Some(p.headers.clone().unwrap_or_default()),
-                    reasoning: None,
-                    session_id: None,
-                    extra: None,
-                })
-                .unwrap_or_default();
-
             Some(OrchModelConfig {
                 model,
-                provider,
                 settings: config.default_settings.clone(),
                 thinking_level_map: config.thinking_level_map.clone(),
             })
@@ -78,7 +63,6 @@ impl AgentExecutionRuntime {
                         name: c.model.name.clone(),
                         provider: c.model.provider.clone(),
                     },
-                    provider: c.provider,
                     settings: c.settings,
                     thinking_level_map: c.thinking_level_map,
                     context_window: config.default_model.context_window,

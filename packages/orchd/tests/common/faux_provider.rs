@@ -3,16 +3,14 @@
 // Mirrors the TS FauxProvider pattern. Returns canned responses without
 // requiring real API keys or network access.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use tokio::sync::Mutex;
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use piko_protocol::messages::{Message, Model, ToolCall, Usage};
 use piko_protocol::model::{ModelCapabilities, ModelRunSettings};
 
@@ -64,7 +62,7 @@ impl CannedResponse {
 pub struct FauxProvider {
     responses: Arc<Mutex<Vec<CannedResponse>>>,
     call_count: Arc<Mutex<u32>>,
-    requests: Arc<Mutex<Vec<GatewayRequest>>>,
+    requests: Arc<Mutex<Vec<ModelRequest>>>,
 }
 
 impl FauxProvider {
@@ -92,7 +90,7 @@ impl FauxProvider {
         *self.call_count.lock().await
     }
 
-    pub async fn requests(&self) -> Vec<GatewayRequest> {
+    pub async fn requests(&self) -> Vec<ModelRequest> {
         self.requests.lock().await.clone()
     }
 }
@@ -105,14 +103,14 @@ impl Default for FauxProvider {
 
 #[async_trait]
 impl LlmGateway for FauxProvider {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        req: GatewayRequest,
-        cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        req: ModelRequest,
+        cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         // Check cancellation
-        if cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
-            return Err("cancelled".into());
+        if cancel.is_cancelled() {
+            return Err(GatewayError::cancelled("faux"));
         }
 
         // Increment call count
@@ -132,35 +130,33 @@ impl LlmGateway for FauxProvider {
             }
         };
         if canned.wait_for_cancel {
-            if let Some(cancel) = cancel {
-                cancel.cancelled().await;
-                return Err("cancelled".into());
-            }
-            std::future::pending::<()>().await;
+            cancel.cancelled().await;
+            return Err(GatewayError::cancelled("faux"));
         }
 
         // Build the sequence of gateway events from the canned response
-        let events: Vec<GatewayEvent> = {
+        let events: Vec<ModelEvent> = {
             let mut evs = Vec::new();
 
             // Content delta for text
             if !canned.text.is_empty() {
-                evs.push(GatewayEvent::ContentDelta(canned.text.clone()));
+                evs.push(ModelEvent::text(canned.text.clone()));
             }
             for call in &canned.tool_calls {
-                evs.push(GatewayEvent::ToolCallChunk {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    args_delta: serde_json::to_string(&call.arguments).unwrap_or_default(),
-                });
+                evs.push(ModelEvent::function_call(
+                    call.id.clone(),
+                    call.name.clone(),
+                    serde_json::to_string(&call.arguments).unwrap_or_default(),
+                ));
             }
 
             // Usage (empty for faux)
-            evs.push(GatewayEvent::Usage(Usage::empty()));
+            evs.push(ModelEvent::Usage(Usage::empty()));
+            evs.push(ModelEvent::output_metadata());
 
             // Done
             let stop = canned.stop_reason.clone().unwrap_or_else(|| "stop".into());
-            evs.push(GatewayEvent::Done(stop));
+            evs.push(ModelEvent::completed(stop));
 
             evs
         };

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use piko_llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::{ModelEvent, ModelOutputMetadata, TerminalStatus};
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::transcript::{ContentBlock, MessageUsage};
@@ -18,6 +18,7 @@ pub(crate) struct AssistantMessageState {
     pub(crate) usage: Option<MessageUsage>,
     pub(crate) stop_reason: String,
     pub(crate) error_message: Option<String>,
+    pub(crate) output_metadata: Option<ModelOutputMetadata>,
 }
 
 impl AssistantMessageState {
@@ -28,21 +29,49 @@ impl AssistantMessageState {
             usage: None,
             stop_reason: "stop".into(),
             error_message: None,
+            output_metadata: None,
         }
     }
 
-    pub(crate) fn apply_gateway_event(&mut self, event: &GatewayEvent) {
+    pub(crate) fn apply_gateway_event(&mut self, event: &ModelEvent) {
         match event {
-            GatewayEvent::ContentDelta(delta) => self.text.push_str(delta),
-            GatewayEvent::ReasoningDelta(delta) => self.reasoning.push_str(delta),
-            GatewayEvent::Usage(usage) => self.usage = Some(usage.clone()),
-            GatewayEvent::Done(reason) => self.stop_reason = reason.clone(),
-            GatewayEvent::Error(error) => {
+            ModelEvent::TextDelta { delta, .. } | ModelEvent::RefusalDelta { delta, .. } => {
+                self.text.push_str(delta);
+            }
+            ModelEvent::ReasoningDelta { delta, .. } => {
+                self.reasoning.push_str(delta);
+            }
+            ModelEvent::Usage(usage) => self.usage = Some(usage.clone()),
+            ModelEvent::Completed(status) => {
+                if matches!(
+                    status,
+                    TerminalStatus::Completed { .. } | TerminalStatus::Incomplete { .. }
+                ) && self.output_metadata.is_none()
+                {
+                    self.stop_reason = "error".into();
+                    self.error_message =
+                        Some("model stream completed without output metadata".into());
+                    return;
+                }
+                self.stop_reason = match status {
+                    TerminalStatus::Completed { reason } => reason.clone(),
+                    TerminalStatus::Incomplete { reason } => {
+                        reason.clone().unwrap_or_else(|| "incomplete".into())
+                    }
+                    TerminalStatus::Failed { message } => {
+                        self.error_message = Some(message.clone());
+                        "error".into()
+                    }
+                    TerminalStatus::Cancelled => "abort".into(),
+                };
+            }
+            ModelEvent::Error(error) => {
                 tracing::error!("Stream error: {error}");
                 self.stop_reason = "error".into();
-                self.error_message = Some(error.clone());
+                self.error_message = Some(error.to_string());
             }
-            GatewayEvent::ToolCallChunk { .. } => {}
+            ModelEvent::OutputMetadata(metadata) => self.output_metadata = Some(metadata.clone()),
+            ModelEvent::FunctionCallDelta { .. } => {}
         }
     }
 
@@ -66,7 +95,11 @@ impl AssistantMessageState {
         }
         Message::Assistant {
             content: blocks,
-            api: "openai-completions".into(),
+            continuation: self
+                .output_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.continuation.clone())
+                .map(Box::new),
             provider: model.provider.clone(),
             model: model.id.clone(),
             usage: self.usage.clone(),
@@ -102,10 +135,10 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
         ));
     }
 
-    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
+    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
         self.state.apply_gateway_event(event);
         match event {
-            GatewayEvent::ContentDelta(delta) => {
+            ModelEvent::TextDelta { delta, .. } | ModelEvent::RefusalDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
                     ctx.execution_id.clone(),
@@ -119,7 +152,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     },
                 ));
             }
-            GatewayEvent::ReasoningDelta(delta) => {
+            ModelEvent::ReasoningDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
                     ctx.execution_id.clone(),
@@ -156,6 +189,63 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     _ => None,
                 },
             },
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use piko_llmd::gateway::{ModelEvent, ModelOutputMetadata};
+    use piko_protocol::Message;
+
+    use super::*;
+
+    #[test]
+    fn llmd_output_metadata_is_persisted_without_interpretation() {
+        let mut state = AssistantMessageState::new();
+        let continuation = serde_json::from_value(serde_json::json!({
+            "protocol": "chat_completions",
+            "tool_call_ids": ["call_1"]
+        }))
+        .unwrap();
+        let metadata = ModelOutputMetadata {
+            continuation: Some(continuation),
+        };
+        state.apply_gateway_event(&ModelEvent::OutputMetadata(metadata.clone()));
+
+        let message = state.build_message(&ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "openai".into(),
+        });
+
+        assert!(matches!(
+            message,
+            Message::Assistant {
+                continuation: Some(continuation),
+                ..
+            } if Some(continuation.as_ref()) == metadata.continuation.as_ref()
+        ));
+    }
+
+    #[test]
+    fn successful_terminal_without_metadata_fails_closed() {
+        let mut state = AssistantMessageState::new();
+        state.apply_gateway_event(&ModelEvent::completed("stop"));
+
+        let message = state.build_message(&ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "openai".into(),
+        });
+        assert!(matches!(
+            message,
+            Message::Assistant {
+                continuation: None,
+                stop_reason: Some(reason),
+                error_message: Some(error),
+                ..
+            } if reason == "error" && error == "model stream completed without output metadata"
         ));
     }
 }

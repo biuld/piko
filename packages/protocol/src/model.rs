@@ -73,25 +73,6 @@ pub struct ModelCapabilities {
     pub tools: Vec<ToolInfo>,
 }
 
-// ---- ModelProviderConfig ----
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelProviderConfig {
-    #[serde(skip_serializing_if = "Option::is_none", rename = "apiKey")]
-    pub api_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ReasoningConfig>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "sessionId")]
-    pub session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "baseUrl")]
-    pub base_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra: Option<serde_json::Value>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReasoningConfig {
@@ -205,15 +186,6 @@ pub struct ProviderInfo {
 pub enum ProviderAuthMethod {
     ApiKey,
     OAuth,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ResolvedModel {
-    pub provider: String,
-    pub model: ModelSummary,
-    #[serde(rename = "providerConfig")]
-    pub provider_config: ModelProviderConfig,
 }
 
 impl Default for ModelRunSettings {

@@ -1,6 +1,7 @@
-use piko_protocol::model::ModelSummary;
+use piko_protocol::model::{ModelSummary, ProviderAuthMethod};
+use std::collections::HashMap;
 
-use super::provider::Provider;
+use super::provider::{Provider, ProviderTarget};
 
 pub(crate) mod loader;
 
@@ -12,19 +13,23 @@ pub(crate) mod loader;
 /// (shipped via include_str!) and user-configured custom endpoints.
 pub struct TomlProvider {
     id: String,
-    adapter: genai::adapter::AdapterKind,
+    protocol: piko_protocol::config::ModelProtocol,
     api_key: Option<String>,
     base_url: Option<String>,
+    oauth_target: Option<ProviderTarget>,
+    model_targets: HashMap<String, ProviderTarget>,
     models: Vec<ModelSummary>,
 }
 
 impl TomlProvider {
-    pub fn new(id: impl Into<String>, adapter: genai::adapter::AdapterKind) -> Self {
+    pub fn new(id: impl Into<String>, protocol: piko_protocol::config::ModelProtocol) -> Self {
         Self {
             id: id.into(),
-            adapter,
+            protocol,
             api_key: None,
             base_url: None,
+            oauth_target: None,
+            model_targets: HashMap::new(),
             models: Vec::new(),
         }
     }
@@ -39,8 +44,18 @@ impl TomlProvider {
         self
     }
 
+    pub fn with_oauth_target(mut self, target: ProviderTarget) -> Self {
+        self.oauth_target = Some(target);
+        self
+    }
+
     pub fn with_models(mut self, models: Vec<ModelSummary>) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_model_targets(mut self, targets: HashMap<String, ProviderTarget>) -> Self {
+        self.model_targets = targets;
         self
     }
 
@@ -60,12 +75,38 @@ impl Provider for TomlProvider {
         &self.id
     }
 
-    fn adapter_kind(&self) -> genai::adapter::AdapterKind {
-        self.adapter
+    fn protocol(&self) -> piko_protocol::config::ModelProtocol {
+        self.protocol
     }
 
     fn base_url(&self) -> Option<&str> {
         self.base_url.as_deref()
+    }
+
+    fn target(&self, auth_method: ProviderAuthMethod) -> Option<ProviderTarget> {
+        match auth_method {
+            ProviderAuthMethod::ApiKey => Some(ProviderTarget {
+                protocol: self.protocol,
+                base_url: self.base_url.clone(),
+                responses_continuation: Default::default(),
+            }),
+            ProviderAuthMethod::OAuth => self.oauth_target.clone(),
+        }
+    }
+
+    fn target_for_model(
+        &self,
+        auth_method: ProviderAuthMethod,
+        model_id: &str,
+    ) -> Option<ProviderTarget> {
+        match auth_method {
+            ProviderAuthMethod::ApiKey => self
+                .model_targets
+                .get(model_id)
+                .cloned()
+                .or_else(|| self.target(auth_method)),
+            ProviderAuthMethod::OAuth => self.target(auth_method),
+        }
     }
 
     fn list_models(&self) -> Vec<ModelSummary> {

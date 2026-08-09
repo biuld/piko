@@ -9,9 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use piko_llmd::executor::LlmdExecutor;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{LlmGateway, ModelEvent, ModelRequest, TerminalStatus};
+use piko_llmd::target::ModelTargetConfig;
 use piko_llmd::telemetry::GatewayTelemetry;
-use piko_protocol::config::{ProviderConfig, RetryConfig};
+use piko_protocol::config::RetryConfig;
 use piko_protocol::messages::Usage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -30,8 +31,12 @@ struct RequestInfo {
 enum Step {
     Status(u16),
     StreamSuccess,
+    StreamBreakBeforeOutput,
     StreamPartialThenClose,
     NonStreaming,
+    ResponsesStreamSuccess,
+    ResponsesNonStreaming,
+    MalformedJson,
 }
 
 #[derive(Debug, Clone)]
@@ -190,8 +195,49 @@ async fn write_response(stream: &mut TcpStream, step: Step) {
             let _ = stream.write_all(partial.as_bytes()).await;
             // Drop the socket without a terminal event: the stream broke.
         }
+        Step::StreamBreakBeforeOutput => {
+            let head = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: text/event-stream\r\n",
+                "Content-Length: 128\r\n",
+                "Connection: close\r\n\r\n"
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            // Closing before the promised body length is a retryable transport
+            // failure, and no semantic output has been observed.
+        }
         Step::NonStreaming => {
             let body = r#"{"id":"chatcmpl-1","object":"chat.completion","created":0,"model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"fallback text"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(body.as_bytes()).await;
+        }
+        Step::ResponsesStreamSuccess => {
+            let head =
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+            let body = concat!(
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
+                "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\n",
+                "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"native\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n",
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(body.as_bytes()).await;
+        }
+        Step::ResponsesNonStreaming => {
+            let body = r#"{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"native"}]}],"usage":{"input_tokens":4,"output_tokens":1}}"#;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(body.as_bytes()).await;
+        }
+        Step::MalformedJson => {
+            let body = "{not-json";
             let head = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -216,22 +262,35 @@ fn retry_config() -> RetryConfig {
 }
 
 fn executor(addr: SocketAddr, streaming_fallback: Option<bool>) -> LlmdExecutor {
+    executor_for_protocol(
+        addr,
+        streaming_fallback,
+        piko_protocol::config::ModelProtocol::ChatCompletions,
+    )
+}
+
+fn executor_for_protocol(
+    addr: SocketAddr,
+    streaming_fallback: Option<bool>,
+    protocol: piko_protocol::config::ModelProtocol,
+) -> LlmdExecutor {
     let mut providers = HashMap::new();
-    providers.insert(
-        "openai".to_string(),
-        ProviderConfig {
-            kind: "openai".to_string(),
-            api_key: "test".to_string(),
-            base_url: Some(format!("http://{addr}")),
-            headers: None,
-            streaming_fallback,
-        },
-    );
+    let config = ModelTargetConfig {
+        protocol,
+        capabilities: None,
+        base_url: Some(format!("http://{addr}")),
+        endpoint: None,
+        responses_continuation: Default::default(),
+        headers: None,
+        streaming_fallback: streaming_fallback.unwrap_or(true),
+    };
+    providers.insert("openai/gpt-test".to_string(), config.clone());
+    providers.insert("openai/gpt-4o".to_string(), config);
     LlmdExecutor::from_providers(providers).with_retry(retry_config())
 }
 
-fn request() -> GatewayRequest {
-    GatewayRequest {
+fn request() -> ModelRequest {
+    ModelRequest {
         session_id: "session-1".to_string(),
         agent_instance_id: "agent-1".to_string(),
         provider: "openai".to_string(),
@@ -262,42 +321,19 @@ impl GatewayTelemetry for PromptCapture {
     fn record_fallback(&self, _model: &str, _provider: &str) {}
 }
 
-#[tokio::test]
-async fn captures_actual_model_input_before_provider_dispatch() {
-    let stub = Stub::start(Script {
-        steps: vec![Step::StreamSuccess],
-    })
-    .await;
-    let capture = Arc::new(PromptCapture::default());
-    let stream = executor(stub.addr, Some(true))
-        .with_telemetry(capture.clone())
-        .chat_stream(request(), None)
-        .await
-        .unwrap();
-    let _ = stream.collect::<Vec<_>>().await;
-
-    let inputs = capture.0.lock().unwrap();
-    assert_eq!(inputs.len(), 1);
-    assert_eq!(inputs[0].session_id, "session-1");
-    assert_eq!(inputs[0].agent_instance_id, "agent-1");
-    assert_eq!(inputs[0].provider, "openai");
-    assert_eq!(inputs[0].request["messages"][0]["content"][0]["Text"], "hi");
-    assert_eq!(inputs[0].options["capture_usage"], true);
-}
-
-async fn collect(exec: &LlmdExecutor, req: GatewayRequest) -> Vec<GatewayEvent> {
+async fn collect(exec: &LlmdExecutor, req: ModelRequest) -> Vec<ModelEvent> {
     let stream = exec
-        .chat_stream(req, None)
+        .execute(req, tokio_util::sync::CancellationToken::new())
         .await
-        .expect("chat_stream should return a stream");
+        .expect("execute should return a stream");
     stream.collect::<Vec<_>>().await
 }
 
-fn text_events(events: &[GatewayEvent]) -> Vec<String> {
+fn text_events(events: &[ModelEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|e| match e {
-            GatewayEvent::ContentDelta(s) => Some(s.clone()),
+            ModelEvent::TextDelta { delta, .. } => Some(delta.clone()),
             _ => None,
         })
         .collect()
@@ -332,27 +368,29 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     .await;
     let mut providers = HashMap::new();
     providers.insert(
-        "openai".to_string(),
-        ProviderConfig {
-            kind: "openai".to_string(),
-            api_key: "test".to_string(),
+        "openai/gpt-test".to_string(),
+        ModelTargetConfig {
+            protocol: piko_protocol::config::ModelProtocol::ChatCompletions,
+            capabilities: None,
             base_url: Some(format!("http://{}", stub.addr)),
+            endpoint: None,
+            responses_continuation: Default::default(),
             headers: None,
-            streaming_fallback: None,
+            streaming_fallback: true,
         },
     );
     let exec = piko_llmd::build_gateway(providers, retry_config());
     let mut req = request();
     req.run_id = "run-otel".to_string();
     let stream = exec
-        .chat_stream(req, None)
+        .execute(req, tokio_util::sync::CancellationToken::new())
         .await
-        .expect("chat_stream should return a stream");
+        .expect("execute should return a stream");
     let events = stream.collect::<Vec<_>>().await;
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, GatewayEvent::Done(r) if r == "stop"))
+            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
     );
 
     tracer_provider.force_flush().unwrap();
@@ -412,12 +450,12 @@ async fn retries_transient_503_then_streams() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, GatewayEvent::Done(r) if r == "stop"))
+            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, GatewayEvent::Usage(u) if u.input == 3 && u.output == 2))
+            .any(|e| matches!(e, ModelEvent::Usage(u) if u.input == 3 && u.output == 2))
     );
     assert_eq!(
         stub.request_count(),
@@ -446,12 +484,12 @@ async fn falls_back_to_non_streaming_after_budget_exhausted() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, GatewayEvent::Done(r) if r == "stop"))
+            .any(|e| matches!(e, ModelEvent::Completed(TerminalStatus::Completed { reason }) if reason == "stop"))
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, GatewayEvent::Usage(u) if u.input == 10 && u.output == 5))
+            .any(|e| matches!(e, ModelEvent::Usage(u) if u.input == 10 && u.output == 5))
     );
     assert_eq!(
         stub.streaming_count(),

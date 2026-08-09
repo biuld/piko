@@ -1,14 +1,12 @@
 //! F-06 tool batch dispatch test doubles and harness.
 
 use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures_core::Stream;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use piko_orchd_api::SessionExecutionPorts;
 use piko_orchd_api::tools::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use piko_protocol::execution::{ExecutionConfig, StartExecutionRequest};
@@ -31,7 +29,7 @@ use piko_protocol::agents::AgentSpec;
 /// Gateway that replays pre-queued event streams, one per model step.
 #[derive(Default)]
 pub(super) struct ToolCallingGateway {
-    responses: Mutex<VecDeque<Vec<GatewayEvent>>>,
+    responses: Mutex<VecDeque<Vec<ModelEvent>>>,
     call_count: AtomicU32,
 }
 
@@ -40,7 +38,7 @@ impl ToolCallingGateway {
         Self::default()
     }
 
-    pub(super) fn push_step(&self, events: Vec<GatewayEvent>) {
+    pub(super) fn push_step(&self, events: Vec<ModelEvent>) {
         self.responses.lock().unwrap().push_back(events);
     }
 
@@ -51,18 +49,18 @@ impl ToolCallingGateway {
 
 #[async_trait]
 impl LlmGateway for ToolCallingGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         let events = self
             .responses
             .lock()
             .unwrap()
             .pop_front()
-            .unwrap_or_else(|| vec![GatewayEvent::Done("stop".into())]);
+            .unwrap_or_else(|| vec![ModelEvent::output_metadata(), ModelEvent::completed("stop")]);
         Ok(Box::pin(tokio_stream::iter(events)))
     }
 
@@ -82,25 +80,23 @@ impl LlmGateway for ToolCallingGateway {
 }
 
 /// One model step that emits the given tool calls and stops with `tool_use`.
-pub(super) fn tool_use_step(calls: &[(&str, &str)]) -> Vec<GatewayEvent> {
-    let mut events = vec![GatewayEvent::ContentDelta(String::new())];
+pub(super) fn tool_use_step(calls: &[(&str, &str)]) -> Vec<ModelEvent> {
+    let mut events = vec![ModelEvent::text(String::new())];
     for (id, name) in calls {
-        events.push(GatewayEvent::ToolCallChunk {
-            id: (*id).into(),
-            name: (*name).into(),
-            args_delta: "{}".into(),
-        });
+        events.push(ModelEvent::function_call(*id, *name, "{}"));
     }
-    events.push(GatewayEvent::Usage(Usage::empty()));
-    events.push(GatewayEvent::Done("tool_use".into()));
+    events.push(ModelEvent::Usage(Usage::empty()));
+    events.push(ModelEvent::output_metadata());
+    events.push(ModelEvent::completed("tool_use"));
     events
 }
 
-pub(super) fn text_step(text: &str) -> Vec<GatewayEvent> {
+pub(super) fn text_step(text: &str) -> Vec<ModelEvent> {
     vec![
-        GatewayEvent::ContentDelta(text.into()),
-        GatewayEvent::Usage(Usage::empty()),
-        GatewayEvent::Done("stop".into()),
+        ModelEvent::text(text),
+        ModelEvent::Usage(Usage::empty()),
+        ModelEvent::output_metadata(),
+        ModelEvent::completed("stop"),
     ]
 }
 

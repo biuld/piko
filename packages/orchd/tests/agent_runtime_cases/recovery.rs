@@ -165,7 +165,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                             content: vec![piko_protocol::ContentBlock::Text {
                                 text: "old answer".into(),
                             }],
-                            api: "test".into(),
+                            continuation: None,
                             provider: "test".into(),
                             model: "test".into(),
                             usage: None,

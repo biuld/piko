@@ -13,12 +13,12 @@ pub trait RuntimeAuthResolver: Send + Sync {
     async fn resolve(&self, provider: &str) -> Result<Option<ProviderRequestAuth>, String>;
 }
 
-pub struct StoredOAuthResolver {
+pub struct StoredAuthResolver {
     storage: Mutex<AuthStorage>,
     flows: HashMap<String, Arc<dyn OAuthFlow>>,
 }
 
-impl StoredOAuthResolver {
+impl StoredAuthResolver {
     pub fn new(storage: AuthStorage, flows: HashMap<String, Arc<dyn OAuthFlow>>) -> Self {
         Self {
             storage: Mutex::new(storage),
@@ -28,26 +28,33 @@ impl StoredOAuthResolver {
 }
 
 #[async_trait]
-impl RuntimeAuthResolver for StoredOAuthResolver {
+impl RuntimeAuthResolver for StoredAuthResolver {
     async fn resolve(&self, provider: &str) -> Result<Option<ProviderRequestAuth>, String> {
         let mut storage = self.storage.lock().await;
-        if !matches!(storage.get(provider), Some(AuthCredential::OAuth { .. })) {
-            return Ok(None);
-        }
-        let flow = self
-            .flows
-            .get(provider)
-            .ok_or_else(|| format!("no OAuth implementation registered for provider {provider}"))?;
         let credential = storage
-            .resolve_credential(provider, Some(flow.as_ref()))
+            .resolve_credential(provider, self.flows.get(provider).map(AsRef::as_ref))
             .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("no OAuth credential configured for provider {provider}"))?;
-        flow.request_auth(&credential)
-            .map(Some)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        match credential {
+            Some(AuthCredential::ApiKey { key }) => Ok(Some(ProviderRequestAuth {
+                headers: HashMap::from([("Authorization".into(), format!("Bearer {key}"))]),
+                expires_at: None,
+            })),
+            Some(credential @ AuthCredential::OAuth { .. }) => {
+                let flow = self.flows.get(provider).ok_or_else(|| {
+                    format!("no OAuth implementation registered for provider {provider}")
+                })?;
+                flow.request_auth(&credential)
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+            }
+            None => Ok(None),
+        }
     }
 }
+
+/// Compatibility alias for callers compiled against the OAuth-only name.
+pub type StoredOAuthResolver = StoredAuthResolver;
 
 #[cfg(test)]
 mod tests {
@@ -81,10 +88,11 @@ mod tests {
             credential: &AuthCredential,
         ) -> Result<ProviderRequestAuth, AuthError> {
             Ok(ProviderRequestAuth {
-                bearer_token: credential.secret().into(),
-                adapter_kind: genai::adapter::AdapterKind::OpenAI,
-                base_url: "https://example.test/v1/".into(),
-                headers: HashMap::new(),
+                headers: HashMap::from([(
+                    "Authorization".into(),
+                    format!("Bearer {}", credential.secret()),
+                )]),
+                expires_at: None,
             })
         }
     }
@@ -103,7 +111,7 @@ mod tests {
                 extra: HashMap::new(),
             },
         )]));
-        let resolver = StoredOAuthResolver::new(
+        let resolver = StoredAuthResolver::new(
             storage,
             HashMap::from([("example".into(), Arc::clone(&flow) as Arc<dyn OAuthFlow>)]),
         );
@@ -114,8 +122,10 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .bearer_token,
-            "fresh"
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer fresh")
         );
         assert_eq!(
             resolver
@@ -123,9 +133,29 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .bearer_token,
-            "fresh"
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer fresh")
         );
         assert_eq!(flow.refreshes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn api_keys_use_the_same_header_only_runtime_auth_boundary() {
+        let resolver = StoredAuthResolver::new(
+            AuthStorage::in_memory(HashMap::from([(
+                "example".into(),
+                AuthCredential::ApiKey {
+                    key: "secret".into(),
+                },
+            )])),
+            HashMap::new(),
+        );
+        let auth = resolver.resolve("example").await.unwrap().unwrap();
+        assert_eq!(
+            auth.headers.get("Authorization").map(String::as_str),
+            Some("Bearer secret")
+        );
     }
 }

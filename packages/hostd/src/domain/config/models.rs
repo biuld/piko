@@ -1,7 +1,23 @@
-use piko_protocol::{ModelProviderConfig, ModelSummary, ProviderInfo, ResolvedModel};
+use piko_protocol::{ModelSummary, ProviderAuthMethod, ProviderInfo};
 
 use piko_llmd::auth::AuthStorage;
 use piko_llmd::providers::{ModelCatalog, ProviderRegistry};
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTargetConfig {
+    pub protocol: Option<piko_protocol::config::ModelProtocol>,
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    pub base_url: Option<String>,
+    pub endpoint: Option<String>,
+    pub responses_continuation: piko_protocol::config::ResponsesContinuationPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedModel {
+    pub provider: String,
+    pub model: ModelSummary,
+    pub provider_config: ResolvedTargetConfig,
+}
 
 #[derive(Debug, Clone)]
 pub struct ModelRegistry {
@@ -137,10 +153,7 @@ impl ModelRegistry {
         }
 
         // Priority 4: hard fallback — first available model
-        for (provider, model_id) in [
-            ("anthropic", "claude-sonnet-4-5-20250929"),
-            ("openai", "gpt-4o"),
-        ] {
+        for (provider, model_id) in [("openai", "gpt-4o")] {
             if let Some(model) = self.find_in_provider(provider, model_id) {
                 return Some(self.to_resolved(model, provider));
             }
@@ -185,18 +198,30 @@ impl ModelRegistry {
 
     fn to_resolved(&self, model: ModelSummary, provider: &str) -> ResolvedModel {
         let catalog_provider = self.catalog.provider(provider);
+        let auth_method = if self.auth_storage.get_api_key(provider).is_some() {
+            ProviderAuthMethod::ApiKey
+        } else if matches!(
+            self.auth_storage.get(provider),
+            Some(piko_llmd::auth::AuthCredential::OAuth { .. })
+        ) {
+            ProviderAuthMethod::OAuth
+        } else {
+            ProviderAuthMethod::ApiKey
+        };
+        let target =
+            catalog_provider.and_then(|provider| provider.target_for_model(auth_method, &model.id));
         ResolvedModel {
             provider: provider.to_string(),
             model,
-            provider_config: ModelProviderConfig {
-                api_key: self.auth_storage.get_api_key(provider),
-                base_url: catalog_provider
-                    .and_then(|provider| provider.base_url())
-                    .map(str::to_string),
+            provider_config: ResolvedTargetConfig {
+                protocol: target.as_ref().map(|target| target.protocol),
+                base_url: target.as_ref().and_then(|target| target.base_url.clone()),
+                endpoint: None,
+                responses_continuation: target
+                    .as_ref()
+                    .map(|target| target.responses_continuation)
+                    .unwrap_or_default(),
                 headers: None,
-                reasoning: None,
-                session_id: None,
-                extra: None,
             },
         }
     }

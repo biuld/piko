@@ -6,7 +6,6 @@ async fn permission_runner(
     super::super::OrchAgentRunRunner::new_with_mcp(
         Arc::new(DirectInputGateway),
         "test",
-        "key",
         "model",
         None,
         None,

@@ -169,7 +169,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 content: vec![ContentBlock::Text {
                     text: "hello from child".into(),
                 }],
-                api: "test".into(),
+                continuation: None,
                 provider: "test".into(),
                 model: "test".into(),
                 usage: None,

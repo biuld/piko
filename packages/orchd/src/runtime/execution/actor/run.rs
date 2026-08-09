@@ -294,7 +294,7 @@ impl ExecutionActor {
             context_remaining = Some(estimate.context_remaining);
         }
 
-        let request = GatewayRequest {
+        let request = ModelRequest {
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             run_id: self.identity.execution_id.clone(),
@@ -330,7 +330,7 @@ impl ExecutionActor {
         let result = match self
             .services
             .model_executor()
-            .chat_stream(request, Some(self.cancel.clone()))
+            .execute(request, self.cancel.clone())
             .await
         {
             Ok(llm) => {

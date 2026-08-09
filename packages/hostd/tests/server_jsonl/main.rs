@@ -178,7 +178,7 @@ impl AgentRunRunner for AssistantRunner {
             content: vec![ContentBlock::Text {
                 text: "world".into(),
             }],
-            api: "test".into(),
+            continuation: None,
             provider: "test-provider".into(),
             model: "test-model".into(),
             usage: None,
@@ -325,7 +325,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                     "again".into()
                 },
             }],
-            api: "test".into(),
+            continuation: None,
             provider: "test-provider".into(),
             model: "test-model".into(),
             usage: None,

@@ -3,8 +3,13 @@
 
 [provider]
 id = "openai"
-adapter = "openai"
+protocol = "responses"
 base_url = "https://api.openai.com/v1"
+
+[provider.oauth_target]
+protocol = "responses"
+base_url = "https://chatgpt.com/backend-api/codex/"
+continuation = "encrypted_reasoning"
 
 # ---- GPT-5.x ----
 

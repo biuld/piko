@@ -14,5 +14,8 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-37: Native OpenAI-family model protocols](D-37-native-openai-model-protocols.md)
+  implements F-25 and replaces genai with piko-owned Responses and Chat
+  Completions adapters (implemented; V-37).
 - [D-36: Provider authentication](D-36-provider-authentication.md) implements
   F-24 typed provider authentication and refresh.

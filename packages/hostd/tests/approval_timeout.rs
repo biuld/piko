@@ -1,19 +1,17 @@
 //! F-07 acceptance: an unanswered tool-approval request expires after the
 //! configured deadline, resolves fail-closed, and late responses are ignored.
 
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::domain::config::ApprovalSettings;
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::protocol::HostServer;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use piko_protocol::Model;
 use piko_protocol::messages::Message;
 use piko_protocol::model::ModelRunSettings;
@@ -37,27 +35,29 @@ impl ScriptedBashGateway {
 
 #[async_trait]
 impl LlmGateway for ScriptedBashGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _request: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _request: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         let step = self.step.fetch_add(1, Ordering::SeqCst);
         if step == 0 {
             Ok(Box::pin(iter(vec![
-                GatewayEvent::ToolCallChunk {
-                    id: "call-exec".into(),
-                    name: "exec_command".into(),
-                    args_delta: r#"{"cmd":"pwd","sandbox_permissions":"require_escalated","justification":"exercise approval timeout"}"#.into(),
-                },
-                GatewayEvent::Usage(piko_protocol::Usage::empty()),
-                GatewayEvent::Done("tool_use".into()),
+                ModelEvent::function_call(
+                    "call-exec",
+                    "exec_command",
+                    r#"{"cmd":"pwd","sandbox_permissions":"require_escalated","justification":"exercise approval timeout"}"#,
+                ),
+                ModelEvent::Usage(piko_protocol::Usage::empty()),
+                ModelEvent::output_metadata(),
+                ModelEvent::completed("tool_use"),
             ])))
         } else {
             Ok(Box::pin(iter(vec![
-                GatewayEvent::ContentDelta("done".into()),
-                GatewayEvent::Usage(piko_protocol::Usage::empty()),
-                GatewayEvent::Done("stop".into()),
+                ModelEvent::text("done"),
+                ModelEvent::Usage(piko_protocol::Usage::empty()),
+                ModelEvent::output_metadata(),
+                ModelEvent::completed("stop"),
             ])))
         }
     }
@@ -149,7 +149,6 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
         OrchAgentRunRunner::new_with_mcp(
             Arc::new(ScriptedBashGateway::new()),
             "test",
-            "test-key",
             "test-model",
             None,
             None,

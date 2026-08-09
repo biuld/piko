@@ -26,7 +26,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
         },
     );
 
-    let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
+    let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
         model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,
@@ -142,7 +142,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
         },
     );
 
-    let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
+    let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
         model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,

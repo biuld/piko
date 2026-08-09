@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::ModelEvent;
 
 use crate::domain::RealtimeFrame;
 use crate::domain::tools::call::ToolCallItem;
@@ -32,6 +32,7 @@ pub struct ToolCallAggregator {
     next_tool_call_index: u32,
     current: Option<InFlightToolCall>,
     completed: Vec<ToolCallItem>,
+    correlated: Vec<InFlightToolCall>,
 }
 
 impl ToolCallAggregator {
@@ -39,15 +40,54 @@ impl ToolCallAggregator {
         Self::default()
     }
 
-    pub fn on_gateway_event(&mut self, event: &GatewayEvent) -> Option<ToolCallChunkUpdate> {
+    pub fn on_gateway_event(&mut self, event: &ModelEvent) -> Option<ToolCallChunkUpdate> {
         match event {
-            GatewayEvent::ToolCallChunk {
-                id,
+            ModelEvent::FunctionCallDelta {
                 name,
-                args_delta,
-            } => self.on_chunk(id.clone(), name.clone(), args_delta.clone()),
+                arguments_delta,
+                identity,
+            } => self.on_correlated_chunk(
+                identity.call_id.clone().unwrap_or_default(),
+                name.clone(),
+                arguments_delta.clone(),
+            ),
             _ => None,
         }
+    }
+
+    fn on_correlated_chunk(
+        &mut self,
+        id: String,
+        name: String,
+        args_delta: String,
+    ) -> Option<ToolCallChunkUpdate> {
+        if id.is_empty() {
+            return None;
+        }
+        let position = self.correlated.iter().position(|call| call.id == id);
+        let index = if let Some(position) = position {
+            position
+        } else {
+            let tool_call_index = self.next_tool_call_index;
+            self.next_tool_call_index += 1;
+            self.correlated.push(InFlightToolCall {
+                tool_call_index,
+                id: id.clone(),
+                name: String::new(),
+                arguments_json: String::new(),
+            });
+            self.correlated.len() - 1
+        };
+        let call = &mut self.correlated[index];
+        if !name.is_empty() {
+            call.name = name;
+        }
+        call.arguments_json.push_str(&args_delta);
+        Some(ToolCallChunkUpdate {
+            content_index: call.tool_call_index,
+            tool_call_id: id,
+            delta: args_delta,
+        })
     }
 
     pub fn on_chunk(
@@ -84,6 +124,18 @@ impl ToolCallAggregator {
 
     pub fn flush(&mut self) -> Vec<ToolCallItem> {
         self.finalize_current();
+        for call in std::mem::take(&mut self.correlated) {
+            let arguments = serde_json::from_str(&call.arguments_json)
+                .unwrap_or(serde_json::Value::String(call.arguments_json));
+            self.completed.push(ToolCallItem {
+                content_index: call.tool_call_index,
+                tool_call_index: call.tool_call_index,
+                id: call.id,
+                name: call.name,
+                arguments,
+            });
+        }
+        self.completed.sort_by_key(|call| call.tool_call_index);
         std::mem::take(&mut self.completed)
     }
 
@@ -159,7 +211,7 @@ impl ToolCallDispatchConsumer {
 
 #[async_trait]
 impl StepEventConsumer for ToolCallDispatchConsumer {
-    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
+    async fn on_gateway_event(&mut self, ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
         let Some(update) = self.aggregator.on_gateway_event(event) else {
             return;
         };

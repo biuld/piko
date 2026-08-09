@@ -283,7 +283,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
             content: vec![ContentBlock::Text {
                 text: "I'll read it.".into(),
             }],
-            api: "test".into(),
+            continuation: None,
             provider: "test".into(),
             model: "test".into(),
             usage: None,

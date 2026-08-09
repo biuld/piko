@@ -35,6 +35,31 @@ pub struct ToolCall {
     pub partial_json: Option<String>,
 }
 
+/// Protocol continuation identity retained with an assistant model step.
+/// OpenAI wire DTOs remain private to llmd; this contains only the durable
+/// identity needed to construct a later semantic request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "protocol", rename_all = "snake_case")]
+pub enum ModelContinuation {
+    Responses {
+        response_id: String,
+        output_item_ids: Vec<String>,
+        call_ids: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        encrypted_reasoning: Vec<EncryptedReasoningItem>,
+    },
+    ChatCompletions {
+        tool_call_ids: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptedReasoningItem {
+    pub item_id: String,
+    pub encrypted_content: String,
+}
+
 // ---- Usage / cost ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -95,7 +120,8 @@ pub enum Message {
     #[serde(rename = "assistant")]
     Assistant {
         content: Vec<ContentBlock>,
-        api: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        continuation: Option<Box<ModelContinuation>>,
         provider: String,
         model: String,
         #[serde(skip_serializing_if = "Option::is_none")]

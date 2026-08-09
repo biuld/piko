@@ -111,13 +111,9 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         .await
         .unwrap();
 
-    let runner = super::super::OrchAgentRunRunner::new(
-        Arc::new(DirectInputGateway),
-        "test",
-        "test-key",
-        "test-model",
-    )
-    .await;
+    let runner =
+        super::super::OrchAgentRunRunner::new(Arc::new(DirectInputGateway), "test", "test-model")
+            .await;
     let run = runner
         .run_agent(AgentRunInput {
             session_id: "session-direct".into(),

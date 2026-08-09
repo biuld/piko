@@ -18,7 +18,7 @@ pub(crate) async fn build_orch_turn_runner(
     ),
     String,
 > {
-    let mut auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
+    let auth = AuthStorage::create(None).map_err(|error| error.to_string())?;
     let registry = ModelRegistry::new(auth.clone(), vec![]);
     let resolved = registry
         .resolve(
@@ -29,23 +29,37 @@ pub(crate) async fn build_orch_turn_runner(
 
     let provider = &resolved.provider;
     let oauth_flow = registry.get_oauth(provider);
-    let credential = auth
-        .resolve_credential(provider, oauth_flow.as_deref())
-        .await
-        .map_err(|e| format!("failed to resolve auth for provider {provider}: {e}"))?
-        .ok_or_else(|| format!("no auth configured for provider {provider}"))?;
-    let api_key = credential.secret().to_string();
-
-    let api_key_for_runner = api_key.clone();
+    if !auth.has_auth(provider) {
+        return Err(format!("no auth configured for provider {provider}"));
+    }
+    let protocol = resolved
+        .provider_config
+        .protocol
+        .ok_or_else(|| format!("no compatible target configured for provider {provider}"))?;
+    let target_id = format!("{}/{}", resolved.provider, resolved.model.id);
     let mut providers = std::collections::HashMap::new();
     providers.insert(
-        resolved.provider.clone(),
-        piko_protocol::config::ProviderConfig {
-            kind: resolved.provider.clone(),
-            api_key,
+        target_id,
+        piko_llmd::target::ModelTargetConfig {
+            protocol,
+            capabilities: Some(piko_llmd::target::ModelCapabilities {
+                text: resolved
+                    .model
+                    .input
+                    .contains(&piko_protocol::model::InputModality::Text),
+                images: resolved
+                    .model
+                    .input
+                    .contains(&piko_protocol::model::InputModality::Image),
+                tools: true,
+                reasoning: resolved.model.reasoning,
+                refusals: true,
+            }),
             base_url: resolved.provider_config.base_url.clone(),
+            endpoint: resolved.provider_config.endpoint.clone(),
+            responses_continuation: resolved.provider_config.responses_continuation,
             headers: resolved.provider_config.headers.clone(),
-            streaming_fallback: None,
+            streaming_fallback: true,
         },
     );
     let retry_config = piko_protocol::config::RetryConfig {
@@ -76,12 +90,15 @@ pub(crate) async fn build_orch_turn_runner(
             .unwrap_or(60_000),
     };
     let mut oauth_flows = std::collections::HashMap::new();
-    if credential.is_oauth() {
+    if matches!(
+        auth.get(provider),
+        Some(piko_llmd::auth::AuthCredential::OAuth { .. })
+    ) {
         let flow = oauth_flow
             .ok_or_else(|| format!("no OAuth implementation registered for provider {provider}"))?;
         oauth_flows.insert(provider.clone(), flow);
     }
-    let auth_resolver = std::sync::Arc::new(piko_llmd::providers::StoredOAuthResolver::new(
+    let auth_resolver = std::sync::Arc::new(piko_llmd::providers::StoredAuthResolver::new(
         auth,
         oauth_flows,
     ));
@@ -97,7 +114,6 @@ pub(crate) async fn build_orch_turn_runner(
         OrchAgentRunRunner::new_with_mcp(
             executor.clone(),
             &resolved.provider,
-            &api_key_for_runner,
             &resolved.model.id,
             thinking,
             thinking_map,

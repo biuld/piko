@@ -6,12 +6,12 @@ async fn new_context_window_mode_rewrites_without_calling_the_model() {
 
     #[async_trait]
     impl LlmGateway for PanicGateway {
-        async fn chat_stream(
+        async fn execute(
             &self,
-            _req: GatewayRequest,
-            _cancel: Option<CancellationToken>,
-        ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-            Err("not used".into())
+            _req: ModelRequest,
+            _cancel: CancellationToken,
+        ) -> Result<ModelEventStream, GatewayError> {
+            Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "panic", "execute", "not used"))
         }
 
         async fn llm_call(
@@ -130,4 +130,3 @@ async fn new_context_window_mode_rewrites_without_calling_the_model() {
         "fresh window must keep the latest user message; entries={entries:?}"
     );
 }
-

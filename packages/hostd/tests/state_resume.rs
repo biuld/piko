@@ -269,7 +269,7 @@ fn multi_step_usages_roll_up_on_turn_completed() {
                 content: vec![ContentBlock::Text {
                     text: format!("step {i}"),
                 }],
-                api: "openai-completions".into(),
+                continuation: None,
                 provider: "test".into(),
                 model: "test-model".into(),
                 usage: Some(usage.clone()),

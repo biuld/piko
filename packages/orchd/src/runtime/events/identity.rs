@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use piko_llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::ModelEvent;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
@@ -107,7 +107,7 @@ pub(crate) struct AgentDispatchContext<'a> {
 pub(crate) trait StepEventConsumer: Send {
     async fn on_step_started(&mut self, _ctx: &AgentDispatchContext<'_>) {}
 
-    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, _event: &GatewayEvent) {}
+    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, _event: &ModelEvent) {}
 
     async fn on_step_finished(&mut self, _ctx: &AgentDispatchContext<'_>) {}
 

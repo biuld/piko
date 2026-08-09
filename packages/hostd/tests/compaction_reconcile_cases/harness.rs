@@ -4,12 +4,12 @@ struct SummaryGateway;
 
 #[async_trait]
 impl LlmGateway for SummaryGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-        Err("not used".into())
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
+        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
     }
 
     async fn llm_call(
@@ -44,12 +44,12 @@ impl FailingOnceGateway {
 
 #[async_trait]
 impl LlmGateway for FailingOnceGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-        Err("not used".into())
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
+        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
     }
 
     async fn llm_call(
@@ -95,12 +95,12 @@ impl BlockingGateway {
 
 #[async_trait]
 impl LlmGateway for BlockingGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
-        Err("not used".into())
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
+        Err(GatewayError::new(piko_llmd::gateway::ErrorClass::Upstream, "summary", "execute", "not used"))
     }
 
     async fn llm_call(
@@ -174,7 +174,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
                         }],
-                        api: "test".into(),
+                        continuation: None,
                         provider: "test-provider".into(),
                         model: "test-model".into(),
                         usage: None,
@@ -289,7 +289,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
                         }],
-                        api: "test".into(),
+                        continuation: None,
                         provider: "test-provider".into(),
                         model: "test-model".into(),
                         usage: None,
@@ -347,4 +347,3 @@ impl AgentRunRunner for DistinctIdRunRunner {
         ))
     }
 }
-

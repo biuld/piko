@@ -125,7 +125,7 @@ mod tests {
     fn assistant_message(text: &str) -> Message {
         Message::Assistant {
             content: vec![ContentBlock::Text { text: text.into() }],
-            api: "test".into(),
+            continuation: None,
             provider: "test".into(),
             model: "test".into(),
             usage: None,

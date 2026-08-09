@@ -83,7 +83,7 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
     agent.tool_set_ids = vec!["bloat".into()];
     agents.insert("main".into(), agent);
 
-    let mut config = piko_protocol::config::OrchdConfig::single_provider("faux", "test", "faux-1");
+    let mut config = test_orchd_config();
     config.agents = agents;
     let runtime = AgentRuntime::bootstrap(
         model.clone() as Arc<dyn piko_llmd::gateway::LlmGateway>,

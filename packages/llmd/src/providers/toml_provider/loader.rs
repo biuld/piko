@@ -12,6 +12,7 @@ use piko_protocol::model::{InputModality, ModelSummary, ThinkingLevel};
 use serde::Deserialize;
 
 use super::TomlProvider;
+use crate::providers::provider::ProviderTarget;
 
 // ---- TOML structures ----
 
@@ -25,9 +26,19 @@ struct ProviderToml {
 #[derive(Debug, Deserialize)]
 struct ProviderHeader {
     id: String,
-    adapter: String,
+    protocol: String,
     #[serde(default)]
     base_url: Option<String>,
+    #[serde(default)]
+    oauth_target: Option<TargetToml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TargetToml {
+    protocol: String,
+    base_url: String,
+    #[serde(default)]
+    continuation: piko_protocol::config::ResponsesContinuationPolicy,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,41 +49,26 @@ struct ModelToml {
     context_window: u64,
     max_tokens: u64,
     #[serde(default)]
+    protocol: Option<String>,
+    #[serde(default)]
+    continuation: Option<piko_protocol::config::ResponsesContinuationPolicy>,
+    #[serde(default)]
     thinking_level_map: Option<HashMap<String, String>>,
 }
 
 // ---- Built-in catalogs (embedded at compile time) ----
 
-const ANTHROPIC_TOML: &str = include_str!("../../../resources/models/anthropic.toml");
 const OPENAI_TOML: &str = include_str!("../../../resources/models/openai.toml");
 const DEEPSEEK_TOML: &str = include_str!("../../../resources/models/deepseek.toml");
 
-const BUILTIN_PROVIDERS: &[(&str, &str)] = &[
-    ("anthropic", ANTHROPIC_TOML),
-    ("openai", OPENAI_TOML),
-    ("deepseek", DEEPSEEK_TOML),
-];
+const BUILTIN_PROVIDERS: &[(&str, &str)] = &[("openai", OPENAI_TOML), ("deepseek", DEEPSEEK_TOML)];
 
 // ---- Adapter kind mapping ----
 
-fn parse_adapter_kind(s: &str) -> Option<genai::adapter::AdapterKind> {
+fn parse_protocol(s: &str) -> Option<piko_protocol::config::ModelProtocol> {
     match s {
-        "anthropic" => Some(genai::adapter::AdapterKind::Anthropic),
-        "openai" => Some(genai::adapter::AdapterKind::OpenAI),
-        "openai_resp" => Some(genai::adapter::AdapterKind::OpenAIResp),
-        "gemini" => Some(genai::adapter::AdapterKind::Gemini),
-        "deepseek" => Some(genai::adapter::AdapterKind::DeepSeek),
-        "groq" => Some(genai::adapter::AdapterKind::Groq),
-        "cohere" => Some(genai::adapter::AdapterKind::Cohere),
-        "together" => Some(genai::adapter::AdapterKind::Together),
-        "fireworks" => Some(genai::adapter::AdapterKind::Fireworks),
-        "ollama" => Some(genai::adapter::AdapterKind::Ollama),
-        "vertex" => Some(genai::adapter::AdapterKind::Vertex),
-        "github_copilot" => Some(genai::adapter::AdapterKind::GithubCopilot),
-        "open_router" => Some(genai::adapter::AdapterKind::OpenRouter),
-        "xai" => Some(genai::adapter::AdapterKind::Xai),
-        "moonshot" => Some(genai::adapter::AdapterKind::Moonshot),
-        "bedrock_api" => Some(genai::adapter::AdapterKind::BedrockApi),
+        "chat_completions" => Some(piko_protocol::config::ModelProtocol::ChatCompletions),
+        "responses" => Some(piko_protocol::config::ModelProtocol::Responses),
         _ => None,
     }
 }
@@ -133,15 +129,45 @@ fn parse_provider_toml(toml_str: &str) -> Result<ProviderToml, String> {
 }
 
 fn build_provider(parsed: ProviderToml, api_key: Option<String>) -> Result<TomlProvider, String> {
-    let adapter = parse_adapter_kind(&parsed.provider.adapter)
-        .ok_or_else(|| format!("Unknown adapter: {}", parsed.provider.adapter))?;
+    let protocol = parse_protocol(&parsed.provider.protocol)
+        .ok_or_else(|| format!("Unknown protocol: {}", parsed.provider.protocol))?;
+
+    let model_targets = parsed
+        .models
+        .iter()
+        .filter_map(|(model_id, model)| {
+            model.protocol.as_deref().map(|value| {
+                let protocol = parse_protocol(value)
+                    .ok_or_else(|| format!("Unknown protocol for {model_id}: {value}"))?;
+                Ok((
+                    model_id.clone(),
+                    ProviderTarget {
+                        protocol,
+                        base_url: parsed.provider.base_url.clone(),
+                        responses_continuation: model.continuation.unwrap_or_default(),
+                    },
+                ))
+            })
+        })
+        .collect::<Result<HashMap<_, _>, String>>()?;
 
     let models = parse_models(parsed.models);
 
-    let mut provider = TomlProvider::new(&parsed.provider.id, adapter).with_models(models);
+    let mut provider = TomlProvider::new(&parsed.provider.id, protocol)
+        .with_models(models)
+        .with_model_targets(model_targets);
 
     if let Some(base_url) = parsed.provider.base_url {
         provider = provider.with_base_url(base_url);
+    }
+    if let Some(target) = parsed.provider.oauth_target {
+        let protocol = parse_protocol(&target.protocol)
+            .ok_or_else(|| format!("Unknown OAuth target protocol: {}", target.protocol))?;
+        provider = provider.with_oauth_target(ProviderTarget {
+            protocol,
+            base_url: Some(target.base_url),
+            responses_continuation: target.continuation,
+        });
     }
     if let Some(key) = api_key {
         provider = provider.with_api_key(key);
@@ -184,7 +210,9 @@ pub fn load_provider_from_toml(toml_str: &str) -> Result<TomlProvider, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::Provider;
     use piko_protocol::model::ModelSummary;
+    use piko_protocol::model::ProviderAuthMethod;
 
     fn load_builtin_provider(provider_id: &str) -> Result<TomlProvider, String> {
         let toml_str = BUILTIN_PROVIDERS
@@ -194,6 +222,25 @@ mod tests {
             .ok_or_else(|| format!("No built-in provider: {provider_id}"))?;
         let parsed = parse_provider_toml(toml_str)?;
         build_provider(parsed, None)
+    }
+
+    #[test]
+    fn openai_catalog_owns_platform_and_subscription_targets() {
+        let provider = load_builtin_provider("openai").unwrap();
+        let platform = provider.target(ProviderAuthMethod::ApiKey).unwrap();
+        assert_eq!(
+            platform.base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+        let subscription = provider.target(ProviderAuthMethod::OAuth).unwrap();
+        assert_eq!(
+            subscription.base_url.as_deref(),
+            Some("https://chatgpt.com/backend-api/codex/")
+        );
+        assert_eq!(
+            subscription.protocol,
+            piko_protocol::config::ModelProtocol::Responses
+        );
     }
 
     fn load_models(provider: &str) -> Vec<ModelSummary> {
@@ -206,16 +253,31 @@ mod tests {
     }
 
     #[test]
-    fn test_load_anthropic_models() {
-        let models = load_models("anthropic");
-        assert!(!models.is_empty(), "Anthropic catalog should not be empty");
+    fn unsupported_native_provider_is_not_bundled() {
+        assert!(load_builtin_provider("anthropic").is_err());
+    }
 
-        let sonnet45 = models.iter().find(|m| m.id == "claude-sonnet-4-5-20250929");
-        assert!(sonnet45.is_some(), "Sonnet 4.5 should exist");
-        let s = sonnet45.unwrap();
-        assert!(s.reasoning);
-        assert_eq!(s.context_window, 200000);
-        assert_eq!(s.max_tokens, 64000);
+    #[test]
+    fn deepseek_catalog_selects_protocol_per_model() {
+        let provider = load_builtin_provider("deepseek").unwrap();
+        let flash = provider
+            .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-flash")
+            .unwrap();
+        assert_eq!(
+            flash.protocol,
+            piko_protocol::config::ModelProtocol::Responses
+        );
+        assert_eq!(
+            flash.responses_continuation,
+            piko_protocol::config::ResponsesContinuationPolicy::StatelessReplay
+        );
+        assert_eq!(
+            provider
+                .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-pro")
+                .unwrap()
+                .protocol,
+            piko_protocol::config::ModelProtocol::ChatCompletions
+        );
     }
 
     #[test]
@@ -231,8 +293,8 @@ mod tests {
     #[test]
     fn test_load_builtin_provider() {
         use crate::providers::Provider;
-        let provider = load_builtin_provider("anthropic").unwrap();
-        assert_eq!(provider.id(), "anthropic");
+        let provider = load_builtin_provider("openai").unwrap();
+        assert_eq!(provider.id(), "openai");
         let models = provider.list_models();
         assert!(models.len() > 10);
     }

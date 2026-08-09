@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::GatewayEvent;
+use piko_llmd::gateway::ModelEvent;
 use piko_orchd_api::RealtimeDeltaSink;
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use tokio_stream::iter;
@@ -60,12 +60,8 @@ async fn realtime_delta_is_published_before_step_completion() {
     let dispatch_task =
         tokio::spawn(async move { dispatch.dispatch_step(Some(dispatch_sink)).await });
 
-    event_tx
-        .send(GatewayEvent::ContentDelta("hello".into()))
-        .unwrap();
-    event_tx
-        .send(GatewayEvent::ContentDelta(" world".into()))
-        .unwrap();
+    event_tx.send(ModelEvent::text("hello")).unwrap();
+    event_tx.send(ModelEvent::text(" world")).unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
         while sink.deltas().len() < 3 {
             tokio::task::yield_now().await;
@@ -91,7 +87,8 @@ async fn realtime_delta_is_published_before_step_completion() {
         RealtimeDelta::Text { content_index: 0, delta } if delta == " world"
     ));
 
-    event_tx.send(GatewayEvent::Done("stop".into())).unwrap();
+    event_tx.send(ModelEvent::output_metadata()).unwrap();
+    event_tx.send(ModelEvent::completed("stop")).unwrap();
     drop(event_tx);
     let result = dispatch_task.await.unwrap();
     assert!(matches!(
@@ -107,19 +104,12 @@ async fn realtime_delta_is_published_before_step_completion() {
 #[tokio::test]
 async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
     let events = iter(vec![
-        GatewayEvent::ContentDelta("hello".into()),
-        GatewayEvent::ReasoningDelta("thinking".into()),
-        GatewayEvent::ToolCallChunk {
-            id: "call_1".into(),
-            name: "read".into(),
-            args_delta: "{\"path\"".into(),
-        },
-        GatewayEvent::ToolCallChunk {
-            id: "ignored-continuation-id".into(),
-            name: String::new(),
-            args_delta: ":\"Cargo.toml\"}".into(),
-        },
-        GatewayEvent::Done("tool_use".into()),
+        ModelEvent::text("hello"),
+        ModelEvent::reasoning("thinking"),
+        ModelEvent::function_call("call_1", "read", "{\"path\""),
+        ModelEvent::function_call("call_1", "", ":\"Cargo.toml\"}"),
+        ModelEvent::output_metadata(),
+        ModelEvent::completed("tool_use"),
     ]);
     let model = ModelSpec {
         id: "gpt-test".into(),
@@ -176,13 +166,10 @@ async fn agent_dispatch_routes_gateway_events_without_persisting_deltas() {
 #[tokio::test]
 async fn local_step_output_keeps_finalize_and_tool_commit_order() {
     let events = iter(vec![
-        GatewayEvent::ContentDelta("hello".into()),
-        GatewayEvent::ToolCallChunk {
-            id: "call_1".into(),
-            name: "read".into(),
-            args_delta: "{}".into(),
-        },
-        GatewayEvent::Done("tool_use".into()),
+        ModelEvent::text("hello"),
+        ModelEvent::function_call("call_1", "read", "{}"),
+        ModelEvent::output_metadata(),
+        ModelEvent::completed("tool_use"),
     ]);
     let model = ModelSpec {
         id: "gpt-test".into(),
@@ -241,11 +228,12 @@ struct RecordingConsumer {
 
 #[async_trait]
 impl StepEventConsumer for RecordingConsumer {
-    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &GatewayEvent) {
+    async fn on_gateway_event(&mut self, _ctx: &AgentDispatchContext<'_>, event: &ModelEvent) {
         match event {
-            GatewayEvent::ContentDelta(_) => self.seen.push("content"),
-            GatewayEvent::ReasoningDelta(_) => self.seen.push("reasoning"),
-            GatewayEvent::Done(_) => self.seen.push("done"),
+            ModelEvent::TextDelta { .. } => self.seen.push("content"),
+            ModelEvent::ReasoningDelta { .. } => self.seen.push("reasoning"),
+            ModelEvent::OutputMetadata(_) => {}
+            ModelEvent::Completed(_) => self.seen.push("done"),
             _ => self.seen.push("other"),
         }
     }
@@ -267,9 +255,10 @@ impl StepEventConsumer for RecordingConsumer {
 #[tokio::test]
 async fn agent_dispatch_invokes_registered_consumers() {
     let events = iter(vec![
-        GatewayEvent::ContentDelta("hello".into()),
-        GatewayEvent::ReasoningDelta("thinking".into()),
-        GatewayEvent::Done("stop".into()),
+        ModelEvent::text("hello"),
+        ModelEvent::reasoning("thinking"),
+        ModelEvent::output_metadata(),
+        ModelEvent::completed("stop"),
     ]);
     let seen = SeenEvents::default();
     let model = ModelSpec {

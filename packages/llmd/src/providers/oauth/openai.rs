@@ -14,7 +14,6 @@ const DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/
 const DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex/";
 const DEFAULT_DEVICE_EXPIRES_SECONDS: u64 = 15 * 60;
 
 #[derive(Debug, Deserialize)]
@@ -258,14 +257,13 @@ impl OAuthFlow for OpenAIOAuthFlow {
             ));
         };
         let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), format!("Bearer {access}"));
         if let Some(account_id) = extra.get("account_id").and_then(|value| value.as_str()) {
             headers.insert("ChatGPT-Account-Id".to_string(), account_id.to_string());
         }
         Ok(ProviderRequestAuth {
-            bearer_token: access.clone(),
-            adapter_kind: genai::adapter::AdapterKind::OpenAIResp,
-            base_url: CHATGPT_CODEX_BASE_URL.to_string(),
             headers,
+            expires_at: None,
         })
     }
 }
@@ -349,10 +347,9 @@ mod tests {
         };
         let request = flow.request_auth(&credential).unwrap();
         assert_eq!(
-            request.adapter_kind,
-            genai::adapter::AdapterKind::OpenAIResp
+            request.headers.get("Authorization").map(String::as_str),
+            Some("Bearer access-token")
         );
-        assert_eq!(request.base_url, CHATGPT_CODEX_BASE_URL);
         assert_eq!(
             request
                 .headers

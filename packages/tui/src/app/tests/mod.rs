@@ -98,7 +98,7 @@ fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
 fn assistant(text: &str) -> Message {
     Message::Assistant {
         content: vec![piko_protocol::ContentBlock::Text { text: text.into() }],
-        api: "test".into(),
+        continuation: None,
         provider: "test".into(),
         model: "test".into(),
         usage: None,

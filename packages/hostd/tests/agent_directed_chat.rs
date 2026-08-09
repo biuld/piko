@@ -1,13 +1,11 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
 use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::protocol::HostServer;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest, LlmGateway};
+use piko_llmd::gateway::{GatewayError, LlmGateway, ModelEvent, ModelEventStream, ModelRequest};
 use piko_orchd_api::AgentCommitPort;
 use piko_protocol::{
     AgentDurableCommand, AgentInstanceIdentity, AgentSpec, Message, MessageContent,
@@ -19,15 +17,16 @@ struct DirectChatGateway;
 
 #[async_trait]
 impl LlmGateway for DirectChatGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _request: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _request: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         Ok(Box::pin(iter(vec![
-            GatewayEvent::ContentDelta("direct reply".into()),
-            GatewayEvent::Usage(piko_protocol::Usage::empty()),
-            GatewayEvent::Done("stop".into()),
+            ModelEvent::text("direct reply"),
+            ModelEvent::Usage(piko_protocol::Usage::empty()),
+            ModelEvent::output_metadata(),
+            ModelEvent::completed("stop"),
         ])))
     }
 
@@ -135,15 +134,8 @@ async fn child_transcript_and_selected_view_persist_independently() {
         .await
         .unwrap();
 
-    let runner = Arc::new(
-        OrchAgentRunRunner::new(
-            Arc::new(DirectChatGateway),
-            "test",
-            "test-key",
-            "test-model",
-        )
-        .await,
-    );
+    let runner =
+        Arc::new(OrchAgentRunRunner::new(Arc::new(DirectChatGateway), "test", "test-model").await);
     let server =
         HostServer::with_storage_and_runner(JsonlSessionRepository::new(temp.path()), runner);
     server

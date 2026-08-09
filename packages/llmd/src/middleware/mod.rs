@@ -40,17 +40,17 @@ impl GatewayContext {
     }
 }
 
-use crate::gateway::GatewayEvent;
+use crate::gateway::{ModelEvent, ModelRequest};
 
 /// A filter chain / interceptor hook for LLM requests
 #[async_trait]
 pub trait LlmdMiddleware: Send + Sync {
     /// Called before the request is sent to the LLM provider.
     /// Return `Err(String)` to short-circuit and abort the request.
-    async fn pre_chat(
+    async fn pre_execute(
         &self,
         _ctx: &mut GatewayContext,
-        _request: &mut genai::chat::ChatRequest,
+        _request: &mut ModelRequest,
     ) -> Result<(), String> {
         Ok(())
     }
@@ -59,7 +59,7 @@ pub trait LlmdMiddleware: Send + Sync {
     async fn on_stream_event(
         &self,
         _ctx: &mut GatewayContext,
-        _event: &mut GatewayEvent,
+        _event: &mut ModelEvent,
     ) -> Result<(), String> {
         Ok(())
     }

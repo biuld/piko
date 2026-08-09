@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_core::Stream;
-use piko_llmd::gateway::{GatewayEvent, GatewayRequest};
+use piko_llmd::gateway::{GatewayError, ModelEventStream, ModelRequest};
 use piko_protocol::execution::{CommitAck, CommitError, StartExecutionRequest};
 
 use super::*;
@@ -96,11 +94,11 @@ struct NoopGateway;
 
 #[async_trait]
 impl LlmGateway for NoopGateway {
-    async fn chat_stream(
+    async fn execute(
         &self,
-        _req: GatewayRequest,
-        _cancel: Option<CancellationToken>,
-    ) -> Result<Pin<Box<dyn Stream<Item = GatewayEvent> + Send + 'static>>, String> {
+        _req: ModelRequest,
+        _cancel: CancellationToken,
+    ) -> Result<ModelEventStream, GatewayError> {
         Ok(Box::pin(tokio_stream::empty()))
     }
 
