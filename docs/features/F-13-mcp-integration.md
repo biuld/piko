@@ -92,7 +92,7 @@ slow or broken server can never block the session or the other servers.
   `{args}` are substituted. The approval gateway resolves the template
   (exact `server/tool` first, then bare `tool`) — scoped to MCP tools only,
   so a bare `tool` key can never hijack a non-MCP tool's question — and
-  carries it on the approval snapshot as `prompt`; TUI and GUI render it in
+  carries it on the approval snapshot as `prompt`; the TUI renders it in
   place of the generic question. Templates are operator text — they never
   loosen the approval flow or bypass the gateway.
 - **Prewarm**: eager connect at session start (existing behavior, now
@@ -205,7 +205,7 @@ prompt = templates.get("{provider}/{tool}").or(templates.get("{tool}"))
 ```
 
 `{server}`, `{tool}`, and `{args}` (compact JSON) are substituted. The prompt
-is carried as `ApprovalSnapshot.prompt`; TUI and GUI render it instead of the
+is carried as `ApprovalSnapshot.prompt`; the TUI renders it instead of the
 generic question. No template → no `prompt` field → current generic rendering
 (no behavior change). Templates are never evaluated as policy.
 
@@ -238,7 +238,7 @@ generic question. No template → no `prompt` field → current generic renderin
       resolves `server/tool` before bare `tool` and carries the rendered
       prompt on `ApprovalSnapshot`; no matching template leaves `prompt`
       absent.
-- [x] TUI and GUI render `ApprovalSnapshot.prompt` when present and keep the
+- [x] TUI renders `ApprovalSnapshot.prompt` when present and keeps the
       generic question otherwise (existing rendering unchanged when absent).
 - [x] `[features] mcp = false` skips all connections and does not register
       `mcp_resource` (F-18 regression).
@@ -268,7 +268,7 @@ generic question. No template → no `prompt` field → current generic renderin
 | MCP server lifecycle + prewarm | kept (adapted) | stdio connect at session start with a bounded per-server timeout and catalog caching; no reconnect/refresh yet (deferred until a consumer) |
 | `mcp_resource` tool | kept | built-in read-only tool listing/reading server resources, with a client-side `query` filter standing in for search |
 | Tool catalog caching | kept | per-provider cached `tools` + cached resources at connect (registry already caches across catalog builds) |
-| `mcp_tool_approval_templates` | kept (adapted) | settings map rendered into `ApprovalSnapshot.prompt` for TUI/GUI; hostd resolves, orchd reports `provider_id` |
+| `mcp_tool_approval_templates` | kept (adapted) | settings map rendered into `ApprovalSnapshot.prompt` for TUI; hostd resolves, orchd reports `provider_id` |
 | Tool approval tier changes per MCP tool | rejected (deferred) | F-07 approval tiers + tool-set policy already cover this; no new tier mechanism |
 | HTTP/SSE transports, server refresh/reconnect | rejected (deferred) | no piko consumer; stdio-only this slice |
 

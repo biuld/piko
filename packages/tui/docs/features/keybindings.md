@@ -159,6 +159,6 @@ Users define customization by specifying bindings mapped to `KeyId` strings (e.g
 
 ## Non-goals
 
-- An interactive, in-app keyboard shortcut re-binder GUI.
+- An interactive, in-app keyboard shortcut re-binder.
 - Defining multi-key chord sequences (e.g., `ctrl+k ctrl+c`).
 - Overriding system-level mouse scrolling or selection behaviors.

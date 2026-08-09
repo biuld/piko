@@ -213,7 +213,7 @@ optional extensions and have no scheduled implementation.
    catalog bootstrap; dedicated `ServerMessage::Usage` after terminal turns
    (sole usage chrome path); sole stream transport `ServerMessage::StreamItem`
    (compat dual envelopes removed; public timeline entry StreamItem-only);
-   shared `AgentForeground::project` for TUI/client-core/GUI. Plan/System
+   shared `AgentForeground::project` for TUI/client-core. Plan/System
    stream kinds deferred. Optional next: Slice 4 ACP adapter (product-gated;
    not a full ACP transport rewrite).
 2. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

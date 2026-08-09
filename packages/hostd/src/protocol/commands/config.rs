@@ -201,34 +201,6 @@ impl ConfigObserver for TuiSettingsObserver {
     }
 }
 
-struct GuiSettingsObserver;
-
-#[async_trait]
-impl ConfigObserver for GuiSettingsObserver {
-    async fn on_change(
-        &self,
-        _server: &HostServer,
-        old: &HostSettings,
-        new: &HostSettings,
-    ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        if new.gui != old.gui {
-            let value = new
-                .gui
-                .clone()
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-            Ok(vec![server_response_ok(
-                "config_update",
-                crate::api::CommandResult::ConfigEntry {
-                    namespace: "gui".to_string(),
-                    value,
-                },
-            )])
-        } else {
-            Ok(Vec::new())
-        }
-    }
-}
-
 impl HostServer {
     pub(crate) async fn apply_config_update(
         &self,
@@ -264,7 +236,6 @@ impl HostServer {
             Box::new(SessionStorageObserver),
             Box::new(DiskPersistenceObserver),
             Box::new(TuiSettingsObserver),
-            Box::new(GuiSettingsObserver),
         ];
 
         let mut events = Vec::new();

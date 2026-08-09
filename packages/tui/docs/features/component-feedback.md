@@ -498,7 +498,7 @@ present themselves:
 - Mouse-only affordances, drag-and-drop, or rich hover cards
 - Sound / haptic feedback
 - Animation curves beyond spinner frame advance
-- GUI/GPUI component feedback (separate package docs)
+- Desktop-client component feedback
 - Per-keybinding default tables (see keybindings feature)
 
 ## Related documents

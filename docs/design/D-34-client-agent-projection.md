@@ -6,8 +6,8 @@
 
 ## Goal
 
-Define how hostd **projects** agent work to clients so TUI, GUI, and
-client-core share one lifecycle: foreground state, stream item identity rules,
+Define how hostd **projects** agent work to clients so TUI and client-core
+share one lifecycle: foreground state, stream item identity rules,
 submit vs complete, and usage (`used`/`size`/cost). Land incremental wire
 changes without adopting ACP transport.
 
@@ -42,7 +42,7 @@ hostd application projections
 piko-protocol ServerMessage / CommandResult / Snapshot
         │
         ▼
-client-core / TUI / GUI projectors
+client-core / TUI projectors
 ```
 
 ### 2. AgentInstance foreground state
@@ -149,7 +149,7 @@ ContextUsageProjection {
    fallback**; host should push size so cold UI does not depend on opening
    the model selector.
 
-Bootstrap duties (TUI/GUI/client-core):
+Bootstrap duties (TUI/client-core):
 
 - On connection: `ModelList` (silent) **or** guarantee `size` on
   `ModelEvent::ConfigChanged` / usage projection. Prefer both: catalog for
@@ -188,7 +188,6 @@ user is viewing the child.
 | `piko-orchd` | Minimal: ensure existing commits expose stable ids; no transport change |
 | `piko-client-core` | Project foreground + usage; silent ModelList bootstrap |
 | `piko-tui` | Bootstrap catalog without modal; BottomBar uses host `size`; render state from projection |
-| `piko-gui` | StatusBar usage uses same projection (beyond cumulative-only when fields exist) |
 
 ## Reusable infrastructure
 
@@ -233,12 +232,11 @@ No `island-rs` change required.
 3. BottomBar size from host window field (fallback catalog).
 4. client-core stores `context_window` and exposes `active_context_window()`.
 
-### Slice 1b — Live usage projection for client-core / GUI (landed)
+### Slice 1b — Live usage projection for client-core (landed)
 
 1. client-core rolls terminal turn `usage` into `last_context_tokens` +
    `cumulative_usage` (parity with TUI BottomBar between reconciles).
 2. Snapshot rebuilds `last_context_tokens` from turn/message usage.
-3. GUI StatusBar renders `used/size` (and optional cost) via shared formatters.
 
 ### Slice 1c — Dedicated `Usage` / `usage_update` event (landed)
 
@@ -260,7 +258,7 @@ No `island-rs` change required.
    `TurnStatus`, including Queued, not “any active turn ⇒ Running”).
 3. client-core approval/interaction turn status sync for
    `WaitingForApproval`.
-4. TUI AgentPanel and GUI agent tree use the same projection semantics.
+4. TUI AgentPanel uses the shared projection semantics.
 5. Host does **not** emit a dedicated foreground event (optional later);
    derivation from turns + pending user actions + `AgentActivity` is enough
    for Slices 1–3.
@@ -273,7 +271,7 @@ No `island-rs` change required.
    `RealtimeMessage` / `ToolExecution` ServerMessage variants).
 3. hostd emits StreamItem for assistant deltas and tool upserts (including
    hydrate/replay).
-4. client-core / TUI / GUI apply StreamItem only; public timeline entry is
+4. client-core / TUI apply StreamItem only; public timeline entry is
    `apply_stream_item` (`apply_realtime*` is `pub(crate)` / internal only).
 5. `ToolExecutionEvent` remains a non-wire helper for building tool patches
    (tests + host mapping), not a client-facing message.

@@ -1,6 +1,6 @@
 # piko
 
-piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** architecture. It separates state management (sessions, settings, auth, prompts, skills, compaction, queues, and turn orchestration) in the Host daemon from transient agent execution in the stream-driven Orchestrator. Terminal (Ratatui) and desktop (GPUI) clients connect to hostd over JSON-lines stdio.
+piko is a Rust-based coding agent harness with a decoupled **hostd + orchd** architecture. It separates state management (sessions, settings, auth, prompts, skills, compaction, queues, and turn orchestration) in the Host daemon from transient agent execution in the stream-driven Orchestrator. The terminal client connects to hostd over JSON-lines stdio.
 
 Agent-runtime capabilities are being reimplemented from the codex-rs core, distilled PRD-first into piko architecture (see [Documentation & Feature Workflow](#documentation--feature-workflow)).
 
@@ -12,7 +12,6 @@ Agent-runtime capabilities are being reimplemented from the codex-rs core, disti
 graph TD
     subgraph Client Layer
         TUI["piko-tui (Ratatui Terminal UI)"]
-        GUI["piko-gui (GPUI Desktop Client)"]
     end
 
     subgraph Host Layer
@@ -36,7 +35,6 @@ graph TD
 
     %% Flow of control
     TUI <-->|JSON-lines over stdio| Hostd
-    GUI <-->|JSON-lines over stdio| Hostd
     Hostd -.->|implements ports| OrchdApi
     Orchd -.->|implements traits| OrchdApi
     Hostd -->|drives API| Orchd
@@ -50,7 +48,6 @@ graph TD
     Orchd -.-> Comms
 
     TUI -.-> Protocol
-    GUI -.-> Protocol
     Hostd -.-> Protocol
     Orchd -.-> Protocol
     LLMd -.-> Protocol
@@ -68,8 +65,6 @@ graph TD
 | `piko-protocol` | `packages/protocol` | library | Shared ubiquitous DTOs, wire formats, commands, and events |
 | `piko-comms` | `packages/comms` | bin + lib | Bounded, contract-enforced async channel topology ensuring design-compliant backpressure |
 | `piko-tui` | `packages/tui` | binary (`piko-tui`) | Terminal UI built with Ratatui (Timeline, Session view, Command dispatch, Keymap) |
-| `piko-gui` | `packages/gui` | binary | GPUI desktop client (Workbench, Settings, overlays); talks to hostd over stdio via client-core |
-| `island` | sibling `island-rs` | external library | Reusable GPUI infrastructure (theme, island panel, layout tree, overlays, widgets); no product ids/messages |
 
 ---
 
@@ -119,7 +114,7 @@ cargo build --release
 
 Set your LLM provider API key and start the terminal user interface.
 
-**Preferred (keeps hostd in sync):** TUI/GUI only talk to a separate
+**Preferred (keeps hostd in sync):** the TUI talks to a separate
 `piko-hostd` process. `cargo run -p piko-tui` rebuilds the UI only and can
 silently use a stale hostd (old tools / orchd). Use the dev scripts so both
 binaries are rebuilt together:
@@ -131,9 +126,6 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ./scripts/dev-tui.sh
 ./scripts/dev-tui.sh -c
 ./scripts/dev-tui.sh -m claude-3-5-sonnet-20241022 --thinking-level medium
-
-# Same for the desktop client
-./scripts/dev-gui.sh
 
 # Release profile
 PIKO_DEV_PROFILE=release ./scripts/dev-tui.sh

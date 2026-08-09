@@ -46,7 +46,7 @@ All F-13 TUI-surface acceptance criteria pass:
   lists `/mcp`.
 - **Regression**: `cargo test --workspace --exclude piko-llmd` green across
   all packages (hostd lib 117/117, orchd 104/104, tui 100/100, protocol
-  24/24, gui, client-core, sandbox). `piko-llmd tests/gateway_retry` remains
+  24/24, client-core, sandbox). `piko-llmd tests/gateway_retry` remains
   the only in-sandbox failure (binds a local TCP listener; unrelated to
   F-13). `cargo clippy --workspace --all-targets -- -D warnings` and
   `cargo fmt --all` clean.

@@ -74,14 +74,13 @@ Today the menu fails basic “settings list” jobs:
 - Free-text path/URL/number entry (no Settings text fields in this PRD).
   Closed enum / preset / boolean only. Custom values beyond presets remain
   file-based but **must still display** in value summaries.
-- Multi-column property sheet, GUI tabs, or mouse-first forms.
+- Multi-column property sheets, tabs, or mouse-first forms.
 - Live re-init of OTel inside a running hostd (Settings only discloses).
 - Editing every hostd key — only the catalog in this PRD.
 - Replacing the shell List selection language (Settings components **extend**
   List/chromelets; they do not invent private carets or focus borders).
 - Reintroducing a separate settings navigation stack: `MenuStack` is the one
   drill-down component for Settings and menu-style surfaces.
-- GUI Settings parity.
 
 ## Component kit
 

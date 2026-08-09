@@ -16,7 +16,7 @@
 cargo test -p piko-hostd --lib safety
 cargo test -p piko-orchd --lib safety
 cargo test -p piko-orchd-api -p piko-sandbox -p piko-protocol
-cargo test -p piko-hostd -p piko-tui -p piko-gui
+cargo test -p piko-hostd -p piko-tui
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```

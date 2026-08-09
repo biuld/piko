@@ -154,7 +154,7 @@ The chosen template is rendered with `{server}`, `{tool}`, `{args}` (compact
 JSON) substituted and carried as `ApprovalSnapshot.prompt` (`Option<String>`).
 No match → `prompt` absent → existing generic rendering, unchanged.
 
-### 6. Wire + client rendering (`piko-protocol`, `client-core`, `tui`, `gui`)
+### 6. Wire + client rendering (`piko-protocol`, `client-core`, `tui`)
 
 - `ApprovalSnapshot` gains `prompt: Option<String>` (camelCase `prompt`,
   skipped when absent).
@@ -163,8 +163,6 @@ No match → `prompt` absent → existing generic rendering, unchanged.
   (`state.rs`) and the `ApprovalRequested` event path (`update/host/events.rs`).
 - TUI `PendingApproval` gains `prompt`; `approval_question` returns the
   rendered prompt verbatim when present (tests updated).
-- GUI `render_approval_body` renders the prompt text block above the
-  arguments when present.
 
 ### 7. Feature gate + docs
 
@@ -184,7 +182,6 @@ No match → `prompt` absent → existing generic rendering, unchanged.
 | `piko-hostd` | `McpSettings` + `timeout_ms`; `McpProvider` resources + connect timeout; `McpResourceProvider` + `mcp_resource`; gateway template resolution + snapshot prompt; `new_with_mcp` threading |
 | `piko-client-core` | `PendingApproval.prompt` propagation |
 | `piko-tui` | approval question renders prompt when present |
-| `piko-gui` | approval body renders prompt when present |
 | `piko-llmd` / `piko-sandbox` | none |
 
 ## Reusable infrastructure

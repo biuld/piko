@@ -16,7 +16,7 @@ model input derived from that assembly.
   debug assembler is introduced.
 - Snapshots are process-local and latest-only. They are not session facts and
   are never written to the v3 session store.
-- Provider-adapter-private HTTP wire JSON, TUI panel, and GUI surface remain
+- Provider-adapter-private HTTP wire JSON and a TUI panel remain
   out of scope. The llmd capture includes the orchd transcript projection and
   inter-agent context once mapped for each model step.
 - Prompt bodies must never be copied into tracing fields or log events.

@@ -45,7 +45,7 @@ pub struct TuiConfig {
     #[serde(default)]
     pub tree: TreeConfig,
     /// TUI-only: hide thinking/reasoning blocks in the timeline. Independent
-    /// of the GUI's `[gui].hide-thinking-block`.
+    /// and is not a host runtime setting.
     #[serde(default)]
     pub hide_thinking_block: bool,
     /// TUI-only: default expanded/folded tool result rendering.

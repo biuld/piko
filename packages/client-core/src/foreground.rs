@@ -1,7 +1,7 @@
 //! Per-AgentInstance foreground work projection (F-22 / D-34).
 //!
 //! Thin adapter over [`AgentForeground::project`] — the sole priority table
-//! lives in `piko-protocol` so TUI and GUI stay aligned.
+//! lives in `piko-protocol` so clients stay aligned.
 
 use piko_protocol::{AgentActivity, AgentForeground, AgentInfo, AgentInstanceId, TurnStatus};
 

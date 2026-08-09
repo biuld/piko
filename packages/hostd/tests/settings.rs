@@ -92,29 +92,11 @@ fn apply_overrides_merges_nested_settings() {
 }
 
 #[test]
-fn gui_namespace_is_opaque_and_project_overridable() {
-    let mut manager = SettingsManager::in_memory(HostSettings {
-        gui: Some(serde_json::json!({"session-open": true})),
-        ..HostSettings::default()
-    });
-    assert_eq!(manager.settings().gui.unwrap()["session-open"], true);
-
-    manager.apply_overrides(HostSettings {
-        gui: Some(serde_json::json!({"session-open": false})),
-        ..HostSettings::default()
-    });
-    assert_eq!(manager.settings().gui.unwrap()["session-open"], false);
-}
-
-#[test]
 fn namespace_value_returns_frontend_blobs_as_stored() {
     let settings = HostSettings {
         tui: Some(serde_json::json!({
             "theme": {"name": "dark"},
             "hide_thinking_block": false,
-        })),
-        gui: Some(serde_json::json!({
-            "hide-thinking-block": true,
         })),
         ..HostSettings::default()
     };
@@ -122,9 +104,6 @@ fn namespace_value_returns_frontend_blobs_as_stored() {
     let tui_value = settings.namespace_value("tui");
     assert_eq!(tui_value["theme"]["name"], "dark");
     assert_eq!(tui_value["hide_thinking_block"], false);
-
-    let gui_value = settings.namespace_value("gui");
-    assert_eq!(gui_value["hide-thinking-block"], true);
 }
 
 #[test]
@@ -142,7 +121,6 @@ fn host_namespace_excludes_frontend_blobs() {
             summarizer_provider: None,
         }),
         tui: Some(serde_json::json!({ "theme": { "name": "dark" } })),
-        gui: Some(serde_json::json!({ "reduced-motion": true })),
         ..HostSettings::default()
     };
 
@@ -150,7 +128,6 @@ fn host_namespace_excludes_frontend_blobs() {
     assert_eq!(host_value["default-provider"], "openai");
     assert_eq!(host_value["default-model"], "gpt-test");
     assert!(host_value.get("tui").is_none());
-    assert!(host_value.get("gui").is_none());
     assert!(host_value.get("theme").is_none());
     assert_eq!(host_value["compaction"]["enabled"], false);
 }
@@ -178,7 +155,6 @@ hide-thinking-block = true
 
     assert_eq!(manager.get_default_model(), Some("kept"));
     assert!(manager.settings().tui.is_none());
-    assert!(manager.settings().gui.is_none());
 }
 
 #[test]

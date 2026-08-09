@@ -14,7 +14,7 @@
 # transport = "stdio"
 
 # Presentation preferences (theme, hide-thinking-block, etc.) are NOT host
-# fields. They belong to the frontend-owned [tui] / [gui] tables below — see
+# fields. They belong to the frontend-owned [tui] table below — see
 # `packages/hostd/src/domain/config/settings.rs`. hostd persists these tables
 # opaquely and does not validate their contents. Unknown top-level keys are
 # ignored.
@@ -24,9 +24,6 @@
 # name = "dark"
 # hide_thinking_block = false
 #
-# [gui]
-# hide-thinking-block = false
-
 [compaction]
 # Enable automatic history compaction when token count exceeds thresholds
 enabled = true
@@ -115,7 +112,7 @@ auto-approve-workspace-writes = true
 [mcp.approval-templates]
 # Operator-authored approval prompts for MCP tools, keyed by "server/tool"
 # (exact) or bare "tool" (fallback). When an MCP tool needs approval, the
-# rendered prompt replaces the generic question in the TUI/GUI. Templates
+# rendered prompt replaces the generic question in the TUI. Templates
 # are presentation text only -- they never change the approval flow.
 # Placeholders: {server}, {tool}, {args}.
 # "github/create_issue" = "This creates a GitHub issue in the configured repository."

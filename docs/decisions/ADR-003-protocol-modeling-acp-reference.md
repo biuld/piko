@@ -5,7 +5,7 @@
 
 ## Context
 
-piko clients (TUI, GUI) talk to **hostd** over a JSON-lines command/event
+piko clients talk to **hostd** over a JSON-lines command/event
 protocol in `piko-protocol`. That surface is still early relative to the
 runtime (F-01 turn lifecycle, multi-agent, session trees, compaction, usage
 ledgers). Gaps show up as incomplete client chrome (for example context
@@ -34,7 +34,7 @@ not a specification to port 1:1.
 
 1. **`piko-protocol` remains the product host–client contract.** hostd stays
    authoritative for durable user-visible state; clients are projectors and
-   intent senders. First-party TUI/GUI do **not** switch to ACP as their sole
+   intent senders. First-party clients do **not** switch to ACP as their sole
    wire protocol.
 
 2. **ACP is a modeling reference for client-visible agent behavior**, in the

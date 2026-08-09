@@ -110,7 +110,7 @@ when the runtime and registry are healthy.
   parent-child authorization policy.
 - New permission-profile or role systems (F-17/F-19 remain authoritative).
 - Changing F-20 completion-fragment injection rules.
-- TUI/GUI multi-agent dashboards (clients may later consume the same host
+- TUI multi-agent dashboards (the client may later consume the same host
   catalog; not required for this PRD).
 - 1:1 parity with codex-rs tool schemas or parameter names.
 - Requiring models to read workspace agent TOML files as the primary discovery

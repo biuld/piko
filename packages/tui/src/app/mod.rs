@@ -277,13 +277,13 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
             })
         }
         SettingsAction::HideThinking(value) => {
-            // TUI-only presentation; lives under `[tui]`, not shared with GUI.
+            // TUI-only presentation; lives under `[tui]`.
             serde_json::json!({
                 "tui": { "hide_thinking_block": value }
             })
         }
         SettingsAction::ToolDetails(value) => {
-            // TUI-only presentation; lives under `[tui]`, not shared with GUI.
+            // TUI-only presentation; lives under `[tui]`.
             serde_json::json!({
                 "tui": { "tools_expanded": value }
             })

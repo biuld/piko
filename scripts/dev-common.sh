@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for scripts/dev-tui.sh and scripts/dev-gui.sh.
+# Shared helpers for scripts/dev-tui.sh.
 # Not meant to be invoked directly.
 
 piko_dev_build_and_run() {
@@ -22,21 +22,12 @@ piko_dev_build_and_run() {
       ;;
   esac
 
-  local client_pkg client_bin
-  case "$client" in
-    tui)
-      client_pkg=piko-tui
-      client_bin=piko-tui
-      ;;
-    gui)
-      client_pkg=piko-gui
-      client_bin=piko-gui
-      ;;
-    *)
-      echo "error: unknown client '$client' (expected tui or gui)" >&2
-      return 1
-      ;;
-  esac
+  if [[ "$client" != "tui" ]]; then
+    echo "error: unknown client '$client' (expected tui)" >&2
+    return 1
+  fi
+  local client_pkg=piko-tui
+  local client_bin=piko-tui
 
   # Optional extra flags for `cargo build` (word-split intentionally).
   # shellcheck disable=SC2206

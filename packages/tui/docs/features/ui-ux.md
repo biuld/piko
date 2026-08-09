@@ -647,7 +647,7 @@ how existing and future settings surface:
 
 ## Non-goals
 
-- Desktop GUI (GPUI) layout and interactions (separate package docs)
+- Desktop-client layout and interactions
 - Redesigning hostd/orchd protocols solely for aesthetics
 - Defining every wire `Command` field or serialization shape (protocol design)
 - Pixel-perfect clone of Grok Build, including dashboard, vim mode, or mouse

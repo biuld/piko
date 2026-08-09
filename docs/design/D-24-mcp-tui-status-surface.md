@@ -8,7 +8,7 @@
 Give the TUI a `/mcp` command and a status panel that shows every configured
 MCP server: connection state, tool/resource/template counts, and the connect
 error when a server failed or timed out at session start (or is disabled by
-the F-18 `mcp` feature gate). GUI surface is deferred.
+the F-18 `mcp` feature gate).
 
 ## Constraints and non-goals
 
@@ -19,7 +19,7 @@ the F-18 `mcp` feature gate). GUI surface is deferred.
   panel rendering are all TUI-local; hostd advertises the neutral id
   `mcp.status` in its command catalog.
 - Non-goals: MCP *management* (connect/reconnect/refresh from the client),
-  live streaming status updates, GUI surface, showing the model-visible tool
+  live streaming status updates, showing the model-visible tool
   catalog itself (covered by `/status` tool state).
 
 ## Proposed design

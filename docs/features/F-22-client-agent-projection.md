@@ -4,7 +4,7 @@
 > Priority: P0
 > Source evidence: Agent Client Protocol v1/v2 (modeling reference, ADR-003);
 > piko F-01 turn runtime, F-07 approvals, F-09 session persistence, F-10
-> multi-agent, D-29 usage accounting; TUI BottomBar / GUI StatusBar usage gaps
+> multi-agent, D-29 usage accounting; TUI BottomBar usage gaps
 
 ## Summary
 
@@ -85,7 +85,7 @@ trade the piko protocol for ACP.
   transcript items when projected.
 - Full permission product redesign (F-07, F-17); only how pending user action
   appears in **foreground state** and stream-level links to approval ids.
-- GUI/TUI pixel layout; only required data for chrome correctness.
+- TUI cell layout; only required data for chrome correctness.
 - ACP adapter implementation (future optional surface).
 
 ## Behavior and states
@@ -202,7 +202,7 @@ Rules:
 
 ## Acceptance criteria
 
-- [x] Documented foreground states and transitions match what TUI/GUI/client-core
+- [x] Documented foreground states and transitions match what TUI/client-core
       can implement without reading hostd sources (`AgentForeground::project`).
 - [x] Submit acceptance is observable separately from foreground idle
       (CommandResult / turn start vs terminal + idle projection).

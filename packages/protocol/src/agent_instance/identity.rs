@@ -85,7 +85,7 @@ impl AgentForeground {
     /// 3. Host [`AgentActivity`] via [`from_activity`](Self::from_activity)
     /// 4. [`Idle`](Self::Idle)
     ///
-    /// TUI, GUI, and client-core must use this function so Queued / Running /
+    /// TUI and client-core must use this function so Queued / Running /
     /// RequiresAction / Cancelling stay aligned.
     pub fn project(
         blocked_on_user: bool,

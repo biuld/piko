@@ -83,9 +83,6 @@ pub struct HostSettings {
     /// TUI-specific settings. The TUI owns the schema; hostd stores and forwards.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tui: Option<serde_json::Value>,
-    /// GUI-specific settings. The GUI owns the schema; hostd stores and forwards.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gui: Option<serde_json::Value>,
 }
 
 /// F-03/D-28: `[prompt]` settings section.
@@ -125,7 +122,6 @@ impl HostSettings {
     pub fn namespace_value(&self, namespace: &str) -> serde_json::Value {
         match namespace {
             "tui" => self.tui.clone().unwrap_or_else(|| serde_json::json!({})),
-            "gui" => self.gui.clone().unwrap_or_else(|| serde_json::json!({})),
             "host" => self.host_namespace_value(),
             _ => serde_json::Value::Object(Default::default()),
         }
@@ -141,7 +137,7 @@ impl HostSettings {
     }
 
     /// Shared runtime fields for `ConfigGet { namespace: "host" }`.
-    /// Excludes frontend blobs (`[tui]`, `[gui]`).
+    /// Excludes the frontend blob (`[tui]`).
     pub fn host_namespace_value(&self) -> serde_json::Value {
         serde_json::json!({
             "default-provider": self.default_provider,

@@ -23,7 +23,7 @@ preserves today's behavior when the window cannot be resolved.
   diverge. Switching the waterline to the per-session active model is a
   separate F-02 continuity concern and out of scope here.
 - Non-goals: token-budget prompt fragments (already rejected in F-05),
-  per-model config tables, TUI/GUI settings surfaces (they expose only
+  per-model config tables, TUI settings surfaces (they expose only
   enabled/reserve/keep today), and protocol wire changes (hostd-only
   setting).
 

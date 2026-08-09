@@ -95,8 +95,8 @@ TreePanel render
 `AgentSubscribed`, or the first live agent event), `AppState` pushes it into
 `TreePanel::set_agent_filter`, and the visible projection is rebuilt. Entries
 attributed to another agent instance are dropped; entries without agent
-attribution (session-level entries) are kept, matching the GUI tree's agent
-scope semantics.
+attribution (session-level entries) are kept so session facts remain visible
+under an agent filter.
 
 Navigation sends a command to hostd:
 

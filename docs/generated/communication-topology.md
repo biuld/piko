@@ -4,9 +4,6 @@
 
 ```mermaid
 flowchart LR
-    subgraph gui["gui"]
-        ngui_host_process_bridge["gui.host.process_bridge<br/>ThreadBridge / Process<br/>Unbounded — blocking host stdout reader crosses into the GPUI foreground poll loop"]
-    end
     subgraph hostd["hostd"]
         nhostd_prompt_approval_reply["hostd.prompt.approval_reply<br/>Reply / Request<br/>One"]
         nhostd_prompt_interaction_reply["hostd.prompt.interaction_reply<br/>Reply / Request<br/>One"]
@@ -39,8 +36,6 @@ flowchart LR
     ncomponent_ExecutionActor["ExecutionActor"]
     ncomponent_ExecutionSupervisor["ExecutionSupervisor"]
     ncomponent_ExecutionTerminalWaiter["ExecutionTerminalWaiter"]
-    ncomponent_GuiClientBridgePoll["GuiClientBridgePoll"]
-    ncomponent_GuiHostStdoutReaderThread["GuiHostStdoutReaderThread"]
     ncomponent_HostApp["HostApp"]
     ncomponent_HostObservationProjection["HostObservationProjection"]
     ncomponent_HostServerCommandTask["HostServerCommandTask"]
@@ -80,8 +75,6 @@ flowchart LR
     nhostd_prompt_interaction_reply --> ncomponent_UserInteractionGateway
     ncomponent_HostStdoutReaderThread --> ntui_host_process_bridge
     ntui_host_process_bridge --> ncomponent_TuiEventLoop
-    ncomponent_GuiHostStdoutReaderThread --> ngui_host_process_bridge
-    ngui_host_process_bridge --> ncomponent_GuiClientBridgePoll
     ncomponent_HostApp --> nhostd_client_output
     ncomponent_HostServerCommandTask --> nhostd_client_output
     nhostd_client_output --> ncomponent_HostTransport

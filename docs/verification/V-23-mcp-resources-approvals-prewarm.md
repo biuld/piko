@@ -6,7 +6,7 @@
 > `tests/fixtures/mcp_server_no_resources.sh`), settings model
 > (`domain/config/settings.rs`), approval gateway
 > (`adapters/turns/orch_runner/approval_gateway.rs`), orchd registry
-> (`adapters/tools/registry.rs`, `registry_tests.rs`), client-core + TUI + GUI
+> (`adapters/tools/registry.rs`, `registry_tests.rs`), client-core + TUI
 > prompt propagation; full workspace suite
 > Environment: macOS (arm64), `cargo test --workspace`,
 > `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -53,17 +53,16 @@ All F-13 acceptance criteria pass:
 - **Approval templates**: `mcp_approval_template_prompt_reaches_the_user_snapshot`
   proves `server/tool` wins over bare `tool`, `{server}`/`{tool}`/`{args}`
   substitution, bare-`tool` keys never match a non-MCP provider, and the
-  rendered prompt reaches the pending `ApprovalSnapshot` for TUI/GUI;
+  rendered prompt reaches the pending `ApprovalSnapshot` for TUI;
   `approval_request_carries_executing_agent_role` (extended) proves the
   registry stamps the route `provider_id` on `ToolApprovalRequest`.
 - **Clients**: `operator_prompt_replaces_the_generic_question` (TUI) proves
   the prompt replaces the generic question when present, and the absence path
   keeps existing rendering; client-core propagates `prompt` on both the
-  snapshot-reconcile and `ApprovalRequested` event paths; GUI renders it
-  above the arguments.
+  snapshot-reconcile and `ApprovalRequested` event paths.
 - **Regression**: `cargo test --workspace --exclude piko-llmd` green across
   all packages (hostd lib 116/116 including the new MCP tests, orchd 104/104,
-  tui 95/95, gui, client-core, protocol, sandbox). `piko-llmd
+  tui 95/95, client-core, protocol, sandbox). `piko-llmd
   tests/gateway_retry` remains the only in-sandbox failure (it binds a local
   TCP listener, which the managed sandbox denies; verified green unsandboxed
   previously and unrelated to F-13). `cargo clippy --workspace --all-targets

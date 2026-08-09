@@ -66,7 +66,6 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         mcp: overrides.mcp.or(base.mcp),
         prompt: overrides.prompt.or(base.prompt),
         tui: overrides.tui.or(base.tui),
-        gui: overrides.gui.or(base.gui),
     }
 }
 

@@ -19,7 +19,7 @@ pub struct HostCommandDescriptor {
     /// Stable dotted id, e.g. `"session.new"`. Frontends map this to a
     /// concrete `Command` / `ClientIntent`; it is never rendered directly.
     pub id: String,
-    /// Neutral English product title (no TUI/GUI/ratatui/GPUI wording).
+    /// Neutral English product title (no TUI/ratatui wording).
     pub title: String,
     /// Neutral English description of what the command does.
     pub detail: String,

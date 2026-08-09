@@ -5,7 +5,7 @@
 > Priority: P1
 > Source evidence: codex-rs `core/src/thread_manager.rs`,
 > `thread_manager_tests.rs`, `rollout.rs`, external `codex_thread_store`;
-> digest Block H; piko hostd schema-v3 storage and TUI/GUI `session.fork`
+> digest Block H; piko hostd schema-v3 storage and TUI `session.fork`
 
 ## Summary
 
