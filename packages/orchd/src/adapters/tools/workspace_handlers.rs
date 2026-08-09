@@ -2,13 +2,12 @@
 //
 // This file owns the file tools (read/edit/write), the read-only
 // `environment` tool, and the aggregate catalog consumed by
-// `WorkspaceToolProvider::discover`. The `bash` tool lives in
-// `shell_handlers.rs` and the long-lived `process` tool in
-// `process_handlers.rs` (F-08 slice 2).
+// `WorkspaceToolProvider::discover`. Command execution lives in
+// `exec_handlers.rs`.
 
 use std::path::Path;
 
-use piko_sandbox::policy::{Access, Policy};
+use piko_sandbox::policy::{Access, EffectivePermissions};
 
 use crate::domain::tools::call::ToolCall;
 use crate::domain::tools::definition::{
@@ -17,8 +16,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
 
-use super::process_handlers::process_tool_def;
-use super::shell_handlers::shell_tool_def;
+use super::exec_handlers::{exec_command_tool_def, write_stdin_tool_def};
 
 pub(crate) const FILE_CHANGE_DETAILS_KEY: &str = "_pikoFileChange";
 
@@ -37,10 +35,10 @@ fn recorded_path(cwd: &Path, resolved: &Path) -> String {
 pub(super) fn workspace_tools() -> Vec<ToolDef> {
     vec![
         read_tool_def(),
-        shell_tool_def(),
+        exec_command_tool_def(),
         edit_tool_def(),
         write_tool_def(),
-        process_tool_def(),
+        write_stdin_tool_def(),
         environment_tool_def(),
     ]
 }
@@ -143,9 +141,8 @@ fn environment_tool_def() -> ToolDef {
         name: "environment".into(),
         version: "1".into(),
         provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/environment"),
-        description:
-            "Report the execution environment: resolved shell, OS, architecture, cwd, PATH, and detected tools."
-                .into(),
+        description: "Report the resolved shell, OS, cwd, PATH, detected tools, effective filesystem roots, scratch roots, network authority, and containment requirement."
+            .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {},
@@ -164,11 +161,11 @@ fn environment_tool_def() -> ToolDef {
     }
 }
 
-/// Execute the file tools (read/edit/write). The provider routes `bash`,
-/// `process`, and `environment` to their dedicated handlers.
+/// Execute the file tools (read/edit/write). The provider routes command
+/// execution and `environment` to their dedicated handlers.
 pub(super) async fn execute_workspace_tool(
     cwd: &Path,
-    policy: &Policy,
+    policy: &EffectivePermissions,
     call: &ToolCall,
     _ctx: &ToolExecutionContext,
 ) -> ToolExecResult {

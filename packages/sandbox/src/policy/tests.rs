@@ -3,20 +3,15 @@ use std::{fs, path::Path};
 use super::*;
 use tempfile::tempdir;
 
-fn policy() -> Policy {
-    Policy {
+fn policy() -> EffectivePermissions {
+    EffectivePermissions {
         version: 1,
-        read: vec![PathBuf::from(".")],
-        write: vec![PathBuf::from(".")],
-        deny: vec![PathBuf::from(".git")],
-        allowed_commands: vec![
-            "git".into(),
-            "rg".into(),
-            "echo".into(),
-            "cat".into(),
-            "npm".into(),
-        ],
-        allow_network: false,
+        read_roots: vec![PathBuf::from(".")],
+        write_roots: vec![PathBuf::from(".")],
+        scratch_roots: vec![],
+        denied_read_roots: vec![PathBuf::from(".git")],
+        denied_write_roots: vec![],
+        network: false.into(),
     }
 }
 
@@ -102,58 +97,4 @@ fn rejects_symlink_escape() {
         policy().authorize(workspace.path(), Path::new("link"), Access::Read, true),
         Err(PolicyError::Denied(_))
     ));
-}
-
-#[test]
-fn validates_every_static_command_segment() {
-    let dir = tempdir().unwrap();
-    assert!(
-        policy()
-            .validate_command("git status && rg TODO", dir.path())
-            .is_ok()
-    );
-    assert!(
-        policy()
-            .validate_command("git status; rm -rf .", dir.path())
-            .is_err()
-    );
-    assert!(
-        policy()
-            .validate_command("git $(printf status)", dir.path())
-            .is_err()
-    );
-}
-
-#[test]
-fn validates_redirections_against_acl() {
-    let dir = tempdir().unwrap();
-    // git status > allowed.log -> allowed write path in workspace (.)
-    assert!(
-        policy()
-            .validate_command("git status > allowed.log", dir.path())
-            .is_ok()
-    );
-
-    // git status > .git/secret.log -> blocked by deny list
-    assert!(
-        policy()
-            .validate_command("git status > .git/secret.log", dir.path())
-            .is_err()
-    );
-}
-
-#[test]
-fn canonicalizes_commands_correctly() {
-    let p = policy();
-    assert_eq!(p.canonicalize_command("git status").unwrap(), "git status");
-    assert_eq!(
-        p.canonicalize_command("npm install lodash -y --save")
-            .unwrap(),
-        "npm install --save -y lodash"
-    );
-    assert_eq!(
-        p.canonicalize_command("echo 'hello | world' > output.log")
-            .unwrap(),
-        "echo hello | world > output.log"
-    );
 }

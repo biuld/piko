@@ -23,6 +23,7 @@ pub fn resolve_permissions(settings: Option<&PermissionsSettings>) -> ResolvedPe
             let config = PermissionConfig {
                 allowed_command_prefixes: profile.allowed_commands.clone(),
                 denied_command_prefixes: profile.denied_commands.clone(),
+                allow_escalation: profile.allow_escalation,
             };
             ResolvedPermissions {
                 materialize: true,
@@ -70,6 +71,7 @@ fn resolve_role_configs(settings: &PermissionsSettings) -> HashMap<String, Permi
                 PermissionConfig {
                     allowed_command_prefixes: profile.allowed_commands.clone(),
                     denied_command_prefixes: profile.denied_commands.clone(),
+                    allow_escalation: profile.allow_escalation,
                 },
             );
         }
@@ -90,6 +92,7 @@ fn resolve_role_policies(settings: &PermissionsSettings) -> HashMap<String, Role
                 RoleSandboxPolicy {
                     read_roots: profile.read_roots.clone(),
                     write_roots: profile.write_roots.clone(),
+                    scratch_roots: profile.scratch_roots.clone(),
                     deny_paths: profile.deny_paths.clone(),
                     allow_network: profile.allow_network,
                 },
@@ -149,36 +152,122 @@ fn normalize_command(command: &str) -> String {
     command.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Extract the shell command from a tool call, if the tool is a command
-/// tool (`bash`, or `process` with `action == "start"`).
+fn bundled_prompt_rule(command: &str) -> bool {
+    let command = normalize_command(command);
+    [
+        "rm -rf",
+        "rm -fr",
+        "git reset --hard",
+        "git clean -f",
+        "sudo ",
+        "chmod -R",
+        "chown -R",
+        "| sh",
+        "| bash",
+    ]
+    .iter()
+    .any(|pattern| command == pattern.trim() || command.contains(pattern))
+}
+
+/// Extract the shell program from an `exec_command` call.
 fn tool_command(tool_name: &str, args: &serde_json::Value) -> Option<String> {
     match tool_name {
-        "bash" => args
-            .get("command")
+        "exec_command" => args
+            .get("cmd")
             .and_then(|value| value.as_str())
             .map(str::to_string),
-        "process" => {
-            let action = args
-                .get("action")
-                .and_then(|value| value.as_str())
-                .unwrap_or("");
-            if action == "start" {
-                args.get("command")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-            } else {
-                None
-            }
-        }
         _ => None,
     }
 }
 
+pub fn validate_command_authority(tool_name: &str, args: &serde_json::Value) -> Result<(), String> {
+    if tool_name != "exec_command" {
+        return Ok(());
+    }
+    let authority = args
+        .get("sandbox_permissions")
+        .and_then(|value| value.as_str())
+        .unwrap_or("use_default");
+    if !matches!(
+        authority,
+        "use_default" | "with_additional_permissions" | "require_escalated"
+    ) {
+        return Err("invalid sandbox_permissions value".into());
+    }
+    if authority != "use_default"
+        && args
+            .get("justification")
+            .and_then(|value| value.as_str())
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err("extra authority requires a non-empty justification".into());
+    }
+    if authority == "with_additional_permissions"
+        && !args
+            .get("additional_permissions")
+            .is_some_and(serde_json::Value::is_object)
+    {
+        return Err("with_additional_permissions requires additional_permissions".into());
+    }
+    if let Some(rule) = args.get("prefix_rule") {
+        if authority != "require_escalated" {
+            return Err("prefix_rule is valid only for require_escalated".into());
+        }
+        let tokens = rule
+            .as_array()
+            .ok_or_else(|| "prefix_rule must be an array of tokens".to_string())?;
+        if tokens.len() < 2 {
+            return Err("prefix_rule must contain a narrow program and subcommand".into());
+        }
+        let tokens: Vec<&str> = tokens
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|token| {
+                        !token.is_empty()
+                            && !token.chars().any(char::is_whitespace)
+                            && !token.chars().any(|ch| ";|&<>`$()".contains(ch))
+                    })
+                    .ok_or_else(|| "prefix_rule entries must be simple argv tokens".to_string())
+            })
+            .collect::<Result<_, _>>()?;
+        let command = args
+            .get("cmd")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if command.chars().any(|ch| ";|&<>`$\n\r".contains(ch)) {
+            return Err("prefix_rule cannot authorize a shell expression".into());
+        }
+        let prefix = tokens.join(" ");
+        if !prefix_rule_match(&prefix, command) {
+            return Err("prefix_rule does not match cmd".into());
+        }
+        if matches!(
+            tokens[0],
+            "sh" | "bash"
+                | "zsh"
+                | "fish"
+                | "sudo"
+                | "env"
+                | "python"
+                | "python3"
+                | "node"
+                | "ruby"
+                | "perl"
+                | "rm"
+                | "curl"
+                | "wget"
+        ) {
+            return Err("prefix_rule starts with a non-reusable command".into());
+        }
+    }
+    Ok(())
+}
+
 /// Evaluate a tool call against the resolved command policy.
 ///
-/// Returns `None` for non-command tools, missing/non-string commands, empty
-/// commands, and commands matching neither prefix list — the existing flow
-/// is unchanged in all those cases.
+/// Returns `None` when the call must continue through guardian/user approval.
 pub fn evaluate_command(
     tool_name: &str,
     args: &serde_json::Value,
@@ -195,10 +284,31 @@ pub fn evaluate_command(
             });
         }
     }
-    for rule in &config.allowed_command_prefixes {
-        if prefix_rule_match(rule, &command) {
-            return Some(CommandDecision::Allow);
-        }
+    let explicitly_allowed = config
+        .allowed_command_prefixes
+        .iter()
+        .any(|rule| prefix_rule_match(rule, &command));
+    let authority = args
+        .get("sandbox_permissions")
+        .and_then(|value| value.as_str())
+        .unwrap_or("use_default");
+    if authority == "require_escalated" && !config.allow_escalation {
+        return Some(CommandDecision::Deny {
+            prefix: "elevated execution".into(),
+        });
     }
-    None
+    if authority != "use_default" {
+        return None;
+    }
+    if explicitly_allowed {
+        return Some(CommandDecision::Allow);
+    }
+    if bundled_prompt_rule(&command) {
+        return None;
+    }
+    // The default sandbox is the normal execution authority. It does not
+    // require a user prompt merely because the shell program is complex or
+    // absent from a static allowlist. Extra or elevated authority continues
+    // through the approval flow.
+    Some(CommandDecision::Allow)
 }

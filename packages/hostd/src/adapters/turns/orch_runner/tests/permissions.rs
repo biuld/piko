@@ -26,7 +26,7 @@ async fn permission_runner(
     .await
 }
 
-fn bash_command_request(
+fn exec_command_request(
     session_id: &str,
     id: &str,
     command: &str,
@@ -39,8 +39,8 @@ fn bash_command_request(
         agent_instance_id: "root".into(),
         agent_role: role.map(str::to_string),
         provider_id: None,
-        tool_name: "bash".into(),
-        tool_args: serde_json::json!({ "command": command }),
+        tool_name: "exec_command".into(),
+        tool_args: serde_json::json!({ "cmd": command }),
         host_context: Some(HostSessionContext::new(session_id)),
         writable_roots: None,
     }
@@ -96,7 +96,7 @@ async fn permission_denied_command_fails_closed_without_prompt() {
     let runner = permission_runner(Some(&locked_settings())).await;
 
     let decision = runner
-        .request_tool_approval(bash_command_request("s1", "a1", "rm -rf /tmp/x", None))
+        .request_tool_approval(exec_command_request("s1", "a1", "rm -rf /tmp/x", None))
         .await;
     match decision {
         ToolApprovalDecision::PermissionDenied { reason } => {
@@ -115,7 +115,7 @@ async fn permission_allowed_command_accepts_one_shot_without_grant() {
     let runner = permission_runner(Some(&locked_settings())).await;
 
     let first = runner
-        .request_tool_approval(bash_command_request(
+        .request_tool_approval(exec_command_request(
             "s1",
             "a1",
             "cargo test -- --nocapture",
@@ -128,7 +128,7 @@ async fn permission_allowed_command_accepts_one_shot_without_grant() {
     // One-shot: no store grant is written, so the identical call is
     // evaluated again rather than served from a grant.
     let second = runner
-        .request_tool_approval(bash_command_request(
+        .request_tool_approval(exec_command_request(
             "s1",
             "a2",
             "cargo test -- --nocapture",
@@ -148,13 +148,13 @@ async fn permission_deny_wins_over_prior_session_grant() {
     // Simulate a prior user grant at session scope for the same command.
     let store = runner.get_approval_store(&cwd);
     store.grant(
-        "bash",
-        &serde_json::json!({ "command": "rm -rf /tmp/x" }),
+        "exec_command",
+        &serde_json::json!({ "cmd": "rm -rf /tmp/x" }),
         crate::adapters::turns::approval::ApprovalScope::Session,
     );
 
     let decision = runner
-        .request_tool_approval(bash_command_request("s1", "a1", "rm -rf /tmp/x", None))
+        .request_tool_approval(exec_command_request("s1", "a1", "rm -rf /tmp/x", None))
         .await;
     match decision {
         ToolApprovalDecision::PermissionDenied { reason } => {
@@ -165,14 +165,11 @@ async fn permission_deny_wins_over_prior_session_grant() {
 }
 
 #[tokio::test]
-async fn permission_non_matching_command_keeps_user_flow() {
+async fn permission_default_sandbox_command_is_accepted_without_prompt() {
     let runner = permission_runner(Some(&locked_settings())).await;
-    let decision = user_flow_resolves(
-        &runner,
-        bash_command_request("s1", "a1", "ls -la", None),
-        "a1",
-    )
-    .await;
+    let decision = runner
+        .request_tool_approval(exec_command_request("s1", "a1", "ls -la", None))
+        .await;
     assert_eq!(decision, ToolApprovalDecision::Accept);
 }
 
@@ -182,7 +179,7 @@ async fn permission_role_denied_command_fails_closed_for_mapped_role() {
 
     // The mapped "coder" role denies `rm -rf` without any prompt.
     let decision = runner
-        .request_tool_approval(bash_command_request(
+        .request_tool_approval(exec_command_request(
             "s1",
             "a1",
             "rm -rf /tmp/x",
@@ -204,7 +201,7 @@ async fn permission_role_denied_command_fails_closed_for_mapped_role() {
     // command rules), so the same command reaches the user.
     let root_decision = user_flow_resolves(
         &runner,
-        bash_command_request("s1", "a2", "rm -rf /tmp/x", Some("root")),
+        exec_command_request("s1", "a2", "rm -rf /tmp/x", Some("root")),
         "a2",
     )
     .await;
@@ -213,7 +210,7 @@ async fn permission_role_denied_command_fails_closed_for_mapped_role() {
     // A missing role on the request also inherits the session profile.
     let none_decision = user_flow_resolves(
         &runner,
-        bash_command_request("s1", "a3", "rm -rf /tmp/x", None),
+        exec_command_request("s1", "a3", "rm -rf /tmp/x", None),
         "a3",
     )
     .await;
@@ -225,7 +222,7 @@ async fn permission_role_allowed_command_accepts_one_shot_for_mapped_role() {
     let runner = permission_runner(Some(&role_settings())).await;
 
     let researcher = runner
-        .request_tool_approval(bash_command_request(
+        .request_tool_approval(exec_command_request(
             "s1",
             "a1",
             "git status",
@@ -237,12 +234,14 @@ async fn permission_role_allowed_command_accepts_one_shot_for_mapped_role() {
 
     // A role mapped to a different profile is not affected by "readonly"'s
     // allow rules and keeps the session flow.
-    let coder = user_flow_resolves(
-        &runner,
-        bash_command_request("s1", "a2", "git status", Some("coder")),
-        "a2",
-    )
-    .await;
+    let coder = runner
+        .request_tool_approval(exec_command_request(
+            "s1",
+            "a2",
+            "git status",
+            Some("coder"),
+        ))
+        .await;
     assert_eq!(coder, ToolApprovalDecision::Accept);
 }
 

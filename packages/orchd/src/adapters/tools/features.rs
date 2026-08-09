@@ -23,8 +23,7 @@ pub fn feature_for_tool(tool: &ToolDef) -> Option<&'static str> {
 pub fn feature_for_tool_name(name: &str) -> Option<&'static str> {
     Some(match name {
         "read" | "edit" | "write" => "workspace",
-        "bash" => "bash",
-        "process" => "process",
+        "exec_command" | "write_stdin" => "exec",
         "environment" => "environment",
         "get_context_remaining" | "new_context_window" => "context",
         "todo_read" | "todo_write" => "todo",
@@ -100,10 +99,13 @@ mod tests {
     #[test]
     fn catalog_tools_map_to_features() {
         assert_eq!(feature_for_tool(&tool("read", "native")), Some("workspace"));
-        assert_eq!(feature_for_tool(&tool("bash", "native")), Some("bash"));
         assert_eq!(
-            feature_for_tool(&tool("process", "native")),
-            Some("process")
+            feature_for_tool(&tool("exec_command", "native")),
+            Some("exec")
+        );
+        assert_eq!(
+            feature_for_tool(&tool("write_stdin", "native")),
+            Some("exec")
         );
         assert_eq!(
             feature_for_tool(&tool("wait_agent", "native")),
@@ -133,25 +135,20 @@ mod tests {
     #[test]
     fn feature_gate_respects_resolved_map() {
         let mut features = HashMap::new();
-        features.insert("process".to_string(), false);
+        features.insert("exec".to_string(), false);
         assert!(!feature_enabled(
             Some(&features),
-            &tool("process", "native")
+            &tool("exec_command", "native")
         ));
-        assert!(feature_enabled(Some(&features), &tool("bash", "native")));
         assert_eq!(
-            disabled_feature_for_tool_name(Some(&features), "process"),
-            Some("process")
-        );
-        assert_eq!(
-            disabled_feature_for_tool_name(Some(&features), "bash"),
-            None
+            disabled_feature_for_tool_name(Some(&features), "write_stdin"),
+            Some("exec")
         );
     }
 
     #[test]
     fn absent_feature_map_keeps_everything_enabled() {
-        assert!(feature_enabled(None, &tool("process", "native")));
-        assert_eq!(disabled_feature_for_tool_name(None, "process"), None);
+        assert!(feature_enabled(None, &tool("exec_command", "native")));
+        assert_eq!(disabled_feature_for_tool_name(None, "write_stdin"), None);
     }
 }

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::policy::{Policy, PolicyError};
+use crate::policy::{EffectivePermissions, PolicyError};
 
 /// The OS-sandbox wrapper command around `<shell> -c <command>`.
 #[derive(Debug, Clone)]
@@ -19,6 +19,31 @@ pub struct SandboxCommand {
     /// Whether loader-injection variables (`DYLD_*`/`LD_*`) must be stripped
     /// from the environment before spawning.
     pub strip_loader_vars: bool,
+}
+
+pub fn backend_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "seatbelt"
+    } else if cfg!(target_os = "linux") {
+        "bwrap"
+    } else {
+        "unsupported"
+    }
+}
+
+pub fn backend_available() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        return !is_app_sandboxed() && Path::new("/usr/bin/sandbox-exec").is_file();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path).any(|root| root.join("bwrap").is_file())
+        });
+    }
+    #[allow(unreachable_code)]
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -37,11 +62,11 @@ fn is_app_sandboxed() -> bool {
 
 /// Build the platform OS-sandbox wrapper for `policy`.
 ///
-/// Returns `Ok(None)` when the platform cannot nest another OS sandbox (for
-/// example we are already inside an Apple App Sandbox) — callers then
-/// execute directly; the filesystem ACL checks in `policy.rs` still apply.
+/// Returns `Ok(None)` when the platform cannot provide containment (for
+/// example an Apple App Sandbox cannot nest seatbelt). Restricted callers
+/// must fail closed; only an explicitly elevated call may execute directly.
 pub fn build_sandbox_command(
-    policy: &Policy,
+    policy: &EffectivePermissions,
     cwd: &Path,
 ) -> Result<Option<SandboxCommand>, PolicyError> {
     #[cfg(target_os = "macos")]
@@ -69,7 +94,10 @@ fn resolve_root(root: &std::path::PathBuf, cwd: &Path) -> std::path::PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, PolicyError> {
+fn macos_build(
+    policy: &EffectivePermissions,
+    cwd: &Path,
+) -> Result<Option<SandboxCommand>, PolicyError> {
     if is_app_sandboxed() {
         return Ok(None);
     }
@@ -84,7 +112,7 @@ fn macos_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, Po
     ];
     let mut dir_params: Vec<(String, String)> = Vec::new();
 
-    for (index, root) in policy.read.iter().enumerate() {
+    for (index, root) in policy.read_roots.iter().enumerate() {
         let p = resolve_root(root, &cwd);
         let key = format!("READABLE_ROOT_{index}");
         dir_params.push((key.clone(), p.display().to_string()));
@@ -92,20 +120,34 @@ fn macos_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, Po
             "; allow read-only file operations\n(allow file-read* (subpath (param \"{key}\")))\n(allow file-map-executable (subpath (param \"{key}\")))\n",
         ));
     }
-    for (index, root) in policy.write.iter().enumerate() {
+    for (index, root) in policy.write_roots.iter().enumerate() {
         let p = resolve_root(root, &cwd);
         let key = format!("WRITABLE_ROOT_{index}");
         dir_params.push((key.clone(), p.display().to_string()));
         policy_parts.push(format!("(allow file-write* (subpath (param \"{key}\")))\n",));
     }
-    for (index, root) in policy.deny.iter().enumerate() {
+    for (index, root) in policy.scratch_roots.iter().enumerate() {
+        let p = resolve_root(root, &cwd);
+        let key = format!("SCRATCH_ROOT_{index}");
+        dir_params.push((key.clone(), p.display().to_string()));
+        policy_parts.push(format!(
+            "(allow file-read* file-write* (subpath (param \"{key}\")))\n"
+        ));
+    }
+    for (index, root) in policy.denied_read_roots.iter().enumerate() {
         let p = resolve_root(root, &cwd);
         let key = format!("DENY_ROOT_{index}");
         dir_params.push((key.clone(), p.display().to_string()));
         policy_parts.push(format!("(deny file* (subpath (param \"{key}\")))\n",));
     }
+    for (index, root) in policy.denied_write_roots.iter().enumerate() {
+        let p = resolve_root(root, &cwd);
+        let key = format!("WRITE_DENY_ROOT_{index}");
+        dir_params.push((key.clone(), p.display().to_string()));
+        policy_parts.push(format!("(deny file-write* (subpath (param \"{key}\")))\n"));
+    }
 
-    if policy.allow_network {
+    if policy.network.is_enabled() {
         policy_parts.push("(allow network-outbound)\n(allow network-inbound)\n".to_string());
     }
 
@@ -124,7 +166,13 @@ fn macos_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, Po
 }
 
 #[cfg(target_os = "linux")]
-fn linux_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, PolicyError> {
+fn linux_build(
+    policy: &EffectivePermissions,
+    cwd: &Path,
+) -> Result<Option<SandboxCommand>, PolicyError> {
+    if !backend_available() {
+        return Ok(None);
+    }
     let cwd = cwd.canonicalize()?;
     let mut args = vec![
         "--die-with-parent".to_string(),
@@ -143,30 +191,56 @@ fn linux_build(policy: &Policy, cwd: &Path) -> Result<Option<SandboxCommand>, Po
         "/bin".to_string(),
         "/bin".to_string(),
     ];
-    for root in &policy.read {
+    for root in &policy.read_roots {
         let p = resolve_root(root, &cwd);
         args.push("--ro-bind".into());
         args.push(p.display().to_string());
         args.push(p.display().to_string());
     }
-    for root in &policy.write {
+    for root in &policy.write_roots {
         let p = resolve_root(root, &cwd);
         args.push("--bind".into());
         args.push(p.display().to_string());
         args.push(p.display().to_string());
     }
-    for root in &policy.deny {
+    for root in &policy.scratch_roots {
+        let p = resolve_root(root, &cwd);
+        args.push("--bind".into());
+        args.push(p.display().to_string());
+        args.push(p.display().to_string());
+    }
+    for root in &policy.denied_read_roots {
         let p = resolve_root(root, &cwd);
         if p.is_dir() {
             args.push("--tmpfs".into());
+            args.push(p.display().to_string());
+            args.push("--remount-ro".into());
             args.push(p.display().to_string());
         } else if p.exists() {
             args.push("--ro-bind".into());
             args.push("/dev/null".into());
             args.push(p.display().to_string());
+        } else {
+            args.push("--tmpfs".into());
+            args.push(p.display().to_string());
+            args.push("--remount-ro".into());
+            args.push(p.display().to_string());
         }
     }
-    if policy.allow_network {
+    for root in &policy.denied_write_roots {
+        let p = resolve_root(root, &cwd);
+        if p.exists() {
+            args.push("--ro-bind".into());
+            args.push(p.display().to_string());
+            args.push(p.display().to_string());
+        } else {
+            args.push("--tmpfs".into());
+            args.push(p.display().to_string());
+            args.push("--remount-ro".into());
+            args.push(p.display().to_string());
+        }
+    }
+    if policy.network.is_enabled() {
         // Must follow --unshare-all: the later flag wins for the network
         // namespace, joining the host namespace instead of an empty one.
         args.push("--share-net".into());

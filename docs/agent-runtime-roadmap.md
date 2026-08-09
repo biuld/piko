@@ -183,7 +183,7 @@ optional extensions and have no scheduled implementation.
 | D Context & Compaction | F-04/F-05 | transcript model, truncation, accounting, compaction |
 | E Tool System | F-06 | registry/routing, batch dispatch, approvals hook |
 | F Approvals & Safety | F-07/F-11/F-12 | approvals, guardian, elicitation decision, safety assessment |
-| G Exec & Sandbox | F-08 | process lifecycle, shell, unified processes, platform sandbox |
+| G Exec & Sandbox | F-08/F-23 | process lifecycle, full-shell unified exec, enforced containment, command authority/elevation |
 | H Persistence & Resume | F-09 | store, fork/resume, recovery, interrupted markers |
 | I Multi-Agent | F-10/F-19/F-20/F-21 | agent tree, v2 tools, role permissions, completion fragments, model tool surface |
 | J Skills/Plugins/MCP | F-13/F-14 | skills, plugins, MCP, hooks |
@@ -208,7 +208,12 @@ optional extensions and have no scheduled implementation.
 
 ## 6. Current next steps
 
-1. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
+1. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
+   redesign of F-08/F-12/F-17 command behavior: full-shell unified exec,
+   host-owned authorization, enforced sandbox-first attempts, constrained
+   additional permissions/elevation, and typed process results. Maintain the
+   cross-platform differential fixtures in V-35 as sandbox backends evolve.
+2. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
    **implemented** (docs status updated): usage `used`/`size` + silent model
    catalog bootstrap; dedicated `ServerMessage::Usage` after terminal turns
    (sole usage chrome path); sole stream transport `ServerMessage::StreamItem`
@@ -216,4 +221,4 @@ optional extensions and have no scheduled implementation.
    shared `AgentForeground::project` for TUI/client-core. Plan/System
    stream kinds deferred. Optional next: Slice 4 ACP adapter (product-gated;
    not a full ACP transport rewrite).
-2. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.
+3. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

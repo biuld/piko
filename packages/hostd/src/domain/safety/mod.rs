@@ -183,7 +183,7 @@ mod tests {
         // Non-write tools.
         assert_eq!(
             assess_write_safety(
-                "bash",
+                "exec_command",
                 &args("src/lib.rs"),
                 &roots(),
                 "/Users/biu/Projects/piko"

@@ -38,52 +38,17 @@ pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u
 /// Load sandbox policy for workspace tools (Execution bootstrap).
 pub(crate) fn load_sandbox_policy(
     sandbox: &piko_protocol::config::SandboxConfig,
-) -> piko_sandbox::policy::Policy {
-    // Permission profiles materialize regardless of `enabled`: they refine
-    // the authorization policy (file roots/deny/network) that applies even
-    // when OS-level sandboxing is off. `[sandbox] policy-path` and
-    // `.piko/sandbox.json` are OS-sandbox policy sources and only apply
-    // when the sandbox is enabled.
-    if !sandbox.enabled && sandbox.policy_profile.is_none() {
-        tracing::info!("Sandbox disabled, using permissive policy");
-        return permissive_sandbox_policy();
-    }
-    if sandbox.enabled
-        && let Some(ref policy_path) = sandbox.policy_path
-    {
-        let path = std::path::Path::new(policy_path);
-        if path.exists() {
-            match piko_sandbox::policy::Policy::load(path) {
-                Ok(p) => {
-                    tracing::info!("Loaded sandbox policy from {}", path.display());
-                    return p;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to load sandbox policy from {}: {}, using permissive",
-                        path.display(),
-                        e
-                    );
-                }
-            }
-        } else {
-            tracing::warn!(
-                "Sandbox policy path configured but file not found: {}, using permissive",
-                path.display()
-            );
-        }
-    }
+) -> piko_sandbox::policy::EffectivePermissions {
     // F-17 permission profiles: the host materializes the resolved profile's
     // file/network policy here. Empty rule lists inherit the permissive
-    // defaults per field (partial profiles do not lock down access), and the
-    // execution whitelist always comes from the permissive default list.
+    // defaults per field (partial profiles do not lock down access).
     if let Some(ref profile) = sandbox.policy_profile {
-        let permissive = permissive_sandbox_policy();
+        let permissive = default_sandbox_policy();
         tracing::info!("Materializing sandbox policy from permission profile");
-        return piko_sandbox::policy::Policy {
+        return piko_sandbox::policy::EffectivePermissions {
             version: 1,
-            read: if profile.read_roots.is_empty() {
-                permissive.read
+            read_roots: if profile.read_roots.is_empty() {
+                permissive.read_roots
             } else {
                 profile
                     .read_roots
@@ -91,8 +56,8 @@ pub(crate) fn load_sandbox_policy(
                     .map(std::path::PathBuf::from)
                     .collect()
             },
-            write: if profile.write_roots.is_empty() {
-                permissive.write
+            write_roots: if profile.write_roots.is_empty() {
+                permissive.write_roots
             } else {
                 profile
                     .write_roots
@@ -100,8 +65,17 @@ pub(crate) fn load_sandbox_policy(
                     .map(std::path::PathBuf::from)
                     .collect()
             },
-            deny: if profile.deny_paths.is_empty() {
-                permissive.deny
+            scratch_roots: if profile.scratch_roots.is_empty() {
+                permissive.scratch_roots
+            } else {
+                profile
+                    .scratch_roots
+                    .iter()
+                    .map(std::path::PathBuf::from)
+                    .collect()
+            },
+            denied_read_roots: if profile.deny_paths.is_empty() {
+                permissive.denied_read_roots
             } else {
                 profile
                     .deny_paths
@@ -109,29 +83,12 @@ pub(crate) fn load_sandbox_policy(
                     .map(std::path::PathBuf::from)
                     .collect()
             },
-            allowed_commands: permissive.allowed_commands,
-            allow_network: profile.allow_network,
+            denied_write_roots: permissive.denied_write_roots,
+            network: profile.allow_network.into(),
         };
     }
-    if sandbox.enabled {
-        let default_path = std::path::Path::new(".piko/sandbox.json");
-        if default_path.exists() {
-            match piko_sandbox::policy::Policy::load(default_path) {
-                Ok(p) => {
-                    tracing::info!("Loaded sandbox policy from default location");
-                    return p;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to load sandbox policy from default location: {}, using permissive",
-                        e
-                    );
-                }
-            }
-        }
-    }
-    tracing::info!("No sandbox policy found, using permissive defaults");
-    permissive_sandbox_policy()
+    tracing::info!("Using built-in restricted workspace policy");
+    default_sandbox_policy()
 }
 
 /// Materialize F-19 per-role sandbox policies from `role_policies`.
@@ -143,16 +100,16 @@ pub(crate) fn load_sandbox_policy(
 /// it (hostd already validates role mappings against defined profiles).
 pub(crate) fn load_role_sandbox_policies(
     sandbox: &piko_protocol::config::SandboxConfig,
-) -> HashMap<String, piko_sandbox::policy::Policy> {
-    let permissive = permissive_sandbox_policy();
+) -> HashMap<String, piko_sandbox::policy::EffectivePermissions> {
+    let permissive = default_sandbox_policy();
     sandbox
         .role_policies
         .iter()
         .map(|(role, profile)| {
-            let policy = piko_sandbox::policy::Policy {
+            let policy = piko_sandbox::policy::EffectivePermissions {
                 version: 1,
-                read: if profile.read_roots.is_empty() {
-                    permissive.read.clone()
+                read_roots: if profile.read_roots.is_empty() {
+                    permissive.read_roots.clone()
                 } else {
                     profile
                         .read_roots
@@ -160,8 +117,8 @@ pub(crate) fn load_role_sandbox_policies(
                         .map(std::path::PathBuf::from)
                         .collect()
                 },
-                write: if profile.write_roots.is_empty() {
-                    permissive.write.clone()
+                write_roots: if profile.write_roots.is_empty() {
+                    permissive.write_roots.clone()
                 } else {
                     profile
                         .write_roots
@@ -169,8 +126,17 @@ pub(crate) fn load_role_sandbox_policies(
                         .map(std::path::PathBuf::from)
                         .collect()
                 },
-                deny: if profile.deny_paths.is_empty() {
-                    permissive.deny.clone()
+                scratch_roots: if profile.scratch_roots.is_empty() {
+                    permissive.scratch_roots.clone()
+                } else {
+                    profile
+                        .scratch_roots
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect()
+                },
+                denied_read_roots: if profile.deny_paths.is_empty() {
+                    permissive.denied_read_roots.clone()
                 } else {
                     profile
                         .deny_paths
@@ -178,61 +144,38 @@ pub(crate) fn load_role_sandbox_policies(
                         .map(std::path::PathBuf::from)
                         .collect()
                 },
-                allowed_commands: permissive.allowed_commands.clone(),
-                allow_network: profile.allow_network,
+                denied_write_roots: permissive.denied_write_roots.clone(),
+                network: profile.allow_network.into(),
             };
             (role.clone(), policy)
         })
         .collect()
 }
 
-fn permissive_sandbox_policy() -> piko_sandbox::policy::Policy {
-    piko_sandbox::policy::Policy {
+fn default_sandbox_policy() -> piko_sandbox::policy::EffectivePermissions {
+    let mut scratch = vec![std::env::temp_dir()];
+    for candidate in ["/tmp", "/private/tmp"] {
+        let path = std::path::PathBuf::from(candidate);
+        if path.exists() && !scratch.contains(&path) {
+            scratch.push(path);
+        }
+    }
+    piko_sandbox::policy::EffectivePermissions {
         version: 1,
-        read: vec![std::path::PathBuf::from(".")],
-        write: vec![std::path::PathBuf::from(".")],
-        deny: vec![
+        read_roots: vec![std::path::PathBuf::from(".")],
+        write_roots: vec![std::path::PathBuf::from(".")],
+        scratch_roots: scratch,
+        // Host-owned state can contain approvals and configuration and is
+        // outside the agent's problem domain.
+        denied_read_roots: vec![std::path::PathBuf::from(".piko")],
+        // Repository and agent-control metadata are useful context but are
+        // immutable under default authority.
+        denied_write_roots: vec![
             std::path::PathBuf::from(".git"),
-            // hostd's own workspace state (approvals, project settings):
-            // tools must never be able to self-grant approvals or rewrite
-            // their own configuration through `edit`/`write`.
-            std::path::PathBuf::from(".piko"),
+            std::path::PathBuf::from(".codex"),
+            std::path::PathBuf::from(".agents"),
         ],
-        allowed_commands: vec![
-            "ls".into(),
-            "cat".into(),
-            "head".into(),
-            "tail".into(),
-            "find".into(),
-            "grep".into(),
-            "rg".into(),
-            "git".into(),
-            "echo".into(),
-            "mkdir".into(),
-            "cp".into(),
-            "mv".into(),
-            "rm".into(),
-            "wc".into(),
-            "sort".into(),
-            "uniq".into(),
-            "sed".into(),
-            "awk".into(),
-            "diff".into(),
-            "npm".into(),
-            "npx".into(),
-            "node".into(),
-            "bun".into(),
-            "cargo".into(),
-            "python3".into(),
-            "python".into(),
-            "go".into(),
-            "make".into(),
-            "rustc".into(),
-            "tsc".into(),
-            "biome".into(),
-            "prettier".into(),
-        ],
-        allow_network: false,
+        network: false.into(),
     }
 }
 
@@ -241,8 +184,8 @@ mod tests {
     use super::*;
     use piko_protocol::config::{PermissionPolicy, SandboxConfig};
 
-    fn permissive() -> piko_sandbox::policy::Policy {
-        permissive_sandbox_policy()
+    fn permissive() -> piko_sandbox::policy::EffectivePermissions {
+        default_sandbox_policy()
     }
 
     fn profile(
@@ -254,47 +197,44 @@ mod tests {
         PermissionPolicy {
             read_roots: read_roots.iter().map(|s| (*s).to_string()).collect(),
             write_roots: write_roots.iter().map(|s| (*s).to_string()).collect(),
+            scratch_roots: vec![],
             deny_paths: deny_paths.iter().map(|s| (*s).to_string()).collect(),
             allow_network,
         }
     }
 
     #[test]
-    fn disabled_sandbox_without_profile_is_permissive() {
-        let sandbox = SandboxConfig {
-            enabled: false,
-            ..Default::default()
-        };
+    fn default_sandbox_uses_builtin_policy() {
+        let sandbox = SandboxConfig::default();
         assert_eq!(load_sandbox_policy(&sandbox), permissive());
     }
 
     #[test]
-    fn profile_materializes_even_when_sandbox_disabled() {
+    fn profile_materializes_file_and_network_policy() {
         let sandbox = SandboxConfig {
-            enabled: false,
             policy_profile: Some(profile(&["/work"], &["/work"], &["/work/secret"], true)),
             ..Default::default()
         };
         let policy = load_sandbox_policy(&sandbox);
-        assert_eq!(policy.read, vec![std::path::PathBuf::from("/work")]);
-        assert_eq!(policy.write, vec![std::path::PathBuf::from("/work")]);
-        assert_eq!(policy.deny, vec![std::path::PathBuf::from("/work/secret")]);
-        assert!(policy.allow_network);
-        // The execution whitelist is inherited from the permissive default.
-        assert_eq!(policy.allowed_commands, permissive().allowed_commands);
+        assert_eq!(policy.read_roots, vec![std::path::PathBuf::from("/work")]);
+        assert_eq!(policy.write_roots, vec![std::path::PathBuf::from("/work")]);
+        assert_eq!(
+            policy.denied_read_roots,
+            vec![std::path::PathBuf::from("/work/secret")]
+        );
+        assert!(policy.network.is_enabled());
     }
 
     #[test]
     fn partial_profile_inherits_permissive_file_defaults() {
         let sandbox = SandboxConfig {
-            enabled: true,
             policy_profile: Some(profile(&[], &[], &[], false)),
             ..Default::default()
         };
         let policy = load_sandbox_policy(&sandbox);
-        assert_eq!(policy.read, permissive().read);
-        assert_eq!(policy.write, permissive().write);
-        assert_eq!(policy.deny, permissive().deny);
+        assert_eq!(policy.read_roots, permissive().read_roots);
+        assert_eq!(policy.write_roots, permissive().write_roots);
+        assert_eq!(policy.denied_read_roots, permissive().denied_read_roots);
     }
 
     #[test]
@@ -305,7 +245,6 @@ mod tests {
             profile(&["/docs"], &[], &["/docs/private"], false),
         );
         let sandbox = SandboxConfig {
-            enabled: false,
             policy_profile: Some(profile(&["/work"], &["/work"], &[], true)),
             role_policies: roles,
             ..Default::default()
@@ -313,22 +252,23 @@ mod tests {
         let policies = load_role_sandbox_policies(&sandbox);
         assert_eq!(policies.len(), 1);
         let researcher = policies.get("researcher").expect("role policy present");
-        assert_eq!(researcher.read, vec![std::path::PathBuf::from("/docs")]);
+        assert_eq!(
+            researcher.read_roots,
+            vec![std::path::PathBuf::from("/docs")]
+        );
         // Empty write roots inherit the permissive default; deny paths and
         // network come from the role profile; the whitelist is inherited.
-        assert_eq!(researcher.write, permissive().write);
+        assert_eq!(researcher.write_roots, permissive().write_roots);
         assert_eq!(
-            researcher.deny,
+            researcher.denied_read_roots,
             vec![std::path::PathBuf::from("/docs/private")]
         );
-        assert!(!researcher.allow_network);
-        assert_eq!(researcher.allowed_commands, permissive().allowed_commands);
+        assert!(!researcher.network.is_enabled());
     }
 
     #[test]
     fn roles_without_entries_keep_the_session_policy() {
         let sandbox = SandboxConfig {
-            enabled: false,
             policy_profile: Some(profile(&["/work"], &["/work"], &[], true)),
             ..Default::default()
         };
@@ -337,38 +277,8 @@ mod tests {
     }
 
     #[test]
-    fn policy_path_file_wins_over_profile() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("policy.json");
-        std::fs::write(
-            &path,
-            r#"{
-                "version": 1,
-                "read": ["/data"],
-                "write": ["/data"],
-                "allowedCommands": ["cat"],
-                "allowNetwork": false
-            }"#,
-        )
-        .unwrap();
-        let sandbox = SandboxConfig {
-            enabled: true,
-            policy_path: Some(path.display().to_string()),
-            policy_profile: Some(profile(&["/work"], &["/work"], &[], true)),
-            ..Default::default()
-        };
-        let policy = load_sandbox_policy(&sandbox);
-        assert_eq!(policy.read, vec![std::path::PathBuf::from("/data")]);
-        assert_eq!(policy.allowed_commands, vec!["cat"]);
-        assert!(!policy.allow_network);
-    }
-
-    #[test]
-    fn enabled_sandbox_with_no_policy_sources_is_permissive() {
-        let sandbox = SandboxConfig {
-            enabled: true,
-            ..Default::default()
-        };
+    fn default_sandbox_with_no_profile_is_restricted_workspace() {
+        let sandbox = SandboxConfig::default();
         assert_eq!(load_sandbox_policy(&sandbox), permissive());
     }
 }

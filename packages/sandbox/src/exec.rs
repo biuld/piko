@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::policy::Policy;
+use crate::policy::EffectivePermissions;
 
 pub mod env;
 #[cfg(unix)]
@@ -67,9 +67,12 @@ impl ShellSnapshot {
 pub struct SpawnConfig {
     pub command: String,
     pub shell: ShellSnapshot,
+    /// Allocate a PTY for interactive or terminal-sensitive programs.
+    /// Ordinary commands use stable pipe semantics.
+    pub tty: bool,
     /// When `Some`, execution is wrapped in the platform OS sandbox
     /// (seatbelt on macOS, bwrap on Linux); `None` runs directly.
-    pub policy: Option<Policy>,
+    pub policy: Option<EffectivePermissions>,
     /// Total run budget; on expiry the process group is SIGTERM'd then
     /// SIGKILL'd after `kill_grace`.
     pub timeout: Option<Duration>,
@@ -87,6 +90,7 @@ impl Default for SpawnConfig {
         Self {
             command: String::new(),
             shell: ShellSnapshot::capture(None),
+            tty: false,
             policy: None,
             timeout: None,
             cancel: None,
@@ -124,7 +128,9 @@ pub enum ExecError {
     #[error("process spawn failed: {0}")]
     Spawn(#[from] std::io::Error),
     #[error("sandbox policy error: {0}")]
-    Policy(#[from] crate::policy::PolicyError),
+    EffectivePermissions(#[from] crate::policy::PolicyError),
+    #[error("sandbox containment is unavailable: {0}")]
+    SandboxUnavailable(String),
 }
 
 /// Run one command to completion with timeout/cancellation and bounded
@@ -342,10 +348,13 @@ mod tests {
 
     /// A policy scoped to the system runtime paths plus `writable`, so
     /// commands can start but cannot touch anything outside.
-    fn os_sandbox_policy(writable: std::path::PathBuf, allow_network: bool) -> Policy {
-        Policy {
+    fn os_sandbox_policy(
+        writable: std::path::PathBuf,
+        allow_network: bool,
+    ) -> EffectivePermissions {
+        EffectivePermissions {
             version: 1,
-            read: vec![
+            read_roots: vec![
                 std::path::PathBuf::from("/bin"),
                 std::path::PathBuf::from("/usr"),
                 std::path::PathBuf::from("/System"),
@@ -358,10 +367,11 @@ mod tests {
                 // developer tools directory to bootstrap.
                 std::path::PathBuf::from("/Library/Developer"),
             ],
-            write: vec![writable],
-            deny: vec![],
-            allowed_commands: vec![],
-            allow_network,
+            write_roots: vec![writable],
+            scratch_roots: vec![],
+            denied_read_roots: vec![],
+            denied_write_roots: vec![],
+            network: allow_network.into(),
         }
     }
 

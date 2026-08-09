@@ -93,7 +93,7 @@ auto-approve-workspace-writes = true
 # Permission profiles (F-17): named bundles of file/network policy
 # (materialized into the sandbox policy) and command policy (materialized
 # into the approval gateway). `profile` selects the active profile; the
-# built-in "default" mirrors the permissive sandbox defaults and has no
+# built-in "default" mirrors the restricted workspace defaults and has no
 # command rules. Profiles merge across global/project/override settings.
 # The built-in default is the same as configuring nothing, so the section is
 # purely opt-in:
@@ -104,8 +104,10 @@ auto-approve-workspace-writes = true
 # [permissions.profiles.locked]
 # read-roots = ["."]
 # write-roots = ["."]
+# scratch-roots = ["/tmp"]
 # deny-paths = [".git", ".piko"]
 # allow-network = false
+# allow-escalation = false
 # allowed-commands = ["cargo test", "git status", "npm test"]
 # denied-commands = ["rm -rf", "curl -sSL | sh"]
 
@@ -155,12 +157,12 @@ cache-policy = "provider-default"
 # session start. All features are enabled by default. Disabling a feature
 # removes its tools from the model-visible catalog; direct calls to a
 # disabled tool fail closed with `feature_disabled`.
-# Canonical keys: workspace (read/edit/write), bash, process, environment,
+# Canonical keys: workspace (read/edit/write), exec (exec_command/write_stdin), environment,
 # context (get_context_remaining / new_context_window), todo,
 # multi-agent (spawn/followup/interrupt/list/wait), user-interaction
 # (ask_user / request_user_input), mcp (MCP-server tools).
-# Example: disable long-lived processes and MCP tools project-wide.
-# process = false
+# Example: disable command execution and MCP tools project-wide.
+# exec = false
 # mcp = false
 
 [features.managed]
@@ -169,13 +171,11 @@ cache-policy = "provider-default"
 # Example: pin MCP off so no global/override setting can re-enable it.
 # mcp = false
 
-[sandbox]
-# Enable sandboxed tool execution for filesystem and process security
-# enabled = false
-# Policy path (JSON) for sandbox rule definitions
-# policy-path = "sandbox-policy.json"
-# Shell path to use for executing terminal commands
-# shell-path = "bash"
+[execution]
+# Shell used for command programs. The default resolves from $SHELL and
+# platform fallbacks. Restricted execution is always enforced and has no
+# disable switch.
+# shell = "/bin/zsh"
 
 [observability]
 # End-to-end tracing + metrics export over OTLP HTTP (Jaeger/OTel collector).

@@ -54,7 +54,7 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         safety: merge_safety(base.safety, overrides.safety),
         permissions: merge_permissions(base.permissions, overrides.permissions),
         features: merge_features(base.features, overrides.features),
-        sandbox: merge_sandbox(base.sandbox, overrides.sandbox),
+        execution: merge_execution(base.execution, overrides.execution),
         observability: merge_observability(base.observability, overrides.observability),
         session_dir: overrides.session_dir.or(base.session_dir),
         active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
@@ -205,15 +205,13 @@ pub(crate) fn merge_features(
     }
 }
 
-pub(crate) fn merge_sandbox(
-    base: Option<SandboxSettings>,
-    overrides: Option<SandboxSettings>,
-) -> Option<SandboxSettings> {
+pub(crate) fn merge_execution(
+    base: Option<ExecutionSettings>,
+    overrides: Option<ExecutionSettings>,
+) -> Option<ExecutionSettings> {
     match (base, overrides) {
-        (Some(base), Some(overrides)) => Some(SandboxSettings {
-            enabled: overrides.enabled.or(base.enabled),
-            policy_path: overrides.policy_path.or(base.policy_path),
-            shell_path: overrides.shell_path.or(base.shell_path),
+        (Some(base), Some(overrides)) => Some(ExecutionSettings {
+            shell: overrides.shell.or(base.shell),
         }),
         (base, overrides) => overrides.or(base),
     }

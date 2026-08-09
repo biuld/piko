@@ -176,10 +176,13 @@ is exceeded.
   cancellation grace; shell selection/snapshot for reuse; fail-closed
   filesystem/network/command policy; platform sandboxes; unified exec with
   long-lived processes; environment capability discovery.
-- piko status: **implemented** — `F-08 exec-sandboxing` complete
-  (slice 1: PTY/process-group lifecycle, shell snapshots, network sandbox,
-  `D-08`/`V-08`; slice 2: unified long-lived processes + environment
-  capability selection, `D-19`/`V-19`).
+- piko status: **redesign implemented** — `F-08
+  exec-sandboxing` completed PTY/process-group lifecycle, shell snapshots,
+  platform sandbox, long-lived processes, and environment capability
+  selection (`D-08`/`D-19`, `V-08`/`V-19`). `F-23`/`D-35`/`ADR-005`
+  replaces the static restricted-shell/command-whitelist path with
+  full-shell unified exec, enforced containment, host-owned authorization,
+  constrained additional permissions/elevation, and typed process results.
 
 ### H. Session Persistence, Threads & Resume
 
@@ -298,7 +301,7 @@ scope; rejected or consumer-triggered behavior remains visible as residue.
 | D Context & Compaction | F-04, F-05 | partial (F-04/D-04/D-17 + F-05/D-05/D-18) | token-budget fragments rejected |
 | E Tool System | F-06 | partial (core + parallel batch D-06) | dynamic tools / tool search (unscheduled) |
 | F Approvals & Safety | F-07, F-11, F-12 | partial (slices landed) | F-12 elicitation deferred until consumer |
-| G Exec & Sandbox | F-08 | implemented (D-08/D-19) | — |
+| G Exec & Sandbox | F-08/F-23 | implemented (D-35/ADR-005, V-35) | platform differential maintenance |
 | H Persistence & Resume | F-09 | partial (store + clone + branch-point fork D-26) | list paging, prewarm |
 | I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14/D-14/V-14 skills baseline landed; plugins/hooks deferred |

@@ -293,7 +293,6 @@ impl AppState {
             SettingsAction::Transport(t) => {
                 self.host_settings.transport = Some((*t).to_string());
             }
-            SettingsAction::Sandbox(v) => self.host_settings.sandbox_enabled = *v,
             SettingsAction::Retry(v) => self.host_settings.retry_enabled = *v,
             SettingsAction::RetryMaxRetries(n) => self.host_settings.retry_max_retries = *n,
             SettingsAction::RetryBaseDelay(n) => self.host_settings.retry_base_delay_ms = *n,

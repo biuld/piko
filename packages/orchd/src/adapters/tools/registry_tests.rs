@@ -170,8 +170,8 @@ impl ToolProvider for CatalogProvider {
     async fn discover(&self, _context: ToolDiscoveryContext) -> Vec<ToolDef> {
         vec![
             catalog_tool("read", "native"),
-            catalog_tool("bash", "native"),
-            catalog_tool("process", "native"),
+            catalog_tool("exec_command", "native"),
+            catalog_tool("write_stdin", "native"),
             catalog_tool("environment", "native"),
             catalog_tool("get_context_remaining", "native"),
             catalog_tool("todo_write", "native"),
@@ -237,38 +237,41 @@ async fn no_feature_map_keeps_the_full_catalog() {
         .await
         .expect("catalog builds");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    assert!(names.contains(&"bash"));
-    assert!(names.contains(&"process"));
+    assert!(names.contains(&"exec_command"));
+    assert!(names.contains(&"write_stdin"));
     assert!(names.contains(&"server_defined_tool"));
-    assert!(routes.contains_key("process"));
+    assert!(routes.contains_key("write_stdin"));
     assert!(routes.contains_key("server_defined_tool"));
 }
 
 #[tokio::test]
 async fn disabled_features_remove_tools_and_routes() {
-    let registry = catalog_registry(Some(feature_map(&[("process", false), ("mcp", false)]))).await;
+    let registry = catalog_registry(Some(feature_map(&[("exec", false), ("mcp", false)]))).await;
     let (tools, routes) = registry
         .discover_tools(&discovery_context(None))
         .await
         .expect("catalog builds");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-    assert!(!names.contains(&"process"));
+    assert!(!names.contains(&"write_stdin"));
     assert!(!names.contains(&"server_defined_tool"));
-    assert!(names.contains(&"bash"));
+    assert!(!names.contains(&"exec_command"));
     assert!(names.contains(&"read"));
-    assert!(!routes.contains_key("process"));
+    assert!(!routes.contains_key("write_stdin"));
     assert!(!routes.contains_key("server_defined_tool"));
-    assert!(routes.contains_key("bash"));
+    assert!(!routes.contains_key("exec_command"));
 }
 
 #[tokio::test]
 async fn feature_gate_classifies_direct_calls() {
-    let registry = catalog_registry(Some(feature_map(&[("process", false)]))).await;
+    let registry = catalog_registry(Some(feature_map(&[("exec", false)]))).await;
     assert_eq!(
-        registry.feature_gate("process").await.as_deref(),
-        Some("process")
+        registry.feature_gate("exec_command").await.as_deref(),
+        Some("exec")
     );
-    assert_eq!(registry.feature_gate("bash").await, None);
+    assert_eq!(
+        registry.feature_gate("write_stdin").await.as_deref(),
+        Some("exec")
+    );
     assert_eq!(registry.feature_gate("unknown_tool").await, None);
     // Server-defined MCP tool names cannot be classified by name alone.
     assert_eq!(registry.feature_gate("server_defined_tool").await, None);
@@ -276,15 +279,18 @@ async fn feature_gate_classifies_direct_calls() {
 
 #[tokio::test]
 async fn active_tool_names_still_intersect_with_features() {
-    let registry = catalog_registry(Some(feature_map(&[("bash", false)]))).await;
+    let registry = catalog_registry(Some(feature_map(&[("exec", false)]))).await;
     let (tools, routes) = registry
-        .discover_tools(&discovery_context(Some(vec!["read".into(), "bash".into()])))
+        .discover_tools(&discovery_context(Some(vec![
+            "read".into(),
+            "exec_command".into(),
+        ])))
         .await
         .expect("catalog builds");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, vec!["read"]);
     assert!(routes.contains_key("read"));
-    assert!(!routes.contains_key("bash"));
+    assert!(!routes.contains_key("exec_command"));
 }
 
 #[tokio::test]

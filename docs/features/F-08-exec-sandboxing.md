@@ -1,14 +1,16 @@
 # F-08: Command execution & sandboxing
 
-> Status: implemented (slice 1: PTY/process-group lifecycle, shell snapshots,
-> network sandbox; slice 2: unified long-lived processes, environment
-> capability selection)
+> Status: superseded by F-23 (process lifecycle retained)
 > Priority: P1
 > Source evidence: codex-rs `core/src/exec.rs`, `core/src/spawn.rs`,
 > `core/src/shell.rs`, `core/src/shell_snapshot.rs`,
 > `core/src/command_canonicalization.rs`, `core/src/exec_env.rs`,
 > `core/src/environment_selection.rs`, `core/src/sandboxing/`,
 > `core/src/sandbox_tags.rs`, `core/src/unified_exec/*`, `core/src/network_proxy`
+
+> [F-23](F-23-command-execution-authority.md) redesigns the
+> command contract, authorization boundary, and result semantics while
+> retaining this feature's process lifecycle.
 
 ## Summary
 

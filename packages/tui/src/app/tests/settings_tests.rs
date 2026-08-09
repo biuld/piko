@@ -22,8 +22,8 @@ fn expanded_host_actions_emit_minimal_merge_patches() {
         json!({ "retry": { "budget-ms": 120000 } })
     );
     assert_eq!(
-        patch(SettingsAction::Feature("process", false)),
-        json!({ "features": { "process": false } })
+        patch(SettingsAction::Feature("exec", false)),
+        json!({ "features": { "exec": false } })
     );
     assert_eq!(
         patch(SettingsAction::PermissionProfile("locked".into())),

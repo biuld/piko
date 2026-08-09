@@ -44,14 +44,14 @@ fn tool_result_text(message: &Message) -> String {
 async fn no_route_error_distinguishes_feature_disabled_tools() {
     let registry = ToolRegistryImpl::new();
     registry
-        .set_features(Some(HashMap::from([("process".to_string(), false)])))
+        .set_features(Some(HashMap::from([("exec".to_string(), false)])))
         .await;
 
-    let disabled = super::no_route_error(&registry, "process").await;
+    let disabled = super::no_route_error(&registry, "exec_command").await;
     let disabled_error = disabled.error.expect("disabled tool must fail");
     assert_eq!(disabled_error.code, "feature_disabled");
     assert_eq!(disabled_error.retryable, Some(false));
-    assert!(disabled_error.message.contains("process"));
+    assert!(disabled_error.message.contains("exec"));
 
     let unknown = super::no_route_error(&registry, "bash").await;
     let unknown_error = unknown.error.expect("unknown tool must fail");

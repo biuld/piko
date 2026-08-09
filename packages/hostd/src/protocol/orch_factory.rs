@@ -93,7 +93,7 @@ pub(crate) async fn build_orch_turn_runner(
             resolved.model.max_tokens,
             &settings.mcp_servers,
             settings.mcp.as_ref(),
-            settings.sandbox.as_ref(),
+            settings.execution.as_ref(),
             settings.approvals.as_ref(),
             settings.guardian.as_ref(),
             settings.safety.as_ref(),

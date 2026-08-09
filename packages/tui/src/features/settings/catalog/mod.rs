@@ -28,7 +28,6 @@ pub enum SettingsAction {
     GuardianTimeout(u64),
     GuardianMaxDenials(u32),
     SafeWorkspaceWrites(bool),
-    Sandbox(bool),
     PermissionProfile(String),
     Feature(&'static str, bool),
     McpConnectTimeout(u64),

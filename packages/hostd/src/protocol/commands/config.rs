@@ -82,7 +82,7 @@ fn runner_settings_changed(old: &HostSettings, new: &HostSettings) -> bool {
         || new.safety != old.safety
         || new.permissions != old.permissions
         || new.features != old.features
-        || new.sandbox != old.sandbox
+        || new.execution != old.execution
         || new.mcp_servers != old.mcp_servers
         || new.mcp != old.mcp
         || new.transcript != old.transcript

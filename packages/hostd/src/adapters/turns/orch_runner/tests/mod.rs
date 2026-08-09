@@ -125,6 +125,15 @@ async fn mcp_template_runner(
 }
 
 fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApprovalRequest {
+    let tool_args = if tool_name == "exec_command" {
+        serde_json::json!({
+            "cmd": "cargo test",
+            "sandbox_permissions": "require_escalated",
+            "justification": "test elevated approval flow"
+        })
+    } else {
+        serde_json::json!({ "cmd": "cargo test" })
+    };
     ToolApprovalRequest {
         tool_entity_id: id.into(),
         call_id: format!("call-{id}"),
@@ -133,7 +142,7 @@ fn approval_request(session_id: &str, tool_name: &str, id: &str) -> ToolApproval
         agent_role: None,
         provider_id: None,
         tool_name: tool_name.into(),
-        tool_args: serde_json::json!({ "cmd": "cargo test" }),
+        tool_args,
         host_context: Some(HostSessionContext::new(session_id)),
         writable_roots: None,
     }

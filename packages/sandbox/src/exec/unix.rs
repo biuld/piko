@@ -39,24 +39,15 @@ pub(super) async fn run(config: SpawnConfig) -> Result<CommandOutcome, ExecError
 
     let cwd = config.shell.cwd.clone();
     let wrapper = match &config.policy {
-        Some(policy) => build_sandbox_command(policy, &cwd)?,
+        Some(policy) => Some(build_sandbox_command(policy, &cwd)?.ok_or_else(|| {
+            ExecError::SandboxUnavailable(
+                "the platform sandbox cannot be nested in this environment".into(),
+            )
+        })?),
         None => None,
     };
 
-    let outcome = run_once(&config, spawn_pty(&config, &cwd, wrapper.as_ref())?).await?;
-
-    // Nested-sandbox SIGABRT not covered by the APP_SANDBOX_CONTAINER_ID
-    // heuristic: retry once without the OS wrapper (mirrors runner.rs).
-    #[cfg(target_os = "macos")]
-    if wrapper.is_some() && outcome.status.signal == Some(6) && outcome.output.is_empty() {
-        eprintln!(
-            "piko-sandbox: sandbox-exec SIGABRT detected (likely nested sandbox). \
-             Falling back to direct execution."
-        );
-        return run_once(&config, spawn_pty(&config, &cwd, None)?).await;
-    }
-
-    Ok(outcome)
+    run_once(&config, spawn_pty(&config, &cwd, wrapper.as_ref())?).await
 }
 
 /// A spawned PTY process: the child plus its process-group id and master fd.
@@ -64,6 +55,68 @@ pub(super) struct SpawnedPty {
     pub child: tokio::process::Child,
     pub pid: u32,
     pub master: tokio::io::unix::AsyncFd<std::fs::File>,
+}
+
+/// A process connected through ordinary stdin/stdout/stderr pipes.
+pub(super) struct SpawnedPipe {
+    pub child: tokio::process::Child,
+    pub pid: u32,
+    pub stdin: tokio::process::ChildStdin,
+    pub stdout: tokio::process::ChildStdout,
+    pub stderr: tokio::process::ChildStderr,
+}
+
+pub(super) fn spawn_pipe(
+    config: &SpawnConfig,
+    cwd: &Path,
+    wrapper: Option<&SandboxCommand>,
+) -> Result<SpawnedPipe, ExecError> {
+    let mut cmd = if let Some(wrapper) = wrapper {
+        let mut cmd = Command::new(&wrapper.program);
+        cmd.args(&wrapper.args).arg(&config.shell.shell_path);
+        cmd
+    } else {
+        Command::new(&config.shell.shell_path)
+    };
+    cmd.arg("-c")
+        .arg(&config.command)
+        .current_dir(cwd)
+        .env_clear()
+        .envs(config.shell.env.iter().cloned())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn()?;
+    let pid = child
+        .id()
+        .ok_or_else(|| std::io::Error::other("spawned process has no pid"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("spawned process has no stdin"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("spawned process has no stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("spawned process has no stderr"))?;
+    Ok(SpawnedPipe {
+        child,
+        pid,
+        stdin,
+        stdout,
+        stderr,
+    })
 }
 
 /// Allocate a PTY, spawn `<wrapper args> -- <shell> -c <command>` (or

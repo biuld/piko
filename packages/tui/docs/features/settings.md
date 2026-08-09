@@ -41,7 +41,7 @@ Today the menu fails basic “settings list” jobs:
    “Disable OTLP export” compete with no in-force highlight on the chosen side.
 3. **Incomplete Active markers.** Only thinking level, theme, and a few TUI
    presentation flags participate in “selected vs active.” Host-backed keys
-   (observability, sandbox, retry, compaction, endpoints) mostly use `_ => false`.
+   (observability, retry, compaction, endpoints) mostly use `_ => false`.
 4. **Latency-to-effect is invisible.** OTel exporters install at hostd process
    start. A user can “Enable” and believe export is live after toast success
    while the running process still uses the old stack.
@@ -375,7 +375,7 @@ Each catalog entry is tagged in product language with one class:
 | **Restart hostd** | Value is durably stored but runtime exporters/log stack take effect on next hostd process | Always disclose in group detail + apply toast |
 
 Hostd rebuilds the orchd runner when runner-frozen execution policy changes
-(retry, approvals, guardian, safety, permissions, features, sandbox, MCP, or
+(retry, approvals, guardian, safety, permissions, features, execution, MCP, or
 transcript policy). The new value therefore applies to subsequent runs; an
 already executing run keeps its frozen configuration. Transport, session
 storage root, and observability exporter construction remain process-start
@@ -439,7 +439,6 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Thinking Blocks | `tui.hide_thinking_block` | Presentation |
 | Automatic Compaction enable | `[compaction].enabled` | Live |
 | API Retries | `[retry].enabled` | Live |
-| Tool Sandbox | `[sandbox].enabled` | Live |
 | Observability (OTLP export) | `[observability].enabled` | **Restart hostd** |
 | Active Tools Mode | enable-all vs empty list via active-tool-names | Live |
 | Guardian review | `[guardian].enabled` | Live on subsequent runs |
@@ -455,7 +454,7 @@ blocks only when clearer).
 
 | Namespace | Keys used by Settings |
 |-----------|------------------------|
-| `ConfigGet { namespace: "host" }` | compaction, retry, sandbox, observability, default-thinking-level, transport, active-tool-names, … as listed above |
+| `ConfigGet { namespace: "host" }` | compaction, retry, execution, observability, default-thinking-level, transport, active-tool-names, … as listed above |
 | `ConfigGet { namespace: "tui" }` | theme, hide_thinking_block (existing TuiConfig) |
 | Live model events | may refresh thinking/model chrome; must not diverge from Settings thinking Active when both are shown |
 
@@ -516,7 +515,7 @@ export **Off**, otel endpoint `http://127.0.0.1:4318`).
 The catalog edits approval timeouts, guardian enable/limits, MCP connect
 timeout, permission-profile selection, and unmanaged feature gates. It does
 not edit MCP server definitions/templates, permission-profile definitions and
-role maps, managed feature pins, guardian model/provider, sandbox policy/path,
+role maps, managed feature pins, guardian model/provider, execution shell,
 session directory, arbitrary active-tool lists, agent specs, or log filters.
 These are open-ended collections or text/path values and remain file-managed
 until `SettingTextField` / `SettingMultiToggle` has its own accepted slice.
@@ -542,7 +541,7 @@ until `SettingTextField` / `SettingMultiToggle` has its own accepted slice.
 - Panel openers: existing Settings surface / slash `/settings` / thinking
   sub-entry as today.
 - No new keybinding required by this PRD.
-- Host keys: existing `[observability]`, `[sandbox]`, `[retry]`,
+- Host keys: existing `[observability]`, `[execution]`, `[retry]`,
   `[compaction]`, `default-thinking-level`, etc.
 - TUI keys: existing `[tui]` blob fields used above.
 

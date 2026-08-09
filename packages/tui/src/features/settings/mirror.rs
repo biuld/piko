@@ -32,7 +32,6 @@ pub struct HostRuntimeSettings {
     pub permission_profiles: Vec<String>,
     pub features: HashMap<String, bool>,
     pub managed_features: HashMap<String, bool>,
-    pub sandbox_enabled: bool,
     pub mcp_connect_timeout_ms: u64,
     pub prompt_cache_policy: String,
     pub observability_enabled: bool,
@@ -66,7 +65,6 @@ impl Default for HostRuntimeSettings {
             permission_profiles: vec!["default".to_string()],
             features: default_features(),
             managed_features: HashMap::new(),
-            sandbox_enabled: false,
             mcp_connect_timeout_ms: 10_000,
             prompt_cache_policy: "provider-default".to_string(),
             observability_enabled: false,
@@ -199,11 +197,6 @@ impl HostRuntimeSettings {
                 }
             }
         }
-        if let Some(s) = value.get("sandbox")
-            && let Some(enabled) = s.get("enabled").and_then(|v| v.as_bool())
-        {
-            self.sandbox_enabled = enabled;
-        }
         if let Some(o) = value.get("observability") {
             if let Some(enabled) = o.get("enabled").and_then(|v| v.as_bool()) {
                 self.observability_enabled = enabled;
@@ -242,8 +235,7 @@ impl HostRuntimeSettings {
 
 const FEATURE_KEYS: &[&str] = &[
     "workspace",
-    "bash",
-    "process",
+    "exec",
     "environment",
     "context",
     "todo",
@@ -353,8 +345,8 @@ mod tests {
                 "profiles": { "locked": {} }
             },
             "features": {
-                "process": true,
-                "managed": { "process": false }
+                "exec": true,
+                "managed": { "exec": false }
             },
             "mcp": { "connect-timeout-ms": 30000 },
             "prompt": { "cache-policy": "ephemeral" }
@@ -368,8 +360,8 @@ mod tests {
         assert!(mirror.guardian_enabled);
         assert_eq!(mirror.permission_profile, "locked");
         assert!(mirror.permission_profiles.contains(&"locked".to_string()));
-        assert_eq!(mirror.features.get("process"), Some(&false));
-        assert_eq!(mirror.managed_features.get("process"), Some(&false));
+        assert_eq!(mirror.features.get("exec"), Some(&false));
+        assert_eq!(mirror.managed_features.get("exec"), Some(&false));
         assert_eq!(mirror.mcp_connect_timeout_ms, 30000);
         assert_eq!(mirror.prompt_cache_policy, "ephemeral");
     }

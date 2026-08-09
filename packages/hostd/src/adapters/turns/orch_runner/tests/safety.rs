@@ -91,7 +91,7 @@ async fn safety_opt_out_keeps_user_flow_for_in_roots_write() {
 #[tokio::test]
 async fn safety_never_assesses_non_write_tools() {
     let runner = safety_runner(None).await;
-    let mut request = approval_request("s1", "bash", "a1");
+    let mut request = approval_request("s1", "exec_command", "a1");
     request.writable_roots = Some(vec!["/workspace".into()]);
     let decision = user_flow_resolves(&runner, request, "a1").await;
     assert_eq!(decision, ToolApprovalDecision::Accept);

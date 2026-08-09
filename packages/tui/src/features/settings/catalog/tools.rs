@@ -3,8 +3,7 @@ use crate::features::settings::mirror::{feature_summary, guardian_summary};
 
 const FEATURES: &[(&str, &str)] = &[
     ("workspace", "Workspace read/edit/write tools"),
-    ("bash", "One-shot shell commands"),
-    ("process", "Long-lived process controls"),
+    ("exec", "Command execution and live sessions"),
     ("environment", "Environment discovery"),
     ("context", "Context budget tools"),
     ("todo", "Task-list planning"),
@@ -56,20 +55,6 @@ pub(super) fn tool_rows(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>>
     let host = &snap.host;
     let tools_all = host.all_tools && !snap.no_tools;
     vec![
-        section_choice(
-            "Sandbox",
-            on_off(host.sandbox_enabled).into(),
-            None,
-            Some(GROUP_TOOLS),
-            "Sandbox",
-            binary_options(
-                host.sandbox_enabled,
-                "Enforce filesystem and process policy",
-                "Disable sandbox enforcement",
-                SettingsAction::Sandbox(true),
-                SettingsAction::Sandbox(false),
-            ),
-        ),
         section_choice(
             "Active Tools",
             if tools_all {

@@ -178,7 +178,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         writable_roots,
                     };
 
-                    let decision = if let Some(token) = cancel {
+                    let decision = if let Some(ref token) = cancel {
                         tokio::select! {
                             d = gw.request_tool_approval(approval_request) => d,
                             _ = token.cancelled() => ToolApprovalDecision::Decline,
@@ -274,10 +274,114 @@ impl ToolRegistry for ToolRegistryImpl {
             context_remaining: context.context_remaining,
         };
 
-        let exec_result = provider.execute(provider_call, exec_context).await;
+        let exec_result = provider
+            .execute(provider_call.clone(), exec_context.clone())
+            .await;
+
+        // A restricted command attempt may request exactly one broader
+        // retry. The retry is a new authority decision owned by hostd; the
+        // provider never silently weakens containment and an already
+        // elevated call can never recurse here.
+        if call_name == "exec_command"
+            && call_args
+                .get("sandbox_permissions")
+                .and_then(|value| value.as_str())
+                .unwrap_or("use_default")
+                != "require_escalated"
+            && exec_result
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code == "sandbox_denied")
+        {
+            let mut retry_args = call_args.clone();
+            retry_args["sandbox_permissions"] = serde_json::json!("require_escalated");
+            retry_args["justification"] = serde_json::json!(
+                "The enforced sandbox denied the initial command attempt; retry once with explicit elevation"
+            );
+            let gateway = self.approval_gateway.read().await;
+            let Some(gateway) = gateway.as_ref() else {
+                return ToolExecutionRecord {
+                    result: exec_result,
+                };
+            };
+            let request = ToolApprovalRequest {
+                tool_entity_id: tool_entity_id.clone(),
+                call_id: call_id.clone(),
+                agent_id: context.agent_id.clone(),
+                agent_instance_id: context.agent_instance_id.clone(),
+                agent_role: context.agent_role.clone(),
+                provider_id: Some(provider.id().to_string()),
+                tool_name: call_name.clone(),
+                tool_args: retry_args.clone(),
+                host_context: context.host_context.clone(),
+                writable_roots: provider.writable_roots_for(context).map(|roots| {
+                    roots
+                        .iter()
+                        .map(|root| root.display().to_string())
+                        .collect()
+                }),
+            };
+            let decision = if let Some(ref token) = cancel {
+                tokio::select! {
+                    decision = gateway.request_tool_approval(request) => decision,
+                    _ = token.cancelled() => ToolApprovalDecision::Decline,
+                }
+            } else {
+                gateway.request_tool_approval(request).await
+            };
+            if !piko_orchd_api::is_approval_accepted(&decision) {
+                let (code, message) = approval_failure(&decision);
+                return ToolExecutionRecord {
+                    result: ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(ToolExecError {
+                            code: code.into(),
+                            message,
+                            retryable: Some(false),
+                        }),
+                    },
+                };
+            }
+            let retry_call = ToolCall {
+                id: call_id,
+                name: provider_call.name,
+                arguments: retry_args,
+                partial_json: None,
+            };
+            return ToolExecutionRecord {
+                result: provider.execute(retry_call, exec_context).await,
+            };
+        }
 
         ToolExecutionRecord {
             result: exec_result,
         }
+    }
+}
+
+fn approval_failure(decision: &ToolApprovalDecision) -> (&'static str, String) {
+    match decision {
+        ToolApprovalDecision::Expired => (
+            "approval_expired",
+            "Approval request expired before a decision arrived".into(),
+        ),
+        ToolApprovalDecision::GuardianDenied { reason } => (
+            "guardian_denied",
+            format!("Guardian denied approval: {reason}"),
+        ),
+        ToolApprovalDecision::GuardianUnavailable => (
+            "guardian_unavailable",
+            "Guardian review failed; failing closed".into(),
+        ),
+        ToolApprovalDecision::SafetyRejected { reason } => (
+            "safety_rejected",
+            format!("Write rejected by safety assessment: {reason}"),
+        ),
+        ToolApprovalDecision::PermissionDenied { reason } => (
+            "permission_denied",
+            format!("Command denied by permission policy: {reason}"),
+        ),
+        _ => ("declined", "User declined approval".into()),
     }
 }

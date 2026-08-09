@@ -1,8 +1,8 @@
 use piko_llmd::gateway::LlmGateway;
 
 use crate::domain::config::{
-    ApprovalSettings, FeaturesSettings, GuardianSettings, McpServerConfig, SafetySettings,
-    SandboxSettings, TranscriptSettings,
+    ApprovalSettings, ExecutionSettings, FeaturesSettings, GuardianSettings, McpServerConfig,
+    SafetySettings, TranscriptSettings,
 };
 use crate::domain::permissions::ResolvedPermissions;
 
@@ -50,7 +50,7 @@ impl OrchAgentRunRunner {
         max_output_tokens: u64,
         mcp_configs: &[McpServerConfig],
         mcp_settings: Option<&crate::domain::config::McpSettings>,
-        sandbox_settings: Option<&SandboxSettings>,
+        execution_settings: Option<&ExecutionSettings>,
         approval_settings: Option<&ApprovalSettings>,
         guardian_settings: Option<&GuardianSettings>,
         safety_settings: Option<&SafetySettings>,
@@ -80,11 +80,9 @@ impl OrchAgentRunRunner {
             ..Default::default()
         };
 
-        let mut sandbox = sandbox_settings
+        let mut sandbox = execution_settings
             .map(|s| SandboxConfig {
-                enabled: s.enabled.unwrap_or(false),
-                policy_path: s.policy_path.clone(),
-                shell_path: s.shell_path.clone(),
+                shell_path: s.shell.clone(),
                 policy_profile: None,
                 role_policies: std::collections::HashMap::new(),
             })
@@ -103,6 +101,7 @@ impl OrchAgentRunRunner {
             sandbox.policy_profile = Some(piko_protocol::config::PermissionPolicy {
                 read_roots: profile.read_roots.clone(),
                 write_roots: profile.write_roots.clone(),
+                scratch_roots: profile.scratch_roots.clone(),
                 deny_paths: profile.deny_paths.clone(),
                 allow_network: profile.allow_network,
             });
@@ -118,6 +117,7 @@ impl OrchAgentRunRunner {
                     piko_protocol::config::PermissionPolicy {
                         read_roots: policy.read_roots.clone(),
                         write_roots: policy.write_roots.clone(),
+                        scratch_roots: policy.scratch_roots.clone(),
                         deny_paths: policy.deny_paths.clone(),
                         allow_network: policy.allow_network,
                     },

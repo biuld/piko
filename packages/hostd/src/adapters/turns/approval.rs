@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -12,147 +12,29 @@ pub enum ApprovalScope {
     Permanent,
 }
 
-static BASH_WRAPPERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    let mut s = HashSet::new();
-    s.insert("sudo");
-    s.insert("env");
-    s.insert("nice");
-    s.insert("nohup");
-    s.insert("time");
-    s.insert("flock");
-    s.insert("chroot");
-    s.insert("su");
-    s.insert("doas");
-    s
-});
-
-static BASH_PROGRAM_LEVEL: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    let mut s = HashSet::new();
-    let programs = vec![
-        "git", "ls", "cat", "find", "grep", "rg", "fd", "curl", "wget", "ssh", "scp", "docker",
-        "kubectl", "python", "python3", "node", "tsc", "biome", "eslint", "prettier", "make",
-        "cmake", "echo", "printf", "date", "which", "whoami", "uname", "head", "tail", "wc",
-        "sort", "uniq", "cut", "tr", "awk", "sed", "xargs", "tee", "diff", "patch", "zip", "unzip",
-        "tar", "ps", "df", "du", "ping", "nslookup", "dig",
-    ];
-    for p in programs {
-        s.insert(p);
-    }
-    s
-});
-
-static BASH_PACKAGE_MANAGERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    let mut s = HashSet::new();
-    let managers = vec![
-        "npm", "yarn", "pnpm", "bun", "pip", "pip3", "poetry", "brew", "apt", "apt-get", "dnf",
-        "pacman", "snap", "gem", "cargo", "go", "composer", "rustup", "dotnet",
-    ];
-    for m in managers {
-        s.insert(m);
-    }
-    s
-});
-
-struct ParsedBashCommand {
-    program: String,
-    subcommand: Option<String>,
-}
-
-fn parse_bash_command(command: &str) -> Option<ParsedBashCommand> {
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
-    let mut i = 0;
-
-    // Skip wrapper prefixes and their flags/assignments.
-    while i < tokens.len() && BASH_WRAPPERS.contains(tokens[i]) {
-        i += 1; // skip wrapper
-        while i < tokens.len() {
-            let tok = tokens[i];
-            if tok.starts_with('-') && tok.len() > 1 {
-                if tok.contains('=') {
-                    i += 1;
-                    continue;
-                }
-                i += 1; // skip flag
-                if i < tokens.len() && !tokens[i].starts_with('-') && !tokens[i].contains('=') {
-                    i += 1; // skip value
-                }
-                continue;
-            }
-            if tok.contains('=') {
-                i += 1;
-                continue;
-            }
-            break;
-        }
-    }
-
-    // Skip leading flags/assignments before the real program
-    while i < tokens.len() && (tokens[i].starts_with('-') || tokens[i].contains('=')) {
-        i += 1;
-    }
-
-    if i >= tokens.len() {
-        return None;
-    }
-
-    let program = tokens[i].to_string();
-
-    // Package manager -> find subcommand
-    if BASH_PACKAGE_MANAGERS.contains(program.as_str()) {
-        let mut j = i + 1;
-        while j < tokens.len() && (tokens[j].starts_with('-') || tokens[j].contains('=')) {
-            j += 1;
-        }
-        if j < tokens.len() {
-            return Some(ParsedBashCommand {
-                program,
-                subcommand: Some(tokens[j].to_string()),
-            });
-        }
-        return Some(ParsedBashCommand {
-            program,
-            subcommand: None,
-        });
-    }
-
-    Some(ParsedBashCommand {
-        program,
-        subcommand: None,
-    })
-}
-
-pub fn compute_bash_fingerprint(args: &serde_json::Value) -> String {
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    if command.trim().is_empty() {
-        return "bash".to_string();
-    }
-
-    let parsed = match parse_bash_command(command) {
-        Some(p) => p,
-        None => return "bash".to_string(),
-    };
-
-    let program = parsed.program.as_str();
-
-    // Known program -> program-level fingerprint
-    if BASH_PROGRAM_LEVEL.contains(program) {
-        return format!("bash:{}", program);
-    }
-
-    // Package manager -> program:subcommand fingerprint
-    if BASH_PACKAGE_MANAGERS.contains(program) {
-        if let Some(ref sub) = parsed.subcommand {
-            return format!("bash:{}:{}", program, sub);
-        }
-        return format!("bash:{}", program);
-    }
-
-    // Unknown -> full command string (fallback)
-    format!("bash:{}", command)
+pub fn compute_exec_fingerprint(args: &serde_json::Value) -> String {
+    let command = args.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+    let authority = args
+        .get("sandbox_permissions")
+        .and_then(|v| v.as_str())
+        .unwrap_or("use_default");
+    let workdir = args.get("workdir").and_then(|v| v.as_str()).unwrap_or(".");
+    let reusable_prefix = args.get("prefix_rule").cloned();
+    let scope = reusable_prefix.unwrap_or_else(|| serde_json::json!([command]));
+    let additional = args
+        .get("additional_permissions")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let identity = serde_json::json!({
+        "authority": authority,
+        "workdir": workdir,
+        "scope": scope,
+        "additional": additional,
+    });
+    format!(
+        "exec_command:{}",
+        serde_json::to_string(&identity).unwrap_or_default()
+    )
 }
 
 /// Path-level fingerprint for file tools. A grant covers exactly the target
@@ -165,26 +47,9 @@ pub fn compute_path_fingerprint(tool_name: &str, args: &serde_json::Value) -> St
 
 pub fn compute_fingerprint(tool_name: &str, tool_args: &serde_json::Value) -> String {
     match tool_name {
-        "bash" => compute_bash_fingerprint(tool_args),
-        "process" => compute_process_fingerprint(tool_args),
+        "exec_command" => compute_exec_fingerprint(tool_args),
         "edit" | "write" | "read" => compute_path_fingerprint(tool_name, tool_args),
         _ => tool_name.to_string(),
-    }
-}
-
-/// `process start` runs a shell command, so it fingerprints like `bash`
-/// (approvals granted for a `bash` command also cover the identical
-/// long-lived start). Other actions fingerprint per action so an approval
-/// for one action never leaks to another.
-pub fn compute_process_fingerprint(tool_args: &serde_json::Value) -> String {
-    let action = tool_args
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if action == "start" {
-        compute_bash_fingerprint(tool_args)
-    } else {
-        format!("process:{action}")
     }
 }
 
@@ -318,63 +183,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_bash_command() {
-        // simple command
-        let p = parse_bash_command("git status").unwrap();
-        assert_eq!(p.program, "git");
-        assert_eq!(p.subcommand, None);
+    fn exec_fingerprint_is_exact_unless_a_prefix_is_explicit() {
+        let first = serde_json::json!({ "cmd": "git status" });
+        let second = serde_json::json!({ "cmd": "git diff" });
+        assert_ne!(
+            compute_exec_fingerprint(&first),
+            compute_exec_fingerprint(&second)
+        );
 
-        // wrapper command
-        let p = parse_bash_command("sudo git status").unwrap();
-        assert_eq!(p.program, "git");
-        assert_eq!(p.subcommand, None);
-
-        // wrapper command with flags/assignments
-        let p = parse_bash_command("sudo -u root env VAR=1 git status").unwrap();
-        assert_eq!(p.program, "git");
-        assert_eq!(p.subcommand, None);
-
-        // package manager command
-        let p = parse_bash_command("npm install express").unwrap();
-        assert_eq!(p.program, "npm");
-        assert_eq!(p.subcommand.as_deref(), Some("install"));
-
-        // package manager command with wrapper and flags
-        let p = parse_bash_command("sudo yarn --silent add react").unwrap();
-        assert_eq!(p.program, "yarn");
-        assert_eq!(p.subcommand.as_deref(), Some("add"));
-    }
-
-    #[test]
-    fn test_compute_bash_fingerprint() {
-        let args = serde_json::json!({ "command": "git status" });
-        assert_eq!(compute_bash_fingerprint(&args), "bash:git");
-
-        let args = serde_json::json!({ "command": "sudo npm install react" });
-        assert_eq!(compute_bash_fingerprint(&args), "bash:npm:install");
-
-        let args = serde_json::json!({ "command": "custom-script.sh -f" });
-        assert_eq!(compute_bash_fingerprint(&args), "bash:custom-script.sh -f");
-    }
-
-    #[test]
-    fn test_compute_process_fingerprint() {
-        // `process start` reuses the bash fingerprint of its inner command.
-        let start = serde_json::json!({
-            "action": "start",
-            "command": "sudo npm install react",
+        let prefixed_first = serde_json::json!({
+            "cmd": "git status --short",
+            "sandbox_permissions": "require_escalated",
+            "prefix_rule": ["git", "status"]
         });
-        assert_eq!(compute_process_fingerprint(&start), "bash:npm:install");
+        let prefixed_second = serde_json::json!({
+            "cmd": "git status --porcelain",
+            "sandbox_permissions": "require_escalated",
+            "prefix_rule": ["git", "status"]
+        });
+        assert_eq!(
+            compute_exec_fingerprint(&prefixed_first),
+            compute_exec_fingerprint(&prefixed_second)
+        );
 
-        // Non-start actions fingerprint per action.
-        let write = serde_json::json!({ "action": "write", "processId": "proc-1" });
-        assert_eq!(compute_process_fingerprint(&write), "process:write");
-        let stop = serde_json::json!({ "action": "stop", "processId": "proc-1" });
-        assert_eq!(compute_process_fingerprint(&stop), "process:stop");
-
-        // Routing through the generic entry point.
-        assert_eq!(compute_fingerprint("process", &start), "bash:npm:install");
-        assert_eq!(compute_fingerprint("process", &write), "process:write");
+        let other_workdir = serde_json::json!({ "cmd": "git status", "workdir": "src" });
+        assert_ne!(
+            compute_exec_fingerprint(&first),
+            compute_exec_fingerprint(&other_workdir)
+        );
     }
 
     #[test]
@@ -398,33 +234,33 @@ mod tests {
         let cwd = temp.path().to_str().unwrap();
         let store = ApprovalStore::new(cwd);
 
-        let args = serde_json::json!({ "command": "git status" });
+        let args = serde_json::json!({ "cmd": "git status" });
 
         // Initially not approved
-        assert_eq!(store.is_approved("bash", &args), None);
+        assert_eq!(store.is_approved("exec_command", &args), None);
 
         // Grant session
-        store.grant("bash", &args, ApprovalScope::Session);
+        store.grant("exec_command", &args, ApprovalScope::Session);
         assert_eq!(
-            store.is_approved("bash", &args),
+            store.is_approved("exec_command", &args),
             Some(ApprovalScope::Session)
         );
 
         // Create new store in same cwd (session is cleared, but workspace/permanent remains)
         let store2 = ApprovalStore::new(cwd);
-        assert_eq!(store2.is_approved("bash", &args), None);
+        assert_eq!(store2.is_approved("exec_command", &args), None);
 
         // Grant workspace
-        store2.grant("bash", &args, ApprovalScope::Workspace);
+        store2.grant("exec_command", &args, ApprovalScope::Workspace);
         assert_eq!(
-            store2.is_approved("bash", &args),
+            store2.is_approved("exec_command", &args),
             Some(ApprovalScope::Workspace)
         );
 
         // New store in same cwd should load workspace approval
         let store3 = ApprovalStore::new(cwd);
         assert_eq!(
-            store3.is_approved("bash", &args),
+            store3.is_approved("exec_command", &args),
             Some(ApprovalScope::Workspace)
         );
     }

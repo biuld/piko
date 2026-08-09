@@ -9,8 +9,8 @@ pub mod safety;
 pub mod sessions;
 
 pub use config::{
-    ApprovalSettings, GuardianSettings, HostSettings, ModelRegistry, ObservabilitySettings,
-    PermissionProfileSettings, PermissionsSettings, SafetySettings, SandboxSettings,
+    ApprovalSettings, ExecutionSettings, GuardianSettings, HostSettings, ModelRegistry,
+    ObservabilitySettings, PermissionProfileSettings, PermissionsSettings, SafetySettings,
     SettingsManager,
 };
 pub use features::ResolvedFeatures;

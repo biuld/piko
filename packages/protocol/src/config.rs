@@ -82,18 +82,11 @@ fn default_max_output_tokens() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxConfig {
-    /// Whether the sandbox is enabled. When false, use permissive defaults.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Path to the sandbox policy file (JSON). Relative to cwd.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_path: Option<String>,
     /// Path to the shell binary for command execution (default: "bash").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_path: Option<String>,
     /// Materialized permission-profile file/network policy (F-17). Applied
-    /// when no `policy_path` file is present; the execution whitelist is
-    /// inherited by the orchestrator.
+    /// for the current session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_profile: Option<PermissionPolicy>,
     /// F-19: materialized per-role file/network policies keyed by agent
@@ -114,6 +107,8 @@ pub struct PermissionPolicy {
     pub read_roots: Vec<String>,
     #[serde(default)]
     pub write_roots: Vec<String>,
+    #[serde(default)]
+    pub scratch_roots: Vec<String>,
     #[serde(default)]
     pub deny_paths: Vec<String>,
     #[serde(default)]

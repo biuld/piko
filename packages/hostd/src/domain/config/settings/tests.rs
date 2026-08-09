@@ -89,8 +89,10 @@ fn permissions_settings_merge_field_by_field() {
                     PermissionProfileSettings {
                         read_roots: vec![".".into()],
                         write_roots: vec![".".into()],
+                        scratch_roots: vec![],
                         deny_paths: vec![".git".into(), ".piko".into()],
                         allow_network: false,
+                        allow_escalation: None,
                         allowed_commands: vec!["cargo test".into()],
                         denied_commands: vec!["rm -rf".into()],
                     },
@@ -174,7 +176,7 @@ fn features_defaults_are_documented_in_template() {
 fn features_settings_merge_per_key() {
     let base = HostSettings {
         features: Some(FeaturesSettings {
-            enabled: HashMap::from([("process".into(), false), ("bash".into(), true)]),
+            enabled: HashMap::from([("exec".into(), false), ("workspace".into(), true)]),
             managed: HashMap::from([("mcp".into(), false)]),
         }),
         ..HostSettings::default()
@@ -182,21 +184,21 @@ fn features_settings_merge_per_key() {
     let overrides = HostSettings {
         features: Some(FeaturesSettings {
             enabled: HashMap::from([
-                // Overrides process per key and adds a new key.
-                ("process".into(), true),
+                // Overrides exec per key and adds a new key.
+                ("exec".into(), true),
                 ("todo".into(), false),
             ]),
-            managed: HashMap::from([("process".into(), false)]),
+            managed: HashMap::from([("exec".into(), false)]),
         }),
         ..HostSettings::default()
     };
     let merged = merge(base, overrides);
     let features = merged.features.expect("features section present");
-    assert_eq!(features.enabled.get("process"), Some(&true));
-    assert_eq!(features.enabled.get("bash"), Some(&true));
+    assert_eq!(features.enabled.get("exec"), Some(&true));
+    assert_eq!(features.enabled.get("workspace"), Some(&true));
     assert_eq!(features.enabled.get("todo"), Some(&false));
     assert_eq!(features.managed.get("mcp"), Some(&false));
-    assert_eq!(features.managed.get("process"), Some(&false));
+    assert_eq!(features.managed.get("exec"), Some(&false));
     // Keys from the base that the override did not touch survive.
     assert_eq!(features.enabled.len(), 3);
     assert_eq!(features.managed.len(), 2);
@@ -207,7 +209,7 @@ fn feature_settings_use_documented_flat_toml_shape() {
     let settings: HostSettings = toml::from_str(
         r#"
 [features]
-process = false
+exec = false
 mcp = true
 
 [features.managed]
@@ -216,7 +218,7 @@ mcp = false
     )
     .unwrap();
     let features = settings.features.expect("features section present");
-    assert_eq!(features.enabled.get("process"), Some(&false));
+    assert_eq!(features.enabled.get("exec"), Some(&false));
     assert_eq!(features.enabled.get("mcp"), Some(&true));
     assert_eq!(features.managed.get("mcp"), Some(&false));
 }
@@ -226,18 +228,18 @@ fn feature_settings_accept_legacy_enabled_table() {
     let settings: HostSettings = toml::from_str(
         r#"
 [features.enabled]
-process = false
-bash = true
+exec = false
+workspace = true
 
 [features.managed]
-process = true
+exec = true
 "#,
     )
     .unwrap();
     let features = settings.features.expect("features section present");
-    assert_eq!(features.enabled.get("process"), Some(&false));
-    assert_eq!(features.enabled.get("bash"), Some(&true));
-    assert_eq!(features.managed.get("process"), Some(&true));
+    assert_eq!(features.enabled.get("exec"), Some(&false));
+    assert_eq!(features.enabled.get("workspace"), Some(&true));
+    assert_eq!(features.managed.get("exec"), Some(&true));
 }
 
 #[test]

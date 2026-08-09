@@ -111,15 +111,10 @@ impl AgentExecutionRuntime {
         // fallback for unmapped roles).
         let role_policies = load_role_sandbox_policies(sandbox);
         let workspace_provider = if let Some(ref shell) = sandbox.shell_path {
-            WorkspaceToolProvider::with_shell(
-                policy,
-                shell.as_str(),
-                sandbox.enabled,
-                Arc::clone(&self.processes),
-            )
-            .with_role_policies(role_policies)
+            WorkspaceToolProvider::with_shell(policy, shell.as_str(), Arc::clone(&self.processes))
+                .with_role_policies(role_policies)
         } else {
-            WorkspaceToolProvider::new(policy, sandbox.enabled, Arc::clone(&self.processes))
+            WorkspaceToolProvider::new(policy, Arc::clone(&self.processes))
                 .with_role_policies(role_policies)
         };
         self.register_tool_provider(Box::new(workspace_provider))

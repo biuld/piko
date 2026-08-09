@@ -1,11 +1,15 @@
 # F-17: Permission profiles (materialized file/network/command policies)
 
-> Status: implemented (F-17/D-20/V-20)
+> Status: superseded in part by F-23 (profile and role selection retained)
 > Priority: P1
 > Source evidence: codex-rs `core/src/config/*` (config layers, permissions,
 > permission-profile catalog, managed features, agent roles, schema),
 > `core/src/safety.rs`, `core/src/tools/handlers/request_permissions.rs`,
 > `core/src/exec/*` (command allow/deny prefix rules)
+
+> [F-23](F-23-command-execution-authority.md) replaces the
+> executable whitelist and string-prefix command path with separated
+> authorization and enforced containment.
 
 ## Summary
 

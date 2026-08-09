@@ -13,14 +13,14 @@ async fn guardian_allow_executes_one_shot_without_store_grant() {
     let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
 
     let first = runner
-        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a1"))
         .await;
     assert_eq!(first, ToolApprovalDecision::Accept);
 
     // One-shot semantics: an identical second call is reviewed again rather
     // than served from a session/workspace/permanent grant.
     let second = runner
-        .request_tool_approval(approval_request("s1", "bash", "a2"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a2"))
         .await;
     assert_eq!(second, ToolApprovalDecision::Accept);
 }
@@ -38,7 +38,7 @@ async fn guardian_deny_fails_closed_and_breaker_escalates_to_user_then_resets() 
     let runner = guardian_runner(Arc::new(DirectInputGateway), review, 2).await;
 
     let first = runner
-        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a1"))
         .await;
     assert!(matches!(
         first,
@@ -46,7 +46,7 @@ async fn guardian_deny_fails_closed_and_breaker_escalates_to_user_then_resets() 
     ));
 
     let second = runner
-        .request_tool_approval(approval_request("s1", "bash", "a2"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a2"))
         .await;
     assert!(matches!(
         second,
@@ -57,7 +57,7 @@ async fn guardian_deny_fails_closed_and_breaker_escalates_to_user_then_resets() 
     let runner_for_spawn = runner.clone();
     let third = tokio::spawn(async move {
         runner_for_spawn
-            .request_tool_approval(approval_request("s1", "bash", "a3"))
+            .request_tool_approval(approval_request("s1", "exec_command", "a3"))
             .await
     });
     for _ in 0..200 {
@@ -83,7 +83,7 @@ async fn guardian_deny_fails_closed_and_breaker_escalates_to_user_then_resets() 
 
     // A user decision reset the breaker: the loop reviews again.
     let fourth = runner
-        .request_tool_approval(approval_request("s1", "bash", "a4"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a4"))
         .await;
     assert!(matches!(
         fourth,
@@ -98,7 +98,7 @@ async fn guardian_failure_fails_closed_without_running() {
     let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
 
     let decision = runner
-        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a1"))
         .await;
     assert_eq!(decision, ToolApprovalDecision::GuardianUnavailable);
 }
@@ -117,7 +117,7 @@ async fn guardian_timeout_fails_closed() {
     let runner = guardian_runner(Arc::new(DirectInputGateway), review, 3).await;
 
     let decision = runner
-        .request_tool_approval(approval_request("s1", "bash", "a1"))
+        .request_tool_approval(approval_request("s1", "exec_command", "a1"))
         .await;
     assert_eq!(decision, ToolApprovalDecision::GuardianUnavailable);
 }

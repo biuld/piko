@@ -16,8 +16,7 @@ use crate::domain::config::FeaturesSettings;
 /// consumed by orchd's catalog filter (`feature_for_tool`).
 pub const FEATURE_KEYS: &[&str] = &[
     "workspace",
-    "bash",
-    "process",
+    "exec",
     "environment",
     "context",
     "todo",
@@ -124,18 +123,17 @@ mod tests {
 
     #[test]
     fn explicit_disable_turns_feature_off() {
-        let settings = features(&[("process", false)], &[]);
+        let settings = features(&[("exec", false)], &[]);
         let resolved = resolve_features(Some(&settings));
-        assert!(!resolved.enabled["process"]);
-        assert!(resolved.enabled["bash"]);
+        assert!(!resolved.enabled["exec"]);
         assert!(resolved.warnings.is_empty());
     }
 
     #[test]
     fn managed_pin_wins_over_enabled_in_same_layer() {
-        let settings = features(&[("process", true)], &[("process", false)]);
+        let settings = features(&[("exec", true)], &[("exec", false)]);
         let resolved = resolve_features(Some(&settings));
-        assert!(!resolved.enabled["process"]);
+        assert!(!resolved.enabled["exec"]);
         assert_eq!(resolved.warnings.len(), 1);
         assert!(resolved.warnings[0].contains("pinned to false"));
     }

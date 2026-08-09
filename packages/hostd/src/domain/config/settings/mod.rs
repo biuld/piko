@@ -56,7 +56,7 @@ pub struct HostSettings {
     pub safety: Option<SafetySettings>,
     pub permissions: Option<PermissionsSettings>,
     pub features: Option<FeaturesSettings>,
-    pub sandbox: Option<SandboxSettings>,
+    pub execution: Option<ExecutionSettings>,
 
     // ---- Observability ----
     pub observability: Option<ObservabilitySettings>,
@@ -152,7 +152,7 @@ impl HostSettings {
             "safety": self.safety,
             "permissions": self.permissions,
             "features": self.features,
-            "sandbox": self.sandbox,
+            "execution": self.execution,
             "observability": self.observability,
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
@@ -279,12 +279,18 @@ pub struct PermissionProfileSettings {
     /// Write roots for sandboxed tools. Default: the working directory.
     #[serde(default)]
     pub write_roots: Vec<String>,
+    /// Explicit writable scratch roots. Empty uses platform defaults.
+    #[serde(default)]
+    pub scratch_roots: Vec<String>,
     /// Paths denied for sandboxed tools (deny wins over roots).
     #[serde(default)]
     pub deny_paths: Vec<String>,
     /// Whether sandboxed tools may open network connections. Default: false.
     #[serde(default)]
     pub allow_network: bool,
+    /// Whether an explicitly approved command may run outside containment.
+    /// Defaults to true; profiles can forbid elevation completely.
+    pub allow_escalation: Option<bool>,
     /// Command prefix rules that auto-accept on-request approvals one-shot
     /// (no store grant).
     #[serde(default)]
@@ -341,11 +347,10 @@ impl<'de> Deserialize<'de> for FeaturesSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct SandboxSettings {
-    pub enabled: Option<bool>,
-    pub policy_path: Option<String>,
-    /// Path to the shell binary for command execution (default: "bash").
-    pub shell_path: Option<String>,
+pub struct ExecutionSettings {
+    /// Shell used for command programs. When absent, environment discovery
+    /// selects `$SHELL` and then a platform fallback.
+    pub shell: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

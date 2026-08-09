@@ -21,7 +21,7 @@ use piko_protocol::{ApprovalDecision, ApprovalEvent};
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
-/// Step 0 emits a `bash` tool call (requires approval); every later step is a
+/// Step 0 emits an elevated `exec_command` call (requires approval); every later step is a
 /// plain text reply so the turn terminates after the expiry resolution.
 struct ScriptedBashGateway {
     step: AtomicUsize,
@@ -46,9 +46,9 @@ impl LlmGateway for ScriptedBashGateway {
         if step == 0 {
             Ok(Box::pin(iter(vec![
                 GatewayEvent::ToolCallChunk {
-                    id: "call-bash".into(),
-                    name: "bash".into(),
-                    args_delta: r#"{"command":"pwd"}"#.into(),
+                    id: "call-exec".into(),
+                    name: "exec_command".into(),
+                    args_delta: r#"{"cmd":"pwd","sandbox_permissions":"require_escalated","justification":"exercise approval timeout"}"#.into(),
                 },
                 GatewayEvent::Usage(piko_protocol::Usage::empty()),
                 GatewayEvent::Done("tool_use".into()),
@@ -194,10 +194,10 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
                 approval_id,
                 tool_name,
                 ..
-            }) if tool_name == "bash" => Some(approval_id.clone()),
+            }) if tool_name == "exec_command" => Some(approval_id.clone()),
             _ => None,
         })
-        .expect("approval requested for bash");
+        .expect("approval requested for exec_command");
 
     assert!(
         events.iter().any(|event| matches!(

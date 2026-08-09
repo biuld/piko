@@ -3,14 +3,15 @@ use crate::domain::tools::call::ToolCall;
 use piko_orchd_api::tools::ToolExecutionContext;
 use std::path::PathBuf;
 
-fn policy() -> Policy {
-    Policy {
+fn policy() -> EffectivePermissions {
+    EffectivePermissions {
         version: 1,
-        read: vec![PathBuf::from(".")],
-        write: vec![PathBuf::from(".")],
-        deny: vec![PathBuf::from(".git"), PathBuf::from(".piko")],
-        allowed_commands: vec![],
-        allow_network: false,
+        read_roots: vec![PathBuf::from(".")],
+        write_roots: vec![PathBuf::from(".")],
+        scratch_roots: vec![],
+        denied_read_roots: vec![PathBuf::from(".git"), PathBuf::from(".piko")],
+        denied_write_roots: vec![],
+        network: false.into(),
     }
 }
 

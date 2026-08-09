@@ -342,13 +342,6 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
                 "transport": value
             })
         }
-        SettingsAction::Sandbox(value) => {
-            serde_json::json!({
-                "sandbox": {
-                    "enabled": value
-                }
-            })
-        }
         SettingsAction::Retry(value) => {
             serde_json::json!({
                 "retry": {

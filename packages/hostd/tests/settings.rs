@@ -222,7 +222,7 @@ fn approval_timeout_merges_across_global_and_project_settings() {
     assert_eq!(manager.settings().approvals.unwrap().timeout_secs, Some(30));
 
     // A project without the key preserves the global (default) value.
-    fs::write(project_dir.join("settings.toml"), "[sandbox]\n").unwrap();
+    fs::write(project_dir.join("settings.toml"), "[execution]\n").unwrap();
     let manager = SettingsManager::from_paths(
         global_dir.join("settings.toml"),
         project_dir.join("settings.toml"),

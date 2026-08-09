@@ -6,6 +6,10 @@
 > `core/src/elicitation.rs` (elicitation pause), `core/src/attestation.rs`
 > (attestation header)
 
+> [F-23](F-23-command-execution-authority.md) separates
+> direct workspace-write assessment from shell-command containment. F-12
+> remains normative for direct `edit`/`write` safety.
+
 ## Summary
 
 Before a workspace write tool (`edit` / `write`) is approved, hostd

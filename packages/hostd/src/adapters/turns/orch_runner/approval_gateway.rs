@@ -18,6 +18,13 @@ impl ApprovalGateway for OrchAgentRunRunner {
         // prompt is presentational only — it never changes the flow below.
         let approval_prompt = self.render_mcp_approval_template(&request);
 
+        if let Err(reason) = crate::domain::permissions::validate_command_authority(
+            &request.tool_name,
+            &request.tool_args,
+        ) {
+            return ToolApprovalDecision::PermissionDenied { reason };
+        }
+
         // F-17 permission profiles: operator command policy is the strongest
         // gate. A denied prefix fails closed before store grants, guardian
         // review, and user prompts; an allowed prefix auto-accepts one-shot

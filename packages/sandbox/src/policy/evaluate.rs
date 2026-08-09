@@ -1,30 +1,7 @@
 use super::*;
-use std::{
-    collections::HashSet,
-    fs,
-    path::{Component, Path},
-};
+use std::path::{Component, Path};
 
-use super::command::parse_shell_command;
-
-impl Policy {
-    pub fn load(path: &Path) -> Result<Self, PolicyError> {
-        if !path.exists() {
-            return Err(PolicyError::Invalid(format!(
-                "policy file not found at '{}'",
-                path.display()
-            )));
-        }
-        let policy: Self = serde_json::from_slice(&fs::read(path)?)?;
-        if policy.version != 1 {
-            return Err(PolicyError::Invalid("version must be 1".into()));
-        }
-        if policy.read.is_empty() {
-            return Err(PolicyError::Invalid("read must not be empty".into()));
-        }
-        Ok(policy)
-    }
-
+impl EffectivePermissions {
     pub(super) fn root(root: &Path, cwd: &Path) -> Result<PathBuf, PolicyError> {
         let root = if root.is_absolute() {
             root.to_path_buf()
@@ -84,14 +61,21 @@ impl Policy {
         {
             return Err(PolicyError::Denied(resolved.display().to_string()));
         }
-        for root in &self.deny {
+        for root in &self.denied_read_roots {
             if resolved.starts_with(Self::root(root, &cwd)?) {
                 return Err(PolicyError::Denied(resolved.display().to_string()));
             }
         }
+        if matches!(access, Access::Write) {
+            for root in &self.denied_write_roots {
+                if resolved.starts_with(Self::root(root, &cwd)?) {
+                    return Err(PolicyError::Denied(resolved.display().to_string()));
+                }
+            }
+        }
         let roots = match access {
-            Access::Read => &self.read,
-            Access::Write => &self.write,
+            Access::Read => self.read_roots.iter().chain(self.scratch_roots.iter()),
+            Access::Write => self.write_roots.iter().chain(self.scratch_roots.iter()),
         };
         for root in roots {
             if resolved.starts_with(Self::root(root, &cwd)?) {
@@ -102,13 +86,29 @@ impl Policy {
     }
 
     /// Absolute writable roots resolved against `cwd`, using the same
-    /// canonicalization as [`Policy::authorize`] (F-12 safety assessment).
+    /// canonicalization as [`EffectivePermissions::authorize`] (F-12 safety assessment).
     ///
     /// The projection is the write boundary that `authorize` enforces; it
     /// lets approval-time callers decide whether a write target is fully
     /// constrained without touching the filesystem beyond canonicalization.
     pub fn writable_roots(&self, cwd: &Path) -> Vec<PathBuf> {
-        self.write
+        self.write_roots
+            .iter()
+            .chain(self.scratch_roots.iter())
+            .filter_map(|root| Self::root(root, cwd).ok())
+            .collect()
+    }
+
+    pub fn readable_roots(&self, cwd: &Path) -> Vec<PathBuf> {
+        self.read_roots
+            .iter()
+            .chain(self.scratch_roots.iter())
+            .filter_map(|root| Self::root(root, cwd).ok())
+            .collect()
+    }
+
+    pub fn scratch_roots(&self, cwd: &Path) -> Vec<PathBuf> {
+        self.scratch_roots
             .iter()
             .filter_map(|root| Self::root(root, cwd).ok())
             .collect()
@@ -136,62 +136,5 @@ impl Policy {
             )));
         }
         Ok(())
-    }
-
-    pub fn validate_command(
-        &self,
-        command: &str,
-        cwd: &Path,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Expansion makes static command identity ambiguous. The OS sandbox remains the
-        // filesystem boundary, but fail closed here instead of pretending to understand it.
-        for syntax in ["`", "$(", "${", "<(", ">(", "\n", "\r"] {
-            if command.contains(syntax) {
-                return Err(
-                    PolicyError::Shell(format!("unsupported syntax pattern: {}", syntax)).into(),
-                );
-            }
-        }
-        let allowed: HashSet<&str> = self.allowed_commands.iter().map(String::as_str).collect();
-        if allowed.is_empty() {
-            return Err(PolicyError::Invalid("allowedCommands must not be empty".into()).into());
-        }
-
-        let segments = parse_shell_command(command)?;
-        for segment in segments {
-            let name = Path::new(&segment.binary)
-                .file_name()
-                .and_then(|v| v.to_str())
-                .unwrap_or(&segment.binary);
-            if !allowed.contains(name) {
-                return Err(PolicyError::Command(name.into()).into());
-            }
-
-            // Statically validate redirections against the filesystem ACL
-            for (op, target) in &segment.redirects {
-                let access = match op.as_str() {
-                    ">" | ">>" | "2>" | "2>>" => Access::Write,
-                    "<" => Access::Read,
-                    _ => continue, // ignore other redirections for ACL
-                };
-                self.authorize(
-                    cwd,
-                    Path::new(target),
-                    access,
-                    matches!(access, Access::Read),
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn canonicalize_command(
-        &self,
-        command: &str,
-    ) -> Result<String, Box<dyn std::error::Error>> {
-        let segments = parse_shell_command(command)?;
-        let canonical_segments: Vec<String> = segments.iter().map(|s| s.canonicalize()).collect();
-        // Join command segments back with single spaces
-        Ok(canonical_segments.join(" && "))
     }
 }

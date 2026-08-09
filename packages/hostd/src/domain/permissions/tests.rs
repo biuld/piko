@@ -139,9 +139,11 @@ fn role_mapped_to_defined_profile_resolves_command_and_sandbox_policy() {
                 "readonly",
                 PermissionProfileSettings {
                     write_roots: vec!["/work".into()],
+                    scratch_roots: vec![],
                     read_roots: vec![".".into()],
                     deny_paths: vec![".git".into(), ".piko".into()],
                     allow_network: false,
+                    allow_escalation: None,
                     allowed_commands: vec!["git status".into()],
                     denied_commands: vec!["rm".into()],
                 },
@@ -240,12 +242,12 @@ fn prefix_rule_match_respects_token_boundary() {
 }
 
 #[test]
-fn evaluate_command_denies_matching_bash_command() {
+fn evaluate_command_denies_matching_exec_command() {
     let config = PermissionConfig {
         denied_command_prefixes: vec!["rm -rf".into()],
         ..Default::default()
     };
-    let decision = evaluate_command("bash", &json!({ "command": "rm -rf /tmp/x" }), &config);
+    let decision = evaluate_command("exec_command", &json!({ "cmd": "rm -rf /tmp/x" }), &config);
     assert_eq!(
         decision,
         Some(CommandDecision::Deny {
@@ -255,14 +257,14 @@ fn evaluate_command_denies_matching_bash_command() {
 }
 
 #[test]
-fn evaluate_command_allows_matching_process_start() {
+fn evaluate_command_allows_default_sandbox_without_allowlist_match() {
     let config = PermissionConfig {
         allowed_command_prefixes: vec!["cargo test".into()],
         ..Default::default()
     };
     let decision = evaluate_command(
-        "process",
-        &json!({ "action": "start", "command": "cargo test -- --nocapture" }),
+        "exec_command",
+        &json!({ "cmd": "printf '%s\\n' \"$(pwd)\"" }),
         &config,
     );
     assert_eq!(decision, Some(CommandDecision::Allow));
@@ -273,8 +275,9 @@ fn evaluate_command_deny_wins_over_allow() {
     let config = PermissionConfig {
         allowed_command_prefixes: vec!["cargo".into()],
         denied_command_prefixes: vec!["cargo test".into()],
+        allow_escalation: true,
     };
-    let decision = evaluate_command("bash", &json!({ "command": "cargo test" }), &config);
+    let decision = evaluate_command("exec_command", &json!({ "cmd": "cargo test" }), &config);
     assert_eq!(
         decision,
         Some(CommandDecision::Deny {
@@ -288,6 +291,7 @@ fn evaluate_command_ignores_non_command_tools_and_actions() {
     let config = PermissionConfig {
         allowed_command_prefixes: vec!["cargo".into()],
         denied_command_prefixes: vec!["rm".into()],
+        allow_escalation: true,
     };
     assert_eq!(
         evaluate_command("edit", &json!({ "path": "a.rs" }), &config),
@@ -295,27 +299,117 @@ fn evaluate_command_ignores_non_command_tools_and_actions() {
     );
     assert_eq!(
         evaluate_command(
-            "process",
-            &json!({ "action": "write_stdin", "input": "cargo test" }),
+            "write_stdin",
+            &json!({ "session_id": "proc-1", "chars": "cargo test" }),
             &config
         ),
         None
     );
     assert_eq!(
-        evaluate_command("bash", &json!({ "command": "" }), &config),
+        evaluate_command("exec_command", &json!({ "cmd": "" }), &config),
         None
     );
-    assert_eq!(evaluate_command("bash", &json!({}), &config), None);
+    assert_eq!(evaluate_command("exec_command", &json!({}), &config), None);
 }
 
 #[test]
-fn evaluate_command_non_matching_keeps_existing_flow() {
+fn evaluate_command_extra_authority_requires_approval() {
     let config = PermissionConfig {
         allowed_command_prefixes: vec!["cargo test".into()],
         denied_command_prefixes: vec!["rm -rf".into()],
+        allow_escalation: true,
     };
     assert_eq!(
-        evaluate_command("bash", &json!({ "command": "ls -la" }), &config),
+        evaluate_command(
+            "exec_command",
+            &json!({
+                "cmd": "ls -la",
+                "sandbox_permissions": "with_additional_permissions"
+            }),
+            &config
+        ),
         None
     );
+}
+
+#[test]
+fn evaluate_command_dangerous_default_attempt_requires_approval() {
+    assert_eq!(
+        evaluate_command(
+            "exec_command",
+            &json!({ "cmd": "git reset --hard HEAD~1" }),
+            &PermissionConfig::default()
+        ),
+        None
+    );
+}
+
+#[test]
+fn extra_authority_requires_structured_reason_and_permissions() {
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({ "cmd": "pwd", "sandbox_permissions": "require_escalated" })
+        )
+        .is_err()
+    );
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({
+                "cmd": "pwd",
+                "sandbox_permissions": "with_additional_permissions",
+                "justification": "read generated data"
+            })
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn reusable_prefix_must_be_narrow_and_simple() {
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({
+                "cmd": "git status --short",
+                "sandbox_permissions": "require_escalated",
+                "justification": "read repository status",
+                "prefix_rule": ["git", "status"]
+            })
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({
+                "cmd": "git status; rm -rf .",
+                "sandbox_permissions": "require_escalated",
+                "justification": "unsafe compound command",
+                "prefix_rule": ["git", "status"]
+            })
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn profile_can_forbid_elevation_before_user_approval() {
+    let config = PermissionConfig {
+        allow_escalation: false,
+        ..Default::default()
+    };
+    assert!(matches!(
+        evaluate_command(
+            "exec_command",
+            &json!({
+                "cmd": "pwd",
+                "sandbox_permissions": "require_escalated",
+                "justification": "requires host access"
+            }),
+            &config
+        ),
+        Some(CommandDecision::Deny { .. })
+    ));
 }

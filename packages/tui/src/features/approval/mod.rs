@@ -185,28 +185,34 @@ fn approval_decision(choice: usize) -> ApprovalDecision {
     }
 }
 
-/// Build the user-facing approval question. Shell-like tools (`bash`, and
-/// `process start`, which runs a shell command under the hood — F-08) render
-/// the inner command instead of raw JSON; everything else stays generic.
+/// Build the user-facing approval question. Command approvals expose the
+/// requested authority and justification instead of hiding them in raw JSON.
 fn approval_question(approval: &PendingApproval) -> String {
     if let Some(prompt) = &approval.prompt {
         return prompt.clone();
     }
     let command = approval
         .args
-        .get("command")
+        .get("cmd")
         .and_then(|v| v.as_str())
         .filter(|c| !c.trim().is_empty());
-    let action = approval
+    let authority = approval
         .args
-        .get("action")
+        .get("sandbox_permissions")
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let is_shell_command = matches!(approval.tool_name.as_str(), "bash" | "process")
-        && (approval.tool_name != "process" || action == "start")
-        && command.is_some();
-    if is_shell_command {
-        format!("Run shell command `{}`?", command.expect("checked above"))
+        .unwrap_or("use_default");
+    if let ("exec_command", Some(command)) = (approval.tool_name.as_str(), command) {
+        let justification = approval
+            .args
+            .get("justification")
+            .and_then(|value| value.as_str());
+        match justification {
+            Some(reason) => format!(
+                "Run command `{}` with authority `{authority}`? Reason: {reason}",
+                command
+            ),
+            None => format!("Run command `{command}`?"),
+        }
     } else {
         format!(
             "Run {} with args {}?",
@@ -231,33 +237,25 @@ mod tests {
     }
 
     #[test]
-    fn shell_like_tools_render_the_inner_command() {
-        let bash = approval(
-            "bash",
-            serde_json::json!({ "command": "cargo test -p tui" }),
+    fn command_tool_renders_authority_and_justification() {
+        let command = approval(
+            "exec_command",
+            serde_json::json!({
+                "cmd": "cargo test -p tui",
+                "sandbox_permissions": "require_escalated",
+                "justification": "sandbox denied the first attempt"
+            }),
         );
         assert_eq!(
-            approval_question(&bash),
-            "Run shell command `cargo test -p tui`?"
-        );
-
-        let start = approval(
-            "process",
-            serde_json::json!({ "action": "start", "command": "npm install" }),
-        );
-        assert_eq!(
-            approval_question(&start),
-            "Run shell command `npm install`?"
+            approval_question(&command),
+            "Run command `cargo test -p tui` with authority `require_escalated`? Reason: sandbox denied the first attempt"
         );
     }
 
     #[test]
     fn non_shell_actions_stay_generic() {
-        let write = approval(
-            "process",
-            serde_json::json!({ "action": "write", "processId": "proc-1" }),
-        );
-        assert!(approval_question(&write).starts_with("Run process with args"));
+        let write = approval("write_stdin", serde_json::json!({ "session_id": "proc-1" }));
+        assert!(approval_question(&write).starts_with("Run write_stdin with args"));
 
         let read = approval("read", serde_json::json!({ "path": "Cargo.toml" }));
         assert!(approval_question(&read).starts_with("Run read with args"));
