@@ -11,3 +11,8 @@ tool-system design is `D-06-tool-dispatch.md`, and the F-01 turn-runtime
 design is `D-01-turn-runtime.md`. Feature-local choices belong in the design;
 decisions that affect multiple features or package boundaries belong in
 [`../decisions/`](../decisions/).
+
+## Recent designs
+
+- [D-36: Provider authentication](D-36-provider-authentication.md) implements
+  F-24 typed provider authentication and refresh.

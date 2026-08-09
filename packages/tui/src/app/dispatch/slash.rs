@@ -46,12 +46,6 @@ impl AppState {
                     effects.push(Effect::send(Command::ModelList {
                         command_id: command_id(),
                     }));
-                    let provider_names: Vec<String> = self
-                        .model
-                        .providers
-                        .iter()
-                        .map(|p| p.provider.clone())
-                        .collect();
                     let auth_names: Vec<String> = self
                         .model
                         .providers
@@ -59,7 +53,7 @@ impl AppState {
                         .filter(|p| p.has_auth)
                         .map(|p| p.provider.clone())
                         .collect();
-                    self.auth_selector.reset(&provider_names, &auth_names);
+                    self.auth_selector.reset(&self.model.providers, &auth_names);
                     self.push_surface(SurfaceId::AuthSelector);
                     self.status = "Select authentication method".to_string();
                 }

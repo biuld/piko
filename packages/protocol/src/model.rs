@@ -196,6 +196,15 @@ pub struct ProviderInfo {
     pub provider: String,
     pub models: Vec<ModelSummary>,
     pub has_auth: bool,
+    #[serde(default)]
+    pub auth_methods: Vec<ProviderAuthMethod>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAuthMethod {
+    ApiKey,
+    OAuth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

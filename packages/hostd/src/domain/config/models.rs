@@ -168,7 +168,10 @@ impl ModelRegistry {
         self.auth_storage.has_auth(provider)
     }
 
-    pub fn get_oauth(&self, provider: &str) -> Option<&dyn piko_llmd::providers::OAuthFlow> {
+    pub fn get_oauth(
+        &self,
+        provider: &str,
+    ) -> Option<std::sync::Arc<dyn piko_llmd::providers::OAuthFlow>> {
         self.catalog.get_oauth(provider)
     }
 
@@ -181,12 +184,15 @@ impl ModelRegistry {
     }
 
     fn to_resolved(&self, model: ModelSummary, provider: &str) -> ResolvedModel {
+        let catalog_provider = self.catalog.provider(provider);
         ResolvedModel {
             provider: provider.to_string(),
             model,
             provider_config: ModelProviderConfig {
                 api_key: self.auth_storage.get_api_key(provider),
-                base_url: None,
+                base_url: catalog_provider
+                    .and_then(|provider| provider.base_url())
+                    .map(str::to_string),
                 headers: None,
                 reasoning: None,
                 session_id: None,

@@ -57,7 +57,7 @@ pub enum OpenOutcome {
 /// treatment before any content event reaches the caller.
 pub async fn open_stream_with_retry(
     client: &genai::Client,
-    model_iden: &genai::ModelIden,
+    target: &genai::ServiceTarget,
     request: &genai::chat::ChatRequest,
     options: Option<&genai::chat::ChatOptions>,
     mut retry: OpenRetryContext<'_>,
@@ -68,7 +68,7 @@ pub async fn open_stream_with_retry(
         }
 
         match client
-            .exec_chat_stream(model_iden.clone(), request.clone(), options)
+            .exec_chat_stream(target.clone(), request.clone(), options)
             .await
         {
             Ok(resp) => match peek_open_events(resp).await {

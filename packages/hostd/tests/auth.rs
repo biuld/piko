@@ -34,6 +34,13 @@ fn file_auth_storage_reads_and_writes_api_keys() {
         )
         .unwrap();
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&auth_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
     let reloaded = AuthStorage::create(Some(auth_path)).unwrap();
     assert_eq!(
         reloaded.get_api_key("anthropic"),
@@ -57,7 +64,7 @@ fn runtime_api_key_overrides_stored_credentials() {
 }
 
 #[test]
-fn oauth_credentials_resolve_to_access_token_without_provider_refresh() {
+fn oauth_credentials_are_not_exposed_as_api_keys() {
     let mut data = HashMap::new();
     data.insert(
         "github-copilot".into(),
@@ -70,10 +77,7 @@ fn oauth_credentials_resolve_to_access_token_without_provider_refresh() {
     );
     let storage = AuthStorage::in_memory(data);
 
-    assert_eq!(
-        storage.get_api_key("github-copilot"),
-        Some("access-token".into())
-    );
+    assert_eq!(storage.get_api_key("github-copilot"), None);
 }
 
 #[tokio::test]
@@ -93,12 +97,15 @@ async fn oauth_resolve_returns_access_token_if_not_expired() {
         },
     );
     let mut storage = AuthStorage::in_memory(data);
-    let resolved = storage.resolve_oauth_api_key("anthropic").await.unwrap();
-    assert_eq!(resolved, Some("valid-token".into()));
+    let resolved = storage.resolve_credential("anthropic", None).await.unwrap();
+    assert_eq!(
+        resolved.as_ref().map(AuthCredential::secret),
+        Some("valid-token")
+    );
 }
 
 #[tokio::test]
-async fn oauth_resolve_returns_existing_token_if_expired_and_unknown_provider() {
+async fn oauth_resolve_rejects_expired_token_without_registered_flow() {
     let mut data = HashMap::new();
     data.insert(
         "unknown-provider".into(),
@@ -110,9 +117,52 @@ async fn oauth_resolve_returns_existing_token_if_expired_and_unknown_provider() 
         },
     );
     let mut storage = AuthStorage::in_memory(data);
-    let resolved = storage
-        .resolve_oauth_api_key("unknown-provider")
+    let error = storage
+        .resolve_credential("unknown-provider", None)
         .await
+        .unwrap_err();
+    assert!(error.to_string().contains("expired"));
+}
+
+struct ExampleOAuthFlow;
+
+#[async_trait::async_trait]
+impl piko_llmd::providers::OAuthFlow for ExampleOAuthFlow {
+    fn provider_id(&self) -> &str {
+        "example"
+    }
+
+    async fn refresh_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<AuthCredential, piko_llmd::auth::AuthError> {
+        assert_eq!(refresh_token, "refresh-token");
+        Ok(AuthCredential::OAuth {
+            access: "fresh-token".into(),
+            refresh: Some("rotated-token".into()),
+            expires: Some(u64::MAX),
+            extra: HashMap::new(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn oauth_refresh_is_delegated_to_registered_flow() {
+    let mut data = HashMap::new();
+    data.insert(
+        "example".into(),
+        AuthCredential::OAuth {
+            access: "expired-token".into(),
+            refresh: Some("refresh-token".into()),
+            expires: Some(100),
+            extra: HashMap::new(),
+        },
+    );
+    let mut storage = AuthStorage::in_memory(data);
+    let refreshed = storage
+        .resolve_credential("example", Some(&ExampleOAuthFlow))
+        .await
+        .unwrap()
         .unwrap();
-    assert_eq!(resolved, Some("expired-token".into()));
+    assert_eq!(refreshed.secret(), "fresh-token");
 }

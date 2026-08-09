@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,15 @@ pub enum AuthError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("{operation} is not supported for provider {provider}")]
+    Unsupported {
+        provider: String,
+        operation: &'static str,
+    },
+    #[error("OAuth credential for provider {provider} is expired and cannot be refreshed")]
+    Expired { provider: String },
+    #[error("provider {provider} authentication failed: {message}")]
+    Provider { provider: String, message: String },
 }
 
 impl AuthStorage {
@@ -187,219 +197,72 @@ impl AuthStorage {
         }
         match self.data.get(provider) {
             Some(AuthCredential::ApiKey { key }) => Some(key.clone()),
-            Some(AuthCredential::OAuth { access, .. }) => Some(access.clone()),
+            Some(AuthCredential::OAuth { .. }) => None,
             None => env_api_key(provider),
         }
     }
 
-    pub async fn resolve_oauth_api_key(
+    pub async fn resolve_credential(
         &mut self,
         provider: &str,
-    ) -> Result<Option<String>, String> {
-        let cred = match self.data.get(provider) {
-            Some(AuthCredential::OAuth {
-                access,
-                refresh,
-                expires,
-                extra,
-            }) => {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-
-                let is_expired = expires.is_none_or(|exp| now_ms >= exp);
-                if !is_expired {
-                    return Ok(Some(access.clone()));
-                }
-
-                (refresh.clone(), extra.clone())
-            }
-            Some(AuthCredential::ApiKey { key }) => return Ok(Some(key.clone())),
-            None => return Ok(env_api_key(provider)),
+        oauth: Option<&dyn crate::providers::OAuthFlow>,
+    ) -> Result<Option<AuthCredential>, AuthError> {
+        if let Some(key) = self.runtime_overrides.get(provider) {
+            return Ok(Some(AuthCredential::ApiKey { key: key.clone() }));
+        }
+        let Some(credential) = self.data.get(provider).cloned() else {
+            return Ok(env_api_key(provider).map(|key| AuthCredential::ApiKey { key }));
         };
-
-        let (refresh_token, extra) = cred;
-        let refresh_token = match refresh_token {
-            Some(ref token) if !token.is_empty() => token,
-            _ => {
-                if let Some(AuthCredential::OAuth { access, .. }) = self.data.get(provider) {
-                    return Ok(Some(access.clone()));
-                }
-                return Ok(None);
-            }
+        let AuthCredential::OAuth {
+            refresh,
+            expires,
+            extra: previous_extra,
+            ..
+        } = &credential
+        else {
+            return Ok(Some(credential));
         };
-
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        let client = reqwest::Client::new();
-
-        match provider {
-            "anthropic" => {
-                let client_id = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-                let token_url = "https://platform.claude.com/v1/oauth/token";
-
-                let payload = serde_json::json!({
-                    "grant_type": "refresh_token",
-                    "client_id": client_id,
-                    "refresh_token": refresh_token,
-                });
-
-                let res = client
-                    .post(token_url)
-                    .json(&payload)
-                    .send()
-                    .await
-                    .map_err(|e| format!("anthropic refresh request failed: {e}"))?;
-
-                if !res.status().is_success() {
-                    let status = res.status();
-                    let body = res.text().await.unwrap_or_default();
-                    return Err(format!("anthropic refresh failed status={status}: {body}"));
-                }
-
-                #[derive(Deserialize)]
-                struct RefreshResponse {
-                    access_token: String,
-                    refresh_token: String,
-                    expires_in: u64,
-                }
-
-                let resp: RefreshResponse = res
-                    .json()
-                    .await
-                    .map_err(|e| format!("failed to parse anthropic refresh response: {e}"))?;
-
-                let expires = now_ms + resp.expires_in * 1000 - 5 * 60 * 1000;
-
-                let new_cred = AuthCredential::OAuth {
-                    access: resp.access_token.clone(),
-                    refresh: Some(resp.refresh_token),
-                    expires: Some(expires),
-                    extra,
-                };
-
-                self.set(provider, new_cred).map_err(|e| e.to_string())?;
-                Ok(Some(resp.access_token))
-            }
-            "antigravity" => {
-                let client_id = std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_ID").unwrap_or_default();
-                let client_secret =
-                    std::env::var("ANTI_GRAVITY_GOOGLE_CLIENT_SECRET").unwrap_or_default();
-                let token_url = "https://oauth2.googleapis.com/token";
-
-                let params: [(&str, &str); 4] = [
-                    ("client_id", client_id.as_str()),
-                    ("client_secret", client_secret.as_str()),
-                    ("refresh_token", refresh_token),
-                    ("grant_type", "refresh_token"),
-                ];
-
-                let res = client
-                    .post(token_url)
-                    .form(&params)
-                    .send()
-                    .await
-                    .map_err(|e| format!("antigravity refresh request failed: {e}"))?;
-
-                if !res.status().is_success() {
-                    let status = res.status();
-                    let body = res.text().await.unwrap_or_default();
-                    return Err(format!(
-                        "antigravity refresh failed status={status}: {body}"
-                    ));
-                }
-
-                #[derive(Deserialize)]
-                struct RefreshResponse {
-                    access_token: String,
-                    refresh_token: Option<String>,
-                    expires_in: u64,
-                }
-
-                let resp: RefreshResponse = res
-                    .json()
-                    .await
-                    .map_err(|e| format!("failed to parse antigravity refresh response: {e}"))?;
-
-                let expires = now_ms + resp.expires_in * 1000 - 5 * 60 * 1000;
-                let new_refresh = resp
-                    .refresh_token
-                    .unwrap_or_else(|| refresh_token.to_string());
-
-                let new_cred = AuthCredential::OAuth {
-                    access: resp.access_token.clone(),
-                    refresh: Some(new_refresh),
-                    expires: Some(expires),
-                    extra,
-                };
-
-                self.set(provider, new_cred).map_err(|e| e.to_string())?;
-                Ok(Some(resp.access_token))
-            }
-            "github-copilot" => {
-                let enterprise_domain = extra
-                    .get("enterpriseUrl")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("github.com");
-
-                let copilot_token_url =
-                    format!("https://api.{enterprise_domain}/copilot_internal/v2/token");
-
-                let res = client
-                    .get(&copilot_token_url)
-                    .header("Accept", "application/json")
-                    .header("Authorization", format!("Bearer {refresh_token}"))
-                    .header("User-Agent", "GitHubCopilotChat/0.35.0")
-                    .header("Editor-Version", "vscode/1.107.0")
-                    .header("Editor-Plugin-Version", "copilot-chat/0.35.0")
-                    .header("Copilot-Integration-Id", "vscode-chat")
-                    .send()
-                    .await
-                    .map_err(|e| format!("github-copilot refresh request failed: {e}"))?;
-
-                if !res.status().is_success() {
-                    let status = res.status();
-                    let body = res.text().await.unwrap_or_default();
-                    return Err(format!(
-                        "github-copilot refresh failed status={status}: {body}"
-                    ));
-                }
-
-                #[derive(Deserialize)]
-                struct RefreshResponse {
-                    token: String,
-                    expires_at: u64,
-                }
-
-                let resp: RefreshResponse = res
-                    .json()
-                    .await
-                    .map_err(|e| format!("failed to parse github-copilot response: {e}"))?;
-
-                let expires = resp.expires_at * 1000 - 5 * 60 * 1000;
-
-                let new_cred = AuthCredential::OAuth {
-                    access: resp.token.clone(),
-                    refresh: Some(refresh_token.to_string()),
-                    expires: Some(expires),
-                    extra,
-                };
-
-                self.set(provider, new_cred).map_err(|e| e.to_string())?;
-                Ok(Some(resp.token))
-            }
-            _ => {
-                if let Some(AuthCredential::OAuth { access, .. }) = self.data.get(provider) {
-                    return Ok(Some(access.clone()));
-                }
-                Ok(None)
+        if expires.is_some_and(|expires| now_ms() < expires) {
+            return Ok(Some(credential));
+        }
+        let flow = oauth.ok_or_else(|| AuthError::Expired {
+            provider: provider.to_string(),
+        })?;
+        let refresh_token = refresh
+            .as_deref()
+            .filter(|token| !token.is_empty())
+            .ok_or_else(|| AuthError::Expired {
+                provider: provider.to_string(),
+            })?;
+        let mut refreshed = flow.refresh_token(refresh_token).await?;
+        if let AuthCredential::OAuth { extra, .. } = &mut refreshed {
+            for (key, value) in previous_extra {
+                extra.entry(key.clone()).or_insert_with(|| value.clone());
             }
         }
+        self.set(provider, refreshed.clone())?;
+        Ok(Some(refreshed))
     }
+}
+
+impl AuthCredential {
+    pub fn secret(&self) -> &str {
+        match self {
+            Self::ApiKey { key } => key,
+            Self::OAuth { access, .. } => access,
+        }
+    }
+
+    pub fn is_oauth(&self) -> bool {
+        matches!(self, Self::OAuth { .. })
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn read_file(path: &Path) -> Result<AuthStorageData, AuthError> {
@@ -410,10 +273,7 @@ fn read_file(path: &Path) -> Result<AuthStorageData, AuthError> {
                 source,
             })?;
         }
-        fs::write(path, "{}").map_err(|source| AuthError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        write_file(path, &AuthStorageData::new())?;
     }
     let content = fs::read_to_string(path).map_err(|source| AuthError::Io {
         path: path.to_path_buf(),
@@ -436,7 +296,29 @@ fn write_file(path: &Path, data: &AuthStorageData) -> Result<(), AuthError> {
         path: path.to_path_buf(),
         source,
     })?;
-    fs::write(path, encoded).map_err(|source| AuthError::Io {
+    let temp_path = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let write_result = (|| -> Result<(), std::io::Error> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temp_path)?;
+        file.write_all(encoded.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp_path, path)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result.map_err(|source| AuthError::Io {
         path: path.to_path_buf(),
         source,
     })

@@ -22,12 +22,12 @@ impl HostServer {
         let server = self.clone();
         let registry = self.model_registry.clone();
         tokio::spawn(async move {
-            let oauth = {
+            let flow = {
                 let reg = registry.lock().await;
-                reg.get_oauth(&provider).is_some()
+                reg.get_oauth(&provider)
             };
 
-            if !oauth {
+            let Some(flow) = flow else {
                 let _ = tx_clone
                     .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                         provider,
@@ -35,20 +35,6 @@ impl HostServer {
                     }))
                     .await;
                 return;
-            }
-
-            let mut reg = registry.lock().await;
-            let flow = match reg.get_oauth(&provider) {
-                Some(f) => f,
-                None => {
-                    let _ = tx_clone
-                        .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
-                            provider,
-                            error: "OAuth not supported for this provider".into(),
-                        }))
-                        .await;
-                    return;
-                }
             };
 
             match flow.start_device_auth().await {
@@ -63,61 +49,60 @@ impl HostServer {
                         ))
                         .await;
 
-                    match flow.poll_device_auth(&info).await {
-                        Ok((code, verifier)) => match flow.exchange_code(code, verifier).await {
-                            Ok(cred) => {
-                                if let Err(e) = {
-                                    let auth = reg.auth_storage_mut();
-                                    auth.set(&provider, cred).and_then(|_| auth.flush())
-                                } {
-                                    let _ = tx_clone
-                                        .send(ServerMessage::Auth(
-                                            crate::api::AuthEvent::LoginFailed {
-                                                provider: provider.clone(),
-                                                error: format!("Failed to store credentials: {e}"),
-                                            },
-                                        ))
-                                        .await;
-                                    return;
-                                }
-
-                                let providers = reg.list_providers();
-                                drop(reg);
-
-                                // Replace any ErrorAgentRunRunner installed pre-login.
-                                server.rebuild_turn_runner().await;
-
-                                let _ = tx_clone
-                                    .send(ServerMessage::Auth(
-                                        crate::api::AuthEvent::LoginSuccess {
-                                            provider: provider.clone(),
-                                        },
-                                    ))
-                                    .await;
-                                let _ = tx_clone
-                                    .send(server_response_ok(
-                                        &command_id,
-                                        crate::api::CommandResult::ModelListed {
-                                            providers,
-                                            timestamp: crate::protocol::now_ms(),
-                                        },
-                                    ))
-                                    .await;
-                            }
-                            Err(e) => {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(info.expires_in_seconds),
+                        flow.finish_device_auth(&info),
+                    )
+                    .await
+                    {
+                        Ok(Ok(cred)) => {
+                            if let Err(e) = {
+                                let mut reg = registry.lock().await;
+                                let auth = reg.auth_storage_mut();
+                                auth.set(&provider, cred)
+                            } {
                                 let _ = tx_clone
                                     .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                                         provider: provider.clone(),
-                                        error: format!("Exchange failed: {e}"),
+                                        error: format!("Failed to store credentials: {e}"),
                                     }))
                                     .await;
+                                return;
                             }
-                        },
-                        Err(e) => {
+
+                            let providers = registry.lock().await.list_providers();
+
+                            // Replace any ErrorAgentRunRunner installed pre-login.
+                            server.rebuild_turn_runner().await;
+
+                            let _ = tx_clone
+                                .send(ServerMessage::Auth(crate::api::AuthEvent::LoginSuccess {
+                                    provider: provider.clone(),
+                                }))
+                                .await;
+                            let _ = tx_clone
+                                .send(server_response_ok(
+                                    &command_id,
+                                    crate::api::CommandResult::ModelListed {
+                                        providers,
+                                        timestamp: crate::protocol::now_ms(),
+                                    },
+                                ))
+                                .await;
+                        }
+                        Ok(Err(e)) => {
                             let _ = tx_clone
                                 .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
                                     provider: provider.clone(),
-                                    error: format!("Poll failed: {e}"),
+                                    error: format!("Device authentication failed: {e}"),
+                                }))
+                                .await;
+                        }
+                        Err(_) => {
+                            let _ = tx_clone
+                                .send(ServerMessage::Auth(crate::api::AuthEvent::LoginFailed {
+                                    provider: provider.clone(),
+                                    error: "Device authorization expired".into(),
                                 }))
                                 .await;
                         }

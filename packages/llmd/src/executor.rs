@@ -16,7 +16,9 @@ use crate::stream::{
 };
 
 mod prompt_mapping;
+mod support;
 use prompt_mapping::{build_genai_messages, stateless_system_block};
+use support::sanitized_options;
 
 // ---- genai-based executor ----
 
@@ -24,6 +26,7 @@ use prompt_mapping::{build_genai_messages, stateless_system_block};
 fn adapter_kind(provider: &str) -> genai::adapter::AdapterKind {
     match provider.to_lowercase().as_str() {
         "openai" | "azure" | "openrouter" => genai::adapter::AdapterKind::OpenAI,
+        "openai_resp" => genai::adapter::AdapterKind::OpenAIResp,
         "groq" => genai::adapter::AdapterKind::Groq,
         "deepseek" => genai::adapter::AdapterKind::DeepSeek,
         "anthropic" | "claude" => genai::adapter::AdapterKind::Anthropic,
@@ -94,6 +97,7 @@ fn build_genai_client(providers: &HashMap<String, ProviderConfig>) -> genai::Cli
 fn provider_for_adapter(kind: genai::adapter::AdapterKind) -> String {
     match kind {
         genai::adapter::AdapterKind::OpenAI => "openai".to_string(),
+        genai::adapter::AdapterKind::OpenAIResp => "openai_resp".to_string(),
         genai::adapter::AdapterKind::Anthropic => "anthropic".to_string(),
         genai::adapter::AdapterKind::Gemini => "gemini".to_string(),
         genai::adapter::AdapterKind::Ollama => "ollama".to_string(),
@@ -108,6 +112,8 @@ fn provider_for_adapter(kind: genai::adapter::AdapterKind) -> String {
 
 struct ExecState {
     client: genai::Client,
+    auth_resolver: Option<Arc<dyn crate::providers::RuntimeAuthResolver>>,
+    provider_headers: HashMap<String, HashMap<String, String>>,
     tool_defs: Vec<piko_protocol::tools::ToolDef>,
     /// Per-provider streaming-fallback opt-out (default enabled).
     streaming_fallback: HashMap<String, bool>,
@@ -131,6 +137,8 @@ impl LlmdExecutor {
         Self {
             state: Arc::new(ExecState {
                 client: genai::Client::default(),
+                auth_resolver: None,
+                provider_headers: HashMap::new(),
                 tool_defs: vec![],
                 streaming_fallback: HashMap::new(),
             }),
@@ -145,9 +153,15 @@ impl LlmdExecutor {
             .iter()
             .map(|(id, cfg)| (id.clone(), cfg.streaming_fallback.unwrap_or(true)))
             .collect();
+        let provider_headers = providers
+            .iter()
+            .filter_map(|(id, config)| config.headers.clone().map(|headers| (id.clone(), headers)))
+            .collect();
         Self {
             state: Arc::new(ExecState {
                 client: build_genai_client(&providers),
+                auth_resolver: None,
+                provider_headers,
                 tool_defs: vec![],
                 streaming_fallback,
             }),
@@ -155,6 +169,16 @@ impl LlmdExecutor {
             retry: RetryConfig::default(),
             telemetry: Arc::new(crate::telemetry::NoopGatewayTelemetry),
         }
+    }
+
+    pub fn with_auth_resolver(
+        mut self,
+        resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
+    ) -> Self {
+        Arc::get_mut(&mut self.state)
+            .expect("auth resolver must be configured before sharing the executor")
+            .auth_resolver = Some(resolver);
+        self
     }
 
     pub fn with_telemetry(
@@ -210,10 +234,9 @@ impl LlmGateway for LlmdExecutor {
         );
         span.record("fallback_enabled", fallback_enabled);
         let telemetry = Arc::clone(&self.telemetry);
+        let (target, request_headers) = self.request_target(&req.provider, &req.model).await?;
 
         let result = async move {
-            let kind = adapter_kind(&req.provider);
-            let model_iden = genai::ModelIden::new(kind, &req.model);
             let llm_messages = build_genai_messages(&req.run_prompt, &req.transcript);
 
             let mut request = genai::chat::ChatRequest::new(llm_messages);
@@ -239,6 +262,11 @@ impl LlmGateway for LlmdExecutor {
 
             // Apply resolved thinking level
             let mut chat_options = genai::chat::ChatOptions::default().with_capture_usage(true);
+            if !request_headers.is_empty() {
+                chat_options = chat_options.with_extra_headers(genai::Headers::from(
+                    request_headers.into_iter().collect::<Vec<_>>(),
+                ));
+            }
             if let Some(ref thinking) = req.thinking {
                 let effort = match thinking.as_str() {
                     "none" => genai::chat::ReasoningEffort::None,
@@ -288,9 +316,7 @@ impl LlmGateway for LlmdExecutor {
                 request: serde_json::to_value(&request).unwrap_or_else(
                     |error| serde_json::json!({ "serializationError": error.to_string() }),
                 ),
-                options: serde_json::to_value(chat_options.as_ref()).unwrap_or_else(
-                    |error| serde_json::json!({ "serializationError": error.to_string() }),
-                ),
+                options: sanitized_options(chat_options.as_ref()),
             });
 
             // Eager open phase: retry with the shared budget, then fall back
@@ -310,7 +336,7 @@ impl LlmGateway for LlmdExecutor {
             };
             let initial = match open_stream_with_retry(
                 &client,
-                &model_iden,
+                &target,
                 &request,
                 chat_options.as_ref(),
                 retry_ctx,
@@ -332,11 +358,7 @@ impl LlmGateway for LlmdExecutor {
                             );
                             ctx.telemetry().record_fallback(&req.model, &req.provider);
                             match client
-                                .exec_chat(
-                                    model_iden.clone(),
-                                    request.clone(),
-                                    chat_options.as_ref(),
-                                )
+                                .exec_chat(target.clone(), request.clone(), chat_options.as_ref())
                                 .await
                             {
                                 Ok(resp) => OpenOutcome::FallbackEvents(
@@ -399,8 +421,7 @@ impl LlmGateway for LlmdExecutor {
         messages: Vec<piko_protocol::messages::Message>,
         _settings: piko_protocol::model::ModelRunSettings,
     ) -> Result<String, String> {
-        let kind = adapter_kind(&model.provider);
-        let model_iden = genai::ModelIden::new(kind, &model.id);
+        let (target, request_headers) = self.request_target(&model.provider, &model.id).await?;
         let sys = system_prompt.unwrap_or_default();
         let prompt = piko_protocol::SemanticRunPrompt {
             blocks: if sys.is_empty() {
@@ -412,6 +433,11 @@ impl LlmGateway for LlmdExecutor {
         };
         let genai_messages = build_genai_messages(&prompt, &messages);
         let request = genai::chat::ChatRequest::new(genai_messages);
+        let chat_options = (!request_headers.is_empty()).then(|| {
+            genai::chat::ChatOptions::default().with_extra_headers(genai::Headers::from(
+                request_headers.into_iter().collect::<Vec<_>>(),
+            ))
+        });
 
         let policy = RetryPolicy::from_config(&self.retry);
         let mut state = RetryState::default();
@@ -419,7 +445,7 @@ impl LlmGateway for LlmdExecutor {
             match self
                 .state
                 .client
-                .exec_chat(model_iden.clone(), request.clone(), None)
+                .exec_chat(target.clone(), request.clone(), chat_options.as_ref())
                 .await
             {
                 Ok(resp) => break resp,

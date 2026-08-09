@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use piko_protocol::model::ModelSummary;
+use piko_protocol::model::{ModelSummary, ProviderAuthMethod};
 
 use super::oauth::OAuthFlow;
 use super::provider::Provider;
@@ -35,6 +35,11 @@ impl ModelCatalog {
                 provider: p.id().to_string(),
                 models: p.list_models(),
                 has_auth: false, // ModelCatalog doesn't know auth; set by hostd ModelRegistry
+                auth_methods: if self.registry.get_oauth(p.id()).is_some() {
+                    vec![ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth]
+                } else {
+                    vec![ProviderAuthMethod::ApiKey]
+                },
             })
             .collect()
     }
@@ -59,7 +64,7 @@ impl ModelCatalog {
     }
 
     /// Get the OAuth flow for a provider, if registered.
-    pub fn get_oauth(&self, id: &str) -> Option<&dyn OAuthFlow> {
+    pub fn get_oauth(&self, id: &str) -> Option<std::sync::Arc<dyn OAuthFlow>> {
         self.registry.get_oauth(id)
     }
 }

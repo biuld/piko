@@ -165,7 +165,10 @@ impl AuthSelector {
             1,
         ))
     }
-    pub fn new(available_providers: &[String], authenticated: &[String]) -> Self {
+    pub fn new(
+        available_providers: &[piko_protocol::ProviderInfo],
+        authenticated: &[String],
+    ) -> Self {
         let rows = Self::build_menu_tree(available_providers, authenticated);
         let mut menu = MenuStack::new();
         menu.open("authentication", MenuRowLayout::Stacked, rows);
@@ -177,22 +180,21 @@ impl AuthSelector {
     }
 
     pub fn build_menu_tree(
-        available_providers: &[String],
+        available_providers: &[piko_protocol::ProviderInfo],
         authenticated: &[String],
     ) -> Vec<MenuRow<AuthAction>> {
-        let oauth_providers = vec!["openai".to_string()];
-        let mut api_key_providers = vec![
-            "anthropic".to_string(),
-            "openai".to_string(),
-            "deepseek".to_string(),
-        ];
+        use piko_protocol::model::ProviderAuthMethod;
 
-        // Merge dynamically discovered providers from hostd
-        for p in available_providers {
-            if !api_key_providers.contains(p) {
-                api_key_providers.push(p.clone());
-            }
-        }
+        let oauth_providers: Vec<String> = available_providers
+            .iter()
+            .filter(|provider| provider.auth_methods.contains(&ProviderAuthMethod::OAuth))
+            .map(|provider| provider.provider.clone())
+            .collect();
+        let api_key_providers: Vec<String> = available_providers
+            .iter()
+            .filter(|provider| provider.auth_methods.contains(&ProviderAuthMethod::ApiKey))
+            .map(|provider| provider.provider.clone())
+            .collect();
 
         let oauth_children = oauth_providers
             .into_iter()
@@ -252,7 +254,11 @@ impl AuthSelector {
         ]
     }
 
-    pub fn reset(&mut self, available_providers: &[String], authenticated: &[String]) {
+    pub fn reset(
+        &mut self,
+        available_providers: &[piko_protocol::ProviderInfo],
+        authenticated: &[String],
+    ) {
         self.state = AuthSelectorState::Menu;
         self.filter.clear();
         let rows = Self::build_menu_tree(available_providers, authenticated);
@@ -398,7 +404,15 @@ mod tests {
 
     #[test]
     fn build_tree_marks_authenticated_providers() {
-        let providers = vec!["anthropic".to_string(), "openai".to_string()];
+        let providers = ["anthropic", "openai"]
+            .into_iter()
+            .map(|provider| piko_protocol::ProviderInfo {
+                provider: provider.to_string(),
+                models: Vec::new(),
+                has_auth: provider == "anthropic",
+                auth_methods: vec![piko_protocol::model::ProviderAuthMethod::ApiKey],
+            })
+            .collect::<Vec<_>>();
         let rows = AuthSelector::build_menu_tree(&providers, &["anthropic".to_string()]);
         let MenuRowKind::Branch(api_key_children) = &rows[1].kind else {
             panic!("second root row must be the API-key group");
@@ -413,5 +427,24 @@ mod tests {
             .find(|r| r.title.contains("OpenAI"))
             .expect("openai row");
         assert!(!openai.is_active);
+    }
+
+    #[test]
+    fn build_tree_uses_host_advertised_oauth_capability() {
+        let providers = vec![piko_protocol::ProviderInfo {
+            provider: "example".into(),
+            models: Vec::new(),
+            has_auth: false,
+            auth_methods: vec![piko_protocol::model::ProviderAuthMethod::OAuth],
+        }];
+        let rows = AuthSelector::build_menu_tree(&providers, &[]);
+        let MenuRowKind::Branch(oauth_children) = &rows[0].kind else {
+            panic!("first root row must be the OAuth group");
+        };
+        assert_eq!(oauth_children[0].title, "example");
+        assert!(matches!(
+            &oauth_children[0].kind,
+            MenuRowKind::Action(AuthAction::StartOAuth { provider }) if provider == "example"
+        ));
     }
 }

@@ -117,6 +117,7 @@ fn model_catalog_resolves_context_window() {
     app.model.providers = vec![piko_protocol::ProviderInfo {
         provider: "openai".into(),
         has_auth: true,
+        auth_methods: vec![piko_protocol::model::ProviderAuthMethod::ApiKey],
         models: vec![piko_protocol::ModelSummary {
             id: "gpt-4o".into(),
             name: "GPT-4o".into(),

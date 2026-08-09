@@ -28,12 +28,13 @@ pub(crate) async fn build_orch_turn_runner(
         .ok_or_else(|| "no model available for hostd".to_string())?;
 
     let provider = &resolved.provider;
-    let api_key = auth
-        .resolve_oauth_api_key(provider)
+    let oauth_flow = registry.get_oauth(provider);
+    let credential = auth
+        .resolve_credential(provider, oauth_flow.as_deref())
         .await
         .map_err(|e| format!("failed to resolve auth for provider {provider}: {e}"))?
-        .or_else(|| auth.get_api_key(provider))
         .ok_or_else(|| format!("no auth configured for provider {provider}"))?;
+    let api_key = credential.secret().to_string();
 
     let api_key_for_runner = api_key.clone();
     let mut providers = std::collections::HashMap::new();
@@ -74,10 +75,21 @@ pub(crate) async fn build_orch_turn_runner(
             .and_then(|r| r.budget_ms)
             .unwrap_or(60_000),
     };
-    let executor = piko_llmd::build_gateway_with_telemetry(
+    let mut oauth_flows = std::collections::HashMap::new();
+    if credential.is_oauth() {
+        let flow = oauth_flow
+            .ok_or_else(|| format!("no OAuth implementation registered for provider {provider}"))?;
+        oauth_flows.insert(provider.clone(), flow);
+    }
+    let auth_resolver = std::sync::Arc::new(piko_llmd::providers::StoredOAuthResolver::new(
+        auth,
+        oauth_flows,
+    ));
+    let executor = piko_llmd::build_gateway_with_auth(
         providers,
         retry_config,
         crate::telemetry::handle(),
+        auth_resolver,
     );
     let thinking = settings.default_thinking_level.clone();
     let thinking_map = resolved.model.thinking_level_map.clone();

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use piko_hostd::domain::config::ModelRegistry;
 use piko_llmd::auth::{AuthCredential, AuthStorage};
 use piko_llmd::providers::ProviderRegistry;
+use piko_protocol::model::ProviderAuthMethod;
 
 fn registry_with_openai_key() -> ModelRegistry {
     let mut auth = HashMap::new();
@@ -23,6 +24,24 @@ fn resolves_default_model_with_auth_config() {
     assert_eq!(resolved.model.id, "gpt-4o");
     assert_eq!(resolved.model.name, "GPT-4o");
     assert_eq!(resolved.provider_config.api_key, Some("openai-key".into()));
+}
+
+#[test]
+fn advertises_registered_authentication_methods() {
+    let providers = registry_with_openai_key().list_providers();
+    let openai = providers
+        .iter()
+        .find(|provider| provider.provider == "openai")
+        .unwrap();
+    assert_eq!(
+        openai.auth_methods,
+        vec![ProviderAuthMethod::ApiKey, ProviderAuthMethod::OAuth]
+    );
+    let anthropic = providers
+        .iter()
+        .find(|provider| provider.provider == "anthropic")
+        .unwrap();
+    assert_eq!(anthropic.auth_methods, vec![ProviderAuthMethod::ApiKey]);
 }
 
 #[test]
@@ -65,6 +84,10 @@ max_tokens = 4096
         .unwrap();
     assert_eq!(resolved.model.id, "mycloud-fast");
     assert_eq!(resolved.provider, "mycloud");
+    assert_eq!(
+        resolved.provider_config.base_url.as_deref(),
+        Some("https://api.mycloud.example/v1")
+    );
 }
 
 #[test]

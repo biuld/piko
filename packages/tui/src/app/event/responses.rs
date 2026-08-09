@@ -119,14 +119,12 @@ impl AppState {
             Ok(piko_protocol::CommandResult::ModelListed { providers, .. }) => {
                 let pending = self.session.pending.take(&response_command_id);
                 self.model.providers = providers.clone();
-                let provider_names: Vec<String> =
-                    providers.iter().map(|p| p.provider.clone()).collect();
                 let auth_names: Vec<String> = providers
                     .iter()
                     .filter(|p| p.has_auth)
                     .map(|p| p.provider.clone())
                     .collect();
-                self.auth_selector.reset(&provider_names, &auth_names);
+                self.auth_selector.reset(&providers, &auth_names);
                 self.models.load(flatten_models(providers));
                 match pending {
                     Some(crate::app::pending::PendingCommandKind::BootstrapModels) => {

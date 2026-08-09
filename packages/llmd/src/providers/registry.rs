@@ -7,7 +7,7 @@ use super::provider::Provider;
 
 pub struct ProviderRegistry {
     providers: std::collections::HashMap<String, Box<dyn Provider>>,
-    oauth_flows: std::collections::HashMap<String, Box<dyn OAuthFlow>>,
+    oauth_flows: std::collections::HashMap<String, std::sync::Arc<dyn OAuthFlow>>,
 }
 
 impl std::fmt::Debug for ProviderRegistry {
@@ -29,7 +29,9 @@ impl ProviderRegistry {
             registry.register(Box::new(provider));
         }
         // Register built-in OAuth flows
-        registry.register_oauth(Box::new(super::oauth::openai::OpenAIProvider::new()));
+        registry.register_oauth(std::sync::Arc::new(
+            super::oauth::openai::OpenAIOAuthFlow::new(),
+        ));
         registry
     }
 
@@ -37,7 +39,7 @@ impl ProviderRegistry {
         self.providers.insert(provider.id().to_string(), provider);
     }
 
-    pub fn register_oauth(&mut self, flow: Box<dyn OAuthFlow>) {
+    pub fn register_oauth(&mut self, flow: std::sync::Arc<dyn OAuthFlow>) {
         self.oauth_flows
             .insert(flow.provider_id().to_string(), flow);
     }
@@ -70,8 +72,8 @@ impl ProviderRegistry {
     }
 
     /// Get the OAuth flow for a provider, if registered.
-    pub fn get_oauth(&self, id: &str) -> Option<&dyn OAuthFlow> {
-        self.oauth_flows.get(id).map(|f| f.as_ref())
+    pub fn get_oauth(&self, id: &str) -> Option<std::sync::Arc<dyn OAuthFlow>> {
+        self.oauth_flows.get(id).cloned()
     }
 
     /// Iterate over all registered providers.

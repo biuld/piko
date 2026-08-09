@@ -190,6 +190,7 @@ fn c3_model_listed_populates_catalog() {
                 providers: vec![piko_protocol::ProviderInfo {
                     provider: "openai".into(),
                     has_auth: true,
+                    auth_methods: vec![piko_protocol::model::ProviderAuthMethod::ApiKey],
                     models: vec![],
                 }],
                 timestamp: 1,

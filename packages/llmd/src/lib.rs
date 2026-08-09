@@ -39,3 +39,22 @@ pub fn build_gateway_with_telemetry(
 
     Arc::new(exec)
 }
+
+pub fn build_gateway_with_auth(
+    providers: HashMap<String, piko_protocol::config::ProviderConfig>,
+    retry: RetryConfig,
+    telemetry: Arc<dyn telemetry::GatewayTelemetry>,
+    auth_resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
+) -> Arc<dyn crate::gateway::LlmGateway> {
+    let exec = executor::LlmdExecutor::from_providers(providers)
+        .with_auth_resolver(auth_resolver)
+        .with_retry(retry)
+        .with_telemetry(telemetry)
+        .add_middleware(Arc::new(
+            middleware::token_usage::TokenUsageMiddleware::new(),
+        ))
+        .add_middleware(Arc::new(
+            middleware::cost_tracker::CostTrackerMiddleware::new(),
+        ));
+    Arc::new(exec)
+}
