@@ -202,8 +202,8 @@ fn assistant_content_block_text(block: &ContentBlock) -> Option<String> {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
         ContentBlock::Image { .. } => None,
-        ContentBlock::HostedToolActivity { .. }
-        | ContentBlock::HostedToolApproval { .. }
+        ContentBlock::UpstreamToolActivity { .. }
+        | ContentBlock::UpstreamToolApproval { .. }
         | ContentBlock::Source { .. }
         | ContentBlock::Citation { .. }
         | ContentBlock::Artifact { .. } => Some(block.text_projection()),

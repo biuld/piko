@@ -129,8 +129,8 @@ fn encode_message(item: &ConversationItemKind) -> Value {
         } => json!({
             "role":"tool","tool_call_id":call_id.0,"content":text_from_content(content)
         }),
-        ConversationItemKind::HostedActivity(activity) => json!({
-            "role":"assistant","content":format!("[hosted tool activity: {activity:?}]")
+        ConversationItemKind::UpstreamActivity(activity) => json!({
+            "role":"assistant","content":format!("[upstream tool activity: {activity:?}]")
         }),
         ConversationItemKind::Source(source) => json!({
             "role":"assistant","content":format!("[source: {source:?}]")

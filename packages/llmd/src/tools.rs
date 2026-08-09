@@ -1,8 +1,8 @@
-use crate::capabilities::{HostedToolKind, ToolExecutionLocus};
+use crate::capabilities::{ToolExecutionLocus, UpstreamToolKind};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostedApprovalPolicy {
+pub enum UpstreamApprovalPolicy {
     Never,
     Always,
     OnRequest,
@@ -15,28 +15,28 @@ pub struct SemanticResourceRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostedToolDefinition {
+pub struct UpstreamToolDefinition {
     pub name: String,
-    pub kind: HostedToolKind,
+    pub kind: UpstreamToolKind,
     pub resources: Vec<SemanticResourceRef>,
-    pub approval: HostedApprovalPolicy,
-    /// Host-owned authorization for provider-side execution. Catalog support
-    /// alone is never sufficient to dispatch a hosted tool.
-    pub authorization: Option<HostedExecutionAuthorization>,
+    pub approval: UpstreamApprovalPolicy,
+    /// Host-owned authorization for upstream (model-API-side) execution.
+    /// Catalog support alone is never sufficient to dispatch an upstream tool.
+    pub authorization: Option<UpstreamExecutionAuthorization>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HostedExecutionAuthorization {
+pub struct UpstreamExecutionAuthorization {
     pub approval_id: String,
 }
 
 #[derive(Debug, Clone)]
 pub enum InferenceTool {
     Caller(piko_protocol::ToolDef),
-    Hosted(HostedToolDefinition),
+    Upstream(UpstreamToolDefinition),
     Hybrid {
         caller: piko_protocol::ToolDef,
-        hosted: HostedToolDefinition,
+        upstream: UpstreamToolDefinition,
     },
 }
 
@@ -44,7 +44,7 @@ impl InferenceTool {
     pub fn locus(&self) -> ToolExecutionLocus {
         match self {
             Self::Caller(_) => ToolExecutionLocus::Caller,
-            Self::Hosted(_) => ToolExecutionLocus::Provider,
+            Self::Upstream(_) => ToolExecutionLocus::Upstream,
             Self::Hybrid { .. } => ToolExecutionLocus::Hybrid,
         }
     }
@@ -52,7 +52,7 @@ impl InferenceTool {
     pub fn name(&self) -> &str {
         match self {
             Self::Caller(definition) => &definition.name,
-            Self::Hosted(definition) => &definition.name,
+            Self::Upstream(definition) => &definition.name,
             Self::Hybrid { caller, .. } => &caller.name,
         }
     }
@@ -63,16 +63,17 @@ impl InferenceTool {
             | Self::Hybrid {
                 caller: definition, ..
             } => Some(definition),
-            Self::Hosted(_) => None,
+            Self::Upstream(_) => None,
         }
     }
 
-    pub(crate) fn hosted_kind(&self) -> Option<HostedToolKind> {
+    pub(crate) fn upstream_kind(&self) -> Option<UpstreamToolKind> {
         match self {
             Self::Caller(_) => None,
-            Self::Hosted(definition)
+            Self::Upstream(definition)
             | Self::Hybrid {
-                hosted: definition, ..
+                upstream: definition,
+                ..
             } => Some(definition.kind),
         }
     }
@@ -85,22 +86,22 @@ impl From<piko_protocol::ToolDef> for InferenceTool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HostedToolActivity {
+pub struct UpstreamToolActivity {
     pub activity_id: String,
     pub tool_name: String,
-    pub kind: HostedToolKind,
-    pub status: HostedActivityStatus,
+    pub kind: UpstreamToolKind,
+    pub status: UpstreamActivityStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum HostedActivityStatus {
+pub enum UpstreamActivityStatus {
     Started,
     InProgress,
     Completed,
     Failed,
 }
 
-impl HostedActivityStatus {
+impl UpstreamActivityStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Started => "started",
@@ -112,7 +113,7 @@ impl HostedActivityStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct HostedApprovalRequest {
+pub struct UpstreamApprovalRequest {
     pub approval_id: String,
     pub tool_name: String,
     pub summary: String,
@@ -142,8 +143,8 @@ pub struct GeneratedArtifact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceAuxiliary {
-    HostedActivity(HostedToolActivity),
-    ApprovalRequired(HostedApprovalRequest),
+    UpstreamActivity(UpstreamToolActivity),
+    ApprovalRequired(UpstreamApprovalRequest),
     Source(InferenceSource),
     Citation(InferenceCitation),
     Artifact(GeneratedArtifact),

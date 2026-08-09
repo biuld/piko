@@ -36,7 +36,7 @@ of particular protocols and duplicates some concepts:
    same inference operation through different models.
 6. Public model metadata mixes model identity, presentation, API location, and
    incomplete capability booleans.
-7. Responses exposes hosted tools, durable background execution, conversation
+7. Responses exposes upstream tools, durable background execution, conversation
    resources, resumable streams, and server-side compaction. Discarding these
    would lose useful capabilities, while exposing their resource DTOs would
    make the core OpenAI-specific.
@@ -67,7 +67,7 @@ common denominator.
    request.
 6. A host restart restores the transcript and opaque checkpoint. The next
    model step has the same semantics as a step performed before the restart.
-7. An authorized target offers hosted search, retrieval, MCP, shell, computer,
+7. An authorized target offers upstream search, retrieval, MCP, shell, computer,
    image, or deferred-tool capabilities. The caller observes typed activity,
    approvals, citations, and artifacts without constructing Responses tools.
 8. A target supports durable background execution. A caller can detach,
@@ -96,7 +96,7 @@ common denominator.
   and result model.
 - Safe persistence, restoration, redaction, and size bounds for opaque
   checkpoints.
-- Typed capability semantics for caller-executed, provider-hosted, and hybrid
+- Typed capability semantics for caller-executed, upstream, and hybrid
   tools, deferred tool discovery, citations, and generated artifacts.
 - A protocol-neutral optional durable-execution lifecycle: start, attach,
   resume after an opaque cursor, observe terminal state, and cancel.
@@ -109,7 +109,7 @@ common denominator.
 - A public provider-plugin or protocol-adapter ABI.
 - Exposing provider response, conversation, vector-store, file, or batch DTOs
   and identifiers directly to model consumers.
-- Enabling every provider-hosted tool in the first implementation slice; each
+- Enabling every upstream tool in the first implementation slice; each
   externally acting capability still requires authorization, approval, and
   observability contracts.
 - Making llmd the durable owner of sessions or transcripts.
@@ -181,16 +181,17 @@ agent runtime as substitutes for modeled controls.
 ### Advanced capabilities
 
 The neutral model distinguishes capability semantics from execution locus. A
-tool or operation may be caller-executed, provider-hosted, or hybrid. Hosted
-search, retrieval, MCP, shell, computer use, image generation, deferred tool
-loading, and programmatic tool execution use typed requests and emit typed
-activity, approval, source, citation, and artifact events where applicable.
+tool or operation may be caller-executed, upstream-executed, or hybrid.
+Upstream search, retrieval, MCP, shell, computer use, image generation,
+deferred tool loading, and programmatic tool execution use typed requests and
+emit typed activity, approval, source, citation, and artifact events where
+applicable.
 
-Provider-hosted execution is opt-in and policy-gated because it does not pass
-through orchd's local tool executor. Catalog support alone never authorizes
-network, code, computer, file, or remote MCP activity.
+Upstream execution is opt-in and policy-gated because it does not pass through
+orchd's local tool executor. Catalog support alone never authorizes network,
+code, computer, file, or remote MCP activity.
 
-Hosted calls, results, sources, citations, and artifacts that affect later
+Upstream calls, results, sources, citations, and artifacts that affect later
 turns remain part of the logical conversation in semantic form. Wire-only
 execution records needed for replay remain inside the checkpoint.
 
@@ -267,9 +268,9 @@ Restored checkpoints pass the same validation as newly produced checkpoints.
       protocol-neutral contract tests.
 - [x] Opaque checkpoint parsing is bounded, rejects malformed data, and never
       logs checkpoint payloads or credential material.
-- [x] Capability discovery distinguishes caller-executed, provider-hosted, and
+- [x] Capability discovery distinguishes caller-executed, upstream, and
       hybrid tools without exposing provider tool JSON.
-- [x] Hosted tool activity, approvals, citations, sources, and artifacts have
+- [x] Upstream tool activity, approvals, citations, sources, and artifacts have
       semantic event forms; hostd policy is required in addition to model
       capability support.
 - [x] Conversation IDs, response IDs, compaction items, background IDs, and
@@ -291,7 +292,7 @@ Restored checkpoints pass the same validation as newly produced checkpoints.
 | Are provider-specific option maps allowed? | No public untyped passthrough. New required semantics are modeled explicitly. | Avoids protocol leakage and unverifiable capability behavior. |
 | Are streaming and non-streaming separate operations? | No. They are delivery modes of one inference operation. | Keeps request and result semantics identical. |
 | Are Responses advanced features discarded for neutrality? | No. General semantics enter typed capability and lifecycle models; provider resources remain private. | Neutrality must preserve capability, not impose a lowest common denominator. |
-| May provider-hosted tools bypass piko policy? | No. Capability support and execution authorization are independent gates. | Hosted execution can perform externally acting operations outside orchd's local executor. |
+| May upstream tools bypass piko policy? | No. Capability support and execution authorization are independent gates. | Upstream execution can perform externally acting operations outside orchd's local executor. |
 | Can provider compaction replace piko history? | No. It is an opaque wire-context optimization. | hostd remains authoritative and provider retention cannot be the only durable state. |
 
 ## Resolved implementation choices

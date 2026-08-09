@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum HostedToolKind {
+pub enum UpstreamToolKind {
     Search,
     Retrieval,
     RemoteMcp,
@@ -20,14 +20,14 @@ pub enum HostedToolKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum HostedActivityStatus {
+pub enum UpstreamActivityStatus {
     Started,
     InProgress,
     Completed,
     Failed,
 }
 
-impl HostedActivityStatus {
+impl UpstreamActivityStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Started => "started",
@@ -55,13 +55,13 @@ pub enum ContentBlock {
         #[serde(rename = "mimeType")]
         mime_type: String,
     },
-    HostedToolActivity {
+    UpstreamToolActivity {
         activity_id: String,
         tool_name: String,
-        kind: HostedToolKind,
-        status: HostedActivityStatus,
+        kind: UpstreamToolKind,
+        status: UpstreamActivityStatus,
     },
-    HostedToolApproval {
+    UpstreamToolApproval {
         approval_id: String,
         tool_name: String,
         summary: String,
@@ -91,12 +91,12 @@ impl ContentBlock {
             Self::Text { text } => text.clone(),
             Self::Thinking { thinking, .. } => format!("[thinking] {thinking}"),
             Self::Image { mime_type, .. } => format!("[image: {mime_type}]"),
-            Self::HostedToolActivity {
+            Self::UpstreamToolActivity {
                 tool_name, status, ..
-            } => format!("[hosted tool: {tool_name} ({})]", status.as_str()),
-            Self::HostedToolApproval {
+            } => format!("[upstream tool: {tool_name} ({})]", status.as_str()),
+            Self::UpstreamToolApproval {
                 tool_name, summary, ..
-            } => format!("[hosted tool approval required: {tool_name}: {summary}]"),
+            } => format!("[upstream tool approval required: {tool_name}: {summary}]"),
             Self::Source { title, uri, .. } => format!(
                 "[source: {}]",
                 title.as_deref().or(uri.as_deref()).unwrap_or("untitled")

@@ -62,7 +62,7 @@ pub(crate) async fn build_orch_turn_runner(
                 reasoning: resolved.model.reasoning,
                 reasoning_efforts: resolved.model.reasoning_efforts.iter().cloned().collect(),
                 refusals: true,
-                hosted_tools: Default::default(),
+                upstream_tools: Default::default(),
                 hybrid_tools: resolved
                     .model
                     .tool_execution_loci

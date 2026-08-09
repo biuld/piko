@@ -131,24 +131,24 @@ fn requested_semantics_are_rejected_instead_of_silently_dropped() {
 }
 
 #[test]
-fn hosted_catalog_support_is_not_execution_authorization() {
-    use crate::capabilities::HostedToolKind;
-    use crate::tools::{HostedApprovalPolicy, HostedToolDefinition, InferenceTool};
+fn upstream_catalog_support_is_not_execution_authorization() {
+    use crate::capabilities::UpstreamToolKind;
+    use crate::tools::{InferenceTool, UpstreamApprovalPolicy, UpstreamToolDefinition};
 
     let mut config = config(ProtocolProfile::Responses {
         continuation: Default::default(),
     });
     config.capabilities = Some(ModelCapabilities {
-        hosted_tools: [HostedToolKind::Search].into_iter().collect(),
+        upstream_tools: [UpstreamToolKind::Search].into_iter().collect(),
         ..Default::default()
     });
     let target = ModelTarget::resolve("custom", "gpt", &config, None).unwrap();
     let mut request = crate::protocols::tests_support::semantic_request();
-    request.tools = vec![InferenceTool::Hosted(HostedToolDefinition {
+    request.tools = vec![InferenceTool::Upstream(UpstreamToolDefinition {
         name: "search".into(),
-        kind: HostedToolKind::Search,
+        kind: UpstreamToolKind::Search,
         resources: Vec::new(),
-        approval: HostedApprovalPolicy::OnRequest,
+        approval: UpstreamApprovalPolicy::OnRequest,
         authorization: None,
     })];
     let error = target.validate(&request).unwrap_err();

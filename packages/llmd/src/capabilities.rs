@@ -18,7 +18,7 @@ pub enum OutputModality {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
-pub enum HostedToolKind {
+pub enum UpstreamToolKind {
     Search,
     Retrieval,
     RemoteMcp,
@@ -29,7 +29,7 @@ pub enum HostedToolKind {
     ProgrammaticExecution,
 }
 
-impl HostedToolKind {
+impl UpstreamToolKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Search => "search",
@@ -47,7 +47,7 @@ impl HostedToolKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub enum ToolExecutionLocus {
     Caller,
-    Provider,
+    Upstream,
     Hybrid,
 }
 
@@ -102,7 +102,7 @@ pub struct ModelCapabilities {
     pub reasoning: ReasoningCapabilities,
     pub structured_output: StructuredOutputCapabilities,
     pub delivery: BTreeSet<DeliveryCapability>,
-    pub hosted_tools: BTreeSet<HostedToolKind>,
+    pub upstream_tools: BTreeSet<UpstreamToolKind>,
     pub state: BTreeSet<StateCapability>,
     pub execution: BTreeSet<ExecutionCapability>,
 }
@@ -137,11 +137,11 @@ impl crate::target::ModelTarget {
         if self.capabilities.tools {
             capabilities.tools.loci.insert(ToolExecutionLocus::Caller);
         }
-        if self.capabilities.hosted_dispatch && !self.capabilities.hosted_tools.is_empty() {
-            capabilities.tools.loci.insert(ToolExecutionLocus::Provider);
-            capabilities.hosted_tools = self.capabilities.hosted_tools.clone();
+        if self.capabilities.upstream_dispatch && !self.capabilities.upstream_tools.is_empty() {
+            capabilities.tools.loci.insert(ToolExecutionLocus::Upstream);
+            capabilities.upstream_tools = self.capabilities.upstream_tools.clone();
         }
-        if self.capabilities.hosted_dispatch && self.capabilities.hybrid_tools {
+        if self.capabilities.upstream_dispatch && self.capabilities.hybrid_tools {
             capabilities.tools.loci.insert(ToolExecutionLocus::Hybrid);
         }
         capabilities.tools.parallel_calls = self.capabilities.parallel_tools;

@@ -173,7 +173,7 @@ structured output variants are added only with a consumer and capability
 contract; the type layout reserves those semantic categories without a raw
 provider JSON escape hatch.
 
-Tool calls and results include their execution locus. Hosted activity that
+Tool calls and results include their execution locus. Upstream activity that
 affects future turns is retained as semantic conversation items; provider-only
 replay records are retained solely in the opaque checkpoint.
 
@@ -288,15 +288,15 @@ durable checkpoint. The assembled collector enforces the same ordering.
 
 ### Advanced capability families
 
-The public tool algebra includes an execution locus: caller, hosted, or
+The public tool algebra includes an execution locus: caller, upstream, or
 hybrid. Typed variants cover search/retrieval, remote MCP, shell, computer use,
 image generation, deferred tool discovery, and programmatic tool execution.
 Their configuration uses semantic resource references and approval policy;
 raw Responses tool objects remain private.
 
-Hosted and hybrid activity uses neutral tool progress/result, approval,
+Upstream and hybrid activity uses neutral tool progress/result, approval,
 citation/source, and artifact events. Catalog support, hostd authorization,
-and adapter support are separate gates. Remote MCP or hosted shell therefore
+and adapter support are separate gates. Remote MCP or upstream shell therefore
 cannot bypass piko policy merely because a model advertises the capability.
 
 Responses Conversations, response chaining, and encrypted replay are private
@@ -329,7 +329,7 @@ pub struct ModelCapabilities {
     pub reasoning: ReasoningCapabilities,
     pub structured_output: StructuredOutputCapabilities,
     pub delivery: DeliveryCapabilities,
-    pub hosted_tools: HostedToolCapabilities,
+    pub upstream_tools: UpstreamToolCapabilities,
     pub state: StateCapabilities,
     pub execution: ExecutionCapabilities,
 }
@@ -400,7 +400,7 @@ restart needs no in-memory reconstruction beyond the supplied conversation.
 |---|---|
 | `piko-protocol` | Replace adapter-tagged continuation DTO with an opaque checkpoint carrier; remove API location from public model presentation DTO; carry stable semantic item IDs where persistence requires them. |
 | `piko-hostd` | Persist opaque checkpoints unchanged; expose generalized model descriptors; migrate compaction and guardian calls to the unified inference operation. |
-| `piko-orchd` | Build `InferenceRequest`, preserve semantic IDs, consume only neutral events, attach checkpoints without inspection, and remove response-coordinate handling; hosted execution remains policy-gated. |
+| `piko-orchd` | Build `InferenceRequest`, preserve semantic IDs, consume only neutral events, attach checkpoints without inspection, and remove response-coordinate handling; upstream execution remains policy-gated. |
 | `piko-llmd` | Own neutral types, descriptors, checkpoint/handle codecs, conversation planning, capability validation, execution lifecycle, and private adapter state. |
 
 ## Reusable infrastructure
@@ -424,7 +424,7 @@ restart needs no in-memory reconstruction beyond the supplied conversation.
   token; do not trust storage origin.
 - Durable attach: deduplicate events through the opaque cursor and reject a
   handle whose target or auth route no longer matches.
-- Hosted tools: require advertised support and host authorization; denial
+- Upstream tools: require advertised support and host authorization; denial
   cannot be reinterpreted as permission to execute a local tool.
 
 ## Verification
@@ -446,7 +446,7 @@ The landed verification record is
   checkpoint boundary, host restart, malformed persisted tokens, and
   non-replayable continuation failure.
 - Lifecycle tests for background detach/attach, polling, cursor deduplication,
-  terminal restoration, cancellation, hosted-tool policy denial, and typed
+  terminal restoration, cancellation, upstream-tool policy denial, and typed
   citation/artifact projection.
 - Architecture scans proving orchd/hostd contain no protocol kinds, adapter
   names, response resource IDs, output/content indexes, continuation-policy

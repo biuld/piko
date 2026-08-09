@@ -54,7 +54,7 @@ pub enum OutputModality {
 #[serde(rename_all = "snake_case")]
 pub enum ToolExecutionLocus {
     Caller,
-    Provider,
+    Upstream,
     Hybrid,
 }
 

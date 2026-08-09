@@ -155,8 +155,8 @@ pub(super) fn result_events(result: InferenceResult) -> Vec<InferenceEvent> {
         });
     }
     events.extend(result.auxiliary.into_iter().map(|item| match item {
-        crate::tools::InferenceAuxiliary::HostedActivity(value) => {
-            InferenceEvent::HostedActivity(value)
+        crate::tools::InferenceAuxiliary::UpstreamActivity(value) => {
+            InferenceEvent::UpstreamActivity(value)
         }
         crate::tools::InferenceAuxiliary::ApprovalRequired(value) => {
             InferenceEvent::ApprovalRequired(value)

@@ -41,8 +41,8 @@ pub async fn collect_execution(
                     ));
                 }
             }
-            InferenceEvent::HostedActivity(value) => {
-                auxiliary.push(crate::tools::InferenceAuxiliary::HostedActivity(value))
+            InferenceEvent::UpstreamActivity(value) => {
+                auxiliary.push(crate::tools::InferenceAuxiliary::UpstreamActivity(value))
             }
             InferenceEvent::ApprovalRequired(value) => {
                 auxiliary.push(crate::tools::InferenceAuxiliary::ApprovalRequired(value))

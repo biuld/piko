@@ -66,15 +66,15 @@ Responses continuation fields remain confined to llmd.
   items, usage, finish reason, and checkpoint. OpenAI API-key/OAuth and the
   bundled DeepSeek Chat/Responses profiles enter through the same target and
   inference contracts.
-- Caller, hosted, and hybrid tools have typed capability and request forms.
-  Hosted activity, approval requirements, sources, citations, and artifacts
+- Caller, upstream, and hybrid tools have typed capability and request forms.
+  Upstream activity, approval requirements, sources, citations, and artifacts
   are semantic events and durable protocol blocks, without raw provider tool
   JSON.
-- orchd's hosted-event test establishes the critical ownership boundary: it
-  projects hosted observations into assistant output but neither authorizes
-  nor executes them. Catalog capability is insufficient for dispatch; hosted
+- orchd's upstream-event test establishes the critical ownership boundary: it
+  projects upstream observations into assistant output but neither authorizes
+  nor executes them. Catalog capability is insufficient for dispatch; upstream
   execution additionally requires explicit authorization and an adapter gate.
-  Production target construction leaves that gate disabled, so no hosted
+  Production target construction leaves that gate disabled, so no upstream
   external action is enabled by this slice. A future enabling path must obtain
   hostd-owned policy approval first.
 - Provider-side compaction is represented only as target state capability and

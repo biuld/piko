@@ -70,58 +70,60 @@ impl AssistantMessageState {
             }
             InferenceEvent::Checkpoint(checkpoint) => self.checkpoint = Some(checkpoint.clone()),
             InferenceEvent::ToolCallDelta { .. } => {}
-            InferenceEvent::HostedActivity(activity) => {
-                self.semantic_blocks.push(ContentBlock::HostedToolActivity {
-                    activity_id: activity.activity_id.clone(),
-                    tool_name: activity.tool_name.clone(),
-                    kind: match activity.kind {
-                        piko_llmd::capabilities::HostedToolKind::Search => {
-                            piko_protocol::messages::HostedToolKind::Search
-                        }
-                        piko_llmd::capabilities::HostedToolKind::Retrieval => {
-                            piko_protocol::messages::HostedToolKind::Retrieval
-                        }
-                        piko_llmd::capabilities::HostedToolKind::RemoteMcp => {
-                            piko_protocol::messages::HostedToolKind::RemoteMcp
-                        }
-                        piko_llmd::capabilities::HostedToolKind::Shell => {
-                            piko_protocol::messages::HostedToolKind::Shell
-                        }
-                        piko_llmd::capabilities::HostedToolKind::Computer => {
-                            piko_protocol::messages::HostedToolKind::Computer
-                        }
-                        piko_llmd::capabilities::HostedToolKind::ImageGeneration => {
-                            piko_protocol::messages::HostedToolKind::ImageGeneration
-                        }
-                        piko_llmd::capabilities::HostedToolKind::DeferredDiscovery => {
-                            piko_protocol::messages::HostedToolKind::DeferredDiscovery
-                        }
-                        piko_llmd::capabilities::HostedToolKind::ProgrammaticExecution => {
-                            piko_protocol::messages::HostedToolKind::ProgrammaticExecution
-                        }
-                    },
-                    status: match activity.status {
-                        piko_llmd::tools::HostedActivityStatus::Started => {
-                            piko_protocol::messages::HostedActivityStatus::Started
-                        }
-                        piko_llmd::tools::HostedActivityStatus::InProgress => {
-                            piko_protocol::messages::HostedActivityStatus::InProgress
-                        }
-                        piko_llmd::tools::HostedActivityStatus::Completed => {
-                            piko_protocol::messages::HostedActivityStatus::Completed
-                        }
-                        piko_llmd::tools::HostedActivityStatus::Failed => {
-                            piko_protocol::messages::HostedActivityStatus::Failed
-                        }
-                    },
-                });
+            InferenceEvent::UpstreamActivity(activity) => {
+                self.semantic_blocks
+                    .push(ContentBlock::UpstreamToolActivity {
+                        activity_id: activity.activity_id.clone(),
+                        tool_name: activity.tool_name.clone(),
+                        kind: match activity.kind {
+                            piko_llmd::capabilities::UpstreamToolKind::Search => {
+                                piko_protocol::messages::UpstreamToolKind::Search
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::Retrieval => {
+                                piko_protocol::messages::UpstreamToolKind::Retrieval
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::RemoteMcp => {
+                                piko_protocol::messages::UpstreamToolKind::RemoteMcp
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::Shell => {
+                                piko_protocol::messages::UpstreamToolKind::Shell
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::Computer => {
+                                piko_protocol::messages::UpstreamToolKind::Computer
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::ImageGeneration => {
+                                piko_protocol::messages::UpstreamToolKind::ImageGeneration
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::DeferredDiscovery => {
+                                piko_protocol::messages::UpstreamToolKind::DeferredDiscovery
+                            }
+                            piko_llmd::capabilities::UpstreamToolKind::ProgrammaticExecution => {
+                                piko_protocol::messages::UpstreamToolKind::ProgrammaticExecution
+                            }
+                        },
+                        status: match activity.status {
+                            piko_llmd::tools::UpstreamActivityStatus::Started => {
+                                piko_protocol::messages::UpstreamActivityStatus::Started
+                            }
+                            piko_llmd::tools::UpstreamActivityStatus::InProgress => {
+                                piko_protocol::messages::UpstreamActivityStatus::InProgress
+                            }
+                            piko_llmd::tools::UpstreamActivityStatus::Completed => {
+                                piko_protocol::messages::UpstreamActivityStatus::Completed
+                            }
+                            piko_llmd::tools::UpstreamActivityStatus::Failed => {
+                                piko_protocol::messages::UpstreamActivityStatus::Failed
+                            }
+                        },
+                    });
             }
             InferenceEvent::ApprovalRequired(approval) => {
-                self.semantic_blocks.push(ContentBlock::HostedToolApproval {
-                    approval_id: approval.approval_id.clone(),
-                    tool_name: approval.tool_name.clone(),
-                    summary: approval.summary.clone(),
-                });
+                self.semantic_blocks
+                    .push(ContentBlock::UpstreamToolApproval {
+                        approval_id: approval.approval_id.clone(),
+                        tool_name: approval.tool_name.clone(),
+                        summary: approval.summary.clone(),
+                    });
             }
             InferenceEvent::Source(source) => self.semantic_blocks.push(ContentBlock::Source {
                 source_id: source.source_id.clone(),
@@ -264,12 +266,12 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
 
 #[cfg(test)]
 mod tests {
-    use piko_llmd::capabilities::HostedToolKind;
+    use piko_llmd::capabilities::UpstreamToolKind;
     use piko_llmd::gateway::{
-        GeneratedArtifact, HostedApprovalRequest, HostedToolActivity, InferenceCitation,
-        InferenceEvent, InferenceSource, OutputItemId, SemanticResourceRef,
+        GeneratedArtifact, InferenceCitation, InferenceEvent, InferenceSource, OutputItemId,
+        SemanticResourceRef, UpstreamApprovalRequest, UpstreamToolActivity,
     };
-    use piko_llmd::tools::HostedActivityStatus;
+    use piko_llmd::tools::UpstreamActivityStatus;
     use piko_protocol::Message;
 
     use super::*;
@@ -338,16 +340,16 @@ mod tests {
     }
 
     #[test]
-    fn hosted_observations_are_projected_without_orchd_policy_decisions() {
+    fn upstream_observations_are_projected_without_orchd_policy_decisions() {
         let mut state = AssistantMessageState::new();
         for event in [
-            InferenceEvent::HostedActivity(HostedToolActivity {
+            InferenceEvent::UpstreamActivity(UpstreamToolActivity {
                 activity_id: "activity-1".into(),
                 tool_name: "search".into(),
-                kind: HostedToolKind::Search,
-                status: HostedActivityStatus::InProgress,
+                kind: UpstreamToolKind::Search,
+                status: UpstreamActivityStatus::InProgress,
             }),
-            InferenceEvent::ApprovalRequired(HostedApprovalRequest {
+            InferenceEvent::ApprovalRequired(UpstreamApprovalRequest {
                 approval_id: "approval-1".into(),
                 tool_name: "search".into(),
                 summary: "search the web".into(),
@@ -379,7 +381,7 @@ mod tests {
         assert!(state.error_message.is_none());
         assert!(matches!(
             &state.semantic_blocks[1],
-            ContentBlock::HostedToolApproval { approval_id, .. } if approval_id == "approval-1"
+            ContentBlock::UpstreamToolApproval { approval_id, .. } if approval_id == "approval-1"
         ));
     }
 }

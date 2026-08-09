@@ -14,10 +14,10 @@ pub struct ModelCapabilities {
     pub reasoning: bool,
     pub reasoning_efforts: std::collections::BTreeSet<piko_protocol::model::ThinkingLevel>,
     pub refusals: bool,
-    pub hosted_tools: std::collections::BTreeSet<crate::capabilities::HostedToolKind>,
+    pub upstream_tools: std::collections::BTreeSet<crate::capabilities::UpstreamToolKind>,
     pub hybrid_tools: bool,
     /// Internal adapter support gate, distinct from catalog discovery.
-    pub hosted_dispatch: bool,
+    pub upstream_dispatch: bool,
     pub parallel_tools: bool,
     pub required_tool_choice: bool,
     pub specific_tool_choice: bool,
@@ -85,9 +85,9 @@ impl Default for ModelCapabilities {
             .into_iter()
             .collect(),
             refusals: true,
-            hosted_tools: Default::default(),
+            upstream_tools: Default::default(),
             hybrid_tools: false,
-            hosted_dispatch: false,
+            upstream_dispatch: false,
             parallel_tools: true,
             required_tool_choice: true,
             specific_tool_choice: true,
@@ -209,9 +209,9 @@ impl ModelTarget {
                     reasoning: capabilities.reasoning,
                     reasoning_efforts: capabilities.reasoning_efforts.clone(),
                     refusals: capabilities.refusals,
-                    hosted_tools: capabilities.hosted_tools.clone(),
+                    upstream_tools: capabilities.upstream_tools.clone(),
                     hybrid_tools: capabilities.hybrid_tools,
-                    hosted_dispatch: capabilities.hosted_dispatch,
+                    upstream_dispatch: capabilities.upstream_dispatch,
                     parallel_tools: capabilities.parallel_tools,
                     required_tool_choice: capabilities.required_tool_choice,
                     specific_tool_choice: capabilities.specific_tool_choice,
@@ -254,14 +254,15 @@ impl ModelTarget {
         for tool in &request.tools {
             if matches!(
                 tool,
-                crate::tools::InferenceTool::Hosted(_) | crate::tools::InferenceTool::Hybrid { .. }
-            ) && !self.capabilities.hosted_dispatch
+                crate::tools::InferenceTool::Upstream(_)
+                    | crate::tools::InferenceTool::Hybrid { .. }
+            ) && !self.capabilities.upstream_dispatch
             {
                 return Err(InferenceError::new(
                     ErrorClass::UnsupportedCapability,
                     &self.id,
                     "validate",
-                    "provider-hosted tool dispatch is not enabled for this target",
+                    "upstream tool dispatch is not enabled for this target",
                 ));
             }
             if matches!(tool, crate::tools::InferenceTool::Hybrid { .. })
@@ -274,24 +275,26 @@ impl ModelTarget {
                     "hybrid tool execution is not supported by this target",
                 ));
             }
-            if let Some(kind) = tool.hosted_kind()
-                && !self.capabilities.hosted_tools.contains(&kind)
+            if let Some(kind) = tool.upstream_kind()
+                && !self.capabilities.upstream_tools.contains(&kind)
             {
                 return Err(InferenceError::new(
                     ErrorClass::UnsupportedCapability,
                     &self.id,
                     "validate",
-                    format!("hosted tool {kind:?} is not supported by this target"),
+                    format!("upstream tool {kind:?} is not supported by this target"),
                 ));
             }
             if matches!(
                 tool,
-                crate::tools::InferenceTool::Hosted(_) | crate::tools::InferenceTool::Hybrid { .. }
+                crate::tools::InferenceTool::Upstream(_)
+                    | crate::tools::InferenceTool::Hybrid { .. }
             ) {
                 let authorized = match tool {
-                    crate::tools::InferenceTool::Hosted(definition)
+                    crate::tools::InferenceTool::Upstream(definition)
                     | crate::tools::InferenceTool::Hybrid {
-                        hosted: definition, ..
+                        upstream: definition,
+                        ..
                     } => definition.authorization.is_some(),
                     crate::tools::InferenceTool::Caller(_) => true,
                 };
@@ -300,7 +303,7 @@ impl ModelTarget {
                         ErrorClass::UnsupportedCapability,
                         &self.id,
                         "validate",
-                        "provider-hosted execution requires host authorization",
+                        "upstream execution requires host authorization",
                     ));
                 }
             }
@@ -418,7 +421,7 @@ impl ModelTarget {
                     .iter()
                     .any(|block| matches!(block, piko_protocol::ContentBlock::Image { .. })),
                 crate::gateway::ConversationItemKind::ToolCall { .. }
-                | crate::gateway::ConversationItemKind::HostedActivity(_)
+                | crate::gateway::ConversationItemKind::UpstreamActivity(_)
                 | crate::gateway::ConversationItemKind::Source(_)
                 | crate::gateway::ConversationItemKind::Citation(_)
                 | crate::gateway::ConversationItemKind::Artifact(_) => false,

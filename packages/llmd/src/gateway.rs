@@ -12,9 +12,9 @@ pub use crate::execution::{
     InferenceExecution, InferenceGateway, InferenceStatus, OpaqueEventCursor, OpaqueExecutionHandle,
 };
 pub use crate::tools::{
-    GeneratedArtifact, HostedApprovalPolicy, HostedApprovalRequest, HostedExecutionAuthorization,
-    HostedToolActivity, HostedToolDefinition, InferenceAuxiliary, InferenceCitation,
-    InferenceSource, InferenceTool, SemanticResourceRef,
+    GeneratedArtifact, InferenceAuxiliary, InferenceCitation, InferenceSource, InferenceTool,
+    SemanticResourceRef, UpstreamApprovalPolicy, UpstreamApprovalRequest,
+    UpstreamExecutionAuthorization, UpstreamToolActivity, UpstreamToolDefinition,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -77,7 +77,7 @@ pub enum ConversationItemKind {
         content: Vec<ContentBlock>,
         is_error: bool,
     },
-    HostedActivity(HostedToolActivity),
+    UpstreamActivity(UpstreamToolActivity),
     Source(InferenceSource),
     Citation(InferenceCitation),
     Artifact(GeneratedArtifact),
@@ -332,8 +332,8 @@ pub enum InferenceEvent {
     },
     Usage(Usage),
     Checkpoint(OpaqueModelCheckpoint),
-    HostedActivity(HostedToolActivity),
-    ApprovalRequired(HostedApprovalRequest),
+    UpstreamActivity(UpstreamToolActivity),
+    ApprovalRequired(UpstreamApprovalRequest),
     Source(InferenceSource),
     Citation(InferenceCitation),
     Artifact(GeneratedArtifact),

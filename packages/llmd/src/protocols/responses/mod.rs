@@ -260,8 +260,8 @@ fn encode_message(
             "call_id": call_id.0,
             "output": text_from_content(content)
         }),
-        ConversationItemKind::HostedActivity(activity) => json!({
-            "role":"assistant","content":[{"type":"input_text","text":format!("[hosted tool activity: {activity:?}]")}]
+        ConversationItemKind::UpstreamActivity(activity) => json!({
+            "role":"assistant","content":[{"type":"input_text","text":format!("[upstream tool activity: {activity:?}]")}]
         }),
         ConversationItemKind::Source(source) => json!({
             "role":"assistant","content":[{"type":"input_text","text":format!("[source: {source:?}]")}]
