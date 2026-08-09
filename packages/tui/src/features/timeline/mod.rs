@@ -18,8 +18,9 @@ mod viewport;
 #[cfg(test)]
 pub use component::TimelineKind;
 pub use component::{
-    AssistantMessageComponent, ComponentId, ContentBlock, ErrorComponent, NoticeColor,
-    NoticeComponent, TimelineComponent, TimelineEntry, ToolEntry, UserMessageComponent,
+    AssistantMessageComponent, ComponentId, ContentBlock, CustomMessageComponent, ErrorComponent,
+    SessionFactComponent, SummaryComponent, SummaryKind, TimelineComponent, TimelineEntry,
+    ToolEntry, UserMessageComponent,
 };
 pub use viewport::ScrollViewport;
 

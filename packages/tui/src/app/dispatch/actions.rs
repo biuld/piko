@@ -103,6 +103,11 @@ impl AppState {
                 self.push_surface(SurfaceId::Status);
                 self.status = "status".to_string();
             }
+            SurfaceAction::OpenNotifications => {
+                self.notifications.open_modal();
+                self.push_surface(SurfaceId::Notifications);
+                self.status = "notifications".to_string();
+            }
             SurfaceAction::OpenTree => {
                 self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_surface(SurfaceId::Tree);
@@ -265,7 +270,13 @@ impl AppState {
         action: NotificationAction,
     ) -> Vec<Effect> {
         match action {
-            NotificationAction::Clear => self.notifications.clear(),
+            NotificationAction::DismissVisible => self.notifications.dismiss_visible(
+                self.session.id.as_deref(),
+                self.agent_panel.active_agent_instance_id.as_deref(),
+            ),
+            NotificationAction::ToggleScope => self.notifications.toggle_view_scope(),
+            NotificationAction::ScrollUp(amount) => self.notifications.scroll_up(amount),
+            NotificationAction::ScrollDown(amount) => self.notifications.scroll_down(amount),
         }
         Vec::new()
     }

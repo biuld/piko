@@ -5,9 +5,7 @@ use crate::app::ToolStatus;
 /// Timeline item accepted by the timeline feature reducer.
 #[derive(Clone)]
 pub enum TimelineEntry {
-    System(String),
     Tool(ToolEntry),
-    Session(String),
     Error(String),
 }
 
@@ -17,7 +15,9 @@ pub enum TimelineKind {
     User,
     Assistant,
     Tool,
-    Notice,
+    SessionFact,
+    Summary,
+    CustomMessage,
     Error,
 }
 
@@ -25,6 +25,7 @@ pub enum TimelineKind {
 pub enum ComponentId {
     MessageId(String),
     ToolCallId(String),
+    EntryId(String),
     Local(u64),
 }
 
@@ -33,7 +34,9 @@ pub enum TimelineComponent {
     User(UserMessageComponent),
     Assistant(AssistantMessageComponent),
     Tool(ToolEntry),
-    Notice(NoticeComponent),
+    SessionFact(SessionFactComponent),
+    Summary(SummaryComponent),
+    CustomMessage(CustomMessageComponent),
     Error(ErrorComponent),
 }
 
@@ -44,7 +47,9 @@ impl TimelineComponent {
             Self::User(_) => TimelineKind::User,
             Self::Assistant(_) => TimelineKind::Assistant,
             Self::Tool(_) => TimelineKind::Tool,
-            Self::Notice(_) => TimelineKind::Notice,
+            Self::SessionFact(_) => TimelineKind::SessionFact,
+            Self::Summary(_) => TimelineKind::Summary,
+            Self::CustomMessage(_) => TimelineKind::CustomMessage,
             Self::Error(_) => TimelineKind::Error,
         }
     }
@@ -56,7 +61,9 @@ impl TimelineComponent {
             Self::User(component) => &component.id,
             Self::Assistant(component) => &component.id,
             Self::Tool(component) => &component.component_id,
-            Self::Notice(component) => &component.id,
+            Self::SessionFact(component) => &component.id,
+            Self::Summary(component) => &component.id,
+            Self::CustomMessage(component) => &component.id,
             Self::Error(component) => &component.id,
         }
     }
@@ -94,17 +101,30 @@ impl From<ProtocolContentBlock> for ContentBlock {
 }
 
 #[derive(Clone)]
-pub struct NoticeComponent {
+pub struct SessionFactComponent {
     pub id: ComponentId,
     pub label: &'static str,
     pub text: String,
-    pub color: NoticeColor,
 }
 
 #[derive(Clone, Copy)]
-pub enum NoticeColor {
-    System,
-    Session,
+pub enum SummaryKind {
+    Compaction,
+    Branch,
+}
+
+#[derive(Clone)]
+pub struct SummaryComponent {
+    pub id: ComponentId,
+    pub kind: SummaryKind,
+    pub text: String,
+}
+
+#[derive(Clone)]
+pub struct CustomMessageComponent {
+    pub id: ComponentId,
+    pub custom_type: String,
+    pub content: piko_protocol::CustomMessageContent,
 }
 
 #[derive(Clone)]

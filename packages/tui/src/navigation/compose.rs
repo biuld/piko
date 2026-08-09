@@ -191,6 +191,23 @@ mod tests {
     }
 
     #[test]
+    fn notifications_is_centered_modal() {
+        let body = Rect::new(0, 0, 80, 30);
+        let mut metrics = metrics();
+        metrics.centered_size = Some((70, 18));
+        let plan = solve(
+            body,
+            &compose_plane(metrics),
+            &compose_modals(Some(SurfaceId::Notifications), metrics, body),
+        );
+        assert!(matches!(
+            plan.layers[0].placement,
+            ModalPlacement::Centered { .. }
+        ));
+        assert!(plan.rects.contains_key(&Region::Stream));
+    }
+
+    #[test]
     fn select_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
         let plan = solve(

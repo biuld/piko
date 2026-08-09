@@ -145,8 +145,14 @@ impl AppState {
                     agent.activity = piko_protocol::AgentActivity::WaitingForApproval;
                 }
                 self.status = format!("approval requested for {tool_name}");
-                self.notify(
+                self.notifications.push_with(
+                    crate::features::notifications::NoticeScope::Session(session_id.clone()),
                     NotificationLevel::Warning,
+                    crate::features::notifications::NoticeLifetime::UntilResolved(
+                        crate::features::notifications::NoticeSubject::Approval(
+                            approval_id.clone(),
+                        ),
+                    ),
                     format!("approval requested for {tool_name}"),
                 );
                 if self.focus_manager.active_mode() != AppMode::Surface(SurfaceId::Approval) {
@@ -169,6 +175,9 @@ impl AppState {
                     .find(|a| a.id == approval_id)
                     .map(|a| a.agent_instance_id.clone());
                 self.approvals.resolve(&approval_id);
+                self.notifications.resolve(
+                    &crate::features::notifications::NoticeSubject::Approval(approval_id.clone()),
+                );
                 if let Some(agent_id) = agent_instance_id {
                     let still_blocked = self
                         .approvals
@@ -245,17 +254,34 @@ impl AppState {
                 provider,
                 user_code,
                 verification_uri,
-            } => self.push(TimelineEntry::System(format!(
-                "{provider} login: open {verification_uri} and enter {user_code}"
-            ))),
+            } => {
+                self.notifications.push_with(
+                    NoticeScope::Global,
+                    NotificationLevel::Warning,
+                    NoticeLifetime::UntilResolved(NoticeSubject::Auth(provider.clone())),
+                    format!("{provider} login: open {verification_uri} and enter {user_code}"),
+                );
+            }
             piko_protocol::AuthEvent::LoginSuccess { provider } => {
-                self.push(TimelineEntry::System(format!("{provider} login succeeded")));
+                self.notifications
+                    .resolve(&NoticeSubject::Auth(provider.clone()));
+                self.notify(
+                    NotificationLevel::Info,
+                    format!("{provider} login succeeded"),
+                );
             }
             piko_protocol::AuthEvent::LoginFailed { provider, error } => {
-                self.push_error(format!("{provider} login failed: {error}"));
+                self.notifications
+                    .resolve(&NoticeSubject::Auth(provider.clone()));
+                self.notify(
+                    NotificationLevel::Error,
+                    format!("{provider} login failed: {error}"),
+                );
             }
             piko_protocol::AuthEvent::LoggedOut { provider } => {
-                self.push(TimelineEntry::System(format!("{provider} logged out")));
+                self.notifications
+                    .resolve(&NoticeSubject::Auth(provider.clone()));
+                self.notify(NotificationLevel::Info, format!("{provider} logged out"));
             }
         }
         effects

@@ -81,6 +81,9 @@ fn route_component(
         Region::Surface(SurfaceId::Diagnostics) => {
             app.diagnostics.pointer_event(component_hit, gesture)
         }
+        Region::Surface(SurfaceId::Notifications) => {
+            app.notifications.pointer_event(component_hit, gesture)
+        }
         Region::Surface(SurfaceId::Tree) => app.tree.pointer_event(component_hit, gesture),
         Region::Surface(SurfaceId::SummaryPrompt) => {
             if gesture != PointerGesture::Activate {

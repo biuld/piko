@@ -32,34 +32,28 @@ pub fn session_entry_label(entry: &SessionTreeEntry) -> String {
     }
 }
 
-pub fn session_entry_timeline_text(entry: &SessionTreeEntry) -> Option<String> {
-    Some(match entry {
+pub fn session_entry_preview_text(entry: &SessionTreeEntry) -> String {
+    let text = match entry {
         SessionTreeEntry::Message(m) => crate::text::message_to_text(&m.message),
-        SessionTreeEntry::ToolCall(e) => {
-            format!(
-                "{} {}",
-                e.tool_name,
-                crate::text::compact_json(&e.arguments)
-            )
-        }
+        SessionTreeEntry::ToolCall(e) => format!(
+            "{} {}",
+            e.tool_name,
+            crate::text::compact_json(&e.arguments)
+        ),
         SessionTreeEntry::ThinkingLevelChange(e) => format!("changed to {}", e.thinking_level),
         SessionTreeEntry::ModelChange(e) => format!("changed to {}/{}", e.provider, e.model_id),
         SessionTreeEntry::ActiveToolsChange(e) => e.active_tool_names.join(", "),
         SessionTreeEntry::Compaction(e) => e.summary.clone(),
         SessionTreeEntry::BranchSummary(e) => e.summary.clone(),
-        SessionTreeEntry::Custom(_) => String::new(),
+        SessionTreeEntry::Custom(e) => e.custom_type.clone(),
         SessionTreeEntry::CustomMessage(e) => match &e.content {
             piko_protocol::CustomMessageContent::String(s) => s.clone(),
-            piko_protocol::CustomMessageContent::Blocks(_) => String::new(),
+            piko_protocol::CustomMessageContent::Blocks(_) => e.custom_type.clone(),
         },
         SessionTreeEntry::Label(e) => e.label.as_deref().unwrap_or("").to_string(),
         SessionTreeEntry::SessionInfo(e) => e.name.as_deref().unwrap_or("").to_string(),
         SessionTreeEntry::Leaf(e) => e.target_id.as_deref().unwrap_or("none").to_string(),
-    })
-}
-
-pub fn session_entry_preview_text(entry: &SessionTreeEntry) -> String {
-    let text = session_entry_timeline_text(entry).unwrap_or_default();
+    };
     compact_single_line(&text, 160)
 }
 

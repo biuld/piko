@@ -176,6 +176,19 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
+                if auto_resolution_ms.is_none() {
+                    self.notifications.push_with(
+                        NoticeScope::Session(session_id.clone()),
+                        NotificationLevel::Warning,
+                        NoticeLifetime::UntilResolved(NoticeSubject::Interaction(
+                            interaction_id.clone(),
+                        )),
+                        title
+                            .as_deref()
+                            .unwrap_or("tool input requested")
+                            .to_string(),
+                    );
+                }
                 self.interactions.push(
                     interaction_id,
                     agent_instance_id,
@@ -197,6 +210,8 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
+                self.notifications
+                    .resolve(&NoticeSubject::Interaction(interaction_id.clone()));
                 self.interactions.resolve(&interaction_id);
                 if self.interactions.is_empty()
                     && self.focus_manager.active_mode()

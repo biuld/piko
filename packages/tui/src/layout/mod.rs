@@ -31,11 +31,15 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
     let centered_size = match modal {
         Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
         Some(SurfaceId::Status) => Some(status_centered_size(app, body)),
+        Some(SurfaceId::Notifications) => Some(notifications_centered_size(app, body)),
         _ => None,
     };
 
     PlaneMetrics {
-        notice: app.notifications.has_visible(),
+        notice: app.notifications.has_visible_for(
+            app.session.id.as_deref(),
+            app.agent_panel.active_agent_instance_id.as_deref(),
+        ),
         suggest,
         suggestion_count: if suggest {
             app.editor.auto_complete.len()
@@ -59,6 +63,17 @@ fn status_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u1
     let content_rows = 6u16.saturating_add(preview_rows);
     let width = cells_from_percent(body.width, 76)
         .clamp(40, 96)
+        .min(body.width);
+    let height = content_rows
+        .saturating_add(5)
+        .min(body.height.saturating_sub(2));
+    (width, height)
+}
+
+fn notifications_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let content_rows = (app.notifications.modal_len().max(1) as u16).min(18);
+    let width = cells_from_percent(body.width, 88)
+        .clamp(52, 120)
         .min(body.width);
     let height = content_rows
         .saturating_add(5)
@@ -225,6 +240,13 @@ pub fn build_surface_hitmap(
                 &crate::features::status::StatusPanel, rect
             ))
         }
+        Region::Surface(SurfaceId::Notifications) => stamp(
+            <crate::features::notifications::NotificationCenter as SurfacePanel<
+                SurfaceId,
+                HitId,
+                crate::features::notifications::NotificationPanelCtx<'_>,
+            >>::hit_regions(&app.notifications, rect),
+        ),
         Region::Surface(SurfaceId::Diagnostics) => stamp(app.diagnostics.hit_regions(rect)),
         Region::Surface(SurfaceId::Settings) => stamp(app.settings.hit_regions(rect)),
         Region::Surface(SurfaceId::Models) => stamp(app.models.hit_regions(rect)),

@@ -23,6 +23,7 @@ pub enum SurfaceId {
     Thinking,
     Settings,
     Status,
+    Notifications,
     Mcp,
     Processes,
     Diagnostics,
@@ -73,7 +74,7 @@ impl SurfaceId {
 
             Self::Approval | Self::ToolInteraction => SurfaceIntent::Dock,
 
-            Self::Settings | Self::Status => SurfaceIntent::Modal,
+            Self::Settings | Self::Status | Self::Notifications => SurfaceIntent::Modal,
         }
     }
 

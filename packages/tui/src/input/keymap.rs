@@ -208,6 +208,7 @@ impl Default for Keymap {
         keymap.bind("f2", KeyAction::SessionTree);
         keymap.bind("f3", KeyAction::Models);
         keymap.bind("f4", KeyAction::AgentPanel);
+        keymap.bind("f8", KeyAction::ClearNotifications);
 
         keymap
     }
@@ -374,4 +375,18 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.model.select" => KeyAction::Models,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn f8_dismisses_the_visible_notice_by_default() {
+        let keymap = Keymap::default();
+        assert_eq!(
+            keymap.action_for(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE)),
+            Some(KeyAction::ClearNotifications)
+        );
+    }
 }

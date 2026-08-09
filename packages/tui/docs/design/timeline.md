@@ -310,18 +310,21 @@ tool data. Snapshot rebuild creates fresh collapsed blocks.
 
 ### NoticeComponent
 
-Represents durable system/session notices that belong in Timeline.
+Represents compact, durable session facts that belong in Timeline. The
+implementation names this `SessionFactComponent`; it is derived from a typed
+session entry and retains that entry's stable id.
 
 Examples:
 
-- session opened
-- session compacted
-- branch navigation completed
-- auth state changed
+- model changed
+- thinking level changed
+- active tool set changed when the product elects to show it
 
-Transient progress should remain in AgentPanel, NotificationRow, or BottomBar.
+Session-open feedback, auth lifecycle, command failures, and transient progress
+remain in Notice Row, AgentPanel, or BottomBar. Label, SessionInfo, and Leaf
+entries remain tree/navigation metadata.
 
-Adjacent status-like notices may coalesce when no non-notice component was
+Adjacent status-like facts may coalesce when no non-fact component was
 appended between them.
 
 ### ErrorComponent

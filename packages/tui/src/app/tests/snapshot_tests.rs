@@ -1,6 +1,144 @@
 use super::*;
 
 #[test]
+fn approval_notice_resolves_with_authoritative_event() {
+    let mut app = live_app();
+    app.apply_event(Event::Approval(piko_protocol::ApprovalEvent::Requested {
+        session_id: "session-1".into(),
+        agent_instance_id: "task-1".into(),
+        agent_id: "main".into(),
+        approval_id: "approval-1".into(),
+        tool_name: "exec".into(),
+        tool_args: serde_json::json!({}),
+        prompt: None,
+    }));
+    assert!(app.notifications.has_visible_for(Some("session-1"), None));
+
+    app.apply_event(Event::Approval(piko_protocol::ApprovalEvent::Resolved {
+        session_id: "session-1".into(),
+        approval_id: "approval-1".into(),
+        decision: piko_protocol::ApprovalDecision::Decline,
+    }));
+
+    assert!(!app.notifications.has_visible_for(Some("session-1"), None));
+}
+
+#[test]
+fn snapshot_projects_only_typed_timeline_entries() {
+    use piko_protocol::{
+        BranchSummaryEntry, CompactionEntry, CustomEntry, CustomMessageContent, CustomMessageEntry,
+        LabelEntry, ModelChangeEntry, SessionInfoEntry, SessionSnapshot, SessionTreeEntry,
+    };
+
+    let entries = vec![
+        SessionTreeEntry::ModelChange(ModelChangeEntry {
+            id: "model-entry".into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            provider: "openai".into(),
+            model_id: "gpt".into(),
+        }),
+        SessionTreeEntry::Compaction(CompactionEntry {
+            id: "compact-entry".into(),
+            parent_id: None,
+            timestamp: "2".into(),
+            summary: "compact summary".into(),
+            first_kept_entry_id: "model-entry".into(),
+            tokens_before: 100,
+            details: None,
+            from_hook: None,
+        }),
+        SessionTreeEntry::BranchSummary(BranchSummaryEntry {
+            id: "branch-entry".into(),
+            parent_id: None,
+            timestamp: "3".into(),
+            from_id: "old-leaf".into(),
+            summary: "branch summary".into(),
+            details: None,
+            from_hook: None,
+        }),
+        SessionTreeEntry::CustomMessage(CustomMessageEntry {
+            id: "visible-custom".into(),
+            parent_id: None,
+            timestamp: "4".into(),
+            custom_type: "skill".into(),
+            content: CustomMessageContent::String("used skill".into()),
+            details: None,
+            display: true,
+        }),
+        SessionTreeEntry::CustomMessage(CustomMessageEntry {
+            id: "hidden-custom".into(),
+            parent_id: None,
+            timestamp: "5".into(),
+            custom_type: "hidden".into(),
+            content: CustomMessageContent::String("do not show".into()),
+            details: None,
+            display: false,
+        }),
+        SessionTreeEntry::Custom(CustomEntry {
+            id: "metadata".into(),
+            parent_id: None,
+            timestamp: "6".into(),
+            custom_type: "metadata".into(),
+            data: None,
+        }),
+        SessionTreeEntry::Label(LabelEntry {
+            id: "label".into(),
+            parent_id: None,
+            timestamp: "7".into(),
+            target_id: "model-entry".into(),
+            label: Some("internal label".into()),
+        }),
+        SessionTreeEntry::SessionInfo(SessionInfoEntry {
+            id: "session-info".into(),
+            parent_id: None,
+            timestamp: "8".into(),
+            name: Some("session name".into()),
+        }),
+    ];
+    let mut app = app();
+    app.session.opening_id = Some("session-1".into());
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 1,
+            },
+            snapshot: SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp/piko-test".into(),
+                seq: 1,
+                entries,
+                current_leaf_id: None,
+                selected_agent_instance_id: None,
+                active_turns: Vec::new(),
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+            },
+            agents: Vec::new(),
+        },
+    ));
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![
+            TimelineKind::SessionFact,
+            TimelineKind::Summary,
+            TimelineKind::Summary,
+            TimelineKind::CustomMessage,
+        ]
+    );
+    assert!(matches!(
+        app.timeline.components.front().map(|component| component.id()),
+        Some(crate::features::timeline::ComponentId::EntryId(id)) if id == "model-entry"
+    ));
+}
+
+#[test]
 fn agent_subscribe_clears_optimistic_active_without_stale_timeline() {
     let mut app = app();
     app.session.id = Some("session-1".into());

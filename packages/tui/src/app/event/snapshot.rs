@@ -2,6 +2,9 @@ use super::*;
 
 impl AppState {
     pub(super) fn apply_snapshot(&mut self, snapshot: SessionSnapshot) {
+        let snapshot_session_id = snapshot.session_id.clone();
+        self.notifications
+            .clear_state_derived_for_session(&snapshot_session_id);
         self.timeline.clear();
         self.agent_timelines.clear();
         self.agent_panel.active_agent_instance_id = None;
@@ -71,25 +74,51 @@ impl AppState {
                 SessionTreeEntry::ModelChange(change) => {
                     self.model.active_model_id = Some(change.model_id.clone());
                     self.model.active_provider = Some(change.provider.clone());
-                    if let Some(text) =
-                        session_entry_timeline_text(&SessionTreeEntry::ModelChange(change))
-                    {
-                        self.push(TimelineEntry::Session(text));
-                    }
+                    self.timeline.push_session_fact(
+                        change.id,
+                        "model",
+                        format!("changed to {}/{}", change.provider, change.model_id),
+                    );
                 }
                 SessionTreeEntry::ThinkingLevelChange(change) => {
                     self.model.active_thinking_level = Some(change.thinking_level.clone());
-                    if let Some(text) =
-                        session_entry_timeline_text(&SessionTreeEntry::ThinkingLevelChange(change))
-                    {
-                        self.push(TimelineEntry::Session(text));
+                    self.timeline.push_session_fact(
+                        change.id,
+                        "thinking",
+                        format!("changed to {}", change.thinking_level),
+                    );
+                }
+                SessionTreeEntry::ActiveToolsChange(change) => {
+                    if !change.active_tool_names.is_empty() {
+                        self.timeline.push_session_fact(
+                            change.id,
+                            "tools",
+                            change.active_tool_names.join(", "),
+                        );
                     }
                 }
-                other => {
-                    if let Some(text) = session_entry_timeline_text(&other) {
-                        self.push(TimelineEntry::Session(text));
-                    }
+                SessionTreeEntry::Compaction(compaction) => self.timeline.push_summary(
+                    compaction.id,
+                    crate::features::timeline::SummaryKind::Compaction,
+                    compaction.summary,
+                ),
+                SessionTreeEntry::BranchSummary(summary) => self.timeline.push_summary(
+                    summary.id,
+                    crate::features::timeline::SummaryKind::Branch,
+                    summary.summary,
+                ),
+                SessionTreeEntry::CustomMessage(custom) if custom.display => {
+                    self.timeline.push_custom_message(
+                        custom.id,
+                        custom.custom_type,
+                        custom.content,
+                    );
                 }
+                SessionTreeEntry::CustomMessage(_)
+                | SessionTreeEntry::Custom(_)
+                | SessionTreeEntry::Label(_)
+                | SessionTreeEntry::SessionInfo(_)
+                | SessionTreeEntry::Leaf(_) => {}
             }
         }
 
@@ -119,8 +148,15 @@ impl AppState {
             } else {
                 approval.tool_name
             };
+            let approval_id = approval.approval_id;
+            self.notifications.push_with(
+                NoticeScope::Session(snapshot_session_id.clone()),
+                NotificationLevel::Warning,
+                NoticeLifetime::UntilResolved(NoticeSubject::Approval(approval_id.clone())),
+                format!("approval requested for {tool_name}"),
+            );
             self.approvals.push(PendingApproval {
-                id: approval.approval_id,
+                id: approval_id,
                 agent_instance_id: approval.agent_instance_id,
                 tool_name,
                 args: approval.request,
@@ -129,10 +165,25 @@ impl AppState {
         }
         self.interactions.clear();
         for interaction in snapshot.pending_interactions {
+            let interaction_id = interaction.interaction_id;
+            let title = interaction.title;
+            if interaction.auto_resolution_ms.is_none() {
+                self.notifications.push_with(
+                    NoticeScope::Session(snapshot_session_id.clone()),
+                    NotificationLevel::Warning,
+                    NoticeLifetime::UntilResolved(NoticeSubject::Interaction(
+                        interaction_id.clone(),
+                    )),
+                    title
+                        .as_deref()
+                        .unwrap_or("tool input requested")
+                        .to_string(),
+                );
+            }
             self.interactions.push(
-                interaction.interaction_id,
+                interaction_id,
                 interaction.agent_instance_id,
-                interaction.title,
+                title,
                 interaction.questions,
                 interaction.require_confirm,
                 true,

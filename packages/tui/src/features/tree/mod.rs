@@ -7,9 +7,7 @@ pub mod visible;
 use std::collections::HashSet;
 
 pub use self::document::TreeDocument;
-pub use self::format::{
-    session_entry_label, session_entry_preview_text, session_entry_timeline_text,
-};
+pub use self::format::{session_entry_label, session_entry_preview_text};
 pub use self::render::TreeCtx;
 pub use self::visible::{ConnectorKind, TreeFilterMode, VisibleTree};
 use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};

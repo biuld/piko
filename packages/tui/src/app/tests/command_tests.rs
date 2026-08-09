@@ -33,6 +33,24 @@ fn local_slash_commands_exist_before_host_catalog_arrives() {
             .iter()
             .any(|entry| entry.slash == "/resume")
     );
+    assert!(
+        app.command_catalog
+            .iter()
+            .any(|entry| entry.slash == "/noti")
+    );
+}
+
+#[test]
+fn noti_opens_the_notifications_modal() {
+    let mut app = app();
+
+    let effects = app.try_slash_command("/noti").expect("known slash");
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.focus_manager.active_mode(),
+        AppMode::Surface(SurfaceId::Notifications)
+    );
 }
 
 #[test]
@@ -344,7 +362,7 @@ fn direct_command_errors_are_visible() {
         result: Err("failed visibly".into()),
     });
     assert_eq!(app.status, "failed visibly");
-    assert!(app.notifications.has_visible());
+    assert!(app.notifications.has_visible_for(None, None));
 }
 
 #[test]

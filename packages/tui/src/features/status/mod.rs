@@ -89,7 +89,10 @@ impl StatusPanel {
             "{} total, {running} running, {completed} completed, {failed} failed",
             timeline.tool_calls.len()
         );
-        let notifications_len = view.notifications.items().len().to_string();
+        let notifications_len = view
+            .notifications
+            .count_for(view.session_id, None)
+            .to_string();
 
         let accent = view.theme.accent;
         let mut lines = vec![

@@ -14,7 +14,7 @@ use crate::{
         agent_status::AgentPanelView,
         bottom_bar::{BottomBar, BottomBarView},
         model_selector::ModelCtx,
-        notifications::NotificationLevel,
+        notifications::{NotificationLevel, NotificationPanelCtx},
         session_list::SessionListCtx,
         status::{StatusCtx, StatusPanel, StatusPanelView},
         thinking::ThinkingCtx,
@@ -224,6 +224,13 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
             };
             render_panel(&StatusPanel, frame, area, &ctx, interaction);
         }
+        SurfaceId::Notifications => {
+            let ctx = NotificationPanelCtx {
+                session_id: app.session_id(),
+                theme: &app.theme,
+            };
+            render_panel(&app.notifications, frame, area, &ctx, interaction);
+        }
         SurfaceId::Diagnostics => {
             render_panel(&app.diagnostics, frame, area, &app.theme, interaction)
         }
@@ -299,17 +306,21 @@ fn render_notification_row(
     app: &AppState,
     interaction: InteractionState<HitId>,
 ) {
-    let Some(notification) = app.notifications.visible() else {
+    let Some(notification) = app.notifications.visible_for(
+        app.session.id.as_deref(),
+        app.agent_panel.active_agent_instance_id.as_deref(),
+    ) else {
         return;
     };
-    let color = match notification.level {
-        NotificationLevel::Info => app.theme.info,
-        NotificationLevel::Warning => app.theme.warning,
-        NotificationLevel::Error => app.theme.error,
+    let (label, color) = match notification.level {
+        NotificationLevel::Info => ("info", app.theme.info),
+        NotificationLevel::Warning => ("warning", app.theme.warning),
+        NotificationLevel::Error => ("error", app.theme.error),
     };
     let line = Line::from(vec![
-        Span::raw(" "),
+        Span::styled(format!(" ● {label} · "), Style::default().fg(color)),
         Span::styled(&notification.message, Style::default().fg(color)),
+        Span::styled(" · F8 dismiss", Style::default().fg(app.theme.dim)),
     ]);
     let mut paragraph = Paragraph::new(line);
     if interaction.hovered == Some(HitId::Notice)

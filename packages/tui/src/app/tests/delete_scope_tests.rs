@@ -5,9 +5,7 @@ fn delete_current_session_waits_for_authoritative_clear() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.timeline
-        .push(crate::features::timeline::TimelineEntry::System(
-            "keep until listed".into(),
-        ));
+        .push_session_fact("keep-entry".into(), "session", "keep until listed".into());
 
     let effects = app.delete_current_session();
     assert!(app.session.id.as_deref() == Some("session-1"));

@@ -298,7 +298,12 @@ usage; once provided, BottomBar must display them.
 
 **Must show** the most recent user-actionable warning or error when present.
 
-**Must not** permanently list full history (Status or logs own history).
+Transient information may appear only when no actionable notice is pending.
+The row is dismissible by mouse or the configured keyboard binding.
+
+**Must not** permanently list full history. The bounded in-memory NoticeCenter
+is an attention queue, not a durable event log; durable session facts belong in
+typed Timeline components projected from hostd state.
 
 ### Approval panel
 
@@ -386,7 +391,7 @@ Wire protocol design stays in system/feature design docs.
 
 | Layer | Owner | Purpose |
 |-------|--------|---------|
-| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
+| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Notifications, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
 | **Host product commands** | hostd catalog + wire | Session/auth/runtime/model intents (`session.new`, `auth.login`, `session.compact`, `process.list`, …). Frontends map stable dotted ids to wire calls and local slash names. |
 
 Rules:
@@ -431,6 +436,7 @@ Each slash entry **must** expose:
 | `/thinking` | Thinking selector (ComposerBand) | Apply level; BottomBar thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
 | `/status` | Centered Status modal | Session/turn/queue/tools/approvals snapshot |
+| `/noti` | Centered Notifications modal | In-memory notices; Current/All title-affix scope |
 | `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
 | `/diff` | Shared Diagnostics surface (diff mode) | Last or active turn workspace diff |
 | `/prompt-debug` | Shared Diagnostics surface (prompt mode) | Prompt assembly diagnostics |

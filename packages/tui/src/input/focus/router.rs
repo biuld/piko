@@ -322,6 +322,27 @@ impl InputRouter {
                 }
                 Self::handle_selectable_surface(key, ka)
             }
+            Some(SurfaceId::Notifications) => {
+                if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                    return Some(NotificationAction::ToggleScope.into());
+                }
+                match ka {
+                    Some(KeyAction::SelectPrev) => Some(NotificationAction::ScrollUp(1).into()),
+                    Some(KeyAction::SelectNext) => Some(NotificationAction::ScrollDown(1).into()),
+                    Some(KeyAction::TimelinePageUp) => {
+                        Some(NotificationAction::ScrollUp(10).into())
+                    }
+                    Some(KeyAction::TimelinePageDown) => {
+                        Some(NotificationAction::ScrollDown(10).into())
+                    }
+                    Some(KeyAction::Cancel) => Some(SurfaceAction::Close.into()),
+                    Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
+                    None if matches!(key.code, KeyCode::Char('q')) => {
+                        Some(SurfaceAction::Close.into())
+                    }
+                    _ => None,
+                }
+            }
             // Info panels
             Some(
                 SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Processes | SurfaceId::Diagnostics,
@@ -408,7 +429,7 @@ impl InputRouter {
             Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
             Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
             Some(KeyAction::Status) => Some(SurfaceAction::OpenStatus.into()),
-            Some(KeyAction::ClearNotifications) => Some(NotificationAction::Clear.into()),
+            Some(KeyAction::ClearNotifications) => Some(NotificationAction::DismissVisible.into()),
             Some(KeyAction::HistoryPrev) => Some(EditorAction::HistoryPrev.into()),
             Some(KeyAction::HistoryNext) => Some(EditorAction::HistoryNext.into()),
             Some(KeyAction::DeleteBackward) => Some(EditorAction::DeleteBackward.into()),

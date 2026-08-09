@@ -86,6 +86,7 @@ Global or editor-level shortcuts that open overlays, manage sessions, or interru
 | `app.session.tree` | `f2` (or *None*) | Open the session list/tree view |
 | `app.session.fork` | *None* | Fork the current session from the selected point |
 | `app.session.resume` | *None* | Resume a selected session |
+| `app.notifications.clear` | `f8` | Dismiss the currently visible notice |
 
 ### 4. Tree-Panel Navigation
 These keys are active when the Session Tree panel is focused:

@@ -242,6 +242,7 @@ impl AppState {
             Some(SurfaceId::Processes) => self.confirm_process_stop(),
             Some(
                 SurfaceId::Status
+                | SurfaceId::Notifications
                 | SurfaceId::Mcp
                 | SurfaceId::Diagnostics
                 | SurfaceId::Approval

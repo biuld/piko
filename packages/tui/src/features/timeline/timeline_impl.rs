@@ -17,14 +17,12 @@ impl Timeline {
 
     pub fn push(&mut self, entry: TimelineEntry) {
         match entry {
-            TimelineEntry::System(text) => self.push_notice("system", text, NoticeColor::System),
             TimelineEntry::Tool(tool) => {
                 let updated = self.upsert_tool(tool.clone());
                 if !updated {
                     self.push_component(TimelineComponent::Tool(tool));
                 }
             }
-            TimelineEntry::Session(text) => self.push_notice("session", text, NoticeColor::Session),
             TimelineEntry::Error(text) => self.push_error(text),
         }
     }
@@ -322,13 +320,32 @@ impl Timeline {
         }
     }
 
-    pub fn push_notice(&mut self, label: &'static str, text: String, color: NoticeColor) {
-        let id = self.local_id();
-        self.push_component(TimelineComponent::Notice(NoticeComponent {
-            id,
+    pub fn push_session_fact(&mut self, entry_id: String, label: &'static str, text: String) {
+        self.push_component(TimelineComponent::SessionFact(SessionFactComponent {
+            id: ComponentId::EntryId(entry_id),
             label,
             text,
-            color,
+        }));
+    }
+
+    pub fn push_summary(&mut self, entry_id: String, kind: SummaryKind, text: String) {
+        self.push_component(TimelineComponent::Summary(SummaryComponent {
+            id: ComponentId::EntryId(entry_id),
+            kind,
+            text,
+        }));
+    }
+
+    pub fn push_custom_message(
+        &mut self,
+        entry_id: String,
+        custom_type: String,
+        content: piko_protocol::CustomMessageContent,
+    ) {
+        self.push_component(TimelineComponent::CustomMessage(CustomMessageComponent {
+            id: ComponentId::EntryId(entry_id),
+            custom_type,
+            content,
         }));
     }
 

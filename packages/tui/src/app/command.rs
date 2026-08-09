@@ -57,6 +57,7 @@ pub enum TimelineAction {
 pub enum SurfaceAction {
     OpenSettings,
     OpenStatus,
+    OpenNotifications,
     OpenTree,
     OpenThinking,
     /// Session agent list → switch viewed agent (ComposerBand).
@@ -111,7 +112,10 @@ pub enum ToolInteractionAction {
 
 #[derive(Debug)]
 pub enum NotificationAction {
-    Clear,
+    DismissVisible,
+    ToggleScope,
+    ScrollUp(usize),
+    ScrollDown(usize),
 }
 
 #[derive(Debug)]
@@ -226,6 +230,7 @@ pub enum LocalCommandId {
     Settings,
     Tree,
     Status,
+    Notifications,
     Sessions,
     Models,
     Thinking,
@@ -288,6 +293,12 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         LocalCommandId::Status,
         "Status",
         "Show turn, queue, approval, and tool state",
+    ),
+    (
+        "/noti",
+        LocalCommandId::Notifications,
+        "Notifications",
+        "Show the in-memory notification queue",
     ),
     (
         "/thinking",
@@ -377,6 +388,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
         LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
+        LocalCommandId::Notifications => SurfaceAction::OpenNotifications.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
         LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),
         LocalCommandId::Quit => AppAction::Quit.into(),

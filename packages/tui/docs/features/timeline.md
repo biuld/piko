@@ -35,8 +35,11 @@ without a visible role label. Assistant messages appear as plain assistant
 output without an `assistant` heading; thinking content is visually quieter than
 normal answer text. Tool executions appear as separate padded blocks with
 state-specific backgrounds for pending, completed, and failed work. Session
-notices and errors use compact styles that do not look like normal assistant
-output.
+facts and errors use compact styles that do not look like normal assistant
+output. Model/thinking/tool-set changes retain their durable entry id as fact
+rows; compaction and branch summaries use summary components; visible custom
+messages use a dedicated custom component. Label, session-info, leaf, and
+non-display custom metadata do not enter Timeline.
 
 Fenced code blocks appear as unobstructed code without a decorative box or
 generic title. When the fence names a recognized language, syntax colors make

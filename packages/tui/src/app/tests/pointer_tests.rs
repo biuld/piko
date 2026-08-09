@@ -391,7 +391,7 @@ fn notice_click_clears_notifications() {
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Notifications(NotificationAction::Clear)]
+        [Action::Notifications(NotificationAction::DismissVisible)]
     ));
 }
 

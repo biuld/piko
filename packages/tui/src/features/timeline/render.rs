@@ -14,8 +14,8 @@ use crate::{
 };
 
 use super::{
-    AssistantMessageComponent, ContentBlock, ErrorComponent, NoticeColor, Timeline,
-    TimelineComponent, ToolEntry, UserMessageComponent,
+    AssistantMessageComponent, ContentBlock, CustomMessageComponent, ErrorComponent, SummaryKind,
+    Timeline, TimelineComponent, ToolEntry, UserMessageComponent,
 };
 
 impl Timeline {
@@ -102,15 +102,37 @@ pub(super) fn component_lines(
             assistant_lines(component, thinking_visible, theme)
         }
         TimelineComponent::Tool(tool) => tool_lines(tool, hovered, theme, width),
-        TimelineComponent::Notice(component) => {
-            let color = match component.color {
-                NoticeColor::System => theme.accent,
-                NoticeColor::Session => theme.accent_alt,
-            };
-            notice_lines(component.label, color, component.text.clone())
+        TimelineComponent::SessionFact(component) => {
+            notice_lines(component.label, theme.accent_alt, component.text.clone())
         }
+        TimelineComponent::Summary(component) => {
+            let label = match component.kind {
+                SummaryKind::Compaction => "compaction",
+                SummaryKind::Branch => "branch summary",
+            };
+            notice_lines(label, theme.accent, component.text.clone())
+        }
+        TimelineComponent::CustomMessage(component) => custom_message_lines(component, theme),
         TimelineComponent::Error(component) => error_lines(component, theme, width),
     }
+}
+
+fn custom_message_lines(component: &CustomMessageComponent, theme: &Theme) -> Vec<Line<'static>> {
+    let text = match &component.content {
+        piko_protocol::CustomMessageContent::String(text) => text.clone(),
+        piko_protocol::CustomMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .map(|block| match block {
+                piko_protocol::ContentBlock::Text { text } => text.clone(),
+                piko_protocol::ContentBlock::Thinking { thinking, .. } => thinking.clone(),
+                piko_protocol::ContentBlock::Image { mime_type, .. } => {
+                    format!("[image: {mime_type}]")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    notice_lines(&component.custom_type, theme.accent, text)
 }
 
 fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
@@ -124,7 +146,7 @@ fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Ve
     lines
 }
 
-fn notice_lines(label: &'static str, color: Color, text: String) -> Vec<Line<'static>> {
+fn notice_lines(label: &str, color: Color, text: String) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(Span::styled(
         format!("{label} "),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
