@@ -1,4 +1,8 @@
-use ratatui::{Frame, layout::Rect};
+use ratatui::{
+    Frame,
+    layout::{Position, Rect},
+};
+use unicode_width::UnicodeWidthStr;
 
 use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
@@ -325,11 +329,13 @@ impl AuthSelector {
                     return;
                 };
 
-                let mut first_line_spans = vec![Span::styled(
-                    "Enter API key: ",
-                    Style::default().fg(theme.text),
-                )];
-                let tb_line = input.render_line(theme, true);
+                const API_KEY_LABEL: &str = "Enter API key: ";
+                let mut first_line_spans =
+                    vec![Span::styled(API_KEY_LABEL, Style::default().fg(theme.text))];
+                // The real terminal caret is painted below. Avoid TextBox's
+                // fallback block caret so an empty value does not put it after
+                // the placeholder text.
+                let tb_line = input.render_line(theme, false);
                 first_line_spans.extend(tb_line.spans);
 
                 let lines = vec![
@@ -342,6 +348,21 @@ impl AuthSelector {
                 ];
 
                 frame.render_widget(Paragraph::new(lines), areas.content);
+
+                let label_width = UnicodeWidthStr::width(API_KEY_LABEL);
+                let origin = Position::new(
+                    areas
+                        .content
+                        .x
+                        .saturating_add(u16::try_from(label_width).unwrap_or(u16::MAX)),
+                    areas.content.y,
+                );
+                let caret = input.caret_position(origin);
+                let max_x = areas
+                    .content
+                    .x
+                    .saturating_add(areas.content.width.saturating_sub(1));
+                frame.set_cursor_position(Position::new(caret.x.min(max_x), caret.y));
             }
         }
     }

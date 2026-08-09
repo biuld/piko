@@ -52,7 +52,7 @@ impl TextBox {
             self.text[..self.cursor.min(self.text.len())]
                 .chars()
                 .count()
-                * mask.len_utf8()
+                * unicode_width::UnicodeWidthChar::width(mask).unwrap_or(1)
         } else {
             UnicodeWidthStr::width(&self.text[..self.cursor.min(self.text.len())])
         }
@@ -179,5 +179,24 @@ impl TextBox {
 
             Line::from(spans)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Position;
+
+    use super::TextBox;
+
+    #[test]
+    fn masked_caret_uses_terminal_columns_not_utf8_bytes() {
+        let mut input = TextBox::new().with_mask('•');
+        input.insert_str("abc");
+
+        assert_eq!(input.width_before_cursor(), 3);
+        assert_eq!(
+            input.caret_position(Position::new(10, 4)),
+            Position::new(13, 4)
+        );
     }
 }

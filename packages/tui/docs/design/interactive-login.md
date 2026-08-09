@@ -84,6 +84,10 @@ pub struct AuthSelector {
   * Prompt: `Enter API key for <provider>:`
   * The characters typed are masked using `*`.
   * Keyboard navigation keys (`Enter` to submit, `Esc` to go back to the menu, and typing keys) are routed to updating `api_key_input`.
+  * `AuthSelector` computes the input origin from the solved Pane content
+    rect and prompt display width, then paints the real terminal caret there.
+    The placeholder never supplies a synthetic caret. Masked values advance
+    the caret by the mask glyph's terminal width, not its UTF-8 byte length.
 
 ### 4. Slash Command updates
 

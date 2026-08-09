@@ -17,6 +17,8 @@ The selector opens as a `ComposerBand` modal over the workspace plane
 2. **API Key Input State**:
    - Prompts the user: `Enter API key for <provider>:`
    - A masked text input field displaying `*` for each typed character to prevent shoulder-surfing.
+   - The terminal caret is positioned at the input cell (before placeholder
+     text when empty) and advances by terminal display columns while masked.
    - Help text showing: `Enter to submit · Esc to go back`.
 
 ## Behavior / Interactions

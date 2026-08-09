@@ -35,7 +35,7 @@ use ratatui::{
 };
 
 use crate::theme::Theme;
-use crate::ui::components::feedback::{frame_border_style, hint_line};
+use crate::ui::components::feedback::frame_border_style;
 
 /// Search-row glyph (product convention: command-style `/` affordance).
 pub const SEARCH_GLYPH: &str = "/";
@@ -647,7 +647,7 @@ fn footer_height(footer: PaneFooter<'_>) -> u16 {
     match footer {
         PaneFooter::None => 0,
         PaneFooter::Hints("") => 0,
-        PaneFooter::Hints(text) => text.lines().filter(|l| !l.is_empty()).count().max(1) as u16,
+        PaneFooter::Hints(_) => 1,
         PaneFooter::Reserved { height } => height.max(1),
     }
 }
@@ -728,15 +728,15 @@ fn paint_rule(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
 }
 
 fn paint_hints(frame: &mut Frame<'_>, area: Rect, hints: &str, theme: &Theme) {
-    let lines: Vec<Line<'static>> = hints
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| hint_line(l, theme))
-        .collect();
-    if lines.is_empty() {
+    let Some(hint) = hints.lines().find(|line| !line.is_empty()) else {
         return;
-    }
-    frame.render_widget(Paragraph::new(lines), area);
+    };
+    crate::ui::components::dock_line::render(
+        frame,
+        area,
+        crate::ui::components::dock_line::hint_line(hint, theme),
+        None,
+    );
 }
 
 /// Section rule line: `Appearance ────────` (label + fill with dim box-drawing).
@@ -874,8 +874,8 @@ mod tests {
     }
 
     #[test]
-    fn footer_height_counts_lines() {
-        assert_eq!(footer_height(PaneFooter::Hints("a\nb")), 2);
+    fn footer_height_is_one_for_any_non_empty_hint() {
+        assert_eq!(footer_height(PaneFooter::Hints("a\nb")), 1);
         assert_eq!(footer_height(PaneFooter::Hints("a")), 1);
         assert_eq!(footer_height(PaneFooter::Hints("")), 0);
     }

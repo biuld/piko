@@ -156,11 +156,6 @@ pub fn settings_apply_hints() -> &'static str {
     "↑/↓ nav | Enter apply | Esc back"
 }
 
-/// Hint spans for embedding under a list (dim).
-pub fn hint_line(text: &str, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled(text.to_string(), hint_style(theme)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

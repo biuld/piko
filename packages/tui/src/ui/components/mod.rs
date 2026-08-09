@@ -1,3 +1,4 @@
+pub mod dock_line;
 pub mod feedback;
 pub mod interactive_workflow;
 pub mod menu;

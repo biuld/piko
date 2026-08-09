@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders},
 };
 
 use crate::{
@@ -324,11 +324,8 @@ fn render_notification_row(
         Span::styled(&notification.message, Style::default().fg(color)),
         Span::styled(" · F8 dismiss", Style::default().fg(app.theme.dim)),
     ]);
-    let mut paragraph = Paragraph::new(line);
-    if interaction.hovered == Some(HitId::Notice)
-        && let Some(background) = crate::ui::components::hover_bg(&app.theme)
-    {
-        paragraph = paragraph.style(Style::default().bg(background));
-    }
-    frame.render_widget(paragraph, area);
+    let background = (interaction.hovered == Some(HitId::Notice))
+        .then(|| crate::ui::components::hover_bg(&app.theme))
+        .flatten();
+    crate::ui::components::dock_line::render(frame, area, line, background);
 }
