@@ -1,9 +1,10 @@
 # V-06: F-06 tool batch dispatch acceptance evidence
 
-> Date: 2026-08-02
+> Date: 2026-08-09
 > Fixture: `piko-orchd` unit/integration tests in
 > `packages/orchd/src/runtime/execution/tool_batch/tests.rs` and
-> `packages/orchd/src/adapters/tools/registry.rs`
+> `packages/orchd/src/adapters/tools/registry.rs`, plus `piko-llmd` projection
+> tests in `packages/llmd/src/executor/prompt_mapping_tests.rs`
 > Environment: macOS, `cargo test -p piko-orchd`
 
 ## Reproduction
@@ -11,6 +12,7 @@
 ```bash
 cargo test -p piko-orchd --lib runtime::execution::tool_batch::tests
 cargo test -p piko-orchd --lib adapters::tools::registry::tests
+cargo test -p piko-llmd executor::prompt_mapping
 ```
 
 The execution tests drive a real `ExecutionActor` end-to-end with a
@@ -19,8 +21,8 @@ ordering, and cancellation behavior.
 
 ## Result
 
-All F-06 acceptance criteria pass (`14` execution tests, `3` registry
-resolution tests):
+All F-06 acceptance criteria pass in the tool-batch, registry-resolution, and
+provider prompt-projection suites:
 
 - Two parallel calls overlap (observed max concurrency 2) and commit results
   in call order.
@@ -34,13 +36,18 @@ resolution tests):
 - Cancelling during a sequential call does not start pending parallel calls;
   never-started calls still receive committed aborted results.
 - Unknown tools produce the unchanged bounded error shape.
-- All-sequential steps keep the per-call `ToolCall` → result transcript shape.
+- All-sequential steps use the provider-valid `Assistant` → all `ToolCall`
+  → all `ToolResult` transcript shape.
+- Legacy sequential transcripts with interleaved calls and results normalize
+  to the same provider-valid shape while retaining assistant reasoning.
 - Registry resolution: explicit per-tool mode wins; set-level `allowParallel`
   upgrades an unset mode; unset defaults fail-closed to sequential.
 
 ## Invariants
 
 - Batch results commit in `tool_call_index` order, never completion order.
+- Every call declared by one assistant step is committed before any result for
+  that step, independent of execution mode.
 - Sequential calls never overlap any other call; parallel calls overlap only
   within their own group and under the set-level cap.
 - Cancellation aborts in-flight calls, starts nothing new, and leaves a

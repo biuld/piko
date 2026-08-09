@@ -8,6 +8,18 @@ impl ExecutionActor {
         parent_message_id: &str,
         context_remaining: Option<u64>,
     ) -> Result<(), AgentApiError> {
+        // Tool calls belong to the assistant message that produced the whole
+        // step, regardless of how their executions are scheduled. Commit every
+        // declaration first so the durable transcript retains the provider
+        // message shape: Assistant -> all ToolCalls -> all ToolResults.
+        for tc in tool_calls {
+            self.commit_message(
+                tool_batch::tool_call_message(tc),
+                tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
+            )
+            .await?;
+        }
+
         // Batch dispatch groups consecutive calls by their effective execution
         // mode (F-06 / D-06): parallel calls in a group overlap under a shared
         // cap, sequential calls run exclusively, and results commit in
@@ -38,15 +50,6 @@ impl ExecutionActor {
                 match group.mode {
                     ToolExecutionMode::Sequential => {
                         for tc in group.calls {
-                            self.commit_message(
-                                tool_batch::tool_call_message(tc),
-                                tool_batch::tool_call_message_id(
-                                    parent_message_id,
-                                    tc.tool_call_index,
-                                ),
-                            )
-                            .await?;
-
                             let record = if self.cancel.is_cancelled() {
                                 Some(tool_batch::aborted_tool_exec_result())
                             } else {
@@ -93,16 +96,6 @@ impl ExecutionActor {
                         }
                     }
                     ToolExecutionMode::Parallel => {
-                        for tc in &group.calls {
-                            self.commit_message(
-                                tool_batch::tool_call_message(tc),
-                                tool_batch::tool_call_message_id(
-                                    parent_message_id,
-                                    tc.tool_call_index,
-                                ),
-                            )
-                            .await?;
-                        }
                         let results = tool_batch::execute_parallel_group(
                             registry.clone(),
                             self.cancel.clone(),
@@ -134,7 +127,7 @@ impl ExecutionActor {
             }
             .instrument(batch_span)
             .await;
-            let _ = batch_result;
+            batch_result?;
         }
         if fresh_window_requested {
             // The model asked for a fresh window: the durable hostd tree was

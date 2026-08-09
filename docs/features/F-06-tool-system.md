@@ -121,8 +121,8 @@ for differential replay against codex-rs.
 - [x] Cancelling mid-batch commits a bounded error result for every in-flight
       call in call order and starts no new calls.
 - [x] Unknown tools produce a bounded error result (unchanged).
-- [x] Transcript ordering for a sequential batch is byte-identical to current
-      behavior (differential regression).
+- [x] Sequential and parallel batches use the same provider-valid transcript
+      shape: Assistant, all ToolCalls, then all ToolResults.
 
 ## Product decisions
 

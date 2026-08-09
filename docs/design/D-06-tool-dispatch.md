@@ -13,8 +13,8 @@ cancellation aborts in-flight calls, and the transcript stays deterministic.
 
 - Transcripts are append-only and must be deterministic per run; result commit
   order is by `tool_call_index`, never completion order.
-- Existing all-sequential batches must remain byte-identical to today (no
-  regression in durable message shapes).
+- Every batch uses the provider-valid model-turn shape: the assistant message,
+  every declared tool call, then every tool result.
 - No cross-batch scheduling, no retry policy, no provider-level truncation.
 - Approval and routing behavior is unchanged; this design only changes
   concurrency and commit grouping.
@@ -39,16 +39,16 @@ Resolution order matches the PRD: explicit tool/per-tool-policy mode wins;
 
 ### 2. Batch dispatch (ExecutionActor)
 
-`execute_and_commit_tools` becomes group-based:
+`execute_and_commit_tools` separates durable declaration order from execution
+scheduling:
 
 ```text
+commit every ToolCall message in tool_call_index order
 for each group in calls grouped by (consecutive) effective mode:
   if group is sequential (single call):
-    commit ToolCall message
     execute exclusively (unchanged path)
     commit ToolResult message
   else:  # parallel group
-    commit every ToolCall message in index order
     run all calls concurrently under a Semaphore(capacity = min caps, ≥ 1)
       where each future selects on run cancellation
     commit every ToolResult message in index order
@@ -76,12 +76,13 @@ On cancellation the future returns a bounded error result with
 call of the step — executed, aborted, or never started — so an assistant
 message never leaves dangling tool calls in the durable transcript.
 
-### 4. Sequential regression path
+### 4. Provider-facing transcript shape
 
-When every call in a step is sequential, the code path is the current per-call
-loop unchanged (`ToolCall` → execute → `ToolResult`, repeated). Only steps
-containing parallel calls use the batched shape
-(assistant → all `ToolCall` → all `ToolResult`).
+Execution remains grouped by effective mode, but execution chronology does not
+change the model message structure. Sequential and parallel steps both persist
+`assistant → all ToolCall → all ToolResult`. This lets provider projection
+reconstruct one assistant message containing every call and round-trip
+provider-owned reasoning fields without duplicating them onto orphan calls.
 
 ## Package impact
 
@@ -90,7 +91,7 @@ containing parallel calls use the batched shape
 | `piko-orchd` | `CatalogRoute` + `max_concurrent_calls`; mode projection from set policy; group-based dispatch in `ExecutionActor`; cancellation selection; complete-transcript commit |
 | `piko-protocol` | None (types already present: `ToolExecutionMode`, `ToolSetPolicy`) |
 | `piko-hostd` | None |
-| `piko-llmd` | None |
+| `piko-llmd` | Normalize legacy interleaved tool exchanges when projecting provider messages |
 | `piko-sandbox` | None |
 
 ## Reusable infrastructure
@@ -114,7 +115,9 @@ No `island-rs` change required.
   - cap of 1 serializes parallel calls;
   - completion order differs from commit order;
   - cancellation mid-batch commits aborted results for all calls;
-  - all-sequential step transcript stays byte-identical.
+  - all-sequential steps commit every call before every result;
+  - legacy interleaved sequential history projects to one assistant message
+    with all calls before the tool results.
 - Differential reference: codex-rs `core/src/tools/parallel.rs` gate semantics.
 - `cargo test -p piko-orchd`, `cargo clippy --workspace --all-targets -- -D warnings`.
 

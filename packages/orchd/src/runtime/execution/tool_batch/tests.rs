@@ -130,7 +130,7 @@ async fn sequential_call_in_mixed_batch_overlaps_nothing() {
     );
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
-        ["tc", "tc", "tr", "tr", "tc", "tr"]
+        ["tc", "tc", "tc", "tr", "tr", "tr"]
     );
 }
 
@@ -321,7 +321,7 @@ async fn cancel_during_sequential_call_does_not_start_pending_parallel_calls() {
     ));
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
-        ["tc", "tr", "tc", "tr"],
+        ["tc", "tc", "tr", "tr"],
         "never-started calls must still receive committed aborted results"
     );
     assert_eq!(harness.provider.execution_count("seq_c"), 1);
@@ -351,7 +351,7 @@ async fn unknown_tool_commits_bounded_error_and_does_not_block_batch() {
 
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
-        ["tc", "tr", "tc", "tr"]
+        ["tc", "tc", "tr", "tr"]
     );
     let results = tool_results(&terminal.transcript);
     assert_eq!(tool_result_text(results[0]), "result-par_a");
@@ -362,7 +362,7 @@ async fn unknown_tool_commits_bounded_error_and_does_not_block_batch() {
 }
 
 #[tokio::test]
-async fn all_sequential_step_keeps_per_call_transcript_shape() {
+async fn all_sequential_step_commits_all_calls_before_results() {
     let gateway = Arc::new(ToolCallingGateway::new());
     gateway.push_step(tool_use_step(&[("call-0", "seq_c"), ("call-1", "seq_d")]));
     gateway.push_step(text_step("finished"));
@@ -380,8 +380,8 @@ async fn all_sequential_step_keeps_per_call_transcript_shape() {
     assert_eq!(harness.provider.max_concurrent(), 1);
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
-        ["tc", "tr", "tc", "tr"],
-        "all-sequential steps keep the per-call ToolCall/result loop shape"
+        ["tc", "tc", "tr", "tr"],
+        "all calls from one assistant step must precede every result"
     );
     let results = tool_results(&terminal.transcript);
     assert_eq!(tool_result_text(results[0]), "result-seq_c");
