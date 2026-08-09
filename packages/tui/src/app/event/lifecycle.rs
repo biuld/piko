@@ -87,7 +87,10 @@ impl AppState {
                 }
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} failed");
-                self.push_error(error);
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
+                    timeline.finish_turn(&turn_id, crate::app::ToolStatus::Failed);
+                    timeline.push_error(error);
+                });
             }
             piko_protocol::TurnEvent::Cancelled {
                 session_id,
@@ -108,6 +111,9 @@ impl AppState {
                 }
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} cancelled");
+                self.with_agent_timeline(&agent_instance_id, |timeline| {
+                    timeline.finish_turn(&turn_id, crate::app::ToolStatus::Cancelled);
+                });
             }
         }
         effects

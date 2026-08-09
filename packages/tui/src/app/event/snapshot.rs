@@ -7,6 +7,7 @@ impl AppState {
             .clear_state_derived_for_session(&snapshot_session_id);
         self.timeline.clear();
         self.agent_timelines.clear();
+        self.session_timeline_entries.clear();
         self.agent_panel.active_agent_instance_id = None;
         self.tree.set_agent_filter(None);
         self.queue_status = QueueStatus::default();
@@ -34,7 +35,35 @@ impl AppState {
         let active_entries =
             get_active_branch_entries(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
-        for entry in active_entries {
+        let mut timeline_agent_ids = Vec::new();
+        for entry in &active_entries {
+            let agent_instance_id = match entry {
+                SessionTreeEntry::Message(message) => Some(message.agent_instance_id.as_str()),
+                SessionTreeEntry::ToolCall(tool) => tool.agent_instance_id.as_deref(),
+                _ => None,
+            };
+            if let Some(agent_instance_id) = agent_instance_id
+                && !timeline_agent_ids.iter().any(|id| id == agent_instance_id)
+            {
+                timeline_agent_ids.push(agent_instance_id.to_string());
+            }
+        }
+        let selected_timeline = snapshot
+            .selected_agent_instance_id
+            .clone()
+            .filter(|selected| timeline_agent_ids.contains(selected))
+            .or_else(|| timeline_agent_ids.first().cloned());
+        self.agent_panel.active_agent_instance_id = selected_timeline.clone();
+        for agent_instance_id in timeline_agent_ids {
+            if Some(&agent_instance_id) != selected_timeline.as_ref() {
+                self.agent_timelines.insert(
+                    agent_instance_id,
+                    crate::features::timeline::Timeline::new(),
+                );
+            }
+        }
+
+        for (order, entry) in active_entries.into_iter().enumerate() {
             match entry {
                 SessionTreeEntry::Message(message_entry) => {
                     let agent_instance_id = message_entry.agent_instance_id.clone();
@@ -53,72 +82,47 @@ impl AppState {
                 }
                 SessionTreeEntry::ToolCall(tool_call) => {
                     let agent_instance_id = tool_call.agent_instance_id.clone();
-                    let tool = ToolEntry::new(
-                        tool_call.tool_call_id,
-                        tool_call.tool_name,
-                        ToolStatus::Running,
-                        compact_json(&tool_call.arguments),
-                        None,
-                        tool_call.parent_message_id,
-                    );
+                    let tool_call_id = tool_call.tool_call_id;
+                    let tool_name = tool_call.tool_name;
+                    let arguments = tool_call.arguments;
+                    let parent_message_id = tool_call.parent_message_id;
                     if let Some(agent_instance_id) = agent_instance_id {
                         self.with_agent_timeline(&agent_instance_id, |timeline| {
-                            if !timeline.upsert_tool(tool.clone()) {
-                                timeline.push(TimelineEntry::Tool(tool));
-                            }
+                            timeline.project_tool_started(
+                                tool_call_id,
+                                tool_name,
+                                arguments,
+                                parent_message_id,
+                            );
                         });
-                    } else if !self.timeline.upsert_tool(tool.clone()) {
-                        self.push(TimelineEntry::Tool(tool));
-                    }
-                }
-                SessionTreeEntry::ModelChange(change) => {
-                    self.model.active_model_id = Some(change.model_id.clone());
-                    self.model.active_provider = Some(change.provider.clone());
-                    self.timeline.push_session_fact(
-                        change.id,
-                        "model",
-                        format!("changed to {}/{}", change.provider, change.model_id),
-                    );
-                }
-                SessionTreeEntry::ThinkingLevelChange(change) => {
-                    self.model.active_thinking_level = Some(change.thinking_level.clone());
-                    self.timeline.push_session_fact(
-                        change.id,
-                        "thinking",
-                        format!("changed to {}", change.thinking_level),
-                    );
-                }
-                SessionTreeEntry::ActiveToolsChange(change) => {
-                    if !change.active_tool_names.is_empty() {
-                        self.timeline.push_session_fact(
-                            change.id,
-                            "tools",
-                            change.active_tool_names.join(", "),
+                    } else {
+                        self.timeline.project_tool_started(
+                            tool_call_id,
+                            tool_name,
+                            arguments,
+                            parent_message_id,
                         );
                     }
                 }
-                SessionTreeEntry::Compaction(compaction) => self.timeline.push_summary(
-                    compaction.id,
-                    crate::features::timeline::SummaryKind::Compaction,
-                    compaction.summary,
-                ),
-                SessionTreeEntry::BranchSummary(summary) => self.timeline.push_summary(
-                    summary.id,
-                    crate::features::timeline::SummaryKind::Branch,
-                    summary.summary,
-                ),
-                SessionTreeEntry::CustomMessage(custom) if custom.display => {
-                    self.timeline.push_custom_message(
-                        custom.id,
-                        custom.custom_type,
-                        custom.content,
+                entry => {
+                    if let SessionTreeEntry::ModelChange(change) = &entry {
+                        self.model.active_model_id = Some(change.model_id.clone());
+                        self.model.active_provider = Some(change.provider.clone());
+                    } else if let SessionTreeEntry::ThinkingLevelChange(change) = &entry {
+                        self.model.active_thinking_level = Some(change.thinking_level.clone());
+                    }
+                    let applied_entry = entry.clone();
+                    let outcome = super::events::merge_session_entry(
+                        &mut self.timeline,
+                        &mut self.agent_timelines,
+                        entry,
+                        order as u64,
                     );
+                    if outcome != piko_client_core::ApplyOutcome::Ignored {
+                        self.session_timeline_entries
+                            .push((applied_entry, order as u64));
+                    }
                 }
-                SessionTreeEntry::CustomMessage(_)
-                | SessionTreeEntry::Custom(_)
-                | SessionTreeEntry::Label(_)
-                | SessionTreeEntry::SessionInfo(_)
-                | SessionTreeEntry::Leaf(_) => {}
             }
         }
 

@@ -84,7 +84,71 @@ fn stream_item_applies_text_chunk() {
     let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
         panic!("expected draft");
     };
-    assert_eq!(draft.text_segments[0], "hi");
+    assert_eq!(draft.text(), "hi");
+}
+
+#[test]
+fn realtime_segments_coalesce_chunks_and_keep_first_seen_kind_order() {
+    let mut tl = AgentTimeline::new();
+    for (seq, delta) in [
+        (
+            0,
+            RealtimeDelta::MessageStarted {
+                role: piko_protocol::MessageRole::Assistant,
+            },
+        ),
+        (
+            1,
+            RealtimeDelta::Thinking {
+                content_index: 0,
+                delta: "thinking".into(),
+            },
+        ),
+        (
+            2,
+            RealtimeDelta::Thinking {
+                content_index: 0,
+                delta: " now".into(),
+            },
+        ),
+        (
+            3,
+            RealtimeDelta::Text {
+                content_index: 0,
+                delta: "hello".into(),
+            },
+        ),
+        (
+            4,
+            RealtimeDelta::Text {
+                content_index: 0,
+                delta: " world".into(),
+            },
+        ),
+    ] {
+        let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+            Some("s".into()),
+            Some("root".into()),
+            "msg",
+            Some(seq),
+            &delta,
+        )
+        .pop()
+        .unwrap();
+        assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    }
+
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.content_segments.len(), 2);
+    assert_eq!(
+        draft.content_segments[0].kind,
+        RealtimeContentKind::Thinking
+    );
+    assert_eq!(draft.content_segments[0].text, "thinking now");
+    assert_eq!(draft.content_segments[1].kind, RealtimeContentKind::Text);
+    assert_eq!(draft.content_segments[1].text, "hello world");
 }
 
 #[test]
@@ -115,4 +179,238 @@ fn stream_item_tool_upsert_starts_tool() {
     };
     assert_eq!(tool.tool_name, "read");
     assert_eq!(tool.status, ToolStatus::Running);
+}
+
+#[test]
+fn replace_and_clear_message_content_are_applied_by_segment() {
+    let mut tl = AgentTimeline::new();
+    for (seq, op, text, index) in [
+        (
+            1,
+            piko_protocol::StreamItemOp::AppendChunk,
+            Some("draft"),
+            Some(0),
+        ),
+        (
+            2,
+            piko_protocol::StreamItemOp::AppendChunk,
+            Some("second"),
+            Some(1),
+        ),
+        (
+            3,
+            piko_protocol::StreamItemOp::ReplaceContent,
+            Some("correct"),
+            Some(0),
+        ),
+        (4, piko_protocol::StreamItemOp::ClearContent, None, None),
+    ] {
+        let patch = piko_protocol::StreamItemPatch {
+            session_id: Some("s".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: "msg".into(),
+            item_kind: piko_protocol::StreamItemKind::AgentMessage,
+            op,
+            text: text.map(str::to_string),
+            content_index: index,
+            delta_seq: Some(seq),
+            fields: Some(serde_json::json!({"parentMessageId": "msg"})),
+        };
+        assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    }
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.text(), "");
+}
+
+#[test]
+fn replace_and_clear_tool_argument_content_are_applied() {
+    let mut tl = AgentTimeline::new();
+    for (seq, op, text, index) in [
+        (
+            1,
+            piko_protocol::StreamItemOp::AppendChunk,
+            Some("bad"),
+            Some(0),
+        ),
+        (
+            2,
+            piko_protocol::StreamItemOp::ReplaceContent,
+            Some("{\"ok\":true}"),
+            Some(0),
+        ),
+        (3, piko_protocol::StreamItemOp::ClearContent, None, None),
+    ] {
+        let patch = piko_protocol::StreamItemPatch {
+            session_id: Some("s".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: "call".into(),
+            item_kind: piko_protocol::StreamItemKind::ToolCall,
+            op,
+            text: text.map(str::to_string),
+            content_index: index,
+            delta_seq: Some(seq),
+            fields: Some(serde_json::json!({
+                "parentMessageId": "msg",
+                "turnId": "turn-1"
+            })),
+        };
+        assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    }
+    let tool = tl
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            TimelineItem::Tool(tool) => Some(tool),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(tool.partial_json.as_deref(), Some(""));
+    assert!(tool.argument_segments.is_empty());
+}
+
+#[test]
+fn full_text_upsert_replaces_all_prior_chunks() {
+    let mut tl = AgentTimeline::new();
+    for (seq, op, text, index) in [
+        (1, piko_protocol::StreamItemOp::AppendChunk, "a", 0),
+        (2, piko_protocol::StreamItemOp::AppendChunk, "b", 1),
+        (3, piko_protocol::StreamItemOp::Upsert, "final", 0),
+    ] {
+        let patch = piko_protocol::StreamItemPatch {
+            session_id: Some("s".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: "msg".into(),
+            item_kind: piko_protocol::StreamItemKind::AgentMessage,
+            op,
+            text: Some(text.into()),
+            content_index: Some(index),
+            delta_seq: Some(seq),
+            fields: Some(serde_json::json!({"parentMessageId": "msg"})),
+        };
+        assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    }
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.text(), "final");
+}
+
+#[test]
+fn committed_message_rejects_late_content_correction() {
+    let mut tl = AgentTimeline::new();
+    tl.apply_committed(
+        "msg".into(),
+        1,
+        piko_protocol::Message::Assistant {
+            content: vec![piko_protocol::ContentBlock::Text {
+                text: "final".into(),
+            }],
+            api: "test".into(),
+            provider: "test".into(),
+            model: "test".into(),
+            usage: None,
+            stop_reason: None,
+            error_message: None,
+            timestamp: None,
+        },
+        "turn-1".into(),
+    );
+    let patch = piko_protocol::StreamItemPatch {
+        session_id: Some("s".into()),
+        agent_instance_id: Some("root".into()),
+        item_id: "msg".into(),
+        item_kind: piko_protocol::StreamItemKind::AgentMessage,
+        op: piko_protocol::StreamItemOp::ReplaceContent,
+        text: Some("stale".into()),
+        content_index: Some(0),
+        delta_seq: Some(2),
+        fields: None,
+    };
+    assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Ignored);
+}
+
+#[test]
+fn mixed_session_facts_keep_branch_position_when_commits_reorder() {
+    let mut tl = AgentTimeline::new();
+    tl.apply_session_entry(
+        piko_protocol::SessionTreeEntry::ModelChange(piko_protocol::ModelChangeEntry {
+            id: "model-change".into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            provider: "openai".into(),
+            model_id: "gpt".into(),
+        }),
+        0,
+    );
+    for (id, seq, text) in [("assistant", 2, "answer"), ("user", 1, "question")] {
+        let message = if id == "user" {
+            piko_protocol::Message::User {
+                content: piko_protocol::MessageContent::String(text.into()),
+                timestamp: None,
+            }
+        } else {
+            piko_protocol::Message::Assistant {
+                content: vec![piko_protocol::ContentBlock::Text { text: text.into() }],
+                api: "test".into(),
+                provider: "test".into(),
+                model: "test".into(),
+                usage: None,
+                stop_reason: None,
+                error_message: None,
+                timestamp: None,
+            }
+        };
+        tl.apply_committed(id.into(), seq, message, "turn".into());
+    }
+    assert!(matches!(tl.items()[0], TimelineItem::SessionEntry(_)));
+    assert!(matches!(
+        &tl.items()[1],
+        TimelineItem::Committed(item) if item.message_id == "user"
+    ));
+    assert!(matches!(
+        &tl.items()[2],
+        TimelineItem::Committed(item) if item.message_id == "assistant"
+    ));
+}
+
+#[test]
+fn cancelled_turn_finalizes_only_its_running_tools() {
+    let mut tl = AgentTimeline::new();
+    for (call, turn) in [("call-1", "turn-1"), ("call-2", "turn-2")] {
+        let patch = piko_protocol::StreamItemPatch {
+            session_id: Some("s".into()),
+            agent_instance_id: Some("root".into()),
+            item_id: call.into(),
+            item_kind: piko_protocol::StreamItemKind::ToolCall,
+            op: piko_protocol::StreamItemOp::Upsert,
+            text: None,
+            content_index: None,
+            delta_seq: None,
+            fields: Some(serde_json::json!({
+                "toolName": "exec",
+                "args": {},
+                "status": "running",
+                "turnId": turn
+            })),
+        };
+        tl.apply_stream_item(&patch);
+    }
+    tl.finish_turn("turn-1", ToolStatus::Cancelled);
+    let statuses: Vec<_> = tl
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            TimelineItem::Tool(tool) => Some((tool.tool_call_id.as_str(), tool.status)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            ("call-1", ToolStatus::Cancelled),
+            ("call-2", ToolStatus::Running)
+        ]
+    );
 }

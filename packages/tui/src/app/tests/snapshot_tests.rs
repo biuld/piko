@@ -145,6 +145,77 @@ fn snapshot_projects_only_typed_timeline_entries() {
 }
 
 #[test]
+fn session_facts_are_merged_into_every_agent_timeline() {
+    use piko_protocol::{MessageEntry, ModelChangeEntry, SessionSnapshot, SessionTreeEntry};
+
+    let model = SessionTreeEntry::ModelChange(ModelChangeEntry {
+        id: "model".into(),
+        parent_id: None,
+        timestamp: "1".into(),
+        provider: "openai".into(),
+        model_id: "gpt".into(),
+    });
+    let root = SessionTreeEntry::Message(MessageEntry {
+        id: "root-message".into(),
+        parent_id: Some("model".into()),
+        timestamp: "2".into(),
+        agent_id: "main".into(),
+        agent_instance_id: "root".into(),
+        source_turn_id: "turn-root".into(),
+        transcript_seq: 1,
+        message: Message::User {
+            content: piko_protocol::MessageContent::String("root".into()),
+            timestamp: None,
+        },
+    });
+    let child = SessionTreeEntry::Message(MessageEntry {
+        id: "child-message".into(),
+        parent_id: Some("root-message".into()),
+        timestamp: "3".into(),
+        agent_id: "child".into(),
+        agent_instance_id: "child".into(),
+        source_turn_id: "turn-child".into(),
+        transcript_seq: 1,
+        message: assistant("child"),
+    });
+    let mut app = app();
+    app.session.opening_id = Some("session-1".into());
+    app.apply_event(Event::SessionReconciled(
+        piko_protocol::SessionReconciledEvent {
+            session_id: "session-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "hostd:session-1".into(),
+                seq: 3,
+            },
+            snapshot: SessionSnapshot {
+                session_id: "session-1".into(),
+                cwd: "/tmp".into(),
+                seq: 3,
+                entries: vec![model, root, child],
+                current_leaf_id: Some("child-message".into()),
+                selected_agent_instance_id: Some("child".into()),
+                active_turns: Vec::new(),
+                pending_approvals: Vec::new(),
+                pending_interactions: Vec::new(),
+                name: None,
+                cumulative_usage: None,
+            },
+            agents: Vec::new(),
+        },
+    ));
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![TimelineKind::SessionFact, TimelineKind::Assistant]
+    );
+    assert_eq!(
+        app.agent_timelines["root"].component_kinds(),
+        vec![TimelineKind::SessionFact, TimelineKind::User]
+    );
+}
+
+#[test]
 fn agent_subscribe_clears_optimistic_active_without_stale_timeline() {
     let mut app = app();
     app.session.id = Some("session-1".into());

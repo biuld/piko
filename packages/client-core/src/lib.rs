@@ -26,7 +26,8 @@ pub use intent::ClientIntent;
 pub use msg::{ClientMsg, TransportObservation};
 pub use state::{ClientState, ConnectionState, LiveSession, ModelState, SessionPhase};
 pub use timeline::{
-    AgentTimeline, ApplyOutcome, CommittedItem, RealtimeDraft, TimelineItem, ToolItem, ToolStatus,
+    AgentTimeline, ApplyOutcome, CommittedItem, RealtimeContentKind, RealtimeContentSegment,
+    RealtimeDraft, SessionEntryItem, TimelineItem, TimelineOrderKey, ToolItem, ToolStatus,
 };
 pub use update::{CommandIdSource, UpdateContext, update};
 pub use usage::{

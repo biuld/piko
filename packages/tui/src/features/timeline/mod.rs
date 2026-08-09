@@ -1,7 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::{Message, TranscriptCommittedEvent};
+use piko_protocol::TranscriptCommittedEvent;
 
 use crate::{
     app::{HitId, command::TimelineAction},
@@ -33,20 +32,12 @@ pub struct Timeline {
     pub thinking_visible: bool,
     /// Running and completed tool calls, kept for status lookup.
     pub tool_calls: Vec<ToolEntry>,
-    live_assistant: Option<ComponentId>,
+    projection: piko_client_core::AgentTimeline,
     next_local_id: u64,
-    committed_messages: HashMap<String, (u64, Message)>,
-    committed_task_seq: HashMap<ComponentId, u64>,
-    realtime_delta_seq: HashMap<String, u64>,
 }
 
 mod internals;
 mod timeline_impl;
-
-enum AssistantBlockKind {
-    Text,
-    Thinking,
-}
 
 impl PointerComponent<HitId> for Timeline {
     fn pointer_event(

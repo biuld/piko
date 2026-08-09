@@ -27,7 +27,7 @@ impl AppState {
         &mut self,
         patch: piko_protocol::StreamItemPatch,
     ) -> Vec<Effect> {
-        let effects = Vec::new();
+        let mut effects = Vec::new();
         let Some(session_id) = patch.session_id.as_deref() else {
             return effects;
         };
@@ -37,10 +37,52 @@ impl AppState {
         let Some(agent_instance_id) = patch.agent_instance_id.clone() else {
             return effects;
         };
+        let mut outcome = piko_client_core::ApplyOutcome::Ignored;
         self.with_agent_timeline(&agent_instance_id, |timeline| {
-            timeline.apply_stream_item(&patch);
+            outcome = timeline.apply_stream_item(&patch);
         });
+        if outcome == piko_client_core::ApplyOutcome::Inconsistent
+            && let Some(session_id) = self.session.id.clone()
+        {
+            effects.push(Effect::send(Command::StateSnapshot {
+                command_id: command_id(),
+                session_id,
+            }));
+        }
         effects
+    }
+
+    pub(super) fn apply_session_entry_committed(
+        &mut self,
+        committed: piko_protocol::SessionEntryCommittedEvent,
+    ) -> Vec<Effect> {
+        if !self.accepts_session(&committed.session_id) {
+            return Vec::new();
+        }
+        let order = self.timeline.components.len() as u64;
+        let entry = committed.entry;
+        let outcome = merge_session_entry(
+            &mut self.timeline,
+            &mut self.agent_timelines,
+            entry.clone(),
+            order,
+        );
+        if outcome != piko_client_core::ApplyOutcome::Ignored
+            && self
+                .session_timeline_entries
+                .iter()
+                .all(|(existing, _)| existing.id() != entry.id())
+        {
+            self.session_timeline_entries.push((entry, order));
+        }
+        if outcome == piko_client_core::ApplyOutcome::Inconsistent {
+            vec![Effect::send(Command::StateSnapshot {
+                command_id: command_id(),
+                session_id: committed.session_id,
+            })]
+        } else {
+            Vec::new()
+        }
     }
 
     pub(super) fn apply_session_reconciled(
@@ -239,4 +281,20 @@ impl AppState {
         );
         effects
     }
+}
+
+pub(super) fn merge_session_entry(
+    visible: &mut crate::features::timeline::Timeline,
+    agents: &mut std::collections::HashMap<String, crate::features::timeline::Timeline>,
+    entry: piko_protocol::SessionTreeEntry,
+    order: u64,
+) -> piko_client_core::ApplyOutcome {
+    let mut outcome = visible.apply_session_entry(entry.clone(), order);
+    for timeline in agents.values_mut() {
+        let next = timeline.apply_session_entry(entry.clone(), order);
+        if next == piko_client_core::ApplyOutcome::Inconsistent {
+            outcome = next;
+        }
+    }
+    outcome
 }

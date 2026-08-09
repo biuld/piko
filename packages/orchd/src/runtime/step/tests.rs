@@ -63,8 +63,11 @@ async fn realtime_delta_is_published_before_step_completion() {
     event_tx
         .send(GatewayEvent::ContentDelta("hello".into()))
         .unwrap();
+    event_tx
+        .send(GatewayEvent::ContentDelta(" world".into()))
+        .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        while sink.deltas().len() < 2 {
+        while sink.deltas().len() < 3 {
             tokio::task::yield_now().await;
         }
     })
@@ -81,7 +84,11 @@ async fn realtime_delta_is_published_before_step_completion() {
     assert_eq!(deltas[1].delta_seq, 1);
     assert!(matches!(
         &deltas[1].delta,
-        RealtimeDelta::Text { delta, .. } if delta == "hello"
+        RealtimeDelta::Text { content_index: 0, delta } if delta == "hello"
+    ));
+    assert!(matches!(
+        &deltas[2].delta,
+        RealtimeDelta::Text { content_index: 0, delta } if delta == " world"
     ));
 
     event_tx.send(GatewayEvent::Done("stop".into())).unwrap();

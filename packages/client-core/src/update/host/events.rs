@@ -74,8 +74,8 @@ pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protoco
         if let Some(error) = failure {
             session.turn_failures.retain(|item| item.turn_id != turn_id);
             session.turn_failures.push(TurnFailure {
-                turn_id,
-                agent_instance_id,
+                turn_id: turn_id.clone(),
+                agent_instance_id: agent_instance_id.clone(),
                 error,
             });
             const MAX_FAILURES: usize = 20;
@@ -83,6 +83,17 @@ pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protoco
                 session
                     .turn_failures
                     .drain(..session.turn_failures.len() - MAX_FAILURES);
+            }
+        }
+        if let Some(timeline) = session.timelines.get_mut(&agent_instance_id) {
+            match status {
+                TurnStatus::Failed => {
+                    timeline.finish_turn(&turn_id, crate::timeline::ToolStatus::Failed)
+                }
+                TurnStatus::Cancelled => {
+                    timeline.finish_turn(&turn_id, crate::timeline::ToolStatus::Cancelled)
+                }
+                _ => {}
             }
         }
     } else if let Some(existing) = session
@@ -312,7 +323,7 @@ pub(super) fn handle_stream_item(
         let Some(session) = &mut state.live_session else {
             return;
         };
-        let timeline = session.timelines.entry(agent_instance_id).or_default();
+        let timeline = session.timeline_mut(&agent_instance_id);
         timeline.apply_stream_item(&patch)
     };
     if outcome == crate::timeline::ApplyOutcome::Inconsistent {

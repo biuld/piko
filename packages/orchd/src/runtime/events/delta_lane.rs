@@ -112,7 +112,9 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Text {
-                        content_index: self.state.text.len() as u32,
+                        // Text chunks belong to one stable content segment;
+                        // this is a segment id, not a byte offset.
+                        content_index: 0,
                         delta: delta.clone(),
                     },
                 ));
@@ -124,7 +126,9 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Thinking {
-                        content_index: self.state.reasoning.len() as u32,
+                        // Thought and text are distinct stream item kinds, so
+                        // each kind owns its own segment-zero namespace.
+                        content_index: 0,
                         delta: delta.clone(),
                     },
                 ));

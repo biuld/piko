@@ -120,7 +120,7 @@ fn m4_stale_realtime_delta_seq_ignored() {
             _ => None,
         })
         .expect("draft");
-    let body = draft.text_segments.join("");
+    let body = draft.text();
     assert!(body.contains("second"));
     assert!(!body.contains("STALE"));
     assert_eq!(draft.last_delta_seq, 2);
@@ -270,13 +270,14 @@ fn m4_failed_tool_result_on_timeline() {
         .get("root")
         .unwrap();
     let has_error_result = tl.items().iter().any(|i| match i {
-        TimelineItem::Committed(c) => matches!(
-            &c.message,
-            piko_protocol::Message::ToolResult {
-                is_error: Some(true),
-                ..
-            }
-        ),
+        TimelineItem::Tool(tool) => {
+            tool.tool_call_id == "call-fail"
+                && tool.status == piko_client_core::ToolStatus::Failed
+                && matches!(
+                    tool.result_content.as_slice(),
+                    [piko_protocol::ContentBlock::Text { text }] if text == "exit 1"
+                )
+        }
         _ => false,
     });
     assert!(has_error_result);

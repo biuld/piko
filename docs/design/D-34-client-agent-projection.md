@@ -1,6 +1,6 @@
 # D-34: Client agent projection lifecycle
 
-> Status: implemented (Slices 1–3; Slice 4 product-gated)
+> Status: implemented (Slices 1–3b; Slice 4 product-gated)
 > Implements: [F-22](../features/F-22-client-agent-projection.md)
 > Decisions: [ADR-003](../decisions/ADR-003-protocol-modeling-acp-reference.md)
 
@@ -279,6 +279,43 @@ No `island-rs` change required.
    for forward compatibility; no host emitter until plan UX / system-marker
    fold is productized. Live usage is **not** StreamItem — use
    `ServerMessage::Usage`.
+
+### Slice 3b — Canonical Timeline convergence (landed)
+
+`piko-client-core::timeline` is the sole reducer for host-authored Timeline
+state. It accepts snapshot entries, committed messages, stream patches,
+non-message durable entry commits, and turn terminals. TUI maps the normalized
+items into render components and owns only viewport, tool expansion, and local
+error presentation.
+
+Every projected item carries a stable identity and an ordering key. Snapshot
+rebuild uses active-branch ordinal. Live transcript commits reorder only the
+agent-authored items addressed by transcript sequence; they must not sort
+session facts and summaries behind the conversation. Replacing a realtime
+draft with its committed message preserves the draft's visible position unless
+the authoritative ordering key places it elsewhere.
+
+`ReplaceContent` addresses the segment at `content_index` and replaces its
+current bytes. `ClearContent` clears that segment; an omitted index clears all
+text/thinking segments for the item. Tool-call operations address streamed
+argument content. These corrections are ignored after the corresponding
+authoritative committed item exists.
+
+For message and thought patches, `content_index` is scoped by item kind and is
+stable across chunks; producers must not encode accumulated byte length in it.
+The normalized draft stores typed segments in first-seen order and mutates the
+matching `(kind, content_index)` segment in place. This preserves inter-kind
+ordering and whitespace while avoiding one render block per token.
+
+Tool patches carry `turnId`. The normalized tool item retains this identity and
+supports `running`, `completed`, `failed`, and `cancelled`. A failed or
+cancelled terminal finalizes every unresolved tool attributed to that turn.
+
+Host emits `SessionEntryCommitted` for newly durable, non-message entries that
+have a live Timeline projection. It does not duplicate `Message` entries,
+which remain on `TranscriptCommitted`. Session-scoped entries are merged into
+each agent view by the client projection; presentation clients do not assign
+them to whichever agent happened to be focused when the event arrived.
 
 ### Slice 4 — Optional ACP adapter sketch (product-gated, not this goal)
 

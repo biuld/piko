@@ -7,11 +7,8 @@ impl Timeline {
             viewport: ScrollViewport::default(),
             thinking_visible: true,
             tool_calls: Vec::new(),
-            live_assistant: None,
+            projection: piko_client_core::AgentTimeline::new(),
             next_local_id: 1,
-            committed_messages: HashMap::new(),
-            committed_task_seq: HashMap::new(),
-            realtime_delta_seq: HashMap::new(),
         }
     }
 
@@ -27,326 +24,62 @@ impl Timeline {
         }
     }
 
-    pub fn push_user(&mut self, message_id: String, text: String) {
-        let id = ComponentId::MessageId(message_id);
-        self.upsert_or_push(TimelineComponent::User(UserMessageComponent { id, text }));
-    }
-
-    pub fn start_assistant(&mut self, message_id: String) {
-        let id = ComponentId::MessageId(message_id);
-        if self.component_index(&id).is_none() {
-            self.push_component(TimelineComponent::Assistant(AssistantMessageComponent {
-                id: id.clone(),
-                blocks: Vec::new(),
-                stop_reason: None,
-                error_message: None,
-            }));
-        }
-        self.live_assistant = Some(id);
-    }
-
-    pub fn append_text_delta(&mut self, message_id: String, delta: String) {
-        self.append_assistant_block(message_id, delta, AssistantBlockKind::Text);
-    }
-
-    pub fn append_thinking_delta(&mut self, message_id: String, delta: String) {
-        self.append_assistant_block(message_id, delta, AssistantBlockKind::Thinking);
-    }
-
-    pub fn end_assistant_draft(
+    pub fn apply_stream_item(
         &mut self,
-        message_id: String,
-        stop_reason: Option<String>,
-        error_message: Option<String>,
-    ) {
-        let id = ComponentId::MessageId(message_id);
-        if let Some(TimelineComponent::Assistant(component)) = self.component_mut(&id) {
-            component.stop_reason = stop_reason;
-            component.error_message = error_message;
+        patch: &piko_protocol::StreamItemPatch,
+    ) -> piko_client_core::ApplyOutcome {
+        let outcome = self.projection.apply_stream_item(patch);
+        if outcome == piko_client_core::ApplyOutcome::Applied {
+            self.sync_projection();
         }
-        if self.live_assistant.as_ref() == Some(&id) {
-            self.live_assistant = None;
-        }
-    }
-
-    pub(super) fn apply_realtime_delta(
-        &mut self,
-        message_id: String,
-        delta_seq: u64,
-        delta: RealtimeDelta,
-    ) {
-        if self.committed_messages.contains_key(&message_id) {
-            return;
-        }
-        if self
-            .realtime_delta_seq
-            .get(&message_id)
-            .is_some_and(|seq| *seq >= delta_seq)
-        {
-            return;
-        }
-        self.realtime_delta_seq
-            .insert(message_id.clone(), delta_seq);
-        match delta {
-            RealtimeDelta::MessageStarted { role } => {
-                if matches!(role, piko_protocol::MessageRole::Assistant) {
-                    self.start_assistant(message_id);
-                }
-            }
-            RealtimeDelta::Text { delta, .. } => {
-                self.append_text_delta(message_id, delta);
-            }
-            RealtimeDelta::Thinking { delta, .. } => {
-                self.append_thinking_delta(message_id, delta);
-            }
-            RealtimeDelta::ToolCall {
-                tool_call_id,
-                delta,
-                ..
-            } => {
-                self.append_tool_arg_chunk(tool_call_id, delta, Some(message_id));
-            }
-            RealtimeDelta::MessageEnded {
-                stop_reason,
-                error_message,
-            } => self.end_assistant_draft(message_id, stop_reason, error_message),
-        }
-    }
-
-    /// Apply a host stream-item patch (sole live stream path; F-22).
-    pub fn apply_stream_item(&mut self, patch: &piko_protocol::StreamItemPatch) {
-        if let Some((message_id, delta_seq, delta)) = patch.as_realtime_apply() {
-            self.apply_realtime_delta(message_id, delta_seq, delta);
-            return;
-        }
-        if let (piko_protocol::StreamItemKind::ToolCall, piko_protocol::StreamItemOp::AppendChunk) =
-            (patch.item_kind, patch.op)
-        {
-            let parent = patch
-                .fields
-                .as_ref()
-                .and_then(|f| f.get("parentMessageId"))
-                .and_then(|v| v.as_str().map(str::to_string));
-            self.append_tool_arg_chunk(
-                patch.item_id.clone(),
-                patch.text.clone().unwrap_or_default(),
-                parent,
-            );
-            return;
-        }
-        if let Some(tool) = patch.tool_upsert_apply() {
-            match tool {
-                piko_protocol::ToolUpsertApply::Started {
-                    tool_call_id,
-                    tool_name,
-                    args,
-                    parent_message_id,
-                } => {
-                    let tool = ToolEntry::new(
-                        tool_call_id,
-                        tool_name,
-                        crate::app::ToolStatus::Running,
-                        crate::text::compact_json(&args),
-                        None,
-                        parent_message_id,
-                    );
-                    if !self.upsert_tool(tool.clone()) {
-                        self.push(TimelineEntry::Tool(tool));
-                    }
-                }
-                piko_protocol::ToolUpsertApply::Ended {
-                    tool_call_id,
-                    tool_name,
-                    result,
-                    is_error,
-                } => {
-                    let status = if is_error {
-                        crate::app::ToolStatus::Failed
-                    } else {
-                        crate::app::ToolStatus::Completed
-                    };
-                    let tool = ToolEntry::new(
-                        tool_call_id,
-                        tool_name,
-                        status,
-                        String::new(),
-                        Some(crate::text::compact_json(&result)),
-                        None,
-                    );
-                    if !self.upsert_tool(tool.clone()) {
-                        self.push(TimelineEntry::Tool(tool));
-                    }
-                }
-            }
-        }
-    }
-
-    /// Stream item discipline: upsert by tool_call_id, append argument JSON chunks.
-    pub fn append_tool_arg_chunk(
-        &mut self,
-        tool_call_id: String,
-        chunk: String,
-        parent_message_id: Option<String>,
-    ) {
-        if let Some(tool) = self.tool_calls.iter_mut().find(|t| t.id == tool_call_id) {
-            if matches!(tool.status, crate::app::ToolStatus::Running) {
-                tool.args.push_str(&chunk);
-                if tool.parent_message_id.is_none() {
-                    tool.parent_message_id = parent_message_id;
-                }
-                let tool = tool.clone();
-                let _ = self.upsert_tool(tool);
-            }
-            return;
-        }
-        let tool = ToolEntry::new(
-            tool_call_id,
-            String::new(),
-            crate::app::ToolStatus::Running,
-            chunk,
-            None,
-            parent_message_id,
-        );
-        if !self.upsert_tool(tool.clone()) {
-            self.push(TimelineEntry::Tool(tool));
-        }
+        outcome
     }
 
     pub fn apply_committed(&mut self, event: TranscriptCommittedEvent) -> bool {
-        if let Some((task_seq, message)) = self.committed_messages.get(&event.message_id) {
-            return *task_seq == event.transcript_seq && *message == event.message;
+        let outcome = self.projection.apply_committed_checked(
+            event.message_id,
+            event.transcript_seq,
+            event.message,
+            event.source_turn_id,
+        );
+        if outcome == piko_client_core::ApplyOutcome::Applied {
+            self.sync_projection();
         }
-        let message_id = event.message_id.clone();
-        let message = event.message.clone();
-        match &message {
-            Message::Context { .. } => {
-                // Runtime-only context is not a user-authored timeline entry.
-            }
-            Message::User { .. } => {
-                let text = crate::text::message_to_text(&message);
-                self.push_user(message_id.clone(), text);
-                self.committed_task_seq.insert(
-                    ComponentId::MessageId(message_id.clone()),
-                    event.transcript_seq,
-                );
-            }
-            Message::Assistant { .. } => {
-                self.complete_assistant_message(message_id.clone(), message.clone());
-                self.committed_task_seq.insert(
-                    ComponentId::MessageId(message_id.clone()),
-                    event.transcript_seq,
-                );
-            }
-            Message::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => {
-                self.push(TimelineEntry::Tool(ToolEntry::new(
-                    id.clone(),
-                    name.clone(),
-                    crate::app::ToolStatus::Running,
-                    crate::text::compact_json(arguments),
-                    None,
-                    None,
-                )));
-                self.committed_task_seq
-                    .entry(ComponentId::ToolCallId(id.clone()))
-                    .or_insert(event.transcript_seq);
-            }
-            Message::ToolResult {
-                tool_call_id,
-                tool_name,
-                is_error,
-                ..
-            } => {
-                let text = crate::text::message_to_text(&message);
-                let status = if is_error.unwrap_or(false) {
-                    crate::app::ToolStatus::Failed
-                } else {
-                    crate::app::ToolStatus::Completed
-                };
-                let mut tool = self
-                    .tool_calls
-                    .iter()
-                    .find(|tool| tool.id == *tool_call_id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        ToolEntry::new(
-                            tool_call_id.clone(),
-                            tool_name.clone().unwrap_or_else(|| "tool".into()),
-                            status,
-                            String::new(),
-                            None,
-                            None,
-                        )
-                    });
-                tool.status = status;
-                tool.result = Some(text);
-                self.push(TimelineEntry::Tool(tool));
-                self.committed_task_seq
-                    .entry(ComponentId::ToolCallId(tool_call_id.clone()))
-                    .or_insert(event.transcript_seq);
-            }
-        }
-        self.committed_messages
-            .insert(message_id, (event.transcript_seq, event.message));
-        self.reorder_committed_messages();
-        true
+        outcome != piko_client_core::ApplyOutcome::Inconsistent
     }
 
-    pub fn complete_assistant_message(&mut self, message_id: String, message: Message) {
-        let Message::Assistant {
-            content,
-            stop_reason,
-            error_message,
-            ..
-        } = message
-        else {
-            return;
-        };
-        let id = ComponentId::MessageId(message_id);
-        let blocks = content.into_iter().map(ContentBlock::from).collect();
-        let component = TimelineComponent::Assistant(AssistantMessageComponent {
-            id: id.clone(),
-            blocks,
-            stop_reason,
-            error_message,
-        });
-        self.upsert_or_push(component);
-        if self.live_assistant.as_ref() == Some(&id) {
-            self.live_assistant = None;
-        }
-    }
-
-    pub fn push_session_fact(&mut self, entry_id: String, label: &'static str, text: String) {
-        self.push_component(TimelineComponent::SessionFact(SessionFactComponent {
-            id: ComponentId::EntryId(entry_id),
-            label,
-            text,
-        }));
-    }
-
-    pub fn push_summary(&mut self, entry_id: String, kind: SummaryKind, text: String) {
-        self.push_component(TimelineComponent::Summary(SummaryComponent {
-            id: ComponentId::EntryId(entry_id),
-            kind,
-            text,
-        }));
-    }
-
-    pub fn push_custom_message(
+    pub fn apply_session_entry(
         &mut self,
-        entry_id: String,
-        custom_type: String,
-        content: piko_protocol::CustomMessageContent,
+        entry: piko_protocol::SessionTreeEntry,
+        branch_order: u64,
+    ) -> piko_client_core::ApplyOutcome {
+        let outcome = self.projection.apply_session_entry(entry, branch_order);
+        if outcome == piko_client_core::ApplyOutcome::Applied {
+            self.sync_projection();
+        }
+        outcome
+    }
+
+    pub fn project_tool_started(
+        &mut self,
+        tool_call_id: String,
+        tool_name: String,
+        args: serde_json::Value,
+        parent_message_id: Option<String>,
     ) {
-        self.push_component(TimelineComponent::CustomMessage(CustomMessageComponent {
-            id: ComponentId::EntryId(entry_id),
-            custom_type,
-            content,
-        }));
+        self.projection
+            .apply_tool_started(tool_call_id, tool_name, args, parent_message_id);
+        self.sync_projection();
+    }
+
+    pub fn finish_turn(&mut self, turn_id: &str, status: crate::app::ToolStatus) {
+        let status = match status {
+            crate::app::ToolStatus::Failed => piko_client_core::ToolStatus::Failed,
+            crate::app::ToolStatus::Cancelled => piko_client_core::ToolStatus::Cancelled,
+            _ => return,
+        };
+        self.projection.finish_turn(turn_id, status);
+        self.sync_projection();
     }
 
     pub fn push_error(&mut self, text: String) {
@@ -382,14 +115,11 @@ impl Timeline {
         self.components.clear();
         self.tool_calls.clear();
         self.viewport.jump_latest();
-        self.live_assistant = None;
-        self.committed_messages.clear();
-        self.committed_task_seq.clear();
-        self.realtime_delta_seq.clear();
+        self.projection.clear();
     }
 
-    /// Update or insert a tool in the registry. Returns `true` if an existing
-    /// visible component was found and updated in-place.
+    /// Update or insert a presentation-only tool. Host-authored tools enter
+    /// through the canonical client-core projection above.
     pub fn upsert_tool(&mut self, mut tool: ToolEntry) -> bool {
         tool.component_id = ComponentId::ToolCallId(tool.id.clone());
         if let Some(existing) = self.tool_calls.iter_mut().find(|t| t.id == tool.id) {
@@ -407,6 +137,100 @@ impl Timeline {
             }
         }
         false
+    }
+
+    fn sync_projection(&mut self) {
+        use piko_client_core::TimelineItem as CoreItem;
+
+        let expanded: HashMap<String, bool> = self
+            .tool_calls
+            .iter()
+            .map(|tool| (tool.id.clone(), tool.expanded))
+            .collect();
+        let local_errors: Vec<TimelineComponent> = self
+            .components
+            .iter()
+            .filter(|component| matches!(component, TimelineComponent::Error(_)))
+            .cloned()
+            .collect();
+        let was_at_latest = self.viewport.is_at_latest();
+        self.components.clear();
+        self.tool_calls.clear();
+
+        for item in self.projection.items() {
+            let component = match item {
+                CoreItem::Committed(committed) => {
+                    component_from_message(committed.message_id.clone(), &committed.message)
+                }
+                CoreItem::RealtimeDraft(draft) => {
+                    let blocks = draft
+                        .content_segments
+                        .iter()
+                        .filter(|segment| !segment.text.is_empty())
+                        .map(|segment| match segment.kind {
+                            piko_client_core::RealtimeContentKind::Text => {
+                                ContentBlock::Text(segment.text.clone())
+                            }
+                            piko_client_core::RealtimeContentKind::Thinking => {
+                                ContentBlock::Thinking(segment.text.clone())
+                            }
+                        })
+                        .collect();
+                    Some(TimelineComponent::Assistant(AssistantMessageComponent {
+                        id: ComponentId::MessageId(draft.message_id.clone()),
+                        blocks,
+                        stop_reason: None,
+                        error_message: None,
+                    }))
+                }
+                CoreItem::Tool(tool) => {
+                    let result = if !tool.result_content.is_empty() {
+                        Some(protocol_blocks_to_text(&tool.result_content))
+                    } else {
+                        tool.result.as_ref().map(crate::text::compact_json)
+                    };
+                    let args = tool
+                        .partial_json
+                        .clone()
+                        .unwrap_or_else(|| crate::text::compact_json(&tool.args));
+                    let mut projected = ToolEntry::new(
+                        tool.tool_call_id.clone(),
+                        tool.tool_name.clone(),
+                        map_tool_status(tool.status),
+                        args,
+                        result,
+                        tool.parent_message_id.clone(),
+                    );
+                    projected.result_details =
+                        tool.result_details.as_ref().map(crate::text::compact_json);
+                    projected.expanded = expanded.get(&projected.id).copied().unwrap_or(false);
+                    self.tool_calls.push(projected.clone());
+                    Some(TimelineComponent::Tool(projected))
+                }
+                CoreItem::SessionEntry(entry) => component_from_session_entry(&entry.entry),
+            };
+            if let Some(component) = component {
+                self.components.push_back(component);
+            }
+        }
+        self.components.extend(local_errors);
+        while self.components.len() > MAX_COMPONENTS {
+            self.components.pop_front();
+        }
+        if was_at_latest {
+            self.viewport.jump_latest();
+        } else {
+            self.viewport.mark_appended();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn push_session_fact(&mut self, entry_id: String, label: &'static str, text: String) {
+        self.push_component(TimelineComponent::SessionFact(SessionFactComponent {
+            id: ComponentId::EntryId(entry_id),
+            label,
+            text,
+        }));
     }
 
     #[cfg(test)]
@@ -456,5 +280,103 @@ impl Timeline {
                     .collect(),
             )
         })
+    }
+}
+
+fn component_from_message(
+    id: String,
+    message: &piko_protocol::Message,
+) -> Option<TimelineComponent> {
+    match message {
+        piko_protocol::Message::User { .. } => {
+            Some(TimelineComponent::User(UserMessageComponent {
+                id: ComponentId::MessageId(id),
+                text: crate::text::message_to_text(message),
+            }))
+        }
+        piko_protocol::Message::Assistant {
+            content,
+            stop_reason,
+            error_message,
+            ..
+        } => Some(TimelineComponent::Assistant(AssistantMessageComponent {
+            id: ComponentId::MessageId(id),
+            blocks: content.iter().cloned().map(ContentBlock::from).collect(),
+            stop_reason: stop_reason.clone(),
+            error_message: error_message.clone(),
+        })),
+        _ => None,
+    }
+}
+
+fn component_from_session_entry(
+    entry: &piko_protocol::SessionTreeEntry,
+) -> Option<TimelineComponent> {
+    use piko_protocol::SessionTreeEntry;
+    match entry {
+        SessionTreeEntry::ModelChange(change) => {
+            Some(TimelineComponent::SessionFact(SessionFactComponent {
+                id: ComponentId::EntryId(change.id.clone()),
+                label: "model",
+                text: format!("changed to {}/{}", change.provider, change.model_id),
+            }))
+        }
+        SessionTreeEntry::ThinkingLevelChange(change) => {
+            Some(TimelineComponent::SessionFact(SessionFactComponent {
+                id: ComponentId::EntryId(change.id.clone()),
+                label: "thinking",
+                text: format!("changed to {}", change.thinking_level),
+            }))
+        }
+        SessionTreeEntry::ActiveToolsChange(change) if !change.active_tool_names.is_empty() => {
+            Some(TimelineComponent::SessionFact(SessionFactComponent {
+                id: ComponentId::EntryId(change.id.clone()),
+                label: "tools",
+                text: change.active_tool_names.join(", "),
+            }))
+        }
+        SessionTreeEntry::Compaction(compaction) => {
+            Some(TimelineComponent::Summary(SummaryComponent {
+                id: ComponentId::EntryId(compaction.id.clone()),
+                kind: SummaryKind::Compaction,
+                text: compaction.summary.clone(),
+            }))
+        }
+        SessionTreeEntry::BranchSummary(summary) => {
+            Some(TimelineComponent::Summary(SummaryComponent {
+                id: ComponentId::EntryId(summary.id.clone()),
+                kind: SummaryKind::Branch,
+                text: summary.summary.clone(),
+            }))
+        }
+        SessionTreeEntry::CustomMessage(custom) if custom.display => {
+            Some(TimelineComponent::CustomMessage(CustomMessageComponent {
+                id: ComponentId::EntryId(custom.id.clone()),
+                custom_type: custom.custom_type.clone(),
+                content: custom.content.clone(),
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn protocol_blocks_to_text(blocks: &[piko_protocol::ContentBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            piko_protocol::ContentBlock::Text { text } => text.clone(),
+            piko_protocol::ContentBlock::Thinking { thinking, .. } => thinking.clone(),
+            piko_protocol::ContentBlock::Image { mime_type, .. } => format!("[image: {mime_type}]"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn map_tool_status(status: piko_client_core::ToolStatus) -> crate::app::ToolStatus {
+    match status {
+        piko_client_core::ToolStatus::Running => crate::app::ToolStatus::Running,
+        piko_client_core::ToolStatus::Completed => crate::app::ToolStatus::Completed,
+        piko_client_core::ToolStatus::Failed => crate::app::ToolStatus::Failed,
+        piko_client_core::ToolStatus::Cancelled => crate::app::ToolStatus::Cancelled,
     }
 }

@@ -90,7 +90,7 @@ fn scale_rapid_realtime_then_commit() {
         });
         let draft = draft.expect("draft");
         assert_eq!(draft.last_delta_seq, RAPID_DELTAS);
-        assert_eq!(draft.text_segments.join("").len(), RAPID_DELTAS as usize);
+        assert_eq!(draft.text().len(), RAPID_DELTAS as usize);
     }
 
     let (state, _) = host(

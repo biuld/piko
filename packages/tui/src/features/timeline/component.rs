@@ -5,6 +5,7 @@ use crate::app::ToolStatus;
 /// Timeline item accepted by the timeline feature reducer.
 #[derive(Clone)]
 pub enum TimelineEntry {
+    #[allow(dead_code)]
     Tool(ToolEntry),
     Error(String),
 }
@@ -55,6 +56,7 @@ impl TimelineComponent {
     }
 }
 
+#[cfg(test)]
 impl TimelineComponent {
     pub fn id(&self) -> &ComponentId {
         match self {
@@ -71,12 +73,14 @@ impl TimelineComponent {
 
 #[derive(Clone)]
 pub struct UserMessageComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub text: String,
 }
 
 #[derive(Clone)]
 pub struct AssistantMessageComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
@@ -102,6 +106,7 @@ impl From<ProtocolContentBlock> for ContentBlock {
 
 #[derive(Clone)]
 pub struct SessionFactComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub label: &'static str,
     pub text: String,
@@ -115,6 +120,7 @@ pub enum SummaryKind {
 
 #[derive(Clone)]
 pub struct SummaryComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub kind: SummaryKind,
     pub text: String,
@@ -122,6 +128,7 @@ pub struct SummaryComponent {
 
 #[derive(Clone)]
 pub struct CustomMessageComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub custom_type: String,
     pub content: piko_protocol::CustomMessageContent,
@@ -129,6 +136,7 @@ pub struct CustomMessageComponent {
 
 #[derive(Clone)]
 pub struct ErrorComponent {
+    #[allow(dead_code)]
     pub id: ComponentId,
     pub text: String,
 }
@@ -142,6 +150,7 @@ pub struct ToolEntry {
     pub status: ToolStatus,
     pub args: String,
     pub result: Option<String>,
+    pub result_details: Option<String>,
     pub parent_message_id: Option<String>,
     /// Transient presentation state owned by this session's Timeline.
     pub expanded: bool,
@@ -163,6 +172,7 @@ impl ToolEntry {
             status,
             args,
             result,
+            result_details: None,
             parent_message_id,
             expanded: false,
         }

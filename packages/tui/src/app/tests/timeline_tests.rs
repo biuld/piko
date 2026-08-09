@@ -111,6 +111,7 @@ fn tool_start_and_end_update_one_timeline_item() {
                 tool_name: "read".into(),
                 args: json!({ "path": "Cargo.toml" }),
                 parent_message_id: Some("message-1".into()),
+                source_turn_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -127,6 +128,7 @@ fn tool_start_and_end_update_one_timeline_item() {
                 tool_name: "read".into(),
                 result: json!({ "ok": true }),
                 is_error: false,
+                source_turn_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -153,6 +155,7 @@ fn committed_tool_result_updates_existing_tool_call() {
                 tool_name: "run".into(),
                 args: json!({ "cmd": "true" }),
                 parent_message_id: None,
+                source_turn_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -169,6 +172,7 @@ fn committed_tool_result_updates_existing_tool_call() {
                 tool_name: "run".into(),
                 result: json!({"done": true}),
                 is_error: true,
+                source_turn_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -224,6 +228,98 @@ fn assistant_streaming_updates_one_component() {
         app.timeline.component_kinds(),
         vec![TimelineKind::Assistant]
     );
+}
+
+#[test]
+fn realtime_gap_requests_authoritative_snapshot() {
+    let mut app = live_app();
+    app.apply_event(realtime(
+        "message-gap",
+        1,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "a".into(),
+        },
+    ));
+    let effects = app.apply_event(realtime(
+        "message-gap",
+        3,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "c".into(),
+        },
+    ));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::StateSnapshot { session_id, .. })]
+            if session_id == "session-1"
+    ));
+    assert_eq!(
+        app.timeline.assistant_text("message-gap").as_deref(),
+        Some("a")
+    );
+}
+
+#[test]
+fn replace_and_clear_content_flow_through_canonical_projection() {
+    let mut app = live_app();
+    for (seq, op, text) in [
+        (1, piko_protocol::StreamItemOp::AppendChunk, Some("draft")),
+        (
+            2,
+            piko_protocol::StreamItemOp::ReplaceContent,
+            Some("correct"),
+        ),
+        (3, piko_protocol::StreamItemOp::ClearContent, None),
+    ] {
+        app.apply_event(Event::StreamItem(piko_protocol::StreamItemPatch {
+            session_id: Some("session-1".into()),
+            agent_instance_id: Some("task-1".into()),
+            item_id: "message-correction".into(),
+            item_kind: piko_protocol::StreamItemKind::AgentMessage,
+            op,
+            text: text.map(str::to_string),
+            content_index: Some(0),
+            delta_seq: Some(seq),
+            fields: Some(serde_json::json!({
+                "parentMessageId": "message-correction"
+            })),
+        }));
+    }
+    assert_eq!(
+        app.timeline.assistant_text("message-correction").as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn cancelled_turn_finalizes_running_tool() {
+    let mut app = live_app();
+    app.apply_event(Event::StreamItem(
+        piko_protocol::StreamItemPatch::from_tool_execution(
+            &piko_protocol::ToolExecutionEvent::Started {
+                session_id: "session-1".into(),
+                agent_instance_id: "task-1".into(),
+                agent_id: "agent-1".into(),
+                tool_call_id: "call-cancel".into(),
+                tool_name: "exec".into(),
+                args: json!({"cmd": "sleep 10"}),
+                parent_message_id: None,
+                source_turn_id: Some("turn-cancel".into()),
+            },
+        )
+        .into_iter()
+        .next()
+        .unwrap(),
+    ));
+    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled {
+        session_id: "session-1".into(),
+        turn_id: "turn-cancel".into(),
+        agent_instance_id: "task-1".into(),
+        usage: Default::default(),
+        timestamp: 1,
+    }));
+    assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Cancelled);
 }
 
 #[test]

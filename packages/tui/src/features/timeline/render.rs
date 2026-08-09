@@ -267,7 +267,7 @@ fn tool_lines(tool: &ToolEntry, hovered: bool, theme: &Theme, width: u16) -> Vec
     let bg = match tool.status {
         ToolStatus::Running => theme.tool_pending_bg,
         ToolStatus::Completed => theme.tool_success_bg,
-        ToolStatus::Failed => theme.tool_error_bg,
+        ToolStatus::Failed | ToolStatus::Cancelled => theme.tool_error_bg,
     };
     let title_style = Style::default()
         .fg(if hovered {
@@ -305,6 +305,12 @@ fn tool_lines(tool: &ToolEntry, hovered: bool, theme: &Theme, width: u16) -> Vec
             lines.push(filled_line("", output_style, width));
             for line in text_lines(result) {
                 lines.push(filled_line(format!(" {line}"), output_style, width));
+            }
+        }
+        if let Some(details) = &tool.result_details {
+            lines.push(filled_line(" details", muted_style, width));
+            for line in text_lines(details) {
+                lines.push(filled_line(format!(" {line}"), muted_style, width));
             }
         }
     } else if let Some(result) = &tool.result {
@@ -366,95 +372,5 @@ fn text_lines(text: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::component_lines;
-    use crate::app::ToolStatus;
-    use crate::features::timeline::{
-        AssistantMessageComponent, ComponentId, ContentBlock, Timeline, TimelineComponent,
-        TimelineEntry, ToolEntry,
-    };
-    use crate::theme::Theme;
-
-    fn tool_entry(id: &str, name: &str) -> ToolEntry {
-        ToolEntry::new(
-            id.into(),
-            name.into(),
-            ToolStatus::Completed,
-            String::new(),
-            Some(r#"{"ok":true}"#.into()),
-            None,
-        )
-    }
-
-    fn empty_tool_use_assistant(id: &str) -> TimelineComponent {
-        TimelineComponent::Assistant(AssistantMessageComponent {
-            id: ComponentId::MessageId(id.into()),
-            blocks: vec![ContentBlock::Text(String::new())],
-            stop_reason: Some("tool_use".into()),
-            error_message: None,
-        })
-    }
-
-    #[test]
-    fn zero_height_assistant_does_not_double_gap_between_tools() {
-        let theme = Theme::dark();
-        let mut timeline = Timeline::new();
-        timeline.push(TimelineEntry::Tool(tool_entry("c1", "list_agent_specs")));
-        timeline
-            .components
-            .push_back(empty_tool_use_assistant("a-empty"));
-        timeline.push(TimelineEntry::Tool(tool_entry("c2", "spawn_agent")));
-
-        let lines = timeline.render_lines(&theme, 40);
-        let blank_rows = lines
-            .iter()
-            .filter(|line| {
-                line.spans
-                    .iter()
-                    .all(|span| span.content.chars().all(char::is_whitespace))
-                    && line.spans.iter().all(|span| span.style.bg.is_none())
-            })
-            .count();
-
-        // Only one inter-component separator between the two visible tool cards.
-        assert_eq!(blank_rows, 1, "unexpected blank rows: {lines:?}");
-        assert!(
-            lines.iter().any(|line| {
-                line.spans
-                    .iter()
-                    .any(|span| span.content.contains("list_agent_specs"))
-            }),
-            "first tool missing: {lines:?}"
-        );
-        assert!(
-            lines.iter().any(|line| {
-                line.spans
-                    .iter()
-                    .any(|span| span.content.contains("spawn_agent"))
-            }),
-            "second tool missing: {lines:?}"
-        );
-    }
-
-    #[test]
-    fn tool_disclosure_and_hover_preserve_status_card_semantics() {
-        let theme = Theme::dark();
-        let mut tool = tool_entry("c1", "bash");
-        let collapsed = component_lines(
-            &TimelineComponent::Tool(tool.clone()),
-            true,
-            true,
-            &theme,
-            40,
-        );
-        let title = &collapsed[1].spans[0];
-        assert!(title.content.contains('▸'));
-        assert_eq!(title.style.fg, Some(theme.accent));
-        assert_eq!(title.style.bg, Some(theme.tool_success_bg));
-
-        tool.expanded = true;
-        let expanded = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 40);
-        assert!(expanded[1].spans[0].content.contains('▾'));
-        assert!(expanded.len() > collapsed.len());
-    }
-}
+#[path = "render_tests.rs"]
+mod tests;

@@ -42,6 +42,7 @@ impl AppState {
             spinner_frame: 0,
             timeline: Timeline::new(),
             agent_timelines: HashMap::new(),
+            session_timeline_entries: Vec::new(),
             approvals: ApprovalPanel::new(),
             mcp: crate::features::mcp::McpPanel::new(),
             processes: crate::features::processes::ProcessPanel::new(),

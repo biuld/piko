@@ -15,9 +15,6 @@ produce the same message stream shape as live event playback.
 
 Timeline owns:
 
-- the ordered visible message stream for the active session branch
-- live assistant and tool items that are still being updated
-- lookup indexes used to update visible items by stable ids
 - scroll position and pending-new counters
 - local presentation state such as tool expansion
 - rendering the message stream into Slot A
@@ -34,8 +31,8 @@ Timeline does not own:
 - global notifications
 
 hostd remains authoritative for persisted user-visible session state. Timeline
-is a TUI projection of hostd session state plus the live stream currently being
-received.
+renders the canonical presentation-independent projection owned by
+`piko-client-core`; it does not independently reduce host events.
 
 ## Architecture
 
@@ -495,13 +492,20 @@ components.
 
 ### tui
 
-TUI owns Timeline projection, indexes, local presentation state, viewport
-state, and rendering.
+TUI owns local presentation state, viewport state, and rendering.
+`piko-client-core` owns Timeline identity, ordering, stream patch semantics,
+tool-result merging, and terminal cleanup. TUI maps normalized items into
+render components while preserving per-tool expansion state.
 
 The app event layer translates hostd events into TimelineController operations.
 Timeline components do not send hostd commands directly.
 
 ## Migration Plan
+
+Phases 1–4 are implemented. The canonical projection convergence follow-up
+also routes TUI host-authored state through `piko-client-core`, supports
+`ReplaceContent` / `ClearContent`, and projects non-message durable entries
+live via `SessionEntryCommitted`.
 
 ### Phase 1: Message Components With Current Behavior
 

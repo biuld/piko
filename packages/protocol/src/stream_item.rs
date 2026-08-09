@@ -6,7 +6,8 @@
 //!
 //! | Kind | Live host path |
 //! |---|---|
-//! | `UserMessage` / `AgentMessage` / `AgentThought` / `ToolCall` | Emitted (realtime + tool mapping) |
+//! | `UserMessage` | Reserved on StreamItem; durable user text uses `TranscriptCommitted` |
+//! | `AgentMessage` / `AgentThought` / `ToolCall` | Emitted (realtime + tool mapping) |
 //! | `Plan` | **Deferred** — reserved; no host emitter until plan UX ships (F-22) |
 //! | `Usage` | **Not used on StreamItem** — live usage is `ServerMessage::Usage` |
 //! | `System` | **Deferred** — system/context markers stay on transcript/other events |
@@ -43,7 +44,9 @@ pub enum StreamItemKind {
 pub enum StreamItemOp {
     Upsert,
     AppendChunk,
+    /// Replace the addressed `content_index` without changing item identity.
     ReplaceContent,
+    /// Clear the addressed segment, or all segments when no index is supplied.
     ClearContent,
 }
 
@@ -62,6 +65,7 @@ pub struct StreamItemPatch {
     pub op: StreamItemOp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Stable segment id scoped by `item_kind`; never a byte/chunk offset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_index: Option<u32>,
     /// Realtime ordering key for message-scoped stream deltas.
@@ -183,6 +187,7 @@ impl StreamItemPatch {
                 tool_name,
                 args,
                 parent_message_id,
+                source_turn_id,
                 ..
             } => {
                 vec![Self {
@@ -199,6 +204,7 @@ impl StreamItemPatch {
                         "args": args,
                         "status": "running",
                         "parentMessageId": parent_message_id,
+                        "turnId": source_turn_id,
                     })),
                 }]
             }
@@ -209,6 +215,7 @@ impl StreamItemPatch {
                 tool_name,
                 result,
                 is_error,
+                source_turn_id,
                 ..
             } => {
                 let status = if *is_error { "failed" } else { "completed" };
@@ -225,6 +232,7 @@ impl StreamItemPatch {
                         "toolName": tool_name,
                         "result": result,
                         "status": status,
+                        "turnId": source_turn_id,
                     })),
                 }]
             }
@@ -295,71 +303,6 @@ impl StreamItemPatch {
         };
         Some((parent, seq, delta))
     }
-
-    /// Tool lifecycle apply when the patch is a tool upsert.
-    pub fn tool_upsert_apply(&self) -> Option<ToolUpsertApply> {
-        if self.item_kind != StreamItemKind::ToolCall || self.op != StreamItemOp::Upsert {
-            return None;
-        }
-        let fields = self.fields.as_ref()?;
-        let tool_name = fields
-            .get("toolName")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let status = fields.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        let parent = fields.get("parentMessageId").and_then(|v| {
-            if v.is_null() {
-                None
-            } else {
-                v.as_str().map(str::to_string)
-            }
-        });
-        match status {
-            "running" => {
-                let args = fields
-                    .get("args")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                Some(ToolUpsertApply::Started {
-                    tool_call_id: self.item_id.clone(),
-                    tool_name,
-                    args,
-                    parent_message_id: parent,
-                })
-            }
-            "completed" | "failed" => {
-                let result = fields
-                    .get("result")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                Some(ToolUpsertApply::Ended {
-                    tool_call_id: self.item_id.clone(),
-                    tool_name,
-                    result,
-                    is_error: status == "failed",
-                })
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Tool upsert projection extracted from a `StreamItemPatch`.
-#[derive(Debug, Clone)]
-pub enum ToolUpsertApply {
-    Started {
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-        parent_message_id: Option<String>,
-    },
-    Ended {
-        tool_call_id: String,
-        tool_name: String,
-        result: serde_json::Value,
-        is_error: bool,
-    },
 }
 
 #[cfg(test)]

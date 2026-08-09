@@ -13,6 +13,9 @@ pub enum ServerMessage {
     Auth(AuthEvent),
     /// Authoritative transcript record after a durable commit.
     TranscriptCommitted(TranscriptCommittedEvent),
+    /// Newly durable non-message session entry with a live Timeline projection.
+    /// Message entries remain on `TranscriptCommitted` to keep one authority.
+    SessionEntryCommitted(SessionEntryCommittedEvent),
     /// Session hydration/reconciliation with reliable event boundaries.
     SessionReconciled(SessionReconciledEvent),
     /// Authoritative transition from a visible session to no session.
@@ -65,6 +68,13 @@ pub struct TranscriptCommittedEvent {
     pub message: crate::messages::Message,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEntryCommittedEvent {
+    pub session_id: SessionId,
+    pub entry: crate::SessionTreeEntry,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReconcileReason {
@@ -102,6 +112,8 @@ pub enum ToolExecutionEvent {
         args: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         parent_message_id: Option<MessageId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<TurnId>,
     },
     Ended {
         session_id: SessionId,
@@ -111,6 +123,8 @@ pub enum ToolExecutionEvent {
         tool_name: String,
         result: serde_json::Value,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_turn_id: Option<TurnId>,
     },
 }
 

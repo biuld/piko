@@ -130,6 +130,8 @@ pub struct LiveSession {
     pub agents: Vec<AgentInfo>,
     pub selected_agent: Option<AgentInstanceId>,
     pub timelines: HashMap<AgentInstanceId, AgentTimeline>,
+    /// Session-scoped durable entries merged into every agent Timeline.
+    pub session_timeline_entries: Vec<(piko_protocol::SessionTreeEntry, u64)>,
     pub active_turns: Vec<ActiveTurn>,
     pub turn_failures: Vec<TurnFailure>,
     pub queue: QueueProjection,
@@ -288,7 +290,7 @@ impl LiveSession {
             })
             .collect();
 
-        let timelines =
+        let (timelines, session_timeline_entries) =
             timelines_from_snapshot(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
         Self {
@@ -300,6 +302,7 @@ impl LiveSession {
             agents: agents.to_vec(),
             selected_agent,
             timelines,
+            session_timeline_entries,
             active_turns,
             turn_failures: Vec::new(),
             queue: QueueProjection::default(),
@@ -308,6 +311,20 @@ impl LiveSession {
             cumulative_usage: snapshot.cumulative_usage.clone(),
             last_context_tokens: last_context_tokens_from_snapshot(snapshot),
         }
+    }
+
+    pub(crate) fn timeline_mut(&mut self, agent_instance_id: &str) -> &mut AgentTimeline {
+        if !self.timelines.contains_key(agent_instance_id) {
+            let mut timeline = AgentTimeline::new();
+            for (entry, order) in &self.session_timeline_entries {
+                let _ = timeline.apply_session_entry(entry.clone(), *order);
+            }
+            self.timelines
+                .insert(agent_instance_id.to_string(), timeline);
+        }
+        self.timelines
+            .get_mut(agent_instance_id)
+            .expect("timeline inserted above")
     }
 }
 
@@ -357,9 +374,42 @@ fn last_context_tokens_from_entries(
 fn timelines_from_snapshot(
     entries: &[SessionTreeEntry],
     current_leaf_id: Option<&str>,
-) -> HashMap<AgentInstanceId, AgentTimeline> {
+) -> (
+    HashMap<AgentInstanceId, AgentTimeline>,
+    Vec<(SessionTreeEntry, u64)>,
+) {
+    let active = active_branch_entries(entries, current_leaf_id);
     let mut timelines: HashMap<AgentInstanceId, AgentTimeline> = HashMap::new();
-    for entry in active_branch_entries(entries, current_leaf_id) {
+    for entry in &active {
+        if let SessionTreeEntry::Message(message) = entry {
+            timelines
+                .entry(message.agent_instance_id.clone())
+                .or_default();
+        } else if let SessionTreeEntry::ToolCall(tool) = entry
+            && let Some(agent_instance_id) = &tool.agent_instance_id
+        {
+            timelines.entry(agent_instance_id.clone()).or_default();
+        }
+    }
+    let mut session_timeline_entries = Vec::new();
+    for (order, entry) in active.into_iter().enumerate() {
+        if !matches!(
+            entry,
+            SessionTreeEntry::Message(_) | SessionTreeEntry::ToolCall(_)
+        ) {
+            let order = order as u64;
+            let mut visible = false;
+            for timeline in timelines.values_mut() {
+                visible |= matches!(
+                    timeline.apply_session_entry(entry.clone(), order),
+                    crate::timeline::ApplyOutcome::Applied
+                );
+            }
+            if visible || timelines.is_empty() {
+                session_timeline_entries.push((entry, order));
+            }
+            continue;
+        }
         match entry {
             SessionTreeEntry::Message(message_entry) => {
                 let timeline = timelines
@@ -388,7 +438,7 @@ fn timelines_from_snapshot(
             _ => {}
         }
     }
-    timelines
+    (timelines, session_timeline_entries)
 }
 
 /// Resolve selected agent: prefer snapshot, fallback to root, else first.

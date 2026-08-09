@@ -329,5 +329,6 @@ fn c7_subscribe_prefers_snapshot_events() {
         TimelineItem::Committed(item) => assert_eq!(item.message_id, "snap-msg-1"),
         TimelineItem::RealtimeDraft(_) => panic!("expected committed item"),
         TimelineItem::Tool(_) => panic!("expected committed item"),
+        TimelineItem::SessionEntry(_) => panic!("expected committed item"),
     }
 }

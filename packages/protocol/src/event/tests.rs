@@ -92,4 +92,24 @@ mod observation_projection_tests {
             serde_json::to_value(event).unwrap()
         );
     }
+
+    #[test]
+    fn session_entry_committed_round_trips() {
+        let event = ServerMessage::SessionEntryCommitted(SessionEntryCommittedEvent {
+            session_id: "session-1".into(),
+            entry: crate::SessionTreeEntry::ModelChange(crate::ModelChangeEntry {
+                id: "model-change".into(),
+                parent_id: Some("message-1".into()),
+                timestamp: "42".into(),
+                provider: "openai".into(),
+                model_id: "gpt".into(),
+            }),
+        });
+        let json = serde_json::to_string(&event).unwrap();
+        let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            serde_json::to_value(decoded).unwrap(),
+            serde_json::to_value(event).unwrap()
+        );
+    }
 }

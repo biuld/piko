@@ -81,6 +81,7 @@ pub enum ToolStatus {
     Running,
     Completed,
     Failed,
+    Cancelled,
 }
 
 #[derive(Clone, Default)]
@@ -132,6 +133,8 @@ pub struct AppState {
     // panels (each owns its own state + render)
     pub timeline: Timeline,
     pub agent_timelines: HashMap<String, Timeline>,
+    /// Session-scoped durable Timeline entries merged into every agent view.
+    pub session_timeline_entries: Vec<(piko_protocol::SessionTreeEntry, u64)>,
     pub approvals: ApprovalPanel,
     pub mcp: crate::features::mcp::McpPanel,
     pub processes: crate::features::processes::ProcessPanel,

@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 piko-comms = { path = "../comms" }
+piko-client-core = { path = "../client-core" }
 piko-protocol = { version = "0.1.0", path = "../protocol" }
 piko-tui-layout = { path = "../tui-layout" }
 anyhow = "1"

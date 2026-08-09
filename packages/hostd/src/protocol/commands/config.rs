@@ -99,6 +99,7 @@ impl ConfigObserver for SessionStorageObserver {
         old: &HostSettings,
         new: &HostSettings,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        let mut events = Vec::new();
         let changed = new.default_model != old.default_model
             || new.default_provider != old.default_provider
             || new.default_thinking_level != old.default_thinking_level;
@@ -142,9 +143,19 @@ impl ConfigObserver for SessionStorageObserver {
                         None,
                     ) {
                         Ok(entries) => {
-                            let mut state = server.state.lock().await;
+                            {
+                                let mut state = server.state.lock().await;
+                                for entry in &entries {
+                                    let _ = state.append_entry(&session_id, entry.clone());
+                                }
+                            }
                             for entry in entries {
-                                let _ = state.append_entry(&session_id, entry);
+                                events.push(ServerMessage::SessionEntryCommitted(
+                                    piko_protocol::SessionEntryCommittedEvent {
+                                        session_id: session_id.clone(),
+                                        entry,
+                                    },
+                                ));
                             }
                         }
                         Err(e) => {
@@ -156,7 +167,7 @@ impl ConfigObserver for SessionStorageObserver {
                 }
             }
         }
-        Ok(Vec::new())
+        Ok(events)
     }
 }
 

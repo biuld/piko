@@ -30,10 +30,7 @@ pub(super) fn handle_host(
                 return;
             }
             if let Some(session) = &mut state.live_session {
-                let timeline = session
-                    .timelines
-                    .entry(event.agent_instance_id.clone())
-                    .or_default();
+                let timeline = session.timeline_mut(&event.agent_instance_id);
                 let outcome = timeline.apply_committed_checked(
                     event.message_id,
                     event.transcript_seq,
@@ -47,6 +44,31 @@ pub(super) fn handle_host(
         }
         ServerMessage::StreamItem(patch) => {
             events::handle_stream_item(state, patch, ctx, effects);
+        }
+        ServerMessage::SessionEntryCommitted(event) => {
+            if !is_live_session_event(state, &event.session_id) {
+                return;
+            }
+            if let Some(session) = &mut state.live_session {
+                let order = session.entries.len() as u64;
+                if session
+                    .entries
+                    .iter()
+                    .all(|entry| entry.id() != event.entry.id())
+                {
+                    session.entries.push(event.entry.clone());
+                }
+                for timeline in session.timelines.values_mut() {
+                    let _ = timeline.apply_session_entry(event.entry.clone(), order);
+                }
+                if session
+                    .session_timeline_entries
+                    .iter()
+                    .all(|(entry, _)| entry.id() != event.entry.id())
+                {
+                    session.session_timeline_entries.push((event.entry, order));
+                }
+            }
         }
         ServerMessage::TurnLifecycle(event) => {
             events::handle_turn_lifecycle(state, event);
@@ -175,9 +197,14 @@ fn handle_command_response(
                     return;
                 }
                 if let Some(session) = &mut state.live_session {
+                    let expected_session_id = session.session_id.clone();
+                    let session_entries = session.session_timeline_entries.clone();
                     session.selected_agent = Some(agent_instance_id.clone());
-                    let timeline = session.timelines.entry(agent_instance_id).or_default();
+                    let timeline = session.timeline_mut(&agent_instance_id);
                     timeline.clear();
+                    for (entry, order) in session_entries {
+                        let _ = timeline.apply_session_entry(entry, order);
+                    }
                     let events = if !snapshot.events.is_empty() {
                         &snapshot.events
                     } else {
@@ -187,7 +214,7 @@ fn handle_command_response(
                         apply_sequenced_to_timeline(
                             timeline,
                             &seq_msg.message,
-                            &session.session_id,
+                            &expected_session_id,
                         );
                     }
                 }

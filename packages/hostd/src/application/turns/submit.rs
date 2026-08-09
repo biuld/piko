@@ -206,9 +206,23 @@ impl HostApp {
                     None,
                     None,
                 ) {
-                    let mut state = self.state.lock().await;
+                    {
+                        let mut state = self.state.lock().await;
+                        for entry in &entries {
+                            let _ = state.append_entry(&session_id, entry.clone());
+                        }
+                    }
                     for entry in entries {
-                        let _ = state.append_entry(&session_id, entry);
+                        send_event(
+                            tx,
+                            ServerMessage::SessionEntryCommitted(
+                                piko_protocol::SessionEntryCommittedEvent {
+                                    session_id: session_id.clone(),
+                                    entry,
+                                },
+                            ),
+                        )
+                        .await;
                     }
                 }
             }

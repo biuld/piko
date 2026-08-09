@@ -24,6 +24,7 @@ fn tool_lifecycle_is_projected_and_scoped() {
                 tool_name: "exec".into(),
                 args: serde_json::json!({"cmd": "true"}),
                 parent_message_id: Some("m1".into()),
+                source_turn_id: Some("turn-1".into()),
             })
             .into_iter()
             .next()
@@ -52,6 +53,7 @@ fn tool_lifecycle_is_projected_and_scoped() {
                 tool_name: "exec".into(),
                 result: serde_json::json!({"exit": 0}),
                 is_error: false,
+                source_turn_id: Some("turn-1".into()),
             })
             .into_iter()
             .next()
@@ -69,6 +71,51 @@ fn tool_lifecycle_is_projected_and_scoped() {
         .unwrap();
     assert_eq!(tool.status, ToolStatus::Completed);
     assert_eq!(tool.result, Some(serde_json::json!({"exit": 0})));
+}
+
+#[test]
+fn live_session_entry_is_backfilled_into_future_agent_timeline() {
+    let mut ids = SeqIds(0);
+    let state = drive_to_live(&mut ids, "s1");
+    let (state, _) = host(
+        state,
+        ServerMessage::SessionEntryCommitted(piko_protocol::SessionEntryCommittedEvent {
+            session_id: "s1".into(),
+            entry: piko_protocol::SessionTreeEntry::ModelChange(piko_protocol::ModelChangeEntry {
+                id: "model-change".into(),
+                parent_id: None,
+                timestamp: "1".into(),
+                provider: "openai".into(),
+                model_id: "gpt".into(),
+            }),
+        }),
+        &mut ids,
+    );
+    let (state, _) = host(
+        state,
+        ServerMessage::StreamItem(
+            piko_protocol::StreamItemPatch::from_realtime_delta(
+                Some("s1".into()),
+                Some("child".into()),
+                "child-message",
+                Some(1),
+                &RealtimeDelta::Text {
+                    content_index: 0,
+                    delta: "hello".into(),
+                },
+            )
+            .into_iter()
+            .next()
+            .unwrap(),
+        ),
+        &mut ids,
+    );
+    let timeline = &state.live_session.as_ref().unwrap().timelines["child"];
+    assert!(matches!(
+        timeline.items().first(),
+        Some(TimelineItem::SessionEntry(entry))
+            if entry.entry.id() == "model-change"
+    ));
 }
 
 #[test]
@@ -181,7 +228,7 @@ fn realtime_gap_requests_one_refresh() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(draft.text_segments.join(""), "a");
+    assert_eq!(draft.text(), "a");
 
     let (_, effects) = host(state, realtime(4, "d"), &mut ids);
     assert!(

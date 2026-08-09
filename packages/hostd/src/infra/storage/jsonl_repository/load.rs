@@ -206,6 +206,7 @@ fn project_agent_view_from_entry(
                 tool_name: tool.tool_name.clone(),
                 args: tool.arguments.clone(),
                 parent_message_id: tool.parent_message_id.clone(),
+                source_turn_id: None,
             };
             piko_protocol::StreamItemPatch::from_tool_execution(&tool_event)
                 .into_iter()

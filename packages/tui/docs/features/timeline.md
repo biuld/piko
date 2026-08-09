@@ -62,6 +62,12 @@ tree, Timeline rebuilds from the authoritative active session branch and
 presents the same message stream shape as live updates would have produced.
 Background compaction does not clear or rebuild the visible live Timeline.
 
+The presentation consumes the canonical `piko-client-core` Timeline
+projection. It does not maintain a second interpretation of stream patches or
+committed transcript entries. Session-scoped facts are visible in every agent
+view of the active branch; switching agents cannot accidentally move or hide a
+fact based on which agent was selected when it arrived.
+
 Switching agents shows that task's conversation. Returning to a previously
 viewed task restores its confirmed messages and any current live draft without
 mixing messages from another task.
@@ -89,6 +95,8 @@ Tool details:
 - Expansion state belongs to the in-memory Timeline for the current session.
   It is retained while switching between that session's agent timelines, but
   is discarded when the session projection is cleared or rebuilt.
+- Failed and cancelled turns finalize any still-running tool blocks belonging
+  to that turn. Cancelled tools use a distinct cancelled presentation state.
 - Tool blocks expose block-aware hover and click regions derived from the same
   measured render plan used for paint and viewport clipping. Read-only message,
   notice, error, and inter-block spacing rows do not expose actionable hits.

@@ -185,7 +185,7 @@ async fn session_model_continuity_is_durable_and_drives_prompt_fragment() {
     server
         .set_active_model(Some(SessionModelRef::new("anthropic", "model-b")))
         .await;
-    server
+    let second_turn_events = server
         .handle_command(Command::ChatSubmit {
             command_id: "s2".into(),
             session_id: session_id.clone(),
@@ -214,6 +214,20 @@ async fn session_model_continuity_is_durable_and_drives_prompt_fragment() {
         .expect("model-switch fragment on model change");
     assert!(switch.content.contains("\"model-a\""));
     assert!(switch.content.contains("\"model-b\""));
+
+    assert!(
+        second_turn_events.iter().any(|event| matches!(
+            event,
+            Event::SessionEntryCommitted(committed)
+                if committed.session_id == session_id
+                    && matches!(
+                        &committed.entry,
+                        SessionTreeEntry::ModelChange(change)
+                            if change.provider == "anthropic" && change.model_id == "model-b"
+                    )
+        )),
+        "model change is projected live after its durable append"
+    );
 
     // Durable record + exactly one JSONL ModelChange marker, reloaded from disk.
     let repo = JsonlSessionRepository::new(root);

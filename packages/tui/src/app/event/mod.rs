@@ -2,16 +2,12 @@ use piko_protocol::{Command, ServerMessage as Event, SessionSnapshot, SessionTre
 
 use crate::{
     app::{
-        AppMode, AppState, QueueStatus, SurfaceId, ToolStatus, command_id, effect::Effect,
-        flatten_models, get_active_branch_entries,
+        AppMode, AppState, QueueStatus, SurfaceId, command_id, effect::Effect, flatten_models,
+        get_active_branch_entries,
     },
     config::TuiConfig,
+    features::approval::PendingApproval,
     features::notifications::{NoticePolicy, NoticeScope, NoticeSubject, NotificationLevel},
-    features::{
-        approval::PendingApproval,
-        timeline::{TimelineEntry, ToolEntry},
-    },
-    text::compact_json,
 };
 
 mod events;
@@ -37,6 +33,14 @@ impl AppState {
             }
             apply(&mut self.timeline);
         } else {
+            if !self.agent_timelines.contains_key(agent_instance_id) {
+                let mut timeline = crate::features::timeline::Timeline::new();
+                for (entry, order) in &self.session_timeline_entries {
+                    let _ = timeline.apply_session_entry(entry.clone(), *order);
+                }
+                self.agent_timelines
+                    .insert(agent_instance_id.to_string(), timeline);
+            }
             apply(
                 self.agent_timelines
                     .entry(agent_instance_id.to_string())
@@ -66,18 +70,29 @@ impl AppState {
             .active_agent_instance_id
             .replace(agent_instance_id.to_string())
         {
+            let mut next_timeline = self.agent_timelines.remove(agent_instance_id);
+            if next_timeline.is_none() {
+                let mut timeline = crate::features::timeline::Timeline::new();
+                for (entry, order) in &self.session_timeline_entries {
+                    let _ = timeline.apply_session_entry(entry.clone(), *order);
+                }
+                next_timeline = Some(timeline);
+            }
             let previous_timeline = std::mem::replace(
                 &mut self.timeline,
-                self.agent_timelines
-                    .remove(agent_instance_id)
-                    .unwrap_or_else(crate::features::timeline::Timeline::new),
+                next_timeline.expect("timeline constructed above"),
             );
             self.agent_timelines.insert(previous, previous_timeline);
         } else {
-            self.timeline = self
-                .agent_timelines
-                .remove(agent_instance_id)
-                .unwrap_or_else(crate::features::timeline::Timeline::new);
+            self.timeline = if let Some(timeline) = self.agent_timelines.remove(agent_instance_id) {
+                timeline
+            } else {
+                let mut timeline = crate::features::timeline::Timeline::new();
+                for (entry, order) in &self.session_timeline_entries {
+                    let _ = timeline.apply_session_entry(entry.clone(), *order);
+                }
+                timeline
+            };
         }
         self.tree.set_agent_filter(Some(agent_instance_id));
     }
@@ -85,6 +100,9 @@ impl AppState {
     pub fn apply_event(&mut self, event: Event) -> Vec<Effect> {
         match event {
             Event::TranscriptCommitted(committed) => self.apply_transcript_committed(committed),
+            Event::SessionEntryCommitted(committed) => {
+                self.apply_session_entry_committed(committed)
+            }
             Event::StreamItem(patch) => self.apply_stream_item(patch),
             Event::SessionReconciled(reconciled) => self.apply_session_reconciled(reconciled),
             Event::SessionCleared(cleared) => self.apply_session_cleared(cleared),

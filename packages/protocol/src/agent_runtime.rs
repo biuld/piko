@@ -123,14 +123,17 @@ pub enum RealtimeDelta {
         role: MessageRole,
     },
     Text {
+        /// Stable segment id within text deltas; never a byte/chunk offset.
         content_index: u32,
         delta: String,
     },
     Thinking {
+        /// Stable segment id within thinking deltas; never a byte/chunk offset.
         content_index: u32,
         delta: String,
     },
     ToolCall {
+        /// Stable streamed argument segment id for this tool call.
         content_index: u32,
         tool_call_id: String,
         delta: String,

@@ -237,6 +237,9 @@ impl AppState {
                 // so select + clear before applying replay.
                 self.select_agent_timeline(&agent_instance_id);
                 self.timeline.clear();
+                for (entry, order) in &self.session_timeline_entries {
+                    let _ = self.timeline.apply_session_entry(entry.clone(), *order);
+                }
                 let events = if snapshot.events.is_empty() {
                     replay
                 } else {

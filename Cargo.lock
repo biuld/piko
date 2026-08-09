@@ -2006,6 +2006,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "dirs",
+ "piko-client-core",
  "piko-comms",
  "piko-protocol",
  "piko-tui-layout",

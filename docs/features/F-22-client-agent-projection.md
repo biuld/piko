@@ -1,6 +1,6 @@
 # F-22: Client agent projection lifecycle
 
-> Status: implemented (Slices 1–3; Slice 4 product-gated)
+> Status: implemented (Slices 1–3b; Slice 4 product-gated)
 > Priority: P0
 > Source evidence: Agent Client Protocol v1/v2 (modeling reference, ADR-003);
 > piko F-01 turn runtime, F-07 approvals, F-09 session persistence, F-10
@@ -148,8 +148,37 @@ Minimum kinds:
 
 Chunk operations **append** to the current content for that id. Full content
 on an upsert **replaces** prior content for that id (including earlier chunks).
-Omitted fields on patch leave prior values unchanged (JSON merge discipline to
-be fixed in design).
+Other omitted fields on an upsert leave prior values unchanged.
+
+`content_index` identifies a stable content segment within its stream kind; it
+is never a byte, character, or chunk offset. Repeated chunks for the same
+`(kind, content_index)` append to one segment, preserving whitespace. The
+projection retains segments in first-seen order across message and thought
+kinds so streaming presentation converges without token-sized blocks.
+
+`replace_content` replaces one addressed content segment without changing the
+item identity or its other fields. `clear_content` clears one addressed
+segment, or all textual segments when `content_index` is omitted. Both
+operations are idempotent and are supported for agent messages, thoughts, and
+streamed tool arguments. A patch for a committed authoritative message is
+ignored; durable transcript state always wins over a live correction.
+
+### Timeline convergence
+
+- `piko-client-core` owns the canonical, presentation-independent Timeline
+  projection. Product clients may add viewport and rendering state, but do not
+  independently reinterpret host events.
+- Snapshot active-branch order is authoritative. Live committed messages use
+  their transcript sequence without moving durable session facts, summaries,
+  or custom messages out of branch order.
+- A stream sequence gap is inconsistent state and causes an authoritative
+  snapshot refresh.
+- Running tool items retain their source turn identity. Failed and cancelled
+  terminal turns finalize unresolved tools for that turn so clients never show
+  permanently running work.
+- Non-message durable entries that are visible in Timeline are emitted live as
+  committed session entries. Session-scoped facts are merged into every agent
+  view of that active branch at the same logical position.
 
 ### Usage projection
 
@@ -218,6 +247,12 @@ Rules:
       runtime outcomes; this PRD only projects them.
 - [x] ADR-003 fusion table is filled for ACP shapes used here.
 - [x] Design D-34 maps protocol DTOs; Slices 1–3 landed without ACP transport.
+- [x] Canonical Timeline projection is shared by client-core and TUI; snapshot
+      rebuild and live replay converge for mixed messages, tools, and facts.
+- [x] `replace_content` / `clear_content`, stream-gap recovery, and terminal
+      tool finalization are implemented and verified.
+- [x] Visible non-message durable entries are projected live as well as from
+      snapshots.
 - [ ] Slice 4 optional ACP adapter (product-gated; out of Slices 1–3 scope).
 
 ## Product decisions
@@ -268,6 +303,10 @@ ACP is a modeling reference (ADR-003), not a port target.
   mapping input only.
 - **Activity names**: runtime keeps `AgentActivity::WaitingForApproval`;
   client chrome uses `RequiresAction` via the sole mapping table above.
+- **Timeline**: `piko-client-core::AgentTimeline` is the canonical reducer;
+  TUI maps normalized items into render components. `SessionEntryCommitted`
+  carries live non-message durable facts, tool items retain turn attribution,
+  and all four StreamItem operations have defined reducer behavior.
 
 ## Open questions
 
