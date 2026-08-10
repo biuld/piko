@@ -9,6 +9,7 @@ use ratatui::{
 
 use crate::{
     app::{HitId, ToolStatus},
+    features::welcome::{self, WelcomeView},
     theme::Theme,
     ui::components::feedback::{
         CANCELLED_GLYPH, CHIP_SEP, DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, FAIL_GLYPH,
@@ -34,6 +35,7 @@ impl Timeline {
         area: Rect,
         theme: &Theme,
         interaction: InteractionState<HitId>,
+        welcome: WelcomeView<'_>,
     ) {
         let hovered_tool = match interaction.hovered {
             Some(HitId::TimelineTool(index)) => Some(index),
@@ -41,10 +43,9 @@ impl Timeline {
         };
         let mut plan = self.render_plan(area, theme, hovered_tool);
         if plan.lines.is_empty() {
-            plan.lines.push(Line::from(Span::styled(
-                "Type a prompt and press Enter.",
-                Style::default().fg(theme.dim),
-            )));
+            // Bordered, centered welcome card — not part of the scrollable stream.
+            welcome::render(frame, plan.content_area, theme, welcome);
+            return;
         }
 
         let block = if self.viewport.pending_new_items() > 0 {

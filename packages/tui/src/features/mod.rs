@@ -18,6 +18,7 @@ pub mod timeline;
 pub mod todos;
 pub mod tool_interaction;
 pub mod tree;
+pub mod welcome;
 
 use ratatui::layout::Rect;
 

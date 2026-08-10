@@ -25,6 +25,38 @@ fn draw(app: &AppState, area: Rect) -> Terminal<TestBackend> {
 }
 
 #[test]
+fn empty_stream_paints_welcome_banner() {
+    let app = app();
+    let area = Rect::new(0, 0, 80, 24);
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    assert!(
+        text.contains("piko"),
+        "expected welcome title/logo in empty stream:\n{text}"
+    );
+    assert!(
+        text.contains("coding agent"),
+        "expected tagline in empty stream:\n{text}"
+    );
+    assert!(
+        text.contains("submit prompt"),
+        "expected tip line in empty stream:\n{text}"
+    );
+    // Bordered card uses box-drawing corners.
+    assert!(
+        text.contains('┌') && text.contains('└'),
+        "expected welcome card border:\n{text}"
+    );
+}
+
+#[test]
 fn notice_component_paints_its_hover_background() {
     let mut app = app();
     app.session.id = Some("session-1".into());

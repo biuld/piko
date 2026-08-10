@@ -73,6 +73,11 @@ fn paint_regions(
             area,
             &app.theme,
             interaction_state(app, Region::Stream),
+            crate::features::welcome::WelcomeView {
+                version: env!("CARGO_PKG_VERSION"),
+                cwd: &app.cwd,
+                spinner_frame: app.spinner_frame,
+            },
         );
     }
     if let Some(area) = rects.get(&Region::Notice).copied() {
