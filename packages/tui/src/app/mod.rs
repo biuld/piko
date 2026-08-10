@@ -21,7 +21,7 @@ use crate::{
     },
     input::focus::FocusManager,
     theme::Theme,
-    ui::components::{interactive_workflow::InteractiveWorkflow, text_box::TextBox},
+    ui::components::{choice_workflow::ChoiceWorkflow, text_box::TextBox},
 };
 
 mod bootstrap;
@@ -150,7 +150,7 @@ pub struct AppState {
     pub thinking: ThinkingSelector,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
-    pub summary_prompt: Option<InteractiveWorkflow>,
+    pub summary_prompt: Option<ChoiceWorkflow>,
     pub auth_selector: AuthSelector,
     /// True while the Tree surface is choosing a branch point for `/fork`.
     pub tree_fork_mode: bool,

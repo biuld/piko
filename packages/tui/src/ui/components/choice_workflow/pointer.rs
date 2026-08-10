@@ -6,18 +6,85 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use super::{InteractiveWorkflow, clamp_rect, prompt_content_area, row_rect};
-use crate::{app::HitId, theme::Theme, ui::components::hover_bg};
+use super::{ChoiceWorkflow, clamp_rect, row_rect};
+use crate::{
+    app::HitId,
+    theme::Theme,
+    ui::components::{
+        feedback::selected_bg, hover_bg, selectable_list::paint_index_hover, selection_prefix,
+    },
+};
 
-impl InteractiveWorkflow {
-    pub(super) fn render_hover(
+impl ChoiceWorkflow {
+    /// Post-paint selected full-row bg + hover preview (content-relative).
+    pub(super) fn paint_selected_and_hover(
         &self,
         frame: &mut Frame<'_>,
-        area: Rect,
+        content: Rect,
         theme: &Theme,
         interaction: InteractionState<HitId>,
     ) {
-        self.paint_hover(frame, area, theme, interaction, false);
+        let regions = self.component_regions_in(content, content);
+        // Selected full-row background only on choice / confirm rows — not tabs
+        // (tabs use accent text). Matches SelectableList row highlight, not a
+        // second full-pane fill.
+        if let Some(bg) = selected_bg(theme) {
+            for (rect, id) in &regions {
+                let paint = match id {
+                    HitId::Choice { question, choice } => {
+                        self.active_question_idx == *question
+                            && self
+                                .questions
+                                .get(*question)
+                                .is_some_and(|q| q.selected_idx == *choice)
+                    }
+                    HitId::Submit => self.confirm_focused,
+                    _ => false,
+                };
+                if paint && !rect.is_empty() {
+                    frame.buffer_mut().set_style(*rect, Style::default().bg(bg));
+                }
+            }
+        }
+        // Choice hover via shared helper; Tab/Submit keep simple hover.
+        let choice_regions: Vec<(Rect, usize)> = regions
+            .iter()
+            .filter_map(|(rect, id)| match id {
+                HitId::Choice { choice, .. } => Some((*rect, *choice)),
+                _ => None,
+            })
+            .collect();
+        let selected_choice = self
+            .questions
+            .get(self.active_question_idx)
+            .map(|q| q.selected_idx)
+            .unwrap_or(0);
+        let hovered_choice = match interaction.hovered {
+            Some(HitId::Choice { choice, .. }) => Some(choice),
+            _ => None,
+        };
+        paint_index_hover(
+            frame,
+            &choice_regions,
+            hovered_choice,
+            selected_choice,
+            theme,
+        );
+
+        let Some(element) = interaction.hovered else {
+            return;
+        };
+        if matches!(element, HitId::Choice { .. }) || self.element_is_selected(element) {
+            return;
+        }
+        let Some(background) = hover_bg(theme) else {
+            return;
+        };
+        if let Some((rect, _)) = regions.into_iter().find(|(_, id)| *id == element) {
+            frame
+                .buffer_mut()
+                .set_style(rect, Style::default().bg(background));
+        }
     }
 
     pub fn render_embedded_hover(
@@ -27,36 +94,8 @@ impl InteractiveWorkflow {
         theme: &Theme,
         interaction: InteractionState<HitId>,
     ) {
-        self.paint_hover(frame, area, theme, interaction, true);
-    }
-
-    fn paint_hover(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        theme: &Theme,
-        interaction: InteractionState<HitId>,
-        embedded: bool,
-    ) {
-        let Some(element) = interaction.hovered else {
-            return;
-        };
-        if self.element_is_selected(element) {
-            return;
-        }
-        let Some(background) = hover_bg(theme) else {
-            return;
-        };
-        let regions = if embedded {
-            self.component_regions_embedded(area)
-        } else {
-            self.component_regions_modal(area)
-        };
-        if let Some((rect, _)) = regions.into_iter().find(|(_, id)| *id == element) {
-            frame
-                .buffer_mut()
-                .set_style(rect, Style::default().bg(background));
-        }
+        // Embedded: `area` is already the Pane footer/content rect.
+        self.paint_selected_and_hover(frame, area, theme, interaction);
     }
 
     fn element_is_selected(&self, element: HitId) -> bool {
@@ -74,14 +113,15 @@ impl InteractiveWorkflow {
         }
     }
 
+    /// Hit regions for a standalone Decide dock (host = full pane area).
     pub fn component_regions_modal(&self, area: Rect) -> Vec<(Rect, HitId)> {
         let inner = self.modal_content_area(area);
         self.component_regions_in(inner, area)
     }
 
+    /// Hit regions when body fills `area` (parent Pane content / footer).
     pub fn component_regions_embedded(&self, area: Rect) -> Vec<(Rect, HitId)> {
-        let inner = prompt_content_area(area);
-        self.component_regions_in(inner, area)
+        self.component_regions_in(area, area)
     }
 
     fn component_regions_in(&self, inner: Rect, bounds: Rect) -> Vec<(Rect, HitId)> {
@@ -144,12 +184,13 @@ impl InteractiveWorkflow {
         let y = *rows.choice_y.get(choice)?;
         let label = &question.choices.get(choice)?.label;
         let number = format!("{}. ", choice + 1);
+        let prefix_w = UnicodeWidthStr::width(selection_prefix(true).as_str()) as u16;
         let x = inner
             .x
-            .saturating_add(2)
+            .saturating_add(prefix_w)
             .saturating_add(UnicodeWidthStr::width(number.as_str()) as u16)
             .saturating_add(UnicodeWidthStr::width(label.as_str()) as u16)
-            .saturating_add(2);
+            .saturating_add(2); // ": "
         Some(Position::new(x, y))
     }
 }

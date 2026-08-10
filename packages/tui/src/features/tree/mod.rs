@@ -10,9 +10,9 @@ pub use self::document::TreeDocument;
 pub use self::format::{session_entry_label, session_entry_preview_text};
 pub use self::render::TreeCtx;
 pub use self::visible::{ConnectorKind, TreeFilterMode, VisibleTree};
-use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
+use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question};
 
-pub fn create_summary_prompt(target_entry_id: String) -> InteractiveWorkflow {
+pub fn create_summary_prompt(target_entry_id: String) -> ChoiceWorkflow {
     let question = Question::new(
         "Branch switch",
         "leave current-path entries behind?",
@@ -34,7 +34,7 @@ pub fn create_summary_prompt(target_entry_id: String) -> InteractiveWorkflow {
             },
         ],
     );
-    let mut workflow = InteractiveWorkflow::new(vec![question], false);
+    let mut workflow = ChoiceWorkflow::new(vec![question], false);
     workflow.target_entry_id = Some(target_entry_id);
     workflow
 }
@@ -49,7 +49,7 @@ pub enum SummaryPromptConfirm {
     None,
 }
 
-pub fn confirm_summary_prompt(workflow: &mut InteractiveWorkflow) -> SummaryPromptConfirm {
+pub fn confirm_summary_prompt(workflow: &mut ChoiceWorkflow) -> SummaryPromptConfirm {
     if workflow.questions.is_empty() {
         return SummaryPromptConfirm::None;
     }

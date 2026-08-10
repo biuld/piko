@@ -262,7 +262,9 @@ pub struct PaneSpec<'a> {
     pub footer: PaneFooter<'a>,
     /// Optional tip line above the footer.
     pub tip: Option<&'a str>,
-    /// Optional backdrop fill behind the chrome (opaque modal dialogs).
+    /// Optional backdrop fill behind the chrome (opaque floating modals).
+    /// Dock bands leave this `None` so they match the shell background.
+    #[allow(dead_code)] // public Pane API; Decide docks intentionally omit fill
     pub fill: Option<Color>,
     pub focused: bool,
 }
@@ -368,6 +370,7 @@ impl<'a> PaneSpec<'a> {
     }
 
     /// Fill the whole area with `color` behind the chrome (modal backdrop).
+    #[allow(dead_code)] // public Pane API; Decide docks intentionally omit fill
     pub fn fill(mut self, color: Color) -> Self {
         self.fill = Some(color);
         self

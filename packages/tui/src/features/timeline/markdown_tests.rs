@@ -73,3 +73,38 @@ fn unknown_fenced_language_falls_back_to_plain_text() {
             .all(|span| span.style == Default::default())
     );
 }
+
+#[test]
+fn strong_emphasis_strips_markers_and_applies_bold() {
+    use ratatui::style::Modifier;
+
+    let lines = parse_markdown("answer is **Rust** today\n", &Theme::dark());
+    let plain = rendered_text(&lines).join("");
+    assert!(plain.contains("Rust"), "{plain}");
+    assert!(!plain.contains("**"), "asterisks must not remain: {plain}");
+    let has_bold = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .any(|s| s.content.contains("Rust") && s.style.add_modifier.contains(Modifier::BOLD));
+    assert!(has_bold, "Rust span should be bold: {lines:?}");
+}
+
+#[test]
+fn gfm_table_renders_without_pipe_soup() {
+    let md = "\
+| 问题 | 选择 |
+| --- | --- |
+| 语言 | **Rust** |
+| 编辑器 | Vim |
+";
+    let lines = parse_markdown(md, &Theme::dark());
+    let plain = rendered_text(&lines).join("\n");
+    assert!(plain.contains("问题") && plain.contains("Rust"), "{plain}");
+    assert!(!plain.contains('|'), "raw pipes should be gone: {plain}");
+    assert!(
+        !plain.contains("**"),
+        "bold inside cells should strip markers: {plain}"
+    );
+    // Header rule uses box-drawing, not markdown --- row.
+    assert!(plain.contains('─'), "expected header rule: {plain}");
+}

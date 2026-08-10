@@ -205,6 +205,21 @@ impl AppState {
     pub(super) fn dispatch_approval_action(&mut self, action: ApprovalAction) -> Vec<Effect> {
         match action {
             ApprovalAction::Respond(decision) => self.respond_approval(decision),
+            ApprovalAction::SelectNext => {
+                self.approvals.select_next();
+                Vec::new()
+            }
+            ApprovalAction::SelectPrev => {
+                self.approvals.select_prev();
+                Vec::new()
+            }
+            ApprovalAction::ConfirmSelected => {
+                if let Some(decision) = self.approvals.selected_decision() {
+                    self.respond_approval(decision)
+                } else {
+                    Vec::new()
+                }
+            }
         }
     }
 

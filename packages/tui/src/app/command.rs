@@ -95,7 +95,12 @@ pub enum TreeAction {
 
 #[derive(Debug)]
 pub enum ApprovalAction {
+    /// Immediate decision (Esc decline, pointer click on a specific choice).
     Respond(ApprovalDecision),
+    SelectNext,
+    SelectPrev,
+    /// Enter: confirm the currently selected grant.
+    ConfirmSelected,
 }
 
 #[derive(Debug)]

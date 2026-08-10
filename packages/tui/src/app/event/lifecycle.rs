@@ -140,6 +140,7 @@ impl AppState {
                     tool_name: tool_name.clone(),
                     args: tool_args,
                     prompt,
+                    selected_idx: 0,
                 });
                 if let Some(agent) = self
                     .agent_panel

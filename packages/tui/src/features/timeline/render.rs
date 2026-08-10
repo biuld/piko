@@ -16,7 +16,7 @@ use crate::{
     },
     ui::line_layout::{
         BodyWithTrailing, DEFAULT_EDGE_INSET, DEFAULT_TRAILING_SPACER, body_with_trailing,
-        filled_line, paint_cols, trailing_reserve, truncate_cols,
+        filled_line, paint_cols, trailing_reserve, truncate_cols, truncate_paint_cols,
     },
 };
 
@@ -204,7 +204,9 @@ fn assistant_lines(
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+    // ── Content presentation (never depends on timestamp) ─────────────────
+    // Timestamp is stream chrome applied after body lines exist. Protocol may
+    // omit epoch on drafts; missing clock only means reserve=0, not plain body.
     let visible_blocks: Vec<&ContentBlock> = component
         .blocks
         .iter()
@@ -215,114 +217,28 @@ fn assistant_lines(
         })
         .collect();
 
-    let ts = format_message_timestamp(component.timestamp);
-    let dim = Style::default().fg(theme.dim);
-    let plain = Style::default().fg(theme.text);
-    let show_ts = ts.as_deref().filter(|_| {
-        !visible_blocks.is_empty()
-            || component.error_message.is_some()
-            || component
-                .stop_reason
-                .as_deref()
-                .is_some_and(|r| !matches!(r, "stop" | "toolUse" | "tool_use"))
-    });
-    let reserve = trailing_reserve(show_ts, DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET);
-    // Paint clock only once (first body row); every row keeps the same left budget.
-    let mut ts_pending = show_ts;
-
+    let mut body: Vec<Line<'static>> = Vec::new();
     for (index, block) in visible_blocks.iter().enumerate() {
         match block {
             ContentBlock::Text(text) => {
-                // Column-aware plain wrap when a right zone is reserved so body
-                // never runs under the clock. Without timestamp, keep markdown.
-                if reserve > 0 {
-                    let trailing = ts_pending.take();
-                    lines.extend(body_with_trailing(BodyWithTrailing {
-                        text: text.trim(),
-                        trailing,
-                        reserve,
-                        left_style: plain,
-                        trailing_style: dim,
-                        fill: Style::default(),
-                        width,
-                        leading_space: true,
-                        pad_rows: true,
-                    }));
-                } else {
-                    let parsed = super::markdown::parse_markdown(text.trim(), theme);
-                    for mut line in parsed {
-                        if line.spans.is_empty() {
-                            line.spans.push(Span::from(" "));
-                        } else {
-                            line.spans.insert(0, Span::from(" "));
-                        }
-                        lines.push(line);
-                    }
-                }
+                body.extend(present_assistant_markdown(text.trim(), theme));
             }
             ContentBlock::Thinking(text) if thinking_visible => {
                 let style = Style::default()
                     .fg(theme.thinking_text)
                     .add_modifier(Modifier::ITALIC);
-                if reserve > 0 {
-                    let trailing = ts_pending.take();
-                    lines.extend(body_with_trailing(BodyWithTrailing {
-                        text: text.trim(),
-                        trailing,
-                        reserve,
-                        left_style: style,
-                        trailing_style: dim,
-                        fill: Style::default(),
-                        width,
-                        leading_space: true,
-                        pad_rows: true,
-                    }));
-                } else {
-                    for line in text_lines(text.trim()) {
-                        lines.push(Line::from(Span::styled(format!(" {line}"), style)));
-                    }
-                }
+                body.extend(present_plain_body(text.trim(), style, width));
             }
             ContentBlock::Thinking(_) => {
                 let style = Style::default()
                     .fg(theme.thinking_text)
                     .add_modifier(Modifier::ITALIC);
-                if reserve > 0 {
-                    let trailing = ts_pending.take();
-                    lines.extend(body_with_trailing(BodyWithTrailing {
-                        text: "Thinking...",
-                        trailing,
-                        reserve,
-                        left_style: style,
-                        trailing_style: dim,
-                        fill: Style::default(),
-                        width,
-                        leading_space: true,
-                        pad_rows: true,
-                    }));
-                } else {
-                    lines.push(Line::from(Span::styled(" Thinking...", style)));
-                }
+                body.extend(present_plain_body("Thinking...", style, width));
             }
             ContentBlock::Image { mime_type } => {
                 let style = Style::default().fg(theme.dim);
                 let label = format!("[image {mime_type}]");
-                if reserve > 0 {
-                    let trailing = ts_pending.take();
-                    lines.extend(body_with_trailing(BodyWithTrailing {
-                        text: &label,
-                        trailing,
-                        reserve,
-                        left_style: style,
-                        trailing_style: dim,
-                        fill: Style::default(),
-                        width,
-                        leading_space: true,
-                        pad_rows: true,
-                    }));
-                } else {
-                    lines.push(Line::from(Span::styled(format!(" {label}"), style)));
-                }
+                body.extend(present_plain_body(&label, style, width));
             }
         }
         let has_visible_content_after = visible_blocks[index + 1..]
@@ -331,14 +247,14 @@ fn assistant_lines(
         if matches!(block, ContentBlock::Text(_) | ContentBlock::Thinking(_))
             && has_visible_content_after
         {
-            lines.push(Line::from(""));
+            body.push(Line::from(""));
         }
     }
     if let Some(stop_reason) = &component.stop_reason
         && !matches!(stop_reason.as_str(), "stop" | "toolUse" | "tool_use")
     {
-        if !lines.is_empty() {
-            lines.push(Line::from(""));
+        if !body.is_empty() {
+            body.push(Line::from(""));
         }
         let message = match stop_reason.as_str() {
             "length" => "Error: Model stopped because it reached the maximum output token limit. The response may be incomplete.".to_string(),
@@ -353,24 +269,167 @@ fn assistant_lines(
             other => format!("Error: stopped: {other}"),
         };
         let err = Style::default().fg(theme.error);
-        if reserve > 0 {
-            let trailing = ts_pending.take();
-            lines.extend(body_with_trailing(BodyWithTrailing {
-                text: &message,
-                trailing,
-                reserve,
-                left_style: err,
-                trailing_style: dim,
-                fill: Style::default(),
-                width,
-                leading_space: false,
-                pad_rows: true,
-            }));
-        } else {
-            lines.push(Line::from(Span::styled(message, err)));
-        }
+        // Error lines keep no leading gutter (historical).
+        body.extend(present_plain_body_unguttered(&message, err, width));
     }
+
+    // ── Stream chrome: optional clock on first body row ───────────────────
+    let ts = format_message_timestamp(component.timestamp);
+    let show_ts = ts.as_deref().filter(|_| {
+        !body.is_empty()
+            || component.error_message.is_some()
+            || component
+                .stop_reason
+                .as_deref()
+                .is_some_and(|r| !matches!(r, "stop" | "toolUse" | "tool_use"))
+    });
+    let dim = Style::default().fg(theme.dim);
+    apply_message_trailing_chrome(body, show_ts, width, dim)
+}
+
+/// Markdown body only — no timestamp / reserve logic.
+fn present_assistant_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let parsed = super::markdown::parse_markdown(text, theme);
+    if parsed.is_empty() {
+        return vec![Line::from(Span::from(" "))];
+    }
+    parsed
+        .into_iter()
+        .map(|mut line| {
+            if line.spans.is_empty() {
+                line.spans.push(Span::from(" "));
+            } else {
+                line.spans.insert(0, Span::from(" "));
+            }
+            line
+        })
+        .collect()
+}
+
+/// Soft-wrapped plain body with leading gutter (thinking / image).
+/// No full-width pad here — chrome layer may pad when a trailing clock is present.
+fn present_plain_body(text: &str, style: Style, width: u16) -> Vec<Line<'static>> {
+    body_with_trailing(BodyWithTrailing {
+        text,
+        trailing: None,
+        reserve: 0,
+        left_style: style,
+        trailing_style: Style::default(),
+        fill: Style::default(),
+        width,
+        leading_space: true,
+        pad_rows: false,
+    })
+}
+
+fn present_plain_body_unguttered(text: &str, style: Style, width: u16) -> Vec<Line<'static>> {
+    body_with_trailing(BodyWithTrailing {
+        text,
+        trailing: None,
+        reserve: 0,
+        left_style: style,
+        trailing_style: Style::default(),
+        fill: Style::default(),
+        width,
+        leading_space: false,
+        pad_rows: false,
+    })
+}
+
+/// Layout-only: pin trailing label (timestamp) on the first row and keep every
+/// row's left budget clear of the right chrome zone. Content is already final.
+fn apply_message_trailing_chrome(
+    lines: Vec<Line<'static>>,
+    trailing: Option<&str>,
+    width: u16,
+    trailing_style: Style,
+) -> Vec<Line<'static>> {
+    if lines.is_empty() {
+        return lines;
+    }
+    let reserve = trailing_reserve(trailing, DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET);
+    if reserve == 0 {
+        return lines;
+    }
+
+    let target = usize::from(width);
+    let edge = DEFAULT_EDGE_INSET;
+    let mid = DEFAULT_TRAILING_SPACER;
+
     lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, mut line)| {
+            if i == 0 {
+                if let Some(ts) = trailing {
+                    let right_w = paint_cols(ts);
+                    let left_budget = target
+                        .saturating_sub(right_w)
+                        .saturating_sub(mid)
+                        .saturating_sub(edge);
+                    line.spans = truncate_spans_to_cols(line.spans, left_budget);
+                    let left_w: usize = line
+                        .spans
+                        .iter()
+                        .map(|s| paint_cols(s.content.as_ref()))
+                        .sum();
+                    let spacer = target
+                        .saturating_sub(left_w)
+                        .saturating_sub(right_w)
+                        .saturating_sub(edge);
+                    if spacer > 0 {
+                        line.spans
+                            .push(Span::styled(" ".repeat(spacer), Style::default()));
+                    }
+                    line.spans
+                        .push(Span::styled(ts.to_string(), trailing_style));
+                    if edge > 0 {
+                        line.spans
+                            .push(Span::styled(" ".repeat(edge), Style::default()));
+                    }
+                }
+            } else {
+                let left_budget = target.saturating_sub(reserve);
+                line.spans = truncate_spans_to_cols(line.spans, left_budget);
+                let left_w: usize = line
+                    .spans
+                    .iter()
+                    .map(|s| paint_cols(s.content.as_ref()))
+                    .sum();
+                let pad = target.saturating_sub(left_w);
+                if pad > 0 {
+                    line.spans
+                        .push(Span::styled(" ".repeat(pad), Style::default()));
+                }
+            }
+            line
+        })
+        .collect()
+}
+
+fn truncate_spans_to_cols(spans: Vec<Span<'static>>, max_cols: usize) -> Vec<Span<'static>> {
+    if max_cols == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    for span in spans {
+        let w = paint_cols(span.content.as_ref());
+        if used.saturating_add(w) <= max_cols {
+            out.push(span);
+            used = used.saturating_add(w);
+            continue;
+        }
+        let room = max_cols.saturating_sub(used);
+        if room > 0 {
+            let clipped = truncate_paint_cols(span.content.as_ref(), room);
+            if !clipped.is_empty() {
+                out.push(Span::styled(clipped, span.style));
+            }
+        }
+        break;
+    }
+    out
 }
 
 /// Line index of the title row within a tool card produced by [`tool_lines`]

@@ -163,44 +163,16 @@ impl InputRouter {
     ) -> Option<Action> {
         // Approval / tool-interaction / summary have dedicated capture paths.
         if active.is_surface(SurfaceId::Approval) {
-            if let Some(action) = match ka {
-                Some(KeyAction::ApprovalAccept) => {
-                    Some(ApprovalAction::Respond(ApprovalDecision::Accept).into())
-                }
-                Some(KeyAction::ApprovalAcceptSession) => {
-                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptSession).into())
-                }
-                Some(KeyAction::ApprovalAcceptWorkspace) => {
-                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptWorkspace).into())
-                }
-                Some(KeyAction::ApprovalDecline) => {
-                    Some(ApprovalAction::Respond(ApprovalDecision::Decline).into())
-                }
-                _ => None,
-            } {
-                return Some(action);
+            // List-only Decide: ↑/↓ select grant, Enter confirms selection, Esc declines.
+            // Letter shortcuts (a/w/p) are intentionally not wired.
+            if ka == Some(KeyAction::ApprovalDecline) {
+                return Some(ApprovalAction::Respond(ApprovalDecision::Decline).into());
             }
             return match key.code {
-                KeyCode::Enter => Some(ApprovalAction::Respond(ApprovalDecision::Accept).into()),
+                KeyCode::Enter => Some(ApprovalAction::ConfirmSelected.into()),
                 KeyCode::Esc => Some(ApprovalAction::Respond(ApprovalDecision::Decline).into()),
-                KeyCode::Char('a' | 'A')
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT) =>
-                {
-                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptSession).into())
-                }
-                KeyCode::Char('w' | 'W')
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT) =>
-                {
-                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptWorkspace).into())
-                }
-                KeyCode::Char('p' | 'P')
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT) =>
-                {
-                    Some(ApprovalAction::Respond(ApprovalDecision::AcceptPermanent).into())
-                }
+                KeyCode::Down => Some(ApprovalAction::SelectNext.into()),
+                KeyCode::Up => Some(ApprovalAction::SelectPrev.into()),
                 _ => None,
             };
         }

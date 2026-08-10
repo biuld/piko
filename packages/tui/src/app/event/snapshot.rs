@@ -167,6 +167,7 @@ impl AppState {
                 tool_name,
                 args: approval.request,
                 prompt: approval.prompt,
+                selected_idx: 0,
             });
         }
         self.interactions.clear();

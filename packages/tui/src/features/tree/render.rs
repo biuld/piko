@@ -12,7 +12,7 @@ use super::{ConnectorKind, TreeFilterMode, TreePanel, visible};
 use crate::app::{HitId, command::SurfaceAction};
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
-use crate::ui::components::interactive_workflow::InteractiveWorkflow;
+use crate::ui::components::choice_workflow::ChoiceWorkflow;
 use crate::ui::components::pane::{PaneAffixHit, PaneFooter, PaneSearch, PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{
     ColumnCell, SelectableItem, SelectablePanelBody, paint_row_hover, paint_selectable_panel,
@@ -24,7 +24,7 @@ use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture, pai
 /// Render context for the session-tree surface (including its summary prompt).
 pub struct TreeCtx<'a> {
     pub filter: &'a str,
-    pub summary_prompt: Option<&'a InteractiveWorkflow>,
+    pub summary_prompt: Option<&'a ChoiceWorkflow>,
     pub theme: &'a Theme,
 }
 
@@ -244,7 +244,7 @@ impl TreePanel {
         frame: &mut Frame<'_>,
         area: Rect,
         filter: &str,
-        summary_prompt: Option<&InteractiveWorkflow>,
+        summary_prompt: Option<&ChoiceWorkflow>,
         theme: &Theme,
     ) {
         let mut left_title = "Session Tree".to_string();

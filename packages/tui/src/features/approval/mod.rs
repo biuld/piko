@@ -11,7 +11,7 @@ use crate::ui::components::pane::PaneTitleAffix;
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 use crate::text::compact_json;
-use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
+use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question};
 
 /// A single pending tool-approval request.
 pub struct PendingApproval {
@@ -23,6 +23,8 @@ pub struct PendingApproval {
     /// F-13: operator-authored approval prompt (MCP approval templates);
     /// absent → the generic question is rendered.
     pub prompt: Option<String>,
+    /// Durable choice selection for list navigation (default: Accept once).
+    pub selected_idx: usize,
 }
 
 /// Approval state: a queue of pending requests.
@@ -61,52 +63,82 @@ impl ApprovalPanel {
         self.pending.len()
     }
 
+    pub const CHOICE_COUNT: usize = 5;
+
+    pub fn select_next(&mut self) {
+        if let Some(front) = self.pending.front_mut()
+            && front.selected_idx + 1 < Self::CHOICE_COUNT
+        {
+            front.selected_idx += 1;
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        if let Some(front) = self.pending.front_mut()
+            && front.selected_idx > 0
+        {
+            front.selected_idx -= 1;
+        }
+    }
+
+    pub fn select_choice(&mut self, idx: usize) {
+        if let Some(front) = self.pending.front_mut()
+            && idx < Self::CHOICE_COUNT
+        {
+            front.selected_idx = idx;
+        }
+    }
+
+    pub fn selected_decision(&self) -> Option<ApprovalDecision> {
+        self.pending
+            .front()
+            .map(|a| approval_decision(a.selected_idx))
+    }
+
     /// Build the single-question approval workflow for the front request.
-    pub(crate) fn workflow(&self) -> Option<InteractiveWorkflow> {
+    pub(crate) fn workflow(&self) -> Option<ChoiceWorkflow> {
         let approval = self.pending.front()?;
+        let mut question = Question::new(
+            "Approval",
+            approval_question(approval),
+            vec![
+                ChoiceOption {
+                    label: "Accept once".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+                ChoiceOption {
+                    label: "Accept for session".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+                ChoiceOption {
+                    label: "Accept for workspace".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+                ChoiceOption {
+                    label: "Accept permanently".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+                ChoiceOption {
+                    label: "Decline".into(),
+                    has_input: false,
+                    input_prompt: String::new(),
+                },
+            ],
+        );
+        question.selected_idx = approval.selected_idx.min(Self::CHOICE_COUNT - 1);
         Some(
-            InteractiveWorkflow::new(
-            vec![Question::new(
-                "Approval",
-                approval_question(approval),
-                vec![
-                    ChoiceOption {
-                        label: "Accept once".into(),
-                        has_input: false,
-                        input_prompt: String::new(),
-                    },
-                    ChoiceOption {
-                        label: "Accept for session".into(),
-                        has_input: false,
-                        input_prompt: String::new(),
-                    },
-                    ChoiceOption {
-                        label: "Accept for workspace".into(),
-                        has_input: false,
-                        input_prompt: String::new(),
-                    },
-                    ChoiceOption {
-                        label: "Accept permanently".into(),
-                        has_input: false,
-                        input_prompt: String::new(),
-                    },
-                    ChoiceOption {
-                        label: "Decline".into(),
-                        has_input: false,
-                        input_prompt: String::new(),
-                    },
-                ],
-            )],
-            false,
-            )
-            .with_help(format!(
-                " Enter accept once · A session · W workspace · P permanent · Esc decline · tool {} ",
+            ChoiceWorkflow::new(vec![question], false).with_help(format!(
+                "↑↓ select · Enter confirm · Esc decline · tool {}",
                 approval.tool_name,
             )),
         )
     }
 
-    /// Render the approval popup if there is a pending request.
+    /// Render the approval dock if there is a pending request.
     pub fn render(
         &self,
         frame: &mut Frame<'_>,
@@ -115,18 +147,14 @@ impl ApprovalPanel {
         interaction: InteractionState<HitId>,
     ) {
         if let Some(workflow) = self.workflow() {
-            let affix = self
-                .pending
-                .front()
-                .map(|a| PaneTitleAffix::label(format!("tool: {}", a.tool_name)));
-            workflow.render_modal(
-                frame,
-                area,
-                theme,
-                "Approval",
-                affix.into_iter().collect(),
-                interaction,
-            );
+            let mut affixes = Vec::new();
+            if let Some(a) = self.pending.front() {
+                affixes.push(PaneTitleAffix::label(format!("tool: {}", a.tool_name)));
+            }
+            if self.pending.len() > 1 {
+                affixes.push(PaneTitleAffix::selection(1, self.pending.len()));
+            }
+            workflow.render_in_pane(frame, area, theme, "Approval", affixes, interaction);
         }
     }
 }
@@ -171,6 +199,7 @@ impl PointerComponent<HitId> for ApprovalPanel {
         let Some(HitId::Choice { choice, .. }) = hit.element else {
             return Vec::new();
         };
+        self.select_choice(choice);
         vec![ApprovalAction::Respond(approval_decision(choice)).into()]
     }
 }
@@ -233,6 +262,7 @@ mod tests {
             tool_name: tool_name.into(),
             args,
             prompt: None,
+            selected_idx: 0,
         }
     }
 
@@ -269,10 +299,26 @@ mod tests {
             tool_name: "create_issue".into(),
             args: serde_json::json!({ "title": "x" }),
             prompt: Some("This creates a GitHub issue in the configured repository.".into()),
+            selected_idx: 0,
         };
         assert_eq!(
             approval_question(&templated),
             "This creates a GitHub issue in the configured repository."
+        );
+    }
+
+    #[test]
+    fn selection_persists_across_workflow_rebuild() {
+        let mut panel = ApprovalPanel::new();
+        panel.push(approval("bash", serde_json::json!({})));
+        panel.select_next();
+        panel.select_next();
+        assert_eq!(panel.front().unwrap().selected_idx, 2);
+        let wf = panel.workflow().unwrap();
+        assert_eq!(wf.questions[0].selected_idx, 2);
+        assert_eq!(
+            panel.selected_decision(),
+            Some(ApprovalDecision::AcceptWorkspace)
         );
     }
 }

@@ -55,6 +55,7 @@ fn agent_foreground_matches_protocol_project_for_busy_states() {
             tool_name: "shell".into(),
             args: json!({}),
             prompt: None,
+            selected_idx: 0,
         });
     assert_eq!(
         app.agent_foreground(agent_id, &activity),

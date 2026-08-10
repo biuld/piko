@@ -19,7 +19,7 @@ use crate::input::pointer::route_pointer;
 use crate::layout::build_surface_hitmap;
 use crate::layout::compose_frame;
 use crate::navigation::Region;
-use crate::ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question};
+use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question};
 use crate::ui::components::pane::PaneSpec;
 
 fn app() -> AppState {
@@ -58,6 +58,7 @@ fn push_approval(app: &mut AppState) {
         tool_name: "bash".into(),
         args: serde_json::json!({ "command": "cargo test" }),
         prompt: None,
+        selected_idx: 0,
     });
     app.push_surface(SurfaceId::Approval);
 }
@@ -179,7 +180,7 @@ fn hover_outside_modal_does_not_expose_lower_layer_target() {
 
 fn push_workflow(app: &mut AppState) {
     app.session.id = Some("session-1".into());
-    let workflow = InteractiveWorkflow::new(
+    let workflow = ChoiceWorkflow::new(
         vec![
             Question::new(
                 "Scope",
@@ -446,7 +447,7 @@ fn workflow_inline_input_cursor_tracks_caret() {
     app.interactions = ToolInteractionPanel::new();
     app.interactions
         .push("i1".into(), "agent-1".into(), None, Vec::new(), false, true);
-    let workflow = InteractiveWorkflow::new(
+    let workflow = ChoiceWorkflow::new(
         vec![Question::new(
             "Go",
             "continue?",
@@ -567,7 +568,7 @@ fn mcp_row_click_only_moves_read_only_selection() {
 #[test]
 fn summary_prompt_choice_click_uses_embedded_workflow() {
     let mut app = app();
-    app.summary_prompt = Some(InteractiveWorkflow::new(
+    app.summary_prompt = Some(ChoiceWorkflow::new(
         vec![Question::new(
             "Summary",
             "choose",

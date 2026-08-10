@@ -12,7 +12,7 @@ use crate::ui::components::pane::PaneTitleAffix;
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 use crate::{
     theme::Theme,
-    ui::components::interactive_workflow::{ChoiceOption, InteractiveWorkflow, Question},
+    ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question},
 };
 
 pub struct PendingInteraction {
@@ -20,7 +20,7 @@ pub struct PendingInteraction {
     /// Agent instance that requested the interaction; F-22 foreground key.
     pub agent_instance_id: String,
     pub questions: Vec<InteractionQuestion>,
-    pub workflow: InteractiveWorkflow,
+    pub workflow: ChoiceWorkflow,
     pub submitting: bool,
     /// True when this interaction owns the ToolInteraction surface (it was
     /// surfaced to the user). Auto-resolving interactions never surface.
@@ -73,7 +73,7 @@ impl ToolInteractionPanel {
             id,
             agent_instance_id,
             questions,
-            workflow: InteractiveWorkflow::new(workflow_questions, require_confirm),
+            workflow: ChoiceWorkflow::new(workflow_questions, require_confirm),
             submitting: false,
             surfaced,
         });
@@ -121,7 +121,7 @@ impl ToolInteractionPanel {
         } else {
             Vec::new()
         };
-        interaction.workflow.render_modal(
+        interaction.workflow.render_in_pane(
             frame,
             area,
             theme,

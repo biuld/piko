@@ -91,6 +91,7 @@ fn workflow_component_keeps_selection_above_hover() {
         tool_name: "bash".into(),
         args: serde_json::json!({ "command": "cargo test" }),
         prompt: None,
+        selected_idx: 0,
     });
     app.push_surface(SurfaceId::Approval);
     let area = Rect::new(0, 0, 80, 24);

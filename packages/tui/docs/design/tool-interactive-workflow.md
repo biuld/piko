@@ -40,8 +40,9 @@ tool needs structured input from the user before the running turn can continue.
 - serializing display and input so only one approval or user-input prompt is
   active at a time
 
-`InteractiveWorkflow` remains a reusable low-level component. It should not know
-about tool calls, session ids, hostd commands, or orchd callbacks.
+`ChoiceWorkflow` (formerly InteractiveWorkflow) remains a reusable low-level
+component. It should not know about tool calls, session ids, hostd commands, or
+orchd callbacks. See also `docs/design/decide-surfaces-ux.md`.
 
 ## Product Boundary
 

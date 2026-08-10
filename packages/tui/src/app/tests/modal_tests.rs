@@ -37,6 +37,7 @@ fn push_approval(app: &mut AppState) {
         tool_name: "bash".into(),
         args: serde_json::json!({ "command": "cargo test" }),
         prompt: None,
+        selected_idx: 0,
     });
     app.push_surface(SurfaceId::Approval);
 }
@@ -87,24 +88,13 @@ fn f4_does_not_steal_focus_from_pending_decide() {
 }
 
 #[test]
-fn approval_letter_shortcuts_ignore_modified_chords() {
+fn approval_list_nav_enter_confirms_selected() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     push_approval(&mut app);
 
     let keymap = Keymap::default();
-    // ctrl+a must NOT resolve AcceptSession.
-    let action = InputRouter::route_key(
-        &mut app,
-        &keymap,
-        key(
-            crossterm::event::KeyCode::Char('a'),
-            crossterm::event::KeyModifiers::CONTROL,
-        ),
-    );
-    assert!(action.is_none());
-
-    // Plain 'a' still resolves AcceptSession.
+    // Letter shortcuts are removed — plain 'a' does not accept session.
     let action = InputRouter::route_key(
         &mut app,
         &keymap,
@@ -113,25 +103,51 @@ fn approval_letter_shortcuts_ignore_modified_chords() {
             crossterm::event::KeyModifiers::NONE,
         ),
     );
+    assert!(action.is_none());
+
+    let down = InputRouter::route_key(
+        &mut app,
+        &keymap,
+        key(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("down selects next grant");
     assert!(matches!(
-        action,
-        Some(crate::app::command::Action::Approval(
-            crate::app::command::ApprovalAction::Respond(
-                piko_protocol::ApprovalDecision::AcceptSession
-            )
-        ))
+        down,
+        crate::app::command::Action::Approval(crate::app::command::ApprovalAction::SelectNext)
     ));
+    app.dispatch(down);
+    assert_eq!(app.approvals.front().unwrap().selected_idx, 1);
+
+    let enter = InputRouter::route_key(
+        &mut app,
+        &keymap,
+        key(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ),
+    )
+    .expect("enter confirms selected");
+    assert!(matches!(
+        enter,
+        crate::app::command::Action::Approval(crate::app::command::ApprovalAction::ConfirmSelected)
+    ));
+    let effects = app.dispatch(enter);
+    assert!(
+        !effects.is_empty(),
+        "confirm selected sends ApprovalRespond"
+    );
 }
 
 #[test]
 fn tool_interaction_arrows_move_choices_tab_moves_steps() {
-    use crate::ui::components::interactive_workflow::{
-        ChoiceOption, InteractiveWorkflow, Question,
-    };
+    use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question};
 
     let mut app = app();
     app.session.id = Some("session-1".into());
-    let workflow = InteractiveWorkflow::new(
+    let workflow = ChoiceWorkflow::new(
         vec![
             Question::new(
                 "Scope",
@@ -210,16 +226,14 @@ fn tool_interaction_arrows_move_choices_tab_moves_steps() {
 
 #[test]
 fn workflow_locks_input_after_submit_and_cancel() {
-    use crate::ui::components::interactive_workflow::{
-        ChoiceOption, InteractiveWorkflow, Question,
-    };
+    use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Question};
 
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.interactions = ToolInteractionPanel::new();
     app.interactions
         .push("i1".into(), "agent-1".into(), None, Vec::new(), false, true);
-    app.interactions.front_mut().expect("front").workflow = InteractiveWorkflow::new(
+    app.interactions.front_mut().expect("front").workflow = ChoiceWorkflow::new(
         vec![Question::new(
             "Go",
             "continue?",

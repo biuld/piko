@@ -306,6 +306,55 @@ fn non_json_passthrough() {
 }
 
 #[test]
+fn request_user_input_maps_answers_not_raw_json() {
+    let args = r#"{
+      "title": "Ask User 功能测试",
+      "questions": [
+        {
+          "id": "q1",
+          "header": "基本信息",
+          "prompt": "你喜欢用什么编程语言？",
+          "choices": [
+            {"id": "rust", "label": "Rust"},
+            {"id": "python", "label": "Python"}
+          ]
+        },
+        {
+          "id": "q2",
+          "header": "开发偏好",
+          "prompt": "编辑器？",
+          "choices": [
+            {"id": "vim", "label": "Vim/Neovim"},
+            {"id": "vscode", "label": "VS Code"}
+          ]
+        }
+      ]
+    }"#;
+    let result = r#"{
+      "answers": [
+        {"questionId": "q1", "choiceId": "rust", "value": null},
+        {"questionId": "q2", "choiceId": "vscode", "value": null}
+      ]
+    }"#;
+    let presented = present_tool("request_user_input", args, Some(result), None);
+    let plain = presented.plain_body_lines().join("\n");
+    assert!(
+        plain.contains("✓ Rust"),
+        "selected choice marked in list: {plain}"
+    );
+    assert!(
+        plain.contains("✓ VS Code"),
+        "second selected choice marked: {plain}"
+    );
+    assert!(
+        !plain.contains("answers")
+            && !plain.contains("questionId")
+            && !plain.contains("基本信息 ·"),
+        "no redundant answers summary / raw JSON: {plain}"
+    );
+}
+
+#[test]
 fn body_line_kinds_cover_paint_paths() {
     let lines = [
         BodyLine::meta("cwd", "/tmp"),

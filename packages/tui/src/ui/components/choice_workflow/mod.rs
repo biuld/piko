@@ -1,8 +1,16 @@
+//! ChoiceWorkflow — Decide-surface choice shell (Approval, Ask User, SummaryPrompt).
+//!
+//! Chrome always goes through [`Pane`](super::pane): features build a
+//! [`PaneSpec`] and call [`ChoiceWorkflow::render_in_pane`], or paint the body
+//! into a parent content / reserved-footer rect via [`ChoiceWorkflow::paint_body`].
+//! This component owns questions, tabs, confirm, inline input, and choice
+//! selection — not outer borders or title affixes.
+
 use super::text_box::TextBox;
 use crate::app::HitId;
 use crate::theme::Theme;
 use crate::ui::components::{
-    frame_border_style, hint_style,
+    feedback::row_primary_style,
     pane::{PaneSpec, PaneTitleAffix, render_pane},
     selection_prefix,
 };
@@ -12,10 +20,13 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::Paragraph,
 };
 
+mod layout;
 mod pointer;
+
+pub(crate) use layout::{clamp_rect, row_rect};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChoiceOption {
@@ -51,22 +62,20 @@ impl Question {
     }
 }
 
-/// Shared low-level workflow panel: choice-based prompts with optional inline
-/// text input and an explicit Submit step. Used by approval prompts, tool
-/// interaction workflows, and the tree summary prompt.
+/// Shared choice workflow: multi-question tabs, optional inline text, confirm
+/// step. Used by Approval, Tool Interaction, and Tree SummaryPrompt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InteractiveWorkflow {
+pub struct ChoiceWorkflow {
     pub questions: Vec<Question>,
     pub active_question_idx: usize,
     pub require_confirm: bool,
     pub confirm_focused: bool,
     pub target_entry_id: Option<String>,
-    /// When set, replaces the state-derived help line (e.g. approval's
-    /// shortcut legend, which the generic choice help does not describe).
+    /// When set, replaces the state-derived help line.
     pub help_override: Option<String>,
 }
 
-impl InteractiveWorkflow {
+impl ChoiceWorkflow {
     pub fn new(questions: Vec<Question>, require_confirm: bool) -> Self {
         Self {
             questions,
@@ -135,8 +144,8 @@ impl InteractiveWorkflow {
         }
     }
 
-    /// Jump to a step directly (pointer tabs). `step == questions.len()` is
-    /// the Submit step; larger values clamp to the last question.
+    /// Jump to a step. `step == questions.len()` is the Submit step when
+    /// confirmation is required.
     pub fn goto_step(&mut self, step: usize) {
         if self.questions.is_empty() {
             return;
@@ -186,67 +195,11 @@ impl InteractiveWorkflow {
         self.questions[self.active_question_idx].is_input_active = active;
     }
 
-    // ── geometry (shared by render and hit regions) ────────────────────────
-
-    /// Row geometry of the active question, mirroring the renderer's line
-    /// order exactly. Used by [`Self::component_regions`] so painting and
-    /// hit-testing cannot drift.
-    fn rows_in(&self, inner: Rect) -> WorkflowRows {
-        let mut rows = WorkflowRows::default();
-        if self.confirm_focused {
-            rows.submit_y = Some(inner.y.saturating_add(2));
-            return rows;
-        }
-        let Some(q) = self.questions.get(self.active_question_idx) else {
-            return rows;
-        };
-        let mut y = inner.y;
-        if self.questions.len() > 1 {
-            let mut x = inner.x;
-            for (i, question) in self.questions.iter().enumerate() {
-                if i > 0 {
-                    x = x.saturating_add(3);
-                }
-                let width = (question.header.chars().count() as u16).saturating_add(2);
-                rows.tab_rects.push((i, Rect::new(x, y, width, 1)));
-                x = x.saturating_add(width);
-            }
-            if self.require_confirm {
-                let width = 8; // "[Submit]"
-                rows.tab_rects.push((
-                    self.questions.len(),
-                    Rect::new(x.saturating_add(3), y, width, 1),
-                ));
-            }
-            y = y.saturating_add(2);
-        }
-        // Prompt line + blank spacer.
-        y = y.saturating_add(2);
-        rows.choice_y = (0..q.choices.len())
-            .map(|i| y.saturating_add(i as u16))
-            .collect();
-        rows
-    }
-
-    /// Modal content zone: Standard pane chrome + hint footer.
-    fn modal_content_area(&self, area: Rect) -> Rect {
-        let help = self.help_text();
-        // Must mirror `render_modal`'s spec exactly (Standard chrome + hints
-        // footer) so hit geometry cannot drift from paint.
-        PaneSpec::new("")
-            .hints(&help)
-            .content_rect(area)
-            .unwrap_or(area)
-    }
-
-    /// Content rows the composer dock needs (body lines, no chrome). The dock
-    /// height = these rows + Standard pane chrome (borders 2 + padding 2 +
-    /// hint footer 1).
+    /// Content rows for dock height budgeting (body only; chrome is Pane).
     pub(crate) fn dock_content_rows(&self, theme: &Theme) -> u16 {
         self.body_lines(theme).len() as u16
     }
 
-    /// The state-derived help line (or the approval shortcut override).
     pub fn help_text(&self) -> String {
         if let Some(help) = &self.help_override {
             return help.clone();
@@ -260,15 +213,23 @@ impl InteractiveWorkflow {
             } else if self.questions.len() > 1 {
                 "Enter to select · ↑/↓ choose · Tab switch question · Esc cancel".into()
             } else {
-                "Enter to select · ↑/↓ to navigate · Esc to cancel".into()
+                "↑↓ select · Enter confirm · Esc cancel".into()
             }
         } else {
             "Esc to cancel".into()
         }
     }
 
-    /// Workflow body lines (tabs, prompt, choices, confirm) — shared by the
-    /// embedded and modal renderers.
+    /// Content rect for a standalone Decide dock (Standard pane + hints).
+    pub fn modal_content_area(&self, area: Rect) -> Rect {
+        let help = self.help_text();
+        PaneSpec::new("")
+            .hints(&help)
+            .content_rect(area)
+            .unwrap_or(area)
+    }
+
+    /// Body lines (tabs, prompt, choices, confirm) — shared paint source.
     fn body_lines<'a>(&'a self, theme: &Theme) -> Vec<Line<'a>> {
         let mut lines = Vec::new();
 
@@ -314,10 +275,8 @@ impl InteractiveWorkflow {
             )));
             lines.push(Line::default());
             lines.push(Line::from(Span::styled(
-                "❯ [ Confirm ]",
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                format!("{}[ Confirm ]", selection_prefix(true)),
+                row_primary_style(true, theme).fg(theme.accent),
             )));
         } else if !self.questions.is_empty() {
             let q = &self.questions[self.active_question_idx];
@@ -337,24 +296,19 @@ impl InteractiveWorkflow {
                 let is_selected = i == q.selected_idx;
                 let prefix = selection_prefix(is_selected);
                 let num_str = format!("{}. ", i + 1);
-
                 let style = if is_selected {
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD)
+                    row_primary_style(true, theme)
                 } else {
                     Style::default().fg(theme.muted)
                 };
+                let caret_style = if is_selected {
+                    Style::default().fg(theme.accent)
+                } else {
+                    Style::default()
+                };
 
                 let mut spans = vec![
-                    Span::styled(
-                        prefix,
-                        if is_selected {
-                            Style::default().fg(theme.accent)
-                        } else {
-                            Style::default()
-                        },
-                    ),
+                    Span::styled(prefix, caret_style),
                     Span::styled(num_str, style),
                     Span::styled(choice.label.clone(), style),
                 ];
@@ -377,9 +331,21 @@ impl InteractiveWorkflow {
         lines
     }
 
-    /// Render as a standalone modal: full pane chrome (title, affixes, hint
-    /// footer) with an opaque backdrop. Used by Approval / Tool Interaction.
-    pub fn render_modal(
+    /// Paint workflow body into a content rect (no chrome). Parent must be Pane.
+    pub fn paint_body(
+        &self,
+        frame: &mut Frame<'_>,
+        content: Rect,
+        theme: &Theme,
+        interaction: InteractionState<HitId>,
+    ) {
+        let lines = self.body_lines(theme);
+        frame.render_widget(Paragraph::new(lines), content);
+        self.paint_selected_and_hover(frame, content, theme, interaction);
+    }
+
+    /// Standalone Decide dock: Pane chrome + body.
+    pub fn render_in_pane(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
@@ -389,74 +355,21 @@ impl InteractiveWorkflow {
         interaction: InteractionState<HitId>,
     ) {
         let help = self.help_text();
+        // No elevated fill: Decide docks sit in the composer band like Models /
+        // Agents. Pane still Clear's the host so the stream does not bleed
+        // through; body bg stays terminal/base (not a second "card" layer).
         let spec = PaneSpec::new(title)
             .title_affixes(affixes)
-            .fill(theme.bg_elevated)
             .hints(&help)
             .focused(true);
         if let Some(areas) = render_pane(frame, area, &spec, theme) {
-            let lines = self.body_lines(theme);
-            frame.render_widget(Paragraph::new(lines), areas.content);
-            self.render_hover(frame, area, theme, interaction);
+            self.paint_body(frame, areas.content, theme, interaction);
         }
     }
 
-    /// Render embedded inside another pane (tree summary prompt): compact
-    /// top-border chrome + inline help, no floating frame.
+    /// Embedded body into a parent Pane reserved footer / content slot.
+    /// No private Block — chrome belongs to the outer Pane.
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-        let block = Block::default()
-            .borders(Borders::TOP)
-            .border_style(frame_border_style(true, theme))
-            .style(Style::default().bg(theme.bg_elevated));
-        frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
-
-        let inner = prompt_content_area(area);
-        let mut lines = self.body_lines(theme);
-        lines.push(Line::default());
-        lines.push(Line::from(Span::styled(
-            self.help_text(),
-            hint_style(theme),
-        )));
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
-}
-
-/// Geometry shared by [`InteractiveWorkflow::render`] and
-/// [`InteractiveWorkflow::component_regions_modal`].
-#[derive(Clone, Debug, Default)]
-struct WorkflowRows {
-    /// (question index, rect) for each tab, plus a trailing Submit tab when
-    /// confirmation is required. The submit sentinel is `questions.len()`.
-    tab_rects: Vec<(usize, Rect)>,
-    /// y of each choice row of the active question.
-    choice_y: Vec<u16>,
-    /// y of the Confirm action row.
-    submit_y: Option<u16>,
-}
-
-fn prompt_content_area(area: Rect) -> Rect {
-    let horizontal_padding = if area.width > 8 { 3 } else { 1 };
-    Rect::new(
-        area.x + horizontal_padding,
-        area.y.saturating_add(1),
-        area.width.saturating_sub(horizontal_padding * 2),
-        area.height.saturating_sub(1),
-    )
-}
-
-fn row_rect(area: Rect, y: u16) -> Rect {
-    clamp_rect(Rect::new(area.x, y, area.width, 1), area)
-}
-
-fn clamp_rect(rect: Rect, area: Rect) -> Rect {
-    let x = rect.x.max(area.x);
-    let y = rect.y.max(area.y);
-    let right = (rect.x + rect.width).min(area.x + area.width);
-    let bottom = (rect.y + rect.height).min(area.y + area.height);
-    if right <= x || bottom <= y {
-        Rect::default()
-    } else {
-        Rect::new(x, y, right - x, bottom - y)
+        self.paint_body(frame, area, theme, InteractionState::default());
     }
 }

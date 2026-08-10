@@ -144,9 +144,12 @@ request; later requests wait behind it:
     4. Accept permanently
     5. Decline
 
-  Enter accept once · A session · W workspace · P permanent · Esc decline
+  ↑↓ select · Enter confirm · Esc decline · tool bash
 ──────────────────────────────────────────────────────────────────────────────
 ```
+
+Queue length (when >1) shows as a title selection affix (`1/n`). Letter
+shortcuts for session/workspace/permanent are not used; grants are list + Enter.
 
 After the active approval resolves, the next pending request replaces it in the
 same slot:
@@ -247,14 +250,18 @@ active key handling.
 
 ### Approval prompt mapping
 
-Approval prompts use this same UI pattern as a single-question workflow:
+Approval prompts use this same UI pattern as a single-question workflow
+(`ChoiceWorkflow`):
 
 - The header is Approval.
 - The prompt names the tool/action being approved.
 - Choices represent approval decisions such as accept once, accept for session,
   accept for workspace, accept permanently, and decline.
+- ↑/↓ moves selection; Enter confirms the **selected** grant (default: accept
+  once); Esc declines immediately.
 - Submitting an approval choice resolves an approval, not a normal tool-input
   answer.
+- Chrome always uses Pane; body is `ChoiceWorkflow` only.
 
 ## Behavior / interactions
 

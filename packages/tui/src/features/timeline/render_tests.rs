@@ -75,6 +75,49 @@ fn user_and_assistant_timestamp_shares_first_line() {
 }
 
 #[test]
+fn assistant_markdown_survives_timestamp_chrome() {
+    use ratatui::style::Modifier;
+
+    let theme = Theme::dark();
+    let ts = 1_786_359_296_000i64;
+    let component = TimelineComponent::Assistant(AssistantMessageComponent {
+        id: ComponentId::MessageId("a-md".into()),
+        blocks: vec![ContentBlock::Text(
+            "answer is **Rust** and a table:\n\n| a | b |\n| - | - |\n| 1 | 2 |\n".into(),
+        )],
+        stop_reason: Some("stop".into()),
+        error_message: None,
+        timestamp: Some(ts),
+    });
+    let lines = component_lines(&component, true, false, &theme, 80);
+    let plain: String = lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(
+        !plain.contains("**"),
+        "bold markers must not survive with timestamp: {plain}"
+    );
+    assert!(plain.contains("Rust"), "bold text content kept: {plain}");
+    assert!(
+        !plain.contains('|'),
+        "table pipes must not survive with timestamp: {plain}"
+    );
+    assert!(
+        plain.contains('─') || plain.contains('1'),
+        "table body still rendered: {plain}"
+    );
+    let bold_rust = lines
+        .iter()
+        .flat_map(|l| &l.spans)
+        .any(|s| s.content.contains("Rust") && s.style.add_modifier.contains(Modifier::BOLD));
+    assert!(bold_rust, "Rust should stay bold under clock chrome");
+    let has_clock = plain.chars().filter(|c| *c == ':').count() >= 1;
+    assert!(has_clock, "timestamp still painted: {plain}");
+}
+
+#[test]
 fn long_user_body_wraps_inside_left_column_not_under_timestamp() {
     let theme = Theme::dark();
     let ts = 1_786_359_296_000i64;

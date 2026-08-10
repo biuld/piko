@@ -139,6 +139,27 @@ pub(super) fn present_request_user_input(
         })
         .unwrap_or_else(|| "questions".into());
 
+    // Map answer questionId/choiceId → labels (tool result uses camelCase).
+    let answer_index = result
+        .and_then(|r| r.get("answers"))
+        .and_then(Value::as_array)
+        .map(|answers| {
+            answers
+                .iter()
+                .filter_map(|a| {
+                    let qid = str_field(a, "questionId")
+                        .or_else(|| str_field(a, "question_id"))?
+                        .to_string();
+                    let cid = str_field(a, "choiceId")
+                        .or_else(|| str_field(a, "choice_id"))?
+                        .to_string();
+                    let input = str_field(a, "input").map(str::to_string);
+                    Some((qid, (cid, input)))
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        })
+        .unwrap_or_default();
+
     let mut blocks = Vec::new();
     if let Some(args) = args {
         if let Some(title) = str_field(args, "title").filter(|s| !s.is_empty()) {
@@ -149,8 +170,10 @@ pub(super) fn present_request_user_input(
                 if i > 0 {
                     blocks.push(BodyLine::Gap);
                 }
+                let qid = str_field(q, "id").unwrap_or("");
                 let header = str_field(q, "header").unwrap_or("Q");
                 let prompt = str_field(q, "prompt").unwrap_or("");
+                let selected = answer_index.get(qid);
                 blocks.push(BodyLine::Text {
                     kind: LineKind::Plain,
                     text: format!("▸ {header}"),
@@ -162,23 +185,45 @@ pub(super) fn present_request_user_input(
                 }
                 if let Some(choices) = q.get("choices").and_then(Value::as_array) {
                     for choice in choices {
+                        let cid = str_field(choice, "id").unwrap_or("");
                         let label = str_field(choice, "label")
                             .or_else(|| str_field(choice, "id"))
                             .unwrap_or("?");
-                        blocks.push(BodyLine::dim(format!("  · {label}")));
+                        let is_picked = selected.is_some_and(|(pick, _)| pick.as_str() == cid);
+                        if is_picked {
+                            // Optional free-text lives on the answer; show inline.
+                            let suffix = selected
+                                .and_then(|(_, input)| input.as_deref())
+                                .filter(|s| !s.is_empty())
+                                .map(|s| format!(": {s}"))
+                                .unwrap_or_default();
+                            blocks.push(BodyLine::success(format!(
+                                "  {SUCCESS_GLYPH} {label}{suffix}"
+                            )));
+                        } else {
+                            blocks.push(BodyLine::dim(format!("  · {label}")));
+                        }
                     }
                 }
             }
         }
     }
 
-    if let Some(result) = result
-        && let Ok(pretty) = serde_json::to_string_pretty(result)
-    {
-        blocks.push(BodyLine::Gap);
-        blocks.push(BodyLine::meta("response", ""));
-        for line in pretty.lines().take(40) {
-            blocks.push(BodyLine::dim(line));
+    // Cancel only — selected answers already show as ✓ on the choice list.
+    // Never dump a redundant answers: JSON/summary block.
+    if let Some(result) = result {
+        let cancelled = str_field(result, "reason")
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                result
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .filter(|t| *t == "cancel")
+                    .and_then(|_| str_field(result, "reason"))
+            });
+        if let Some(reason) = cancelled {
+            blocks.push(BodyLine::Gap);
+            blocks.push(BodyLine::dim(format!("cancelled · {reason}")));
         }
     }
 

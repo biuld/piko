@@ -131,7 +131,7 @@ impl AppState {
         match self.mode {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
-                    workflow.next_step();
+                    workflow.select_next();
                 }
             }
             _ => self.select_next(),
@@ -142,7 +142,7 @@ impl AppState {
         match self.mode {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
-                    workflow.prev_step();
+                    workflow.select_prev();
                 }
             }
             _ => self.select_prev(),
