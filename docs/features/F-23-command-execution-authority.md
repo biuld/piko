@@ -8,6 +8,34 @@
 > `core/src/unified_exec/`, `sandboxing/`, `execpolicy/`, and
 > `shell-command/`
 
+## Amendment (Rev B — 2026-08-10): approval-friction mitigations
+
+Real sessions showed routine approval prompts because the default platform
+sandbox denied ordinary toolchain commands, the denial retry jumped straight
+to full elevation, and each approved command needed a fresh prompt. Rev B
+keeps the authority model unchanged and reduces that friction:
+
+1. **Platform sandbox defaults cover the standard toolchain.** The default
+   seatbelt/bwrap policy includes read-only access to system toolchains and
+   read-only user configuration, and declares platform temp locations as
+   scratch roots. Ordinary read commands execute under the default sandbox
+   without a platform denial and therefore without an approval-backed retry.
+2. **Denial retries prefer narrow additional permissions.** A typed sandbox
+   denial derives the narrowest representable `additional_permissions`
+   (missing read roots, scratch roots) and requests approval for that attempt.
+   Full `require_escalated` is reserved for denials that cannot be
+   represented as sandbox permissions.
+3. **Approved retries propose a reusable narrow prefix.** When the command
+   has a stable narrow argv prefix, the retry carries it so repeat commands
+   under the same approved prefix reuse the grant instead of prompting again.
+4. **The default yield is 30 seconds and running results state the poll
+   contract.** Most commands complete inside one call; a still-running result
+   explicitly names `write_stdin` polling so the model does not treat it as
+   final.
+
+Sections below are normative as amended; unchanged paragraphs retain their
+prior meaning. New acceptance criteria are unchecked until verified.
+
 ## Summary
 
 piko provides one coherent command-execution capability that accepts normal
@@ -171,7 +199,7 @@ validate tool arguments
        still active after yield ------------------> running result + session id
        timeout/cancel/signal ---------------------> matching process result
        sandbox denial ----------------------------> typed denial
-          -> policy permits retry + approval -----> one elevated retry
+          -> policy permits retry + approval -----> one broader retry (narrow additions first)
           -> otherwise ---------------------------> sandbox_denied
        backend unavailable -----------------------> sandbox_unavailable
 ```
@@ -188,6 +216,14 @@ validate tool arguments
 - Selecting unrestricted execution is an explicit configuration or approved
   per-call elevation, never the meaning of “sandbox disabled because no
   backend was found.”
+- Platform sandbox defaults add read-only access to the standard system
+  toolchain — OS binaries, frameworks and dylibs, Homebrew and `/usr/local`
+  bin/lib/cellar paths, and Xcode CommandLineTools — and read-only access to
+  the user's home configuration. Platform temp locations are writable scratch
+  roots. These defaults exist so ordinary read commands (`git status`,
+  `python3`, image tools, build tools) run inside the default sandbox without
+  a platform denial. `$HOME` is read-only and never becomes a write root;
+  workspace write policy is unchanged.
 
 ### Command classification
 
@@ -199,6 +235,11 @@ validate tool arguments
 - Broad interpreters, shells, package-script runners, destructive utilities,
   and commands without a stable narrow prefix are ineligible for automatic
   reusable-prefix suggestions.
+- An approval-backed denial retry attaches a proposed reusable prefix to the
+  approval when the command has a stable narrow argv prefix, so a later
+  command under the same approved prefix reuses the grant rather than
+  prompting again. No prefix is proposed for shells, interpreters, script
+  runners, destructive utilities, or otherwise ineligible commands.
 - A small bundled dangerous-command classifier may require a prompt but can
   never forbid by itself; only explicit operator rules forbid.
 - A configured forbid is an authorization rule, not claimed containment. The
@@ -216,6 +257,12 @@ The result includes bounded output, truncation metadata, elapsed time, and
 exactly one of an exit code or a live session id where applicable. Polling is
 incremental and does not repeat already-consumed output unless explicitly
 requested by a future API.
+
+The default initial yield is 30 seconds (configurable per call up to the same
+bound). A command still active when the yield elapses returns a `running`
+result whose `session_id` must be polled with `write_stdin`; the running
+result text states that polling is required, so a model that treats the
+result as final loses output.
 
 ### Tool replacement
 
@@ -252,6 +299,17 @@ requested by a future API.
 - [x] A sandbox denial is distinguishable from exit code 1 and may cause at
       most one approval-backed retry; an ordinary nonzero exit is never
       retried automatically.
+- [ ] A typed denial retry requests the narrowest representable additional
+      permission first and only proposes full elevation when the denial
+      cannot be represented as sandbox permissions (Rev B).
+- [ ] Under the default profile, ordinary toolchain and read commands execute
+      sandboxed without a platform denial and without an approval prompt
+      (Rev B).
+- [ ] An approved denial retry carries a reusable narrow prefix where
+      eligible, and a repeat command under that approved prefix auto-accepts
+      without a new prompt (Rev B).
+- [ ] The default initial yield is 30 seconds, and a `running` result names
+      `write_stdin` polling (Rev B).
 - [x] Exit codes 1 and 127 are returned as completed process results, not as
       `command_failed` tool errors.
 - [x] A still-running process returns a session id and can be polled, written,
@@ -274,8 +332,11 @@ requested by a future API.
 | What if the sandbox backend is unavailable? | Fail closed for restricted execution | “Unavailable” must not silently mean full host authority. |
 | Role of command parsing | Authorization optimization only | Parse uncertainty reduces auto-approval; it does not invalidate shell. |
 | Nonzero exit | Normal process result | Exit status belongs to the child program, not tool infrastructure. |
-| Escalation | Explicit request or typed denial followed by approval; one retry | Makes authority changes visible and prevents retry loops. |
+| Escalation | Explicit request or typed denial followed by approval; one broader retry with narrow additions first | Makes authority changes visible, preserves least authority, and prevents retry loops. |
 | Additional authority | Prefer sandboxed per-call additions; reserve unsandboxed elevation for effects that cannot be represented | Least authority preserves containment. |
+| Platform sandbox defaults | Standard toolchain reads + read-only home config; temp scratch roots | Ordinary commands run without platform denials, so routine approvals disappear. |
+| Retry grant reuse | Reusable narrow prefix on eligible approved retries | Repeat commands reuse grants instead of re-prompting. |
+| Default yield | 30 seconds | Most commands finish in one call; long processes still yield a session id. |
 | Dangerous-command heuristics | Bundled prompt-only heuristic; operator rules alone may forbid | Reduces accidents without pretending heuristics are enforcement. |
 | Process tool shape | `exec_command` + `write_stdin` | One lifecycle covers short, long, interactive, and polled commands. |
 | Workspace file mutations | Keep dedicated path-aware tools | They provide stronger intent and deterministic path enforcement than shell. |

@@ -83,7 +83,7 @@ impl TodoProvider {
                 name: "todo_write".into(),
                 version: "1".into(),
                 provenance: piko_protocol::PromptSource::new("built-in-tool", "todo/todo_write"),
-                description: "Create or replace a structured todo list for your current coding session. Use this to plan and track multi-step work. Each item should have 'id' (string or number), 'status' (pending/in_progress/completed), and 'content' (description).".into(),
+                description: "Create or replace a structured todo list for your current coding session. Use this to plan and track multi-step work. Each item has 'id' (string or number), 'content' (description), and optional 'status' (pending/in_progress/completed; omitted status defaults to pending).".into(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -97,7 +97,7 @@ impl TodoProvider {
                                     "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
                                     "content": { "type": "string" }
                                 },
-                                "required": ["id", "status", "content"]
+                                "required": ["id", "content"]
                             }
                         }
                     },

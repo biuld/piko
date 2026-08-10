@@ -146,9 +146,17 @@
 (allow file-read-metadata (subpath "/usr/libexec"))
 
 (allow file-read* (subpath "/Library/Preferences"))
-(allow file-read* (subpath "/opt/homebrew/lib"))
-(allow file-read* (subpath "/usr/local/lib"))
+(allow file-read* (subpath "/opt/homebrew"))
+(allow file-map-executable (subpath "/opt/homebrew"))
+(allow file-read* (subpath "/usr/local"))
+(allow file-map-executable (subpath "/usr/local"))
+(allow file-read* (subpath "/Library/Developer/CommandLineTools"))
+(allow file-map-executable (subpath "/Library/Developer/CommandLineTools/usr/lib"))
 (allow file-read* (subpath "/Applications"))
+
+; Platform scratch: writable temp locations (non-persistent).
+(allow file-read* file-write* (subpath "/private/tmp"))
+(allow file-read* file-write* (literal "/tmp"))
 
 ; Terminal basics and device handles.
 (allow file-read* (regex "^/dev/fd/(0|1|2)$"))

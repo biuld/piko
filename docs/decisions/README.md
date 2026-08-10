@@ -18,3 +18,4 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-007](ADR-007-typed-provider-authentication.md) | Preserve typed provider authentication | accepted; partially superseded |
 | [ADR-008](ADR-008-separate-model-targets-from-auth-material.md) | Separate model targets from authentication material | accepted |
 | [ADR-009](ADR-009-first-class-model-targets.md) | Model targets join models, API surfaces, auth routes, and protocols | accepted |
+| [ADR-010](ADR-010-approval-ux-mitigations.md) | Toolchain-covering sandbox defaults, narrow denial retries, reusable retry prefixes, 30s exec yield, missing-todo-status default | accepted |

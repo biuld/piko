@@ -395,6 +395,36 @@ fn reusable_prefix_must_be_narrow_and_simple() {
 }
 
 #[test]
+fn reusable_prefix_valid_for_additional_permissions_retry() {
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({
+                "cmd": "git status --short",
+                "sandbox_permissions": "with_additional_permissions",
+                "additional_permissions": {
+                    "read_roots": ["/opt/homebrew/bin"]
+                },
+                "justification": "read access denied by the sandbox; retry with minimal read roots",
+                "prefix_rule": ["git", "status"]
+            })
+        )
+        .is_ok()
+    );
+    // Default sandbox calls never carry a prefix rule.
+    assert!(
+        validate_command_authority(
+            "exec_command",
+            &json!({
+                "cmd": "git status --short",
+                "prefix_rule": ["git", "status"]
+            })
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn profile_can_forbid_elevation_before_user_approval() {
     let config = PermissionConfig {
         allow_escalation: false,

@@ -169,6 +169,9 @@ pub(super) fn observation(
     });
     if !chunk.exited {
         value["session_id"] = serde_json::json!(session_id);
+        value["poll_hint"] = serde_json::json!(
+            "command still running; poll with write_stdin using this session_id until state is exited"
+        );
     } else if let Some(exit_code) = chunk.status.and_then(|status| status.code) {
         value["exit_code"] = serde_json::json!(exit_code);
     } else if let Some(signal) = chunk.status.and_then(|status| status.signal) {

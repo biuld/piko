@@ -16,6 +16,7 @@ use piko_protocol::tools::ToolProviderSource;
 
 struct DenyOnceProvider {
     calls: Arc<AtomicUsize>,
+    deny_message: String,
 }
 
 #[async_trait]
@@ -39,7 +40,7 @@ impl ToolProvider for DenyOnceProvider {
                 value: None,
                 error: Some(ToolExecError {
                     code: "sandbox_denied".into(),
-                    message: "outside default roots".into(),
+                    message: self.deny_message.clone(),
                     retryable: Some(true),
                 }),
             }
@@ -115,6 +116,7 @@ async fn sandbox_denial_gets_one_approved_elevated_retry() {
     registry
         .register_provider(Box::new(DenyOnceProvider {
             calls: Arc::clone(&calls),
+            deny_message: "outside default roots".into(),
         }))
         .await;
     registry
@@ -142,4 +144,91 @@ async fn sandbox_denial_gets_one_approved_elevated_retry() {
         requests[0].tool_args["sandbox_permissions"],
         "require_escalated"
     );
+}
+
+#[tokio::test]
+async fn sandbox_denial_retries_with_narrow_additional_read_permissions() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let registry = ToolRegistryImpl::new();
+    registry
+        .register_provider(Box::new(DenyOnceProvider {
+            calls: Arc::clone(&calls),
+            deny_message: "sandbox-exec: deny file-read-data /opt/homebrew/bin/magick".into(),
+        }))
+        .await;
+    registry
+        .set_approval_gateway(Some(Box::new(CapturingGateway(Arc::clone(&captured)))))
+        .await;
+    let route = CatalogRoute {
+        provider_id: "fake-exec".into(),
+        provider_tool_name: "exec_command".into(),
+        tool_def: definition(),
+        execution_mode: ToolExecutionMode::Sequential,
+        max_concurrent_calls: None,
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({ "cmd": "git status --short" }),
+        partial_json: None,
+    };
+    let record = registry.execute_tool(&call, &context(), &route, None).await;
+    assert!(record.result.ok, "{:?}", record.result);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let requests = captured.lock().await;
+    assert_eq!(requests.len(), 1);
+    let retry_args = &requests[0].tool_args;
+    assert_eq!(
+        retry_args["sandbox_permissions"],
+        "with_additional_permissions"
+    );
+    assert_eq!(
+        retry_args["additional_permissions"]["read_roots"][0],
+        "/opt/homebrew/bin/magick"
+    );
+    assert!(retry_args["justification"].as_str().is_some());
+    // Simple program + subcommand retries carry a reusable narrow prefix.
+    assert_eq!(
+        retry_args["prefix_rule"],
+        serde_json::json!(["git", "status"])
+    );
+}
+
+#[tokio::test]
+async fn sandbox_denial_skips_prefix_for_complex_shell() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let registry = ToolRegistryImpl::new();
+    registry
+        .register_provider(Box::new(DenyOnceProvider {
+            calls: Arc::clone(&calls),
+            deny_message: "sandbox-exec: deny file-read-data /Users/biu/.gitconfig".into(),
+        }))
+        .await;
+    registry
+        .set_approval_gateway(Some(Box::new(CapturingGateway(Arc::clone(&captured)))))
+        .await;
+    let route = CatalogRoute {
+        provider_id: "fake-exec".into(),
+        provider_tool_name: "exec_command".into(),
+        tool_def: definition(),
+        execution_mode: ToolExecutionMode::Sequential,
+        max_concurrent_calls: None,
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({ "cmd": "cd /tmp && git status" }),
+        partial_json: None,
+    };
+    let record = registry.execute_tool(&call, &context(), &route, None).await;
+    assert!(record.result.ok, "{:?}", record.result);
+    let requests = captured.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].tool_args["sandbox_permissions"],
+        "with_additional_permissions"
+    );
+    assert!(requests[0].tool_args.get("prefix_rule").is_none());
 }

@@ -19,7 +19,7 @@ use crate::domain::tools::definition::{
 use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::ToolExecutionContext;
 
-const DEFAULT_YIELD_MS: u64 = 10_000;
+const DEFAULT_YIELD_MS: u64 = 30_000;
 const DEFAULT_POLL_MS: u64 = 5_000;
 const MAX_YIELD_MS: u64 = 30_000;
 const STOP_GRACE: Duration = Duration::from_secs(2);
@@ -39,14 +39,14 @@ pub(super) fn exec_command_tool_def() -> ToolDef {
         name: "exec_command".into(),
         version: "1".into(),
         provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/exec-command"),
-        description: "Run a complete shell command in a PTY. Non-zero exit codes are normal command results. Commands still running after the yield return a session_id for write_stdin.".into(),
+        description: "Run a complete shell command in a PTY. Non-zero exit codes are normal command results. Commands still running after the initial yield (default 30s) return a running result with a session_id; poll it with write_stdin until the result reports exited. Prefer `rg` over `find` for searches; when using `find`, prune heavy directories (e.g. `-not -path '*/target/*' -not -path '*/.git/*'`).".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
                 "cmd": { "type": "string", "description": "Complete shell program" },
                 "workdir": { "type": "string", "description": "Working directory; relative paths resolve from the session cwd" },
                 "tty": { "type": "boolean", "description": "Allocate a PTY for interactive or terminal-sensitive commands; defaults to false" },
-                "yield_time_ms": { "type": "integer", "minimum": 0, "maximum": MAX_YIELD_MS },
+                "yield_time_ms": { "type": "integer", "minimum": 0, "maximum": MAX_YIELD_MS, "description": "Initial wait before returning a running result; defaults to 30000" },
                 "timeout_ms": { "type": "integer", "minimum": 1 },
                 "max_output_tokens": { "type": "integer", "minimum": 1 },
                 "sandbox_permissions": {

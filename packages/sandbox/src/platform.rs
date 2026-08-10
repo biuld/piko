@@ -134,6 +134,17 @@ fn macos_build(
             "(allow file-read* file-write* (subpath (param \"{key}\")))\n"
         ));
     }
+    // Read-only user home configuration (Rev B, F-23): commands such as git
+    // and cargo read `$HOME/.gitconfig`, `$HOME/.cargo/config.toml`, and
+    // similar files. Allow reads only; home never becomes a write root.
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = std::path::PathBuf::from(home);
+        let p = home.canonicalize().unwrap_or(home);
+        dir_params.push(("USER_HOME".into(), p.display().to_string()));
+        policy_parts.push(
+            "(allow file-read* file-test-existence (subpath (param \"USER_HOME\")))\n".into(),
+        );
+    }
     for (index, root) in policy.denied_read_roots.iter().enumerate() {
         let p = resolve_root(root, &cwd);
         let key = format!("DENY_ROOT_{index}");

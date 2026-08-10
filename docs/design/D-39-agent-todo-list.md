@@ -114,9 +114,14 @@ pub struct TodoListUpdated {
 |-------|--------|
 | `id`: number `1` | `"1"` |
 | `id`: string `"a"` | `"a"` |
-| missing `status` / `content` | reject write |
-| empty `content` (trim) | reject write |
+| missing `status` | default to `pending` (Rev B) |
+| unknown `status` | reject write (item-indexed, actionable error) |
+| missing / empty `content` (trim) | reject write |
 | unknown item keys | keep on value map only if using `Value` intermediate; typed `TodoItem` drops unknown unless `#[serde(flatten)]` extras map is added later |
+
+Rejection errors must be actionable (Rev B): they name the failing item
+index, the offending field, and the accepted values so the model can correct
+and retry the write in the same turn.
 
 **Tool args** remain `{ "todos": [ ... ] }` (not `items`) for model stability.
 Adapter: `todos` ↔ `TodoList.items`.

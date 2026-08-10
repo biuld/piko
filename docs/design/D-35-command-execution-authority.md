@@ -131,6 +131,9 @@ The `exec_command` description states:
 - `workdir` defaults to the turn cwd and should be preferred over leading
   `cd`;
 - a command that outlives the yield window returns `session_id`;
+- `yield_time_ms` defaults to 30_000 (Rev B); a still-running command returns
+  a `running` result whose text instructs the model to poll the returned
+  `session_id` with `write_stdin`;
 - `with_additional_permissions` requests narrow extra sandbox authority and
   requires a user-facing `justification`;
 - `require_escalated` is only for an attempt that cannot be represented by
@@ -186,12 +189,21 @@ The built-in profile becomes restricted workspace execution:
 - repository `.git` and agent-control metadata (`.codex`, `.agents`) are
   readable but read-only by default, including for shell commands;
 - platform scratch roots are explicit and reported to the model;
+- platform defaults add read-only access to the standard system toolchain
+  (OS binaries, frameworks/dylibs, Homebrew and `/usr/local` bin/lib/Cellar,
+  Xcode CommandLineTools) and read-only access to user home configuration;
+- platform temp locations are scratch roots (writable, non-persistent);
 - network restricted.
 
 Read-only Git operations therefore work in the default sandbox. Commands that
 mutate Git metadata, including commit, require a constrained `.git` write
 addition when the backend can represent it, or explicit elevation otherwise.
 Direct `edit`/`write` tools never gain `.git` access from a command approval.
+
+The toolchain and home-config defaults exist so a platform denial — and its
+approval-backed retry — is the exception rather than the rule: ordinary read
+commands run inside the default sandbox without prompting. `$HOME` remains
+read-only and is never a write root.
 
 `AttemptPermissions` is the effective restricted permissions, that profile
 plus approved per-call additions, or an explicit elevated mode. Additional
@@ -291,7 +303,8 @@ prompt gate, publish pending/resolved events, apply the configured timeout,
 and own scope grants. Approval fingerprints include:
 
 - normalized command identity;
-- cwd;
+- cwd, with `workdir` lexically normalized against the session cwd (`.`,
+  `./`, and the absolute cwd produce one grant);
 - agent role;
 - requested authority;
 - relevant permission-profile identity;
@@ -302,7 +315,17 @@ If the sandbox returns a typed denial, orchd first derives the narrowest
 representable additional permission. When policy permits, it requests that
 authority through `SandboxEscalation`; only an unrepresentable denial may
 propose full elevation. After acceptance it runs one retry. There is no
-recursive escalation.
+recursive escalation. The implementation must honor this ordering —
+`with_additional_permissions` before `require_escalated` — rather than
+short-cutting to full elevation (Rev B).
+
+Grant matching may key on a proposed narrow prefix in addition to the full
+command identity (Rev B): an approved denial retry attaches a reusable
+prefix when the command has a stable narrow argv prefix, and a repeat command
+whose normalized command starts with that approved prefix reuses the grant.
+Prefix proposals follow the same eligibility restrictions as operator prefix
+rules (no shells, interpreters, script runners, destructive utilities, or
+broad interpreters).
 
 Guardian review remains an approval reviewer, not a sandbox or policy
 evaluator. Operator forbids and backend-unavailable failures occur before the
@@ -321,6 +344,7 @@ authorize(intent)
   -> observe/yield
   -> if typed SandboxDenied:
        derive narrow additional authority or evaluate elevation eligibility
+       propose reusable narrow prefix when eligible
        request escalation approval
        build one broader attempt
        spawn once

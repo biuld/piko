@@ -210,8 +210,18 @@ pub fn validate_command_authority(tool_name: &str, args: &serde_json::Value) -> 
         return Err("with_additional_permissions requires additional_permissions".into());
     }
     if let Some(rule) = args.get("prefix_rule") {
-        if authority != "require_escalated" {
-            return Err("prefix_rule is valid only for require_escalated".into());
+        // F-23 Rev B: approval-backed denial retries may carry a reusable
+        // narrow prefix under constrained additional permissions as well as
+        // under explicit elevation. Prefix rules never apply to default
+        // sandbox calls.
+        if !matches!(
+            authority,
+            "require_escalated" | "with_additional_permissions"
+        ) {
+            return Err(
+                "prefix_rule is valid only for require_escalated or with_additional_permissions"
+                    .into(),
+            );
         }
         let tokens = rule
             .as_array()

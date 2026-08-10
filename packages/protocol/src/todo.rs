@@ -75,7 +75,8 @@ impl std::error::Error for TodoNormalizeError {}
 ///
 /// - `id` number → decimal string; string kept as-is
 /// - missing/empty `content` (after trim) → reject
-/// - missing/unknown `status` → reject
+/// - missing `status` → default to `pending` (F-27 Rev B)
+/// - unknown `status` → reject with the accepted values named
 /// - empty array is valid (clear list)
 pub fn normalize_todos_from_tool_json(
     value: &serde_json::Value,
@@ -131,15 +132,12 @@ fn normalize_one_item(
         Some(other) => {
             return Err(TodoNormalizeError::InvalidItem {
                 index,
-                reason: format!("unknown status '{other}'"),
+                reason: format!(
+                    "unknown status '{other}' (expected pending|in_progress|completed)"
+                ),
             });
         }
-        None => {
-            return Err(TodoNormalizeError::InvalidItem {
-                index,
-                reason: "missing status".into(),
-            });
-        }
+        None => TodoStatus::Pending,
     };
 
     let content = match obj.get("content").and_then(|v| v.as_str()) {
@@ -230,11 +228,12 @@ mod tests {
     }
 
     #[test]
-    fn reject_missing_status() {
+    fn default_missing_status_to_pending() {
         let v = serde_json::json!({
             "todos": [ { "id": 1, "content": "x" } ]
         });
-        assert!(normalize_todos_from_tool_json(&v).is_err());
+        let items = normalize_todos_from_tool_json(&v).unwrap();
+        assert_eq!(items[0].status, TodoStatus::Pending);
     }
 
     #[test]

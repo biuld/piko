@@ -5,6 +5,14 @@
 > Source evidence: piko product direction (long-horizon goal compression);
 > orchd `todo` tool family (baseline write path only)
 
+## Amendment (2026-08-10): missing-status default
+
+Models occasionally emit a `todo_write` item without `status`. Rejecting the
+entire list on that omission voids the agent's plan for a one-field mistake.
+Rev B defaults a **missing** `status` to `pending` while still rejecting
+**unknown** `status` values. Rejection errors become actionable: they name
+the failing item index, the offending field, and the accepted values.
+
 ## Terminology (canonical)
 
 | Layer | Term | Notes |
@@ -144,7 +152,7 @@ TodoItem {
 | Field | Required | Rules |
 |-------|----------|--------|
 | `id` | yes | **String** on the wire. Tool/model may still send JSON numbers; adapters **normalize to decimal string** (`1` → `"1"`). Stable within one agent’s list across rewrites when the agent keeps the same id. |
-| `status` | yes | One of the three enum values above. Unknown status → reject write or coerce to `pending` (design: **reject** invalid write). |
+| `status` | no (defaults to `pending`) | One of the three enum values above. **Missing status normalizes to `pending`**; unknown status → reject the write with an item-indexed error (design: reject invalid values only). |
 | `content` | yes | Non-empty after trim for new/updated items; empty content rejected. |
 | `detail` | no | Free text; omitted when null/absent. |
 
@@ -181,6 +189,11 @@ Tools keep the familiar **`todos`** array key for the model:
 // todo_read / preferred write result
 { "todos": [ { "id": "1", "status": "in_progress", "content": "…" } ] }
 ```
+
+`status` may be omitted on any item; normalization defaults it to `pending`,
+so a model that emits a partial item cannot silently void the plan. Unknown
+`status` values still reject the write with an actionable, item-indexed
+error.
 
 | Tool JSON | Protocol |
 |-----------|----------|
@@ -230,7 +243,9 @@ make the model aware of that agent’s current todo list:
 ### Tool behavior
 
 - `todo_write`: replaces the agent’s **entire** current list; persists;
-  projects; returns normalized `todos` (should).
+  projects; returns normalized `todos` (should). Rejection errors are
+  actionable: they name the failing item index, the offending field, and the
+  accepted values, so the model can correct and retry in the same turn.
 - `todo_read`: returns the current list for the calling agent.
 - Disabled feature `todo`: tools absent / fail closed per F-18; no list
   fragment; no dock strip.
@@ -300,6 +315,9 @@ This feature owns product/serde/persist/prompt; the TUI docs own client surfaces
 - [ ] Timeline tool cards no longer required to force-show checklist bodies
       once the strip ships.
 - [ ] Item schema allows additive fields without breaking v1 projection.
+- [ ] `todo_write` accepts items with a missing `status` and normalizes them
+      to `pending`; unknown `status` values reject the write with an
+      item-indexed, actionable error (Rev B).
 
 ## Product decisions
 
@@ -313,6 +331,7 @@ This feature owns product/serde/persist/prompt; the TUI docs own client surfaces
 | Product term | **todo list** / types `TodoList` | Aligns with tools; avoids F-01/multi-agent “task” collision |
 | Item id wire type | **string** (normalize numbers from tools) | Stable, extensible; tool JSON stays model-friendly |
 | Replace vs patch | **Full replace** on write (v1) | Simple, matches current tool; patch can be a later tool |
+| Missing `status` | **Default to `pending`** | Model output is lossy; a one-field omission should not void the whole plan. Unknown values still fail closed. |
 | Empty UI | **Hide strip** | Density; empty is not a status chrome fact |
 | Prompt | **Always inject non-empty list** + drive to finish remaining | Model must see plan without tool_read; prevents long-run drift |
 | World-state | **Separate** todo fragment, not F-03 run-identity world-state | Different lifecycle and cache/update rules |
