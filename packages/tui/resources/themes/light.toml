@@ -37,9 +37,12 @@ accent_blue = "#547da7"
 red_light = "#f5dade"
 green_light = "#daf2dc"
 user_msg_bg = "#e8e8e8"
-tool_pending_bg = "#e8e8f0"
-tool_success_bg = "#e8f0e8"
-tool_error_bg = "#f0e8e8"
+# Tool cards stay on the neutral surface ramp; status is carried by the
+# right-zone chips (badge / duration / tokens), not by card fill. Slots are
+# kept separate so custom themes may still differentiate per status.
+tool_pending_bg = "bg_highlight_v"
+tool_success_bg = "bg_highlight_v"
+tool_error_bg = "bg_highlight_v"
 custom_msg_bg = "#ede7f6"
 
 syntax_comment = "#008000"
