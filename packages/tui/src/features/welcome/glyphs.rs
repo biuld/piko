@@ -50,8 +50,7 @@ impl LogoStyle {
 }
 
 /// All logo styles that may appear in the cycle / fallback order.
-pub(super) const ALL_STYLES: [LogoStyle; 3] =
-    [LogoStyle::Slant, LogoStyle::Box, LogoStyle::Blocks];
+pub(super) const ALL_STYLES: [LogoStyle; 3] = [LogoStyle::Slant, LogoStyle::Box, LogoStyle::Blocks];
 
 /// Fixed logo band height — tall enough for every style so the welcome card
 /// does not resize when the animated style changes.
@@ -84,16 +83,9 @@ const LOGO_SLANT: &[&str] = &[
     r"/_/               ",
 ];
 
-const LOGO_BOX: &[&str] = &[
-    "┌─┐ ┬ ┬┌─┌─┐",
-    "├─┘ │┌┘│ │ │",
-    "┴   ┴└─└─┘─┘",
-];
+const LOGO_BOX: &[&str] = &["┌─┐ ┬ ┬┌─┌─┐", "├─┘ │┌┘│ │ │", "┴   ┴└─└─┘─┘"];
 
-const LOGO_BLOCKS: &[&str] = &[
-    "█▀█ █ █▄▀ █▀█",
-    "█▀▀ █ █ █ █▄█",
-];
+const LOGO_BLOCKS: &[&str] = &["█▀█ █ █▄▀ █▀█", "█▀▀ █ █ █ █▄█"];
 
 /// Narrow-terminal wordmark sparkle cycle.
 const SPARKLE_FRAMES: &[&str] = &["·", "✧", "·", "✦", "·", " "];
@@ -148,10 +140,7 @@ mod tests {
     #[test]
     fn narrow_pick_prefers_fitting_style() {
         let style = pick_logo_style(STYLE_TICKS * 2, 14);
-        assert!(
-            style.min_width() <= 14,
-            "picked style too wide: {style:?}"
-        );
+        assert!(style.min_width() <= 14, "picked style too wide: {style:?}");
     }
 
     #[test]
@@ -182,9 +171,6 @@ mod tests {
     #[test]
     fn sparkle_cycles() {
         assert_eq!(sparkle_glyph(0), SPARKLE_FRAMES[0]);
-        assert_eq!(
-            sparkle_glyph(SPARKLE_FRAMES.len()),
-            SPARKLE_FRAMES[0]
-        );
+        assert_eq!(sparkle_glyph(SPARKLE_FRAMES.len()), SPARKLE_FRAMES[0]);
     }
 }

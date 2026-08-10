@@ -349,21 +349,14 @@ mod tests {
     #[test]
     fn body_height_is_stable_across_logo_styles() {
         let v = view("0.1.0", Path::new("/tmp/project"), 0);
-        let heights: Vec<usize> = [
-            LogoStyle::Slant,
-            LogoStyle::Box,
-            LogoStyle::Blocks,
-        ]
-        .into_iter()
-        .map(|style| card_body_lines(&theme(), &v, style, 42).len())
-        .collect();
+        let heights: Vec<usize> = [LogoStyle::Slant, LogoStyle::Box, LogoStyle::Blocks]
+            .into_iter()
+            .map(|style| card_body_lines(&theme(), &v, style, 42).len())
+            .collect();
         assert!(
             heights.windows(2).all(|w| w[0] == w[1]),
             "welcome body height must not depend on logo style: {heights:?}"
         );
-        assert_eq!(
-            heights[0],
-            logo_region_height() + FIXED_TAIL_LINES as usize
-        );
+        assert_eq!(heights[0], logo_region_height() + FIXED_TAIL_LINES as usize);
     }
 }
