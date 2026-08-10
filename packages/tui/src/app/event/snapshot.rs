@@ -11,6 +11,8 @@ impl AppState {
         self.agent_panel.active_agent_instance_id = None;
         self.tree.set_agent_filter(None);
         self.queue_status = QueueStatus::default();
+        // Host-projected todo lists replace any prior session map.
+        self.todo_lists.replace_all(snapshot.todo_lists.clone());
         // Authoritative session ledger replaces any local roll-up.
         self.session.cumulative_usage = snapshot.cumulative_usage.clone();
         self.session.last_context_tokens = snapshot

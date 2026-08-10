@@ -140,6 +140,9 @@ pub struct SessionSnapshot {
     /// Cumulative token usage and cost across all turns
     #[serde(skip_serializing_if = "Option::is_none", rename = "cumulativeUsage")]
     pub cumulative_usage: Option<crate::messages::Usage>,
+    /// Current todo list per agent (F-27). Empty when feature off or none set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todo_lists: Vec<crate::TodoList>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

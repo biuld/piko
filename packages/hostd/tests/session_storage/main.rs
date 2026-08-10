@@ -94,6 +94,7 @@ impl AgentRunRunner for AgentPersistRunner {
                             spec: None,
                             lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
                             latest_report: None,
+                            todo_list: None,
                             created_at,
                             updated_at: created_at,
                         },

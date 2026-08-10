@@ -10,6 +10,8 @@ pub enum Region {
     Stream,
     /// Transient notice above the dock.
     Notice,
+    /// Viewed-agent todo strip (Dock Stack durable band; height 0 when empty).
+    Todos,
     /// Completion list above the composer.
     Suggest,
     /// Text / composer.

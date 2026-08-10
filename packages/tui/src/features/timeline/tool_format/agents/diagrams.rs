@@ -179,7 +179,12 @@ fn usage_line(result: &Value) -> Option<String> {
     }
     let tok = |n: u64| piko_client_core::format_tokens(n);
     if total > 0 {
-        Some(format!("{}  in {}  out {}", tok(total), tok(input), tok(output)))
+        Some(format!(
+            "{}  in {}  out {}",
+            tok(total),
+            tok(input),
+            tok(output)
+        ))
     } else {
         Some(format!("in {}  out {}", tok(input), tok(output)))
     }

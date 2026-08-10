@@ -43,6 +43,10 @@ impl AgentRunRunner for OrchAgentRunRunner {
         self.mcp_server_statuses.clone()
     }
 
+    async fn seed_todo_lists(&self, lists: Vec<piko_protocol::TodoList>) {
+        self.agent_runtime.seed_todo_lists(lists).await;
+    }
+
     fn set_context_window_callback(&self, callback: piko_orchd::tools::NewContextWindowCallback) {
         self.set_context_window_callback(callback);
     }

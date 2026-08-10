@@ -3,7 +3,9 @@
 ```text
 frame
   → split_shell (BottomBar: agent · model · cwd · context · cost)
-  → plane = Stream ▾ [Notice] ▾ [Suggest] ▾ Composer
+  → plane = Stream ▾ Dock Stack grants (Notice? Todos? Suggest?) ▾ Composer
+       Dock Stack = features/dock_stack (offer/grant; see dock-coexistence)
+       Suggest = / command palette or @ file browser (not a separate modal)
   → modals by SurfaceIntent
        Browse  → CoverBody
        Select  → ComposerBand (height from content-row budget)
@@ -11,6 +13,10 @@ frame
        Modal   → Centered (settings dialog)
   → solve → paint
 ```
+
+Non-resident plane bands are coordinated by the **Dock Stack** feature
+([dock-coexistence.md](./dock-coexistence.md)): providers offer heights; the
+stack solves grants so Stream keeps a minimum.
 
 ## ComposerBand sizing
 

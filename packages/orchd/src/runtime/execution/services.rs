@@ -4,10 +4,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::adapters::tools::registry::ToolRegistryImpl;
+use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::InferenceGateway;
 use piko_orchd_api::ToolProvider;
 use piko_orchd_api::telemetry::{NoopRuntimeTelemetry, RuntimeTelemetry};
+use piko_protocol::TodoList;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::ToolSet;
 
@@ -18,6 +20,8 @@ pub struct ExecutionServices {
     model_config: Arc<RwLock<Option<ModelConfig>>>,
     tool_registry: Arc<ToolRegistryImpl>,
     telemetry: Arc<dyn RuntimeTelemetry>,
+    /// Shared with the registered todo tool provider (same Arc state).
+    todo_provider: Arc<RwLock<Option<TodoProvider>>>,
 }
 
 impl ExecutionServices {
@@ -35,6 +39,7 @@ impl ExecutionServices {
             model_config: Arc::new(RwLock::new(None)),
             tool_registry: Arc::new(ToolRegistryImpl::new()),
             telemetry,
+            todo_provider: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -79,5 +84,18 @@ impl ExecutionServices {
 
     pub async fn register_tool_set(&self, tool_set: ToolSet) {
         self.tool_registry.register_tool_set(tool_set).await;
+    }
+
+    /// Keep a clone of the todo provider so host can seed durable lists.
+    pub async fn set_todo_provider(&self, provider: TodoProvider) {
+        *self.todo_provider.write().await = Some(provider);
+    }
+
+    /// Seed runtime todo store from host durable lists (session hydrate).
+    pub async fn seed_todo_lists(&self, lists: impl IntoIterator<Item = TodoList>) {
+        let guard = self.todo_provider.read().await;
+        if let Some(provider) = guard.as_ref() {
+            provider.seed_from_lists(lists).await;
+        }
     }
 }

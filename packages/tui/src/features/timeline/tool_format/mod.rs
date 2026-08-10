@@ -41,15 +41,17 @@ pub fn present_tool(
 
     match name {
         "read" => workspace::present_read(args_value.as_ref(), result_value.as_ref(), result),
-        "write" => {
-            workspace::present_write(args_value.as_ref(), result_value.as_ref(), details_value.as_ref())
-        }
-        "edit" => {
-            workspace::present_edit(args_value.as_ref(), result_value.as_ref(), details_value.as_ref())
-        }
-        "exec_command" => {
-            shell::present_exec(args_value.as_ref(), result_value.as_ref(), result)
-        }
+        "write" => workspace::present_write(
+            args_value.as_ref(),
+            result_value.as_ref(),
+            details_value.as_ref(),
+        ),
+        "edit" => workspace::present_edit(
+            args_value.as_ref(),
+            result_value.as_ref(),
+            details_value.as_ref(),
+        ),
+        "exec_command" => shell::present_exec(args_value.as_ref(), result_value.as_ref(), result),
         "write_stdin" => {
             shell::present_write_stdin(args_value.as_ref(), result_value.as_ref(), result)
         }

@@ -266,6 +266,18 @@ impl AppState {
         effects
     }
 
+    pub(super) fn apply_todo_list_updated(
+        &mut self,
+        updated: piko_protocol::TodoListUpdated,
+    ) -> Vec<Effect> {
+        // Live projection: no session id on the event body; accept when we have a live session.
+        if self.session.id.is_none() || self.session.initializing {
+            return Vec::new();
+        }
+        self.todo_lists.upsert(updated.todo_list);
+        Vec::new()
+    }
+
     pub(super) fn apply_turn_diff(&mut self, diff: piko_protocol::TurnDiffEvent) -> Vec<Effect> {
         let effects = Vec::new();
         if !self.accepts_session(&diff.session_id) {

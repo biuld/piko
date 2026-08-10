@@ -96,6 +96,8 @@ impl HostApp {
         session_id: &str,
         mut messages: Vec<ServerMessage>,
     ) -> Vec<ServerMessage> {
+        // F-27: seed orchd runtime todo store from host durable lists on hydrate.
+        self.seed_orch_todo_lists(session_id).await;
         for message in &mut messages {
             if let ServerMessage::SessionReconciled(reconciled) = message {
                 let (snapshot, agents) = self
@@ -111,6 +113,19 @@ impl HostApp {
             }
         }
         messages
+    }
+
+    /// Push host-durable todo lists into the orch runtime tool provider.
+    pub(crate) async fn seed_orch_todo_lists(&self, session_id: &str) {
+        let lists = {
+            let state = self.state.lock().await;
+            state
+                .session(session_id)
+                .map(|s| s.todo_lists_for_snapshot())
+                .unwrap_or_default()
+        };
+        let runner = self.turn_runner.lock().await.clone();
+        runner.seed_todo_lists(lists).await;
     }
 
     pub(crate) async fn session_view(

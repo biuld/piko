@@ -30,6 +30,7 @@ impl SessionState {
             pending_interactions: Vec::new(),
             name: self.name.clone(),
             cumulative_usage: Some(self.cumulative_usage.clone()),
+            todo_lists: self.todo_lists_for_snapshot(),
         }
     }
 }

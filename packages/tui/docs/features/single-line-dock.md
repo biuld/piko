@@ -9,6 +9,11 @@ to an interaction surface. Notice Row messages and Pane footer key hints use
 the same renderer, alignment, clipping, and optional hover backdrop while
 retaining their separate state, priority, and input behavior.
 
+This is a **paint helper** (`ui::components::dock_line`), **not** the plane
+**Dock Stack** feature that coordinates multiple optional bands (Notice /
+Todos / Suggest heights). Stack coexistence:
+[dock-coexistence.md](./dock-coexistence.md).
+
 ## Layout
 
 ```text

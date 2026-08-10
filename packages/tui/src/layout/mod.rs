@@ -1,12 +1,19 @@
 //! Product composition: shell + plane + modal stack via `piko-tui-layout`.
+//!
+//! Plane dock band heights are allocated only via Dock Stack offer → solve →
+//! grant ([`crate::features::dock_stack`]).
 
 use crate::{
     app::{AppState, HitId},
+    features::dock_stack::{
+        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, NOTICE_HEIGHT,
+        SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+    },
     navigation::{SelectBandBudget, compose_modals, compose_plane},
 };
 use piko_tui_layout::{
     FramePlan, HitMap, HitRegion, ShellChrome, ShellSplit, SurfacePanel, build_hitmap,
-    cells_from_percent, solve, split_shell,
+    cells_from_percent, solve as layout_solve, split_shell,
 };
 
 pub use crate::navigation::{PlaneMetrics, Region, SurfaceId};
@@ -25,9 +32,9 @@ pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
     app.modal_surface()
 }
 
+/// Collect per-band offers and solve joint height under Stream floor.
 pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetrics {
     let modal = resolve_modal_surface(app);
-    let suggest = has_visible_suggestions(app) && modal.is_none();
     let centered_size = match modal {
         Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
         Some(SurfaceId::Status) => Some(status_centered_size(app, body)),
@@ -35,25 +42,65 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
         _ => None,
     };
 
+    let offers = collect_dock_offers(app, body, modal.is_some());
+    let dock = solve(DockSolveInput {
+        body_height: body.height,
+        offers,
+    });
+
     PlaneMetrics {
-        notice: app.notifications.has_row_visible_for(
-            app.last_tick,
-            app.session.id.as_deref(),
-            app.agent_panel.active_agent_instance_id.as_deref(),
-        ),
-        suggest,
-        suggestion_count: if suggest {
-            app.editor.auto_complete.len()
-        } else {
-            0
-        },
-        composer_height: app
-            .editor
-            .visible_height(&app.tui_config.editor, body.width),
+        dock,
         body_height: body.height,
         select_band: modal.and_then(|s| select_band_budget(app, s)),
         centered_size,
     }
+}
+
+/// Provider offers for the Dock Stack (domain rules stay with feature owners).
+fn collect_dock_offers(
+    app: &AppState,
+    body: ratatui::layout::Rect,
+    modal_open: bool,
+) -> Vec<DockBandOffer> {
+    let notice = app.notifications.has_row_visible_for(
+        app.last_tick,
+        app.session.id.as_deref(),
+        app.agent_panel.active_agent_instance_id.as_deref(),
+    );
+    let notice_offer = if notice {
+        DockBandOffer::active(BandId::Notice, NOTICE_HEIGHT, NOTICE_HEIGHT)
+    } else {
+        DockBandOffer::inactive(BandId::Notice)
+    };
+
+    // Todos strip: offer when projection path has a non-empty viewed list.
+    let todos_offer = todos_band_offer(app);
+
+    // Suggest forced inactive while any product modal is open.
+    let suggest = has_visible_suggestions(app) && !modal_open;
+    let suggest_offer = if suggest {
+        let preferred = suggestion_preferred_height(app.editor.auto_complete.len());
+        DockBandOffer::active(BandId::Suggest, preferred, SUGGEST_MIN_HEIGHT)
+    } else {
+        DockBandOffer::inactive(BandId::Suggest)
+    };
+
+    let composer_preferred = app
+        .editor
+        .visible_height(&app.tui_config.editor, body.width);
+    let composer_offer =
+        DockBandOffer::active(BandId::Composer, composer_preferred, COMPOSER_MIN_HEIGHT);
+
+    vec![notice_offer, todos_offer, suggest_offer, composer_offer]
+}
+
+fn todos_band_offer(app: &AppState) -> DockBandOffer {
+    // When the todos feature module lands full projection, this calls into it.
+    // Until then (or when empty / feature off / no viewed agent), height 0.
+    if let Some(offer) = crate::features::todos::dock_band_offer(app) {
+        return offer;
+    }
+    DockBandOffer::inactive(BandId::Todos)
 }
 
 /// Centered size for the compact read-only status dialog.
@@ -136,9 +183,9 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
     let shell = split_shell(terminal, SHELL_CHROME);
     let modal_surface = resolve_modal_surface(app);
     let metrics = plane_metrics(app, shell.body);
-    let plane = compose_plane(metrics);
-    let modals = compose_modals(modal_surface, metrics, shell.body);
-    let plan = solve(shell.body, &plane, &modals);
+    let plane = compose_plane(&metrics);
+    let modals = compose_modals(modal_surface, &metrics, shell.body);
+    let plan = layout_solve(shell.body, &plane, &modals);
     ProductFrame {
         modal_surface,
         shell,
@@ -187,6 +234,12 @@ pub fn build_surface_hitmap(
             region: Region::Notice,
             rect,
             element: Some(HitId::Notice),
+        }],
+        // v1 strip is read-only / non-focusable — surface rect only, no elements.
+        Region::Todos => vec![HitRegion {
+            region: Region::Todos,
+            rect,
+            element: None,
         }],
         Region::Suggest => app
             .editor

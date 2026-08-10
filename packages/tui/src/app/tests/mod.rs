@@ -48,6 +48,7 @@ fn empty_reconcile(session_id: &str) -> Event {
             pending_interactions: Vec::new(),
             name: None,
             cumulative_usage: None,
+            todo_lists: Vec::new(),
         },
         agents: vec![piko_protocol::AgentInfo {
             session_id: session_id.into(),

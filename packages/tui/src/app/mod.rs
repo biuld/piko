@@ -15,6 +15,7 @@ use crate::{
         settings::{HostRuntimeSettings, SettingsAction, SettingsPanel},
         thinking::ThinkingSelector,
         timeline::Timeline,
+        todos::TodoListsState,
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
     },
@@ -159,6 +160,9 @@ pub struct AppState {
 
     // notifications
     pub notifications: NotificationCenter,
+
+    /// Host-projected todo lists by agent instance id (F-27 dock strip).
+    pub todo_lists: TodoListsState,
 
     // tui config (from hostd settings under `tui` namespace)
     pub tui_config: TuiConfig,

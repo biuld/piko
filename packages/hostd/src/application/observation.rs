@@ -154,7 +154,39 @@ impl HostApp {
                                 event.agent_instance_id
                             ))
                         })?;
+                        // F-27: live + durable project after successful todo_write
+                        // (including empty clear — pending holds empty lists too).
+                        let todo_list = {
+                            let mut state = self.state.lock().await;
+                            state
+                                .session_mut(session_id)
+                                .ok()
+                                .and_then(|s| s.take_pending_todo_projection())
+                        };
+                        if let Some(list) = todo_list.as_ref()
+                            && let Some(storage) = &self.storage
+                        {
+                            let durable = if list.items.is_empty() {
+                                None
+                            } else {
+                                Some(list)
+                            };
+                            let _ = storage.set_agent_todo_list(
+                                session_dir,
+                                &event.agent_instance_id,
+                                durable,
+                            );
+                        }
                         send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
+                        if let Some(list) = todo_list {
+                            send_event(
+                                tx,
+                                ServerMessage::TodoListUpdated(
+                                    crate::domain::todos::todo_list_updated_event(list),
+                                ),
+                            )
+                            .await;
+                        }
                         if let Some(turn_diff) = turn_diff {
                             send_event(tx, ServerMessage::TurnDiff(turn_diff)).await;
                         }

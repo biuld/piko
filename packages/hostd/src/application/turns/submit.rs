@@ -152,6 +152,21 @@ impl HostApp {
         } else {
             None
         };
+        let todo_feature_on = {
+            let settings = self.settings.lock().await;
+            let features = crate::domain::features::resolve_features(settings.features.as_ref());
+            features.enabled.get("todo").copied().unwrap_or(true)
+        };
+        let todo_list = if todo_feature_on {
+            let state = self.state.lock().await;
+            state
+                .session(&session_id)
+                .ok()
+                .and_then(|s| s.todo_lists.get(&agent_instance_id).cloned())
+                .filter(|l| !l.items.is_empty())
+        } else {
+            None
+        };
         let mut prompt_resources = snapshot_prompt_resources(PromptSnapshotOptions {
             cwd: PathBuf::from(&cwd),
             context_files,
@@ -161,6 +176,8 @@ impl HostApp {
             previous_model: previous_model.as_ref().map(|model| model.model_id.clone()),
             environment: crate::domain::prompts::EnvironmentSnapshot::capture(),
             cache_policy: self.settings.lock().await.prompt_cache_policy(),
+            todo_list,
+            todo_feature_on,
             ..PromptSnapshotOptions::default()
         });
         prompt_resources.world_state = world_state_message;

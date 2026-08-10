@@ -336,11 +336,7 @@ pub(super) fn present_generic(
     }
 }
 
-fn present_agent(
-    name: &str,
-    args: Option<&Value>,
-    result: Option<&Value>,
-) -> ToolPresentation {
+fn present_agent(name: &str, args: Option<&Value>, result: Option<&Value>) -> ToolPresentation {
     let title = args
         .and_then(|a| super::agents::agent_args_preview(name, a))
         .or_else(|| result.and_then(|r| super::agents::agent_result_preview(name, r)))

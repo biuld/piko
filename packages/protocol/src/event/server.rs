@@ -34,6 +34,8 @@ pub enum ServerMessage {
     Usage(UsageEvent),
     /// Unified stream-item patch envelope — sole live stream transport (F-22).
     StreamItem(crate::StreamItemPatch),
+    /// Host-authoritative current todo list for one agent (F-27).
+    TodoListUpdated(crate::TodoListUpdated),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

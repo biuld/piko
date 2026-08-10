@@ -78,6 +78,7 @@ pub fn session_snapshot(session_id: &str) -> SessionSnapshot {
         pending_interactions: Vec::new(),
         name: Some("Test Session".to_string()),
         cumulative_usage: None,
+        todo_lists: Vec::new(),
     }
 }
 

@@ -118,6 +118,11 @@ impl AgentRuntime {
         self.execution.register_tool_provider(provider).await;
     }
 
+    /// Seed runtime todo lists from host durable projection (session hydrate).
+    pub async fn seed_todo_lists(&self, lists: impl IntoIterator<Item = piko_protocol::TodoList>) {
+        self.execution.seed_todo_lists(lists).await;
+    }
+
     /// The context-budget tool provider (F-05). Hosts wire the
     /// `new_context_window` callback here.
     pub fn context_tools(&self) -> Arc<crate::adapters::tools::ContextToolsProvider> {

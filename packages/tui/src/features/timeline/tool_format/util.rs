@@ -67,19 +67,8 @@ pub(super) fn object_entries(value: &Value) -> Vec<(&str, &Value)> {
 
 pub(super) fn primary_string_preview(value: &Value) -> Option<String> {
     const PREFERRED: &[&str] = &[
-        "path",
-        "cmd",
-        "command",
-        "query",
-        "prompt",
-        "message",
-        "question",
-        "title",
-        "content",
-        "text",
-        "name",
-        "url",
-        "id",
+        "path", "cmd", "command", "query", "prompt", "message", "question", "title", "content",
+        "text", "name", "url", "id",
     ];
     let obj = value.as_object()?;
     for key in PREFERRED {

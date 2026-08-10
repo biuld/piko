@@ -204,6 +204,7 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
+                todo_lists: Vec::new(),
             },
             agents: vec![piko_protocol::AgentInfo {
                 session_id: "session-1".into(),

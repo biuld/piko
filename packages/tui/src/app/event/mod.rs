@@ -119,6 +119,7 @@ impl AppState {
             Event::Auth(event) => self.apply_auth(event),
             Event::Model(event) => self.apply_model(event),
             Event::Usage(event) => self.apply_usage(event),
+            Event::TodoListUpdated(updated) => self.apply_todo_list_updated(updated),
         }
     }
 }

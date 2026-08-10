@@ -86,8 +86,10 @@ impl AgentExecutionRuntime {
     }
 
     async fn register_single_agent_tools(&self, sandbox: &piko_protocol::config::SandboxConfig) {
-        self.register_tool_provider(Box::new(TodoProvider::new()))
-            .await;
+        // One shared TodoProvider: registry clone + seed handle share Arc state.
+        let todo = TodoProvider::new();
+        self.services.set_todo_provider(todo.clone()).await;
+        self.register_tool_provider(Box::new(todo)).await;
 
         let policy = load_sandbox_policy(sandbox);
         // F-19: attach per-role sandbox policies so workspace tools select

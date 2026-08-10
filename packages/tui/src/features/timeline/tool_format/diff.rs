@@ -387,14 +387,7 @@ fn lcs_table(a: &[&str], b: &[&str]) -> Vec<Vec<u16>> {
     table
 }
 
-fn emit_ops(
-    table: &[Vec<u16>],
-    a: &[&str],
-    b: &[&str],
-    i: usize,
-    j: usize,
-    out: &mut Vec<DiffOp>,
-) {
+fn emit_ops(table: &[Vec<u16>], a: &[&str], b: &[&str], i: usize, j: usize, out: &mut Vec<DiffOp>) {
     if i > 0 && j > 0 && a[i - 1] == b[j - 1] {
         emit_ops(table, a, b, i - 1, j - 1, out);
         out.push(DiffOp::Equal(a[i - 1].to_string()));

@@ -70,10 +70,7 @@ pub(super) fn present_read(
             );
         }
         if let Some(err) = str_field(result, "message") {
-            return ToolPresentation::with_meta(
-                path,
-                ToolBody::Blocks(vec![BodyLine::error(err)]),
-            );
+            return ToolPresentation::with_meta(path, ToolBody::Blocks(vec![BodyLine::error(err)]));
         }
     }
 
@@ -200,12 +197,7 @@ pub(super) fn present_edit(
     let meta = if n == 0 {
         path.to_string()
     } else {
-        format!(
-            "{path}  {n} edit{}",
-            if n == 1 { "" } else { "s" }
-        )
+        format!("{path}  {n} edit{}", if n == 1 { "" } else { "s" })
     };
     ToolPresentation::with_meta(meta, ToolBody::Empty)
 }
-
-

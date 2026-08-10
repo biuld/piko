@@ -14,6 +14,7 @@ pub mod prompt;
 pub mod runtime;
 pub mod session;
 pub mod stream_item;
+pub mod todo;
 pub mod tools;
 pub mod user_mention;
 
@@ -37,5 +38,6 @@ pub use prompt::*;
 pub use runtime::*;
 pub use session::*;
 pub use stream_item::*;
+pub use todo::*;
 pub use tools::*;
 pub use user_mention::*;

@@ -120,7 +120,12 @@ pub(in super::super) fn agent_result_preview(name: &str, result: &Value) -> Opti
                 .or_else(|| result.get("consumed"))
                 .and_then(Value::as_array)
                 .map(|a| a.len())
-                .or_else(|| result.get("count").and_then(Value::as_u64).map(|n| n as usize))
+                .or_else(|| {
+                    result
+                        .get("count")
+                        .and_then(Value::as_u64)
+                        .map(|n| n as usize)
+                })
                 .unwrap_or(0);
             format!("{n} report{}", if n == 1 { "" } else { "s" })
         }

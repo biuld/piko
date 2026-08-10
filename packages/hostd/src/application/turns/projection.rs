@@ -204,6 +204,17 @@ fn append_committed_message(
     {
         let _ = state.track_turn_file_change(session_id, source_turn_id, change)?;
     }
+    // F-27: successful todo_write replaces the agent’s durable projected list.
+    if is_new && let Ok(session) = state.session_mut(session_id) {
+        let previous = session.todo_lists.get(agent_instance_id).cloned();
+        if let Some(list) = crate::domain::todos::todo_list_from_tool_result(
+            agent_instance_id,
+            message,
+            previous.as_ref(),
+        ) {
+            session.set_todo_list(list);
+        }
+    }
     let parent_id = parent_id
         .map(str::to_string)
         .or_else(|| {

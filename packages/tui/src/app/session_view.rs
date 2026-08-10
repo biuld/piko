@@ -61,6 +61,7 @@ impl AppState {
         self.approvals.clear();
         self.interactions.clear();
         self.queue_status = QueueStatus::default();
+        self.todo_lists.clear();
         self.tree.document = Default::default();
         self.tree.visible.rows.clear();
     }

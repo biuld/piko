@@ -231,9 +231,6 @@ mod tests {
         assert_eq!(regions.len(), 1, "one tool hit: {regions:?}");
         let (rect, id) = regions[0];
         assert_eq!(id, HitId::TimelineTool(0));
-        assert_eq!(
-            rect.height, 1,
-            "hit must be title-row only, got {rect:?}"
-        );
+        assert_eq!(rect.height, 1, "hit must be title-row only, got {rect:?}");
     }
 }

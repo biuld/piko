@@ -7,6 +7,7 @@ pub mod permissions;
 pub mod prompts;
 pub mod safety;
 pub mod sessions;
+pub mod todos;
 
 pub use config::{
     ApprovalSettings, ExecutionSettings, GuardianSettings, HostSettings, ModelRegistry,

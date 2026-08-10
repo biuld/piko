@@ -12,6 +12,14 @@ pub fn snapshot_prompt_resources(
     let date = current_date_string();
     let environment_host = environment_host_content(&options.environment);
     let model_switch = model_switch_content(&options);
+    let platform_policy = if options.todo_feature_on {
+        format!(
+            "{PLATFORM_POLICY}\n\n{}",
+            crate::domain::todos::TODO_DRIVE_INSTRUCTION
+        )
+    } else {
+        PLATFORM_POLICY.to_string()
+    };
     let mut blocks = vec![block(
         "platform.policy",
         piko_protocol::PromptBlockKind::Instruction,
@@ -19,7 +27,7 @@ pub fn snapshot_prompt_resources(
         piko_protocol::ContentTrust::Trusted,
         piko_protocol::PromptSource::new("compiled", "piko/platform-policy")
             .with_version(env!("CARGO_PKG_VERSION")),
-        PLATFORM_POLICY.to_string(),
+        platform_policy,
         piko_protocol::CacheScope::GlobalStable,
     )];
 
@@ -113,6 +121,23 @@ pub fn snapshot_prompt_resources(
         format!("Current date: {date}\nCurrent working directory: {cwd}"),
         piko_protocol::CacheScope::RunDynamic,
     ));
+
+    // F-27: separate todo.list fragment (not world-state). Only when feature on
+    // and list non-empty for this agent.
+    if options.todo_feature_on
+        && let Some(list) = options.todo_list.as_ref()
+        && let Some(content) = crate::domain::todos::todo_list_fragment_content(list)
+    {
+        blocks.push(block(
+            "todo.list",
+            piko_protocol::PromptBlockKind::Context,
+            piko_protocol::InstructionAuthority::None,
+            piko_protocol::ContentTrust::Trusted,
+            piko_protocol::PromptSource::new("hostd", "todo"),
+            content,
+            piko_protocol::CacheScope::RunDynamic,
+        ));
+    }
 
     piko_protocol::PromptResourceSnapshot {
         blocks,

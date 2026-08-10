@@ -66,6 +66,9 @@ pub struct AgentManifestEntry {
     pub lifecycle: AgentInstanceLifecycle,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_report: Option<AgentRunReport>,
+    /// Durable current todo list for this agent (F-27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo_list: Option<piko_protocol::TodoList>,
     pub created_at: i64,
     pub updated_at: i64,
 }

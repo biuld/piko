@@ -32,6 +32,7 @@ fn session_reconcile_projects_cumulative_usage() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: Some(usage.clone()),
+                todo_lists: Vec::new(),
             },
             agents: vec![piko_protocol::AgentInfo {
                 session_id: "session-1".into(),

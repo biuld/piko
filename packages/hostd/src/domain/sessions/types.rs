@@ -66,6 +66,13 @@ pub struct SessionState {
     /// Budget-window compaction state (F-05): pending guard, window counter,
     /// and rearm baseline. Derived on resume from the last checkpoint entry.
     pub compaction: crate::domain::compaction::CompactionState,
+    /// Per-agent durable todo lists (F-27). Keyed by agent_instance_id.
+    /// Empty lists are omitted (cleared).
+    pub todo_lists: HashMap<String, piko_protocol::TodoList>,
+    /// Last successful `todo_write` projection (including empty clear) waiting
+    /// for the observation path to emit `TodoListUpdated` + durable persist.
+    /// Process-local; not part of snapshot.
+    pub pending_todo_projection: Option<piko_protocol::TodoList>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +148,35 @@ impl SessionState {
             agent_views: HashMap::new(),
             next_agent_view_seq: 1,
             compaction: Default::default(),
+            todo_lists: HashMap::new(),
+            pending_todo_projection: None,
         }
+    }
+
+    /// Snapshot projection of all non-empty durable todo lists.
+    pub fn todo_lists_for_snapshot(&self) -> Vec<piko_protocol::TodoList> {
+        let mut lists: Vec<_> = self.todo_lists.values().cloned().collect();
+        lists.sort_by(|a, b| a.agent_instance_id.cmp(&b.agent_instance_id));
+        lists
+    }
+
+    /// Replace one agent's list (full replace). Empty items clear durable
+    /// storage but still queue a pending projection so live clients learn
+    /// about the clear.
+    pub fn set_todo_list(&mut self, list: piko_protocol::TodoList) -> piko_protocol::TodoList {
+        let id = list.agent_instance_id.clone();
+        if list.items.is_empty() {
+            self.todo_lists.remove(&id);
+        } else {
+            self.todo_lists.insert(id, list.clone());
+        }
+        self.pending_todo_projection = Some(list.clone());
+        list
+    }
+
+    /// Take the pending todo projection (if any) for live emit + durable write.
+    pub fn take_pending_todo_projection(&mut self) -> Option<piko_protocol::TodoList> {
+        self.pending_todo_projection.take()
     }
 
     #[allow(clippy::collapsible_if)]

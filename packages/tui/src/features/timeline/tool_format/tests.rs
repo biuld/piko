@@ -1,5 +1,5 @@
-use super::*;
 use super::model::{BodyLine, LineKind, ToolBody};
+use super::*;
 
 #[test]
 fn read_uses_title_meta_and_code_view() {
@@ -50,10 +50,7 @@ fn exec_command_nonzero_exit_uses_error_badge() {
     let args = r#"{"cmd":"false"}"#;
     let result = r#"{"state":"exited","exit_code":127,"output":"","wall_time_seconds":0.06}"#;
     let presented = present_tool("exec_command", args, Some(result), None);
-    assert_eq!(
-        presented.title_meta.as_deref(),
-        Some("$ false")
-    );
+    assert_eq!(presented.title_meta.as_deref(), Some("$ false"));
     let badge = presented.title_badge.as_ref().expect("badge");
     assert_eq!(badge.text, "exit 127");
     assert_eq!(badge.tone, BadgeTone::Error);
@@ -71,7 +68,10 @@ fn todo_write_checklist_with_progress() {
     let presented = present_tool("todo_write", args, None, None);
     assert_eq!(presented.title_meta.as_deref(), Some("1/2 done"));
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains('✓') && plain.contains("done task"), "{plain}");
+    assert!(
+        plain.contains('✓') && plain.contains("done task"),
+        "{plain}"
+    );
     assert!(plain.contains('·') && plain.contains("later"), "{plain}");
     // No serial ids in the checklist body.
     assert!(!plain.contains("✓ 1") && !plain.contains("· 2"), "{plain}");
@@ -83,13 +83,21 @@ fn unknown_tool_uses_primary_field_as_title() {
     let presented = present_tool("search_web", args, None, None);
     assert_eq!(presented.title_meta.as_deref(), Some("hello"));
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains("query") || plain.contains("hello"), "{plain}");
+    assert!(
+        plain.contains("query") || plain.contains("hello"),
+        "{plain}"
+    );
 }
 
 #[test]
 fn edit_args_render_as_ide_diff_without_edit_hunk_headers() {
     let args = r#"{"path":"src/lib.rs","edits":[{"oldText":"fn a() {}\n","newText":"fn a() {\n  ok\n}\n"}]}"#;
-    let presented = present_tool("edit", args, Some(r#"{"edited":true,"editsApplied":1}"#), None);
+    let presented = present_tool(
+        "edit",
+        args,
+        Some(r#"{"edited":true,"editsApplied":1}"#),
+        None,
+    );
     let meta = presented.title_meta.expect("meta");
     assert!(meta.contains("src/lib.rs"), "{meta}");
     match presented.body {
@@ -100,9 +108,9 @@ fn edit_args_render_as_ide_diff_without_edit_hunk_headers() {
                 diff.stats
             );
             assert!(
-                diff.rows
-                    .iter()
-                    .any(|r| matches!(r, DiffRow::Delete { text, .. } if text.contains("fn a() {}"))),
+                diff.rows.iter().any(
+                    |r| matches!(r, DiffRow::Delete { text, .. } if text.contains("fn a() {}"))
+                ),
                 "missing delete: {:?}",
                 diff.rows
             );
@@ -115,7 +123,8 @@ fn edit_args_render_as_ide_diff_without_edit_hunk_headers() {
 
 #[test]
 fn edit_file_change_prefers_full_file_context_diff() {
-    let details = r#"{"_pikoFileChange":{"path":"src/lib.rs","before":"a\nold\nb\n","after":"a\nnew\nb\n"}}"#;
+    let details =
+        r#"{"_pikoFileChange":{"path":"src/lib.rs","before":"a\nold\nb\n","after":"a\nnew\nb\n"}}"#;
     let presented = present_tool(
         "edit",
         r#"{"path":"src/lib.rs","edits":[{"oldText":"old","newText":"new"}]}"#,
@@ -172,7 +181,10 @@ fn spawn_agent_uses_plain_title_and_meta_body() {
         "title must stay ASCII for width stability: {meta}"
     );
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains("agent") && plain.contains("agent_abc12345"), "{plain}");
+    assert!(
+        plain.contains("agent") && plain.contains("agent_abc12345"),
+        "{plain}"
+    );
     assert!(plain.contains("succeeded"), "outcome type only: {plain}");
     assert!(
         !plain.contains("cacheRead") && !plain.contains("\"type\""),
@@ -188,7 +200,10 @@ fn spawn_agent_uses_plain_title_and_meta_body() {
         !plain.contains("fix the tests"),
         "do not duplicate prompt when summary exists: {plain}"
     );
-    assert!(!plain.contains('└') && !plain.contains('┌'), "no box art: {plain}");
+    assert!(
+        !plain.contains('└') && !plain.contains('┌'),
+        "no box art: {plain}"
+    );
 }
 
 #[test]
@@ -213,8 +228,14 @@ fn list_agents_renders_plain_rows() {
     }"#;
     let presented = present_tool("list_agents", "{}", Some(result), None);
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains("root") && plain.contains("[main]"), "{plain}");
-    assert!(plain.contains("child") && plain.contains("[coder]"), "{plain}");
+    assert!(
+        plain.contains("root") && plain.contains("[main]"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("child") && plain.contains("[coder]"),
+        "{plain}"
+    );
     assert!(
         !plain.contains('●') && !plain.contains('└') && !plain.contains('├'),
         "no tree art: {plain}"
@@ -243,13 +264,31 @@ fn list_agent_specs_body_is_card_blocks() {
     let presented = present_tool("list_agent_specs", "{}", Some(result), None);
     assert_eq!(presented.title_meta.as_deref(), Some("2 specs"));
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains("default") && plain.contains("general"), "{plain}");
-    assert!(plain.contains("(default)"), "mark default template: {plain}");
-    assert!(plain.contains("role") && plain.contains("assistant"), "{plain}");
-    assert!(plain.contains("Default helper"), "description prose: {plain}");
-    assert!(plain.contains("coder") && plain.contains("implementer"), "{plain}");
+    assert!(
+        plain.contains("default") && plain.contains("general"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("(default)"),
+        "mark default template: {plain}"
+    );
+    assert!(
+        plain.contains("role") && plain.contains("assistant"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("Default helper"),
+        "description prose: {plain}"
+    );
+    assert!(
+        plain.contains("coder") && plain.contains("implementer"),
+        "{plain}"
+    );
     // name equal to id is omitted; distinct name is kept.
-    assert!(plain.contains("name") && plain.contains("General"), "{plain}");
+    assert!(
+        plain.contains("name") && plain.contains("General"),
+        "{plain}"
+    );
     assert!(
         !plain.contains('└') && !plain.contains('◇') && !plain.contains('├'),
         "no tree / palette art: {plain}"
@@ -260,7 +299,10 @@ fn list_agent_specs_body_is_card_blocks() {
 fn non_json_passthrough() {
     let presented = present_tool("custom", "not-json", Some("plain result"), None);
     let plain = presented.plain_body_lines().join("\n");
-    assert!(plain.contains("not-json") || plain.contains("plain result"), "{plain}");
+    assert!(
+        plain.contains("not-json") || plain.contains("plain result"),
+        "{plain}"
+    );
 }
 
 #[test]

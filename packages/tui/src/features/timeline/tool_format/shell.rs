@@ -5,9 +5,7 @@
 
 use serde_json::Value;
 
-use super::model::{
-    BadgeTone, BodyLine, LineKind, TitleBadge, ToolBody, ToolPresentation,
-};
+use super::model::{BadgeTone, BodyLine, LineKind, TitleBadge, ToolBody, ToolPresentation};
 use super::util::{MAX_BODY_LINES, clip, single_line, str_field};
 
 pub(super) fn present_exec(
@@ -35,10 +33,7 @@ pub(super) fn present_exec(
         for line in raw.lines().take(MAX_BODY_LINES) {
             blocks.push(BodyLine::terminal(line));
         }
-        (
-            Some(TitleBadge::new("done", BadgeTone::Neutral)),
-            blocks,
-        )
+        (Some(TitleBadge::new("done", BadgeTone::Neutral)), blocks)
     } else {
         let mut blocks = Vec::new();
         if let Some(wd) = workdir.filter(|s| !s.is_empty()) {
@@ -47,10 +42,7 @@ pub(super) fn present_exec(
         if !cmd.is_empty() {
             blocks.push(BodyLine::prompt(format!("$ {cmd}")));
         }
-        (
-            Some(TitleBadge::new("running", BadgeTone::Running)),
-            blocks,
-        )
+        (Some(TitleBadge::new("running", BadgeTone::Running)), blocks)
     };
 
     if let Some(args) = args {
@@ -115,7 +107,15 @@ pub(super) fn present_write_stdin(
 
     let badge = if let Some(result) = result {
         let (badge, mut out) = terminal_body(result, "", None);
-        out.retain(|line| !matches!(line, BodyLine::Text { kind: LineKind::Prompt, .. }));
+        out.retain(|line| {
+            !matches!(
+                line,
+                BodyLine::Text {
+                    kind: LineKind::Prompt,
+                    ..
+                }
+            )
+        });
         if !out.is_empty() {
             blocks.push(BodyLine::Gap);
             blocks.append(&mut out);
@@ -140,11 +140,7 @@ pub(super) fn present_write_stdin(
 
 /// Build expanded body + command-outcome badge. Does **not** repeat exit status
 /// as a body headline — that lives on the title right zone.
-fn terminal_body(
-    result: &Value,
-    cmd: &str,
-    workdir: Option<&str>,
-) -> (TitleBadge, Vec<BodyLine>) {
+fn terminal_body(result: &Value, cmd: &str, workdir: Option<&str>) -> (TitleBadge, Vec<BodyLine>) {
     let state = str_field(result, "state").unwrap_or("");
     let exit = result.get("exit_code").and_then(Value::as_i64);
     let output = str_field(result, "output").unwrap_or("");
@@ -219,9 +215,7 @@ fn append_exec_meta(blocks: &mut Vec<BodyLine>, args: &Value, result: Option<&Va
     let has_cwd = blocks
         .iter()
         .any(|b| matches!(b, BodyLine::Meta { key, .. } if key == "cwd"));
-    if !has_cwd
-        && let Some(wd) = str_field(args, "workdir").filter(|s| !s.is_empty())
-    {
+    if !has_cwd && let Some(wd) = str_field(args, "workdir").filter(|s| !s.is_empty()) {
         blocks.insert(0, BodyLine::meta("cwd", wd));
     }
     if result.is_none() {
@@ -230,8 +224,8 @@ fn append_exec_meta(blocks: &mut Vec<BodyLine>, args: &Value, result: Option<&Va
         {
             blocks.push(BodyLine::meta("tty", "yes"));
         }
-        if let Some(perm) = str_field(args, "sandbox_permissions")
-            .filter(|s| !s.is_empty() && *s != "use_default")
+        if let Some(perm) =
+            str_field(args, "sandbox_permissions").filter(|s| !s.is_empty() && *s != "use_default")
         {
             blocks.push(BodyLine::meta("sandbox", perm));
         }

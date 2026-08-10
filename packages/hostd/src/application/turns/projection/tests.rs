@@ -263,3 +263,193 @@ fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
     assert!(diff.unified_diff.contains("-old"));
     assert!(diff.unified_diff.contains("+new"));
 }
+
+#[test]
+fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
+    use piko_protocol::execution::MessageCommit;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    let agent = root.agent_instance_id.clone();
+
+    let mut state = HostState::default();
+    state.insert_session(crate::domain::sessions::SessionState::new(
+        "session-1".into(),
+        "/project".into(),
+    ));
+    // Seed a non-empty list, then clear via empty todo_write.
+    {
+        let session = state.session_mut("session-1").unwrap();
+        session.set_todo_list(piko_protocol::TodoList {
+            agent_instance_id: agent.clone(),
+            items: vec![piko_protocol::TodoItem {
+                id: "1".into(),
+                status: piko_protocol::TodoStatus::Pending,
+                content: "keep until clear".into(),
+                detail: None,
+            }],
+            updated_at: 1,
+            revision: 1,
+        });
+        // Drain the seed pending so only the clear write is observed.
+        let _ = session.take_pending_todo_projection();
+        assert!(session.todo_lists.contains_key(&agent));
+    }
+
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: Some("turn-1".into()),
+                execution_id: "exec-1".into(),
+                agent_instance_id: agent.clone(),
+                message_id: "todo-clear".into(),
+                parent_message_id: None,
+                message: Message::ToolResult {
+                    tool_call_id: "call-todo".into(),
+                    tool_name: Some("todo_write".into()),
+                    content: vec![piko_protocol::ContentBlock::Text {
+                        text: r#"{"todos":[]}"#.into(),
+                    }],
+                    details: Some(serde_json::json!({ "todos": [] })),
+                    is_error: Some(false),
+                    timestamp: Some(3),
+                },
+                committed_at: 3,
+            },
+            "main",
+        )
+        .unwrap();
+
+    record_committed_message(&mut state, Some(&store), "session-1", &agent, "todo-clear")
+        .unwrap()
+        .expect("committed projection");
+
+    let session = state.session_mut("session-1").unwrap();
+    // Durable map cleared.
+    assert!(
+        !session.todo_lists.contains_key(&agent),
+        "empty write must remove durable in-memory list"
+    );
+    // Pending projection still carries empty list for live emit + disk clear.
+    let pending = session
+        .take_pending_todo_projection()
+        .expect("empty clear must queue pending projection");
+    assert!(pending.items.is_empty());
+    assert_eq!(pending.agent_instance_id, agent);
+    assert_eq!(pending.revision, 2); // bumped from previous revision 1
+}
+
+#[test]
+fn todo_write_nonempty_sets_map_and_pending() {
+    use piko_protocol::execution::MessageCommit;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    let agent = root.agent_instance_id.clone();
+
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: Some("turn-1".into()),
+                execution_id: "exec-1".into(),
+                agent_instance_id: agent.clone(),
+                message_id: "todo-write-1".into(),
+                parent_message_id: None,
+                message: Message::ToolResult {
+                    tool_call_id: "call-todo".into(),
+                    tool_name: Some("todo_write".into()),
+                    content: vec![piko_protocol::ContentBlock::Text { text: "ok".into() }],
+                    details: Some(serde_json::json!({
+                        "todos": [
+                            { "id": "1", "status": "pending", "content": "Ship it" }
+                        ]
+                    })),
+                    is_error: Some(false),
+                    timestamp: Some(2),
+                },
+                committed_at: 2,
+            },
+            "main",
+        )
+        .unwrap();
+
+    let mut state = HostState::default();
+    state.insert_session(crate::domain::sessions::SessionState::new(
+        "session-1".into(),
+        "/project".into(),
+    ));
+    record_committed_message(
+        &mut state,
+        Some(&store),
+        "session-1",
+        &agent,
+        "todo-write-1",
+    )
+    .unwrap();
+
+    let session = state.session_mut("session-1").unwrap();
+    let list = session.todo_lists.get(&agent).expect("list stored");
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].id, "1");
+    let pending = session.take_pending_todo_projection().unwrap();
+    assert_eq!(pending.items.len(), 1);
+}
+
+#[test]
+fn empty_clear_pending_drives_durable_none() {
+    // Simulates observation path: pending empty → set_agent_todo_list(None).
+    use crate::infra::storage::JsonlSessionRepository;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let sessions_root = temp.path();
+    let repo = JsonlSessionRepository::new(sessions_root);
+    let persisted = repo.create("/project").unwrap();
+    let session_dir = persisted.path.clone();
+    let store = SessionStore::new(&session_dir);
+    let root = store.ensure_root_agent("main").unwrap();
+    let agent = root.agent_instance_id.clone();
+
+    // Persist a non-empty list first.
+    let list = piko_protocol::TodoList {
+        agent_instance_id: agent.clone(),
+        items: vec![piko_protocol::TodoItem {
+            id: "1".into(),
+            status: piko_protocol::TodoStatus::Pending,
+            content: "x".into(),
+            detail: None,
+        }],
+        updated_at: 1,
+        revision: 1,
+    };
+    repo.set_agent_todo_list(&session_dir, &agent, Some(&list))
+        .unwrap();
+    assert!(
+        store
+            .load_manifest()
+            .unwrap()
+            .agents
+            .get(&agent)
+            .unwrap()
+            .todo_list
+            .is_some()
+    );
+
+    // Empty clear: same call observation makes after pending empty list.
+    repo.set_agent_todo_list(&session_dir, &agent, None)
+        .unwrap();
+
+    let after = store.load_manifest().unwrap();
+    assert!(
+        after.agents.get(&agent).unwrap().todo_list.is_none(),
+        "empty clear must drop durable todo_list field"
+    );
+}

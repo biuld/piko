@@ -293,15 +293,8 @@ pub fn body_with_trailing(layout: BodyWithTrailing<'_>) -> Vec<Line<'static>> {
     }
     let lead = usize::from(leading_space);
     // Mirror left pad on the right when we have a trailing zone.
-    let edge = if leading_space {
-        DEFAULT_EDGE_INSET
-    } else {
-        0
-    };
-    let left_max = target
-        .saturating_sub(lead)
-        .saturating_sub(reserve)
-        .max(1);
+    let edge = if leading_space { DEFAULT_EDGE_INSET } else { 0 };
+    let left_max = target.saturating_sub(lead).saturating_sub(reserve).max(1);
 
     let wrap_row = |left: String, paint_trailing: Option<&str>| -> Line<'static> {
         if let Some(ts) = paint_trailing {
@@ -372,11 +365,7 @@ mod tests {
         let lines = body_with_trailing(BodyWithTrailing {
             text: "abcdefghijklmnopqrstuvwxyz",
             trailing: Some("14:32"),
-            reserve: trailing_reserve(
-                Some("14:32"),
-                DEFAULT_TRAILING_SPACER,
-                DEFAULT_EDGE_INSET,
-            ),
+            reserve: trailing_reserve(Some("14:32"), DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET),
             left_style: style,
             trailing_style: style,
             fill: style,
@@ -388,10 +377,7 @@ mod tests {
         let first: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(first.contains("14:32"), "{first}");
         // Affix must not sit flush on the right edge (edge inset).
-        assert!(
-            first.ends_with(' '),
-            "right edge inset missing: {first:?}"
-        );
+        assert!(first.ends_with(' '), "right edge inset missing: {first:?}");
         for line in lines.iter().skip(1) {
             let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
             assert!(!text.contains("14:32"), "no clock on continuation: {text}");

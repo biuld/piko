@@ -4,6 +4,7 @@ pub mod auth_selector;
 pub mod auto_completion;
 pub mod bottom_bar;
 pub mod diagnostics;
+pub mod dock_stack;
 pub mod editor;
 pub mod mcp;
 pub mod model_selector;
@@ -14,6 +15,7 @@ pub mod settings;
 pub mod status;
 pub mod thinking;
 pub mod timeline;
+pub mod todos;
 pub mod tool_interaction;
 pub mod tree;
 

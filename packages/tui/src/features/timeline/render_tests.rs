@@ -61,8 +61,7 @@ fn user_and_assistant_timestamp_shares_first_line() {
         "timestamp on same line as body: {first_body}"
     );
 
-    let assistant =
-        component_lines(&assistant_with_ts("world", ts), true, false, &theme, 40);
+    let assistant = component_lines(&assistant_with_ts("world", ts), true, false, &theme, 40);
     let first: String = assistant[0]
         .spans
         .iter()
@@ -116,7 +115,7 @@ fn long_user_body_wraps_inside_left_column_not_under_timestamp() {
 }
 
 #[test]
-fn non_empty_todo_list_always_shows_checklist_body() {
+fn collapsed_todo_tool_does_not_force_checklist_body() {
     use crate::app::ToolStatus;
     use crate::features::timeline::ToolEntry;
 
@@ -129,7 +128,7 @@ fn non_empty_todo_list_always_shows_checklist_body() {
         Some(r#"{"updated":true}"#.into()),
         None,
     );
-    // Even when not expanded, checklist body must remain visible.
+    // Strip is live truth — collapsed audit cards stay collapsed.
     tool.expanded = false;
     let lines = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 48);
     let plain: String = lines
@@ -137,9 +136,39 @@ fn non_empty_todo_list_always_shows_checklist_body() {
         .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(plain.contains("done task"), "completed item: {plain}");
-    assert!(plain.contains("doing now"), "active item: {plain}");
-    assert!(plain.contains("1/2 done") || plain.contains("todo_write"), "{plain}");
+    assert!(
+        plain.contains("todo_write") || plain.contains("1/2 done"),
+        "title remains: {plain}"
+    );
+    assert!(
+        !plain.contains("done task"),
+        "checklist body must not force-open: {plain}"
+    );
+}
+
+#[test]
+fn expanded_todo_tool_still_formats_checklist_history() {
+    use crate::app::ToolStatus;
+    use crate::features::timeline::ToolEntry;
+
+    let theme = Theme::dark();
+    let mut tool = ToolEntry::new(
+        "c-todo".into(),
+        "todo_write".into(),
+        ToolStatus::Completed,
+        r#"{"todos":[{"id":1,"status":"completed","content":"done task"},{"id":2,"status":"in_progress","content":"doing now"}]}"#.into(),
+        Some(r#"{"todos":[{"id":"1","status":"completed","content":"done task"},{"id":"2","status":"in_progress","content":"doing now"}]}"#.into()),
+        None,
+    );
+    tool.expanded = true;
+    let lines = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 48);
+    let plain: String = lines
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(plain.contains("done task"), "history body: {plain}");
+    assert!(plain.contains("doing now"), "history body: {plain}");
 }
 
 #[test]
@@ -288,10 +317,7 @@ fn tool_disclosure_and_hover_preserve_status_card_semantics() {
         "collapsed disclosure missing: {title_text}"
     );
     assert_eq!(collapsed[1].spans[0].style.fg, Some(theme.accent));
-    assert_eq!(
-        collapsed[1].spans[0].style.bg,
-        Some(theme.tool_success_bg)
-    );
+    assert_eq!(collapsed[1].spans[0].style.bg, Some(theme.tool_success_bg));
 
     tool.expanded = true;
     let expanded = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 40);
@@ -392,21 +418,19 @@ fn title_row_has_status_glyph_and_token_estimate_on_the_right() {
         &theme,
         72,
     );
-    assert_eq!(collapsed.len(), 3, "collapsed should be 3 lines: {collapsed:?}");
+    assert_eq!(
+        collapsed.len(),
+        3,
+        "collapsed should be 3 lines: {collapsed:?}"
+    );
     let title: String = collapsed[1]
         .spans
         .iter()
         .map(|s| s.content.as_ref())
         .collect();
     assert!(title.contains("read") && title.contains("a.rs"), "{title}");
-    assert!(
-        title.contains('✓'),
-        "status glyph on title: {title}"
-    );
-    assert!(
-        title.contains('▸'),
-        "collapsed disclosure glyph: {title}"
-    );
+    assert!(title.contains('✓'), "status glyph on title: {title}");
+    assert!(title.contains('▸'), "collapsed disclosure glyph: {title}");
     assert!(title.contains("~5"), "token estimate after status: {title}");
     assert!(
         !title.contains("call-abc") && !title.contains("msg-pare"),
@@ -455,8 +479,13 @@ fn title_right_zone_keeps_token_unit_when_left_meta_is_long() {
         None,
     );
     for width in [40u16, 48, 56, 64, 80] {
-        let lines =
-            component_lines(&TimelineComponent::Tool(tool.clone()), true, false, &theme, width);
+        let lines = component_lines(
+            &TimelineComponent::Tool(tool.clone()),
+            true,
+            false,
+            &theme,
+            width,
+        );
         let title: String = lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(
             title.contains("~1.2k"),
@@ -615,7 +644,10 @@ fn exec_tool_shows_command_left_and_exit_badge_right() {
         "exec_command".into(),
         ToolStatus::Completed,
         r#"{"cmd":"echo hi"}"#.into(),
-        Some(r#"{"state":"exited","exit_code":127,"output":"nope\n","wall_time_seconds":0.06}"#.into()),
+        Some(
+            r#"{"state":"exited","exit_code":127,"output":"nope\n","wall_time_seconds":0.06}"#
+                .into(),
+        ),
         None,
     );
     tool.expanded = true;

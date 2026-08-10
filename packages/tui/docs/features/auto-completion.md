@@ -12,6 +12,12 @@ Auto-completion paints in workspace `Region::Suggest` (directly above
 `Region::Composer`), with **Minimal** [`Pane`](./pane-chrome.md) chrome.
 Filter typing lives in the editor — the pane uses **`.no_search()`**.
 
+**Slash suggestions are the command palette** (no separate palette surface).
+Suggest is a **Dock Stack** ephemeral band (`BandId::Suggest`, shrink class
+**transient**): this feature builds a [DockBandOffer](./dock-coexistence.md);
+the stack may grant less than preferred when Notice/Todos/Composer compete.
+Paint must respect granted height (fewer list rows), not assume preferred.
+
 ### Slash Suggestions Layout
 ```
 ─ slash commands ───────────────────── [1/15] ─

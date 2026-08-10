@@ -110,6 +110,8 @@ fn route_component(
             }
         }
         Region::Notice => app.notifications.pointer_event(component_hit, gesture),
+        // v1 strip is read-only / non-focusable.
+        Region::Todos => Vec::new(),
         Region::Suggest => app
             .editor
             .auto_complete

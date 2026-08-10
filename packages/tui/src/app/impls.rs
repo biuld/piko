@@ -60,10 +60,23 @@ impl AppState {
             tree_fork_mode: false,
             agent_panel,
             notifications: NotificationCenter::default(),
+            todo_lists: crate::features::todos::TodoListsState::default(),
             tui_config: TuiConfig::default(),
             host_settings: HostRuntimeSettings::default(),
             theme: Theme::load(&TuiConfig::default().theme.name),
         }
+    }
+
+    /// Whether managed/user feature `todo` is enabled (default true).
+    pub fn todo_feature_enabled(&self) -> bool {
+        if let Some(v) = self.host_settings.managed_features.get("todo") {
+            return *v;
+        }
+        self.host_settings
+            .features
+            .get("todo")
+            .copied()
+            .unwrap_or(true)
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────

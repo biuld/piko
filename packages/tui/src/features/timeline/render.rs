@@ -151,11 +151,7 @@ fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Ve
     let dim = Style::default().fg(theme.dim).bg(bg);
     let mut lines = vec![filled_line("", body, width)];
     let ts = format_message_timestamp(component.timestamp);
-    let reserve = trailing_reserve(
-        ts.as_deref(),
-        DEFAULT_TRAILING_SPACER,
-        DEFAULT_EDGE_INSET,
-    );
+    let reserve = trailing_reserve(ts.as_deref(), DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET);
     lines.extend(body_with_trailing(BodyWithTrailing {
         text: &component.text,
         trailing: ts.as_deref(),
@@ -410,11 +406,9 @@ fn tool_lines(tool: &ToolEntry, hovered: bool, theme: &Theme, width: u16) -> Vec
     let title_meta = presented.title_meta.as_deref();
     let tokens = estimate_tool_result_tokens(tool);
 
-    // Non-empty todo checklists stay visible even when the card is "collapsed"
-    // — the list is the product signal, not optional detail.
-    let force_body = matches!(tool.name.as_str(), "todo_write" | "todo_read")
-        && !matches!(presented.body, ToolBody::Empty);
-    let show_body = tool.expanded || force_body;
+    // Todo strip is live truth (F-27); timeline todo_* cards are audit only —
+    // do not force-expand checklist bodies when the strip path is enabled.
+    let show_body = tool.expanded;
 
     // Always bookend with pad rows so collapsed cards stay 3 lines tall.
     let mut lines = vec![
@@ -543,10 +537,7 @@ fn tool_title_line(spec: ToolTitle<'_>) -> Line<'static> {
             ToolStatus::Failed => (FAIL_GLYPH, spec.theme.error),
             ToolStatus::Cancelled => (CANCELLED_GLYPH, spec.theme.warning),
         };
-        (
-            label.to_string(),
-            Style::default().fg(fg).bg(spec.bg),
-        )
+        (label.to_string(), Style::default().fg(fg).bg(spec.bg))
     };
     let dim = Style::default().fg(spec.theme.dim).bg(spec.bg);
 
@@ -556,10 +547,7 @@ fn tool_title_line(spec: ToolTitle<'_>) -> Line<'static> {
         right_chips.push((dur.clone(), dim));
     }
     if let Some(n) = spec.tokens {
-        right_chips.push((
-            format!("~{}", piko_client_core::format_tokens(n)),
-            dim,
-        ));
+        right_chips.push((format!("~{}", piko_client_core::format_tokens(n)), dim));
     }
 
     let right_content_w: usize = right_chips
@@ -582,15 +570,9 @@ fn tool_title_line(spec: ToolTitle<'_>) -> Line<'static> {
     // / flow noise that used to live in spawn titles — not status glyphs.
     let safe_meta = spec.meta.map(sanitize_title_meta);
     let (left_text, meta_span) = fit_title_left(core, safe_meta.as_deref(), left_max);
-    let left_w = paint_cols(&left_text)
-        + meta_span
-            .as_ref()
-            .map(|m| paint_cols(m))
-            .unwrap_or(0);
+    let left_w = paint_cols(&left_text) + meta_span.as_ref().map(|m| paint_cols(m)).unwrap_or(0);
 
-    let spacer = target
-        .saturating_sub(left_w)
-        .saturating_sub(right_block_w);
+    let spacer = target.saturating_sub(left_w).saturating_sub(right_block_w);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     if !left_text.is_empty() {
@@ -636,10 +618,7 @@ fn tool_title_line(spec: ToolTitle<'_>) -> Line<'static> {
 }
 
 /// Prefer trailing chips (tokens) when the right zone cannot fit everything.
-fn fit_right_chips_from_end(
-    chips: &[(String, Style)],
-    max_cols: usize,
-) -> Vec<(String, Style)> {
+fn fit_right_chips_from_end(chips: &[(String, Style)], max_cols: usize) -> Vec<(String, Style)> {
     if max_cols == 0 || chips.is_empty() {
         return Vec::new();
     }
@@ -690,11 +669,7 @@ fn sanitize_title_meta(meta: &str) -> String {
 }
 
 /// Fit `core` (+ optional meta) into `max_cols`, truncating meta first, then core.
-fn fit_title_left(
-    core: String,
-    meta: Option<&str>,
-    max_cols: usize,
-) -> (String, Option<String>) {
+fn fit_title_left(core: String, meta: Option<&str>, max_cols: usize) -> (String, Option<String>) {
     if max_cols == 0 {
         return (String::new(), None);
     }

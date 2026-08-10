@@ -65,11 +65,7 @@ impl ToolPresentation {
         }
     }
 
-    pub fn with_meta_badge(
-        meta: impl Into<String>,
-        badge: TitleBadge,
-        body: ToolBody,
-    ) -> Self {
+    pub fn with_meta_badge(meta: impl Into<String>, badge: TitleBadge, body: ToolBody) -> Self {
         Self {
             title_meta: Some(meta.into()),
             collapsed_preview: String::new(),
@@ -150,9 +146,15 @@ impl CodeView {
 pub enum BodyLine {
     Gap,
     /// `key  value` chip row.
-    Meta { key: String, value: String },
+    Meta {
+        key: String,
+        value: String,
+    },
     /// Free text with a semantic kind for paint.
-    Text { kind: LineKind, text: String },
+    Text {
+        kind: LineKind,
+        text: String,
+    },
 }
 
 impl BodyLine {

@@ -1,21 +1,24 @@
 //! Product layout trees with `piko-tui-layout` primitives only.
 //!
-//! Workspace plane = Stream + optional Notice/Suggest + Composer.
+//! Workspace plane = Stream + dock stack grants (Notice/Todos/Suggest/Composer).
 //! Surfaces = modal z-stack (Browse / Select / Dock / Modal).
+//!
+//! Dock band heights come only from [`crate::features::dock_stack`] grants —
+//! never ad-hoc fixed stacking that ignores joint budget.
 
 use piko_tui_layout::{FlexItem, ModalLayer, Node, flex_column, leaf};
 use ratatui::layout::Rect;
 
+use crate::features::dock_stack::DockSolveOutput;
+
 use super::select_band::SelectBandBudget;
 use super::{Region, SurfaceId, SurfaceIntent};
 
-/// Per-frame sizes from feature state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Per-frame sizes from feature state + dock stack solution.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaneMetrics {
-    pub notice: bool,
-    pub suggest: bool,
-    pub suggestion_count: usize,
-    pub composer_height: u16,
+    /// Dock stack grants (Notice / Todos / Suggest / Composer heights).
+    pub dock: DockSolveOutput,
     pub body_height: u16,
     /// When the active modal is Select / Dock: content-row budget for
     /// ComposerBand.
@@ -24,26 +27,46 @@ pub struct PlaneMetrics {
     pub centered_size: Option<(u16, u16)>,
 }
 
-/// Stable workspace plane (always composed).
-pub fn compose_plane(m: PlaneMetrics) -> Node<Region> {
+impl PlaneMetrics {
+    #[allow(dead_code)]
+    pub fn notice(&self) -> bool {
+        self.dock
+            .height(crate::features::dock_stack::BandId::Notice)
+            > 0
+    }
+
+    #[allow(dead_code)]
+    pub fn suggest(&self) -> bool {
+        self.dock
+            .height(crate::features::dock_stack::BandId::Suggest)
+            > 0
+    }
+
+    #[allow(dead_code)]
+    pub fn todos(&self) -> bool {
+        self.dock.height(crate::features::dock_stack::BandId::Todos) > 0
+    }
+
+    #[allow(dead_code)]
+    pub fn composer_height(&self) -> u16 {
+        self.dock
+            .height(crate::features::dock_stack::BandId::Composer)
+    }
+}
+
+/// Stable workspace plane (always composed). Heights come only from grants.
+pub fn compose_plane(m: &PlaneMetrics) -> Node<Region> {
     let mut children = vec![FlexItem::grow(1, leaf(Region::Stream))];
-    if m.notice {
-        children.push(FlexItem::fixed(1, leaf(Region::Notice)));
+    for grant in m.dock.active_grants() {
+        children.push(FlexItem::fixed(grant.height, leaf(grant.id.region())));
     }
-    if m.suggest {
-        children.push(FlexItem::fixed(
-            suggestion_height(m.suggestion_count),
-            leaf(Region::Suggest),
-        ));
-    }
-    children.push(FlexItem::fixed(m.composer_height, leaf(Region::Composer)));
     flex_column(children)
 }
 
 /// Host-priority + focus → modal layers (at most one product surface for now).
 pub fn compose_modals(
     host_surface: Option<SurfaceId>,
-    metrics: PlaneMetrics,
+    metrics: &PlaneMetrics,
     body: Rect,
 ) -> Vec<ModalLayer<Region>> {
     let Some(surface) = host_surface else {
@@ -53,7 +76,7 @@ pub fn compose_modals(
     vec![surface.modal_layer(body, band, metrics.centered_size)]
 }
 
-fn select_band_height(surface: SurfaceId, m: PlaneMetrics) -> u16 {
+fn select_band_height(surface: SurfaceId, m: &PlaneMetrics) -> u16 {
     if !matches!(
         surface.intent(),
         SurfaceIntent::Select | SurfaceIntent::Dock
@@ -66,53 +89,135 @@ fn select_band_height(surface: SurfaceId, m: PlaneMetrics) -> u16 {
     budget.resolve_band_rows(m.body_height)
 }
 
-fn suggestion_height(count: usize) -> u16 {
-    // Minimal pane: top/bottom borders + content rows (empty → 1) + footer hints.
-    let rows = (count.max(1) as u16).min(6);
-    (rows + 3).min(10)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use piko_tui_layout::{ModalPlacement, solve, solve_flex};
+    use crate::features::dock_stack::{
+        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, NOTICE_HEIGHT,
+        SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+    };
+    use piko_tui_layout::{ModalPlacement, solve as layout_solve, solve_flex};
     use ratatui::layout::Rect;
 
-    fn metrics() -> PlaneMetrics {
+    fn metrics_from_offers(body: u16, offers: Vec<DockBandOffer>) -> PlaneMetrics {
+        let dock = solve(DockSolveInput {
+            body_height: body,
+            offers,
+        });
         PlaneMetrics {
-            notice: false,
-            suggest: false,
-            suggestion_count: 0,
-            composer_height: 5,
-            body_height: 30,
+            dock,
+            body_height: body,
             select_band: None,
             centered_size: None,
         }
     }
 
+    fn idle_metrics() -> PlaneMetrics {
+        metrics_from_offers(
+            30,
+            vec![
+                DockBandOffer::inactive(BandId::Notice),
+                DockBandOffer::inactive(BandId::Todos),
+                DockBandOffer::inactive(BandId::Suggest),
+                DockBandOffer::active(BandId::Composer, 5, COMPOSER_MIN_HEIGHT),
+            ],
+        )
+    }
+
     fn metrics_with_budget(budget: SelectBandBudget) -> PlaneMetrics {
-        PlaneMetrics {
-            select_band: Some(budget),
-            ..metrics()
-        }
+        let mut m = idle_metrics();
+        m.select_band = Some(budget);
+        m
     }
 
     #[test]
     fn plane_is_stream_and_composer() {
-        let rects = solve_flex(Rect::new(0, 0, 80, 30), &compose_plane(metrics()));
+        let m = idle_metrics();
+        let rects = solve_flex(Rect::new(0, 0, 80, 30), &compose_plane(&m));
         assert!(rects.contains_key(&Region::Stream));
         assert!(rects.contains_key(&Region::Composer));
         assert!(!rects.keys().any(|r| matches!(r, Region::Surface(_))));
         assert_eq!(rects.get(&Region::Stream).map(|r| r.height), Some(25));
+        assert_eq!(rects.get(&Region::Composer).map(|r| r.height), Some(5));
+    }
+
+    #[test]
+    fn plane_grants_drive_fixed_heights_and_order() {
+        let suggest = suggestion_preferred_height(2);
+        let m = metrics_from_offers(
+            40,
+            vec![
+                DockBandOffer::active(BandId::Notice, NOTICE_HEIGHT, NOTICE_HEIGHT),
+                DockBandOffer::active(BandId::Todos, 4, 1),
+                DockBandOffer::active(BandId::Suggest, suggest, SUGGEST_MIN_HEIGHT),
+                DockBandOffer::active(BandId::Composer, 5, COMPOSER_MIN_HEIGHT),
+            ],
+        );
+        let node = compose_plane(&m);
+        let rects = solve_flex(Rect::new(0, 0, 80, 40), &node);
+        assert!(rects.contains_key(&Region::Stream));
+        assert_eq!(rects[&Region::Notice].height, 1);
+        assert_eq!(rects[&Region::Todos].height, 4);
+        assert_eq!(rects[&Region::Suggest].height, suggest);
+        assert_eq!(rects[&Region::Composer].height, 5);
+        // Order: Stream y < Notice y < Todos y < Suggest y < Composer y
+        let ys = [
+            rects[&Region::Stream].y,
+            rects[&Region::Notice].y,
+            rects[&Region::Todos].y,
+            rects[&Region::Suggest].y,
+            rects[&Region::Composer].y,
+        ];
+        assert!(ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3] && ys[3] < ys[4]);
+    }
+
+    #[test]
+    fn plane_omits_zero_grant_regions() {
+        let m = idle_metrics();
+        let rects = solve_flex(Rect::new(0, 0, 80, 30), &compose_plane(&m));
+        assert!(!rects.contains_key(&Region::Notice));
+        assert!(!rects.contains_key(&Region::Todos));
+        assert!(!rects.contains_key(&Region::Suggest));
+    }
+
+    #[test]
+    fn short_body_keeps_stream_floor() {
+        let m = metrics_from_offers(
+            20,
+            vec![
+                DockBandOffer::active(BandId::Notice, 1, 1),
+                DockBandOffer::active(BandId::Todos, 8, 1),
+                DockBandOffer::active(BandId::Suggest, 10, SUGGEST_MIN_HEIGHT),
+                DockBandOffer::active(BandId::Composer, 8, COMPOSER_MIN_HEIGHT),
+            ],
+        );
+        let rects = solve_flex(Rect::new(0, 0, 80, 20), &compose_plane(&m));
+        let stream_h = rects[&Region::Stream].height;
+        assert!(
+            stream_h >= m.dock.stream_min,
+            "stream={stream_h} min={}",
+            m.dock.stream_min
+        );
+        let dock_h: u16 = [
+            Region::Notice,
+            Region::Todos,
+            Region::Suggest,
+            Region::Composer,
+        ]
+        .iter()
+        .filter_map(|r| rects.get(r).map(|rect| rect.height))
+        .sum();
+        assert!(dock_h <= m.dock.dock_max);
     }
 
     #[test]
     fn browse_covers_body() {
         let body = Rect::new(0, 0, 80, 30);
-        let plan = solve(
+        let metrics = idle_metrics();
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Sessions), metrics(), body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Sessions), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -124,10 +229,10 @@ mod tests {
     fn approval_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
         let metrics = metrics_with_budget(SelectBandBudget::standard_info(7));
-        let plan = solve(
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Approval), metrics, body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Approval), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -140,28 +245,27 @@ mod tests {
     fn tool_interaction_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
         let metrics = metrics_with_budget(SelectBandBudget::standard_info(6));
-        let plan = solve(
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::ToolInteraction), metrics, body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::ToolInteraction), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
             ModalPlacement::ComposerBand
         ));
-        // Stream remains visible above the dock.
         assert!(plan.rects.contains_key(&Region::Stream));
     }
 
     #[test]
     fn settings_is_centered_modal() {
         let body = Rect::new(0, 0, 80, 30);
-        let mut metrics = metrics();
+        let mut metrics = idle_metrics();
         metrics.centered_size = Some((60, 24));
-        let plan = solve(
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Settings), metrics, body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Settings), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -173,12 +277,12 @@ mod tests {
     #[test]
     fn status_is_centered_modal() {
         let body = Rect::new(0, 0, 80, 30);
-        let mut metrics = metrics();
+        let mut metrics = idle_metrics();
         metrics.centered_size = Some((60, 11));
-        let plan = solve(
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Status), metrics, body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Status), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -193,12 +297,12 @@ mod tests {
     #[test]
     fn notifications_is_centered_modal() {
         let body = Rect::new(0, 0, 80, 30);
-        let mut metrics = metrics();
+        let mut metrics = idle_metrics();
         metrics.centered_size = Some((70, 18));
-        let plan = solve(
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics),
-            &compose_modals(Some(SurfaceId::Notifications), metrics, body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Notifications), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -210,10 +314,11 @@ mod tests {
     #[test]
     fn select_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
-        let plan = solve(
+        let metrics = idle_metrics();
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Models), metrics(), body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Models), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -226,26 +331,27 @@ mod tests {
         let body = Rect::new(0, 0, 80, 30);
         let budget = SelectBandBudget::minimal_stacked_list(3);
         let expected = budget.resolve_band_rows(30);
-        let plan = solve(
+        let metrics = metrics_with_budget(budget);
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics_with_budget(budget)),
-            &compose_modals(Some(SurfaceId::Models), metrics_with_budget(budget), body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Models), &metrics, body),
         );
         let layer = &plan.layers[0];
         assert!(matches!(layer.placement, ModalPlacement::ComposerBand));
         let surface_h = layer.rects.values().map(|r| r.height).max().unwrap_or(0);
         assert_eq!(surface_h, expected);
-        // Prefer content budget over legacy ~40% body (would be 12+).
         assert_eq!(expected, 10); // 4 chrome + 3×2 content
     }
 
     #[test]
     fn agents_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
-        let plan = solve(
+        let metrics = idle_metrics();
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Agents), metrics(), body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Agents), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -257,10 +363,11 @@ mod tests {
     #[test]
     fn thinking_uses_composer_band() {
         let body = Rect::new(0, 0, 80, 30);
-        let plan = solve(
+        let metrics = idle_metrics();
+        let plan = layout_solve(
             body,
-            &compose_plane(metrics()),
-            &compose_modals(Some(SurfaceId::Thinking), metrics(), body),
+            &compose_plane(&metrics),
+            &compose_modals(Some(SurfaceId::Thinking), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,
@@ -273,10 +380,10 @@ mod tests {
         let body = Rect::new(0, 0, 80, 30);
         for surface in [SurfaceId::Mcp, SurfaceId::Processes] {
             let metrics = metrics_with_budget(SelectBandBudget::standard_info(4));
-            let plan = solve(
+            let plan = layout_solve(
                 body,
-                &compose_plane(metrics),
-                &compose_modals(Some(surface), metrics, body),
+                &compose_plane(&metrics),
+                &compose_modals(Some(surface), &metrics, body),
             );
             assert!(matches!(
                 plan.layers[0].placement,

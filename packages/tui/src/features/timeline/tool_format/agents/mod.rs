@@ -50,7 +50,10 @@ pub(super) fn agent_body_lines(
         });
         if !has_prose
             && let Some(args) = args
-            && matches!(name, "spawn_agent" | "spawn_agent_detached" | "message_agent")
+            && matches!(
+                name,
+                "spawn_agent" | "spawn_agent_detached" | "message_agent"
+            )
         {
             let arg_lines = agent_args_body(name, args);
             if !arg_lines.is_empty() {

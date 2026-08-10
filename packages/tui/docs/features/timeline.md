@@ -89,8 +89,10 @@ Tool details (**behavior** only; per-tool layout is code + [ui-ux](./ui-ux.md)
 stream principles):
 
 - Collapsed by default; expand shows typed detail (not raw wire JSON).
-  Non-empty session todo lists keep the checklist visible (durable product
-  state, not optional expand detail).
+  Live agent **todo list** is the dock strip ([todo-list.md](./todo-list.md) /
+  F-27), not a force-expanded Timeline card. `todo_*` tools remain audit
+  history; once the strip ships, checklist bodies need not stay open when
+  collapsed.
 - Title is scannable (name + short summary); status/exit/duration/tokens may
   appear as chrome. Prefer real result `usage` for tokens when present;
   otherwise a payload-size heuristic is fine. Call/parent ids are not chrome.

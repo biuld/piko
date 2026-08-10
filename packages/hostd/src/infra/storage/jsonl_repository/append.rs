@@ -186,6 +186,25 @@ impl JsonlSessionRepository {
         Ok(())
     }
 
+    /// Persist one agent's durable todo list on the agent manifest entry (F-27).
+    pub fn set_agent_todo_list(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        list: Option<&piko_protocol::TodoList>,
+    ) -> Result<(), SessionStorageError> {
+        let store = SessionStore::new(session_dir);
+        store.update_manifest(|manifest| {
+            if let Some(agent) = manifest.agents.get_mut(agent_instance_id) {
+                agent.todo_list = list.cloned().filter(|l| !l.items.is_empty());
+                if let Some(list) = list {
+                    agent.updated_at = list.updated_at;
+                }
+            }
+        })?;
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn append_compaction(
         &self,

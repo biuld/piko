@@ -109,6 +109,9 @@ pub trait AgentRunRunner: Send + Sync {
         Vec::new()
     }
 
+    /// Seed orchd runtime todo store from host durable lists (F-27 hydrate).
+    async fn seed_todo_lists(&self, _lists: Vec<piko_protocol::TodoList>) {}
+
     async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
             "Agent run is unavailable".into(),

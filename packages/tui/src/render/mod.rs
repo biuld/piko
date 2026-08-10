@@ -78,6 +78,9 @@ fn paint_regions(
     if let Some(area) = rects.get(&Region::Notice).copied() {
         render_notification_row(frame, area, app, interaction_state(app, Region::Notice));
     }
+    if let Some(area) = rects.get(&Region::Todos).copied() {
+        crate::features::todos::render_todos_strip(frame, area, app, &app.theme);
+    }
     if let Some(area) = rects.get(&Region::Suggest).copied() {
         app.editor.auto_complete.render(
             frame,

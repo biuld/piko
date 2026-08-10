@@ -71,6 +71,11 @@ impl AgentExecutionRuntime {
             .await;
     }
 
+    /// Seed the runtime todo store from host durable lists (session hydrate).
+    pub async fn seed_todo_lists(&self, lists: impl IntoIterator<Item = piko_protocol::TodoList>) {
+        self.services.seed_todo_lists(lists).await;
+    }
+
     pub fn services(&self) -> &ExecutionServices {
         &self.services
     }

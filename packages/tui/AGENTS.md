@@ -5,15 +5,22 @@
 ```
 piko-tui-layout  →  shell split, flex plane, modal z-stack, FocusManager<T>
 piko-tui         →  Region / SurfaceId / AppMode, declare trees, paint, route keys
+                 →  features/dock_stack — plane ephemeral-band offers/grants
 ```
 
 ```
 Terminal
   → split_shell (BottomBar chrome: agent · model · cwd · ctx · cost)
-  → plane      Stream | Notice? | Suggest? | Composer
+  → plane      Stream | dock_stack grants (Notice? Todos? Suggest?) | Composer
   → modals     Browse CoverBody | Select/Dock ComposerBand | Modal Centered
   → solve → paint chrome → plane (unless CoverBody) → layers
 ```
+
+**Dock Stack** (`features/dock-coexistence` docs, `features/dock_stack` code):
+standalone infrastructure for **non-resident** plane bands (Notice, Todos,
+`/` palette / `@` in Suggest). Providers offer preferred height; the stack
+solves joint budget and grants rects. Not `SurfaceIntent::Dock` (modal band)
+and not `ui::dock_line` (one-row paint helper).
 
 ## Information architecture
 
@@ -23,6 +30,7 @@ Terminal
 ├──────────────────────────────────────┤
 │ DOCK              (plane, bottom)     │
 │  Notice?                              │
+│  Todos?           viewed agent todo list when non-empty (F-27)
 │  Suggest?                             │
 │  Composer                             │
 ├──────────────────────────────────────┤
@@ -86,7 +94,11 @@ Engine: `packages/tui-layout/docs/`. Product: `packages/tui/docs/`.
 | `features/component-feedback.md` | Shared component state language |
 | `features/themes.md` | Semantic color tokens |
 | `features/<surface>.md` | **Behavior contract** (what/when/interactions)—not per-projection layout designs |
+| `features/dock-coexistence.md` | **Dock Stack** — infrastructure: band registry, offer/grant, coexistence (**Todos prerequisite**) |
+| `features/todo-list.md` | Dock **Todos** strip + Timeline history split (agent todo list / F-27) |
 | `design/<topic>.md` | Modules, data flow, algorithms, reusable primitives |
+| `design/dock-coexistence.md` | `features/dock_stack` module, types, solver, migration |
+| `design/todo-list.md` | Todos strip as a **band provider** under Dock Stack |
 
 Do **not** document layout design for every projected kind (user/assistant/
 each tool body). Family-wide rules → `ui-ux.md`; concrete typesetting → code

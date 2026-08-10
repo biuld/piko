@@ -93,6 +93,15 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         JsonlSessionRepository::set_world_state_baseline(self, session_dir, facts)
     }
 
+    fn set_agent_todo_list(
+        &self,
+        session_dir: &Path,
+        agent_instance_id: &str,
+        list: Option<&piko_protocol::TodoList>,
+    ) -> Result<(), SessionStorageError> {
+        JsonlSessionRepository::set_agent_todo_list(self, session_dir, agent_instance_id, list)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn append_compaction(
         &self,

@@ -47,6 +47,14 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     state.seq = state.entries.len() as u64;
     state.rebuild_cumulative_usage_from_entries();
     restore_agent_runtime_state(&mut state, &manifest);
+    // F-27: seed durable todo lists from agent manifest fields.
+    for agent in manifest.agents.values() {
+        if let Some(list) = &agent.todo_list {
+            state
+                .todo_lists
+                .insert(agent.identity.agent_instance_id.clone(), list.clone());
+        }
+    }
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),

@@ -189,13 +189,12 @@ impl Timeline {
                     let result = if !tool.result_content.is_empty() {
                         Some(protocol_blocks_to_text(&tool.result_content))
                     } else {
-                        tool.result
-                            .as_ref()
-                            .map(super::tool_format::json_for_entry)
+                        tool.result.as_ref().map(super::tool_format::json_for_entry)
                     };
-                    let args = tool.partial_json.clone().unwrap_or_else(|| {
-                        super::tool_format::json_for_entry(&tool.args)
-                    });
+                    let args = tool
+                        .partial_json
+                        .clone()
+                        .unwrap_or_else(|| super::tool_format::json_for_entry(&tool.args));
                     let mut projected = ToolEntry::new(
                         tool.tool_call_id.clone(),
                         tool.tool_name.clone(),

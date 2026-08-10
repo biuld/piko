@@ -34,6 +34,11 @@ pub struct PromptSnapshotOptions {
     pub environment: EnvironmentSnapshot,
     /// Provider prompt-cache policy for this run (F-03 / D-28).
     pub cache_policy: piko_protocol::PromptCachePolicy,
+    /// Current durable todo list for the running agent (F-27), when feature on
+    /// and items non-empty. Injected as a separate `todo.list` fragment.
+    pub todo_list: Option<piko_protocol::TodoList>,
+    /// When true, include the standing todo drive instruction in the policy block.
+    pub todo_feature_on: bool,
 }
 
 #[derive(Debug, thiserror::Error)]

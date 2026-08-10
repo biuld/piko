@@ -62,6 +62,7 @@ impl SessionStore {
                         spec: Some(spec),
                         lifecycle: AgentInstanceLifecycle::Open,
                         latest_report: None,
+                        todo_list: None,
                         created_at: now,
                         updated_at: now,
                     },

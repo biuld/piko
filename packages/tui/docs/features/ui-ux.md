@@ -74,8 +74,9 @@ update this contract (or list an explicit exception).
 6. **Density with hierarchy.** Primary facts stay one glance away (status row,
    agent strip, turn indicator). Secondary detail is collapsed by default and
    expands on demand (tools, thinking, long results). **Exception class:**
-   product state that the user needs at a glance (e.g. a non-empty session
-   todo list) may stay expanded even when tool cards are otherwise collapsed.
+   product state the user needs at a glance may use a dedicated dock surface
+   (e.g. agent todo list strip, F-27) rather than forcing Timeline tool cards
+   open.
 7. **Semantic theming.** Surfaces use meaning tokens (accent, success, error,
    warning, muted, dim, border), not hard-coded “green/red.” Themes change
    paint, not structure.
@@ -133,11 +134,20 @@ Workspace + shell chrome (not A–E slots):
 ├──────────────────────────────────────────────────────────────┤
 │ DOCK (plane bottom stack)                                    │
 │   Notice?         ephemeral warning/error                    │
-│   Suggest?        completions when free composer             │
+│   Todos?          viewed agent todo list when non-empty (F-27) │
+│   Suggest?        / command palette or @ file browser        │
 │   Composer        editor                                     │
 ├──────────────────────────────────────────────────────────────┤
 │ CHROME            agent · model · cwd · context · cost       │
 └──────────────────────────────────────────────────────────────┘
+
+These dock bands **may all be visible together**. Coordination is a standalone
+TUI infrastructure feature — **Dock Stack**
+([dock-coexistence.md](./dock-coexistence.md)): band registry, offer/grant,
+joint height solver. Product bands (Notice, Todos, Suggest) do not own plane
+stacking. Suggest is not a separate “command palette” modal — `/` paints in
+`Region::Suggest`. `SurfaceIntent::Dock` (approval / tool workflow) is a
+**ComposerBand modal**, not a Dock Stack band.
 
 Z-modals (intent):
   Browse  CoverBody    — sessions, tree, diagnostics…
@@ -264,8 +274,8 @@ What each surface **must**, **should**, and **must not** show.
 - User prompts (after server accept), visually distinct from assistant text
 - Assistant final text (and progressive draft while streaming)
 - Tool executions as separate cards: tool name, run status, scannable summary
-  on the title; typed body when expanded (or always when the body is durable
-  product state such as a non-empty todo list)
+  on the title; typed body when expanded. Live **agent todo list** is not
+  Timeline-owned product chrome (see F-27 dock strip).
 - Session-level notices and errors that belong in the transcript
 - Clear visual difference: user / assistant / tool / notice / error
 
@@ -333,8 +343,36 @@ Detail ownership: agent panel / agent-directed chat feature docs.
 
 - Model/cost/context (those belong in BottomBar or selectors)
 - Approval or workflow questions (those replace the composer zone)
+- Full agent todo list (dock strip / F-27, not the editor body)
 
 Detail ownership: [editor.md](./editor.md), [auto-completion.md](./auto-completion.md).
+
+### Todos (agent todo list strip)
+
+Product name: **todo list** (see F-27 terminology). Dock chrome may label
+**Todos**. Avoid product **task list** (collides with F-01 / multi-agent
+“task”).
+
+**Must show** (when F-27 is implemented and the viewed agent’s list is non-empty)
+
+- Current todo list for the **viewed** AgentInstance only
+- Enough structure to see progress and the active item(s) without scrolling
+  Timeline
+
+**Should show**
+
+- Compact counts (done / total) when the full list is capped by height budget
+
+**Must not show**
+
+- Another agent’s list while that agent is not viewed
+- Invented items not present in host projection
+- Placement in BottomBar as a multi-line checklist
+
+Detail ownership: TUI [todo-list.md](./todo-list.md) +
+[design/todo-list.md](../design/todo-list.md); product
+[F-27](../../../../docs/features/F-27-agent-todo-list.md). Per-row typesetting
+stays in code.
 
 ### BottomBar (status chrome)
 

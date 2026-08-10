@@ -144,12 +144,7 @@ fn render_code_view(
 /// Shared left inset with tool title content (` " ▸ name"` starts with one space).
 const TOOL_BODY_INSET: &str = " ";
 
-fn render_body_line(
-    line: &BodyLine,
-    theme: &Theme,
-    card_bg: Color,
-    width: u16,
-) -> Line<'static> {
+fn render_body_line(line: &BodyLine, theme: &Theme, card_bg: Color, width: u16) -> Line<'static> {
     match line {
         BodyLine::Gap => filled_line("", Style::default().bg(card_bg), width),
         BodyLine::Meta { key, value } => {
