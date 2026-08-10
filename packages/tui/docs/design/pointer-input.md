@@ -44,8 +44,9 @@ generic render-state contract in `piko-tui-layout`, while selection/hover
 precedence stays with the component that owns the business state.
 
 - Choice, tab, submit, suggestion, and notice targets receive `bg_hover`.
-- Composer does not paint hover feedback. It keeps its normal `bg_elevated`
-  body and focus-owned prompt border; click still places the caret.
+- Composer does not paint hover feedback. It keeps its focus-owned prompt
+  border (no elevated body fill); click still places the caret.
+- Suggestion-row activate maps to `AcceptAndSubmitSuggestion` (same as Enter).
 - Stream, surface defaults, stale targets, and plane targets hidden by a modal
   receive no feedback.
 - A target that is also keyboard-selected keeps its selected styling; hover

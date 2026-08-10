@@ -110,7 +110,7 @@ modal surfaces
 - Mouse movement updates `AppState::hovered` to the resolved
   `(region, element)`.
 - Actionable row targets use `theme.bg_hover`. Composer hover is intentionally
-  inert: focus border, elevated body, and caret already communicate its input
+  inert: focus border and caret already communicate its input
   state; pointer click only places the cursor.
 - Timeline tool blocks preserve their status background and use an accent
   disclosure affordance on hover.

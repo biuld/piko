@@ -205,8 +205,8 @@ Every interactive component supports a subset of these **visual states**.
 
 | State | Visual |
 |-------|--------|
-| Blurred | `bg_elevated` body, `prompt_border`; no caret emphasis |
-| Focused | `bg_elevated` body, `prompt_border_active`; terminal caret at insertion point |
+| Blurred | no elevated body fill, `prompt_border`; no caret emphasis |
+| Focused | no elevated body fill, `prompt_border_active`; terminal caret at insertion point |
 | Placeholder | `dim` placeholder; disappears on first character |
 | Invalid (forms) | `error` border or inline error line under field |
 | Read-only display | No caret; body uses normal text tokens |

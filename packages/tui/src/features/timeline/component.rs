@@ -76,6 +76,8 @@ pub struct UserMessageComponent {
     #[allow(dead_code)]
     pub id: ComponentId,
     pub text: String,
+    /// Epoch milliseconds from protocol `Message::User.timestamp`, when set.
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -85,6 +87,8 @@ pub struct AssistantMessageComponent {
     pub blocks: Vec<ContentBlock>,
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,
+    /// Epoch milliseconds from protocol `Message::Assistant.timestamp`, when set.
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -152,6 +156,8 @@ pub struct ToolEntry {
     pub args: String,
     pub result: Option<String>,
     pub result_details: Option<String>,
+    /// Parent assistant message id (projection fidelity; not shown in card chrome).
+    #[allow(dead_code)]
     pub parent_message_id: Option<String>,
     /// Transient presentation state owned by this session's Timeline.
     pub expanded: bool,

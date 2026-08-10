@@ -364,10 +364,10 @@ pub fn visible_height(&self, width: u16) -> u16;
 Rules:
 
 - Minimum height is 3 rows: one content row plus top and bottom border.
-- Paint uses `bg_elevated` for the body and `prompt_border_active` whenever
-  Chat owns editor focus. Pointer hover does not add a competing visual state.
+- Paint uses **no body fill** (plane background shows through). Border is
+  `prompt_border_active` when Chat owns editor focus, otherwise
+  `prompt_border`. Pointer hover does not add a competing visual state.
 - Borders are top and bottom only.
-- Border color is the theme's muted chrome color in normal mode.
 - Content height is one row unless auto-resize is enabled.
 - With auto-resize enabled, content height grows up to `max_lines`.
 - Longer content scrolls internally.

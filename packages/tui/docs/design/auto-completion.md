@@ -63,6 +63,8 @@ pub struct CompletionRow {
     
     /// If true, accepting this item keeps the autocomplete panel open.
     pub keep_active: bool,
+    /// When true, accept also submits the editor (Immediate slash commands).
+    pub submit_on_accept: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,3 +124,18 @@ Rows are rendered with ratatui's `Table` widget, using a small marker column for
 > @src/main.rs        file        1.2 KB        rw-r--r--
 ```
 This is fully sub-feature agnostic.
+
+### Accept paths
+
+| Input | Action | Result |
+|-------|--------|--------|
+| Enter (suggestions active) | `AcceptAndSubmitSuggestion` | `accept_suggestion()` then `submit()` if `submit_on_accept` |
+| Pointer activate on a row | select that index, then `AcceptAndSubmitSuggestion` | same as Enter |
+| Tab | `SuggestionSelectNext` only | cycle; no insert-submit |
+| Esc | `CancelSuggestions` | clear list, leave editor text |
+
+Slash provider sets `submit_on_accept` from
+`HostCommandInvoke::Immediate`. File provider always sets `false`.
+
+Click must not use bare `AcceptSuggestion` for slash Immediate commands — that
+would only fill the composer without executing the command.

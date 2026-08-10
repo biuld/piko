@@ -47,7 +47,8 @@ fn assert_editor_focus_feedback(mut app: AppState) {
     let composer = compose_frame(&app, area).plan.rects[&Region::Composer];
 
     let idle = draw(&app, area);
-    assert_eq!(
+    // Composer has no elevated fill — body cells must not use bg_elevated.
+    assert_ne!(
         idle.backend().buffer()[(composer.x + 1, composer.y + 1)].bg,
         app.theme.bg_elevated
     );
@@ -59,7 +60,7 @@ fn assert_editor_focus_feedback(mut app: AppState) {
     app.hovered = Some((Region::Composer, Some(HitId::Composer)));
     let hovered = draw(&app, area);
 
-    assert_eq!(
+    assert_ne!(
         hovered.backend().buffer()[(composer.x + 1, composer.y + 1)].bg,
         app.theme.bg_elevated
     );

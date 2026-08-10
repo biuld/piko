@@ -181,18 +181,21 @@ impl Timeline {
                         blocks,
                         stop_reason: None,
                         error_message: None,
+                        // Streaming draft has no committed timestamp yet.
+                        timestamp: None,
                     }))
                 }
                 CoreItem::Tool(tool) => {
                     let result = if !tool.result_content.is_empty() {
                         Some(protocol_blocks_to_text(&tool.result_content))
                     } else {
-                        tool.result.as_ref().map(crate::text::compact_json)
+                        tool.result
+                            .as_ref()
+                            .map(super::tool_format::json_for_entry)
                     };
-                    let args = tool
-                        .partial_json
-                        .clone()
-                        .unwrap_or_else(|| crate::text::compact_json(&tool.args));
+                    let args = tool.partial_json.clone().unwrap_or_else(|| {
+                        super::tool_format::json_for_entry(&tool.args)
+                    });
                     let mut projected = ToolEntry::new(
                         tool.tool_call_id.clone(),
                         tool.tool_name.clone(),
@@ -201,8 +204,10 @@ impl Timeline {
                         result,
                         tool.parent_message_id.clone(),
                     );
-                    projected.result_details =
-                        tool.result_details.as_ref().map(crate::text::compact_json);
+                    projected.result_details = tool
+                        .result_details
+                        .as_ref()
+                        .map(super::tool_format::json_for_entry);
                     projected.expanded = expanded.get(&projected.id).copied().unwrap_or(false);
                     self.tool_calls.push(projected.clone());
                     Some(TimelineComponent::Tool(projected))
@@ -288,22 +293,25 @@ fn component_from_message(
     message: &piko_protocol::Message,
 ) -> Option<TimelineComponent> {
     match message {
-        piko_protocol::Message::User { .. } => {
+        piko_protocol::Message::User { timestamp, .. } => {
             Some(TimelineComponent::User(UserMessageComponent {
                 id: ComponentId::MessageId(id),
                 text: crate::text::message_to_text(message),
+                timestamp: *timestamp,
             }))
         }
         piko_protocol::Message::Assistant {
             content,
             stop_reason,
             error_message,
+            timestamp,
             ..
         } => Some(TimelineComponent::Assistant(AssistantMessageComponent {
             id: ComponentId::MessageId(id),
             blocks: content.iter().cloned().map(ContentBlock::from).collect(),
             stop_reason: stop_reason.clone(),
             error_message: error_message.clone(),
+            timestamp: *timestamp,
         })),
         _ => None,
     }

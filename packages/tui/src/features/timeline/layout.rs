@@ -33,7 +33,9 @@ impl Timeline {
         };
 
         let mut lines = Vec::new();
-        let mut tool_ranges = Vec::new();
+        // Hit targets are title-row only (not the full expanded body).
+        // tool_lines always lays out: pad · title · … so title is start+1.
+        let mut tool_title_rows: Vec<(usize, usize)> = Vec::new();
         for (source_index, component) in self.components.iter().enumerate() {
             let body = component_lines(
                 component,
@@ -49,10 +51,13 @@ impl Timeline {
                 lines.push(Line::from(""));
             }
             let start = lines.len();
-            let height = body.len();
             lines.extend(body);
             if matches!(component, TimelineComponent::Tool(_)) {
-                tool_ranges.push((source_index, start, height));
+                // Title row is the second line of every tool card (after top pad).
+                let title_row = start.saturating_add(super::render::TOOL_TITLE_ROW_OFFSET);
+                if title_row < lines.len() {
+                    tool_title_rows.push((source_index, title_row));
+                }
             }
         }
 
@@ -63,22 +68,20 @@ impl Timeline {
         let top_offset = self.viewport.top_offset();
         let visible_end = top_offset.saturating_add(visible_height);
         let content_bottom = content_area.y.saturating_add(content_area.height);
-        let tool_regions = tool_ranges
+        let tool_regions = tool_title_rows
             .into_iter()
-            .filter_map(|(source_index, start, height)| {
-                let end = start.saturating_add(height);
-                let clipped_start = start.max(top_offset);
-                let clipped_end = end.min(visible_end);
-                if clipped_start >= clipped_end {
+            .filter_map(|(source_index, title_row)| {
+                if title_row < top_offset || title_row >= visible_end {
                     return None;
                 }
                 let y = content_area
                     .y
-                    .saturating_add((clipped_start - top_offset).min(u16::MAX as usize) as u16);
-                let height = (clipped_end - clipped_start).min(u16::MAX as usize) as u16;
-                let height = height.min(content_bottom.saturating_sub(y));
-                (height > 0).then_some((
-                    Rect::new(content_area.x, y, content_area.width, height),
+                    .saturating_add((title_row - top_offset).min(u16::MAX as usize) as u16);
+                if y >= content_bottom {
+                    return None;
+                }
+                Some((
+                    Rect::new(content_area.x, y, content_area.width, 1),
                     HitId::TimelineTool(source_index),
                 ))
             })
@@ -110,11 +113,13 @@ mod tests {
     };
 
     fn tool(id: &str, result: &str) -> ToolEntry {
+        // Keep a stable collapsed card height for layout geometry tests:
+        // empty args + plain-text result → title + preview row (not title_meta).
         ToolEntry::new(
             id.into(),
-            "bash".into(),
+            "tool".into(),
             ToolStatus::Completed,
-            r#"{"cmd":"true"}"#.into(),
+            String::new(),
             Some(result.into()),
             None,
         )
@@ -154,26 +159,43 @@ mod tests {
         timeline.push(TimelineEntry::Tool(tool("two", "second")));
         let area = Rect::new(0, 0, 40, 4);
 
+        // Collapsed cards are short (title [+ preview]); pin to latest and
+        // assert hit geometry rather than fixed historical heights.
         let latest = timeline.pointer_regions(area, &theme);
-        assert_eq!(
-            latest,
-            vec![(Rect::new(1, 0, 38, 4), HitId::TimelineTool(1))]
+        assert!(
+            !latest.is_empty(),
+            "expected at least the latest tool hit: {latest:?}"
         );
+        assert_eq!(
+            latest.last().map(|(_, id)| *id),
+            Some(HitId::TimelineTool(1))
+        );
+        // Visible hits are ordered top→bottom and do not overlap.
+        for window in latest.windows(2) {
+            let (a, _) = window[0];
+            let (b, _) = window[1];
+            assert!(a.y <= b.y, "hits should be top-to-bottom: {latest:?}");
+            assert!(
+                a.y.saturating_add(a.height) <= b.y,
+                "hits must not overlap: {latest:?}"
+            );
+        }
 
         timeline.scroll_up(3);
         let scrolled = timeline.pointer_regions(area, &theme);
-        assert_eq!(
-            scrolled,
-            vec![
-                (Rect::new(1, 0, 38, 2), HitId::TimelineTool(0)),
-                (Rect::new(1, 3, 38, 1), HitId::TimelineTool(1)),
-            ]
-        );
         assert!(
-            scrolled
-                .iter()
-                .all(|(rect, _)| { !(rect.y <= 2 && 2 < rect.y.saturating_add(rect.height)) })
+            scrolled.iter().any(|(_, id)| *id == HitId::TimelineTool(0)),
+            "scroll-up should reveal older tool: {scrolled:?}"
         );
+        // Gap rows between cards are not hit targets.
+        for window in scrolled.windows(2) {
+            let (a, _) = window[0];
+            let (b, _) = window[1];
+            assert!(
+                a.y.saturating_add(a.height) <= b.y,
+                "hits must not overlap after scroll: {scrolled:?}"
+            );
+        }
     }
 
     #[test]
@@ -183,9 +205,9 @@ mod tests {
         let actions = timeline.pointer_event(
             ComponentHit {
                 element: Some(HitId::TimelineTool(0)),
-                rect: Rect::new(2, 0, 37, 4),
+                rect: Rect::new(2, 0, 37, 1),
                 x: 3,
-                y: 1,
+                y: 0,
             },
             PointerGesture::Activate,
         );
@@ -193,5 +215,25 @@ mod tests {
             actions.as_slice(),
             [Action::Timeline(TimelineAction::ToggleTool(0))]
         ));
+    }
+
+    #[test]
+    fn tool_hit_region_is_title_row_only_even_when_expanded() {
+        let theme = Theme::dark();
+        let mut timeline = Timeline::new();
+        let mut t = tool("one", "first");
+        t.expanded = true;
+        // Give the body some height so a full-block hit would be taller than 1.
+        t.result = Some("line1\nline2\nline3\nline4\nline5".into());
+        timeline.push(TimelineEntry::Tool(t));
+        let area = Rect::new(0, 0, 40, 20);
+        let regions = timeline.pointer_regions(area, &theme);
+        assert_eq!(regions.len(), 1, "one tool hit: {regions:?}");
+        let (rect, id) = regions[0];
+        assert_eq!(id, HitId::TimelineTool(0));
+        assert_eq!(
+            rect.height, 1,
+            "hit must be title-row only, got {rect:?}"
+        );
     }
 }

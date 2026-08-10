@@ -1,25 +1,27 @@
 # Timeline
 
+> Parent UX: [ui-ux.md](./ui-ux.md) (shell IA, stream projection *principles*,
+> information duties). This PRD is the **behavior contract** for the
+> conversation stream—not a layout design for each projected kind.
+
 ## Overview
 
 Timeline is the main conversation history area in the Chat layout. It shows the
 active session branch as a message stream, including submitted user prompts,
 assistant responses, tool executions, session notices, errors, and summaries.
 
-Each visible message type has its own presentation. User prompts, assistant
-output, tools, notices, and errors should be visually distinct instead of being
-rendered as one generic text row style.
+Message kinds are visually distinct. **How each kind is laid out** (row zones,
+wrap, per-tool body structure) follows the parent UX stream principles and
+lives in presenters; it is not specified here type-by-type.
 
 ## Layout
 
-Timeline occupies the top elastic area of the Chat layout.
+Timeline’s place in the **Chat shell** (not per-message typesetting):
 
-- It sits above the AgentPanel, notifications, suggestions, Editor, and BottomBar.
-- It is replaced by full-screen overlays such as the session list, tree, and
-  status views.
-- It remains visible when partial overlays replace the Editor.
-- It has no enclosing box by default; it may use subtle separators or status
-  hints when useful.
+- Top elastic area of the Chat layout (above dock + chrome).
+- Replaced by full-screen overlays (session list, tree, status, …).
+- Remains visible when partial overlays replace the Editor.
+- No enclosing box by default; subtle separators or status hints when useful.
 
 ## Behavior / interactions
 
@@ -30,22 +32,21 @@ Submitted user prompts appear only after the server confirms them. Pressing
 Enter clears the accepted editor input and may show turn status immediately,
 but it does not create a temporary duplicate prompt in Timeline.
 
-User messages appear as submitted prompt blocks with a distinct background and
-without a visible role label. Assistant messages appear as plain assistant
-output without an `assistant` heading; thinking content is visually quieter than
-normal answer text. Tool executions appear as separate padded blocks with
-state-specific backgrounds for pending, completed, and failed work. Session
-facts and errors use compact styles that do not look like normal assistant
-output. Model/thinking/tool-set changes retain their durable entry id as fact
-rows; compaction and branch summaries use summary components; visible custom
-messages use a dedicated custom component. Label, session-info, leaf, and
-non-display custom metadata do not enter Timeline.
+**What appears (projection duties):**
 
-Fenced code blocks appear as unobstructed code without a decorative box or
-generic title. When the fence names a recognized language, syntax colors make
-keywords, strings, comments, and other language elements easier to scan. Code
-without a language, code using an unknown language, and exceptionally large
-blocks remain readable as plain text.
+- User prompts: submitted blocks, no role label; only after server accept.
+- Assistant output: no role heading; thinking quieter than answer text; may
+  stream then finalize in place.
+- Optional protocol `timestamp` on user/assistant: show local time when present
+  (layout per parent stream principles, not specified here).
+- Tools: separate cards with status-aware presentation; expand for typed detail.
+- Notices/errors/facts: compact, not mistaken for assistant prose.
+- Model / thinking / tool-set changes keep durable entry ids as fact rows;
+  compaction and branch summaries use summary components; displayable custom
+  messages use a custom component. Label, session-info, leaf, and non-display
+  custom metadata do not enter Timeline.
+- Fenced code: readable; syntax color when language is known; no decorative
+  code frame as the default.
 
 When live events update an existing assistant message or tool execution, the
 existing visible item changes in place. The Timeline should not append duplicate
@@ -84,22 +85,21 @@ Scrolling:
 - When scrolled up, new content does not move the user's view unexpectedly; a
   new-item hint indicates that newer content arrived.
 
-Tool details:
+Tool details (**behavior** only; per-tool layout is code + [ui-ux](./ui-ux.md)
+stream principles):
 
-- Tool blocks have collapsed and expanded presentations.
-- Collapsed mode shows the tool name, status, short id, and a concise preview.
-- Expanded mode shows additional details such as arguments, parent message, and
-  results when available.
-- Each tool block owns its expansion state independently. Activating a visible
-  tool block toggles only that block.
-- Expansion state belongs to the in-memory Timeline for the current session.
-  It is retained while switching between that session's agent timelines, but
-  is discarded when the session projection is cleared or rebuilt.
-- Failed and cancelled turns finalize any still-running tool blocks belonging
-  to that turn. Cancelled tools use a distinct cancelled presentation state.
-- Tool blocks expose block-aware hover and click regions derived from the same
-  measured render plan used for paint and viewport clipping. Read-only message,
-  notice, error, and inter-block spacing rows do not expose actionable hits.
+- Collapsed by default; expand shows typed detail (not raw wire JSON).
+  Non-empty session todo lists keep the checklist visible (durable product
+  state, not optional expand detail).
+- Title is scannable (name + short summary); status/exit/duration/tokens may
+  appear as chrome. Prefer real result `usage` for tokens when present;
+  otherwise a payload-size heuristic is fine. Call/parent ids are not chrome.
+- Shell exit semantics belong with command outcome, not only generic tool-ok.
+- Each block owns expand state independently; activate toggles that block only;
+  hit target is the title/scan row.
+- Expand state is in-memory for the session (kept across agent switches;
+  cleared on projection rebuild).
+- Failed/cancelled turns finalize still-running tools for that turn.
 
 Thinking content:
 
@@ -139,3 +139,8 @@ Timeline key bindings use the existing timeline action namespace:
 - Timeline does not require partial tool-output streaming in the first version.
 - Timeline does not make every transient progress update a durable transcript
   entry.
+- Title token estimates are **not** provider-billable per-tool accounting for
+  every tool. Real usage is used when embedded in the tool result (e.g. spawn
+  reports); otherwise the estimate is a coarse result-size heuristic.
+- Column widths use `unicode-width` only — no locale-specific “Ambiguous = 2”
+  override for title reservation.

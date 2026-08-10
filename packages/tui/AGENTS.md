@@ -79,3 +79,15 @@ Overflow list items scroll.
 ## Docs
 
 Engine: `packages/tui-layout/docs/`. Product: `packages/tui/docs/`.
+
+| Doc | Role |
+|-----|------|
+| `features/ui-ux.md` | **UI/UX 宣导** — principles, shell IA, interaction grammar, stream projection *principles*, must/should/must-not |
+| `features/component-feedback.md` | Shared component state language |
+| `features/themes.md` | Semantic color tokens |
+| `features/<surface>.md` | **Behavior contract** (what/when/interactions)—not per-projection layout designs |
+| `design/<topic>.md` | Modules, data flow, algorithms, reusable primitives |
+
+Do **not** document layout design for every projected kind (user/assistant/
+each tool body). Family-wide rules → `ui-ux.md`; concrete typesetting → code
+presenters (`tool_format/`, message components).

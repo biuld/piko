@@ -57,9 +57,15 @@ Tab cycle | Enter accept
 - **Editor Live Preview**: As the user cycles through items, the text in the Editor is **automatically updated** in real-time to show the currently selected item.
 
 ### Acceptance and Submission
-- **Enter**: Accepts the selected suggestion.
-  - **Commands**: Immediate commands execute. Commands needing arguments or confirmation insert the slash token and wait for more input.
-  - **Files**: If the suggestion is a file, Enter inserts the file into the Editor as a placeholder block and closes the autocomplete view.
+- **Enter** and **pointer click** on a row share the same accept path
+  (`AcceptAndSubmitSuggestion`): first insert/replace the editor range, then
+  submit when the row is marked for immediate execution.
+  - **Commands (`/`)**: Immediate host commands execute on accept. Commands that
+    need arguments or confirmation insert the slash token (trailing space) and
+    wait for more input (`submit_on_accept = false`).
+  - **Files (`@`)**: Insert as a placeholder block and close the list
+    (`submit_on_accept = false` — never auto-submits chat).
+- **Tab / Shift-Tab**: Cycle selection only (do not submit).
 - **Esc**: Cancels suggestions, closes the view, and leaves the editor's text unchanged.
 - There is no separate command-palette shortcut. Slash suggestions are the
   single command-discovery and invocation entry point.

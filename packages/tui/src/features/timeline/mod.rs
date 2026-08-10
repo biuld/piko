@@ -12,6 +12,8 @@ mod highlight;
 mod layout;
 mod markdown;
 mod render;
+mod render_diff;
+mod tool_format;
 mod viewport;
 
 #[cfg(test)]

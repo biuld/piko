@@ -213,8 +213,10 @@ so a partially visible tool card cannot drift from its pointer region.
 
 Only blocks with a distinct action emit a hit region. In the current contract,
 tool blocks emit `HitId::TimelineTool(source_index)` and toggle their own
-expansion state. User/assistant messages, notices, errors, and spacing remain
-read-only and retain only the Stream-level wheel target.
+expansion state. The hit rectangle is the **title row only**
+(`TOOL_TITLE_ROW_OFFSET` within the card), not the expanded body. User/assistant
+messages, notices, errors, and spacing remain read-only and retain only the
+Stream-level wheel target.
 
 ## Message Components
 
@@ -227,18 +229,13 @@ State:
 - message id when available
 - prompt text
 - optional attachment or reference summaries
+- optional protocol `timestamp` (epoch ms)
 
-Rendering:
+Rendering: user background, no role label. Optional timestamp and row
+composition live in presenters (shared [line-layout](./line-layout.md)
+primitives when left/right columns are needed)—not specified type-by-type here.
 
-- user-message background with horizontal and vertical padding
-- submitted content styled with the user message text token
-- no visible `user` role label
-- visually distinct from assistant output
-
-Updates:
-
-- normally immutable after insertion
-- rebuilt from snapshots
+Updates: normally immutable after insertion; rebuilt from snapshots.
 
 ### AssistantMessageComponent
 
@@ -250,12 +247,10 @@ State:
 - ordered content blocks
 - streaming/finalized state
 - stop reason and error text when user-visible
+- optional protocol `timestamp` (epoch ms); streaming drafts may omit it
 
-Assistant content blocks should distinguish:
-
-- normal assistant text
-- thinking text
-- tool-call declarations
+Content blocks distinguish normal text, thinking, and tool-call declarations.
+Presentation/layout details stay in presenters.
 
 Updates:
 
@@ -271,16 +266,14 @@ not the target representation.
 
 ### ToolExecutionComponent
 
-Represents one tool call.
+Represents one tool call (`ToolEntry` in code).
 
 State:
 
 - tool call id
 - tool name
-- parent message id when available
-- args, preferably structured
-- partial result
-- final result
+- parent message id when available (not shown in chrome)
+- args / result / result_details as strings (JSON when structured)
 - status: pending, running, completed, failed, cancelled
 - local `expanded` presentation state, initialized collapsed
 
@@ -292,18 +285,13 @@ Updates:
 - tool end or committed result mutates final result and status
 - turn failure marks unresolved related tools failed or cancelled
 
-Rendering:
+Presentation pipeline: `features/timeline/tool_format/` turns args/result into
+a presentation model and paint. **Per-tool layout recipes stay in that
+module** (see [ui-ux](../features/ui-ux.md) stream projection principles).
 
-- pending/running/success/error backgrounds
-- title styled with the tool title token
-- output styled with the tool output token
-- collapsed preview by default
-- expanded details for args, parent message, partial result, final result, and
-  error output
-
-Tool updates must not append duplicate entries for the same tool call id.
-Upserts preserve the existing block's `expanded` value while replacing runtime
-tool data. Snapshot rebuild creates fresh collapsed blocks.
+Behavior anchors: upsert by tool call id (preserve `expanded`); snapshot
+rebuild starts collapsed; hit region is title row; token chip prefers usage
+when present; non-empty todo body always paints.
 
 ### NoticeComponent
 

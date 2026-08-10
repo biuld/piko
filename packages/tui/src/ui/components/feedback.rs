@@ -9,19 +9,33 @@ use ratatui::text::{Line, Span};
 use crate::theme::Theme;
 
 // ── Glyphs ───────────────────────────────────────────────────────────────────
+//
+// One shared glyph language for lists, agent diagrams, tree connectors, and
+// disclosure. Feature modules must not invent private duplicates.
 
 /// Keyboard selection caret (selected row).
 pub const SELECTION_CARET: &str = "❯";
-/// Active / current value marker (already in force).
+/// Active / live / in-force marker.
 pub const ACTIVE_MARKER: &str = "●";
-/// Idle / hollow marker.
+/// Idle / hollow / detached marker.
 pub const IDLE_MARKER: &str = "○";
 /// Group drill-in affordance (hierarchical menu).
 pub const GROUP_DRILL: &str = "▸";
+/// Collapsed disclosure (tool cards, sections). Same shape as [`GROUP_DRILL`].
+pub const DISCLOSURE_COLLAPSED: &str = "▸";
+/// Expanded disclosure (tool cards, sections).
+pub const DISCLOSURE_EXPANDED: &str = "▾";
 /// Success glyph.
 pub const SUCCESS_GLYPH: &str = "✓";
-/// Failure / cancelled glyph.
+/// Failure glyph.
 pub const FAIL_GLYPH: &str = "✗";
+/// Cancelled / aborted glyph.
+pub const CANCELLED_GLYPH: &str = "⊘";
+/// Running / in-progress mark on compact chrome (not an animated spinner).
+pub const RUNNING_GLYPH: &str = "○";
+/// Compact chip separator (status · duration · tokens). Surrounding spaces are
+/// part of the constant so call sites can use it as a single span.
+pub const CHIP_SEP: &str = " · ";
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -205,5 +219,19 @@ mod tests {
             frame_border_style(false, &theme).fg,
             Some(theme.border_muted)
         );
+    }
+
+    #[test]
+    fn shared_glyphs_are_stable() {
+        assert_eq!(GROUP_DRILL, "▸");
+        assert_eq!(DISCLOSURE_COLLAPSED, GROUP_DRILL);
+        assert_ne!(DISCLOSURE_EXPANDED, DISCLOSURE_COLLAPSED);
+        assert_eq!(ACTIVE_MARKER, "●");
+        assert_eq!(IDLE_MARKER, "○");
+        assert_eq!(RUNNING_GLYPH, IDLE_MARKER);
+        assert_eq!(SUCCESS_GLYPH, "✓");
+        assert_eq!(FAIL_GLYPH, "✗");
+        assert_eq!(CANCELLED_GLYPH, "⊘");
+        assert_eq!(CHIP_SEP, " · ");
     }
 }

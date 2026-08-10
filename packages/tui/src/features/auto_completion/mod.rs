@@ -214,8 +214,10 @@ impl PointerComponent<HitId> for AutoComplete {
     ) -> Vec<crate::app::command::Action> {
         match (gesture, hit.element) {
             (PointerGesture::Activate, Some(HitId::Suggest(index))) if index < self.list.len() => {
+                // Same as Enter: insert, then submit when the row is Immediate
+                // (slash command palette). File completions keep submit_on_accept=false.
                 self.select_index(index);
-                vec![EditorAction::AcceptSuggestion.into()]
+                vec![EditorAction::AcceptAndSubmitSuggestion.into()]
             }
             (PointerGesture::ScrollUp, _) => {
                 self.select_prev();

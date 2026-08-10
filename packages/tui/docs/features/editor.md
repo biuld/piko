@@ -22,9 +22,9 @@ closes, the Editor reappears with its content preserved.
 
 - Fixed height (default 3 rows: 1 content line + top border + bottom border)
 - Top and bottom borders only, no left/right border
-- The body uses the elevated-surface background. Pointer hover is visually
-  inert; focus and caret already communicate the input state.
-- Border uses the muted chrome color from the active theme
+- **No elevated body fill** — the composer sits on the plane background. Pointer
+  hover is visually inert; focus border and caret communicate input state.
+- Border uses `prompt_border` / `prompt_border_active` when Chat-focused
 - Terminal cursor tracks the text cursor position, clamped within the visible area
 
 ## Editing

@@ -434,7 +434,7 @@ fn suggestion_click_accepts_that_row() {
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Editor(EditorAction::AcceptSuggestion)]
+        [Action::Editor(EditorAction::AcceptAndSubmitSuggestion)]
     ));
     assert_eq!(app.editor.auto_complete.list.selected, 0);
 }

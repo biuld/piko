@@ -40,14 +40,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
+#[allow(dead_code)] // shared helper for compact id display
 pub fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
-}
-
-pub fn preview_text(text: &str) -> String {
-    let mut out = text.chars().take(96).collect::<String>();
-    if text.chars().count() > 96 {
-        out.push_str("...");
-    }
-    out
 }

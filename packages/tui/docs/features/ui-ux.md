@@ -30,6 +30,30 @@ Goals:
 4. **Projection-only** — the TUI never invents durable state; it reflects
    hostd/protocol truth with graceful placeholders when data is unknown.
 
+## What this document is for (and what it is not)
+
+This file is the **UI/UX 宣导 / contract**: principles, shell information
+architecture, interaction grammar, and per-surface *information duties*
+(must / should / must not show).
+
+| Layer | Owns | Does **not** own |
+|-------|------|------------------|
+| **This doc** | Cross-cutting rules: what surfaces are for, shared interaction grammar, **projection layout principles** | A layout blueprint for every message/tool/notice variant |
+| [component-feedback.md](./component-feedback.md) | Shared state language (selected/active/focus, success/error, density) | Product copy or per-tool body structure |
+| [themes.md](./themes.md) | Semantic color token names | Row composition recipes |
+| Surface feature PRDs | Behavior: ordering, focus, expand/scroll, what data is projected | **Per-projection layout design** (how each type is typeset) |
+| Design docs | Modules, data flow, algorithms, reusable primitives | Restating every presenter’s row layout |
+
+**Per-projection layout lives in code** (`tool_format/`, message presenters,
+etc.). Docs do **not** need a section per projected kind (user vs assistant vs
+`spawn_agent` vs `list_agent_specs` …) describing left/right zones, meta rows,
+or wrap rules. Feature PRDs say *what the user can see and do*; this doc says
+*how stream projections should feel as a family*.
+
+If a change still satisfies the principles and information duties, presenters
+may re-layout without rewriting feature PRDs. Violations of principles below
+update this contract (or list an explicit exception).
+
 ## Design principles
 
 1. **Keyboard-first, mouse optional.** Full product use is possible without a
@@ -49,7 +73,9 @@ Goals:
    meaning is avoided.
 6. **Density with hierarchy.** Primary facts stay one glance away (status row,
    agent strip, turn indicator). Secondary detail is collapsed by default and
-   expands on demand (tools, thinking, long results).
+   expands on demand (tools, thinking, long results). **Exception class:**
+   product state that the user needs at a glance (e.g. a non-empty session
+   todo list) may stay expanded even when tool cards are otherwise collapsed.
 7. **Semantic theming.** Surfaces use meaning tokens (accent, success, error,
    warning, muted, dim, border), not hard-coded “green/red.” Themes change
    paint, not structure.
@@ -59,6 +85,43 @@ Goals:
    grammar* (list + filter, expand/collapse, footer hints, usage in chrome,
    state glyphs) where it helps. Keep piko’s slot layout, hostd authority, and
    multi-agent AgentPanel model.
+10. **One state language.** Running / success / failure / cancelled / idle use
+    the same semantic tokens and glyph *family* across timeline tools, agent
+    chrome, and notices. Do not invent a private palette per tool name.
+11. **Readable tool cards, not raw protocol.** Tool bodies present typed
+    summaries (paths, diffs, shell exit, agent outcome). Raw JSON dumps and
+    ornamental ASCII art are not the default projection.
+
+## Stream projection layout principles
+
+These rules apply to **Timeline (and similar stream) projections as a class**.
+They are not a layout catalog for each message or tool name—presenters implement
+them.
+
+1. **Scan row first.** One primary line carries identity + status (+ optional
+   size/time chrome). Detail is secondary and collapsed by default unless it
+   is durable product state the user must always see (e.g. a non-empty todo
+   list).
+2. **Left content, right chrome when both exist.** Scannable text grows/truncates
+   on the left; status, exit, duration, tokens, or clocks stay on the right and
+   are not sacrificed first. Soft-wrap stays in the content column so body text
+   does not run under right chrome.
+3. **Symmetric outer inset.** When a stream row pads left, right chrome keeps a
+   matching edge so affixes are not flush against the terminal border.
+4. **Typed bodies over dumps.** Expanded detail is structured for the tool’s
+   job (diff, code, shell blocks, short meta + prose)—not a second copy of
+   wire JSON or decorative diagrams.
+5. **Title owns activation.** Expand/collapse hit targets are the title/scan
+   row, not the full expanded body, unless a surface explicitly needs body
+   hits.
+6. **Shared column math.** Multi-line left/right composition reuses one
+   line-layout toolkit (`ui/line_layout`); do not invent a private wrap model
+   per projection type.
+7. **Width = `unicode-width`.** No locale “Ambiguous = 2” overrides in layout
+   math unless productized later as a setting.
+
+Shell flex (stream/dock/chrome, modals) remains [layout-engine](../design/layout-engine.md)
+/ `piko-tui-layout`. Line-layout is only in-band text columns.
 
 ## Shell layout (information zones)
 
@@ -200,15 +263,19 @@ What each surface **must**, **should**, and **must not** show.
 
 - User prompts (after server accept), visually distinct from assistant text
 - Assistant final text (and progressive draft while streaming)
-- Tool executions as separate cards with name, status, short id, concise
-  preview
+- Tool executions as separate cards: tool name, run status, scannable summary
+  on the title; typed body when expanded (or always when the body is durable
+  product state such as a non-empty todo list)
 - Session-level notices and errors that belong in the transcript
 - Clear visual difference: user / assistant / tool / notice / error
 
 **Should show**
 
 - Thinking / reasoning as quieter nested content when enabled
-- Collapsed vs expanded tool detail (args, result summary, parent linkage)
+- Collapsed vs expanded tool detail (result summary, not protocol dumps)
+- Message local time when protocol `timestamp` is present
+- Compact token/size signal on tools when estimable (prefer real usage fields
+  when present; otherwise payload-size heuristic)
 - Syntax-colored fenced code when language is known
 - Per-agent conversation when an agent is selected (no cross-agent mix)
 
@@ -217,10 +284,13 @@ What each surface **must**, **should**, and **must not** show.
 - Unconfirmed local “ghost” prompts that duplicate server-committed rows
 - Every partial stream delta as a new row
 - Floating tool windows
+- Call ids / parent message ids as title chrome (projection fidelity only)
 - Partial tool-output streaming until protocol supports it (remain deferred)
 
-Detail ownership: [timeline.md](./timeline.md), [turn-lifecycle.md](./turn-lifecycle.md),
-[thinking.md](./thinking.md).
+Detail ownership: [timeline.md](./timeline.md) for stream behavior;
+[turn-lifecycle.md](./turn-lifecycle.md), [thinking.md](./thinking.md).
+**How each kind is laid out** follows *Stream projection layout principles*
+above and lives in presenters—not a per-type layout PRD.
 
 ### Agent strip
 
@@ -648,6 +718,8 @@ how existing and future settings surface:
 - Plugins/hooks UI before runtime consumers exist
 - Partial tool-output streaming without protocol events
 - Replacing per-feature PRDs; this document does not restate every keybinding
+- **Per-projection layout designs** (how user / assistant / each tool name is
+  typeset)—presenters own those; this doc only states family-wide principles
 - Accessibility beyond terminal norms (screen-reader tree) in the first cut
 
 ## Related documents

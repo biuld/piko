@@ -285,11 +285,10 @@ fn render_editor(
     } else {
         app.theme.prompt_border
     };
-    let background = app.theme.bg_elevated;
+    // No elevated fill — composer sits on the plane background.
     let block = Block::default()
         .borders(Borders::TOP | Borders::BOTTOM)
-        .style(Style::default().bg(background))
-        .border_style(Style::default().fg(border_color).bg(background));
+        .border_style(Style::default().fg(border_color));
     app.editor.render(frame, area, block);
 
     if focused {
