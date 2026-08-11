@@ -16,7 +16,9 @@ Previously, typing `/login` immediately launched an OAuth flow for `anthropic`, 
    * If **Use a subscription (OAuth)** is selected, the list of providers supporting OAuth (e.g., `openai`) is displayed.
    * If **Use an API key** is selected, the list of all available providers (e.g., `anthropic`, `openai`, `gemini`, `deepseek`) is displayed.
 4. **Credential Input / Execution**:
-   * Selecting an OAuth provider triggers the standard device authorization flow: a verification URL and user code are displayed in the timeline, and the browser is launched.
+   * Selecting an OAuth provider starts browser authorization. hostd emits the
+     authorization URL after binding its loopback callback, and the TUI opens
+     the platform browser while retaining the URL in a notice.
    * Selecting an API key provider switches the overlay to an **API Key Input Prompt**. The user types or pastes their API key (which is visually masked with `*` or `•` for security) and presses Enter.
    * On submit, the TUI sends `Command::AuthSetApiKey { provider, api_key }` to `hostd` and closes the overlay.
 
@@ -95,6 +97,16 @@ In `packages/tui/src/app/slash.rs` and `packages/tui/src/app/dispatch.rs`, the `
 1. Send a `Command::ModelList` request to `hostd` to ensure we have the latest provider list.
 2. Open the `AuthSelector` panel in `AppMode::AuthSelector`.
 3. If `/login <provider>` is explicitly typed (e.g. `/login openai`), it will immediately trigger `Command::AuthLoginOAuth` for that provider, bypassing the menu.
+4. `/login-device <provider>` requests the explicit headless device-code mode;
+   `/login-cancel <provider>` cancels either active mode.
+
+### 5. Browser side effect
+
+`AuthEvent::LoginBrowser` becomes `Effect::OpenUrl`. The executable shell owns
+the platform opener (`open`, `xdg-open`, or PowerShell); app state remains pure
+and unit-testable. Failure is surfaced locally and the notice still contains
+the complete authorization URL. TUI never receives the callback code, PKCE
+verifier, token, or credential metadata.
 
 ## Security Considerations
 

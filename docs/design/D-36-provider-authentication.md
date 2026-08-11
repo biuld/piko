@@ -2,7 +2,8 @@
 
 > Status: accepted
 > Implements: [F-24](../features/F-24-provider-authentication.md)
-> Decisions: [ADR-007](../decisions/ADR-007-typed-provider-authentication.md)
+> Decisions: [ADR-007](../decisions/ADR-007-typed-provider-authentication.md),
+> [ADR-011](../decisions/ADR-011-host-owned-oauth-callbacks.md)
 
 ## Goal
 
@@ -16,22 +17,23 @@ authentication authority out of hostd.
   third-party protocol contract; those endpoints stay isolated and replaceable.
 - Provider secrets never enter model/session transcripts or telemetry.
 - piko-protocol remains DTO-only.
-- The first slice keeps the existing device-code interaction and does not add a
-  localhost browser callback server.
+- Local OAuth defaults to browser authorization with a loopback callback;
+  device code remains an explicit headless fallback.
 
 ## Proposed design
 
 ### Provider authentication boundary
 
-`OAuthFlow` becomes a complete provider adapter rather than only a login
-adapter. It owns interactive login, refresh, and conversion of an OAuth
-credential into `ProviderRequestAuth`. Shared `AuthStorage` owns only durable
-credential CRUD and expiry decisions; it contains no provider-name branches.
+`OAuthFlow` is a complete provider adapter rather than only a device-login
+adapter. It owns browser authorization construction and code exchange,
+device-code interaction, refresh, and conversion of an OAuth credential into
+`ProviderRequestAuth`. Shared `AuthStorage` owns only durable credential CRUD
+and expiry decisions; it contains no provider-name branches.
 
-`ProviderRequestAuth` contains the adapter kind, bearer token, endpoint, and
-additional headers needed for one provider request. API-key materialization is
-derived from the model provider catalog. OAuth materialization is delegated to
-the registered OAuth flow.
+`ProviderRequestAuth` contains only protected request headers and expiry
+metadata. Protocol, endpoint, model, and capabilities remain frozen in the
+catalog-selected target per ADR-008/ADR-009. OAuth header materialization is
+delegated to the registered OAuth flow.
 
 ### Resolution
 
@@ -60,8 +62,27 @@ allowlist from TUI.
 ### Login concurrency
 
 OAuth flow registrations are shared `Arc` values so hostd does not borrow the
-model registry across network waits. Device polling includes expiry and a
-cancellation token in its interaction context.
+model registry across network waits. hostd stores active operations by provider
+and issues a unique `login_id`; a second login for the same provider fails
+without replacing the first. Browser callbacks and device polling both select
+over expiry and a cancellation token.
+
+### Browser callback
+
+hostd binds a loopback listener before asking the provider adapter to construct
+an authorization URL. The adapter declares its registered callback ports;
+OpenAI uses `1455` with registered fallback `1457`. hostd tries those ports in
+order and fails with device login guidance if neither is available instead of
+creating an invalid redirect on an ephemeral port. The adapter generates PKCE
+and state, while hostd accepts one bounded callback, validates the returned
+state, and delegates code exchange to the adapter. The authorization URL is
+emitted as a DTO-only auth event. The TUI opens it with the platform browser and
+keeps the URL visible as a copyable fallback. Tokens, authorization codes, PKCE
+verifiers, and callback query strings never enter protocol events, transcripts,
+or telemetry.
+
+Device code uses the same host-owned operation lifecycle but is selected only
+when a client explicitly requests `device_code`.
 
 ### Storage
 
@@ -73,9 +94,9 @@ permissions to `0600` on Unix, and atomically renames the completed file.
 | Package | Change |
 |---|---|
 | `piko-protocol` | Authentication-method capability DTOs. |
-| `piko-hostd` | Authoritative resolution, capability projection, bounded login orchestration. |
-| `piko-llmd` | Provider-owned refresh/materialization and typed gateway transport. |
-| `piko-tui` | Render host-advertised authentication methods. |
+| `piko-hostd` | Authoritative resolution, callback listener, operation registry, cancellation, and bounded login orchestration. |
+| `piko-llmd` | Provider-owned browser/device protocol, refresh/materialization, and typed gateway transport. |
+| `piko-tui` | Render host-advertised methods and open browser authorization URLs. |
 
 ## Reusable infrastructure
 
@@ -87,6 +108,8 @@ No `island-rs` change required.
   authentication error; the stale access token is not used.
 - Refresh responses that omit a rotated refresh token retain the previous one.
 - Login cancellation and provider expiry terminate polling.
+- Callback state mismatch and provider denial are typed terminal failures.
+- Browser launch failure leaves a visible URL for manual opening.
 - A failed atomic credential write leaves the previous credential file intact.
 
 ## Verification
@@ -111,5 +134,5 @@ No `island-rs` change required.
 1. Typed credentials, provider refresh, capabilities, and storage hardening.
 2. OpenAI subscription request materialization and gateway header support.
 3. Per-request refresh resolver.
-4. Explicit login cancellation and browser-callback login.
+4. Browser-callback default, explicit device-code fallback, and cancellation.
 5. Keyring storage backend.

@@ -33,7 +33,8 @@ The thinking levels supported are:
 - `low`: Use low reasoning budget.
 - `medium`: Use medium reasoning budget.
 - `high`: Use high reasoning budget.
-- `xhigh`: Use extra high reasoning budget (maximum).
+- `xhigh`: Use extra high reasoning budget.
+- `max`: Use the maximum reasoning budget on models that support it.
 
 ## Non-goals
 

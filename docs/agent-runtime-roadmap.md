@@ -69,6 +69,8 @@ Status: **complete for committed scope**.
 | F-09 persistence | schema-v3 store, resume/recovery, full clone, branch-point fork | D-26/V-26 |
 | F-10 multi-agent core | agent tree plus v2 followup/interrupt/list/wait tools | D-10/V-10 |
 | F-21 multi-agent tool surface | model-facing tools: spec catalog, message_agent(when), spawn defaults/errors | implemented (F-21/D-33 A–C; prompt hint deferred) |
+| F-24 provider authentication | typed API-key/OAuth routes, browser callback, refresh, cancellation | D-36/V-36 |
+| F-25/F-26 inference protocols | native Responses/Chat Completions behind one protocol-neutral boundary | D-37/D-38, V-37/V-38 |
 
 Deferred residue: model prewarm/sticky routing; dynamic/extension tools and
 tool search; session-list cursor paging and session prewarm. These are not on
@@ -178,7 +180,7 @@ optional extensions and have no scheduled implementation.
 | Block | F-ID | Decomposed behavior |
 |---|---|---|
 | A Turn & Agent Runtime | F-01 | lifecycle, admission/queueing, tasks, abort reconstruction |
-| B Model Gateway | F-02 | providers, streaming/retry, usage, model continuity |
+| B Model Gateway | F-02/F-24/F-25/F-26 | providers, authentication, native protocols, protocol-neutral inference, streaming/retry, usage, model continuity, locally authoritative catalogs |
 | C Prompt Assembly | F-03 | fragments, AGENTS.md, skills, world-state/environment context |
 | D Context & Compaction | F-04/F-05 | transcript model, truncation, accounting, compaction |
 | E Tool System | F-06 | registry/routing, batch dispatch, approvals hook |

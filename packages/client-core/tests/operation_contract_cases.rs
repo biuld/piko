@@ -7,6 +7,20 @@ use piko_protocol::{
     TurnStatus, UserInteractionResponse, UserInteractionStatus,
 };
 
+fn test_cost(total: f64) -> piko_protocol::messages::UsageCost {
+    piko_protocol::messages::UsageCost {
+        entries: vec![piko_protocol::messages::UsageCostEntry {
+            currency: "USD".into(),
+            basis: piko_protocol::messages::UsageCostBasis::ListPrice,
+            input: total,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+            total,
+        }],
+    }
+}
+
 // C8 — Submit and cancel Turn
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -120,10 +134,7 @@ fn turn_completed_does_not_roll_usage_chrome() {
         cache_read: 3_000,
         cache_write: 0,
         total_tokens: 13_100,
-        cost: piko_protocol::messages::UsageCost {
-            total: 0.01,
-            ..Default::default()
-        },
+        cost: test_cost(0.01),
     };
     let (state, _) = host(
         state,
@@ -177,10 +188,7 @@ fn usage_updated_event_is_authoritative_for_chrome() {
         cache_read: 10_000,
         cache_write: 0,
         total_tokens: 62_000,
-        cost: piko_protocol::messages::UsageCost {
-            total: 1.25,
-            ..Default::default()
-        },
+        cost: test_cost(1.25),
     };
     let (state, _) = host(
         state,
@@ -203,7 +211,10 @@ fn usage_updated_event_is_authoritative_for_chrome() {
         session.cumulative_usage.as_ref().map(|u| u.total_tokens),
         Some(62_000)
     );
-    assert!((session.cumulative_usage.as_ref().unwrap().cost.total - 1.25).abs() < f64::EPSILON);
+    assert!(
+        (session.cumulative_usage.as_ref().unwrap().cost.entries[0].total - 1.25).abs()
+            < f64::EPSILON
+    );
     assert_eq!(state.model.context_window, Some(200_000));
 }
 

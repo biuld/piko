@@ -113,3 +113,18 @@ gateway compatibility scans return no matches.
 - Protocol implementation files are organized under
   `protocols/responses/` and `protocols/chat_completions/`; cohesive Rust files
   remain below the project's 500-line ceiling.
+
+## 2026-08-12 catalog supplement
+
+- ADR-012 records the decision to keep executable model catalogs locally
+  authoritative and to reject generic remote model discovery.
+- The bundled OpenAI catalog includes `gpt-5.6` (the Sol alias),
+  `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Each declares a
+  1,050,000-token context window, 128,000 maximum output, text/image input,
+  Responses targets, and the documented `none`, `low`, `medium`, `high`,
+  `xhigh`, and `max` reasoning efforts.
+- `ThinkingLevel::Max` round-trips as `max`; catalog parsing requires explicit
+  per-model opt-in, so older reasoning models do not gain unsupported `max`
+  capability implicitly.
+- `cargo test -p piko-protocol -p piko-llmd -p piko-tui` and
+  `cargo clippy --workspace --all-targets -- -D warnings` pass.

@@ -3,6 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod cost;
+pub use cost::{UsageCost, UsageCostBasis, UsageCostEntry};
+
 // ---- Content block (the only one — ToolCall extracted to ToolCall) ----
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,16 +183,6 @@ pub struct Usage {
     pub cost: UsageCost,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct UsageCost {
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
-    pub cache_write: f64,
-    pub total: f64,
-}
-
 // ---- Model ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -302,11 +295,7 @@ impl Usage {
         self.cache_read = self.cache_read.saturating_add(other.cache_read);
         self.cache_write = self.cache_write.saturating_add(other.cache_write);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
-        self.cost.input += other.cost.input;
-        self.cost.output += other.cost.output;
-        self.cost.cache_read += other.cost.cache_read;
-        self.cost.cache_write += other.cost.cache_write;
-        self.cost.total += other.cost.total;
+        self.cost.accumulate(&other.cost);
     }
 
     /// Prompt-side fill used for context chrome (`used` in F-22 usage projection).
@@ -317,7 +306,21 @@ impl Usage {
 
 #[cfg(test)]
 mod usage_tests {
-    use super::{Usage, UsageCost};
+    use super::{Usage, UsageCost, UsageCostBasis, UsageCostEntry};
+
+    fn usd(total: f64) -> UsageCost {
+        UsageCost {
+            entries: vec![UsageCostEntry {
+                currency: "USD".into(),
+                basis: UsageCostBasis::ListPrice,
+                input: total,
+                output: 0.0,
+                cache_read: 0.0,
+                cache_write: 0.0,
+                total,
+            }],
+        }
+    }
 
     #[test]
     fn accumulate_sums_tokens_and_cost() {
@@ -327,13 +330,7 @@ mod usage_tests {
             cache_read: 1,
             cache_write: 0,
             total_tokens: 16,
-            cost: UsageCost {
-                input: 0.1,
-                output: 0.2,
-                cache_read: 0.0,
-                cache_write: 0.0,
-                total: 0.3,
-            },
+            cost: usd(0.3),
         };
         total.accumulate(&Usage {
             input: 3,
@@ -341,20 +338,30 @@ mod usage_tests {
             cache_read: 0,
             cache_write: 2,
             total_tokens: 12,
-            cost: UsageCost {
-                input: 0.03,
-                output: 0.07,
-                cache_read: 0.0,
-                cache_write: 0.01,
-                total: 0.11,
-            },
+            cost: usd(0.11),
         });
         assert_eq!(total.input, 13);
         assert_eq!(total.output, 12);
         assert_eq!(total.cache_read, 1);
         assert_eq!(total.cache_write, 2);
         assert_eq!(total.total_tokens, 28);
-        assert!((total.cost.total - 0.41).abs() < f64::EPSILON);
+        assert!((total.cost.entries[0].total - 0.41).abs() < f64::EPSILON);
+
+        total.accumulate(&Usage {
+            cost: UsageCost {
+                entries: vec![UsageCostEntry {
+                    currency: "CNY".into(),
+                    basis: UsageCostBasis::ListPrice,
+                    input: 1.0,
+                    output: 0.0,
+                    cache_read: 0.0,
+                    cache_write: 0.0,
+                    total: 1.0,
+                }],
+            },
+            ..Default::default()
+        });
+        assert_eq!(total.cost.entries.len(), 2);
     }
 }
 

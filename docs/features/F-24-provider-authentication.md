@@ -1,6 +1,6 @@
 # F-24: Provider authentication
 
-> Status: partial (typed OAuth/device-code slice implemented)
+> Status: implemented
 > Priority: P0
 > Source evidence: OpenAI authentication product documentation and codex-rs
 > authentication behavior
@@ -15,12 +15,12 @@ use, and refreshed credentials remain available after restart.
 
 ## Problem
 
-Authentication currently ends at obtaining a bearer string. The runtime then
-treats every bearer string as an API key, loses the selected authentication
-method, and cannot choose the method-specific endpoint, headers, or account
-context. Refresh behavior is selected with provider-name conditionals rather
-than the registered provider implementation. Adding another OAuth provider
-therefore requires coordinated edits throughout the product.
+Before F-24, authentication ended at obtaining a bearer string. The runtime
+then treated every bearer string as an API key, lost the selected method, and
+could not choose a compatible target or preserve account context. Refresh
+behavior was selected with provider-name conditionals rather than the
+registered provider implementation. That made each new OAuth provider require
+coordinated edits throughout the product.
 
 ## User journeys
 
@@ -41,26 +41,40 @@ therefore requires coordinated edits throughout the product.
 
 - Distinct API-key and OAuth credential semantics.
 - Provider-owned interactive login, refresh, and request-auth materialization.
-- Device-code interaction with cancellation and expiry.
+- Browser-callback interaction for local clients, with device-code login as an
+  explicit headless fallback.
+- Interactive login cancellation, expiry, and per-provider concurrency.
 - Provider authentication capabilities authored by hostd and projected to
   clients.
-- Method-specific endpoint, adapter, and header selection.
+- Authentication-method-compatible target selection plus provider-owned
+  protected request headers.
 - Durable storage of refreshed credentials with restricted file permissions.
 
 ## Out of scope
 
 - Publishing or promising stability for provider-private OAuth endpoints.
 - OAuth client registration for arbitrary third-party applications.
-- Browser-callback login in the first implementation slice.
 - Cross-device credential synchronization.
 - Migrating credentials from other agent products.
 
 ## Behavior and states
 
 Authentication methods are `api_key` and `oauth`; clients display only methods
-reported by hostd. OAuth interaction moves through `starting`, `waiting`, and
-one terminal state: `succeeded`, `denied`, `expired`, `cancelled`, or `failed`.
-Waiting is bounded by provider expiry and observes cancellation.
+reported by hostd. For a local interactive client, OAuth defaults to a browser
+authorization-code flow with PKCE and a loopback callback. A client may request
+device-code interaction explicitly when it cannot receive a local callback.
+OAuth interaction is correlated by a host-issued `login_id` and moves through
+`starting`, `waiting`, and one terminal state: `succeeded`, `denied`, `expired`,
+`cancelled`, or `failed`. Waiting is bounded and observes cancellation.
+
+hostd permits at most one active login per provider. It owns the loopback
+listener, using only callback ports declared by the provider adapter, validates
+callback state, exchanges the code through the provider adapter, and persists
+the resulting credential. It never substitutes an arbitrary port when the
+provider's registered OAuth client requires an allow-listed redirect. The
+client owns the local UI side effect of opening the authorization URL. Failure
+to launch a browser does not discard the login: the URL remains visible and
+copyable.
 
 An OAuth credential contains an access token, optional refresh token, expiry,
 and provider-owned metadata. Before a request, hostd asks the registered
@@ -84,8 +98,11 @@ adapters, headers, billing, and governance.
 - [x] A second OAuth implementation can register login, refresh, and request
   materialization without adding a provider-name branch to shared storage.
 - [x] Clients derive OAuth choices from hostd provider capabilities.
-- [ ] Device-code polling expires and can be cancelled. Expiry is implemented;
-  explicit user cancellation remains.
+- [x] Local OpenAI OAuth opens a browser and completes through a validated
+  loopback callback; device code remains an explicit fallback.
+- [x] Browser and device-code login expire and can be cancelled.
+- [x] Every asynchronous login command receives an immediate correlated start
+  response and one typed terminal authentication event.
 - [x] Credential files are created with user-only permissions on Unix.
 
 ## Product decisions
@@ -95,6 +112,8 @@ adapters, headers, billing, and governance.
 | Is an OAuth bearer token an API key? | No | The method controls entitlement, endpoint, billing, and governance. |
 | Who owns durable auth state? | hostd | It is user-visible durable configuration. |
 | Who owns provider OAuth protocol details? | The llmd provider adapter | Provider protocol differences do not belong in storage or clients. |
+| Who owns the loopback callback and login state? | hostd | Login lifecycle and durable auth remain host-authoritative. |
+| Who opens the browser? | The local client | Browser launch is a client-machine UI side effect; the authorization URL comes from hostd. |
 | Is device code the universal OAuth shape? | No | It is one interactive method and is beta for OpenAI headless login. |
 
 ## Fusion decisions (codex-rs)
@@ -103,15 +122,13 @@ adapters, headers, billing, and governance.
 |---|---|---|
 | Distinct ChatGPT and API-key login modes | kept | hostd durable auth state and llmd request materialization |
 | Refresh before token expiry | kept | provider auth implementation invoked before requests |
-| Browser callback as default login | kept (adapted) | product contract retains it; first slice keeps existing device-code UI |
+| Browser callback as default login | kept (adapted) | hostd owns callback/state; the client opens the URL |
 | Device-code login for headless environments | kept | bounded interactive flow |
 | OpenAI-specific endpoint and claims in core auth state | rejected | isolated in the OpenAI llmd adapter |
 
 ## Open questions
 
 1. Which desktop keyring backends should follow the restricted file backend?
-2. When should browser-callback login replace device code as the default local
-   OpenAI journey?
 
 ## Reference evidence
 

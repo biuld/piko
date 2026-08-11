@@ -255,9 +255,25 @@ impl AppState {
     }
 
     pub(super) fn apply_auth(&mut self, event: piko_protocol::AuthEvent) -> Vec<Effect> {
-        let effects = Vec::new();
+        let mut effects = Vec::new();
         match event {
+            piko_protocol::AuthEvent::LoginBrowser {
+                login_id: _,
+                provider,
+                authorization_url,
+            } => {
+                self.notifications.push_with(
+                    NoticeScope::Global,
+                    NotificationLevel::Warning,
+                    NoticePolicy::UntilResolved(NoticeSubject::Auth(provider.clone())),
+                    format!(
+                        "{provider} login opened in your browser; if it did not open, use {authorization_url}"
+                    ),
+                );
+                effects.push(Effect::open_url(authorization_url));
+            }
             piko_protocol::AuthEvent::LoginDeviceCode {
+                login_id: _,
                 provider,
                 user_code,
                 verification_uri,
@@ -269,15 +285,26 @@ impl AppState {
                     format!("{provider} login: open {verification_uri} and enter {user_code}"),
                 );
             }
-            piko_protocol::AuthEvent::LoginSuccess { provider } => {
+            piko_protocol::AuthEvent::LoginSuccess {
+                login_id: _,
+                provider,
+            } => {
                 self.notifications
                     .resolve(&NoticeSubject::Auth(provider.clone()));
                 self.notify(
                     NotificationLevel::Info,
                     format!("{provider} login succeeded"),
                 );
+                effects.push(Effect::send(piko_protocol::Command::ModelList {
+                    command_id: command_id(),
+                }));
             }
-            piko_protocol::AuthEvent::LoginFailed { provider, error } => {
+            piko_protocol::AuthEvent::LoginFailed {
+                login_id: _,
+                provider,
+                reason: _,
+                error,
+            } => {
                 self.notifications
                     .resolve(&NoticeSubject::Auth(provider.clone()));
                 self.notify(

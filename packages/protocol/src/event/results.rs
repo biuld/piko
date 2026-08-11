@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 use crate::HostCommandDescriptor;
+use crate::command::OAuthLoginMode;
 use crate::model::ProviderInfo;
 use crate::session::SessionTreeEntry;
 
@@ -10,6 +11,12 @@ use crate::session::SessionTreeEntry;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
     Empty,
+    AuthLoginStarted {
+        login_id: String,
+        provider: String,
+        mode: OAuthLoginMode,
+        timestamp: i64,
+    },
     SessionCreated {
         session_id: SessionId,
         cwd: String,
@@ -100,19 +107,40 @@ pub enum CommandResult {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthFailureReason {
+    Denied,
+    Expired,
+    Cancelled,
+    Callback,
+    Provider,
+    Storage,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthEvent {
+    LoginBrowser {
+        login_id: String,
+        provider: String,
+        authorization_url: String,
+    },
     LoginDeviceCode {
+        login_id: String,
         provider: String,
         user_code: String,
         verification_uri: String,
     },
     LoginSuccess {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        login_id: Option<String>,
         provider: String,
     },
     LoginFailed {
+        login_id: String,
         provider: String,
+        reason: AuthFailureReason,
         error: String,
     },
     LoggedOut {

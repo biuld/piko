@@ -148,12 +148,17 @@ pub(crate) fn all_items<'a>(plan: &'a ConversationPlan<'a>) -> &'a [Conversation
     }
 }
 
-pub(crate) fn usage(input: u64, output: u64, cache_read: u64) -> piko_protocol::Usage {
+pub(crate) fn usage(
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+) -> piko_protocol::Usage {
     piko_protocol::Usage {
         input,
         output,
         cache_read,
-        cache_write: 0,
+        cache_write,
         total_tokens: input.saturating_add(output),
         cost: Default::default(),
     }

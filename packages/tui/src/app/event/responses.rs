@@ -9,6 +9,9 @@ impl AppState {
         let mut effects = Vec::new();
         match result {
             Ok(piko_protocol::CommandResult::Empty) => {}
+            Ok(piko_protocol::CommandResult::AuthLoginStarted { provider, mode, .. }) => {
+                self.status = format!("starting {provider} {mode:?} login");
+            }
             Err(error) => {
                 self.status = error.clone();
                 self.notify(NotificationLevel::Error, error);

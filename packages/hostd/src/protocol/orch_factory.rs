@@ -85,6 +85,7 @@ pub(crate) async fn build_orch_turn_runner(
             headers: None,
             streaming_fallback: true,
             reasoning_effort_map: target.reasoning_effort_map.clone(),
+            pricing: target.pricing.clone(),
         },
     );
     let retry_config = piko_protocol::config::RetryConfig {

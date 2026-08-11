@@ -273,6 +273,15 @@ fn executor_for_protocol(
     );
     config.base_url = Some(format!("http://{addr}"));
     config.streaming_fallback = streaming_fallback.unwrap_or(true);
+    config.pricing = Some(piko_llmd::modeling::TokenPricing {
+        currency: "USD".into(),
+        basis: piko_protocol::messages::UsageCostBasis::ListPrice,
+        input_per_million: 2.5,
+        cached_input_per_million: 1.25,
+        output_per_million: 10.0,
+        cache_write_per_million: None,
+        tiers: Vec::new(),
+    });
     targets.insert("openai/gpt-test".to_string(), config.clone());
     config.target_id = "openai/gpt-4o@platform".into();
     targets.insert("openai/gpt-4o".to_string(), config);
@@ -309,7 +318,7 @@ impl GatewayTelemetry for PromptCapture {
     }
 
     fn record_ttft(&self, _model: &str, _provider: &str, _ttft_ms: u64) {}
-    fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage, _cost_usd: f64) {}
+    fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage) {}
     fn record_retry(&self, _model: &str, _provider: &str, _error_class: &str, _attempt: u32) {}
     fn record_fallback(&self, _model: &str, _provider: &str) {}
 }

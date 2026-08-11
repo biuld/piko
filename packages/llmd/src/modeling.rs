@@ -1,5 +1,6 @@
 use std::fmt;
 
+use piko_protocol::messages::UsageCostBasis;
 use piko_protocol::model::ProviderAuthMethod;
 use serde::{Deserialize, Serialize};
 
@@ -105,8 +106,27 @@ pub struct ModelTargetProfile {
     pub protocol: ProtocolProfile,
 }
 
+/// One catalog-owned token price schedule for a concrete model API surface.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenPricing {
+    pub currency: String,
+    pub basis: UsageCostBasis,
+    pub input_per_million: f64,
+    pub cached_input_per_million: f64,
+    pub output_per_million: f64,
+    pub cache_write_per_million: Option<f64>,
+    pub tiers: Vec<TokenPricingTier>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenPricingTier {
+    pub input_tokens_above: u64,
+    pub input_multiplier: f64,
+    pub output_multiplier: f64,
+}
+
 /// One model target selected for a concrete authentication route.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedModelTarget {
     pub id: String,
     pub model: ModelKey,
@@ -114,6 +134,7 @@ pub struct ResolvedModelTarget {
     pub auth_method: ProviderAuthMethod,
     pub base_url: String,
     pub protocol: ProtocolProfile,
+    pub pricing: Option<TokenPricing>,
     /// Private wire mapping for closed semantic reasoning efforts.
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,

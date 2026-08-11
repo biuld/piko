@@ -47,7 +47,7 @@ pub struct Telemetry {
     model_step_calls: Option<Counter<u64>>,
     model_ttft_ms: Option<Histogram<f64>>,
     model_tokens: Option<Counter<u64>>,
-    model_cost_usd: Option<Counter<f64>>,
+    model_cost: Option<Counter<f64>>,
     model_retries: Option<Counter<u64>>,
     model_fallbacks: Option<Counter<u64>>,
     tool_duration_ms: Option<Histogram<f64>>,
@@ -55,7 +55,7 @@ pub struct Telemetry {
     turn_duration_ms: Option<Histogram<f64>>,
     turn_calls: Option<Counter<u64>>,
     turn_tokens: Option<Counter<u64>>,
-    turn_cost_usd: Option<Counter<f64>>,
+    turn_cost: Option<Counter<f64>>,
 }
 
 impl Telemetry {
@@ -66,7 +66,7 @@ impl Telemetry {
             model_step_calls: None,
             model_ttft_ms: None,
             model_tokens: None,
-            model_cost_usd: None,
+            model_cost: None,
             model_retries: None,
             model_fallbacks: None,
             tool_duration_ms: None,
@@ -74,7 +74,7 @@ impl Telemetry {
             turn_duration_ms: None,
             turn_calls: None,
             turn_tokens: None,
-            turn_cost_usd: None,
+            turn_cost: None,
         }
     }
 
@@ -87,7 +87,7 @@ impl Telemetry {
             model_step_calls: Some(meter.u64_counter("piko.model.step.calls").build()),
             model_ttft_ms: Some(meter.f64_histogram("piko.model.ttft_ms").build()),
             model_tokens: Some(meter.u64_counter("piko.model.tokens").build()),
-            model_cost_usd: Some(meter.f64_counter("piko.model.cost_usd").build()),
+            model_cost: Some(meter.f64_counter("piko.model.cost").build()),
             model_retries: Some(meter.u64_counter("piko.model.retries").build()),
             model_fallbacks: Some(meter.u64_counter("piko.model.streaming_fallbacks").build()),
             tool_duration_ms: Some(meter.f64_histogram("piko.tool.duration_ms").build()),
@@ -95,7 +95,7 @@ impl Telemetry {
             turn_duration_ms: Some(meter.f64_histogram("piko.turn.duration_ms").build()),
             turn_calls: Some(meter.u64_counter("piko.turn.calls").build()),
             turn_tokens: Some(meter.u64_counter("piko.turn.tokens").build()),
-            turn_cost_usd: Some(meter.f64_counter("piko.turn.cost_usd").build()),
+            turn_cost: Some(meter.f64_counter("piko.turn.cost").build()),
         }
     }
 
@@ -142,13 +142,17 @@ impl Telemetry {
                 );
             }
         }
-        if usage.cost.total != 0.0
-            && let Some(counter) = &self.turn_cost_usd
-        {
-            counter.add(
-                usage.cost.total,
-                &[KeyValue::new("status", status.to_string())],
-            );
+        if let Some(counter) = &self.turn_cost {
+            for cost in &usage.cost.entries {
+                counter.add(
+                    cost.total,
+                    &[
+                        KeyValue::new("status", status.to_string()),
+                        KeyValue::new("currency", cost.currency.clone()),
+                        KeyValue::new("basis", cost.basis.as_str()),
+                    ],
+                );
+            }
         }
     }
 
@@ -198,7 +202,7 @@ impl GatewayTelemetry for Telemetry {
         }
     }
 
-    fn record_usage(&self, model: &str, provider: &str, usage: &Usage, cost_usd: f64) {
+    fn record_usage(&self, model: &str, provider: &str, usage: &Usage) {
         if let Some(counter) = &self.model_tokens {
             let base = Self::model_provider(model, provider);
             for (token_type, count) in [
@@ -212,8 +216,13 @@ impl GatewayTelemetry for Telemetry {
                 counter.add(count, &attributes);
             }
         }
-        if let Some(counter) = &self.model_cost_usd {
-            counter.add(cost_usd, &Self::model_provider(model, provider));
+        if let Some(counter) = &self.model_cost {
+            for cost in &usage.cost.entries {
+                let mut attributes = Self::model_provider(model, provider);
+                attributes.push(KeyValue::new("currency", cost.currency.clone()));
+                attributes.push(KeyValue::new("basis", cost.basis.as_str()));
+                counter.add(cost.total, &attributes);
+            }
         }
     }
 

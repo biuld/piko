@@ -21,6 +21,14 @@ pub use crate::messages::{Usage, UsageCost};
 
 pub type CommandId = String;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OAuthLoginMode {
+    #[default]
+    Browser,
+    DeviceCode,
+}
+
 /// A currently running external process spawned by the workspace `process`
 /// tool (F-08). Modeled on codex-rs `BackgroundTerminalInfo`, plus piko's
 /// exit state.
@@ -103,8 +111,15 @@ pub enum Command {
         provider: String,
         api_key: String,
     },
-    /// Start OAuth device-code login flow (asynchronous, polling).
+    /// Start an asynchronous OAuth login flow.
     AuthLoginOAuth {
+        command_id: CommandId,
+        provider: String,
+        #[serde(default)]
+        mode: OAuthLoginMode,
+    },
+    /// Cancel the active OAuth login for a provider.
+    AuthCancelOAuth {
         command_id: CommandId,
         provider: String,
     },
@@ -299,6 +314,7 @@ impl Command {
         match self {
             Self::AuthSetApiKey { command_id, .. }
             | Self::AuthLoginOAuth { command_id, .. }
+            | Self::AuthCancelOAuth { command_id, .. }
             | Self::AuthLogout { command_id, .. }
             | Self::SessionCreate { command_id, .. }
             | Self::SessionOpen { command_id, .. }

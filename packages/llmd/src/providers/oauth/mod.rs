@@ -22,6 +22,18 @@ pub struct DeviceAuthInfo {
     pub expires_in_seconds: u64,
 }
 
+/// Provider-owned state for one browser authorization-code interaction.
+/// Only `authorization_url` crosses the host/client protocol boundary; the
+/// verifier and state remain inside hostd for callback validation/exchange.
+#[derive(Clone)]
+pub struct BrowserAuthInfo {
+    pub authorization_url: String,
+    pub redirect_uri: String,
+    pub state: String,
+    pub code_verifier: String,
+    pub expires_in_seconds: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderRequestAuth {
     pub headers: HashMap<String, String>,
@@ -32,6 +44,32 @@ pub struct ProviderRequestAuth {
 pub trait OAuthFlow: Send + Sync {
     /// Return the provider ID, e.g. "openai"
     fn provider_id(&self) -> &str;
+
+    // ---- Browser authorization-code flow ----
+
+    /// Loopback ports accepted by the provider's registered OAuth client.
+    /// Port zero requests an ephemeral port for providers that allow one.
+    fn browser_callback_ports(&self) -> &'static [u16] {
+        &[0]
+    }
+
+    async fn start_browser_auth(&self, _redirect_uri: &str) -> Result<BrowserAuthInfo, AuthError> {
+        Err(AuthError::Unsupported {
+            provider: self.provider_id().to_string(),
+            operation: "browser authentication",
+        })
+    }
+
+    async fn finish_browser_auth(
+        &self,
+        _info: &BrowserAuthInfo,
+        _code: String,
+    ) -> Result<AuthCredential, AuthError> {
+        Err(AuthError::Unsupported {
+            provider: self.provider_id().to_string(),
+            operation: "browser authentication exchange",
+        })
+    }
 
     // ---- Device Code Flow ----
 

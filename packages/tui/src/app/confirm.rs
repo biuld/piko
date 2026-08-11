@@ -75,6 +75,7 @@ impl AppState {
                 effects.push(Effect::send(Command::AuthLoginOAuth {
                     command_id: command_id(),
                     provider: provider.clone(),
+                    mode: piko_protocol::OAuthLoginMode::Browser,
                 }));
                 self.status = format!("starting {provider} OAuth login");
                 self.pop_focus();

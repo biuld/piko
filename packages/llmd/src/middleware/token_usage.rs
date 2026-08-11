@@ -45,7 +45,7 @@ impl LlmdMiddleware for TokenUsageMiddleware {
                 "llm.usage"
             );
             ctx.telemetry()
-                .record_usage(&ctx.model_id, &ctx.provider, usage, usage.cost.total);
+                .record_usage(&ctx.model_id, &ctx.provider, usage);
 
             // Expose the raw counts via the context metadata for other middlewares
             ctx.metadata

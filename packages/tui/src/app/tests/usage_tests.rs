@@ -1,5 +1,19 @@
 use super::*;
 
+fn test_cost(total: f64) -> piko_protocol::messages::UsageCost {
+    piko_protocol::messages::UsageCost {
+        entries: vec![piko_protocol::messages::UsageCostEntry {
+            currency: "USD".into(),
+            basis: piko_protocol::messages::UsageCostBasis::ListPrice,
+            input: total,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+            total,
+        }],
+    }
+}
+
 #[test]
 fn session_reconcile_projects_cumulative_usage() {
     let mut app = app();
@@ -10,7 +24,7 @@ fn session_reconcile_projects_cumulative_usage() {
     usage.input = 10_000;
     usage.output = 2_000;
     usage.total_tokens = 12_000;
-    usage.cost.total = 0.42;
+    usage.cost = test_cost(0.42);
 
     app.apply_event(Event::SessionReconciled(
         piko_protocol::SessionReconciledEvent {
@@ -50,7 +64,10 @@ fn session_reconcile_projects_cumulative_usage() {
     ));
 
     assert_eq!(
-        app.session.cumulative_usage.as_ref().map(|u| u.cost.total),
+        app.session
+            .cumulative_usage
+            .as_ref()
+            .map(|u| u.cost.entries[0].total),
         Some(0.42)
     );
     assert_eq!(
@@ -78,7 +95,7 @@ fn usage_event_sets_chrome_and_clears_active_turn() {
     turn_usage.cache_read = 800;
     turn_usage.output = 400;
     turn_usage.total_tokens = 13_400;
-    turn_usage.cost.total = 0.05;
+    turn_usage.cost = test_cost(0.05);
 
     // Turn terminal no longer rolls usage into chrome.
     app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
@@ -105,7 +122,10 @@ fn usage_event_sets_chrome_and_clears_active_turn() {
 
     assert_eq!(app.session.last_context_tokens, Some(13_000));
     assert_eq!(
-        app.session.cumulative_usage.as_ref().map(|u| u.cost.total),
+        app.session
+            .cumulative_usage
+            .as_ref()
+            .map(|u| u.cost.entries[0].total),
         Some(0.05)
     );
 }

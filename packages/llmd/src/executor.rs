@@ -131,12 +131,15 @@ impl LlmdExecutor {
         self.target_for(&request.model).await
     }
 
-    fn context(&self, request: &InferenceRequest) -> GatewayContext {
+    fn context(&self, request: &InferenceRequest, target: &ModelTarget) -> GatewayContext {
         GatewayContext {
             run_id: request.context.run_id.clone(),
             step_id: request.context.step_id.clone(),
             model_id: request.model.model.clone(),
             provider: request.model.provider.clone(),
+            api_surface: target.api_surface.clone(),
+            auth_method: Some(target.auth_method),
+            pricing: target.pricing.clone(),
             metadata: HashMap::new(),
             telemetry: Some(Arc::clone(&self.telemetry)),
         }
@@ -162,7 +165,7 @@ impl InferenceGateway for LlmdExecutor {
         }
         let target = self.target(&request).await?;
         target.validate(&request)?;
-        let mut context = self.context(&request);
+        let mut context = self.context(&request, &target);
         for middleware in &self.middlewares {
             middleware
                 .pre_execute(&mut context, &mut request)

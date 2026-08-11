@@ -14,6 +14,9 @@ pub struct GatewayContext {
     pub step_id: String,
     pub model_id: String,
     pub provider: String,
+    pub api_surface: String,
+    pub auth_method: Option<piko_protocol::model::ProviderAuthMethod>,
+    pub pricing: Option<crate::modeling::TokenPricing>,
     /// Mutable metadata store for middlewares to share data (e.g., costs, trace IDs)
     pub metadata: HashMap<String, String>,
     /// Metrics sink; `None` records nothing (used by tests and no-telemetry
@@ -28,6 +31,9 @@ impl std::fmt::Debug for GatewayContext {
             .field("step_id", &self.step_id)
             .field("model_id", &self.model_id)
             .field("provider", &self.provider)
+            .field("api_surface", &self.api_surface)
+            .field("auth_method", &self.auth_method)
+            .field("pricing", &self.pricing)
             .finish_non_exhaustive()
     }
 }

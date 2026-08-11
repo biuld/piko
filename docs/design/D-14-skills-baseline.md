@@ -114,7 +114,7 @@ continues through the normal hostd/orchd path after submission.
 
 - Existing prompt frontmatter parser.
 - `PromptMaterials` port for cwd-scoped resources.
-- F-03 typed prompt fragments and F-28 cache plan.
+- F-03 typed prompt fragments and D-28 cache plan.
 - F-03/D-27 retained mention messages.
 
 ## Verification

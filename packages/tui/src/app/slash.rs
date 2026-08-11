@@ -89,6 +89,27 @@ impl AppState {
                     },
                 )
             }
+            "auth.login-device" | "auth.cancel-login" => {
+                let provider = parts.next().map(str::to_string);
+                if provider.is_none() {
+                    self.reject_slash(
+                        submitted_text,
+                        if id == "auth.login-device" {
+                            "usage: /login-device <provider>"
+                        } else {
+                            "usage: /login-cancel <provider>"
+                        },
+                    )
+                } else {
+                    self.dispatch_host_command(
+                        id,
+                        HostCommandArgs {
+                            fork_entry_id: None,
+                            provider,
+                        },
+                    )
+                }
+            }
             "auth.logout" => {
                 let provider = parts.next().map(str::to_string);
                 if provider.is_none() && self.model.active_provider.is_none() {

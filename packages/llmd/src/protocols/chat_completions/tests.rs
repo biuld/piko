@@ -82,6 +82,30 @@ fn complete_response_has_only_semantic_identities() {
 }
 
 #[test]
+fn deepseek_cache_hit_usage_maps_to_semantic_cache_read() {
+    let request = crate::protocols::tests_support::semantic_request();
+    let result = ChatCompletionsAdapter
+        .decode_response(
+            json!({
+                "choices":[{"index":0,"message":{"content":"done"},"finish_reason":"stop"}],
+                "usage":{
+                    "prompt_tokens":10,
+                    "completion_tokens":2,
+                    "prompt_cache_hit_tokens":4,
+                    "prompt_cache_miss_tokens":6
+                }
+            }),
+            &target(),
+            &request,
+        )
+        .unwrap();
+    let usage = result.usage.unwrap();
+    assert_eq!(usage.input, 10);
+    assert_eq!(usage.cache_read, 4);
+    assert_eq!(usage.output, 2);
+}
+
+#[test]
 fn stream_uses_stable_semantic_call_id() {
     let request = crate::protocols::tests_support::semantic_request();
     let mut stream = ChatCompletionsAdapter.new_stream(&target(), &request);

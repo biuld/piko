@@ -6,7 +6,8 @@ mod toml_provider;
 
 pub use catalog::ModelCatalog;
 pub use oauth::{
-    DeviceAuthInfo, OAuthFlow, ProviderRequestAuth, RuntimeAuthResolver, StoredAuthResolver,
+    BrowserAuthInfo, DeviceAuthInfo, OAuthFlow, ProviderRequestAuth, RuntimeAuthResolver,
+    StoredAuthResolver,
 };
 pub use provider::Provider;
 pub use registry::ProviderRegistry;

@@ -17,6 +17,9 @@ request when streaming cannot be established within that budget. The gateway
 also carries usage and cost metadata with every completed response so the
 runtime can account for tokens without knowing provider details.
 
+Provider-native price selection, currencies, estimate bases, and session cost
+aggregation are specified by F-28. This PRD owns only usage-event delivery.
+
 ## Problem
 
 Agent runs depend on providers that fail transiently: connections drop, rate

@@ -26,6 +26,14 @@ minimal = ""
 low = ""
 medium = ""
 
+[[models."deepseek-v4-pro".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "CNY"
+input_per_million = 3.0
+cached_input_per_million = 0.025
+output_per_million = 6.0
+
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 reasoning = true
@@ -43,6 +51,14 @@ xhigh = "max"
 minimal = ""
 low = ""
 medium = ""
+
+[[models."deepseek-v4-flash".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "CNY"
+input_per_million = 1.0
+cached_input_per_million = 0.02
+output_per_million = 2.0
 
 # ---- V3 (non-reasoning) ----
 

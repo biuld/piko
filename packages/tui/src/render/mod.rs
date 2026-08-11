@@ -125,11 +125,11 @@ fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
             cwd: &app.cwd,
             context_used: app.session.last_context_tokens,
             context_total: app.model.active_context_window(),
-            cost_usd: app
+            cost: app
                 .session
                 .cumulative_usage
                 .as_ref()
-                .map(|usage| usage.cost.total),
+                .map(|usage| &usage.cost),
             theme: &app.theme,
         },
     );

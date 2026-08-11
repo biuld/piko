@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn oauth_login_defaults_to_browser_and_cancel_round_trips() {
+    let parsed: Command = serde_json::from_value(serde_json::json!({
+        "type": "auth_login_o_auth",
+        "command_id": "login-1",
+        "provider": "openai"
+    }))
+    .unwrap();
+    assert!(matches!(
+        parsed,
+        Command::AuthLoginOAuth {
+            mode: OAuthLoginMode::Browser,
+            ..
+        }
+    ));
+
+    let cancel = Command::AuthCancelOAuth {
+        command_id: "cancel-1".into(),
+        provider: "openai".into(),
+    };
+    let value = serde_json::to_value(cancel).unwrap();
+    assert_eq!(value["type"], "auth_cancel_o_auth");
+    assert_eq!(value["provider"], "openai");
+}
+
+#[test]
 fn session_compact_without_mode_defaults_to_summarize() {
     // Older clients omit `mode`; the wire must stay compatible.
     let parsed: Command = serde_json::from_value(serde_json::json!({

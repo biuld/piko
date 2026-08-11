@@ -1,6 +1,6 @@
 //! Context fill helpers for F-22 / D-34 usage projection.
 
-use piko_protocol::messages::Usage;
+use piko_protocol::messages::{Usage, UsageCost, UsageCostBasis, UsageCostEntry};
 
 /// Prompt-side tokens used as an approximate context-window fill.
 ///
@@ -12,7 +12,7 @@ pub fn context_fill_from_usage(usage: &Usage) -> u64 {
 /// True when the usage payload has any token or cost signal worth projecting.
 pub fn usage_has_signal(usage: &Usage) -> bool {
     usage.total_tokens > 0
-        || usage.cost.total > 0.0
+        || !usage.cost.entries.is_empty()
         || usage.input > 0
         || usage.output > 0
         || usage.cache_read > 0
@@ -51,19 +51,35 @@ pub fn format_context(used: Option<u64>, size: Option<u64>) -> String {
     }
 }
 
-/// Session cost in USD (`$0.42`, `$0.0042` for small amounts).
-pub fn format_cost(cost_usd: f64) -> String {
-    if !cost_usd.is_finite() || cost_usd < 0.0 {
+/// Format a native-currency cost ledger for compact client chrome.
+pub fn format_cost(cost: &UsageCost) -> String {
+    cost.entries
+        .iter()
+        .map(format_cost_entry)
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn format_cost_entry(cost: &UsageCostEntry) -> String {
+    if !cost.total.is_finite() || cost.total < 0.0 {
         return "—".to_string();
     }
-    if cost_usd == 0.0 {
-        return "$0.00".to_string();
-    }
-    if cost_usd >= 0.01 {
-        format!("${cost_usd:.2}")
+    let symbol = match cost.currency.as_str() {
+        "USD" => "$".to_string(),
+        "CNY" => "¥".to_string(),
+        currency => format!("{currency} "),
+    };
+    let amount = if cost.total == 0.0 || cost.total >= 0.01 {
+        format!("{:.2}", cost.total)
     } else {
-        format!("${cost_usd:.4}")
-    }
+        format!("{:.4}", cost.total)
+    };
+    let estimate = if cost.basis == UsageCostBasis::ApiEquivalent {
+        "~"
+    } else {
+        ""
+    };
+    format!("{estimate}{symbol}{amount}")
 }
 
 #[cfg(test)]

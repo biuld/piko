@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use piko_protocol::messages::UsageCost;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -33,7 +34,7 @@ pub struct BottomBarView<'a> {
     pub cwd: &'a Path,
     pub context_used: Option<u64>,
     pub context_total: Option<u64>,
-    pub cost_usd: Option<f64>,
+    pub cost: Option<&'a UsageCost>,
     pub theme: &'a Theme,
 }
 
@@ -58,7 +59,7 @@ impl BottomBar {
                     BottomBarItem::Context => {
                         render_context(view.context_used, view.context_total, view.theme)
                     }
-                    BottomBarItem::Cost => render_cost(view.cost_usd, view.theme),
+                    BottomBarItem::Cost => render_cost(view.cost, view.theme),
                 };
                 [
                     Span::raw(" "),
@@ -152,8 +153,8 @@ fn render_context(used: Option<u64>, total: Option<u64>, theme: &Theme) -> Span<
     Span::styled(text, style)
 }
 
-fn render_cost(cost_usd: Option<f64>, theme: &Theme) -> Span<'static> {
-    match cost_usd {
+fn render_cost(cost: Option<&UsageCost>, theme: &Theme) -> Span<'static> {
+    match cost.filter(|cost| !cost.entries.is_empty()) {
         None => Span::styled("—", Style::default().fg(theme.dim)),
         Some(cost) => Span::raw(format_cost(cost)),
     }
@@ -170,18 +171,8 @@ pub fn format_context(used: Option<u64>, total: Option<u64>) -> String {
     }
 }
 
-pub fn format_cost(cost_usd: f64) -> String {
-    if !cost_usd.is_finite() || cost_usd < 0.0 {
-        return "—".to_string();
-    }
-    if cost_usd == 0.0 {
-        return "$0.00".to_string();
-    }
-    if cost_usd >= 0.01 {
-        format!("${cost_usd:.2}")
-    } else {
-        format!("${cost_usd:.4}")
-    }
+pub fn format_cost(cost: &UsageCost) -> String {
+    piko_client_core::usage::format_cost(cost)
 }
 
 pub fn format_tokens(n: u64) -> String {
@@ -210,6 +201,7 @@ pub fn context_tokens_from_usage(usage: &piko_protocol::messages::Usage) -> u64 
 #[cfg(test)]
 mod tests {
     use super::{format_context, format_cost, format_tokens};
+    use piko_protocol::messages::{UsageCost, UsageCostBasis, UsageCostEntry};
 
     #[test]
     fn format_tokens_humanizes() {
@@ -226,9 +218,29 @@ mod tests {
     }
 
     #[test]
-    fn format_cost_usd() {
-        assert_eq!(format_cost(0.0), "$0.00");
-        assert_eq!(format_cost(0.42), "$0.42");
-        assert_eq!(format_cost(0.0042), "$0.0042");
+    fn format_native_currency_cost_ledger() {
+        let cost = UsageCost {
+            entries: vec![
+                UsageCostEntry {
+                    currency: "USD".into(),
+                    basis: UsageCostBasis::ApiEquivalent,
+                    input: 0.0,
+                    output: 0.0,
+                    cache_read: 0.0,
+                    cache_write: 0.0,
+                    total: 0.0042,
+                },
+                UsageCostEntry {
+                    currency: "CNY".into(),
+                    basis: UsageCostBasis::ListPrice,
+                    input: 0.0,
+                    output: 0.0,
+                    cache_read: 0.0,
+                    cache_write: 0.0,
+                    total: 0.42,
+                },
+            ],
+        };
+        assert_eq!(format_cost(&cost), "~$0.0042 + ¥0.42");
     }
 }

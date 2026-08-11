@@ -421,7 +421,7 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 
 | Group | Options | Storage |
 |-------|---------|---------|
-| Thinking Level | off, minimal, low, medium, high, xhigh | host `default-thinking-level` (Live for new turns per existing model config hooks) |
+| Thinking Level | off, minimal, low, medium, high, xhigh, max | host `default-thinking-level` (Live for new turns per existing model config hooks) |
 | UI Theme | dark, light | `tui.theme.name` (Presentation) |
 | Transport Preference | presets as product allows (e.g. stdio) | host transport (as today) |
 | Compaction reserve / keep | closed token sizes | host `[compaction]` (Live on next compaction evaluation) |

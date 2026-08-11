@@ -12,6 +12,9 @@ impl HostServer {
 
         match command {
             Command::AuthLoginOAuth { .. } => unreachable!("auth oauth handled in stream"),
+            Command::AuthCancelOAuth { provider, .. } => {
+                self.apply_auth_cancel_oauth(&command_id, provider).await
+            }
             Command::ChatSubmit { .. } => {
                 unreachable!("streaming chat commands handled in stream")
             }

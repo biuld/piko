@@ -74,6 +74,24 @@ pub fn command_catalog() -> Vec<HostCommandDescriptor> {
             HostCommandGroup::Auth,
         ),
         item(
+            "auth.login-device",
+            "Sign in with device code",
+            "Start headless OAuth login for a model provider",
+            Args {
+                schema: vec![arg("provider", HostCommandArgKind::Provider, true)],
+            },
+            HostCommandGroup::Auth,
+        ),
+        item(
+            "auth.cancel-login",
+            "Cancel sign in",
+            "Cancel an active OAuth login for a model provider",
+            Args {
+                schema: vec![arg("provider", HostCommandArgKind::Provider, true)],
+            },
+            HostCommandGroup::Auth,
+        ),
+        item(
             "auth.logout",
             "Sign out",
             "Remove stored credentials for a model provider",

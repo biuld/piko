@@ -7,7 +7,7 @@
 # Default AI model ID (e.g., "claude-3-5-sonnet", "gpt-4o")
 # default-model = "claude-3-5-sonnet"
 
-# Default thinking level for reasoning models ("off", "minimal", "low", "medium", "high", "xhigh")
+# Default thinking level for reasoning models ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 # default-thinking-level = "medium"
 
 # Stdio framing transport protocol ("stdio")

@@ -293,6 +293,11 @@ fn decode_usage(value: &Value) -> piko_protocol::Usage {
             .unwrap_or(0),
         value
             .pointer("/prompt_tokens_details/cached_tokens")
+            .or_else(|| value.get("prompt_cache_hit_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        value
+            .pointer("/prompt_tokens_details/cache_write_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(0),
     )

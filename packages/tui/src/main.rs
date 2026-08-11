@@ -162,6 +162,41 @@ fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: Vec<Effect>)
                     app.push_error(err.to_string());
                 }
             }
+            Effect::OpenUrl(url) => {
+                if let Err(err) = open_url(&url) {
+                    app.push_error(format!(
+                        "could not open browser: {err}; open this URL manually: {url}"
+                    ));
+                }
+            }
         }
     }
+}
+
+fn open_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(url);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Process -FilePath $args[0]",
+            url,
+        ]);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+    command.spawn().map(|_| ())
 }

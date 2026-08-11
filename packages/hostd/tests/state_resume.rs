@@ -221,7 +221,7 @@ fn finalize_interrupted_turns_clears_active_turn_and_emits_failed() {
 fn multi_step_usages_roll_up_on_turn_completed() {
     use piko_protocol::{
         ContentBlock, Message, MessageEntry, SessionTreeEntry,
-        messages::{Usage, UsageCost},
+        messages::{Usage, UsageCost, UsageCostBasis, UsageCostEntry},
     };
 
     let mut state = HostState::new();
@@ -248,11 +248,15 @@ fn multi_step_usages_roll_up_on_turn_completed() {
         cache_write: 0,
         total_tokens: input + output,
         cost: UsageCost {
-            input: input as f64 * 0.001,
-            output: output as f64 * 0.002,
-            cache_read: 0.0,
-            cache_write: 0.0,
-            total: input as f64 * 0.001 + output as f64 * 0.002,
+            entries: vec![UsageCostEntry {
+                currency: "USD".into(),
+                basis: UsageCostBasis::ListPrice,
+                input: input as f64 * 0.001,
+                output: output as f64 * 0.002,
+                cache_read: 0.0,
+                cache_write: 0.0,
+                total: input as f64 * 0.001 + output as f64 * 0.002,
+            }],
         },
     };
 
@@ -313,7 +317,7 @@ fn multi_step_usages_roll_up_on_turn_completed() {
 
 #[test]
 fn step_usage_accounts_into_turn_and_session() {
-    use piko_protocol::messages::{Usage, UsageCost};
+    use piko_protocol::messages::{Usage, UsageCost, UsageCostBasis, UsageCostEntry};
 
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp/project") {
@@ -332,11 +336,15 @@ fn step_usage_accounts_into_turn_and_session() {
         cache_write: 1,
         total_tokens: 17,
         cost: UsageCost {
-            input: 0.01,
-            output: 0.02,
-            cache_read: 0.001,
-            cache_write: 0.002,
-            total: 0.033,
+            entries: vec![UsageCostEntry {
+                currency: "USD".into(),
+                basis: UsageCostBasis::ListPrice,
+                input: 0.01,
+                output: 0.02,
+                cache_read: 0.001,
+                cache_write: 0.002,
+                total: 0.033,
+            }],
         },
     };
     state

@@ -130,7 +130,7 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>> {
         .thinking_level
         .as_deref()
         .or(host.thinking_level.as_deref());
-    let thinking_options = ["off", "minimal", "low", "medium", "high", "xhigh"]
+    let thinking_options = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
         .iter()
         .map(|level| {
             option_row(
@@ -210,7 +210,8 @@ pub fn thinking_level_detail(level: &str) -> &'static str {
         "low" => "Low reasoning budget",
         "medium" => "Medium reasoning budget",
         "high" => "High reasoning budget",
-        "xhigh" => "Extra high reasoning budget (maximum)",
+        "xhigh" => "Extra high reasoning budget",
+        "max" => "Maximum reasoning budget",
         _ => "Reasoning budget",
     }
 }

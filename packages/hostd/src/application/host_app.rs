@@ -5,6 +5,7 @@ use std::sync::Arc;
 use piko_llmd::auth::AuthStorage;
 use piko_llmd::gateway::InferenceGateway;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::domain::config::{HostSettings, ModelRegistry};
 use crate::domain::sessions::{HostState, SessionModelRef};
@@ -38,6 +39,7 @@ pub struct HostApp {
     pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn InferenceGateway>>>>,
     pub(crate) settings: Arc<Mutex<HostSettings>>,
     pub(crate) model_registry: Arc<Mutex<ModelRegistry>>,
+    pub(crate) auth_logins: Arc<Mutex<HashMap<String, ActiveAuthLogin>>>,
     /// The resolved provider+model the current turn runner executes with.
     /// This is the single source of truth for session model continuity:
     /// turn submission records it per session (durable), and the prompt
@@ -47,6 +49,12 @@ pub struct HostApp {
     pub(crate) project_settings_path: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) session_store_factory: Arc<dyn SessionStoreFactory>,
     pub(crate) prompt_materials: Arc<dyn PromptMaterialLoader>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ActiveAuthLogin {
+    pub(crate) login_id: String,
+    pub(crate) cancellation: CancellationToken,
 }
 
 impl Default for HostApp {
@@ -84,6 +92,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            auth_logins: Arc::new(Mutex::new(HashMap::new())),
             active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
@@ -107,6 +116,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            auth_logins: Arc::new(Mutex::new(HashMap::new())),
             active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
@@ -129,6 +139,7 @@ impl HostApp {
                 AuthStorage::in_memory(std::collections::HashMap::new()),
                 vec![],
             ))),
+            auth_logins: Arc::new(Mutex::new(HashMap::new())),
             active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
@@ -151,6 +162,7 @@ impl HostApp {
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
+            auth_logins: Arc::new(Mutex::new(HashMap::new())),
             active_model: Arc::new(Mutex::new(None)),
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),

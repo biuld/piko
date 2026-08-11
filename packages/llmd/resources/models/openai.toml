@@ -21,6 +21,130 @@ continuation = "encrypted_reasoning"
 
 # ---- GPT-5.x ----
 
+[models."gpt-5.6"]
+name = "GPT-5.6 (Sol alias)"
+reasoning = true
+input = ["text", "image"]
+context_window = 1050000
+max_tokens = 128000
+
+[models."gpt-5.6".thinking_level_map]
+off = "none"
+minimal = ""
+max = "max"
+
+[[models."gpt-5.6".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 5.0
+cached_input_per_million = 0.5
+output_per_million = 30.0
+cache_write_per_million = 6.25
+
+[[models."gpt-5.6".pricing.tiers]]
+input_tokens_above = 272000
+input_multiplier = 2.0
+output_multiplier = 1.5
+
+[[models."gpt-5.6".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
+
+[models."gpt-5.6-sol"]
+name = "GPT-5.6 Sol"
+reasoning = true
+input = ["text", "image"]
+context_window = 1050000
+max_tokens = 128000
+
+[models."gpt-5.6-sol".thinking_level_map]
+off = "none"
+minimal = ""
+max = "max"
+
+[[models."gpt-5.6-sol".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 5.0
+cached_input_per_million = 0.5
+output_per_million = 30.0
+cache_write_per_million = 6.25
+
+[[models."gpt-5.6-sol".pricing.tiers]]
+input_tokens_above = 272000
+input_multiplier = 2.0
+output_multiplier = 1.5
+
+[[models."gpt-5.6-sol".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
+
+[models."gpt-5.6-terra"]
+name = "GPT-5.6 Terra"
+reasoning = true
+input = ["text", "image"]
+context_window = 1050000
+max_tokens = 128000
+
+[models."gpt-5.6-terra".thinking_level_map]
+off = "none"
+minimal = ""
+max = "max"
+
+[[models."gpt-5.6-terra".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 2.0
+cached_input_per_million = 0.2
+output_per_million = 12.0
+cache_write_per_million = 2.5
+
+[[models."gpt-5.6-terra".pricing.tiers]]
+input_tokens_above = 272000
+input_multiplier = 2.0
+output_multiplier = 1.5
+
+[[models."gpt-5.6-terra".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
+
+[models."gpt-5.6-luna"]
+name = "GPT-5.6 Luna"
+reasoning = true
+input = ["text", "image"]
+context_window = 1050000
+max_tokens = 128000
+
+[models."gpt-5.6-luna".thinking_level_map]
+off = "none"
+minimal = ""
+max = "max"
+
+[[models."gpt-5.6-luna".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 0.2
+cached_input_per_million = 0.02
+output_per_million = 1.2
+cache_write_per_million = 0.25
+
+[[models."gpt-5.6-luna".pricing.tiers]]
+input_tokens_above = 272000
+input_multiplier = 2.0
+output_multiplier = 1.5
+
+[[models."gpt-5.6-luna".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
+
 [models."gpt-5.5"]
 name = "GPT-5.5"
 reasoning = true
@@ -293,12 +417,38 @@ input = ["text", "image"]
 context_window = 128000
 max_tokens = 16384
 
+[[models."gpt-4o".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 2.5
+cached_input_per_million = 1.25
+output_per_million = 10.0
+
+[[models."gpt-4o".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
+
 [models."gpt-4o-mini"]
 name = "GPT-4o mini"
 reasoning = false
 input = ["text", "image"]
 context_window = 128000
 max_tokens = 16384
+
+[[models."gpt-4o-mini".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "USD"
+input_per_million = 0.15
+cached_input_per_million = 0.075
+output_per_million = 0.6
+
+[[models."gpt-4o-mini".pricing]]
+surface = "subscription"
+basis = "api_equivalent"
+copy_from = "platform"
 
 [models."gpt-4-turbo"]
 name = "GPT-4 Turbo"

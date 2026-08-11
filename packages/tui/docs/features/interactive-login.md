@@ -34,6 +34,13 @@ The selector opens as a `ComposerBand` modal over the workspace plane
   - `Enter` submits the key to `hostd` (triggers config updates) and closes the overlay.
   - `Esc` cancels key entry and returns to the provider selection menu.
 - **Direct Login Bypass**: Running `/login <provider>` (e.g., `/login openai`) immediately triggers the OAuth flow for that provider in the background, bypassing the overlay entirely.
+- **Browser Default**: Local OAuth emits an authorization URL and the TUI opens
+  it with the platform browser. The active notice retains the URL for copying
+  when browser launch is unavailable.
+- **Headless Fallback**: `/login-device <provider>` explicitly starts the
+  device-code flow and displays the verification URL and one-time code.
+- **Cancellation**: `/login-cancel <provider>` cancels that provider's active
+  browser or device-code login.
 
 ## Non-goals
 

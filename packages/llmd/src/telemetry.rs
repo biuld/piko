@@ -17,7 +17,7 @@ pub trait GatewayTelemetry: Send + Sync {
     fn record_ttft(&self, model: &str, provider: &str, ttft_ms: u64);
 
     /// Token usage and cost for one completed model response.
-    fn record_usage(&self, model: &str, provider: &str, usage: &Usage, cost_usd: f64);
+    fn record_usage(&self, model: &str, provider: &str, usage: &Usage);
 
     /// One retry attempt with its error class.
     fn record_retry(&self, model: &str, provider: &str, error_class: &str, attempt: u32);
@@ -32,7 +32,7 @@ pub struct NoopGatewayTelemetry;
 
 impl GatewayTelemetry for NoopGatewayTelemetry {
     fn record_ttft(&self, _model: &str, _provider: &str, _ttft_ms: u64) {}
-    fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage, _cost_usd: f64) {}
+    fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage) {}
     fn record_retry(&self, _model: &str, _provider: &str, _error_class: &str, _attempt: u32) {}
     fn record_fallback(&self, _model: &str, _provider: &str) {}
 }

@@ -9,6 +9,9 @@
 > Transport and adapter mechanics are superseded by D-37. The bounded retry,
 > same-protocol fallback, usage, and no-mid-stream-restart behavior remains
 > normative through F-02.
+>
+> Provider-native pricing and cost-ledger mechanics are superseded by D-40;
+> this design retains only usage capture and middleware delivery ordering.
 
 ## Goal
 

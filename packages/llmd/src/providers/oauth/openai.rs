@@ -6,7 +6,7 @@ use tokio::time::sleep;
 
 use crate::auth::{AuthCredential, AuthError};
 
-use super::{DeviceAuthInfo, OAuthFlow, ProviderRequestAuth};
+use super::{BrowserAuthInfo, DeviceAuthInfo, OAuthFlow, ProviderRequestAuth};
 
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEVICE_USER_CODE_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
@@ -15,6 +15,9 @@ const DEVICE_VERIFICATION_URI: &str = "https://auth.openai.com/codex/device";
 const DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const DEFAULT_DEVICE_EXPIRES_SECONDS: u64 = 15 * 60;
+const DEFAULT_BROWSER_EXPIRES_SECONDS: u64 = 10 * 60;
+const DEFAULT_TOKEN_EXPIRES_SECONDS: u64 = 60 * 60;
+const BROWSER_CALLBACK_PORTS: &[u16] = &[1455, 1457];
 
 #[derive(Debug, Deserialize)]
 struct DeviceCodeResponse {
@@ -34,6 +37,7 @@ struct DeviceTokenResponse {
 struct TokenExchangeResponse {
     access_token: String,
     refresh_token: Option<String>,
+    #[serde(default = "default_token_expires_seconds")]
     expires_in: u64,
     id_token: Option<String>,
 }
@@ -62,6 +66,72 @@ impl OpenAIOAuthFlow {
 impl OAuthFlow for OpenAIOAuthFlow {
     fn provider_id(&self) -> &str {
         "openai"
+    }
+
+    fn browser_callback_ports(&self) -> &'static [u16] {
+        BROWSER_CALLBACK_PORTS
+    }
+
+    async fn start_browser_auth(&self, redirect_uri: &str) -> Result<BrowserAuthInfo, AuthError> {
+        use base64::Engine as _;
+        use rand::RngCore as _;
+        use sha2::Digest as _;
+
+        let mut verifier_bytes = [0_u8; 64];
+        rand::thread_rng().fill_bytes(&mut verifier_bytes);
+        let code_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let digest = sha2::Sha256::digest(code_verifier.as_bytes());
+        let code_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+
+        let mut state_bytes = [0_u8; 32];
+        rand::thread_rng().fill_bytes(&mut state_bytes);
+        let state = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(state_bytes);
+
+        let mut url = reqwest::Url::parse("https://auth.openai.com/oauth/authorize")
+            .map_err(|error| provider_error(format!("invalid authorization URL: {error}")))?;
+        url.query_pairs_mut()
+            .append_pair("response_type", "code")
+            .append_pair("client_id", CLIENT_ID)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair(
+                "scope",
+                "openid profile email offline_access api.connectors.read api.connectors.invoke",
+            )
+            .append_pair("code_challenge", &code_challenge)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("id_token_add_organizations", "true")
+            .append_pair("codex_cli_simplified_flow", "true")
+            .append_pair("state", &state)
+            .append_pair("originator", "codex_cli_rs");
+
+        Ok(BrowserAuthInfo {
+            authorization_url: url.into(),
+            redirect_uri: redirect_uri.to_string(),
+            state,
+            code_verifier,
+            expires_in_seconds: DEFAULT_BROWSER_EXPIRES_SECONDS,
+        })
+    }
+
+    async fn finish_browser_auth(
+        &self,
+        info: &BrowserAuthInfo,
+        code: String,
+    ) -> Result<AuthCredential, AuthError> {
+        let res = self
+            .client
+            .post(TOKEN_URL)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code.as_str()),
+                ("redirect_uri", info.redirect_uri.as_str()),
+                ("client_id", CLIENT_ID),
+                ("code_verifier", info.code_verifier.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|error| provider_error(format!("token exchange failed: {error}")))?;
+        token_response(res, None).await
     }
 
     async fn start_device_auth(&self) -> Result<DeviceAuthInfo, AuthError> {
@@ -275,6 +345,40 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+const fn default_token_expires_seconds() -> u64 {
+    DEFAULT_TOKEN_EXPIRES_SECONDS
+}
+
+async fn token_response(
+    res: reqwest::Response,
+    previous_refresh: Option<&str>,
+) -> Result<AuthCredential, AuthError> {
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        return Err(provider_error(format!(
+            "token exchange failed ({status}): {body}"
+        )));
+    }
+    let data: TokenExchangeResponse = res
+        .json()
+        .await
+        .map_err(|error| provider_error(format!("invalid token response: {error}")))?;
+    let extra = token_metadata(
+        data.id_token
+            .as_deref()
+            .or(Some(data.access_token.as_str())),
+    );
+    Ok(AuthCredential::OAuth {
+        access: data.access_token,
+        refresh: data
+            .refresh_token
+            .or_else(|| previous_refresh.map(str::to_string)),
+        expires: Some(refresh_at(now_ms(), data.expires_in)),
+        extra,
+    })
+}
+
 fn refresh_at(now_ms: u64, expires_in_seconds: u64) -> u64 {
     now_ms
         .saturating_add(expires_in_seconds.saturating_mul(1_000))
@@ -362,5 +466,29 @@ mod tests {
     #[test]
     fn refresh_window_saturates_for_short_lived_tokens() {
         assert_eq!(refresh_at(100, 60), 0);
+    }
+
+    #[tokio::test]
+    async fn browser_login_uses_pkce_state_and_loopback_redirect() {
+        let flow = OpenAIOAuthFlow::new();
+        assert_eq!(flow.browser_callback_ports(), &[1455, 1457]);
+        let info = flow
+            .start_browser_auth("http://localhost:1455/auth/callback")
+            .await
+            .unwrap();
+        let url = reqwest::Url::parse(&info.authorization_url).unwrap();
+        let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(url.path(), "/oauth/authorize");
+        assert_eq!(query.get("response_type").map(String::as_str), Some("code"));
+        assert_eq!(
+            query.get("redirect_uri").map(String::as_str),
+            Some("http://localhost:1455/auth/callback")
+        );
+        assert_eq!(query.get("state"), Some(&info.state));
+        assert_eq!(
+            query.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert!(!info.code_verifier.is_empty());
     }
 }

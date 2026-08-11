@@ -8,9 +8,9 @@ impl HostServer {
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         match command {
-            Command::AuthLoginOAuth { provider, .. } => {
-                self.start_oauth_login(&command_id, provider, tx);
-                Ok(())
+            Command::AuthLoginOAuth { provider, mode, .. } => {
+                self.start_oauth_login(&command_id, provider, mode, tx)
+                    .await
             }
             Command::ChatSubmit {
                 session_id,

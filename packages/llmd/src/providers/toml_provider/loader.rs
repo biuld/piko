@@ -59,6 +59,8 @@ struct ModelToml {
     targets: HashMap<String, TargetToml>,
     #[serde(default)]
     thinking_level_map: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pricing: Vec<super::pricing::PricingToml>,
 }
 
 // ---- Built-in catalogs (embedded at compile time) ----
@@ -96,6 +98,7 @@ fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
         "medium" => Some(ThinkingLevel::Medium),
         "high" => Some(ThinkingLevel::High),
         "xhigh" => Some(ThinkingLevel::XHigh),
+        "max" => Some(ThinkingLevel::Max),
         _ => None,
     }
 }
@@ -143,7 +146,7 @@ fn semantic_reasoning_efforts(model: &ModelToml) -> Vec<ThinkingLevel> {
     if !model.reasoning {
         return Vec::new();
     }
-    [
+    let mut efforts = [
         ThinkingLevel::Off,
         ThinkingLevel::Minimal,
         ThinkingLevel::Low,
@@ -159,7 +162,16 @@ fn semantic_reasoning_efforts(model: &ModelToml) -> Vec<ThinkingLevel> {
             .and_then(|map| map.get(level.as_str()))
             .is_none_or(|wire_value| !wire_value.is_empty())
     })
-    .collect()
+    .collect::<Vec<_>>();
+    if model
+        .thinking_level_map
+        .as_ref()
+        .and_then(|map| map.get(ThinkingLevel::Max.as_str()))
+        .is_some_and(|wire_value| !wire_value.is_empty())
+    {
+        efforts.push(ThinkingLevel::Max);
+    }
+    efforts
 }
 
 fn private_reasoning_map(model: &ModelToml) -> std::collections::BTreeMap<ThinkingLevel, String> {
@@ -283,6 +295,14 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
         .iter()
         .map(|(id, model)| (id.clone(), private_reasoning_map(model)))
         .collect();
+    let pricing = super::pricing::build_pricing(
+        parsed
+            .models
+            .iter()
+            .map(|(id, model)| (id.clone(), model.pricing.clone()))
+            .collect(),
+        &surfaces,
+    )?;
     let models = parse_models(parsed.models);
 
     Ok(TomlProvider::new(&parsed.provider.id)
@@ -290,6 +310,7 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
         .with_default_targets(defaults)
         .with_models(models)
         .with_reasoning_effort_maps(reasoning_effort_maps)
+        .with_pricing(pricing)
         .with_model_targets(model_targets))
 }
 
@@ -330,6 +351,8 @@ mod tests {
     use crate::providers::Provider;
     use piko_protocol::model::ModelSummary;
     use piko_protocol::model::ProviderAuthMethod;
+
+    mod pricing_tests;
 
     fn load_builtin_provider(provider_id: &str) -> Result<TomlProvider, String> {
         let toml_str = BUILTIN_PROVIDERS
@@ -377,34 +400,6 @@ mod tests {
     #[test]
     fn unsupported_native_provider_is_not_bundled() {
         assert!(load_builtin_provider("anthropic").is_err());
-    }
-
-    #[test]
-    fn deepseek_catalog_selects_protocol_per_model() {
-        let provider = load_builtin_provider("deepseek").unwrap();
-        let flash = provider
-            .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-flash")
-            .unwrap();
-        assert_eq!(
-            flash.protocol,
-            ProtocolProfile::Responses {
-                continuation: ResponsesContinuationPolicy::StatelessReplay
-            }
-        );
-        assert_eq!(
-            flash
-                .reasoning_effort_map
-                .get(&ThinkingLevel::XHigh)
-                .map(String::as_str),
-            Some("max")
-        );
-        assert_eq!(
-            provider
-                .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-pro")
-                .unwrap()
-                .protocol,
-            ProtocolProfile::ChatCompletions
-        );
     }
 
     #[test]

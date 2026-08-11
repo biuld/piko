@@ -5,6 +5,7 @@ use super::provider::Provider;
 use crate::modeling::{ApiSurface, ModelKey, ModelTargetProfile, ResolvedModelTarget};
 
 pub(crate) mod loader;
+mod pricing;
 
 // ============================================================================
 // TomlProvider — TOML-configured provider (API key + URL + adapter kind)
@@ -20,6 +21,7 @@ pub struct TomlProvider {
     models: Vec<ModelSummary>,
     reasoning_effort_maps:
         HashMap<String, std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>>,
+    pricing: HashMap<String, HashMap<String, crate::modeling::TokenPricing>>,
 }
 
 impl TomlProvider {
@@ -31,6 +33,7 @@ impl TomlProvider {
             model_targets: HashMap::new(),
             models: Vec::new(),
             reasoning_effort_maps: HashMap::new(),
+            pricing: HashMap::new(),
         }
     }
 
@@ -52,6 +55,14 @@ impl TomlProvider {
         >,
     ) -> Self {
         self.reasoning_effort_maps = maps;
+        self
+    }
+
+    pub fn with_pricing(
+        mut self,
+        pricing: HashMap<String, HashMap<String, crate::modeling::TokenPricing>>,
+    ) -> Self {
+        self.pricing = pricing;
         self
     }
 
@@ -107,6 +118,11 @@ impl Provider for TomlProvider {
             auth_method,
             base_url: surface.base_url.clone(),
             protocol: profile.protocol,
+            pricing: self
+                .pricing
+                .get(model_id)
+                .and_then(|pricing| pricing.get(&surface.id))
+                .cloned(),
             reasoning_effort_map: self
                 .reasoning_effort_maps
                 .get(model_id)

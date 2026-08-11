@@ -170,7 +170,8 @@ async fn usage_and_cost_middleware_process_both_protocols() {
             .await;
         assert_eq!(usage.total_input.load(Ordering::SeqCst), expected_input);
         assert!(events.iter().any(|event| matches!(event,
-            piko_llmd::gateway::InferenceEvent::Usage(value) if value.cost.total > 0.0
+            piko_llmd::gateway::InferenceEvent::Usage(value)
+                if value.cost.entries.iter().any(|cost| cost.total > 0.0)
         )));
     }
 }

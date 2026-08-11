@@ -87,7 +87,7 @@ impl SurfacePanel<SurfaceId, HitId, ThinkingCtx<'_>> for ThinkingSelector {
 use super::settings::thinking_level_detail;
 
 /// Thinking levels, ordered by reasoning budget.
-pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh"];
+pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 #[derive(Clone, Debug)]
 pub struct ThinkingOption {

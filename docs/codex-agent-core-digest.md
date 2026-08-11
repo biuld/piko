@@ -74,7 +74,10 @@ is exceeded.
   usage; model continuity via hostd `active_model` + durable per-session
   record, prompt model-switch fragment, JSONL `ModelChange` marker;
   F-02/D-02/D-16, V-02/V-16). Residual gaps (not on the critical path):
-  prewarm and sticky routing.
+  prewarm and sticky routing. Native OpenAI-family protocols and the
+  protocol-neutral inference boundary landed in F-25/F-26. ADR-012 keeps the
+  executable model catalog locally authoritative and rejects generic remote
+  discovery until a narrower availability consumer exists.
 
 ### C. Prompt Assembly & Context Injection
 

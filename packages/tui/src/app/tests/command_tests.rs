@@ -21,6 +21,25 @@ fn test_unknown_slash_command_blocks_submit() {
 }
 
 #[test]
+fn browser_auth_event_opens_url_and_keeps_fallback_notice() {
+    let mut app = app();
+    let effects = app.apply_event(Event::Auth(piko_protocol::AuthEvent::LoginBrowser {
+        login_id: "login-1".into(),
+        provider: "openai".into(),
+        authorization_url: "https://auth.example/login".into(),
+    }));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::OpenUrl(url)] if url == "https://auth.example/login"
+    ));
+    assert!(
+        app.notifications
+            .row_visible_for(std::time::Instant::now(), None, None)
+            .is_some_and(|notice| notice.message.contains("https://auth.example/login"))
+    );
+}
+
+#[test]
 fn local_slash_commands_exist_before_host_catalog_arrives() {
     let app = app();
     assert!(
