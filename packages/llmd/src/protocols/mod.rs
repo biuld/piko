@@ -160,6 +160,7 @@ pub(crate) fn usage(
         cache_read,
         cache_write,
         total_tokens: input.saturating_add(output),
+        units: Default::default(),
         cost: Default::default(),
     }
 }

@@ -139,7 +139,7 @@ impl LlmdExecutor {
             provider: request.model.provider.clone(),
             api_surface: target.api_surface.clone(),
             auth_method: Some(target.auth_method),
-            pricing: target.pricing.clone(),
+            billing: target.billing.clone(),
             metadata: HashMap::new(),
             telemetry: Some(Arc::clone(&self.telemetry)),
         }

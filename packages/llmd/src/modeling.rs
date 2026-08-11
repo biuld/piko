@@ -1,6 +1,5 @@
 use std::fmt;
 
-use piko_protocol::messages::UsageCostBasis;
 use piko_protocol::model::ProviderAuthMethod;
 use serde::{Deserialize, Serialize};
 
@@ -106,23 +105,15 @@ pub struct ModelTargetProfile {
     pub protocol: ProtocolProfile,
 }
 
-/// One catalog-owned token price schedule for a concrete model API surface.
+/// Catalog-selected billing behavior for a concrete model API surface.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TokenPricing {
+pub struct BillingPlan {
+    pub usage_adapter: String,
+    pub pricing_policy: String,
     pub currency: String,
-    pub basis: UsageCostBasis,
-    pub input_per_million: f64,
-    pub cached_input_per_million: f64,
-    pub output_per_million: f64,
-    pub cache_write_per_million: Option<f64>,
-    pub tiers: Vec<TokenPricingTier>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TokenPricingTier {
-    pub input_tokens_above: u64,
-    pub input_multiplier: f64,
-    pub output_multiplier: f64,
+    pub basis: piko_protocol::messages::UsageCostBasis,
+    /// Policy-owned configuration. The generic engine never interprets it.
+    pub configuration: serde_json::Value,
 }
 
 /// One model target selected for a concrete authentication route.
@@ -134,7 +125,7 @@ pub struct ResolvedModelTarget {
     pub auth_method: ProviderAuthMethod,
     pub base_url: String,
     pub protocol: ProtocolProfile,
-    pub pricing: Option<TokenPricing>,
+    pub billing: Option<BillingPlan>,
     /// Private wire mapping for closed semantic reasoning efforts.
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,

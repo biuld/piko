@@ -3,12 +3,17 @@ use std::collections::HashMap;
 use piko_protocol::messages::UsageCostBasis;
 use serde::Deserialize;
 
-use crate::modeling::{ApiSurface, TokenPricing, TokenPricingTier};
+use crate::billing::{BillingRegistry, StandardTokenPricing, StandardTokenTier};
+use crate::modeling::{ApiSurface, BillingPlan};
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct PricingToml {
     surface: String,
     basis: String,
+    #[serde(default = "default_usage_adapter")]
+    usage_adapter: String,
+    #[serde(default = "default_pricing_policy")]
+    policy: String,
     #[serde(default)]
     copy_from: Option<String>,
     #[serde(default)]
@@ -23,6 +28,8 @@ pub(super) struct PricingToml {
     cache_write_per_million: Option<f64>,
     #[serde(default)]
     tiers: Vec<PricingTierToml>,
+    #[serde(default)]
+    configuration: Option<toml::Table>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -30,6 +37,14 @@ struct PricingTierToml {
     input_tokens_above: u64,
     input_multiplier: f64,
     output_multiplier: f64,
+}
+
+fn default_usage_adapter() -> String {
+    "semantic_tokens".into()
+}
+
+fn default_pricing_policy() -> String {
+    "token_tiered".into()
 }
 
 fn basis(value: &str) -> Result<UsageCostBasis, String> {
@@ -50,7 +65,7 @@ fn validate_currency(currency: &str) -> Result<(), String> {
     }
 }
 
-fn direct(spec: &PricingToml) -> Result<TokenPricing, String> {
+fn direct(spec: &PricingToml, registry: &BillingRegistry) -> Result<BillingPlan, String> {
     if spec.copy_from.is_some() {
         return Err("Copied pricing cannot be parsed as a direct schedule".into());
     }
@@ -74,34 +89,53 @@ fn direct(spec: &PricingToml) -> Result<TokenPricing, String> {
                     spec.surface
                 ));
             }
-            Ok(TokenPricingTier {
+            Ok(StandardTokenTier {
                 input_tokens_above: tier.input_tokens_above,
                 input_multiplier: tier.input_multiplier,
                 output_multiplier: tier.output_multiplier,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(TokenPricing {
+    let configuration = if let Some(configuration) = &spec.configuration {
+        serde_json::to_value(configuration)
+            .map_err(|error| format!("Cannot encode pricing configuration: {error}"))?
+    } else if spec.policy == "token_tiered" {
+        serde_json::to_value(StandardTokenPricing {
+            input_per_million: positive("input_per_million", spec.input_per_million)?,
+            cached_input_per_million: positive(
+                "cached_input_per_million",
+                spec.cached_input_per_million,
+            )?,
+            output_per_million: positive("output_per_million", spec.output_per_million)?,
+            cache_write_per_million: spec
+                .cache_write_per_million
+                .map(|value| positive("cache_write_per_million", Some(value)))
+                .transpose()?,
+            tiers,
+        })
+        .map_err(|error| format!("Cannot encode pricing configuration: {error}"))?
+    } else {
+        return Err(format!(
+            "Pricing policy {} for {} requires a configuration table",
+            spec.policy, spec.surface
+        ));
+    };
+    let plan = BillingPlan {
+        usage_adapter: spec.usage_adapter.clone(),
+        pricing_policy: spec.policy.clone(),
         currency: currency.into(),
         basis: basis(&spec.basis)?,
-        input_per_million: positive("input_per_million", spec.input_per_million)?,
-        cached_input_per_million: positive(
-            "cached_input_per_million",
-            spec.cached_input_per_million,
-        )?,
-        output_per_million: positive("output_per_million", spec.output_per_million)?,
-        cache_write_per_million: spec
-            .cache_write_per_million
-            .map(|value| positive("cache_write_per_million", Some(value)))
-            .transpose()?,
-        tiers,
-    })
+        configuration,
+    };
+    registry.validate(&plan)?;
+    Ok(plan)
 }
 
 pub(super) fn build_pricing(
     specs_by_model: HashMap<String, Vec<PricingToml>>,
     surfaces: &HashMap<String, ApiSurface>,
-) -> Result<HashMap<String, HashMap<String, TokenPricing>>, String> {
+    registry: &BillingRegistry,
+) -> Result<HashMap<String, HashMap<String, BillingPlan>>, String> {
     let mut result = HashMap::new();
     for (model_id, specs) in specs_by_model {
         let mut schedules = HashMap::new();
@@ -113,7 +147,7 @@ pub(super) fn build_pricing(
                 ));
             }
             if schedules
-                .insert(spec.surface.clone(), direct(spec)?)
+                .insert(spec.surface.clone(), direct(spec, registry)?)
                 .is_some()
             {
                 return Err(format!("Duplicate pricing for {model_id}/{}", spec.surface));

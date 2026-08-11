@@ -102,6 +102,7 @@ mod tests {
             cache_read: 3_000,
             cache_write: 0,
             total_tokens: 13_050,
+            units: Default::default(),
             cost: Default::default(),
         };
         assert_eq!(context_fill_from_usage(&usage), 13_000);

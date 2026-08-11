@@ -14,9 +14,13 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-41: Provider-pluggable billing](D-41-provider-pluggable-billing.md)
+  implements F-29 with registered usage adapters, pricing policies, and open
+  billable/cost components (implemented; V-40).
 - [D-40: Provider-native cost accounting](D-40-provider-native-cost-accounting.md)
   implements F-28 with catalog-owned API-surface prices, typed estimate bases,
-  native currencies, and a multi-entry session ledger (implemented; V-39).
+  native currencies, and a multi-entry session ledger (superseded by D-41;
+  V-39).
 - [D-38: Protocol-neutral inference boundary](D-38-protocol-neutral-inference.md)
   implements F-26 and hides full-replay versus continuation planning behind a
   general semantic request, event, capability, and opaque-checkpoint model

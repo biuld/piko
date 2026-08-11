@@ -273,14 +273,19 @@ fn executor_for_protocol(
     );
     config.base_url = Some(format!("http://{addr}"));
     config.streaming_fallback = streaming_fallback.unwrap_or(true);
-    config.pricing = Some(piko_llmd::modeling::TokenPricing {
+    config.billing = Some(piko_llmd::modeling::BillingPlan {
+        usage_adapter: "semantic_tokens".into(),
+        pricing_policy: "token_tiered".into(),
         currency: "USD".into(),
         basis: piko_protocol::messages::UsageCostBasis::ListPrice,
-        input_per_million: 2.5,
-        cached_input_per_million: 1.25,
-        output_per_million: 10.0,
-        cache_write_per_million: None,
-        tiers: Vec::new(),
+        configuration: serde_json::to_value(piko_llmd::billing::StandardTokenPricing {
+            input_per_million: 2.5,
+            cached_input_per_million: 1.25,
+            output_per_million: 10.0,
+            cache_write_per_million: None,
+            tiers: Vec::new(),
+        })
+        .unwrap(),
     });
     targets.insert("openai/gpt-test".to_string(), config.clone());
     config.target_id = "openai/gpt-4o@platform".into();

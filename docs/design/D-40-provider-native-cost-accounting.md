@@ -1,6 +1,6 @@
 # D-40: Provider-native cost accounting
 
-> Status: implemented
+> Status: superseded by [D-41](D-41-provider-pluggable-billing.md)
 > Implements: [F-28](../features/F-28-provider-native-cost-accounting.md)
 > Decisions: [ADR-013](../decisions/ADR-013-provider-native-cost-ledger.md)
 
@@ -10,6 +10,10 @@ Replace llmd's global USD/model-ID estimator with catalog-owned pricing that
 flows through resolved targets, normalizes provider usage, and accumulates a
 multi-currency session ledger without leaking provider wire formats beyond
 llmd.
+
+This document records the first provider-native implementation. D-41 replaces
+its closed `TokenPricing` calculator and fixed ledger components while
+preserving the F-28 behavior contract.
 
 ## Constraints and non-goals
 

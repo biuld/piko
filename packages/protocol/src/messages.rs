@@ -180,6 +180,9 @@ pub struct Usage {
     pub cache_read: u64,
     pub cache_write: u64,
     pub total_tokens: u64,
+    /// Protocol-normalized billable quantities not represented by the common
+    /// token counters. Names are stable llmd contracts, never raw wire keys.
+    pub units: std::collections::BTreeMap<String, f64>,
     pub cost: UsageCost,
 }
 
@@ -295,6 +298,9 @@ impl Usage {
         self.cache_read = self.cache_read.saturating_add(other.cache_read);
         self.cache_write = self.cache_write.saturating_add(other.cache_write);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        for (name, quantity) in &other.units {
+            *self.units.entry(name.clone()).or_default() += quantity;
+        }
         self.cost.accumulate(&other.cost);
     }
 
@@ -313,10 +319,7 @@ mod usage_tests {
             entries: vec![UsageCostEntry {
                 currency: "USD".into(),
                 basis: UsageCostBasis::ListPrice,
-                input: total,
-                output: 0.0,
-                cache_read: 0.0,
-                cache_write: 0.0,
+                components: [("input_tokens".into(), total)].into(),
                 total,
             }],
         }
@@ -330,6 +333,7 @@ mod usage_tests {
             cache_read: 1,
             cache_write: 0,
             total_tokens: 16,
+            units: [("search_call".into(), 1.0)].into(),
             cost: usd(0.3),
         };
         total.accumulate(&Usage {
@@ -338,6 +342,7 @@ mod usage_tests {
             cache_read: 0,
             cache_write: 2,
             total_tokens: 12,
+            units: [("search_call".into(), 2.0)].into(),
             cost: usd(0.11),
         });
         assert_eq!(total.input, 13);
@@ -345,6 +350,7 @@ mod usage_tests {
         assert_eq!(total.cache_read, 1);
         assert_eq!(total.cache_write, 2);
         assert_eq!(total.total_tokens, 28);
+        assert_eq!(total.units["search_call"], 3.0);
         assert!((total.cost.entries[0].total - 0.41).abs() < f64::EPSILON);
 
         total.accumulate(&Usage {
@@ -352,16 +358,45 @@ mod usage_tests {
                 entries: vec![UsageCostEntry {
                     currency: "CNY".into(),
                     basis: UsageCostBasis::ListPrice,
-                    input: 1.0,
-                    output: 0.0,
-                    cache_read: 0.0,
-                    cache_write: 0.0,
+                    components: [("input_tokens".into(), 1.0)].into(),
                     total: 1.0,
                 }],
             },
             ..Default::default()
         });
         assert_eq!(total.cost.entries.len(), 2);
+    }
+
+    #[test]
+    fn prior_usage_and_fixed_cost_shapes_are_not_accepted() {
+        let missing_units = serde_json::json!({
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 2,
+            "cost": { "entries": [] }
+        });
+        assert!(serde_json::from_value::<Usage>(missing_units).is_err());
+
+        let fixed_components = serde_json::json!({
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 2,
+            "units": {},
+            "cost": { "entries": [{
+                "currency": "USD",
+                "basis": "list_price",
+                "input": 0.1,
+                "output": 0.2,
+                "cacheRead": 0.0,
+                "cacheWrite": 0.0,
+                "total": 0.3
+            }] }
+        });
+        assert!(serde_json::from_value::<Usage>(fixed_components).is_err());
     }
 }
 

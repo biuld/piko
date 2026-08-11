@@ -247,14 +247,16 @@ fn multi_step_usages_roll_up_on_turn_completed() {
         cache_read: 0,
         cache_write: 0,
         total_tokens: input + output,
+        units: Default::default(),
         cost: UsageCost {
             entries: vec![UsageCostEntry {
                 currency: "USD".into(),
                 basis: UsageCostBasis::ListPrice,
-                input: input as f64 * 0.001,
-                output: output as f64 * 0.002,
-                cache_read: 0.0,
-                cache_write: 0.0,
+                components: [
+                    ("input_tokens".into(), input as f64 * 0.001),
+                    ("output_tokens".into(), output as f64 * 0.002),
+                ]
+                .into(),
                 total: input as f64 * 0.001 + output as f64 * 0.002,
             }],
         },
@@ -335,14 +337,18 @@ fn step_usage_accounts_into_turn_and_session() {
         cache_read: 2,
         cache_write: 1,
         total_tokens: 17,
+        units: Default::default(),
         cost: UsageCost {
             entries: vec![UsageCostEntry {
                 currency: "USD".into(),
                 basis: UsageCostBasis::ListPrice,
-                input: 0.01,
-                output: 0.02,
-                cache_read: 0.001,
-                cache_write: 0.002,
+                components: [
+                    ("input_tokens".into(), 0.01),
+                    ("output_tokens".into(), 0.02),
+                    ("cached_input_tokens".into(), 0.001),
+                    ("cache_write_tokens".into(), 0.002),
+                ]
+                .into(),
                 total: 0.033,
             }],
         },

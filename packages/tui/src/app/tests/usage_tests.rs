@@ -5,10 +5,7 @@ fn test_cost(total: f64) -> piko_protocol::messages::UsageCost {
         entries: vec![piko_protocol::messages::UsageCostEntry {
             currency: "USD".into(),
             basis: piko_protocol::messages::UsageCostBasis::ListPrice,
-            input: total,
-            output: 0.0,
-            cache_read: 0.0,
-            cache_write: 0.0,
+            components: [("input_tokens".into(), total)].into(),
             total,
         }],
     }

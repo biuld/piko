@@ -4,6 +4,9 @@
 > Priority: P1
 > Source evidence: OpenAI model pricing documentation; DeepSeek Models &
 > Pricing and Context Caching documentation; piko product decision
+>
+> Billing extensibility and the open component representation are specified by
+> [F-29](F-29-provider-pluggable-billing.md).
 
 ## Summary
 

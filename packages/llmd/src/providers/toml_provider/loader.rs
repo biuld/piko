@@ -245,7 +245,10 @@ fn validate_unambiguous(
     Ok(())
 }
 
-fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
+fn build_provider(
+    parsed: ProviderToml,
+    billing: &crate::billing::BillingRegistry,
+) -> Result<TomlProvider, String> {
     let surfaces = parsed
         .api_surfaces
         .into_iter()
@@ -295,13 +298,14 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
         .iter()
         .map(|(id, model)| (id.clone(), private_reasoning_map(model)))
         .collect();
-    let pricing = super::pricing::build_pricing(
+    let billing = super::pricing::build_pricing(
         parsed
             .models
             .iter()
             .map(|(id, model)| (id.clone(), model.pricing.clone()))
             .collect(),
         &surfaces,
+        billing,
     )?;
     let models = parse_models(parsed.models);
 
@@ -310,7 +314,7 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
         .with_default_targets(defaults)
         .with_models(models)
         .with_reasoning_effort_maps(reasoning_effort_maps)
-        .with_pricing(pricing)
+        .with_billing(billing)
         .with_model_targets(model_targets))
 }
 
@@ -318,12 +322,13 @@ fn build_provider(parsed: ProviderToml) -> Result<TomlProvider, String> {
 
 /// Load all built-in providers from embedded TOML catalogs.
 pub fn load_builtin_providers() -> Vec<TomlProvider> {
+    let billing = crate::billing::BillingRegistry::standard();
     BUILTIN_PROVIDERS
         .iter()
         .filter_map(|(id, toml)| {
             parse_provider_toml(toml)
                 .ok()
-                .and_then(|parsed| build_provider(parsed).ok())
+                .and_then(|parsed| build_provider(parsed, &billing).ok())
                 .or_else(|| {
                     tracing::warn!("Failed to load built-in provider: {id}");
                     None
@@ -341,8 +346,17 @@ pub fn load_provider_from_path(path: &Path) -> Result<TomlProvider, String> {
 
 /// Load a provider from a TOML string.
 pub fn load_provider_from_toml(toml_str: &str) -> Result<TomlProvider, String> {
+    let billing = crate::billing::BillingRegistry::standard();
+    load_provider_from_toml_with_billing(toml_str, &billing)
+}
+
+/// Load a provider using the same billing plugins that will execute its plans.
+pub fn load_provider_from_toml_with_billing(
+    toml_str: &str,
+    billing: &crate::billing::BillingRegistry,
+) -> Result<TomlProvider, String> {
     let parsed = parse_provider_toml(toml_str)?;
-    build_provider(parsed)
+    build_provider(parsed, billing)
 }
 
 #[cfg(test)]
@@ -361,7 +375,7 @@ mod tests {
             .map(|(_, toml)| *toml)
             .ok_or_else(|| format!("No built-in provider: {provider_id}"))?;
         let parsed = parse_provider_toml(toml_str)?;
-        build_provider(parsed)
+        build_provider(parsed, &crate::billing::BillingRegistry::standard())
     }
 
     #[test]

@@ -51,6 +51,7 @@ mod observation_projection_tests {
                 cache_read: 3_000,
                 cache_write: 0,
                 total_tokens: 13_100,
+                units: Default::default(),
                 cost: Default::default(),
             }),
             turn_usage: Some(crate::messages::Usage {
@@ -59,6 +60,7 @@ mod observation_projection_tests {
                 cache_read: 3_000,
                 cache_write: 0,
                 total_tokens: 13_100,
+                units: Default::default(),
                 cost: Default::default(),
             }),
             timestamp: 42,

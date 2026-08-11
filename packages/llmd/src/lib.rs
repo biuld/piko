@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod billing;
 pub mod capabilities;
 mod checkpoint;
 mod collector;
@@ -36,11 +37,25 @@ pub fn build_gateway_with_telemetry(
     retry: RetryConfig,
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
 ) -> Arc<dyn crate::gateway::InferenceGateway> {
+    build_gateway_with_billing(
+        targets,
+        retry,
+        telemetry,
+        Arc::new(billing::BillingRegistry::standard()),
+    )
+}
+
+pub fn build_gateway_with_billing(
+    targets: HashMap<String, target::ModelTargetConfig>,
+    retry: RetryConfig,
+    telemetry: Arc<dyn telemetry::GatewayTelemetry>,
+    billing: Arc<billing::BillingRegistry>,
+) -> Arc<dyn crate::gateway::InferenceGateway> {
     let exec = executor::LlmdExecutor::from_targets(targets)
         .with_retry(retry)
         .with_telemetry(telemetry)
         .add_middleware(Arc::new(
-            middleware::cost_tracker::CostTrackerMiddleware::new(),
+            middleware::cost_tracker::CostTrackerMiddleware::with_registry(billing),
         ))
         .add_middleware(Arc::new(
             middleware::token_usage::TokenUsageMiddleware::new(),
@@ -55,12 +70,28 @@ pub fn build_gateway_with_auth(
     telemetry: Arc<dyn telemetry::GatewayTelemetry>,
     auth_resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
 ) -> Arc<dyn crate::gateway::InferenceGateway> {
+    build_gateway_with_auth_and_billing(
+        targets,
+        retry,
+        telemetry,
+        auth_resolver,
+        Arc::new(billing::BillingRegistry::standard()),
+    )
+}
+
+pub fn build_gateway_with_auth_and_billing(
+    targets: HashMap<String, target::ModelTargetConfig>,
+    retry: RetryConfig,
+    telemetry: Arc<dyn telemetry::GatewayTelemetry>,
+    auth_resolver: Arc<dyn crate::providers::RuntimeAuthResolver>,
+    billing: Arc<billing::BillingRegistry>,
+) -> Arc<dyn crate::gateway::InferenceGateway> {
     let exec = executor::LlmdExecutor::from_targets(targets)
         .with_auth_resolver(auth_resolver)
         .with_retry(retry)
         .with_telemetry(telemetry)
         .add_middleware(Arc::new(
-            middleware::cost_tracker::CostTrackerMiddleware::new(),
+            middleware::cost_tracker::CostTrackerMiddleware::with_registry(billing),
         ))
         .add_middleware(Arc::new(
             middleware::token_usage::TokenUsageMiddleware::new(),

@@ -4,7 +4,7 @@ use piko_protocol::model::ProviderAuthMethod;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::gateway::{ErrorClass, InferenceError, InferenceRequest};
-use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy, TokenPricing};
+use crate::modeling::{BillingPlan, ProtocolProfile, ResponsesContinuationPolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
@@ -44,7 +44,7 @@ pub struct ModelTargetConfig {
     pub streaming_fallback: bool,
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
-    pub pricing: Option<TokenPricing>,
+    pub billing: Option<BillingPlan>,
 }
 
 impl ModelTargetConfig {
@@ -65,7 +65,7 @@ impl ModelTargetConfig {
             headers: None,
             streaming_fallback: true,
             reasoning_effort_map: Default::default(),
-            pricing: None,
+            billing: None,
         }
     }
 }
@@ -116,7 +116,7 @@ pub struct ModelTarget {
     pub streaming_fallback: bool,
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
-    pub pricing: Option<TokenPricing>,
+    pub billing: Option<BillingPlan>,
 }
 
 impl ModelTarget {
@@ -228,7 +228,7 @@ impl ModelTarget {
                 .unwrap_or_default(),
             streaming_fallback: config.streaming_fallback,
             reasoning_effort_map: config.reasoning_effort_map.clone(),
-            pricing: config.pricing.clone(),
+            billing: config.billing.clone(),
         })
     }
 

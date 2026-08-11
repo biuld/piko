@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -11,10 +12,7 @@ pub struct UsageCost {
 pub struct UsageCostEntry {
     pub currency: String,
     pub basis: UsageCostBasis,
-    pub input: f64,
-    pub output: f64,
-    pub cache_read: f64,
-    pub cache_write: f64,
+    pub components: BTreeMap<String, f64>,
     pub total: f64,
 }
 
@@ -42,11 +40,10 @@ impl UsageCost {
                 .iter_mut()
                 .find(|entry| entry.currency == incoming.currency && entry.basis == incoming.basis)
             {
-                existing.input += incoming.input;
-                existing.output += incoming.output;
-                existing.cache_read += incoming.cache_read;
-                existing.cache_write += incoming.cache_write;
-                existing.total += incoming.total;
+                for (name, amount) in &incoming.components {
+                    *existing.components.entry(name.clone()).or_default() += amount;
+                }
+                existing.total = existing.components.values().sum();
             } else {
                 self.entries.push(incoming.clone());
             }

@@ -21,7 +21,7 @@ pub struct TomlProvider {
     models: Vec<ModelSummary>,
     reasoning_effort_maps:
         HashMap<String, std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>>,
-    pricing: HashMap<String, HashMap<String, crate::modeling::TokenPricing>>,
+    billing: HashMap<String, HashMap<String, crate::modeling::BillingPlan>>,
 }
 
 impl TomlProvider {
@@ -33,7 +33,7 @@ impl TomlProvider {
             model_targets: HashMap::new(),
             models: Vec::new(),
             reasoning_effort_maps: HashMap::new(),
-            pricing: HashMap::new(),
+            billing: HashMap::new(),
         }
     }
 
@@ -58,11 +58,11 @@ impl TomlProvider {
         self
     }
 
-    pub fn with_pricing(
+    pub fn with_billing(
         mut self,
-        pricing: HashMap<String, HashMap<String, crate::modeling::TokenPricing>>,
+        billing: HashMap<String, HashMap<String, crate::modeling::BillingPlan>>,
     ) -> Self {
-        self.pricing = pricing;
+        self.billing = billing;
         self
     }
 
@@ -87,6 +87,13 @@ impl TomlProvider {
     /// Load from a TOML string.
     pub fn from_toml_str(toml: &str) -> Result<Self, String> {
         loader::load_provider_from_toml(toml)
+    }
+
+    pub fn from_toml_str_with_billing(
+        toml: &str,
+        billing: &crate::billing::BillingRegistry,
+    ) -> Result<Self, String> {
+        loader::load_provider_from_toml_with_billing(toml, billing)
     }
 }
 
@@ -118,10 +125,10 @@ impl Provider for TomlProvider {
             auth_method,
             base_url: surface.base_url.clone(),
             protocol: profile.protocol,
-            pricing: self
-                .pricing
+            billing: self
+                .billing
                 .get(model_id)
-                .and_then(|pricing| pricing.get(&surface.id))
+                .and_then(|billing| billing.get(&surface.id))
                 .cloned(),
             reasoning_effort_map: self
                 .reasoning_effort_maps

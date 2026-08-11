@@ -12,10 +12,7 @@ fn test_cost(total: f64) -> piko_protocol::messages::UsageCost {
         entries: vec![piko_protocol::messages::UsageCostEntry {
             currency: "USD".into(),
             basis: piko_protocol::messages::UsageCostBasis::ListPrice,
-            input: total,
-            output: 0.0,
-            cache_read: 0.0,
-            cache_write: 0.0,
+            components: [("input_tokens".into(), total)].into(),
             total,
         }],
     }
@@ -134,6 +131,7 @@ fn turn_completed_does_not_roll_usage_chrome() {
         cache_read: 3_000,
         cache_write: 0,
         total_tokens: 13_100,
+        units: Default::default(),
         cost: test_cost(0.01),
     };
     let (state, _) = host(
@@ -171,6 +169,7 @@ fn usage_updated_event_is_authoritative_for_chrome() {
                 cache_read: 0,
                 cache_write: 0,
                 total_tokens: 1_010,
+                units: Default::default(),
                 cost: Default::default(),
             },
             timestamp: 1,
@@ -188,6 +187,7 @@ fn usage_updated_event_is_authoritative_for_chrome() {
         cache_read: 10_000,
         cache_write: 0,
         total_tokens: 62_000,
+        units: Default::default(),
         cost: test_cost(1.25),
     };
     let (state, _) = host(
