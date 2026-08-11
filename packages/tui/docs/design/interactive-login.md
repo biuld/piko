@@ -97,8 +97,9 @@ In `packages/tui/src/app/slash.rs` and `packages/tui/src/app/dispatch.rs`, the `
 1. Send a `Command::ModelList` request to `hostd` to ensure we have the latest provider list.
 2. Open the `AuthSelector` panel in `AppMode::AuthSelector`.
 3. If `/login <provider>` is explicitly typed (e.g. `/login openai`), it will immediately trigger `Command::AuthLoginOAuth` for that provider, bypassing the menu.
-4. `/login-device <provider>` requests the explicit headless device-code mode;
-   `/login-cancel <provider>` cancels either active mode.
+4. `/login` remains the only login slash command. Device-code login and login
+   cancellation remain lower-level host capabilities and are not projected as
+   separate TUI commands.
 
 ### 5. Browser side effect
 

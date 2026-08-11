@@ -19,7 +19,6 @@ impl AppState {
                 self.status = "creating session".to_string();
             }
             SlashAction::Fork(entry_id) => effects.extend(self.fork_session(entry_id)),
-            SlashAction::Clone => effects.extend(self.fork_session(None)),
             SlashAction::Rename(name) => effects.extend(self.rename_session(name)),
             SlashAction::Import(path) => {
                 self.begin_session_hydration(None);
@@ -58,29 +57,6 @@ impl AppState {
                     self.push_surface(SurfaceId::AuthSelector);
                     self.status = "Select authentication method".to_string();
                 }
-            }
-            SlashAction::LoginDevice(provider_opt) => {
-                let Some(provider) = provider_opt else {
-                    self.status = "usage: /login-device <provider>".to_string();
-                    return effects;
-                };
-                effects.push(Effect::send(Command::AuthLoginOAuth {
-                    command_id: command_id(),
-                    provider: provider.clone(),
-                    mode: piko_protocol::OAuthLoginMode::DeviceCode,
-                }));
-                self.status = format!("starting {provider} device-code login");
-            }
-            SlashAction::CancelLogin(provider_opt) => {
-                let Some(provider) = provider_opt else {
-                    self.status = "usage: /login-cancel <provider>".to_string();
-                    return effects;
-                };
-                effects.push(Effect::send(Command::AuthCancelOAuth {
-                    command_id: command_id(),
-                    provider: provider.clone(),
-                }));
-                self.status = format!("cancelling {provider} login");
             }
             SlashAction::Logout(provider_opt) => {
                 let Some(provider) = provider_opt.or_else(|| self.model.active_provider.clone())

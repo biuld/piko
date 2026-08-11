@@ -22,6 +22,9 @@ It reuses `SelectableList`, `SelectableItem`, `PaneSpec`, and
 - Invalid argument forms restore the submitted text and show usage.
 - `/fork` without an entry reuses the Tree picker.
 - `/login` without a provider reuses AuthSelector.
+- The TUI projection intentionally omits `session.clone`,
+  `auth.login-device`, and `auth.cancel-login`; these host capabilities do not
+  create duplicate slash-command rows.
 - `/mcp` and `/top` reuse the standard information-pane chrome and mount through
   the shared ComposerBand budget solver. `/top` projects `process.list` and
   `process.stop` into one selectable process-management journey; stop

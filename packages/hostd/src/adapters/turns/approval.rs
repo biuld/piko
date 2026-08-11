@@ -275,10 +275,7 @@ mod tests {
     fn test_compute_path_fingerprint() {
         let cwd = std::path::Path::new("/repo");
         let edit = serde_json::json!({ "path": "src/lib.rs", "edits": [] });
-        assert_eq!(
-            compute_fingerprint("edit", &edit, cwd),
-            "edit:src/lib.rs"
-        );
+        assert_eq!(compute_fingerprint("edit", &edit, cwd), "edit:src/lib.rs");
 
         let write = serde_json::json!({ "path": "/abs/out.md", "content": "x" });
         assert_eq!(

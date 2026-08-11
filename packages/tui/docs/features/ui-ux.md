@@ -556,7 +556,7 @@ Each slash entry **must** expose:
 | Host id | Typical slash | User-visible result |
 |---------|---------------|---------------------|
 | `session.new` | `/new` | New empty session; Timeline/Agent strip rehydrate |
-| `session.fork` / `session.clone` | `/fork`, `/clone` | New session branch; view switches or status confirms |
+| `session.fork` | `/fork` | New session branch; view switches or status confirms |
 | `session.rename` | `/rename` | Name updates in session list / title surfaces |
 | `session.delete` | `/delete` | After confirm, session gone; empty or previous view |
 | `session.import` | `/import` | Imported session openable |

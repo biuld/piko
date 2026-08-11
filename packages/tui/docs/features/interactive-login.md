@@ -37,10 +37,9 @@ The selector opens as a `ComposerBand` modal over the workspace plane
 - **Browser Default**: Local OAuth emits an authorization URL and the TUI opens
   it with the platform browser. The active notice retains the URL for copying
   when browser launch is unavailable.
-- **Headless Fallback**: `/login-device <provider>` explicitly starts the
-  device-code flow and displays the verification URL and one-time code.
-- **Cancellation**: `/login-cancel <provider>` cancels that provider's active
-  browser or device-code login.
+- **Single Command Entry**: `/login` is the only login slash command. Device
+  code and cancellation remain host capabilities rather than additional TUI
+  command rows.
 
 ## Non-goals
 

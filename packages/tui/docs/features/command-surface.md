@@ -31,11 +31,14 @@ product capabilities and invocation metadata.
 
 - Presentation: sessions, tree, models, thinking, settings, status, agents,
   turn diff, prompt debug, quit.
-- Host-owned: new, fork, clone, rename, import, delete, login, logout, compact,
+- Host-owned: new, fork, rename, import, delete, login, logout, compact,
   process management, and MCP status when advertised by hostd.
+- The TUI exposes one session-copy command, `/fork`, and one authentication
+  entry command, `/login`. Lower-level host capabilities such as full-session
+  clone, device-code login, and login cancellation are not separate slash
+  commands.
 - `/top` is the single process command. It opens the process ComposerBand;
   selecting a running process and pressing Enter arms an inline stop
   confirmation, and a second Enter invokes `process.stop`.
-- `/clear` is a hidden compatibility alias for `/new`.
 - `session.export` is not advertised until hostd provides an executable wire
   command and authoritative result.

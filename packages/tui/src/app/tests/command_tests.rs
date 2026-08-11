@@ -150,6 +150,27 @@ fn command_catalog_retains_invoke_and_hides_unsupported_aliases() {
             invoke: HostCommandInvoke::Immediate,
             group: Some(HostCommandGroup::Session),
         },
+        HostCommandDescriptor {
+            id: "session.clone".into(),
+            title: "Clone session".into(),
+            detail: "Clone the current session".into(),
+            invoke: HostCommandInvoke::Immediate,
+            group: Some(HostCommandGroup::Session),
+        },
+        HostCommandDescriptor {
+            id: "auth.login-device".into(),
+            title: "Sign in with device code".into(),
+            detail: "Start headless OAuth login".into(),
+            invoke: HostCommandInvoke::Args { schema: Vec::new() },
+            group: Some(HostCommandGroup::Auth),
+        },
+        HostCommandDescriptor {
+            id: "auth.cancel-login".into(),
+            title: "Cancel sign in".into(),
+            detail: "Cancel active OAuth login".into(),
+            invoke: HostCommandInvoke::Args { schema: Vec::new() },
+            group: Some(HostCommandGroup::Auth),
+        },
     ]);
     let rename = entries
         .iter()
@@ -158,6 +179,15 @@ fn command_catalog_retains_invoke_and_hides_unsupported_aliases() {
     assert!(matches!(rename.invoke, HostCommandInvoke::Args { .. }));
     assert!(!entries.iter().any(|entry| entry.slash == "/clear"));
     assert!(!entries.iter().any(|entry| entry.slash == "/export"));
+    assert!(!entries.iter().any(|entry| entry.slash == "/clone"));
+    assert!(!entries.iter().any(|entry| entry.slash == "/login-device"));
+    assert!(!entries.iter().any(|entry| entry.slash == "/login-cancel"));
+}
+
+#[test]
+fn removed_compatibility_alias_is_not_a_command() {
+    let mut app = live_app();
+    assert!(app.try_slash_command("/clear").is_none());
 }
 
 #[test]
