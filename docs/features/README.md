@@ -46,3 +46,4 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-29 | provider-pluggable-billing | Registered usage adapters and pricing policies with open billable units and cost components | implemented (F-29/D-41/V-40/ADR-014) | piko product direction |
 | F-30 | per-agent-usage | Host-authoritative per-AgentInstance run time, token, and provider-native cost accounting; TUI `/usage` surface | implemented (F-30/D-42/V-41) | piko product direction; F-15/F-28/F-29 foundation |
 | F-31 | durable-session-journal | One host-owned append-only history with deterministic replay, branch/private-transcript ancestry, accounting facts, crash recovery, and compatible event evolution | implemented (F-31/D-43/ADR-015/V-42) | piko product direction; schema-v3 reliability review |
+| F-32 | session-bookkeeping | Host-owned incurred usage/cost ledger plus F-04 occupancy for compaction | implemented (F-32/D-44/V-43) | piko product direction; F-04/F-05/F-15/F-30 |

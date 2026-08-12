@@ -164,41 +164,6 @@ impl SessionState {
         lists
     }
 
-    /// Rebuild per-AgentInstance token/cost buckets from durable message facts.
-    pub fn agent_usage_for_snapshot(&self) -> Vec<piko_protocol::AgentUsageSummary> {
-        let mut rows = BTreeMap::<String, piko_protocol::AgentUsageSummary>::new();
-
-        for agent in self.active_agents.values() {
-            rows.entry(agent.agent_instance_id.clone())
-                .or_insert_with(|| piko_protocol::AgentUsageSummary {
-                    agent_instance_id: agent.agent_instance_id.clone(),
-                    agent_id: agent.agent_id.clone(),
-                    run_count: None,
-                    active_duration_ms: None,
-                    usage: Usage::empty(),
-                });
-        }
-
-        for (agent_instance_id, usage) in &self.agent_usage {
-            let row = rows.entry(agent_instance_id.clone()).or_insert_with(|| {
-                piko_protocol::AgentUsageSummary {
-                    agent_instance_id: agent_instance_id.clone(),
-                    agent_id: self
-                        .active_agents
-                        .get(agent_instance_id)
-                        .map(|agent| agent.agent_id.clone())
-                        .unwrap_or_else(|| agent_instance_id.clone()),
-                    run_count: None,
-                    active_duration_ms: None,
-                    usage: Usage::empty(),
-                }
-            });
-            row.usage = usage.clone();
-        }
-
-        rows.into_values().collect()
-    }
-
     /// Replace one agent's list (full replace). Empty items clear durable
     /// storage but still queue a pending projection so live clients learn
     /// about the clear.
@@ -278,29 +243,6 @@ impl SessionState {
             session_path,
             parent_session_path,
             integrity_error: None,
-        }
-    }
-
-    /// Accumulate usage from an assistant message (session roll-up).
-    pub fn accumulate_usage(&mut self, usage: &Usage) {
-        self.cumulative_usage.accumulate(usage);
-    }
-
-    /// Account one model-step usage into the product ledger.
-    ///
-    /// Always updates session `cumulative_usage`. When `turn_id` matches an
-    /// open turn record, also rolls the step into that turn's usage total.
-    pub fn account_step_usage(&mut self, turn_id: Option<&str>, usage: &Usage) {
-        self.accumulate_usage(usage);
-        let Some(turn_id) = turn_id else {
-            return;
-        };
-        if let Some(turn) = self.turns.get_mut(turn_id) {
-            self.agent_usage
-                .entry(turn.agent_instance_id.clone())
-                .or_default()
-                .accumulate(usage);
-            turn.usage.accumulate(usage);
         }
     }
 }

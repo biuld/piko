@@ -2,7 +2,7 @@
 
 use crate::api::{ContentBlock, Message, MessageContent, SessionTreeEntry};
 
-use super::tokens::estimate_tokens;
+use crate::domain::bookkeeping::estimate_entry_tokens;
 
 pub fn active_branch_entries(
     entries: &[SessionTreeEntry],
@@ -102,7 +102,7 @@ pub fn find_cut_point(
     let mut cut_index = cut_points[0];
 
     for i in (start_index..end_index).rev() {
-        let tokens = estimate_tokens(&entry_text(&entries[i]));
+        let tokens = estimate_entry_tokens(&entries[i]);
         accumulated_tokens += tokens;
 
         if accumulated_tokens >= keep_recent_tokens {

@@ -220,7 +220,8 @@ max_tokens = 1024
         )
     };
     assert_eq!(window_number, 1);
-    assert_eq!(rearm, 9_000);
+    // Two retained 12_000-byte messages at F-04: 2 × (ceil(12000/3)+16).
+    assert_eq!(rearm, 8_032);
 
     // Growth of 400 tokens past the rearm baseline (< derived 1_024
     // guard): the fixed 16_384 default would hold forever on this 8k

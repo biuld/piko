@@ -93,6 +93,7 @@ Status: **complete**.
 | F-05 compaction | automatic and inline compaction, budget windows, context tools, summarizer-model override | D-05/V-05 |
 | F-05 model defaults | resolved-model growth threshold via `min-growth-fraction` | D-18/V-18 |
 | F-15 usage accounting | durable per-step facts plus hostd turn/session ledger | D-29/V-29 |
+| F-32 session bookkeeping | hostd ledger + F-04 occupancy for compact/chrome | D-44/V-43 |
 
 Provider-side remote compaction and token-budget prompt fragments are rejected
 for this roadmap; piko-native summarization and model-visible context tools

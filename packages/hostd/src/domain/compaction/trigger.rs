@@ -2,8 +2,8 @@
 
 use super::CompactionSettings;
 use super::CompactionState;
-use super::tokens::{ContextUsageEstimate, estimate_context_tokens};
 use crate::api::SessionTreeEntry;
+use crate::domain::bookkeeping::{ContextUsageEstimate, estimate_context_tokens};
 
 /// Why an auto-compact decision held off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

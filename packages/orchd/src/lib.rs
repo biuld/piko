@@ -20,6 +20,11 @@ pub mod events {
 #[doc(hidden)]
 pub mod testing;
 pub mod tools;
+/// F-04 conservative transcript estimator. hostd bookkeeping consumes this
+/// as the single occupancy formula (F-32).
+pub mod transcript {
+    pub use crate::domain::transcript::tokens::{estimate_messages, message_tokens, text_tokens};
+}
 
 pub use api::{AgentApiError, SessionOutputStream, SessionSubscription};
 pub use piko_orchd_api;

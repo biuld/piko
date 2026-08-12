@@ -14,6 +14,9 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-44: Session bookkeeping](D-44-session-bookkeeping.md)
+  implements F-32 with a hostd domain ledger for incurred usage/cost and
+  F-04 occupancy consumed by compaction (implemented; V-43).
 - [D-43: Event-sourced session store](D-43-event-sourced-session-store.md)
   implements schema-v4 with a dedicated `piko-session-store` crate, one
   host-owned journal, deterministic reducers, durable accounting, explicit

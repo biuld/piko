@@ -5,7 +5,6 @@ mod snapshot;
 mod transcript;
 mod turn_diff;
 mod types;
-mod usage;
 
 #[cfg(test)]
 mod tests;

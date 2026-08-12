@@ -3,14 +3,16 @@
 pub mod summarizer;
 
 mod file_ops;
-mod tokens;
 mod tree;
 mod trigger;
 
+pub use crate::domain::bookkeeping::{
+    ContextOccupancy, ContextUsageEstimate, estimate_context_tokens, estimate_entry_tokens,
+    estimate_tokens,
+};
 pub use file_ops::{
     FileOperationLists, FileOperations, compute_file_lists, format_file_operations,
 };
-pub use tokens::{ContextUsageEstimate, estimate_context_tokens, estimate_tokens};
 pub use tree::{
     CutPointResult, active_branch_entries, context_entries_after_compaction, entry_role,
     entry_text, find_cut_point, find_valid_cut_points,
