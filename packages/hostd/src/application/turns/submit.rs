@@ -11,8 +11,8 @@ use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
 
 impl HostApp {
-    /// Resolve the on-disk directory backing this session's AgentInstance
-    /// shards. Sessions opened without a configured storage backend (e.g.
+    /// Resolve the on-disk directory backing this session journal. Sessions
+    /// opened without a configured storage backend (e.g.
     /// in-process test harnesses) get a lazily created ephemeral directory
     /// scoped to the process temp dir, cached in `session_paths` so repeated
     /// Turns on the same session reuse one durable store.
@@ -42,7 +42,7 @@ impl HostApp {
         if self
             .session_store_factory
             .open(&dir)
-            .load_manifest()
+            .load_projection()
             .is_err()
         {
             self.session_store_factory
@@ -111,8 +111,9 @@ impl HostApp {
         let skills = loaded_skills.skills;
         let active_model = self.active_model.lock().await.clone();
         let (previous_model, continuation) = {
-            let mut state = self.state.lock().await;
-            let previous_model = state.record_turn_model(&session_id, active_model.as_ref())?;
+            let state = self.state.lock().await;
+            let session = state.session(&session_id)?;
+            let previous_model = session.last_model.clone();
             let continuation = state
                 .session(&session_id)
                 .map(|session| !session.entries.is_empty())
@@ -138,8 +139,12 @@ impl HostApp {
             model,
         };
         let previous_world_state = if is_root {
-            let mut state = self.state.lock().await;
-            state.record_world_state(&session_id, &world_state_facts)?
+            self.state
+                .lock()
+                .await
+                .session(&session_id)?
+                .world_state_baseline
+                .clone()
         } else {
             None
         };
@@ -197,51 +202,66 @@ impl HostApp {
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
         // The world-state baseline is durable regardless of model
         // configuration: `model` is one optional fact, not a precondition.
-        if is_root && let Some(storage) = &self.storage {
-            let _ = storage.set_world_state_baseline(&session_dir, Some(&world_state_facts));
+        if is_root {
+            if let Some(storage) = &self.storage {
+                storage
+                    .set_world_state_baseline(&session_dir, Some(&world_state_facts))
+                    .map_err(storage_error)?;
+            }
+            self.state
+                .lock()
+                .await
+                .session_mut(&session_id)?
+                .world_state_baseline = Some(world_state_facts.clone());
         }
-        if let (Some(storage), Some(current)) = (&self.storage, active_model.as_ref()) {
+        if let Some(current) = active_model.as_ref() {
             let changed = previous_model
                 .as_ref()
                 .is_some_and(|previous| previous != current);
-            if changed || previous_model.is_none() {
-                let _ = storage.set_last_model(&session_dir, Some(current));
-            }
-            if changed {
-                let parent_id = {
-                    let state = self.state.lock().await;
-                    state
-                        .session(&session_id)
-                        .ok()
-                        .and_then(|session| session.current_leaf_id.clone())
-                };
-                if let Ok(entries) = storage.append_config_metadata(
-                    &session_dir,
-                    parent_id.as_deref(),
-                    Some(current.model_id.as_str()),
-                    Some(current.provider.as_str()),
-                    None,
-                    None,
-                ) {
-                    {
-                        let mut state = self.state.lock().await;
-                        for entry in &entries {
-                            let _ = state.append_entry(&session_id, entry.clone());
-                        }
-                    }
-                    for entry in entries {
-                        send_event(
-                            tx,
-                            ServerMessage::SessionEntryCommitted(
-                                piko_protocol::SessionEntryCommittedEvent {
-                                    session_id: session_id.clone(),
-                                    entry,
-                                },
-                            ),
+            let mut durable_entries = Vec::new();
+            if let Some(storage) = &self.storage {
+                if changed {
+                    let parent_id = {
+                        let state = self.state.lock().await;
+                        state
+                            .session(&session_id)
+                            .ok()
+                            .and_then(|session| session.current_leaf_id.clone())
+                    };
+                    durable_entries = storage
+                        .append_config_metadata(
+                            &session_dir,
+                            parent_id.as_deref(),
+                            Some(current.model_id.as_str()),
+                            Some(current.provider.as_str()),
+                            None,
+                            None,
                         )
-                        .await;
-                    }
+                        .map_err(storage_error)?;
+                } else if previous_model.is_none() {
+                    storage
+                        .set_last_model(&session_dir, Some(current))
+                        .map_err(storage_error)?;
                 }
+            }
+            {
+                let mut state = self.state.lock().await;
+                state.session_mut(&session_id)?.last_model = Some(current.clone());
+                for entry in &durable_entries {
+                    state.append_entry(&session_id, entry.clone())?;
+                }
+            }
+            for entry in durable_entries {
+                send_event(
+                    tx,
+                    ServerMessage::SessionEntryCommitted(
+                        piko_protocol::SessionEntryCommittedEvent {
+                            session_id: session_id.clone(),
+                            entry,
+                        },
+                    ),
+                )
+                .await;
             }
         }
         let resume_agent = if agent_instance_id == root_agent_instance_id {

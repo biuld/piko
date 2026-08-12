@@ -1,14 +1,18 @@
 //! Pure session-tree transcript projection helpers.
 
 use crate::api::{Message, MessageContent, SessionTreeEntry};
-use crate::domain::compaction::context_entries_after_compaction;
+use crate::domain::compaction::{active_branch_entries, context_entries_after_compaction};
 
 /// Build ordered protocol messages from all session-tree message entries.
 ///
-/// Used when each Turn uses a distinct Execution shard: model context must
-/// span the whole conversation, not a single shard.
-pub fn transcript_messages_from_session_entries(entries: &[SessionTreeEntry]) -> Vec<Message> {
-    context_entries_after_compaction(entries)
+/// Model context spans the selected session branch rather than physical
+/// commit order.
+pub fn transcript_messages_from_session_entries(
+    entries: &[SessionTreeEntry],
+    selected_entry_id: Option<&str>,
+) -> Vec<Message> {
+    let branch = active_branch_entries(entries, selected_entry_id);
+    context_entries_after_compaction(&branch)
         .iter()
         .filter_map(|entry| match entry {
             SessionTreeEntry::Message(message) => Some(message.message.clone()),
@@ -62,7 +66,7 @@ mod tests {
             }),
         ];
 
-        let transcript = transcript_messages_from_session_entries(&entries);
+        let transcript = transcript_messages_from_session_entries(&entries, Some("compact"));
         assert_eq!(transcript.len(), 2);
         assert!(matches!(
             &transcript[0],

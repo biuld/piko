@@ -112,3 +112,34 @@ fn turn_completion_never_synthesizes_execution_observation() {
     assert!(!run.contains("ExecutionObservationSnapshot"));
     assert!(!run.contains("let execution_id = turn_id"));
 }
+
+#[test]
+fn production_session_storage_has_no_v3_or_mutable_manifest_path() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "src/infra/storage/jsonl_io.rs",
+        "src/infra/storage/session_store/manifest.rs",
+        "src/infra/storage/session_store/io.rs",
+        "src/infra/storage/session_store/create.rs",
+        "src/infra/storage/session_store/commit",
+    ] {
+        assert!(
+            !root.join(relative).exists(),
+            "legacy storage remains: {relative}"
+        );
+    }
+    let mut pending = vec![root.join("src/infra/storage/session_store")];
+    while let Some(path) = pending.pop() {
+        for entry in std::fs::read_dir(path).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+                let source = std::fs::read_to_string(&path).unwrap();
+                assert!(!source.contains("update_manifest"));
+                assert!(!source.contains("load_manifest"));
+                assert!(!source.contains("AgentShardHeader"));
+            }
+        }
+    }
+}

@@ -424,6 +424,7 @@ fn upsert_created_session(list: &mut SessionListProjection, session_id: &str, cw
             modified_at: None,
             session_path: None,
             parent_session_path: None,
+            integrity_error: None,
         },
     );
 }

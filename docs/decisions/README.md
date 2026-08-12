@@ -23,3 +23,4 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-012](ADR-012-local-model-catalog-authority.md) | Keep executable model catalogs locally authoritative | accepted |
 | [ADR-013](ADR-013-provider-native-cost-ledger.md) | Preserve provider-native currencies in a typed cost ledger | accepted |
 | [ADR-014](ADR-014-registered-billing-policies.md) | Use registered billing adapters and policies | accepted |
+| [ADR-015](ADR-015-host-owned-session-journal.md) | Use a host-owned canonical session journal in a dedicated session-store crate | accepted |

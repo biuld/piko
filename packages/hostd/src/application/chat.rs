@@ -16,12 +16,12 @@ impl HostApp {
     ) -> Result<(), ProtocolError> {
         let cwd = self.state.lock().await.session_cwd(&session_id)?;
         let session_dir = self.ensure_turn_session_dir(&session_id, &cwd).await?;
-        let manifest = self
+        let projection = self
             .session_store_factory
             .open(&session_dir)
-            .load_manifest()
+            .load_projection()
             .map_err(storage_error)?;
-        let target = manifest
+        let target = projection
             .agents
             .get(&target_agent_instance_id)
             .ok_or_else(|| {

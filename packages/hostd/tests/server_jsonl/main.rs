@@ -152,9 +152,18 @@ impl AgentRunRunner for AssistantRunner {
 
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let agent_instance_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
+        let agent_spec_id = store
+            .load_projection()
+            .unwrap()
+            .agents
+            .get(&agent_instance_id)
+            .expect("run agent must be durable")
+            .identity
+            .agent_spec_id
+            .clone();
 
         store
             .commit_message(
@@ -165,13 +174,14 @@ impl AgentRunRunner for AssistantRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt),
                         timestamp: Some(1),
                     },
                     committed_at: 1,
                 },
-                "agent-1",
+                &agent_spec_id,
             )
             .unwrap();
         let assistant_message = Message::Assistant {
@@ -195,10 +205,11 @@ impl AgentRunRunner for AssistantRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
                     parent_message_id: Some("user-1".into()),
+                    tree_parent_entry_id: None,
                     message: assistant_message,
                     committed_at: 3,
                 },
-                "agent-1",
+                &agent_spec_id,
             )
             .unwrap();
 
@@ -271,18 +282,30 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let agent_instance_id = if turn == 0 {
-            let id = input.operation_id.clone();
+            let id = input.agent_instance_id.clone();
             *self.root_agent_instance_id.lock().unwrap() = Some(id.clone());
             id
         } else {
-            self.root_agent_instance_id
+            let recovered = self
+                .root_agent_instance_id
                 .lock()
                 .unwrap()
                 .clone()
-                .expect("root agent instance id")
+                .expect("root agent instance id");
+            assert_eq!(recovered, input.agent_instance_id);
+            recovered
         };
         let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
+        let agent_spec_id = store
+            .load_projection()
+            .unwrap()
+            .agents
+            .get(&agent_instance_id)
+            .expect("run agent must be durable")
+            .identity
+            .agent_spec_id
+            .clone();
 
         let user_message_id: String = if turn == 0 {
             "user-1".into()
@@ -302,13 +325,14 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                     } else {
                         Some("assistant-1".into())
                     },
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt),
                         timestamp: Some(1),
                     },
                     committed_at: 1,
                 },
-                "agent-1",
+                &agent_spec_id,
             )
             .unwrap();
 
@@ -342,10 +366,11 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_message_id.clone(),
                     parent_message_id: Some(user_message_id.clone()),
+                    tree_parent_entry_id: None,
                     message: assistant_message,
                     committed_at: 3,
                 },
-                "agent-1",
+                &agent_spec_id,
             )
             .unwrap();
 
@@ -420,7 +445,7 @@ impl AgentRunRunner for WaitingApprovalRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let started = self.started.clone();
         let finish = self.finish.clone();
-        let agent_instance_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let publisher_task = Arc::clone(&publisher);
         let barrier = piko_protocol::agent_runtime::SessionCursor {
             epoch: subscription.cursor.epoch.clone(),

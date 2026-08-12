@@ -1,0 +1,483 @@
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions as FsOpenOptions};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+use piko_protocol::AgentInstanceIdentity;
+use serde::{Deserialize, Serialize};
+
+use crate::error::io_error;
+use crate::journal_io::{atomic_json, checksum, proposal_matches, sync_dir};
+use crate::replay::read_all;
+use crate::schema::{EventData, RawEvent};
+use crate::segments::{
+    append_line, create_open_segment, normalize_segment_boundary, open_path, segment_start,
+};
+use crate::{COMMITS_PER_SEGMENT, Result, SCHEMA_VERSION, SessionAggregate, StoreError};
+
+#[derive(Debug, Clone)]
+pub struct NewSession {
+    pub session_id: String,
+    pub cwd: String,
+    pub created_at: i64,
+    pub root: AgentInstanceIdentity,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OpenOptions {
+    pub repair_incomplete_tail: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self {
+            repair_incomplete_tail: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProposedCommit {
+    pub commit_id: String,
+    pub committed_at: i64,
+    pub causation_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub events: Vec<RawEvent>,
+    pub extensions: BTreeMap<String, serde_json::Value>,
+}
+
+impl ProposedCommit {
+    pub fn one(commit_id: impl Into<String>, committed_at: i64, event: RawEvent) -> Self {
+        Self {
+            commit_id: commit_id.into(),
+            committed_at,
+            causation_id: None,
+            correlation_id: None,
+            events: vec![event],
+            extensions: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DurableCommit {
+    pub schema_version: u32,
+    pub session_id: String,
+    pub journal_generation: String,
+    pub revision: u64,
+    pub commit_id: String,
+    pub committed_at: i64,
+    pub producer: Producer,
+    pub causation_id: Option<String>,
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub previous_checksum: Option<String>,
+    pub events: Vec<RawEvent>,
+    #[serde(default)]
+    pub extensions: BTreeMap<String, serde_json::Value>,
+    pub checksum: Checksum,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Producer {
+    pub component: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Checksum {
+    pub algorithm: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionIdentityFile {
+    schema_version: u32,
+    session_id: String,
+    cwd: String,
+    created_at: i64,
+    journal_generation: String,
+    #[serde(default)]
+    extensions: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecoveryReport {
+    pub repaired: bool,
+    pub truncated_bytes: u64,
+    pub last_verified_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionDescriptor {
+    pub session_id: String,
+    pub cwd: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug)]
+pub struct OpenedSession {
+    pub store: SessionStore,
+    pub aggregate: SessionAggregate,
+    pub recovery: RecoveryReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationReport {
+    pub revision: u64,
+    pub segment_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionStore {
+    pub(crate) inner: Arc<SessionStoreInner>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SessionStoreInner {
+    pub(crate) path: PathBuf,
+    pub(crate) session_id: String,
+    pub(crate) journal_generation: String,
+    _lock: File,
+    pub(crate) aggregate: Mutex<SessionAggregate>,
+    last_checksum: Mutex<Option<String>>,
+}
+
+static OPEN_STORES: OnceLock<Mutex<BTreeMap<PathBuf, Weak<SessionStoreInner>>>> = OnceLock::new();
+
+impl SessionStore {
+    pub fn inspect(path: &Path) -> Result<SessionDescriptor> {
+        let identity_path = path.join("session.json");
+        let data = fs::read(&identity_path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                StoreError::NotFound(path.to_path_buf())
+            } else {
+                io_error(&identity_path, source)
+            }
+        })?;
+        let identity: SessionIdentityFile =
+            serde_json::from_slice(&data).map_err(|source| StoreError::Json {
+                path: identity_path,
+                source,
+            })?;
+        if identity.schema_version != SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedSchema {
+                found: identity.schema_version,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        Ok(SessionDescriptor {
+            session_id: identity.session_id,
+            cwd: identity.cwd,
+            created_at: identity.created_at,
+        })
+    }
+
+    pub fn create(path: &Path, session: NewSession) -> Result<OpenedSession> {
+        match fs::create_dir(path) {
+            Ok(()) => {}
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                let mut entries = fs::read_dir(path).map_err(|source| io_error(path, source))?;
+                if entries.next().is_some() {
+                    return Err(StoreError::InvalidEvent(format!(
+                        "session directory is not empty: {}",
+                        path.display()
+                    )));
+                }
+            }
+            Err(source) => return Err(io_error(path, source)),
+        }
+        fs::create_dir(path.join("events")).map_err(|source| io_error(path, source))?;
+        fs::create_dir(path.join("snapshots")).map_err(|source| io_error(path, source))?;
+        let identity = SessionIdentityFile {
+            schema_version: SCHEMA_VERSION,
+            session_id: session.session_id.clone(),
+            cwd: session.cwd.clone(),
+            created_at: session.created_at,
+            journal_generation: uuid::Uuid::new_v4().to_string(),
+            extensions: BTreeMap::new(),
+        };
+        atomic_json(&path.join("session.json"), &identity)?;
+        create_open_segment(path, 1)?;
+        sync_dir(path)?;
+        let opened = Self::open(path, OpenOptions::default())?;
+        let event = RawEvent::new(
+            uuid::Uuid::new_v4().to_string(),
+            EventData::SessionCreated {
+                session_id: session.session_id,
+                cwd: session.cwd,
+                root: session.root,
+                created_at: session.created_at,
+            },
+        )?;
+        let committed = opened.store.append(
+            0,
+            ProposedCommit::one(uuid::Uuid::new_v4().to_string(), session.created_at, event),
+        )?;
+        let mut aggregate = SessionAggregate::default();
+        aggregate.apply(&committed)?;
+        Ok(OpenedSession {
+            store: opened.store,
+            aggregate,
+            recovery: opened.recovery,
+        })
+    }
+
+    pub fn open(path: &Path, options: OpenOptions) -> Result<OpenedSession> {
+        let path = path
+            .canonicalize()
+            .map_err(|source| io_error(path, source))?;
+        let identity_path = path.join("session.json");
+        let identity_data = fs::read(&identity_path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                StoreError::NotFound(path.to_path_buf())
+            } else {
+                io_error(&identity_path, source)
+            }
+        })?;
+        let identity: SessionIdentityFile =
+            serde_json::from_slice(&identity_data).map_err(|source| StoreError::Json {
+                path: identity_path,
+                source,
+            })?;
+        if identity.schema_version != SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedSchema {
+                found: identity.schema_version,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        // Serialize same-process open through lock acquisition and replay.
+        let mut registry = open_stores()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(inner) = registry.get(&path).and_then(Weak::upgrade) {
+            let store = Self { inner };
+            return Ok(OpenedSession {
+                aggregate: store.aggregate(),
+                store,
+                recovery: RecoveryReport::default(),
+            });
+        }
+        let lock_path = path.join("writer.lock");
+        let lock = FsOpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|source| io_error(&lock_path, source))?;
+        lock.try_lock().map_err(|source| match source {
+            std::fs::TryLockError::WouldBlock => StoreError::WriterLocked(lock_path.clone()),
+            std::fs::TryLockError::Error(source) => io_error(&lock_path, source),
+        })?;
+        let (commits, recovery, _) = read_all(&path, options.repair_incomplete_tail)?;
+        let last_checksum = commits.last().map(|commit| commit.checksum.value.clone());
+        if commits.iter().any(|commit| {
+            commit.session_id != identity.session_id
+                || commit.journal_generation != identity.journal_generation
+        }) {
+            return Err(StoreError::InvalidEvent(
+                "journal identity/generation mismatch".into(),
+            ));
+        }
+        let mut aggregate = crate::snapshot::load_for_replay(
+            &path,
+            &identity.session_id,
+            &identity.journal_generation,
+        )
+        .filter(|snapshot| {
+            commits
+                .get(snapshot.aggregate.revision.saturating_sub(1) as usize)
+                .is_some_and(|commit| {
+                    commit.revision == snapshot.aggregate.revision
+                        && commit.checksum.value == snapshot.through_commit_checksum
+                })
+        })
+        .map(|snapshot| snapshot.aggregate)
+        .unwrap_or_default();
+        let snapshot_revision = aggregate.revision;
+        for commit in commits
+            .iter()
+            .filter(|commit| commit.revision > snapshot_revision)
+        {
+            aggregate.apply(commit)?;
+        }
+        if aggregate.revision > 0
+            && (aggregate.session_id.as_deref() != Some(identity.session_id.as_str())
+                || aggregate.cwd.as_deref() != Some(identity.cwd.as_str()))
+        {
+            return Err(StoreError::InvalidEvent(
+                "journal aggregate does not match session identity".into(),
+            ));
+        }
+        normalize_segment_boundary(&path, aggregate.revision)?;
+        let boundary_revision = (aggregate.revision / COMMITS_PER_SEGMENT) * COMMITS_PER_SEGMENT;
+        let boundary_snapshot = if boundary_revision == 0 {
+            None
+        } else {
+            let boundary_checksum = commits[(boundary_revision - 1) as usize]
+                .checksum
+                .value
+                .clone();
+            if crate::snapshot::valid_boundary(
+                &path,
+                &identity.session_id,
+                &identity.journal_generation,
+                boundary_revision,
+                &boundary_checksum,
+            ) {
+                None
+            } else {
+                let boundary_aggregate = if aggregate.revision == boundary_revision {
+                    aggregate.clone()
+                } else {
+                    let mut rebuilt = SessionAggregate::default();
+                    for commit in commits.iter().take(boundary_revision as usize) {
+                        rebuilt.apply(commit)?;
+                    }
+                    rebuilt
+                };
+                Some((boundary_aggregate, boundary_checksum))
+            }
+        };
+        let inner = Arc::new(SessionStoreInner {
+            path: path.clone(),
+            session_id: identity.session_id,
+            journal_generation: identity.journal_generation,
+            _lock: lock,
+            aggregate: Mutex::new(aggregate.clone()),
+            last_checksum: Mutex::new(last_checksum),
+        });
+        registry.insert(path, Arc::downgrade(&inner));
+        if let Some((boundary_aggregate, checksum)) = boundary_snapshot {
+            crate::snapshot::schedule(
+                inner.path.clone(),
+                inner.session_id.clone(),
+                inner.journal_generation.clone(),
+                boundary_aggregate,
+                checksum,
+            );
+        }
+        Ok(OpenedSession {
+            store: Self { inner },
+            aggregate,
+            recovery,
+        })
+    }
+
+    pub fn append(
+        &self,
+        expected_revision: u64,
+        proposed: ProposedCommit,
+    ) -> Result<DurableCommit> {
+        let mut aggregate = self
+            .inner
+            .aggregate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(revision) = aggregate.commit_revision(&proposed.commit_id) {
+            if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
+                normalize_segment_boundary(&self.inner.path, revision)?;
+            }
+            let existing = self.commit_at(revision)?;
+            if proposal_matches(&proposed, &existing) {
+                if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
+                    crate::snapshot::schedule(
+                        self.inner.path.clone(),
+                        self.inner.session_id.clone(),
+                        self.inner.journal_generation.clone(),
+                        aggregate.clone(),
+                        existing.checksum.value.clone(),
+                    );
+                }
+                return Ok(existing);
+            }
+            return Err(StoreError::IdempotencyConflict(proposed.commit_id));
+        }
+        if expected_revision != aggregate.revision {
+            return Err(StoreError::RevisionConflict {
+                expected: expected_revision,
+                current: aggregate.revision,
+            });
+        }
+        if proposed.events.is_empty() {
+            return Err(StoreError::InvalidEvent("commit has no events".into()));
+        }
+        let revision = expected_revision + 1;
+        let previous_checksum = self
+            .inner
+            .last_checksum
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let mut commit = DurableCommit {
+            schema_version: SCHEMA_VERSION,
+            session_id: self.inner.session_id.clone(),
+            journal_generation: self.inner.journal_generation.clone(),
+            revision,
+            commit_id: proposed.commit_id,
+            committed_at: proposed.committed_at,
+            producer: Producer {
+                component: "hostd".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            causation_id: proposed.causation_id,
+            correlation_id: proposed.correlation_id,
+            previous_checksum,
+            events: proposed.events,
+            extensions: proposed.extensions,
+            checksum: Checksum {
+                algorithm: "crc32".into(),
+                value: String::new(),
+            },
+        };
+        commit.checksum.value = checksum(&commit)?;
+        let mut preflight = aggregate.clone();
+        preflight.apply(&commit)?;
+        append_line(&self.open_segment_path(revision), &commit)?;
+        // The commit is authoritative once append+sync succeeds. Record it in
+        // memory before rollover so an unacknowledged rollover failure retries
+        // idempotently instead of appending the same revision twice.
+        *aggregate = preflight;
+        *self
+            .inner
+            .last_checksum
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(commit.checksum.value.clone());
+        if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
+            self.roll_segment(revision)?;
+            crate::snapshot::schedule(
+                self.inner.path.clone(),
+                self.inner.session_id.clone(),
+                self.inner.journal_generation.clone(),
+                aggregate.clone(),
+                commit.checksum.value.clone(),
+            );
+        }
+        Ok(commit)
+    }
+
+    fn open_segment_path(&self, revision: u64) -> PathBuf {
+        open_path(&self.inner.path, revision)
+    }
+
+    fn roll_segment(&self, revision: u64) -> Result<()> {
+        let start = segment_start(revision);
+        let open = self.open_segment_path(revision);
+        let closed = self
+            .inner
+            .path
+            .join("events")
+            .join(format!("{start:020}-{revision:020}.jsonl"));
+        fs::rename(&open, &closed).map_err(|source| io_error(&open, source))?;
+        sync_dir(&self.inner.path.join("events"))?;
+        create_open_segment(&self.inner.path, revision + 1)
+    }
+}
+
+fn open_stores() -> &'static Mutex<BTreeMap<PathBuf, Weak<SessionStoreInner>>> {
+    OPEN_STORES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}

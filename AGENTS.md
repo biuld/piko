@@ -86,15 +86,19 @@ header; a landed PRD supersedes earlier conflicting documents.
 
 ## Session storage
 
-Schema **v3** under `~/.piko/sessions/<encoded-cwd>/<session-id>/`:
+Schema **v4** under `~/.piko/agent/sessions/<encoded-cwd>/<session-id>/`:
 
 ```text
 session.json
-agents/<agent_instance_id>.jsonl
+events/<start>-<end>.jsonl
+events/<start>-open.jsonl
+snapshots/<revision>.json
+writer.lock
 ```
 
-`session.json` holds AgentInstance metadata/inbox; transcripts are append-only
-JSONL. No migration from older layouts.
+The append-only event journal is the sole durable authority. `session.json`
+contains immutable identity only; snapshots are disposable caches aligned to
+the fixed 1,000-commit segment boundary. No migration from older layouts.
 
 ## Configuration
 

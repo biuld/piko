@@ -118,7 +118,7 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
     assert!(!second.contains("agent_instance_id:"));
     assert!(!second.contains("model:"));
 
-    // Durable baseline: the manifest keeps the last recorded facts, and a
+    // Durable baseline: the journal projection keeps the last recorded facts, and a
     // fresh host reloading the same directory restores them.
     let repo = JsonlSessionRepository::new(root);
     let loaded = repo.list(None).expect("list sessions");

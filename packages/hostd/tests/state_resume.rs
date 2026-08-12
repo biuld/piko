@@ -309,12 +309,9 @@ fn multi_step_usages_roll_up_on_turn_completed() {
     assert_eq!(usage.output, 12);
     assert_eq!(usage.total_tokens, 42);
 
-    // Rebuild from durable entries should match (ignoring turn map).
-    let session = state.session_mut(&session_id).unwrap();
-    session.cumulative_usage = Usage::empty();
-    session.rebuild_cumulative_usage_from_entries();
-    assert_eq!(session.cumulative_usage.input, 30);
-    assert_eq!(session.cumulative_usage.output, 12);
+    let agent_usage = &state.session(&session_id).unwrap().agent_usage;
+    assert_eq!(agent_usage[&agent_instance_id].input, 30);
+    assert_eq!(agent_usage[&agent_instance_id].output, 12);
 }
 
 #[test]

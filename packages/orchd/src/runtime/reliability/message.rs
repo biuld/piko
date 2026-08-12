@@ -31,6 +31,7 @@ impl MessageCommitScope {
                 agent_instance_id: identity.agent_instance_id.clone(),
                 message_id,
                 parent_message_id,
+                tree_parent_entry_id: None,
                 message,
                 committed_at: chrono::Utc::now().timestamp_millis(),
             },

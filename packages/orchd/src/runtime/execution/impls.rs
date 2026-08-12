@@ -78,6 +78,7 @@ impl AgentExecutionRuntime {
                     agent_instance_id: request.agent_instance_id.clone(),
                     message_id: piko_protocol::world_state_message_id(&request.execution_id),
                     parent_message_id: request.context.head_message_id.clone(),
+                    tree_parent_entry_id: None,
                     message: message.clone(),
                     committed_at: now_ms,
                 });
@@ -106,6 +107,7 @@ impl AgentExecutionRuntime {
                 agent_instance_id: request.agent_instance_id.clone(),
                 message_id: message_id.clone(),
                 parent_message_id: chain_parent.clone(),
+                tree_parent_entry_id: None,
                 message: message.clone(),
                 committed_at: now_ms,
             };
@@ -136,6 +138,7 @@ impl AgentExecutionRuntime {
                 agent_instance_id: request.agent_instance_id.clone(),
                 message_id: message_id.clone(),
                 parent_message_id: chain_parent.clone(),
+                tree_parent_entry_id: None,
                 message: message.clone(),
                 committed_at: now_ms,
             };
@@ -149,6 +152,7 @@ impl AgentExecutionRuntime {
             agent_instance_id: request.agent_instance_id.clone(),
             message_id: request.input_message_id.clone(),
             parent_message_id: chain_parent,
+            tree_parent_entry_id: None,
             message: piko_protocol::Message::User {
                 content: request.input.clone(),
                 timestamp: Some(now_ms),

@@ -1,0 +1,182 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+use piko_session_store::{
+    EventData, NewSession, OpenOptions, ProposedCommit, RawEvent, SessionAggregate,
+    SessionStore as Journal,
+};
+
+use crate::ports::storage_types::SessionStorageError;
+
+mod commands;
+mod fork;
+pub(crate) mod mutations;
+mod projection;
+mod reads;
+mod recovery;
+
+#[derive(Debug, Clone)]
+pub struct SessionStore {
+    session_dir: PathBuf,
+    pub(super) io: Arc<Mutex<()>>,
+    journal: Arc<Mutex<Option<Journal>>>,
+}
+
+type JournalHandle = Mutex<Option<Journal>>;
+type JournalHandleCache = Mutex<BTreeMap<PathBuf, Weak<JournalHandle>>>;
+
+fn journal_handles() -> &'static JournalHandleCache {
+    static HANDLES: OnceLock<JournalHandleCache> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+impl SessionStore {
+    pub fn new(session_dir: impl Into<PathBuf>) -> Self {
+        let session_dir = session_dir.into();
+        let io = super::serial::io_lock_for(&session_dir);
+        let journal = {
+            let mut handles = journal_handles()
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(existing) = handles.get(&session_dir).and_then(Weak::upgrade) {
+                existing
+            } else {
+                let journal = Arc::new(Mutex::new(None));
+                handles.insert(session_dir.clone(), Arc::downgrade(&journal));
+                journal
+            }
+        };
+        Self {
+            session_dir,
+            io,
+            journal,
+        }
+    }
+
+    pub fn create_session(
+        session_dir: impl Into<PathBuf>,
+        session_id: String,
+        cwd: String,
+        created_at: i64,
+    ) -> Result<Self, SessionStorageError> {
+        let store = Self::new(session_dir);
+        let root = piko_protocol::AgentInstanceIdentity {
+            session_id: session_id.clone(),
+            agent_instance_id: format!("agent_{session_id}_root"),
+            agent_spec_id: "main".into(),
+            parent_agent_instance_id: None,
+        };
+        let opened = Journal::create(
+            &store.session_dir,
+            NewSession {
+                session_id,
+                cwd,
+                created_at,
+                root,
+            },
+        )
+        .map_err(|error| store.storage_error(error))?;
+        *store
+            .journal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(opened.store);
+        Ok(store)
+    }
+
+    pub(super) fn journal(&self) -> Result<Journal, SessionStorageError> {
+        let mut cached = self
+            .journal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(journal) = cached.as_ref() {
+            return Ok(journal.clone());
+        }
+        let opened = Journal::open(&self.session_dir, OpenOptions::default())
+            .map_err(|error| self.storage_error(error))?;
+        *cached = Some(opened.store.clone());
+        Ok(opened.store)
+    }
+
+    pub(super) fn aggregate(&self) -> Result<SessionAggregate, SessionStorageError> {
+        Ok(self.journal()?.aggregate())
+    }
+
+    pub(crate) fn commit_events(
+        &self,
+        commit_id: &str,
+        committed_at: i64,
+        events: Vec<EventData>,
+    ) -> Result<u64, SessionStorageError> {
+        let journal = self.journal()?;
+        let revision = journal.aggregate().revision;
+        let raw = events
+            .into_iter()
+            .enumerate()
+            .map(|(index, event)| {
+                let index = index.to_string();
+                let event_id = piko_orchd_api::stable_internal_id(
+                    "session-event",
+                    &[commit_id, index.as_str()],
+                );
+                RawEvent::new(event_id, event).map_err(|error| self.storage_error(error))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let proposed = ProposedCommit {
+            commit_id: commit_id.to_string(),
+            committed_at,
+            causation_id: None,
+            correlation_id: None,
+            events: raw,
+            extensions: BTreeMap::new(),
+        };
+        let mut expected_revision = revision;
+        loop {
+            match journal.append(expected_revision, proposed.clone()) {
+                Ok(commit) => return Ok(commit.revision),
+                Err(piko_session_store::StoreError::RevisionConflict { current, .. }) => {
+                    expected_revision = current;
+                }
+                Err(error) => return Err(self.storage_error(error)),
+            }
+        }
+    }
+
+    fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {
+        match error {
+            piko_session_store::StoreError::NotFound(path) => {
+                SessionStorageError::NotFound(path.display().to_string())
+            }
+            piko_session_store::StoreError::Io { path, source } => {
+                SessionStorageError::Io { path, source }
+            }
+            piko_session_store::StoreError::Json { path, source } => {
+                SessionStorageError::Json { path, source }
+            }
+            other => SessionStorageError::Invalid {
+                path: self.session_dir.clone(),
+                message: other.to_string(),
+            },
+        }
+    }
+
+    pub(super) fn commit_error(error: SessionStorageError) -> piko_protocol::CommitError {
+        match &error {
+            SessionStorageError::Invalid { message, .. }
+                if message.contains("idempotency conflict") =>
+            {
+                piko_protocol::CommitError::IdempotencyConflict
+            }
+            SessionStorageError::Invalid { message, .. }
+                if message.contains("unknown") || message.contains("belongs") =>
+            {
+                piko_protocol::CommitError::IdentityMismatch
+            }
+            _ => piko_protocol::CommitError::Failed(error.to_string()),
+        }
+    }
+
+    pub(super) fn session_dir(&self) -> &Path {
+        &self.session_dir
+    }
+}

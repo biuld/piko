@@ -72,6 +72,7 @@ fn project_committed_message_reads_session_store() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::User {
                     content: MessageContent::String("second turn".into()),
                     timestamp: Some(2),
@@ -81,7 +82,6 @@ fn project_committed_message_reads_session_store() {
             "main",
         )
         .unwrap();
-
     let state = HostState::default();
     let projection = project_committed_message(
         &state,
@@ -96,7 +96,7 @@ fn project_committed_message_reads_session_store() {
 }
 
 #[test]
-fn reconciliation_rebuilds_missing_committed_projection_from_agent_shard() {
+fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
     use piko_protocol::MessageContent;
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
@@ -114,6 +114,7 @@ fn reconciliation_rebuilds_missing_committed_projection_from_agent_shard() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "message-rebuild".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::User {
                     content: MessageContent::String("durable".into()),
                     timestamp: Some(2),
@@ -155,6 +156,7 @@ fn record_committed_message_projects_into_host_state() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::User {
                     content: MessageContent::String("second turn".into()),
                     timestamp: Some(2),
@@ -212,6 +214,7 @@ fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "tool-result-1".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::ToolResult {
                     tool_call_id: "call-1".into(),
                     tool_name: Some("edit".into()),
@@ -308,6 +311,7 @@ fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
                 agent_instance_id: agent.clone(),
                 message_id: "todo-clear".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::ToolResult {
                     tool_call_id: "call-todo".into(),
                     tool_name: Some("todo_write".into()),
@@ -363,6 +367,7 @@ fn todo_write_nonempty_sets_map_and_pending() {
                 agent_instance_id: agent.clone(),
                 message_id: "todo-write-1".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::ToolResult {
                     tool_call_id: "call-todo".into(),
                     tool_name: Some("todo_write".into()),
@@ -380,6 +385,17 @@ fn todo_write_nonempty_sets_map_and_pending() {
             "main",
         )
         .unwrap();
+    assert!(
+        store
+            .load_projection()
+            .unwrap()
+            .agents
+            .get(&agent)
+            .unwrap()
+            .todo_list
+            .is_some(),
+        "todo replacement must share the message commit"
+    );
 
     let mut state = HostState::default();
     state.insert_session(crate::domain::sessions::SessionState::new(
@@ -405,36 +421,50 @@ fn todo_write_nonempty_sets_map_and_pending() {
 
 #[test]
 fn empty_clear_pending_drives_durable_none() {
-    // Simulates observation path: pending empty → set_agent_todo_list(None).
-    use crate::infra::storage::JsonlSessionRepository;
+    use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let sessions_root = temp.path();
-    let repo = JsonlSessionRepository::new(sessions_root);
-    let persisted = repo.create("/project").unwrap();
-    let session_dir = persisted.path.clone();
-    let store = SessionStore::new(&session_dir);
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
     let root = store.ensure_root_agent("main").unwrap();
     let agent = root.agent_instance_id.clone();
 
-    // Persist a non-empty list first.
-    let list = piko_protocol::TodoList {
+    let tool_result = |message_id: &str, parent_message_id: Option<&str>, todos| MessageCommit {
+        session_id: "session-1".into(),
+        source_turn_id: Some("turn-1".into()),
+        execution_id: "exec-1".into(),
         agent_instance_id: agent.clone(),
-        items: vec![piko_protocol::TodoItem {
-            id: "1".into(),
-            status: piko_protocol::TodoStatus::Pending,
-            content: "x".into(),
-            detail: None,
-        }],
-        updated_at: 1,
-        revision: 1,
+        message_id: message_id.into(),
+        parent_message_id: parent_message_id.map(str::to_string),
+        tree_parent_entry_id: None,
+        message: Message::ToolResult {
+            tool_call_id: format!("call-{message_id}"),
+            tool_name: Some("todo_write".into()),
+            content: vec![piko_protocol::ContentBlock::Text { text: "ok".into() }],
+            details: Some(serde_json::json!({ "todos": todos })),
+            is_error: Some(false),
+            timestamp: Some(2),
+        },
+        committed_at: 2,
     };
-    repo.set_agent_todo_list(&session_dir, &agent, Some(&list))
+    store
+        .commit_message(
+            tool_result(
+                "todo-1",
+                None,
+                serde_json::json!([{
+                    "id": "1",
+                    "status": "pending",
+                    "content": "x"
+                }]),
+            ),
+            "main",
+        )
         .unwrap();
     assert!(
         store
-            .load_manifest()
+            .load_projection()
             .unwrap()
             .agents
             .get(&agent)
@@ -443,11 +473,14 @@ fn empty_clear_pending_drives_durable_none() {
             .is_some()
     );
 
-    // Empty clear: same call observation makes after pending empty list.
-    repo.set_agent_todo_list(&session_dir, &agent, None)
+    store
+        .commit_message(
+            tool_result("todo-2", Some("todo-1"), serde_json::json!([])),
+            "main",
+        )
         .unwrap();
 
-    let after = store.load_manifest().unwrap();
+    let after = store.load_projection().unwrap();
     assert!(
         after.agents.get(&agent).unwrap().todo_list.is_none(),
         "empty clear must drop durable todo_list field"

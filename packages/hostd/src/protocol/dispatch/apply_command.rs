@@ -411,14 +411,6 @@ impl HostServer {
                 after_seq,
                 command_id,
             } => {
-                let (snapshot, replay) = {
-                    let mut state = self.state.lock().await;
-                    state.set_active_task(&session_id, &agent_instance_id)?;
-                    let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
-                    let replay =
-                        state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
-                    (snapshot, replay)
-                };
                 if let Some(storage) = &self.storage {
                     let session_dir = self
                         .session_paths
@@ -431,6 +423,14 @@ impl HostServer {
                         .set_selected_agent(&session_dir, &agent_instance_id, now_ms())
                         .map_err(crate::util::storage_error)?;
                 }
+                let (snapshot, replay) = {
+                    let mut state = self.state.lock().await;
+                    state.set_active_task(&session_id, &agent_instance_id)?;
+                    let snapshot = state.agent_view_snapshot(&session_id, &agent_instance_id)?;
+                    let replay =
+                        state.agent_view_replay(&session_id, &agent_instance_id, after_seq)?;
+                    (snapshot, replay)
+                };
                 let next_seq = snapshot.next_seq;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,

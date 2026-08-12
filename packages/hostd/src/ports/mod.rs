@@ -12,8 +12,8 @@ pub use prompt_materials::PromptMaterialLoader;
 pub use session_repository::SessionRepositoryPort;
 pub use session_store::{SessionStoreFactory, SessionStorePort};
 pub use storage_types::{
-    AgentExecutionManifestEntry, AgentManifestEntry, AgentShardHeader, CommittedMessage,
-    PersistedSession, RecoveredAgent, SESSION_SCHEMA_VERSION, SessionManifest, SessionStorageError,
+    AgentProjection, CommittedMessage, ExecutionProjection, PersistedSession, RecoveredAgent,
+    SessionProjection, SessionStorageError,
 };
 pub use turn_runner::{
     AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,

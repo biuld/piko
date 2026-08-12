@@ -21,6 +21,7 @@ fn linear_messages(
                     agent_instance_id: agent_instance_id.into(),
                     message_id: (*id).into(),
                     parent_message_id: parent.clone(),
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(format!("body-{id}")),
                         timestamp: Some(committed_at),
@@ -112,8 +113,8 @@ fn branch_point_fork_rejects_unknown_entry() {
     );
 }
 
-#[test]
-fn full_clone_clears_world_state_baseline_and_transient_queues() {
+#[tokio::test]
+async fn full_clone_clears_world_state_baseline_and_transient_queues() {
     let temp = tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let created = repo.create("/project").unwrap();
@@ -127,19 +128,68 @@ fn full_clone_clears_world_state_baseline_and_transient_queues() {
 
     let store = SessionStore::new(&session_dir);
     linear_messages(&store, &session_id, &root, "main", &["m1", "m2"]);
+    let mut usage = piko_protocol::Usage::empty();
+    usage.input = 11;
+    usage.output = 7;
+    usage.total_tokens = 18;
     store
-        .update_manifest(|manifest| {
-            manifest.world_state_baseline = Some(WorldStateFacts {
-                session_id: Some(session_id.clone()),
-                agent_instance_id: Some(root.clone()),
-                operation_id: Some("op-1".into()),
-                run_kind: RunKind::Continuation,
-                model: Some("gpt-test".into()),
-            });
-            manifest.agent_inbox.push(piko_protocol::AgentInboxItem {
-                report_id: "r1".into(),
+        .commit_message(
+            MessageCommit {
+                session_id: session_id.clone(),
+                source_turn_id: Some("turn-m3".into()),
+                execution_id: "exec-m3".into(),
+                agent_instance_id: root.clone(),
+                message_id: "m3".into(),
+                parent_message_id: Some("m2".into()),
+                tree_parent_entry_id: None,
+                message: Message::Assistant {
+                    content: Vec::new(),
+                    checkpoint: None,
+                    provider: "test".into(),
+                    model: "test-model".into(),
+                    usage: Some(usage),
+                    stop_reason: None,
+                    error_message: None,
+                    timestamp: Some(3),
+                },
+                committed_at: 3,
+            },
+            "main",
+        )
+        .unwrap();
+    let source = repo.load_by_path(&session_dir).unwrap();
+    assert_eq!(source.state.cumulative_usage.total_tokens, 18);
+    repo.set_world_state_baseline(
+        &session_dir,
+        Some(&WorldStateFacts {
+            session_id: Some(session_id.clone()),
+            agent_instance_id: Some(root.clone()),
+            operation_id: Some("op-1".into()),
+            run_kind: RunKind::Continuation,
+            model: Some("gpt-test".into()),
+        }),
+    )
+    .unwrap();
+    store
+        .commit_agent_command(
+            &session_id,
+            AgentDurableCommand::Create {
+                identity: AgentInstanceIdentity {
+                    session_id: session_id.clone(),
+                    agent_instance_id: "child".into(),
+                    agent_spec_id: "coder".into(),
+                    parent_agent_instance_id: Some(root.clone()),
+                },
+                spec: test_agent_spec("coder"),
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .commit_agent_command(
+            &session_id,
+            AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id: root.clone(),
-                source_agent_instance_id: "child".into(),
                 report: AgentRunReport {
                     agent_instance_id: "child".into(),
                     report_id: "r1".into(),
@@ -150,19 +200,24 @@ fn full_clone_clears_world_state_baseline_and_transient_queues() {
                     usage: Default::default(),
                     artifacts: Vec::new(),
                 },
-                committed_at: 1,
-                consumed_at: None,
-            });
-        })
+            },
+        )
+        .await
         .unwrap();
 
     let forked = repo.fork(&session_id, &session_dir, None).expect("full clone");
     let forked_store = SessionStore::new(&forked.path);
-    let forked_manifest = forked_store.load_manifest().unwrap();
-    assert!(forked_manifest.world_state_baseline.is_none());
-    assert!(forked_manifest.agent_inbox.is_empty());
-    assert!(forked_manifest.agent_executions.is_empty());
-    assert!(forked_manifest.agent_input_queue.is_empty());
+    let forked_projection = forked_store.load_projection().unwrap();
+    assert!(forked_projection.world_state_baseline.is_none());
+    assert!(forked_projection.agent_inbox.is_empty());
+    assert!(forked_projection.agent_executions.is_empty());
+    assert!(forked_projection.agent_input_queue.is_empty());
+    assert_eq!(forked.state.cumulative_usage.total_tokens, 0);
+    assert!(forked
+        .state
+        .agent_usage_for_snapshot()
+        .iter()
+        .all(|row| row.usage.total_tokens == 0));
 
     let forked_messages: Vec<&str> = forked
         .state
@@ -173,5 +228,5 @@ fn full_clone_clears_world_state_baseline_and_transient_queues() {
             _ => None,
         })
         .collect();
-    assert_eq!(forked_messages, vec!["m1", "m2"]);
+    assert_eq!(forked_messages, vec!["m1", "m2", "m3"]);
 }

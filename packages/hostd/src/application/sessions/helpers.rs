@@ -176,7 +176,7 @@ fn merge_agent_usage_runtime(
     }
 
     if let Some(session_dir) = session_dir
-        && let Ok(manifest) = store_factory.open(&session_dir).load_manifest()
+        && let Ok(projection) = store_factory.open(&session_dir).load_projection()
     {
         for row in row_by_instance.values_mut() {
             row.run_count = Some(0);
@@ -185,7 +185,7 @@ fn merge_agent_usage_runtime(
         merge_execution_stats(
             &mut row_by_instance,
             agents,
-            manifest.agent_executions.into_values(),
+            projection.agent_executions.into_values(),
             now_ms(),
         );
     }
@@ -214,7 +214,7 @@ fn merge_agent_usage_runtime(
 fn merge_execution_stats(
     rows: &mut HashMap<String, piko_protocol::AgentUsageSummary>,
     agents: &[AgentInfo],
-    executions: impl IntoIterator<Item = crate::ports::storage_types::AgentExecutionManifestEntry>,
+    executions: impl IntoIterator<Item = crate::ports::storage_types::ExecutionProjection>,
     snapshot_at: i64,
 ) {
     for execution in executions {
@@ -245,15 +245,11 @@ fn merge_execution_stats(
 #[cfg(test)]
 mod usage_tests {
     use super::merge_execution_stats;
-    use crate::ports::storage_types::AgentExecutionManifestEntry;
+    use crate::ports::storage_types::ExecutionProjection;
     use std::collections::HashMap;
 
-    fn execution(
-        id: &str,
-        started_at: i64,
-        finished_at: Option<i64>,
-    ) -> AgentExecutionManifestEntry {
-        AgentExecutionManifestEntry {
+    fn execution(id: &str, started_at: i64, finished_at: Option<i64>) -> ExecutionProjection {
+        ExecutionProjection {
             agent_instance_id: id.into(),
             run_id: format!("run-{started_at}"),
             execution_id: format!("execution-{started_at}"),

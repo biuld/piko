@@ -195,12 +195,11 @@ is exceeded.
 - Distilled behavior: durable thread store with metadata, fork/branch/resume,
   thread graph + sections, initial/resumed history modes, rollout files with
   cursor paging, interrupted-turn markers.
-- piko status: **partial** — `F-09 session-persistence` (hostd schema-v3
-  `session.json` + per-agent JSONL shards; open/resume; full-session clone
-  fork/import; branch-point fork `SessionFork` with `entry_id` via
-  F-09/D-26/V-26; on-open interrupted-turn finalization into failed turns /
-  F-01 abort markers for incomplete agent executions). Residual: thread list
-  cursor paging, session prewarm.
+- piko status: **implemented for durable storage/resume** —
+  `F-31/D-43/ADR-015/V-42` provides the host-owned schema-v4 canonical event
+  journal, append-only commits, deterministic replay/snapshots, private agent
+  transcripts, branching, accounting, fork, and interrupted-execution
+  recovery. Residual F-09 scope: thread-list cursor paging and session prewarm.
 
 ### I. Multi-Agent & Inter-Agent Communication
 
@@ -305,7 +304,7 @@ scope; rejected or consumer-triggered behavior remains visible as residue.
 | E Tool System | F-06 | partial (core + parallel batch D-06) | dynamic tools / tool search (unscheduled) |
 | F Approvals & Safety | F-07, F-11, F-12 | partial (slices landed) | F-12 elicitation deferred until consumer |
 | G Exec & Sandbox | F-08/F-23 | implemented (D-35/ADR-005, V-35) | platform differential maintenance |
-| H Persistence & Resume | F-09 | partial (store + clone + branch-point fork D-26) | list paging, prewarm |
+| H Persistence & Resume | F-31 | implemented (D-43/V-42; schema-v4 journal) | list paging, prewarm |
 | I Multi-Agent | F-10, F-20 | partial (v2 tools + F-20 completions) | optional role prompt/model layers |
 | J Skills/Plugins/MCP | F-13, F-14 | partial | F-13 complete; F-14/D-14/V-14 skills baseline landed; plugins/hooks deferred |
 | K Realtime/Multimodal | F-16 | not started | deferred extension |

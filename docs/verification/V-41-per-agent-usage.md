@@ -37,8 +37,8 @@ All commands passed on 2026-08-12.
 
 ## Acceptance summary
 
-- Hostd derives token/cost rows from durable assistant message facts and
-  derives run timing from schema-v3 execution records.
+- Hostd derives token/cost rows from schema-v4 accounting facts and derives
+  run timing from journal execution events.
 - Missing execution timing renders unavailable rather than as fabricated zero.
 - Agent rows are stable, distinguish instances, preserve provider-native cost
   entries, and remain scrollable while session token/cost totals stay visible.

@@ -347,7 +347,7 @@ fn session_row(
     show_path: bool,
     show_path_col: bool,
 ) -> SelectableItem {
-    let title_text = if let Some(n) = &item.name {
+    let mut title_text = if let Some(n) = &item.name {
         n.clone()
     } else if let Some(msg) = &item.first_message {
         let cleaned: String = msg
@@ -370,6 +370,9 @@ fn session_row(
     } else {
         "untitled".to_string()
     };
+    if item.integrity_error.is_some() {
+        title_text = format!("⚠ {title_text}");
+    }
 
     let title_cell = if item.name.is_some() {
         ColumnCell::emphasized(title_text)
@@ -389,7 +392,9 @@ fn session_row(
     }
 
     let count = item.message_count;
-    let count_str = if count == 1 {
+    let count_str = if item.integrity_error.is_some() {
+        "integrity error".to_string()
+    } else if count == 1 {
         "1 message".to_string()
     } else {
         format!("{count} messages")
@@ -446,6 +451,7 @@ mod tests {
             modified_at: None,
             session_path: None,
             parent_session_path: None,
+            integrity_error: None,
         }
     }
 

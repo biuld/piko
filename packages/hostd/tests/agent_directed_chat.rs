@@ -91,6 +91,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "message-root".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: Message::User {
                     content: MessageContent::String("root history".into()),
                     timestamp: Some(2),
@@ -216,14 +217,17 @@ async fn child_transcript_and_selected_view_persist_independently() {
             after_seq: None,
         })
         .await;
-    assert!(child_view.iter().any(|event| matches!(
-        event,
-        ServerMessage::CommandResponse {
-            result: Ok(CommandResult::AgentSubscribed { snapshot, .. }),
-            ..
-        } if snapshot.events.iter().filter(|event| matches!(
-            event.message.as_ref(),
-            ServerMessage::TranscriptCommitted(_)
-        )).count() == 2
-    )));
+    assert!(
+        child_view.iter().any(|event| matches!(
+            event,
+            ServerMessage::CommandResponse {
+                result: Ok(CommandResult::AgentSubscribed { snapshot, .. }),
+                ..
+            } if snapshot.events.iter().filter(|event| matches!(
+                event.message.as_ref(),
+                ServerMessage::TranscriptCommitted(_)
+            )).count() == 2
+        )),
+        "unexpected child view: {child_view:#?}"
+    );
 }

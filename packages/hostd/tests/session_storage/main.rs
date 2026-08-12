@@ -11,8 +11,9 @@ use piko_hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_hostd::protocol::HostServer;
+use piko_orchd_api::AgentCommitPort;
 use piko_protocol::agent_runtime::SessionEvent;
-use piko_protocol::{ContentBlock, MessageContent, MessageRole};
+use piko_protocol::{AgentDurableCommand, ContentBlock, MessageContent, MessageRole};
 use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
 
 fn session_id_from(events: &[Event]) -> String {
@@ -64,43 +65,30 @@ impl AgentRunRunner for AgentPersistRunner {
                 publisher_task.publish(agent_instance_id, agent_id, task_seq, event);
             };
 
-            let created_at = 1;
             for (agent_instance_id, agent_id, parent_agent_instance_id) in [
-                ("task-main", "main", None),
-                ("task-child", "hello-agent", Some("task-main")),
+                (
+                    "task-main",
+                    "main",
+                    Some(format!("agent_{session_id}_root")),
+                ),
+                ("task-child", "hello-agent", Some("task-main".into())),
             ] {
-                let is_root = parent_agent_instance_id.is_none();
-                let _ =
-                    store.ensure_agent_shard(&session_id, agent_instance_id, agent_id, created_at);
-                let _ = store.update_manifest(|manifest| {
-                    if is_root {
-                        // Replace the default root AgentInstance created by
-                        // `create_session` with this test's own root agent
-                        // instance id so the manifest only ever tracks the
-                        // two agent instances under test.
-                        manifest.agents.clear();
-                        manifest.root_agent_instance_id = Some(agent_instance_id.to_string());
-                    }
-                    manifest.agents.insert(
-                        agent_instance_id.to_string(),
-                        piko_hostd::infra::storage::AgentManifestEntry {
+                let is_main = agent_instance_id == "task-main";
+                let _ = store
+                    .commit_agent_command(
+                        &session_id,
+                        AgentDurableCommand::Create {
                             identity: piko_protocol::AgentInstanceIdentity {
                                 session_id: session_id.clone(),
                                 agent_instance_id: agent_instance_id.to_string(),
                                 agent_spec_id: agent_id.to_string(),
-                                parent_agent_instance_id: parent_agent_instance_id
-                                    .map(str::to_string),
+                                parent_agent_instance_id,
                             },
-                            spec: None,
-                            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                            latest_report: None,
-                            todo_list: None,
-                            created_at,
-                            updated_at: created_at,
+                            spec: test_agent_spec(agent_id),
                         },
-                    );
-                });
-                if is_root {
+                    )
+                    .await;
+                if is_main {
                     publish(
                         agent_instance_id.into(),
                         agent_id.into(),
@@ -118,6 +106,7 @@ impl AgentRunRunner for AgentPersistRunner {
                     agent_instance_id: "task-main".into(),
                     message_id: "user-main".into(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt.clone()),
                         timestamp: Some(1),
@@ -146,6 +135,7 @@ impl AgentRunRunner for AgentPersistRunner {
                     agent_instance_id: "task-child".into(),
                     message_id: "user-child".into(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String("say hello".into()),
                         timestamp: Some(2),
@@ -188,6 +178,7 @@ impl AgentRunRunner for AgentPersistRunner {
                     agent_instance_id: "task-child".into(),
                     message_id: "assistant-child".into(),
                     parent_message_id: Some("user-child".into()),
+                    tree_parent_entry_id: None,
                     message: message.clone(),
                     committed_at: 2,
                 },
@@ -216,6 +207,22 @@ impl AgentRunRunner for AgentPersistRunner {
             5,
             std::time::Duration::ZERO,
         ))
+    }
+}
+
+fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
+    piko_protocol::AgentSpec {
+        id: id.into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", id),
+        name: id.into(),
+        role: "test".into(),
+        description: None,
+        base_instructions: "test".into(),
+        model: None,
+        thinking_level: None,
+        tool_set_ids: Vec::new(),
+        active_tool_names: None,
     }
 }
 

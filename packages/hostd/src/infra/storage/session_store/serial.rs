@@ -1,6 +1,6 @@
 //! Per-session durable IO serialization.
 //!
-//! Durable commands (agent commits, message commits, manifest mutations) must
+//! Durable commands (agent commits, message commits, and session events) must
 //! not race on the same session directory, and must not block the Tokio
 //! runtime. Callers enter the serial model through [`SessionStore::with_io`]
 //! (sync) or [`SessionStore::run_durable`] (async + `spawn_blocking`).

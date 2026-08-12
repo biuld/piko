@@ -1,8 +1,7 @@
 //! Agent-oriented session recovery helpers.
 //!
-//! Transcript facts come exclusively from `agents/{agent_instance_id}.jsonl`
-//! shards. Display/agent-view replay is projected separately from committed
-//! messages.
+//! Transcript facts come exclusively from the schema-v4 journal aggregate.
+//! Display/agent-view replay is projected separately from committed messages.
 
 use piko_protocol::{Message, SessionTreeEntry};
 
@@ -10,7 +9,7 @@ use crate::api::MessageEntry;
 
 use super::session_store::RecoveredAgent;
 
-/// Build session-tree message entries from a recovered AgentInstance shard.
+/// Build session-tree message entries from a recovered AgentInstance projection.
 pub fn agent_transcript_entries(recovered: &RecoveredAgent) -> Vec<SessionTreeEntry> {
     recovered
         .transcript
@@ -18,7 +17,7 @@ pub fn agent_transcript_entries(recovered: &RecoveredAgent) -> Vec<SessionTreeEn
         .map(|message| {
             SessionTreeEntry::Message(MessageEntry {
                 id: message.id.clone(),
-                parent_id: message.parent_id.clone(),
+                parent_id: message.tree_parent_id.clone(),
                 timestamp: message.timestamp.to_string(),
                 agent_id: message.agent_spec_id.clone(),
                 agent_instance_id: message.agent_instance_id.clone(),
@@ -74,6 +73,7 @@ mod tests {
             transcript: vec![CommittedMessage {
                 id: "msg-1".into(),
                 parent_id: None,
+                tree_parent_id: Some("tree-root".into()),
                 agent_instance_id: "agent-1".into(),
                 agent_spec_id: "main".into(),
                 execution_id: Some("exec-1".into()),
@@ -97,6 +97,7 @@ mod tests {
                 CommittedMessage {
                     id: "msg-2".into(),
                     parent_id: Some("msg-1".into()),
+                    tree_parent_id: Some("msg-1".into()),
                     agent_instance_id: "agent-1".into(),
                     agent_spec_id: "main".into(),
                     execution_id: Some("exec-1".into()),
@@ -117,6 +118,7 @@ mod tests {
                 CommittedMessage {
                     id: "msg-1".into(),
                     parent_id: None,
+                    tree_parent_id: None,
                     agent_instance_id: "agent-1".into(),
                     agent_spec_id: "main".into(),
                     execution_id: Some("exec-1".into()),
@@ -149,5 +151,6 @@ mod tests {
         assert_eq!(entry.agent_instance_id, "agent-1");
         assert_eq!(entry.agent_id, "main");
         assert_eq!(entry.source_turn_id, "turn-1");
+        assert_eq!(entry.parent_id.as_deref(), Some("tree-root"));
     }
 }

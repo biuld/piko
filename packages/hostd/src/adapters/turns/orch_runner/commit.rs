@@ -51,10 +51,10 @@ impl ExecutionCommitPort for ExecutionCommitRouter {
         if let Some(hub) = hub {
             let agent_id = self
                 .store
-                .load_manifest()
+                .load_projection()
                 .ok()
-                .and_then(|manifest| {
-                    manifest
+                .and_then(|projection| {
+                    projection
                         .agents
                         .get(&commit.agent_instance_id)
                         .map(|agent| agent.identity.agent_spec_id.clone())
@@ -114,10 +114,10 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
     async fn commit_message(&self, commit: MessageCommit) -> Result<CommitAck, CommitError> {
         self.store
             .run_durable(move |store| {
-                let manifest = store
-                    .load_manifest()
+                let projection = store
+                    .load_projection()
                     .map_err(|error| CommitError::Failed(error.to_string()))?;
-                let agent_spec_id = manifest
+                let agent_spec_id = projection
                     .agents
                     .get(&commit.agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())

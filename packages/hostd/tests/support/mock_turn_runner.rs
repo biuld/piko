@@ -20,14 +20,14 @@ impl AgentRunRunner for MockAgentRunRunner {
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
         let source_turn_id = input.operation_id.clone();
-        let agent_instance_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let prompt = input.prompt.clone();
         let mut committed_user: Option<String> = None;
 
-        // Sessions backed by a real on-disk store (schema v3) get a durable
+        // Sessions backed by a real schema-v4 journal get a durable
         // commit; ephemeral/in-memory-only test sessions skip persistence.
         let store = SessionStore::new(&input.session_dir);
-        if store.load_manifest().is_ok() {
+        if store.load_projection().is_ok() {
             let now = chrono::Utc::now().timestamp_millis();
             let message_id = format!("msg_{}", uuid::Uuid::new_v4());
             let committed = store.commit_message(
@@ -38,6 +38,7 @@ impl AgentRunRunner for MockAgentRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: message_id.clone(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt),
                         timestamp: Some(now),

@@ -1,10 +1,8 @@
 //! Session storage DTOs and errors shared by `ports::session_store` and
 //! `ports::session_repository`.
 //!
-//! These types were historically owned by `infra::storage`; they live here
-//! so `application` can depend on the storage port surface without pulling
-//! in `crate::infra` or `crate::adapters`. `infra::storage` re-exports the
-//! same names for backward-compatible call sites (tests, adapters).
+//! These read models live at the port boundary so `application` can query the
+//! journal aggregate without depending on `crate::infra` or `crate::adapters`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -18,102 +16,70 @@ use serde::{Deserialize, Serialize};
 use crate::domain::prompts::WorldStateFacts;
 use crate::domain::sessions::{SessionModelRef, SessionState};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 3;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionManifest {
-    pub schema_version: u32,
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionProjection {
     pub session_id: String,
     pub cwd: String,
     pub name: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub current_leaf_id: Option<String>,
-    #[serde(default)]
     pub selected_agent_instance_id: Option<String>,
-    #[serde(default)]
     pub root_agent_instance_id: Option<String>,
-    #[serde(default)]
-    pub agent_revision: u64,
-    #[serde(default)]
-    pub agents: BTreeMap<String, AgentManifestEntry>,
-    #[serde(default)]
+    pub journal_revision: u64,
+    pub agents: BTreeMap<String, AgentProjection>,
     pub agent_inbox: Vec<AgentInboxItem>,
-    #[serde(default)]
-    pub agent_executions: BTreeMap<String, AgentExecutionManifestEntry>,
-    #[serde(default)]
+    pub agent_executions: BTreeMap<String, ExecutionProjection>,
     pub agent_input_queue: Vec<piko_protocol::DurableAgentInput>,
     /// Session-scoped model continuity record: the provider+model that
     /// executed the most recent turn. Derives the durable `ModelChange`
     /// marker and the prompt model-switch fragment.
-    #[serde(default)]
     pub last_model: Option<SessionModelRef>,
     /// World-state diff baseline for the next root turn (F-04 slice 2).
     /// Cleared by compaction so the next run re-injects the full snapshot.
-    #[serde(default)]
     pub world_state_baseline: Option<WorldStateFacts>,
     /// Session-scoped metadata only; transcript messages never live here.
     pub entries: Vec<SessionTreeEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentManifestEntry {
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentProjection {
     pub identity: AgentInstanceIdentity,
-    #[serde(default)]
     pub spec: Option<piko_protocol::AgentSpec>,
     pub lifecycle: AgentInstanceLifecycle,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_report: Option<AgentRunReport>,
     /// Durable current todo list for this agent (F-27).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo_list: Option<piko_protocol::TodoList>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentExecutionManifestEntry {
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecutionProjection {
     pub agent_instance_id: String,
     pub run_id: String,
     pub execution_id: String,
-    #[serde(default)]
     pub request_id: String,
-    #[serde(default)]
     pub source_turn_id: Option<String>,
-    #[serde(default)]
     pub detached_recipient_agent_instance_id: Option<String>,
-    #[serde(default)]
     pub detached_report_delivered: bool,
-    #[serde(default)]
     pub prompt_assembly_version: u32,
-    #[serde(default)]
     pub prompt_digest: String,
     pub status: piko_protocol::ExecutionStatus,
     pub started_at: i64,
-    #[serde(default)]
     pub finished_at: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<AgentRunReport>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentShardHeader {
-    pub schema_version: u32,
-    pub session_id: String,
-    pub agent_instance_id: String,
-    pub agent_spec_id: String,
-    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CommittedMessage {
     pub id: String,
+    /// Parent in this AgentInstance's private transcript chain.
     pub parent_id: Option<String>,
+    /// Parent in the session-wide navigable tree.
+    #[serde(default)]
+    pub tree_parent_id: Option<String>,
     pub agent_instance_id: String,
     pub agent_spec_id: String,
     #[serde(default)]

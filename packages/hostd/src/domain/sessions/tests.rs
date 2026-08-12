@@ -2,33 +2,6 @@ use super::*;
 use crate::api::ServerMessage;
 use piko_protocol::agent_runtime::RealtimeDelta;
 
-fn assistant_entry(
-    id: &str,
-    agent_instance_id: &str,
-    agent_id: &str,
-    usage: piko_protocol::Usage,
-) -> piko_protocol::SessionTreeEntry {
-    piko_protocol::SessionTreeEntry::Message(piko_protocol::MessageEntry {
-        id: id.into(),
-        parent_id: None,
-        timestamp: String::new(),
-        agent_id: agent_id.into(),
-        agent_instance_id: agent_instance_id.into(),
-        source_turn_id: String::new(),
-        transcript_seq: 1,
-        message: piko_protocol::Message::Assistant {
-            content: Vec::new(),
-            checkpoint: None,
-            provider: "test".into(),
-            model: "test".into(),
-            usage: Some(usage),
-            stop_reason: None,
-            error_message: None,
-            timestamp: None,
-        },
-    })
-}
-
 #[test]
 fn per_agent_usage_is_rebuilt_without_merging_instances() {
     let mut state = HostState::new();
@@ -43,12 +16,38 @@ fn per_agent_usage_is_rebuilt_without_merging_instances() {
     second.output = 5;
     second.total_tokens = 5;
     let session = state.session_mut(&session_id).unwrap();
-    session
-        .entries
-        .push(assistant_entry("m1", "instance-a", "worker", first));
-    session
-        .entries
-        .push(assistant_entry("m2", "instance-b", "worker", second));
+    session.agent_usage.insert("instance-a".into(), first);
+    session.agent_usage.insert("instance-b".into(), second);
+    session.active_agents.insert(
+        "instance-a".into(),
+        crate::api::AgentInfo {
+            session_id: session_id.clone(),
+            agent_instance_id: "instance-a".into(),
+            agent_id: "worker".into(),
+            parent_agent_instance_id: None,
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Idle,
+            unread_report_count: 0,
+            name: "worker".into(),
+            role: "assistant".into(),
+            status: crate::api::AgentStatus::Idle,
+        },
+    );
+    session.active_agents.insert(
+        "instance-b".into(),
+        crate::api::AgentInfo {
+            session_id: session_id.clone(),
+            agent_instance_id: "instance-b".into(),
+            agent_id: "worker".into(),
+            parent_agent_instance_id: None,
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Idle,
+            unread_report_count: 0,
+            name: "worker".into(),
+            role: "assistant".into(),
+            status: crate::api::AgentStatus::Idle,
+        },
+    );
 
     let rows = session.agent_usage_for_snapshot();
     assert_eq!(rows.len(), 2);

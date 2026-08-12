@@ -161,6 +161,8 @@ impl HostApp {
             if let Some(b) = &branch_summary {
                 storage.append_entry(path, b, None).map_err(storage_error)?;
                 target_id = Some(b.id().to_string());
+                let persisted = storage.load_by_path(path).map_err(storage_error)?;
+                state.insert_session(persisted.state);
             }
 
             let leaf_target = target_id.clone();

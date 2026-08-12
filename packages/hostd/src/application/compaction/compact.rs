@@ -29,7 +29,7 @@ impl HostApp {
             .unwrap_or(fallback)
     }
 
-    /// Compact the root shard of a session when the budget-window trigger
+    /// Compact the root AgentInstance transcript when the budget-window trigger
     /// fires (auto) or on request (`force`, e.g. `session.compact` or the
     /// `new_context_window` tool).
     ///
@@ -80,7 +80,7 @@ impl HostApp {
         };
         let root_agent_instance_id = format!("agent_{session_id}_root");
         if agent_instance_id != root_agent_instance_id {
-            // SessionTreeEntry compaction currently projects the root shard.
+            // SessionTreeEntry compaction currently projects the root transcript.
             // Never compact a different AgentInstance through root state.
             return Ok(());
         }
@@ -332,14 +332,14 @@ impl HostApp {
         });
 
         let mut state = self.state.lock().await;
-        let mut compacted = false;
         if let Some(storage) = &self.storage {
             let path = {
                 let paths = self.session_paths.lock().await;
                 paths.get(session_id).cloned()
-            };
-            if let Some(path) = path
-                && let Ok(entry) = storage.append_compaction(
+            }
+            .ok_or_else(|| format!("missing storage path for session {session_id}"))?;
+            let entry = storage
+                .append_compaction(
                     &path,
                     parent_id.as_deref(),
                     &summary,
@@ -348,40 +348,49 @@ impl HostApp {
                     tokens_before,
                     Some(details),
                 )
-            {
-                let _ = state.append_entry(session_id, entry);
-                compacted = true;
-                // A rewritten transcript no longer guarantees the retained
-                // world-state snapshot (F-04 slice 2): clear the durable
-                // baseline so the next run re-injects full.
-                let _ = storage.set_world_state_baseline(&path, None);
-            }
+                .map_err(|error| error.to_string())?;
+            state
+                .append_entry(session_id, entry)
+                .map_err(|error| error.to_string())?;
+        } else {
+            let entry = SessionTreeEntry::Compaction(crate::api::CompactionEntry {
+                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
+                parent_id,
+                timestamp: crate::util::now_ms().to_string(),
+                summary,
+                first_kept_entry_id: first_kept_id,
+                tokens_before,
+                details: Some(details),
+                from_hook: None,
+            });
+            state
+                .append_entry(session_id, entry)
+                .map_err(|error| error.to_string())?;
         }
-        if let Ok(session) = state.session_mut(session_id) {
-            session.compaction.pending = false;
-            session.compaction.window_number = window_number_before + 1;
-            session.compaction.rearm_tokens = Some(tokens_after);
-            session.world_state_baseline = None;
-        }
+        let session = state
+            .session_mut(session_id)
+            .map_err(|error| error.to_string())?;
+        session.compaction.pending = false;
+        session.compaction.window_number = window_number_before + 1;
+        session.compaction.rearm_tokens = Some(tokens_after);
+        session.world_state_baseline = None;
         drop(state);
 
         // H2: compact that rewrites the projected tree must rebuild via reconcile.
-        if compacted {
-            let reconcile = self
-                .session_view(session_id)
-                .await
-                .ok()
-                .map(|(snapshot, agents)| {
-                    session_reconciled_message(
-                        session_id.to_string(),
-                        piko_protocol::ReconcileReason::ExplicitRefresh,
-                        snapshot,
-                        agents,
-                    )
-                });
-            if let (Some(tx), Some(reconcile)) = (tx, reconcile) {
-                send_event(tx, reconcile).await;
-            }
+        let reconcile = self
+            .session_view(session_id)
+            .await
+            .ok()
+            .map(|(snapshot, agents)| {
+                session_reconciled_message(
+                    session_id.to_string(),
+                    piko_protocol::ReconcileReason::ExplicitRefresh,
+                    snapshot,
+                    agents,
+                )
+            });
+        if let (Some(tx), Some(reconcile)) = (tx, reconcile) {
+            send_event(tx, reconcile).await;
         }
         Ok(())
     }

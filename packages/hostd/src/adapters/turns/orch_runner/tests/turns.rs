@@ -155,9 +155,10 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             session_dir: temp.path().to_path_buf(),
             resume_agent: None,
         })
-        .await;
+        .await
+        .unwrap();
     assert_eq!(
-        duplicate.unwrap().receipt.disposition,
+        duplicate.receipt.disposition,
         piko_protocol::InputDisposition::Queued
     );
     let second = runner
@@ -176,9 +177,23 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         .await
         .expect("different AgentInstances may run concurrently");
     let completed = run.process.wait_completion().await.unwrap();
+    let duplicate_completed = duplicate.process.wait_completion().await.unwrap();
     let second_completed = second.process.wait_completion().await.unwrap();
     assert_eq!(completed.address.agent_instance_id, child_id);
     assert!(completed.result.is_ok());
+    assert!(
+        duplicate_completed.result.is_ok(),
+        "queued run failed: {:?}",
+        duplicate_completed.result
+    );
+    assert!(
+        matches!(
+            duplicate_completed.result.as_ref().unwrap().outcome,
+            piko_protocol::ExecutionOutcome::Succeeded { .. }
+        ),
+        "queued run did not succeed: {:?}",
+        duplicate_completed.result
+    );
     assert!(second_completed.result.is_ok());
 
     let recovered = store.load_agent("session-direct", child_id).unwrap();

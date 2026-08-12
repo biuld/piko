@@ -97,16 +97,65 @@ impl JsonlSessionRepository {
         Ok(sessions)
     }
     pub fn summaries(&self, cwd: Option<&str>) -> Result<Vec<SessionSummary>, SessionStorageError> {
-        Ok(self
-            .list(cwd)?
-            .into_iter()
-            .map(|s| {
-                let session_path = Some(s.path.to_string_lossy().to_string());
-                let parent_path = s.parent_session_path.clone();
-                s.state
-                    .summary(Some(s.created_at.clone()), None, session_path, parent_path)
-            })
-            .collect())
+        let dirs = if let Some(cwd) = cwd {
+            vec![self.session_dir(cwd)]
+        } else {
+            self.list_session_dirs()?
+        };
+        let mut summaries = Vec::new();
+        for dir in dirs {
+            if !dir.exists() {
+                continue;
+            }
+            for entry in fs::read_dir(&dir).map_err(|source| SessionStorageError::Io {
+                path: dir.clone(),
+                source,
+            })? {
+                let path = entry
+                    .map_err(|source| SessionStorageError::Io {
+                        path: dir.clone(),
+                        source,
+                    })?
+                    .path();
+                if !path.is_dir() || !path.join("session.json").exists() {
+                    continue;
+                }
+                match load_session_dir(&path) {
+                    Ok(session) => {
+                        let session_path = Some(session.path.to_string_lossy().to_string());
+                        let parent_path = session.parent_session_path.clone();
+                        summaries.push(session.state.summary(
+                            Some(session.created_at),
+                            None,
+                            session_path,
+                            parent_path,
+                        ));
+                    }
+                    Err(error) => {
+                        // Schema-v4 identity remains listable even if journal
+                        // replay fails. Unsupported older schemas are omitted.
+                        let Ok(identity) = piko_session_store::SessionStore::inspect(&path) else {
+                            continue;
+                        };
+                        summaries.push(SessionSummary {
+                            session_id: identity.session_id,
+                            cwd: identity.cwd,
+                            seq: 0,
+                            name: None,
+                            first_message: None,
+                            message_count: 0,
+                            created_at: Some(identity.created_at.to_string()),
+                            modified_at: None,
+                            session_path: Some(path.to_string_lossy().to_string()),
+                            parent_session_path: None,
+                            integrity_error: Some(error.to_string()),
+                        });
+                    }
+                }
+            }
+        }
+        summaries.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        Ok(summaries)
     }
 
     pub(super) fn session_dir(&self, cwd: &str) -> PathBuf {

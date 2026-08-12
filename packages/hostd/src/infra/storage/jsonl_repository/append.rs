@@ -1,10 +1,11 @@
 use std::path::Path;
 
+use piko_session_store::{CompactionRecordedV1, EventData};
 use uuid::Uuid;
 
 use crate::api::{Message, SessionInfoEntry, SessionTreeEntry, ThinkingLevelChangeEntry};
 
-use super::super::session_store::SessionStore;
+use super::super::session_store::{SessionStore, tree_entry_event};
 use super::super::types::{JsonlSessionRepository, SessionStorageError};
 use super::helpers::{commit_storage_error, timestamp};
 
@@ -15,10 +16,22 @@ impl JsonlSessionRepository {
         agent_instance_id: &str,
         updated_at: i64,
     ) -> Result<(), SessionStorageError> {
-        SessionStore::new(session_dir).update_manifest(|manifest| {
-            manifest.selected_agent_instance_id = Some(agent_instance_id.to_string());
-            manifest.updated_at = manifest.updated_at.max(updated_at);
-        })
+        let store = SessionStore::new(session_dir);
+        let projection = store.load_projection()?;
+        if projection.selected_agent_instance_id.as_deref() == Some(agent_instance_id) {
+            return Ok(());
+        }
+        let seed = format!("{agent_instance_id}:{}", projection.journal_revision);
+        commit_events(
+            &store,
+            "agent-selected",
+            &seed,
+            updated_at,
+            vec![EventData::AgentSelected {
+                agent_instance_id: agent_instance_id.to_string(),
+                selected_at: updated_at,
+            }],
+        )
     }
 
     pub fn append_entry(
@@ -31,25 +44,26 @@ impl JsonlSessionRepository {
         match entry {
             SessionTreeEntry::Message(message) => {
                 let agent_instance_id = message.agent_instance_id.clone();
-                let manifest = store.load_manifest()?;
-                let agent_spec_id = manifest
+                let projection = store.load_projection()?;
+                let agent_spec_id = projection
                     .agents
                     .get(&agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .unwrap_or_else(|| message.agent_id.clone());
                 let execution_id = piko_orchd_api::stable_internal_id(
                     "projection",
-                    &[&manifest.session_id, &agent_instance_id, &message.id],
+                    &[&projection.session_id, &agent_instance_id, &message.id],
                 );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
-                            session_id: manifest.session_id,
+                            session_id: projection.session_id,
                             source_turn_id: Some(message.source_turn_id.clone()),
                             execution_id,
                             agent_instance_id,
                             message_id: message.id.clone(),
                             parent_message_id: message.parent_id.clone(),
+                            tree_parent_entry_id: message.parent_id.clone(),
                             message: message.message.clone(),
                             committed_at: message.timestamp.parse().unwrap_or_default(),
                         },
@@ -67,20 +81,21 @@ impl JsonlSessionRepository {
                         message: "tool entry requires agent_instance_id and agent_id".into(),
                     });
                 };
-                let manifest = store.load_manifest()?;
+                let projection = store.load_projection()?;
                 let execution_id = piko_orchd_api::stable_internal_id(
                     "projection",
-                    &[&manifest.session_id, agent_instance_id, &tool.id],
+                    &[&projection.session_id, agent_instance_id, &tool.id],
                 );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
-                            session_id: manifest.session_id,
+                            session_id: projection.session_id,
                             source_turn_id: Some(agent_instance_id.clone()),
                             execution_id,
                             agent_instance_id: agent_instance_id.clone(),
                             message_id: tool.id.clone(),
-                            parent_message_id: None,
+                            parent_message_id: tool.parent_id.clone(),
+                            tree_parent_entry_id: tool.parent_id.clone(),
                             message: Message::ToolCall {
                                 id: tool.tool_call_id.clone(),
                                 name: tool.tool_name.clone(),
@@ -96,10 +111,7 @@ impl JsonlSessionRepository {
                     .map_err(commit_storage_error)?;
                 Ok(())
             }
-            _ => store.update_manifest(|manifest| {
-                manifest.current_leaf_id = entry.leaf_target_id().map(str::to_string);
-                manifest.entries.push(entry.clone());
-            }),
+            _ => append_tree_entry(&store, entry),
         }
     }
 
@@ -117,10 +129,19 @@ impl JsonlSessionRepository {
             name: Some(name.to_string()),
         });
         let store = SessionStore::new(session_dir);
-        store.update_manifest(|manifest| {
-            manifest.name = Some(name.to_string());
-            manifest.entries.push(entry.clone());
-        })?;
+        let committed_at = entry.timestamp().parse().unwrap_or_default();
+        commit_events(
+            &store,
+            "session-info",
+            entry.id(),
+            committed_at,
+            vec![
+                EventData::SessionMetadataChanged {
+                    name: Some(name.to_string()),
+                },
+                tree_entry_event(&entry)?,
+            ],
+        )?;
         Ok(entry)
     }
 
@@ -155,8 +176,29 @@ impl JsonlSessionRepository {
             });
             entries.push(e);
         }
-        let store = SessionStore::new(session_dir);
-        store.update_manifest(|manifest| manifest.entries.extend(entries.clone()))?;
+        if let Some(last) = entries.last() {
+            let store = SessionStore::new(session_dir);
+            let mut events = entries
+                .iter()
+                .map(tree_entry_event)
+                .collect::<Result<Vec<_>, _>>()?;
+            if let (Some(model_id), Some(provider)) = (model_id, provider) {
+                events.insert(
+                    0,
+                    EventData::ModelContinuityChanged {
+                        provider: Some(provider.to_string()),
+                        model_id: Some(model_id.to_string()),
+                    },
+                );
+            }
+            commit_events(
+                &store,
+                "config-metadata",
+                last.id(),
+                last.timestamp().parse().unwrap_or_default(),
+                events,
+            )?;
+        }
         Ok(entries)
     }
 
@@ -166,10 +208,24 @@ impl JsonlSessionRepository {
         model: Option<&crate::domain::sessions::SessionModelRef>,
     ) -> Result<(), SessionStorageError> {
         let store = SessionStore::new(session_dir);
-        store.update_manifest(|manifest| {
-            manifest.last_model = model.cloned();
-        })?;
-        Ok(())
+        let projection = store.load_projection()?;
+        if projection.last_model.as_ref() == model {
+            return Ok(());
+        }
+        let value_seed = model
+            .map(|value| format!("{}:{}", value.provider, value.model_id))
+            .unwrap_or_else(|| "cleared".into());
+        let seed = format!("{value_seed}:{}", projection.journal_revision);
+        commit_events(
+            &store,
+            "model-continuity",
+            &seed,
+            now_millis(),
+            vec![EventData::ModelContinuityChanged {
+                provider: model.map(|value| value.provider.clone()),
+                model_id: model.map(|value| value.model_id.clone()),
+            }],
+        )
     }
 
     /// Persist the session's world-state baseline (F-04 slice 2). `None`
@@ -180,29 +236,30 @@ impl JsonlSessionRepository {
         facts: Option<&crate::domain::prompts::WorldStateFacts>,
     ) -> Result<(), SessionStorageError> {
         let store = SessionStore::new(session_dir);
-        store.update_manifest(|manifest| {
-            manifest.world_state_baseline = facts.cloned();
-        })?;
-        Ok(())
-    }
-
-    /// Persist one agent's durable todo list on the agent manifest entry (F-27).
-    pub fn set_agent_todo_list(
-        &self,
-        session_dir: &Path,
-        agent_instance_id: &str,
-        list: Option<&piko_protocol::TodoList>,
-    ) -> Result<(), SessionStorageError> {
-        let store = SessionStore::new(session_dir);
-        store.update_manifest(|manifest| {
-            if let Some(agent) = manifest.agents.get_mut(agent_instance_id) {
-                agent.todo_list = list.cloned().filter(|l| !l.items.is_empty());
-                if let Some(list) = list {
-                    agent.updated_at = list.updated_at;
-                }
-            }
-        })?;
-        Ok(())
+        let projection = store.load_projection()?;
+        if projection.world_state_baseline.as_ref() == facts {
+            return Ok(());
+        }
+        let value = facts
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|source| SessionStorageError::Json {
+                path: session_dir.to_path_buf(),
+                source,
+            })?;
+        let value_seed =
+            serde_json::to_string(&value).map_err(|source| SessionStorageError::Json {
+                path: session_dir.to_path_buf(),
+                source,
+            })?;
+        let seed = format!("{value_seed}:{}", projection.journal_revision);
+        commit_events(
+            &store,
+            "world-state",
+            &seed,
+            now_millis(),
+            vec![EventData::WorldStateAdvanced { facts: value }],
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -246,4 +303,62 @@ impl JsonlSessionRepository {
         self.append_entry(session_dir, &entry, agent_id)?;
         Ok(entry)
     }
+}
+
+fn append_tree_entry(
+    store: &SessionStore,
+    entry: &SessionTreeEntry,
+) -> Result<(), SessionStorageError> {
+    let committed_at = entry.timestamp().parse().unwrap_or_default();
+    let mut events = vec![tree_entry_event(entry)?];
+    if let SessionTreeEntry::Compaction(compaction) = entry {
+        events.push(EventData::CompactionRecorded(CompactionRecordedV1 {
+            compaction_id: compaction.id.clone(),
+            tree_parent_entry_id: compaction.parent_id.clone(),
+            summary: compaction.summary.clone(),
+            first_retained_entry_id: compaction.first_kept_entry_id.clone(),
+            tokens_before: compaction.tokens_before,
+            committed_at,
+        }));
+        events.push(EventData::WorldStateAdvanced { facts: None });
+    }
+    let projection = store.load_projection()?;
+    let root_base_message_id = match entry {
+        SessionTreeEntry::Leaf(leaf) => leaf.target_id.as_ref().and_then(|target| {
+            let root = projection.root_agent_instance_id.as_ref()?;
+            store
+                .find_committed_message(&projection.session_id, root, target)
+                .ok()??;
+            Some(target.clone())
+        }),
+        _ => projection.root_agent_instance_id.as_ref().and_then(|root| {
+            store
+                .load_agent(&projection.session_id, root)
+                .ok()?
+                .head_message_id
+        }),
+    };
+    events.push(EventData::BranchSelected {
+        selected_tree_entry_id: entry.leaf_target_id().map(str::to_string),
+        root_base_message_id,
+    });
+    commit_events(store, "tree-entry", entry.id(), committed_at, events)
+}
+
+fn commit_events(
+    store: &SessionStore,
+    purpose: &str,
+    seed: &str,
+    committed_at: i64,
+    events: Vec<EventData>,
+) -> Result<(), SessionStorageError> {
+    let session_id = store.load_projection()?.session_id;
+    let commit_id = piko_orchd_api::stable_internal_id(purpose, &[&session_id, seed]);
+    store
+        .commit_events(&commit_id, committed_at, events)
+        .map(|_| ())
+}
+
+fn now_millis() -> i64 {
+    timestamp().parse().unwrap_or_default()
 }

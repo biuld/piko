@@ -47,15 +47,18 @@ pub struct SessionState {
     /// Queue of pending steering messages: (agent_instance_id, message)
     pub steer_queue: Vec<(String, String)>,
     /// Last provider+model recorded for a turn in this session. Durable via
-    /// `SessionManifest.last_model`; drives the prompt model-switch fragment
+    /// `SessionProjection.last_model`; drives the prompt model-switch fragment
     /// and the durable JSONL `ModelChange` marker.
     pub last_model: Option<SessionModelRef>,
     /// Last world-state facts recorded for a turn in this session (F-04
-    /// slice 2). Durable via `SessionManifest.world_state_baseline`; drives
+    /// slice 2). Durable via `SessionProjection.world_state_baseline`; drives
     /// the full-vs-diff world-state injection decision.
     pub world_state_baseline: Option<crate::domain::prompts::WorldStateFacts>,
     /// Cumulative token usage and cost across all turns in this session
     pub cumulative_usage: Usage,
+    /// Incurred usage by AgentInstance. This is populated from journal usage
+    /// facts on replay and updated alongside the live session ledger.
+    pub agent_usage: BTreeMap<String, Usage>,
     /// Tracked agent instances from lifecycle events, keyed by agent_instance_id.
     pub active_agents: HashMap<String, crate::api::AgentInfo>,
     /// Agent instance the TUI is currently viewing.
@@ -143,6 +146,7 @@ impl SessionState {
             last_model: None,
             world_state_baseline: None,
             cumulative_usage: Usage::empty(),
+            agent_usage: BTreeMap::new(),
             active_agents: HashMap::new(),
             active_agent_instance_id: None,
             agent_views: HashMap::new(),
@@ -175,25 +179,21 @@ impl SessionState {
                 });
         }
 
-        for entry in &self.entries {
-            let SessionTreeEntry::Message(message) = entry else {
-                continue;
-            };
-            let row = rows
-                .entry(message.agent_instance_id.clone())
-                .or_insert_with(|| piko_protocol::AgentUsageSummary {
-                    agent_instance_id: message.agent_instance_id.clone(),
-                    agent_id: message.agent_id.clone(),
+        for (agent_instance_id, usage) in &self.agent_usage {
+            let row = rows.entry(agent_instance_id.clone()).or_insert_with(|| {
+                piko_protocol::AgentUsageSummary {
+                    agent_instance_id: agent_instance_id.clone(),
+                    agent_id: self
+                        .active_agents
+                        .get(agent_instance_id)
+                        .map(|agent| agent.agent_id.clone())
+                        .unwrap_or_else(|| agent_instance_id.clone()),
                     run_count: None,
                     active_duration_ms: None,
                     usage: Usage::empty(),
-                });
-            if let Message::Assistant {
-                usage: Some(usage), ..
-            } = &message.message
-            {
-                row.usage.accumulate(usage);
-            }
+                }
+            });
+            row.usage = usage.clone();
         }
 
         rows.into_values().collect()
@@ -277,6 +277,7 @@ impl SessionState {
             modified_at: mod_at,
             session_path,
             parent_session_path,
+            integrity_error: None,
         }
     }
 
@@ -295,21 +296,11 @@ impl SessionState {
             return;
         };
         if let Some(turn) = self.turns.get_mut(turn_id) {
+            self.agent_usage
+                .entry(turn.agent_instance_id.clone())
+                .or_default()
+                .accumulate(usage);
             turn.usage.accumulate(usage);
-        }
-    }
-
-    /// Rebuild session cumulative usage from durable assistant messages.
-    pub fn rebuild_cumulative_usage_from_entries(&mut self) {
-        self.cumulative_usage = Usage::empty();
-        for entry in &self.entries {
-            if let SessionTreeEntry::Message(msg) = entry
-                && let Message::Assistant {
-                    usage: Some(usage), ..
-                } = &msg.message
-            {
-                self.cumulative_usage.accumulate(usage);
-            }
         }
     }
 }

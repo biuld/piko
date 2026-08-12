@@ -62,14 +62,31 @@ impl HostState {
         message: ServerMessage,
     ) -> Result<u64, ProtocolError> {
         let state = self.session_mut(session_id)?;
+        if !state.agent_views.contains_key(agent_instance_id) {
+            state.agent_views.insert(
+                agent_instance_id.to_string(),
+                AgentViewState::new(agent_instance_id.to_string(), agent_id.to_string()),
+            );
+            backfill_agent_view_from_entries(state, agent_instance_id);
+        }
+        if let ServerMessage::TranscriptCommitted(incoming) = &message
+            && let Some(existing) = state.agent_views.get(agent_instance_id).and_then(|view| {
+                view.events.iter().find(|event| {
+                    matches!(event.message.as_ref(), ServerMessage::TranscriptCommitted(current)
+                        if current.message_id == incoming.message_id)
+                })
+            })
+        {
+            return Ok(existing.seq);
+        }
         let seq = state.next_agent_view_seq;
         state.next_agent_view_seq = state.next_agent_view_seq.saturating_add(1);
         let view = state
             .agent_views
-            .entry(agent_instance_id.to_string())
-            .or_insert_with(|| {
-                AgentViewState::new(agent_instance_id.to_string(), agent_id.to_string())
-            });
+            .get_mut(agent_instance_id)
+            .ok_or_else(|| {
+                ProtocolError::InvalidCommand(format!("unknown agent {agent_instance_id}"))
+            })?;
         view.push(SequencedServerMessage {
             seq,
             message: Box::new(message),

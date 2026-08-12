@@ -6,30 +6,30 @@ use crate::domain::sessions::AgentViewState;
 use crate::domain::sessions::SessionState;
 
 use super::super::recovery::agent_transcript_entries;
-use super::super::session_store::{SessionManifest, SessionStore};
+use super::super::session_store::{SessionProjection, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
 
 pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
-    let manifest_path = dir.join("session.json");
-    if !manifest_path.exists() {
+    let identity_path = dir.join("session.json");
+    if !identity_path.exists() {
         return Err(SessionStorageError::Invalid {
             path: dir.to_path_buf(),
             message: "missing session.json".into(),
         });
     }
     let store = SessionStore::new(dir);
-    let manifest = store.load_manifest()?;
-    let mut state = SessionState::new(manifest.session_id.clone(), manifest.cwd.clone());
-    state.name = manifest.name.clone();
-    state.current_leaf_id = manifest.current_leaf_id.clone();
-    state.entries = manifest.entries.clone();
-    state.last_model = manifest.last_model.clone();
-    state.world_state_baseline = manifest.world_state_baseline.clone();
+    let projection = store.load_projection()?;
+    let mut state = SessionState::new(projection.session_id.clone(), projection.cwd.clone());
+    state.name = projection.name.clone();
+    state.current_leaf_id = projection.current_leaf_id.clone();
+    state.entries = projection.entries.clone();
+    state.last_model = projection.last_model.clone();
+    state.world_state_baseline = projection.world_state_baseline.clone();
     let mut recovered_root_leaf = None;
-    for agent_instance_id in store.list_agents(&manifest.session_id)? {
-        let recovered = store.load_agent(&manifest.session_id, &agent_instance_id)?;
-        if manifest.root_agent_instance_id.as_deref() == Some(agent_instance_id.as_str()) {
-            recovered_root_leaf = Some(resolve_recovered_root_leaf(&manifest, &recovered));
+    for agent_instance_id in store.list_agents(&projection.session_id)? {
+        let recovered = store.load_agent(&projection.session_id, &agent_instance_id)?;
+        if projection.root_agent_instance_id.as_deref() == Some(agent_instance_id.as_str()) {
+            recovered_root_leaf = Some(resolve_recovered_root_leaf(&projection, &recovered));
         }
         for entry in agent_transcript_entries(&recovered) {
             if let SessionTreeEntry::Message(message) = &entry {
@@ -45,10 +45,27 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
-    state.rebuild_cumulative_usage_from_entries();
-    restore_agent_runtime_state(&mut state, &manifest);
-    // F-27: seed durable todo lists from agent manifest fields.
-    for agent in manifest.agents.values() {
+    state.cumulative_usage = store
+        .usage_summary(&piko_session_store::UsageQuery {
+            incurred_only: true,
+            ..piko_session_store::UsageQuery::default()
+        })?
+        .usage;
+    for agent_instance_id in projection.agents.keys() {
+        let accounting = store.usage_summary(&piko_session_store::UsageQuery {
+            agent_instance_id: Some(agent_instance_id.clone()),
+            incurred_only: true,
+            ..piko_session_store::UsageQuery::default()
+        })?;
+        if accounting.fact_count > 0 {
+            state
+                .agent_usage
+                .insert(agent_instance_id.clone(), accounting.usage);
+        }
+    }
+    restore_agent_runtime_state(&mut state, &projection);
+    // F-27: seed durable todo lists from agent projection fields.
+    for agent in projection.agents.values() {
         if let Some(list) = &agent.todo_list {
             state
                 .todo_lists
@@ -58,19 +75,19 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
     Ok(PersistedSession {
         state,
         path: dir.to_path_buf(),
-        created_at: manifest.created_at.to_string(),
+        created_at: projection.created_at.to_string(),
         parent_session_path: None,
     })
 }
 
 fn resolve_recovered_root_leaf(
-    manifest: &super::super::session_store::SessionManifest,
+    projection: &super::super::session_store::SessionProjection,
     recovered: &super::super::session_store::RecoveredAgent,
 ) -> Option<String> {
     let Some(head_id) = recovered.head_message_id.as_ref() else {
-        return manifest.current_leaf_id.clone();
+        return projection.current_leaf_id.clone();
     };
-    if manifest.current_leaf_id.as_ref() == Some(head_id) {
+    if projection.current_leaf_id.as_ref() == Some(head_id) {
         return Some(head_id.clone());
     }
 
@@ -80,12 +97,12 @@ fn resolve_recovered_root_leaf(
         .find(|message| &message.id == head_id)
         .map(|message| message.timestamp)
         .unwrap_or(i64::MIN);
-    let selection_timestamp = manifest
+    let selection_timestamp = projection
         .entries
         .iter()
         .filter(|entry| match entry {
-            SessionTreeEntry::Leaf(leaf) => leaf.target_id == manifest.current_leaf_id,
-            _ => manifest.current_leaf_id.as_deref() == Some(entry.id()),
+            SessionTreeEntry::Leaf(leaf) => leaf.target_id == projection.current_leaf_id,
+            _ => projection.current_leaf_id.as_deref() == Some(entry.id()),
         })
         .filter_map(|entry| entry.timestamp().parse::<i64>().ok())
         .max()
@@ -94,15 +111,15 @@ fn resolve_recovered_root_leaf(
     if head_timestamp > selection_timestamp {
         Some(head_id.clone())
     } else {
-        manifest.current_leaf_id.clone()
+        projection.current_leaf_id.clone()
     }
 }
 
-fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManifest) {
+fn restore_agent_runtime_state(state: &mut SessionState, projection: &SessionProjection) {
     let specs = crate::adapters::prompts::agent_loader::load_agents(&state.cwd);
-    for agent in manifest.agents.values() {
+    for agent in projection.agents.values() {
         let spec = specs.get(&agent.identity.agent_spec_id);
-        let unread_report_count = manifest
+        let unread_report_count = projection
             .agent_inbox
             .iter()
             .filter(|item| {
@@ -137,11 +154,11 @@ fn restore_agent_runtime_state(state: &mut SessionState, manifest: &SessionManif
         );
     }
 
-    state.active_agent_instance_id = manifest
+    state.active_agent_instance_id = projection
         .selected_agent_instance_id
         .clone()
         .filter(|selected| state.active_agents.contains_key(selected))
-        .or_else(|| manifest.root_agent_instance_id.clone())
+        .or_else(|| projection.root_agent_instance_id.clone())
         .filter(|selected| state.active_agents.contains_key(selected))
         .or_else(|| state.active_agents.keys().next().cloned());
 

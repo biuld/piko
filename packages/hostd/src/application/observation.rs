@@ -154,8 +154,8 @@ impl HostApp {
                                 event.agent_instance_id
                             ))
                         })?;
-                        // F-27: live + durable project after successful todo_write
-                        // (including empty clear — pending holds empty lists too).
+                        // F-27: message commit atomically persisted the todo
+                        // replacement; publish the matching live projection.
                         let todo_list = {
                             let mut state = self.state.lock().await;
                             state
@@ -163,20 +163,6 @@ impl HostApp {
                                 .ok()
                                 .and_then(|s| s.take_pending_todo_projection())
                         };
-                        if let Some(list) = todo_list.as_ref()
-                            && let Some(storage) = &self.storage
-                        {
-                            let durable = if list.items.is_empty() {
-                                None
-                            } else {
-                                Some(list)
-                            };
-                            let _ = storage.set_agent_todo_list(
-                                session_dir,
-                                &event.agent_instance_id,
-                                durable,
-                            );
-                        }
                         send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
                         if let Some(list) = todo_list {
                             send_event(
@@ -277,7 +263,7 @@ impl HostApp {
     }
 
     /// Recover an operation observation and rebuild host projection from the
-    /// durable Agent shards. Root Turns and direct Agent runs share this path.
+    /// durable journal. Root Turns and direct Agent runs share this path.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn recover_operation_observation(
         &self,

@@ -116,6 +116,9 @@ pub struct SessionSummary {
     pub session_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_path: Option<String>,
+    /// Set when immutable identity is readable but journal replay failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

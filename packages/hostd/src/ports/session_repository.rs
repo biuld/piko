@@ -71,14 +71,6 @@ pub trait SessionRepositoryPort: Send + Sync {
         facts: Option<&WorldStateFacts>,
     ) -> Result<(), SessionStorageError>;
 
-    /// Persist one agent's current todo list (F-27). `None` clears it.
-    fn set_agent_todo_list(
-        &self,
-        session_dir: &Path,
-        agent_instance_id: &str,
-        list: Option<&piko_protocol::TodoList>,
-    ) -> Result<(), SessionStorageError>;
-
     #[allow(clippy::too_many_arguments)]
     fn append_compaction(
         &self,

@@ -39,10 +39,10 @@ impl JsonlSessionRepository {
 
     fn fork_full(&self, source_dir: &Path) -> Result<PersistedSession, SessionStorageError> {
         let source = SessionStore::new(source_dir);
-        let source_manifest = source.load_manifest()?;
+        let source_projection = source.load_projection()?;
         let forked_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
-        let forked_dir = self.allocate_fork_dir(&source_manifest.cwd, &forked_id, &created_at);
+        let forked_dir = self.allocate_fork_dir(&source_projection.cwd, &forked_id, &created_at);
         source.fork_to(
             &forked_dir,
             forked_id,
@@ -78,10 +78,10 @@ impl JsonlSessionRepository {
         }
 
         let source = SessionStore::new(source_dir);
-        let source_manifest = source.load_manifest()?;
+        let source_projection = source.load_projection()?;
         let forked_id = Uuid::new_v4().to_string();
         let created_at = timestamp();
-        let forked_dir = self.allocate_fork_dir(&source_manifest.cwd, &forked_id, &created_at);
+        let forked_dir = self.allocate_fork_dir(&source_projection.cwd, &forked_id, &created_at);
 
         let write_result = source.fork_to_at_entry(
             &forked_dir,

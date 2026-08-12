@@ -7,7 +7,7 @@ use crate::ports::ResumeAgent;
 impl HostApp {
     /// Reconstruct the root AgentInstance's resume state (transcript +
     /// head/committed message ids) from either the in-memory session tree or,
-    /// failing that, the durable AgentInstance shard on disk.
+    /// failing that, the durable journal aggregate.
     pub(super) async fn resume_root_agent_for_session(
         &self,
         session_id: &str,
@@ -17,7 +17,10 @@ impl HostApp {
         let state = self.state.lock().await;
         match state.session(session_id) {
             Ok(session) => {
-                let session_transcript = transcript_messages_from_session_entries(&session.entries);
+                let session_transcript = transcript_messages_from_session_entries(
+                    &session.entries,
+                    session.current_leaf_id.as_deref(),
+                );
                 if !session_transcript.is_empty() {
                     let transcript_seq = self
                         .session_store_factory

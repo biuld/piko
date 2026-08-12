@@ -19,8 +19,8 @@ impl HostApp {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         if let Some(path) = session_path {
             let store = session_store_factory.open(path);
-            let manifest = store.load_manifest().map_err(storage_error)?;
-            for queued in manifest.agent_input_queue {
+            let projection = store.load_projection().map_err(storage_error)?;
+            for queued in projection.agent_input_queue {
                 let Some(turn_id) = queued.request.source_turn_id.as_deref() else {
                     continue;
                 };
@@ -36,7 +36,7 @@ impl HostApp {
                     crate::api::TurnStatus::Queued,
                 )?;
             }
-            for execution in manifest.agent_executions.into_values() {
+            for execution in projection.agent_executions.into_values() {
                 if !matches!(
                     execution.status,
                     piko_protocol::ExecutionStatus::Accepted
@@ -110,6 +110,14 @@ impl HostApp {
         } else {
             state.finalize_interrupted_turns(&session_id)?
         };
+        if let Some(path) = session_path {
+            let store = session_store_factory.open(path);
+            crate::application::turns::projection::reconcile_committed_messages(
+                state,
+                store.as_ref(),
+                &session_id,
+            )?;
+        }
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
         Ok(session_opened_messages(

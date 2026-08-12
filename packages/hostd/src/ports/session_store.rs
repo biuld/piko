@@ -11,13 +11,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::storage_types::{
-    AgentManifestEntry, CommittedMessage, RecoveredAgent, SessionManifest, SessionStorageError,
+    AgentProjection, CommittedMessage, RecoveredAgent, SessionProjection, SessionStorageError,
 };
 
 /// Narrow, synchronous read/query surface of the durable session store that
 /// `application` actually calls.
 pub trait SessionStorePort: Send + Sync {
-    fn load_manifest(&self) -> Result<SessionManifest, SessionStorageError>;
+    fn load_projection(&self) -> Result<SessionProjection, SessionStorageError>;
 
     fn load_agent(
         &self,
@@ -25,7 +25,7 @@ pub trait SessionStorePort: Send + Sync {
         agent_instance_id: &str,
     ) -> Result<RecoveredAgent, SessionStorageError>;
 
-    fn agent_instances(&self) -> Result<Vec<AgentManifestEntry>, SessionStorageError>;
+    fn agent_instances(&self) -> Result<Vec<AgentProjection>, SessionStorageError>;
 
     fn find_committed_message(
         &self,
@@ -33,15 +33,6 @@ pub trait SessionStorePort: Send + Sync {
         agent_instance_id: &str,
         message_id: &str,
     ) -> Result<Option<CommittedMessage>, SessionStorageError>;
-
-    /// Scan an agent shard for a message without requiring the full shard to
-    /// parse cleanly. Used by the observation path when concurrent appends
-    /// may leave a trailing partial line.
-    fn find_committed_message_lenient(
-        &self,
-        agent_instance_id: &str,
-        message_id: &str,
-    ) -> Option<CommittedMessage>;
 
     fn agent_report_for_turn(
         &self,

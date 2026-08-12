@@ -57,6 +57,78 @@ async fn persistent_server_reopens_with_session() {
 }
 
 #[tokio::test]
+async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let created = repo.create("/tmp/project").unwrap();
+    let session_id = created.state.session_id.clone();
+    let session_path = created.path.to_string_lossy().to_string();
+    let store = SessionStore::new(&created.path);
+    let root = store.ensure_root_agent("main").unwrap();
+    store
+        .commit_agent_command(
+            &session_id,
+            AgentDurableCommand::RunStarted {
+                agent_instance_id: root.agent_instance_id.clone(),
+                run_id: "run-interrupted".into(),
+                internal_execution_id: "exec-interrupted".into(),
+                request_id: "request-interrupted".into(),
+                source_turn_id: Some("turn-interrupted".into()),
+                detached_recipient_agent_instance_id: None,
+                prompt_assembly_version: 1,
+                prompt_digest: "digest".into(),
+                started_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .commit_message(
+            piko_protocol::execution::MessageCommit {
+                session_id: session_id.clone(),
+                source_turn_id: Some("turn-interrupted".into()),
+                execution_id: "exec-interrupted".into(),
+                agent_instance_id: root.agent_instance_id,
+                message_id: "input-interrupted".into(),
+                parent_message_id: None,
+                tree_parent_entry_id: None,
+                message: Message::User {
+                    content: MessageContent::String("hello".into()),
+                    timestamp: Some(1),
+                },
+                committed_at: 1,
+            },
+            "main",
+        )
+        .unwrap();
+
+    let server = HostServer::with_storage(repo);
+    let opened = server
+        .handle_command(Command::SessionOpen {
+            command_id: "open".into(),
+            session_id: session_id.clone(),
+            session_path: Some(session_path),
+        })
+        .await;
+    let reconciled = opened
+        .iter()
+        .find_map(|event| match event {
+            Event::SessionReconciled(event) => Some(event),
+            _ => None,
+        })
+        .expect("first reconciled snapshot");
+    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-interrupted");
+    assert!(reconciled.snapshot.active_turns.is_empty());
+    assert!(reconciled.snapshot.entries.iter().any(|entry| {
+        matches!(entry, SessionTreeEntry::Message(message) if message.id == marker_id)
+    }));
+    let projection = store.load_projection().unwrap();
+    let execution = projection.agent_executions.get("run-interrupted").unwrap();
+    assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
+    assert!(execution.report.is_some());
+}
+
+#[tokio::test]
 async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
@@ -165,7 +237,7 @@ async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
 }
 
 #[tokio::test]
-async fn persistent_turn_writes_each_task_to_its_own_shard() {
+async fn persistent_turn_recovers_each_agent_private_transcript() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(AgentPersistRunner));
@@ -207,28 +279,27 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         .and_then(|session| session.session_path.as_ref())
         .expect("session path should be listed");
     let session_dir = std::path::PathBuf::from(session_path);
-    let main_jsonl = std::fs::read_to_string(session_dir.join("agents/task-main.jsonl")).unwrap();
-    let child_jsonl = std::fs::read_to_string(session_dir.join("agents/task-child.jsonl")).unwrap();
-    let manifest = std::fs::read_to_string(session_dir.join("session.json")).unwrap();
+    let store = piko_hostd::infra::storage::SessionStore::new(&session_dir);
+    let main = store.load_agent(&session_id, "task-main").unwrap();
+    let child = store.load_agent(&session_id, "task-child").unwrap();
+    let projection = store.load_projection().unwrap();
+    let main_json = serde_json::to_string(&main.transcript).unwrap();
+    let child_json = serde_json::to_string(&child.transcript).unwrap();
 
-    assert!(main_jsonl.contains("spawn child"));
-    assert!(!main_jsonl.contains("hello from child"));
-    assert!(child_jsonl.contains("hello from child"));
-    assert!(
-        child_jsonl.contains("\"agentSpecId\": \"hello-agent\"")
-            || child_jsonl.contains("\"agentSpecId\":\"hello-agent\"")
+    assert!(main_json.contains("spawn child"));
+    assert!(!main_json.contains("hello from child"));
+    assert!(child_json.contains("hello from child"));
+    assert_eq!(child.agent_spec_id, "hello-agent");
+    assert_eq!(
+        projection.agents["task-child"]
+            .identity
+            .parent_agent_instance_id
+            .as_deref(),
+        Some("task-main")
     );
-    assert!(manifest.contains("task-main"));
-    assert!(manifest.contains("task-child"));
-    assert!(!session_dir.join("main.jsonl").exists());
-    assert!(!session_dir.join("hello-agent.jsonl").exists());
-    assert!(!session_dir.join("tasks.json").exists());
-    assert!(!session_dir.join("tasks").exists());
-    assert!(child_jsonl.contains("\"agentInstanceId\":\"task-child\""));
-    assert!(
-        manifest.contains("\"parentAgentInstanceId\": \"task-main\"")
-            || manifest.contains("\"parentAgentInstanceId\":\"task-main\"")
-    );
+    assert!(session_dir.join("events").is_dir());
+    assert!(session_dir.join("snapshots").is_dir());
+    assert!(!session_dir.join("agents").exists());
 
     let reopened_server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
     let opened = reopened_server
@@ -249,9 +320,8 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
         &opened[1],
         Event::SessionReconciled(reconciled)
             if reconciled.reason == piko_protocol::ReconcileReason::InitialHydration
-                && reconciled.agents.len() == 2
-                && reconciled.agents[0].agent_instance_id == "task-main"
-                && reconciled.agents[1].agent_instance_id == "task-child"
+                && reconciled.agents.iter().any(|agent| agent.agent_instance_id == "task-main")
+                && reconciled.agents.iter().any(|agent| agent.agent_instance_id == "task-child")
     ));
     let Event::SessionReconciled(reopened) = &opened[1] else {
         unreachable!()
@@ -284,10 +354,9 @@ async fn persistent_turn_writes_each_task_to_its_own_shard() {
     assert!(matches!(
         &listed_agents[0],
         Event::CommandResponse { result: Ok(piko_hostd::api::CommandResult::AgentListed { agents, .. }), .. }
-            if agents.len() == 2
-                && agents[0].agent_instance_id == "task-main"
-                && agents[1].agent_instance_id == "task-child"
-                && agents[1].parent_agent_instance_id.as_deref() == Some("task-main")
+            if agents.iter().any(|agent| agent.agent_instance_id == "task-main")
+                && agents.iter().any(|agent| agent.agent_instance_id == "task-child"
+                    && agent.parent_agent_instance_id.as_deref() == Some("task-main"))
     ));
 
     let subscribed = reopened_server

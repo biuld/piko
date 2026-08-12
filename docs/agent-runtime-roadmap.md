@@ -66,11 +66,15 @@ Status: **complete for committed scope**.
 | F-03 prompt-assembly | fragment catalog, mention syntax, cache planning | D-03/D-27/D-28, V-03/V-27/V-28 |
 | F-06 tool-system | registry/routing, parallel batches, sequential exclusivity | D-06/V-06 |
 | F-07 approvals | bounded approval timeout with distinct deny/expiry semantics | D-07/V-07 |
-| F-09 persistence | schema-v3 store, resume/recovery, full clone, branch-point fork | D-26/V-26 |
+| F-31 persistence | schema-v4 canonical journal, deterministic replay/accounting, resume/recovery, full clone, branch-point fork | D-43/V-42 |
 | F-10 multi-agent core | agent tree plus v2 followup/interrupt/list/wait tools | D-10/V-10 |
 | F-21 multi-agent tool surface | model-facing tools: spec catalog, message_agent(when), spawn defaults/errors | implemented (F-21/D-33 A–C; prompt hint deferred) |
 | F-24 provider authentication | typed API-key/OAuth routes, browser callback, refresh, cancellation | D-36/V-36 |
 | F-25/F-26 inference protocols | native Responses/Chat Completions behind one protocol-neutral boundary | D-37/D-38, V-37/V-38 |
+
+F-31/D-43/ADR-015/V-42 replaced F-09's schema-v3 storage/replay contract with
+the host-owned schema-v4 journal. F-09 now retains only deferred paging and
+startup-prewarm scope.
 
 Deferred residue: model prewarm/sticky routing; dynamic/extension tools and
 tool search; session-list cursor paging and session prewarm. These are not on
@@ -186,7 +190,7 @@ optional extensions and have no scheduled implementation.
 | E Tool System | F-06 | registry/routing, batch dispatch, approvals hook |
 | F Approvals & Safety | F-07/F-11/F-12 | approvals, guardian, elicitation decision, safety assessment |
 | G Exec & Sandbox | F-08/F-23 | process lifecycle, full-shell unified exec, enforced containment, command authority/elevation |
-| H Persistence & Resume | F-09 | store, fork/resume, recovery, interrupted markers |
+| H Persistence & Resume | F-31 | schema-v4 canonical journal, deterministic replay/accounting, fork/resume, recovery; paging/prewarm deferred |
 | I Multi-Agent | F-10/F-19/F-20/F-21 | agent tree, v2 tools, role permissions, completion fragments, model tool surface |
 | J Skills/Plugins/MCP | F-13/F-14 | skills, plugins, MCP, hooks |
 | K Realtime | F-16 | realtime and multimodal preparation (deferred) |

@@ -1,11 +1,15 @@
 # F-09: Session persistence
 
-> Status: partial (F-09/D-26/V-26 branch-point fork landed; residual list
-> paging / prewarm deferred)
+> Status: superseded in storage/replay by F-31; residual list paging / prewarm
+> deferred
 > Priority: P1
 > Source evidence: codex-rs `core/src/thread_manager.rs`,
 > `thread_manager_tests.rs`, `rollout.rs`, external `codex_thread_store`;
 > digest Block H; piko hostd schema-v3 storage and TUI `session.fork`
+>
+> [F-31 durable session journal](F-31-durable-session-journal.md) replaces the
+> schema-v3 storage/replay contract. F-09 retains only deferred session-list
+> paging and startup prewarm scope.
 
 ## Summary
 

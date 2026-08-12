@@ -81,12 +81,13 @@ impl OrchAgentRunRunner {
                         .load_agent(session_id, &agent_instance_id)
                         .ok()
                         .and_then(|agent| agent.head_message_id);
-                    if agent_instance_id == root.agent_instance_id && transcript.is_empty() {
-                        transcript = resume_agent
-                            .map(|resume| resume.state.transcript.clone())
-                            .unwrap_or_default();
-                        head_message_id =
-                            resume_agent.and_then(|resume| resume.state.head_message_id.clone());
+                    if agent_instance_id == root.agent_instance_id
+                        && let Some(resume) = resume_agent
+                    {
+                        // Root context is the host-reduced active branch with
+                        // compaction applied, not the physical private tail.
+                        transcript = resume.state.transcript.clone();
+                        head_message_id = resume.state.head_message_id.clone();
                     }
                     AgentRecoveryState {
                         inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),

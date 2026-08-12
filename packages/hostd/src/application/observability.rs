@@ -206,6 +206,7 @@ mod tests {
                     agent_instance_id: root.agent_instance_id,
                     message_id: "result-1".into(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::ToolResult {
                         tool_call_id: "call-1".into(),
                         tool_name: Some("write".into()),

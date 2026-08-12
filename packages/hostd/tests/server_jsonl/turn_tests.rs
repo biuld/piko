@@ -250,24 +250,15 @@ async fn rollout_pages_durable_agent_transcript_with_opaque_cursor() {
         other => panic!("expected session_created, got {other:?}"),
     };
     let target_agent_instance_id = format!("agent_{session_id}_root");
-    let turn_events = server
+    let _turn_events = server
         .handle_command(Command::ChatSubmit {
             command_id: "submit-page".into(),
             session_id: session_id.clone(),
-            target_agent_instance_id,
+            target_agent_instance_id: target_agent_instance_id.clone(),
             text: "hello".into(),
         })
         .await;
-    // AssistantRunner stores its fixture transcript under the operation id.
-    let agent_instance_id = turn_events
-        .iter()
-        .find_map(|event| match event {
-            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { turn_id, .. }) => {
-                Some(turn_id.clone())
-            }
-            _ => None,
-        })
-        .expect("started turn id");
+    let agent_instance_id = target_agent_instance_id;
 
     let first = server
         .handle_command(Command::RolloutPageGet {

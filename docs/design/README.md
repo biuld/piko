@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-43: Event-sourced session store](D-43-event-sourced-session-store.md)
+  implements schema-v4 with a dedicated `piko-session-store` crate, one
+  host-owned journal, deterministic reducers, durable accounting, explicit
+  branch ancestry, and compatibility/upcasting rules (implemented; V-42).
 - [D-42: Per-agent usage projection and TUI](D-42-per-agent-usage.md)
   implements F-30 with durable per-AgentInstance usage/time aggregation and a
   host-refreshed `/usage` surface (implemented; V-41).

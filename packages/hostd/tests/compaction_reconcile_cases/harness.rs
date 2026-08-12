@@ -102,7 +102,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
         let store = SessionStore::new(&input.session_dir);
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         let session_id = input.session_id.clone();
-        let agent_instance_id = input.operation_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
         let turn_id = input.operation_id.clone();
         let prompt = input.prompt.clone();
 
@@ -115,13 +115,14 @@ impl AgentRunRunner for CompactAgentRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
                     parent_message_id: None,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt),
                         timestamp: Some(1),
                     },
                     committed_at: 1,
                 },
-                "agent-1",
+                "main",
             )
             .unwrap();
         store
@@ -133,6 +134,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
                     parent_message_id: Some("user-1".into()),
+                    tree_parent_entry_id: None,
                     message: Message::Assistant {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
@@ -147,17 +149,17 @@ impl AgentRunRunner for CompactAgentRunRunner {
                     },
                     committed_at: 3,
                 },
-                "agent-1",
+                "main",
             )
             .unwrap();
 
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(agent_instance_id.clone(), "agent-1", 0, execution_running());
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 1,
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
@@ -168,7 +170,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
             );
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 2,
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
@@ -179,7 +181,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
             );
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 3,
                 execution_succeeded(),
             );
@@ -215,7 +217,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
         let user_id = format!("user-{turn_id}");
         let assistant_id = format!("assistant-{turn_id}");
         let prompt = input.prompt.clone();
-        // Chain onto the shard head so repeated turns stay linear.
+        // Chain onto the private transcript head so repeated turns stay linear.
         let user_parent = store
             .load_agent(&session_id, &agent_instance_id)
             .ok()
@@ -230,13 +232,14 @@ impl AgentRunRunner for DistinctIdRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: user_id.clone(),
                     parent_message_id: user_parent,
+                    tree_parent_entry_id: None,
                     message: Message::User {
                         content: MessageContent::String(prompt),
                         timestamp: Some(1),
                     },
                     committed_at: 1,
                 },
-                "agent-1",
+                "main",
             )
             .unwrap();
         store
@@ -248,6 +251,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_id.clone(),
                     parent_message_id: Some(user_id.clone()),
+                    tree_parent_entry_id: None,
                     message: Message::Assistant {
                         content: vec![ContentBlock::Text {
                             text: "world".into(),
@@ -262,17 +266,17 @@ impl AgentRunRunner for DistinctIdRunRunner {
                     },
                     committed_at: 3,
                 },
-                "agent-1",
+                "main",
             )
             .unwrap();
 
         let publisher_task = Arc::clone(&publisher);
         tokio::spawn(async move {
             tokio::task::yield_now().await;
-            publisher_task.publish(agent_instance_id.clone(), "agent-1", 0, execution_running());
+            publisher_task.publish(agent_instance_id.clone(), "main", 0, execution_running());
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 1,
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
@@ -283,7 +287,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
             );
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 2,
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
@@ -294,7 +298,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
             );
             publisher_task.publish(
                 agent_instance_id.clone(),
-                "agent-1",
+                "main",
                 3,
                 execution_succeeded(),
             );

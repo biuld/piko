@@ -24,7 +24,7 @@ pub(super) fn timestamp() -> String {
 
 pub(super) fn commit_storage_error(error: piko_protocol::CommitError) -> SessionStorageError {
     SessionStorageError::Invalid {
-        path: PathBuf::from("agent shard"),
+        path: PathBuf::from("session journal"),
         message: error.to_string(),
     }
 }

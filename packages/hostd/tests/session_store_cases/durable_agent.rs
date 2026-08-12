@@ -30,6 +30,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "input-interrupted".into(),
                 parent_message_id: None,
+                tree_parent_entry_id: None,
                 message: piko_protocol::Message::User {
                     content: piko_protocol::MessageContent::String("interrupted input".into()),
                     timestamp: Some(1),
@@ -42,8 +43,8 @@ async fn recovery_marks_accepted_execution_interrupted() {
 
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 0);
-    let manifest = store.load_manifest().unwrap();
-    let execution = manifest.agent_executions.get("exec-interrupted").unwrap();
+    let projection = store.load_projection().unwrap();
+    let execution = projection.agent_executions.get("exec-interrupted").unwrap();
     assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
     assert!(matches!(
         execution.report.as_ref().map(|report| &report.outcome),
@@ -208,9 +209,9 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
             .await
             .unwrap();
     }
-    let manifest = store.load_manifest().unwrap();
-    assert_eq!(manifest.agent_executions.len(), 1);
-    let execution = manifest.agent_executions.get("run-idempotent").unwrap();
+    let projection = store.load_projection().unwrap();
+    assert_eq!(projection.agent_executions.len(), 1);
+    let execution = projection.agent_executions.get("run-idempotent").unwrap();
     assert_eq!(execution.report.as_ref(), Some(&report));
     assert_eq!(execution.prompt_assembly_version, 1);
     assert_eq!(execution.prompt_digest, "prompt-idempotent");
@@ -271,10 +272,10 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         )
         .await
         .unwrap();
-    let manifest = store.load_manifest().unwrap();
-    assert!(manifest.agent_input_queue.is_empty());
+    let projection = store.load_projection().unwrap();
+    assert!(projection.agent_input_queue.is_empty());
     assert_eq!(
-        manifest
+        projection
             .agent_executions
             .get("run-queued")
             .unwrap()

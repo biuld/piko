@@ -68,6 +68,7 @@ fn c1_session_listed_populates_projection() {
         modified_at: None,
         session_path: None,
         parent_session_path: None,
+        integrity_error: None,
     }];
 
     let (state, _) = host(

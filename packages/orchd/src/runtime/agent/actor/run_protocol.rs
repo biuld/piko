@@ -274,6 +274,7 @@ impl AgentActor {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: marker_id.clone(),
             parent_message_id: Some(input_message_id.clone()),
+            tree_parent_entry_id: None,
             message: marker.clone(),
             committed_at: chrono::Utc::now().timestamp_millis(),
         };

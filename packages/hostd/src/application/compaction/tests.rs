@@ -18,7 +18,6 @@ use super::*;
 use crate::domain::config::CompactionSettings as ConfigCompaction;
 use crate::domain::config::HostSettings;
 use crate::domain::config::ModelRegistry;
-use crate::infra::storage::JsonlSessionRepository;
 
 const WINDOW: u64 = 8_192;
 /// 12.5% of the resolved 8k window: the derived hysteresis guard.
@@ -123,24 +122,22 @@ fn unset_guard_derives_from_resolved_window() {
 #[tokio::test]
 async fn window_fraction_guard_scales_retrigger_to_resolved_model() {
     let temp = tempfile::tempdir().unwrap();
-    let app = HostApp::with_storage_runner_settings(
-        JsonlSessionRepository::new(temp.path()),
-        Arc::new(crate::ports::ErrorAgentRunRunner::new("not used")),
-        HostSettings {
-            default_model: Some("small-model".into()),
-            default_provider: Some("test-provider".into()),
-            compaction: Some(ConfigCompaction {
-                enabled: Some(true),
-                reserve_tokens: Some(1_024),
-                keep_recent_tokens: Some(7_000),
-                min_growth_tokens: None,
-                min_growth_fraction: Some(0.125),
-                summarizer_model: None,
-                summarizer_provider: None,
-            }),
-            ..HostSettings::default()
-        },
-    );
+    let app =
+        HostApp::with_turn_runner(Arc::new(crate::ports::ErrorAgentRunRunner::new("not used")));
+    *app.settings.lock().await = HostSettings {
+        default_model: Some("small-model".into()),
+        default_provider: Some("test-provider".into()),
+        compaction: Some(ConfigCompaction {
+            enabled: Some(true),
+            reserve_tokens: Some(1_024),
+            keep_recent_tokens: Some(7_000),
+            min_growth_tokens: None,
+            min_growth_fraction: Some(0.125),
+            summarizer_model: None,
+            summarizer_provider: None,
+        }),
+        ..HostSettings::default()
+    };
 
     // Resolve "small-model" to an 8k context window via a test provider.
     let providers_dir = temp.path().join("providers");

@@ -23,7 +23,7 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-06 | tool-system | Tool registry, schemas, routing, parallel batches, output handling | implemented (D-06, V-06) | core/src/tools/ |
 | F-07 | tool-approvals | Human approval flows with bounded deadlines, fail-closed expiry, distinct deny/expire semantics | implemented (F-07/D-07/V-07) | core/src/tools/approvals.rs |
 | F-08 | exec-sandboxing | Original sandbox/process lifecycle baseline; lifecycle retained by F-23 | superseded by F-23 | core/src/exec*.rs, sandboxing/, unified_exec/ |
-| F-09 | session-persistence | Thread store, resume, branch-point fork, message durability, interrupted-turn finalization | partial (F-09/D-26/V-26 branch-point fork landed; list paging / prewarm deferred) | core/src/thread_manager.rs |
+| F-09 | session-persistence | Legacy thread store contract; residual session-list paging and startup prewarm | superseded in storage/replay by F-31; residual scope deferred | core/src/thread_manager.rs |
 | F-10 | multi-agent | Subagent spawn, supervision, result collection; v2 collaboration tools | implemented (F-10/D-10/V-10; F-20 completion fragments) | core/src/agent/, tools/handlers/multi_agents* |
 | F-11 | guardian | Automatic approval review loop | implemented (F-11/D-11/V-11) | core/src/guardian/ |
 | F-12 | safety | Deterministic write-safety gate (patch-safety assessment); elicitation pause deferred; attestation rejected | implemented (F-12/D-12/V-12; patch-safety slice 1) | core/src/safety.rs, elicitation.rs, attestation.rs |
@@ -45,3 +45,4 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-28 | provider-native-cost-accounting | Catalog-owned prices by model/API surface; OAuth API-equivalent estimates; native-currency session ledger; DeepSeek CNY | implemented (F-28/D-40/V-39/ADR-013) | OpenAI and DeepSeek pricing contracts; piko product direction |
 | F-29 | provider-pluggable-billing | Registered usage adapters and pricing policies with open billable units and cost components | implemented (F-29/D-41/V-40/ADR-014) | piko product direction |
 | F-30 | per-agent-usage | Host-authoritative per-AgentInstance run time, token, and provider-native cost accounting; TUI `/usage` surface | implemented (F-30/D-42/V-41) | piko product direction; F-15/F-28/F-29 foundation |
+| F-31 | durable-session-journal | One host-owned append-only history with deterministic replay, branch/private-transcript ancestry, accounting facts, crash recovery, and compatible event evolution | implemented (F-31/D-43/ADR-015/V-42) | piko product direction; schema-v3 reliability review |

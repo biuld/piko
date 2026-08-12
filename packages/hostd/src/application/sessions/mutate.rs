@@ -145,13 +145,27 @@ impl HostApp {
         self.ensure_session_hydrated_for_mutate(&session_id, &path)
             .await?;
 
+        let parent_id = self
+            .state
+            .lock()
+            .await
+            .session(&session_id)?
+            .current_leaf_id
+            .clone();
+        let durable_entry = if let Some(storage) = &self.storage {
+            Some(
+                storage
+                    .append_session_info(&path, parent_id.as_deref(), &name, None)
+                    .map_err(storage_error)?,
+            )
+        } else {
+            None
+        };
         let mut state = self.state.lock().await;
-        let session = state.session_mut(&session_id)?;
-        session.name = Some(name.clone());
-        if let Some(storage) = &self.storage {
-            storage
-                .append_session_info(&path, session.current_leaf_id.as_deref(), &name, None)
-                .map_err(storage_error)?;
+        if let Some(entry) = durable_entry {
+            state.append_entry(&session_id, entry)?;
+        } else {
+            state.session_mut(&session_id)?.name = Some(name.clone());
         }
         drop(state);
         let (snapshot, agents) = self.session_view(&session_id).await?;
@@ -172,14 +186,15 @@ impl HostApp {
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let path = self.resolve_session_storage_path(&session_id).await.ok();
-        self.state.lock().await.delete_session(&session_id);
-        let mapped = self.session_paths.lock().await.remove(&session_id);
+        let mapped = self.session_paths.lock().await.get(&session_id).cloned();
         let path = path.or(mapped);
         if let Some(path) = path {
             std::fs::remove_dir_all(path).map_err(|error| {
                 ProtocolError::InvalidCommand(format!("delete session storage: {error}"))
             })?;
         }
+        self.state.lock().await.delete_session(&session_id);
+        self.session_paths.lock().await.remove(&session_id);
         Ok(vec![
             server_response_ok(command_id, crate::api::CommandResult::Empty),
             ServerMessage::SessionCleared(piko_protocol::SessionClearedEvent {

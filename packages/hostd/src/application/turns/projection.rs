@@ -15,10 +15,10 @@ use crate::ports::storage_types::SessionStorageError;
 
 /// Observation path: project a committed message for TUI emission.
 ///
-/// The Execution runtime commits durably to the AgentInstance shard *before*
+/// The Execution runtime commits durably to the session journal *before*
 /// publishing `MessageCommitted`, so prefer in-memory HostState (already
 /// projected by [`record_committed_message`]) and fall back to durable
-/// storage for the first observation of a shard or during session recovery.
+/// storage for the first observation or during session recovery.
 pub fn project_committed_message(
     state: &HostState,
     store: Option<&dyn SessionStorePort>,
@@ -50,6 +50,13 @@ pub fn record_committed_message(
     else {
         return Ok(None);
     };
+    let tree_parent_id = store.and_then(|store| {
+        store
+            .find_committed_message(session_id, agent_instance_id, message_id)
+            .ok()
+            .flatten()
+            .and_then(|message| message.tree_parent_id)
+    });
     append_committed_message(
         state,
         session_id,
@@ -59,11 +66,11 @@ pub fn record_committed_message(
         &projected.message,
         &projected.message_id,
         projected.transcript_seq,
-        None,
+        tree_parent_id.as_deref(),
     )
 }
 
-/// Rebuild the in-memory committed projection from every durable Agent shard.
+/// Rebuild the in-memory committed projection from the durable aggregate.
 /// This is used when reliable observation cannot replay the full cursor range.
 pub fn reconcile_committed_messages(
     state: &mut HostState,
@@ -135,13 +142,9 @@ fn project_committed_message_from_store(
     message_id: &str,
 ) -> Option<TranscriptCommittedEvent> {
     let message = store
-        .find_committed_message_lenient(agent_instance_id, message_id)
-        .or_else(|| {
-            store
-                .find_committed_message(session_id, agent_instance_id, message_id)
-                .ok()
-                .flatten()
-        })?;
+        .find_committed_message(session_id, agent_instance_id, message_id)
+        .ok()
+        .flatten()?;
     Some(TranscriptCommittedEvent {
         session_id: session_id.to_string(),
         agent_instance_id: agent_instance_id.to_string(),
@@ -226,7 +229,7 @@ fn append_committed_message(
                 .cloned()
         })
         .or_else(|| {
-            // Cross-execution Turns: first message on a new shard has no task head yet.
+            // Cross-execution Turns may not have a projected task head yet.
             state.session(session_id).ok()?.current_leaf_id.clone()
         });
 
@@ -242,7 +245,7 @@ fn append_committed_message(
         message: message.clone(),
     });
 
-    // MessageCommitted notifications arrive after the AgentInstance shard write
+    // MessageCommitted notifications arrive after the journal commit
     // is durable; only project into HostState here.
     state.append_task_entry(session_id, agent_instance_id, entry)?;
     let committed = TranscriptCommittedEvent {

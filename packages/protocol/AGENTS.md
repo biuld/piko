@@ -2,9 +2,10 @@
 
 This crate is the foundation of the Piko event-driven protocol architecture.
 
-Do not add orchestrator-owned event sourcing models here. Durable session facts are
-stored by piko-hostd as `SessionTreeEntry` JSONL records; piko-orchd emits runtime protocol
-events and may keep ephemeral in-memory projections only.
+Do not add orchestrator-owned event-sourcing models here. Durable session facts
+are owned by hostd and stored by `piko-session-store` in the schema-v4 event
+journal; piko-orchd emits runtime protocol events and may keep ephemeral
+in-memory projections only.
 
 Do not add runtime traits or execution contexts here. Tool provider interfaces,
 approval gateways, and tool execution results belong to `piko-orchd::tools`; this

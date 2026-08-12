@@ -32,7 +32,7 @@ pub struct AgentRunInput {
     pub cwd: String,
     /// Active tool names to enable. None = all tools enabled.
     pub active_tool_names: Option<Vec<String>>,
-    /// Session storage directory for the durable AgentInstance shard.
+    /// Session storage directory for the durable journal.
     pub session_dir: PathBuf,
     /// Reattach a resumed root agent with committed transcript history.
     pub resume_agent: Option<ResumeAgent>,

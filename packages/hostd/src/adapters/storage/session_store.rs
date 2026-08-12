@@ -7,12 +7,12 @@ use std::sync::Arc;
 use crate::infra::storage::SessionStore;
 use crate::ports::session_store::{SessionStoreFactory, SessionStorePort};
 use crate::ports::storage_types::{
-    AgentManifestEntry, CommittedMessage, RecoveredAgent, SessionManifest, SessionStorageError,
+    AgentProjection, CommittedMessage, RecoveredAgent, SessionProjection, SessionStorageError,
 };
 
 impl SessionStorePort for SessionStore {
-    fn load_manifest(&self) -> Result<SessionManifest, SessionStorageError> {
-        SessionStore::load_manifest(self)
+    fn load_projection(&self) -> Result<SessionProjection, SessionStorageError> {
+        SessionStore::load_projection(self)
     }
 
     fn load_agent(
@@ -23,7 +23,7 @@ impl SessionStorePort for SessionStore {
         SessionStore::load_agent(self, session_id, agent_instance_id)
     }
 
-    fn agent_instances(&self) -> Result<Vec<AgentManifestEntry>, SessionStorageError> {
+    fn agent_instances(&self) -> Result<Vec<AgentProjection>, SessionStorageError> {
         SessionStore::agent_instances(self)
     }
 
@@ -34,14 +34,6 @@ impl SessionStorePort for SessionStore {
         message_id: &str,
     ) -> Result<Option<CommittedMessage>, SessionStorageError> {
         SessionStore::find_committed_message(self, session_id, agent_instance_id, message_id)
-    }
-
-    fn find_committed_message_lenient(
-        &self,
-        agent_instance_id: &str,
-        message_id: &str,
-    ) -> Option<CommittedMessage> {
-        SessionStore::find_committed_message_lenient(self, agent_instance_id, message_id)
     }
 
     fn agent_report_for_turn(

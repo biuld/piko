@@ -213,6 +213,8 @@ pub struct MessageCommit {
     pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: MessageId,
     pub parent_message_id: Option<MessageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_parent_entry_id: Option<MessageId>,
     pub message: Message,
     pub committed_at: i64,
 }
