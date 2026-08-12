@@ -37,7 +37,7 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
     let modal = resolve_modal_surface(app);
     let centered_size = match modal {
         Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
-        Some(SurfaceId::Status) => Some(status_centered_size(app, body)),
+        Some(SurfaceId::Usage) => Some(usage_centered_size(app, body)),
         Some(SurfaceId::Notifications) => Some(notifications_centered_size(app, body)),
         _ => None,
     };
@@ -103,14 +103,15 @@ fn todos_band_offer(app: &AppState) -> DockBandOffer {
     DockBandOffer::inactive(BandId::Todos)
 }
 
-/// Centered size for the compact read-only status dialog.
-fn status_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
-    let preview_rows = u16::from(app.queue_status.steer_preview.is_some())
-        .saturating_add(u16::from(app.queue_status.follow_up_preview.is_some()))
-        .saturating_mul(3);
-    let content_rows = 6u16.saturating_add(preview_rows);
-    let width = cells_from_percent(body.width, 76)
-        .clamp(40, 96)
+/// Centered size for the per-AgentInstance usage dialog.
+fn usage_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let row_count = app.agent_usage.len().max(1) as u16;
+    let compact_multiplier = if body.width < 100 { 2 } else { 1 };
+    let content_rows = row_count
+        .saturating_mul(compact_multiplier)
+        .saturating_add(3);
+    let width = cells_from_percent(body.width, 90)
+        .clamp(52, 132)
         .min(body.width);
     let height = content_rows
         .saturating_add(5)
@@ -285,13 +286,13 @@ pub fn build_surface_hitmap(
             });
             hits
         }
-        Region::Surface(SurfaceId::Status) => {
-            stamp(<crate::features::status::StatusPanel as SurfacePanel<
+        Region::Surface(SurfaceId::Usage) => {
+            stamp(<crate::features::usage::UsagePanel as SurfacePanel<
                 SurfaceId,
                 HitId,
-                crate::features::status::StatusCtx<'_>,
+                crate::features::usage::UsageCtx<'_>,
             >>::hit_regions(
-                &crate::features::status::StatusPanel, rect
+                &crate::features::usage::UsagePanel, rect
             ))
         }
         Region::Surface(SurfaceId::Notifications) => stamp(
@@ -444,23 +445,23 @@ mod tests {
     }
 
     #[test]
-    fn status_surface_uses_content_sized_centered_modal() {
+    fn usage_surface_uses_content_sized_centered_modal() {
         let mut app = app_state();
-        app.push_surface(SurfaceId::Status);
+        app.push_surface(SurfaceId::Usage);
         let frame = compose_frame(&app, Rect::new(0, 0, 100, 30));
-        let layer = frame.plan.layers.first().expect("status layer");
+        let layer = frame.plan.layers.first().expect("usage layer");
         assert!(matches!(
             layer.placement,
             piko_tui_layout::ModalPlacement::Centered {
-                max_width: 76,
-                max_height: 11
+                max_width: 90,
+                max_height: 9
             }
         ));
-        let status = layer
+        let usage = layer
             .rects
-            .get(&Region::Surface(SurfaceId::Status))
-            .expect("status rect");
-        assert_eq!((status.width, status.height), (76, 11));
+            .get(&Region::Surface(SurfaceId::Usage))
+            .expect("usage rect");
+        assert_eq!((usage.width, usage.height), (90, 9));
     }
 
     #[test]

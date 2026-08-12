@@ -124,6 +124,7 @@ fn snapshot_projects_only_typed_timeline_entries() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
+                agent_usage: Vec::new(),
                 todo_lists: Vec::new(),
             },
             agents: Vec::new(),
@@ -201,6 +202,7 @@ fn session_facts_are_merged_into_every_agent_timeline() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
+                agent_usage: Vec::new(),
                 todo_lists: Vec::new(),
             },
             agents: Vec::new(),
@@ -349,6 +351,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
+                agent_usage: Vec::new(),
                 todo_lists: Vec::new(),
             },
             agents: Vec::new(),
@@ -460,6 +463,7 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: None,
+                agent_usage: Vec::new(),
                 todo_lists: Vec::new(),
             },
             agents,
@@ -497,11 +501,6 @@ fn queue_update_populates_status_data() {
     assert_eq!(app.queue_status.steer_count, 1);
     assert_eq!(app.queue_status.follow_up_count, 2);
     assert_eq!(app.queue_status.next_turn_count, 3);
-    assert_eq!(app.queue_status.steer_preview.as_deref(), Some("steer"));
-    assert_eq!(
-        app.queue_status.follow_up_preview.as_deref(),
-        Some("follow")
-    );
 }
 
 #[test]

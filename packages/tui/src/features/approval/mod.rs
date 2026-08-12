@@ -59,10 +59,6 @@ impl ApprovalPanel {
         self.pending.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.pending.len()
-    }
-
     pub const CHOICE_COUNT: usize = 5;
 
     pub fn select_next(&mut self) {

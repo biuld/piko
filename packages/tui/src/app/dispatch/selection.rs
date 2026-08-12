@@ -15,6 +15,12 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
+            Some(SurfaceId::Usage) => {
+                self.usage_scroll = self
+                    .usage_scroll
+                    .saturating_add(1)
+                    .min(self.agent_usage.len().saturating_sub(1));
+            }
             Some(SurfaceId::Mcp) => self.mcp.select_next(),
             Some(SurfaceId::Processes) => self.processes.select_next(),
             _ => {}
@@ -31,6 +37,9 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
+            Some(SurfaceId::Usage) => {
+                self.usage_scroll = self.usage_scroll.saturating_sub(1);
+            }
             Some(SurfaceId::Mcp) => self.mcp.select_prev(),
             Some(SurfaceId::Processes) => self.processes.select_prev(),
             _ => {}
@@ -241,7 +250,7 @@ impl AppState {
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
             Some(SurfaceId::Processes) => self.confirm_process_stop(),
             Some(
-                SurfaceId::Status
+                SurfaceId::Usage
                 | SurfaceId::Notifications
                 | SurfaceId::Mcp
                 | SurfaceId::Diagnostics

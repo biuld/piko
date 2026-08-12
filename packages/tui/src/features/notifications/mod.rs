@@ -214,13 +214,6 @@ impl NotificationCenter {
             .min(self.modal_len().saturating_sub(1));
     }
 
-    pub fn count_for(&self, session_id: Option<&str>, agent_instance_id: Option<&str>) -> usize {
-        self.items
-            .iter()
-            .filter(|notice| notice.scope.applies_to(session_id, agent_instance_id))
-            .count()
-    }
-
     #[cfg(test)]
     pub fn items(&self) -> &VecDeque<Notification> {
         &self.items

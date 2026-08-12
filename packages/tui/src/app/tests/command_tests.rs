@@ -57,6 +57,16 @@ fn local_slash_commands_exist_before_host_catalog_arrives() {
             .iter()
             .any(|entry| entry.slash == "/noti")
     );
+    assert!(
+        app.command_catalog
+            .iter()
+            .any(|entry| entry.slash == "/usage")
+    );
+    assert!(
+        app.command_catalog
+            .iter()
+            .all(|entry| entry.slash != "/status")
+    );
 }
 
 #[test]
@@ -70,6 +80,23 @@ fn noti_opens_the_notifications_modal() {
         app.focus_manager.active_mode(),
         AppMode::Surface(SurfaceId::Notifications)
     );
+}
+
+#[test]
+fn usage_opens_modal_and_refreshes_host_snapshot() {
+    let mut app = live_app();
+
+    let effects = app.try_slash_command("/usage").expect("known slash");
+
+    assert_eq!(
+        app.focus_manager.active_mode(),
+        AppMode::Surface(SurfaceId::Usage)
+    );
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::StateSnapshot { session_id, .. })]
+            if session_id == "session-1"
+    ));
 }
 
 #[test]

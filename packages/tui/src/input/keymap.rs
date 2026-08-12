@@ -9,7 +9,7 @@ pub enum KeyAction {
     Sessions,
     SessionTree,
     Settings,
-    Status,
+    Usage,
     ApprovalAccept,
     ApprovalAcceptSession,
     ApprovalAcceptWorkspace,
@@ -370,7 +370,7 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
 
         "app.session.tree" => KeyAction::SessionTree,
         "app.settings" => KeyAction::Settings,
-        "app.status" => KeyAction::Status,
+        "app.usage" => KeyAction::Usage,
         "app.notifications.clear" => KeyAction::ClearNotifications,
         "app.model.select" => KeyAction::Models,
         _ => return None,

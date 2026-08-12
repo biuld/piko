@@ -56,7 +56,7 @@ pub enum TimelineAction {
 #[derive(Debug)]
 pub enum SurfaceAction {
     OpenSettings,
-    OpenStatus,
+    OpenUsage,
     OpenNotifications,
     OpenTree,
     OpenThinking,
@@ -233,7 +233,7 @@ impl From<SlashAction> for Action {
 pub enum LocalCommandId {
     Settings,
     Tree,
-    Status,
+    Usage,
     Notifications,
     Sessions,
     Models,
@@ -293,10 +293,10 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "Open hostd-backed runtime settings",
     ),
     (
-        "/status",
-        LocalCommandId::Status,
-        "Status",
-        "Show turn, queue, approval, and tool state",
+        "/usage",
+        LocalCommandId::Usage,
+        "Usage",
+        "Show per-agent time, token, and cost totals",
     ),
     (
         "/noti",
@@ -390,7 +390,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Thinking => SurfaceAction::OpenThinking.into(),
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
-        LocalCommandId::Status => SurfaceAction::OpenStatus.into(),
+        LocalCommandId::Usage => SurfaceAction::OpenUsage.into(),
         LocalCommandId::Notifications => SurfaceAction::OpenNotifications.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
         LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),

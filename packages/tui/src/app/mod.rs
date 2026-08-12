@@ -90,8 +90,6 @@ pub struct QueueStatus {
     pub steer_count: u32,
     pub follow_up_count: u32,
     pub next_turn_count: u32,
-    pub steer_preview: Option<String>,
-    pub follow_up_preview: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -129,6 +127,9 @@ pub struct AppState {
     // session-level status
     pub status: String,
     pub queue_status: QueueStatus,
+    /// Host-authoritative per-AgentInstance resource accounting.
+    pub agent_usage: Vec<piko_protocol::AgentUsageSummary>,
+    pub usage_scroll: usize,
     pub spinner_frame: usize,
 
     // panels (each owns its own state + render)

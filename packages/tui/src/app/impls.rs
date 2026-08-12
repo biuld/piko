@@ -39,6 +39,8 @@ impl AppState {
             command_catalog: crate::app::command::merge_command_catalog(&[]),
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
+            agent_usage: Vec::new(),
+            usage_scroll: 0,
             spinner_frame: 0,
             timeline: Timeline::new(),
             agent_timelines: HashMap::new(),

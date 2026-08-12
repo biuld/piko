@@ -140,9 +140,25 @@ pub struct SessionSnapshot {
     /// Cumulative token usage and cost across all turns
     #[serde(skip_serializing_if = "Option::is_none", rename = "cumulativeUsage")]
     pub cumulative_usage: Option<crate::messages::Usage>,
+    /// Host-authoritative resource accounting grouped by AgentInstance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_usage: Vec<AgentUsageSummary>,
     /// Current todo list per agent (F-27). Empty when feature off or none set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub todo_lists: Vec<crate::TodoList>,
+}
+
+/// Durable usage and execution-time roll-up for one AgentInstance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentUsageSummary {
+    pub agent_instance_id: crate::AgentInstanceId,
+    pub agent_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_duration_ms: Option<u64>,
+    pub usage: crate::messages::Usage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +194,25 @@ pub struct ToolCallSnapshot {
     pub status: ToolCallStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::SessionSnapshot;
+
+    #[test]
+    fn missing_agent_usage_defaults_to_empty() {
+        let snapshot: SessionSnapshot = serde_json::from_value(serde_json::json!({
+            "sessionId": "s1",
+            "cwd": "/tmp",
+            "seq": 0,
+            "entries": [],
+            "activeTurns": [],
+            "pendingApprovals": []
+        }))
+        .unwrap();
+        assert!(snapshot.agent_usage.is_empty());
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

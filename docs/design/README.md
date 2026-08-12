@@ -14,6 +14,9 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-42: Per-agent usage projection and TUI](D-42-per-agent-usage.md)
+  implements F-30 with durable per-AgentInstance usage/time aggregation and a
+  host-refreshed `/usage` surface (implemented; V-41).
 - [D-41: Provider-pluggable billing](D-41-provider-pluggable-billing.md)
   implements F-29 with registered usage adapters, pricing policies, and open
   billable/cost components (implemented; V-40).

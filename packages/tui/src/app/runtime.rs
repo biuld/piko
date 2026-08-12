@@ -28,8 +28,13 @@ impl AppState {
                     command_id,
                     result: Ok(piko_protocol::CommandResult::Empty),
                 } => {
-                    let _ = self.session.pending.take(&command_id);
-                    self.status = format!("done {command_id}");
+                    self.status = if self.session.pending.take(&command_id)
+                        == Some(pending::PendingCommandKind::UsageRefresh)
+                    {
+                        "usage refreshed".to_string()
+                    } else {
+                        format!("done {command_id}")
+                    };
                     Vec::new()
                 }
                 piko_protocol::ServerMessage::CommandResponse {
@@ -105,6 +110,9 @@ impl AppState {
             Some(pending::PendingCommandKind::SessionDelete) => {
                 self.session.pending.delete_session_id = None;
                 self.status = format!("delete failed: {reason}");
+            }
+            Some(pending::PendingCommandKind::UsageRefresh) => {
+                self.status = format!("usage refresh failed: {reason}");
             }
             None => {}
         }

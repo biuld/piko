@@ -54,7 +54,7 @@ summary only.
 | Browse | `CoverBody` | Sessions, Tree, Help, Diagnostics, SummaryPrompt |
 | Select | `ComposerBand` | Agents, Models, AuthSelector, MCP, Processes |
 | Dock | `ComposerBand` | Approval, ToolInteraction |
-| Modal | `Centered` | Settings, Status |
+| Modal | `Centered` | Settings, Usage |
 
 Define via `SurfaceId::intent()` / `modal_layer(body, band_h)`.
 

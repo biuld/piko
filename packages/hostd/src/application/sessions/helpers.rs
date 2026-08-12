@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::api::{AgentInfo, ProtocolError, ServerMessage, SessionSnapshot};
 use crate::application::host_app::HostApp;
 use crate::util::now_ms;
@@ -67,6 +69,12 @@ impl HostApp {
         if let Some(live_agents) = runner.list_agent_instances(session_id).await {
             agents = live_agents;
         }
+        merge_agent_usage_runtime(
+            &mut snapshot,
+            &agents,
+            self.session_paths.lock().await.get(session_id).cloned(),
+            &self.session_store_factory,
+        );
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
@@ -140,5 +148,147 @@ impl HostApp {
             )
         };
         Ok(self.enrich_session_view(session_id, snapshot, agents).await)
+    }
+}
+
+fn merge_agent_usage_runtime(
+    snapshot: &mut SessionSnapshot,
+    agents: &[AgentInfo],
+    session_dir: Option<std::path::PathBuf>,
+    store_factory: &std::sync::Arc<dyn crate::ports::SessionStoreFactory>,
+) {
+    let mut row_by_instance = snapshot
+        .agent_usage
+        .drain(..)
+        .map(|row| (row.agent_instance_id.clone(), row))
+        .collect::<HashMap<_, _>>();
+
+    for agent in agents {
+        row_by_instance
+            .entry(agent.agent_instance_id.clone())
+            .or_insert_with(|| piko_protocol::AgentUsageSummary {
+                agent_instance_id: agent.agent_instance_id.clone(),
+                agent_id: agent.agent_id.clone(),
+                run_count: None,
+                active_duration_ms: None,
+                usage: piko_protocol::Usage::empty(),
+            });
+    }
+
+    if let Some(session_dir) = session_dir
+        && let Ok(manifest) = store_factory.open(&session_dir).load_manifest()
+    {
+        for row in row_by_instance.values_mut() {
+            row.run_count = Some(0);
+            row.active_duration_ms = Some(0);
+        }
+        merge_execution_stats(
+            &mut row_by_instance,
+            agents,
+            manifest.agent_executions.into_values(),
+            now_ms(),
+        );
+    }
+
+    let order = agents
+        .iter()
+        .enumerate()
+        .map(|(index, agent)| (agent.agent_instance_id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    snapshot.agent_usage = row_by_instance.into_values().collect();
+    snapshot.agent_usage.sort_by(|left, right| {
+        order
+            .get(left.agent_instance_id.as_str())
+            .copied()
+            .unwrap_or(usize::MAX)
+            .cmp(
+                &order
+                    .get(right.agent_instance_id.as_str())
+                    .copied()
+                    .unwrap_or(usize::MAX),
+            )
+            .then_with(|| left.agent_instance_id.cmp(&right.agent_instance_id))
+    });
+}
+
+fn merge_execution_stats(
+    rows: &mut HashMap<String, piko_protocol::AgentUsageSummary>,
+    agents: &[AgentInfo],
+    executions: impl IntoIterator<Item = crate::ports::storage_types::AgentExecutionManifestEntry>,
+    snapshot_at: i64,
+) {
+    for execution in executions {
+        let row = rows
+            .entry(execution.agent_instance_id.clone())
+            .or_insert_with(|| piko_protocol::AgentUsageSummary {
+                agent_instance_id: execution.agent_instance_id.clone(),
+                agent_id: agents
+                    .iter()
+                    .find(|agent| agent.agent_instance_id == execution.agent_instance_id)
+                    .map(|agent| agent.agent_id.clone())
+                    .unwrap_or_else(|| execution.agent_instance_id.clone()),
+                run_count: Some(0),
+                active_duration_ms: Some(0),
+                usage: piko_protocol::Usage::empty(),
+            });
+        row.run_count = Some(row.run_count.unwrap_or_default().saturating_add(1));
+        let finished_at = execution.finished_at.unwrap_or(snapshot_at);
+        let duration_ms = finished_at.saturating_sub(execution.started_at).max(0) as u64;
+        row.active_duration_ms = Some(
+            row.active_duration_ms
+                .unwrap_or_default()
+                .saturating_add(duration_ms),
+        );
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::merge_execution_stats;
+    use crate::ports::storage_types::AgentExecutionManifestEntry;
+    use std::collections::HashMap;
+
+    fn execution(
+        id: &str,
+        started_at: i64,
+        finished_at: Option<i64>,
+    ) -> AgentExecutionManifestEntry {
+        AgentExecutionManifestEntry {
+            agent_instance_id: id.into(),
+            run_id: format!("run-{started_at}"),
+            execution_id: format!("execution-{started_at}"),
+            request_id: String::new(),
+            source_turn_id: None,
+            detached_recipient_agent_instance_id: None,
+            detached_report_delivered: false,
+            prompt_assembly_version: 0,
+            prompt_digest: String::new(),
+            status: if finished_at.is_some() {
+                piko_protocol::ExecutionStatus::Succeeded
+            } else {
+                piko_protocol::ExecutionStatus::Running
+            },
+            started_at,
+            finished_at,
+            report: None,
+        }
+    }
+
+    #[test]
+    fn execution_stats_count_runs_and_include_running_elapsed_time() {
+        let mut rows = HashMap::new();
+        merge_execution_stats(
+            &mut rows,
+            &[],
+            [
+                execution("agent-1", 100, Some(350)),
+                execution("agent-1", 500, None),
+            ],
+            1_000,
+        );
+
+        let row = &rows["agent-1"];
+        assert_eq!(row.run_count, Some(2));
+        assert_eq!(row.active_duration_ms, Some(750));
     }
 }

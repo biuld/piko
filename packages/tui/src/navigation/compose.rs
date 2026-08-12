@@ -275,14 +275,14 @@ mod tests {
     }
 
     #[test]
-    fn status_is_centered_modal() {
+    fn usage_is_centered_modal() {
         let body = Rect::new(0, 0, 80, 30);
         let mut metrics = idle_metrics();
         metrics.centered_size = Some((60, 11));
         let plan = layout_solve(
             body,
             &compose_plane(&metrics),
-            &compose_modals(Some(SurfaceId::Status), &metrics, body),
+            &compose_modals(Some(SurfaceId::Usage), &metrics, body),
         );
         assert!(matches!(
             plan.layers[0].placement,

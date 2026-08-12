@@ -43,6 +43,13 @@ fn session_reconcile_projects_cumulative_usage() {
                 pending_interactions: Vec::new(),
                 name: None,
                 cumulative_usage: Some(usage.clone()),
+                agent_usage: vec![piko_protocol::AgentUsageSummary {
+                    agent_instance_id: "agent_session-1_root".into(),
+                    agent_id: "main".into(),
+                    run_count: Some(2),
+                    active_duration_ms: Some(65_000),
+                    usage: usage.clone(),
+                }],
                 todo_lists: Vec::new(),
             },
             agents: vec![piko_protocol::AgentInfo {
@@ -74,6 +81,9 @@ fn session_reconcile_projects_cumulative_usage() {
             .map(|u| u.total_tokens),
         Some(12_000)
     );
+    assert_eq!(app.agent_usage.len(), 1);
+    assert_eq!(app.agent_usage[0].run_count, Some(2));
+    assert_eq!(app.agent_usage[0].active_duration_ms, Some(65_000));
 }
 
 #[test]

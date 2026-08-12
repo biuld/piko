@@ -14,6 +14,7 @@ pub enum PendingCommandKind {
     SessionOpen,
     ChatSubmit,
     SessionDelete,
+    UsageRefresh,
 }
 
 #[derive(Debug, Clone, Default)]

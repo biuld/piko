@@ -16,9 +16,9 @@ use crate::{
         model_selector::ModelCtx,
         notifications::{NotificationLevel, NotificationPanelCtx},
         session_list::SessionListCtx,
-        status::{StatusCtx, StatusPanel, StatusPanelView},
         thinking::ThinkingCtx,
         tree::TreeCtx,
+        usage::{UsageCtx, UsagePanel},
     },
     layout::{Region, SurfaceId, compose_frame},
 };
@@ -217,20 +217,16 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
             };
             render_panel(&app.tree, frame, area, &ctx, interaction);
         }
-        SurfaceId::Status => {
-            let view = StatusPanelView {
-                session_id: app.session_id(),
-                turn_id: app.active_turn_id(),
-                queue: &app.queue_status,
-                notifications: &app.notifications,
+        SurfaceId::Usage => {
+            let ctx = UsageCtx {
+                rows: &app.agent_usage,
+                scroll: app.usage_scroll,
+                session_usage: app.session.cumulative_usage.as_ref(),
+                viewed_agent_instance_id: app.agent_panel.active_agent_instance_id.as_deref(),
+                has_session: app.session_id().is_some(),
                 theme: &app.theme,
             };
-            let ctx = StatusCtx {
-                view,
-                timeline: &app.timeline,
-                approvals: &app.approvals,
-            };
-            render_panel(&StatusPanel, frame, area, &ctx, interaction);
+            render_panel(&UsagePanel, frame, area, &ctx, interaction);
         }
         SurfaceId::Notifications => {
             let ctx = NotificationPanelCtx {

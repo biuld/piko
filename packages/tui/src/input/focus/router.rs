@@ -317,7 +317,7 @@ impl InputRouter {
             }
             // Info panels
             Some(
-                SurfaceId::Status | SurfaceId::Mcp | SurfaceId::Processes | SurfaceId::Diagnostics,
+                SurfaceId::Usage | SurfaceId::Mcp | SurfaceId::Processes | SurfaceId::Diagnostics,
             ) => match ka {
                 Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
@@ -400,7 +400,7 @@ impl InputRouter {
             Some(KeyAction::Sessions) => Some(SessionAction::RequestList.into()),
             Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
             Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
-            Some(KeyAction::Status) => Some(SurfaceAction::OpenStatus.into()),
+            Some(KeyAction::Usage) => Some(SurfaceAction::OpenUsage.into()),
             Some(KeyAction::ClearNotifications) => Some(NotificationAction::DismissVisible.into()),
             Some(KeyAction::HistoryPrev) => Some(EditorAction::HistoryPrev.into()),
             Some(KeyAction::HistoryNext) => Some(EditorAction::HistoryNext.into()),

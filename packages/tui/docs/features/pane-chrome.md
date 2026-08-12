@@ -73,7 +73,7 @@ Placement (Browse CoverBody vs Select ComposerBand) is **orthogonal**.
 | Slash suggestions / file browser (Suggest) | Minimal + **no search** | Filter is editor token (`/` / `@`) |
 | Settings | Standard | Nested catalog + search rule + hints |
 | Sessions, Tree | Standard | Browse table / many affordances |
-| Status, MCP, Diagnostics | Standard | Read-heavy info panels |
+| Usage, MCP, Diagnostics | Standard | Read-heavy info panels |
 
 ### Search zone
 

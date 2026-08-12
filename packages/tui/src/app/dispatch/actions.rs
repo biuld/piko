@@ -99,9 +99,22 @@ impl AppState {
                 }
                 return effects;
             }
-            SurfaceAction::OpenStatus => {
-                self.push_surface(SurfaceId::Status);
-                self.status = "status".to_string();
+            SurfaceAction::OpenUsage => {
+                self.usage_scroll = 0;
+                self.push_surface(SurfaceId::Usage);
+                if let Some(session_id) = self.session_id().map(str::to_string) {
+                    self.status = "refreshing usage".to_string();
+                    let command_id = super::command_id();
+                    self.session.pending.track(
+                        command_id.clone(),
+                        crate::app::pending::PendingCommandKind::UsageRefresh,
+                    );
+                    return vec![Effect::send(Command::StateSnapshot {
+                        command_id,
+                        session_id,
+                    })];
+                }
+                self.status = "no active session for /usage".to_string();
             }
             SurfaceAction::OpenNotifications => {
                 self.notifications.open_modal();

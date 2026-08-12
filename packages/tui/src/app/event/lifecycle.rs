@@ -232,8 +232,6 @@ impl AppState {
                 steer_count,
                 follow_up_count,
                 next_turn_count,
-                steer_preview,
-                follow_up_preview,
                 ..
             } => {
                 if !self.accepts_session(&session_id) {
@@ -243,8 +241,6 @@ impl AppState {
                     steer_count,
                     follow_up_count,
                     next_turn_count,
-                    steer_preview,
-                    follow_up_preview,
                 };
                 self.status = format!(
                     "queue steer={steer_count} follow_up={follow_up_count} next_turn={next_turn_count}"

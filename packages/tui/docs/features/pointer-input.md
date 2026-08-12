@@ -137,7 +137,7 @@ runs and disabled on exit.
 
 - This feature does not implement drag, double-click, right-click, middle-click,
   touch, text selection, or draggable scrollbars.
-- Read-only Status content and bottom chrome do not pretend to be actionable.
+- Read-only Usage content and bottom chrome do not pretend to be actionable.
 
 ## Acceptance criteria
 
@@ -188,7 +188,7 @@ Landed:
   `InteractionState` to the owning component; workflow, autocomplete, notice,
   and editor paint their own feedback.
 - `piko-tui`: all selectable Browse/Select/Modal panels expose paint-aligned
-  row hits; mode strips and Settings close affordance are clickable; Status
+  row hits; mode strips and Settings close affordance are clickable; Usage
   remains intentionally read-only.
 - Component-owned text fields in Auth, Tree label editing, ToolInteraction,
   and SummaryPrompt support pointer caret placement.

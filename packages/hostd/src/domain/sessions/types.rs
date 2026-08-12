@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::api::{
     AgentId, ContentBlock, Message, MessageContent, SessionId, SessionSummary, SessionTreeEntry,
@@ -158,6 +158,45 @@ impl SessionState {
         let mut lists: Vec<_> = self.todo_lists.values().cloned().collect();
         lists.sort_by(|a, b| a.agent_instance_id.cmp(&b.agent_instance_id));
         lists
+    }
+
+    /// Rebuild per-AgentInstance token/cost buckets from durable message facts.
+    pub fn agent_usage_for_snapshot(&self) -> Vec<piko_protocol::AgentUsageSummary> {
+        let mut rows = BTreeMap::<String, piko_protocol::AgentUsageSummary>::new();
+
+        for agent in self.active_agents.values() {
+            rows.entry(agent.agent_instance_id.clone())
+                .or_insert_with(|| piko_protocol::AgentUsageSummary {
+                    agent_instance_id: agent.agent_instance_id.clone(),
+                    agent_id: agent.agent_id.clone(),
+                    run_count: None,
+                    active_duration_ms: None,
+                    usage: Usage::empty(),
+                });
+        }
+
+        for entry in &self.entries {
+            let SessionTreeEntry::Message(message) = entry else {
+                continue;
+            };
+            let row = rows
+                .entry(message.agent_instance_id.clone())
+                .or_insert_with(|| piko_protocol::AgentUsageSummary {
+                    agent_instance_id: message.agent_instance_id.clone(),
+                    agent_id: message.agent_id.clone(),
+                    run_count: None,
+                    active_duration_ms: None,
+                    usage: Usage::empty(),
+                });
+            if let Message::Assistant {
+                usage: Some(usage), ..
+            } = &message.message
+            {
+                row.usage.accumulate(usage);
+            }
+        }
+
+        rows.into_values().collect()
     }
 
     /// Replace one agent's list (full replace). Empty items clear durable

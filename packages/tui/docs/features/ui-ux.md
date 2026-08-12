@@ -259,7 +259,7 @@ not multiple competing spinners for the same work.
 
 | Level | Where | Behavior |
 |-------|-------|----------|
-| Info | Transient; may appear in Status or as a brief toast-like row if implemented | Does not permanently steal layout height by default |
+| Info | Transient; may appear in the status line or as a brief toast-like row if implemented | Does not permanently steal layout height by default |
 | Warning / Error | Notification row (zone C) | Visible until replaced or cleared; error uses error token |
 | Turn rejection / command failure | Notification + optional Timeline system/error line | Must be readable after the ephemeral row scrolls away if durable |
 
@@ -396,7 +396,7 @@ Always visible, **non-interactive**, compact single row.
 
 - Keybinding help
 - Interactive affordances (buttons, focus)
-- Per-tool token breakdown (belongs in Status / future usage detail)
+- Per-agent token breakdown (belongs in the Usage surface)
 
 Detail ownership: [bottom-bar.md](./bottom-bar.md). Usage wiring is part of this
 contract’s acceptance: placeholders are valid only while hostd has not provided
@@ -471,7 +471,7 @@ Detail ownership: [resume-session.md](./resume-session.md),
   confirm—or commit-on-select if the feature PRD says so, but never silent
   discard of the previous value without Esc-cancel semantics
 
-### Status / diagnostics panel
+### Usage / diagnostics panels
 
 **Must show** (read-only snapshot)
 
@@ -500,7 +500,7 @@ Wire protocol design stays in system/feature design docs.
 
 | Layer | Owner | Purpose |
 |-------|--------|---------|
-| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Status, Notifications, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
+| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Usage, Notifications, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
 | **Host product commands** | hostd catalog + wire | Session/auth/runtime/model intents (`session.new`, `auth.login`, `session.compact`, `process.list`, …). Frontends map stable dotted ids to wire calls and local slash names. |
 
 Rules:
@@ -544,7 +544,7 @@ Each slash entry **must** expose:
 | `/models` | Model selector | Apply model; BottomBar model text updates |
 | `/thinking` | Thinking selector (ComposerBand) | Apply level; BottomBar thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
-| `/status` | Centered Status modal | Session/turn/queue/tools/approvals snapshot |
+| `/usage` | Centered Usage modal | Per-agent runs, active time, tokens, and cost; session token/cost total |
 | `/noti` | Centered Notifications modal | In-memory notices; Current/All title-affix scope |
 | `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
 | `/diff` | Shared Diagnostics surface (diff mode) | Last or active turn workspace diff |
@@ -614,7 +614,7 @@ this PRD’s P0):
 Add a local slash row when:
 
 1. The action is open/toggle/quit/navigate chrome, or
-2. It is a thin launcher over an existing host getter (debug/diff/status
+2. It is a thin launcher over an existing host getter (debug/diff/usage
    subsections), and
 3. Slash suggestions can describe it with title, detail, and result surface.
 
@@ -641,7 +641,7 @@ The current command inventory has a visible result path. Future work is a
 product decision rather than a missing-surface repair:
 
 - Queue steer user entry (only if steerable queue is a first-class UX)
-- Richer `/status` subsections linking the above
+- Per-run usage drill-down if a concrete reporting journey requires it
 - New host wire commands for net-new host capabilities
 
 ## Component-level interaction catalog

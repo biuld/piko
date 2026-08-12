@@ -37,6 +37,8 @@ impl AppState {
         self.approvals.clear();
         self.interactions.clear();
         self.queue_status = QueueStatus::default();
+        self.agent_usage.clear();
+        self.usage_scroll = 0;
         self.tree.document = Default::default();
         self.tree.visible.rows.clear();
     }
@@ -61,6 +63,8 @@ impl AppState {
         self.approvals.clear();
         self.interactions.clear();
         self.queue_status = QueueStatus::default();
+        self.agent_usage.clear();
+        self.usage_scroll = 0;
         self.todo_lists.clear();
         self.tree.document = Default::default();
         self.tree.visible.rows.clear();

@@ -210,7 +210,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 - **Partial overlay** (Model Selector, Auth Selector, etc.): the
   Editor is replaced by the overlay. Keystrokes go to the overlay, not the
   Editor. Editor content is preserved and restored when the overlay closes.
-- **Full overlay** (Session List, Tree, Status): the Editor is replaced
+- **Full overlay** (Session List, Tree, Usage): the Editor is replaced
   along with all middle slots. Same preservation on close.
 - **Approval mode**: the Approval panel replaces the Editor as a partial
   overlay. The Editor draft is preserved and restored after the approval is
