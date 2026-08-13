@@ -12,7 +12,7 @@ use crate::domain::sessions::{HostState, SessionModelRef};
 use crate::ports::prompt_materials::PromptMaterialLoader;
 use crate::ports::session_repository::SessionRepositoryPort;
 use crate::ports::session_store::SessionStoreFactory;
-use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
+use crate::ports::{AgentRunRunner, ErrorAgentRunRunner, TranscriptEstimator};
 
 /// Application-layer composition root.
 ///
@@ -49,6 +49,7 @@ pub struct HostApp {
     pub(crate) project_settings_path: Arc<Mutex<Option<PathBuf>>>,
     pub(crate) session_store_factory: Arc<dyn SessionStoreFactory>,
     pub(crate) prompt_materials: Arc<dyn PromptMaterialLoader>,
+    pub(crate) transcript_estimator: Arc<dyn TranscriptEstimator>,
 }
 
 #[derive(Clone)]
@@ -80,6 +81,10 @@ impl HostApp {
         Arc::new(crate::adapters::prompts::FsPromptMaterialLoader)
     }
 
+    fn default_transcript_estimator() -> Arc<dyn TranscriptEstimator> {
+        Arc::new(crate::adapters::bookkeeping::OrchTranscriptEstimator)
+    }
+
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
@@ -97,6 +102,7 @@ impl HostApp {
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
+            transcript_estimator: Self::default_transcript_estimator(),
         }
     }
 
@@ -121,6 +127,7 @@ impl HostApp {
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
+            transcript_estimator: Self::default_transcript_estimator(),
         }
     }
 
@@ -144,6 +151,7 @@ impl HostApp {
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
+            transcript_estimator: Self::default_transcript_estimator(),
         }
     }
 
@@ -167,6 +175,7 @@ impl HostApp {
             project_settings_path: Arc::new(Mutex::new(None)),
             session_store_factory: Self::default_session_store_factory(),
             prompt_materials: Self::default_prompt_materials(),
+            transcript_estimator: Self::default_transcript_estimator(),
         }
     }
 

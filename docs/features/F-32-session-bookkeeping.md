@@ -97,9 +97,9 @@ and fail-closed preflight can disagree about whether the window is full.
 
 | Question | Decision | Rationale |
 |---|---|---|
-| Crate boundary | hostd domain module | The ledger has one consumer; only the estimator is shared, via orchd |
+| Crate boundary | hostd domain plus estimator port/adapter | The ledger has one consumer; orchd integration stays outside the pure host domain |
 | Occupancy vs incurred | Separate facts | Provider usage is billed consumption; occupancy is a conservative window estimate |
-| Estimator owner | orchd F-04 implementation | Preflight already uses it; hostd must not invent a second formula |
+| Estimator owner | orchd F-04 implementation behind a host port | Preflight already uses it; the host adapter delegates without coupling host domain to orchd |
 | Chrome `used` | Last-step provider fill | That is what the last model call reported; estimated occupancy is a different question |
 | Durable store | Journal usage facts only | D-29 / F-31 remain the authority |
 

@@ -2,8 +2,7 @@
 
 use super::CompactionSettings;
 use super::CompactionState;
-use crate::api::SessionTreeEntry;
-use crate::domain::bookkeeping::{ContextUsageEstimate, estimate_context_tokens};
+use crate::domain::bookkeeping::ContextUsageEstimate;
 
 /// Why an auto-compact decision held off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,14 +51,13 @@ pub fn compact_trigger(
 /// Legacy single-threshold predicate: true when the first-window trigger
 /// would fire. Kept for callers that only need the waterline check.
 pub fn should_compact(
-    entries: &[SessionTreeEntry],
+    estimate: &ContextUsageEstimate,
     context_window: u64,
     settings: &CompactionSettings,
 ) -> bool {
-    let estimate = estimate_context_tokens(entries);
     matches!(
         compact_trigger(
-            &estimate,
+            estimate,
             context_window,
             settings,
             &CompactionState::default()
@@ -157,6 +155,6 @@ mod tests {
     #[test]
     fn should_compact_matches_first_window_trigger() {
         let s = settings();
-        assert!(!should_compact(&[], 128_000, &s));
+        assert!(!should_compact(&estimate(0), 128_000, &s));
     }
 }

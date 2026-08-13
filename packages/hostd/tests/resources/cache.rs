@@ -95,8 +95,9 @@ fn compaction_estimates_threshold_and_formats_file_ops() {
             timestamp: None,
         },
     })];
+    let estimate = estimate_context_tokens(&entries);
     assert!(should_compact(
-        &entries,
+        &estimate,
         30,
         &CompactionSettings {
             enabled: true,

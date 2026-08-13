@@ -2,7 +2,7 @@
 
 > Feature: [F-33](../features/F-33-local-installation.md)
 > Design: [D-45](../design/D-45-local-installer.md)
-> Verified: 2026-08-13
+> Verified: 2026-08-14
 
 ## Automated evidence
 
@@ -26,10 +26,10 @@ The Rust suites verify that provider catalogs parse from filesystem fixtures,
 agent definitions load from filesystem catalogs, installed-theme parsing
 retains complete semantic slots, and the host/TUI integration remains intact.
 
-The full `cargo test --workspace` run reaches a pre-existing architecture-test
-failure because `domain/bookkeeping/occupancy.rs` imports `piko_orchd`; the
-focused affected suites above pass, and workspace clippy passes with warnings
-denied.
+The previously recorded bookkeeping architecture failure is resolved:
+host domain now receives token estimates through `TranscriptEstimator`, whose
+orchd-backed implementation lives in adapters. The full `cargo test --workspace`
+run passes, and workspace clippy passes with warnings denied.
 
 ## Static evidence
 

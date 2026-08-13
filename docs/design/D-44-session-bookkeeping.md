@@ -11,8 +11,9 @@ auto-compact and orchd preflight cannot diverge on formula.
 
 ## Constraints and non-goals
 
-- No new crate. hostd already depends on orchd; the estimator is re-exported
-  from `piko-orchd` as a narrow public API.
+- No new crate. The host application reaches the orchd estimator through a
+  host-owned port implemented at the adapter boundary; host domain remains
+  runtime-independent.
 - `piko-protocol` stays DTO-only. `Usage::accumulate` / `context_fill` remain
   the only protocol-side helpers.
 - Journal usage facts stay the sole durable incurred ledger (D-29 / D-43).
@@ -23,18 +24,25 @@ auto-compact and orchd preflight cannot diverge on formula.
 
 ## Proposed design
 
-### 1. orchd public estimator
+### 1. Estimator port and orchd adapter
 
 `piko-orchd` exposes `transcript::{message_tokens, text_tokens, estimate_messages}`
-from the existing F-04 domain. hostd must not reach into `orchd::domain`.
+from the existing F-04 domain. `ports::TranscriptEstimator` is the host-owned
+boundary used by application compaction. `adapters::bookkeeping` maps
+`SessionTreeEntry` values to that API. Neither `hostd/domain/bookkeeping` nor
+`hostd/domain/compaction` imports orchd.
 
 ### 2. `hostd/domain/bookkeeping`
 
 | File | Responsibility |
 |---|---|
 | `ledger.rs` | `SessionState` incurred accumulation and `/usage` row projection |
-| `occupancy.rs` | F-04 occupancy of a `SessionTreeEntry` slice |
+| `occupancy.rs` | Pure occupancy value types and projection from estimated/provider facts |
 | `projection.rs` | Host-authored `UsageEvent` chrome |
+
+`adapters/bookkeeping.rs` owns session-tree estimation, and
+`ports/transcript_estimator.rs` lets application compaction consume it without
+reversing the application/adapter dependency.
 
 Data flow:
 
@@ -44,7 +52,8 @@ llmd Usage → orchd assistant.usage → journal
                                         ├─ session / turn / agent ledger
                                         └─ UsageEvent.cumulative
 
-session tree → bookkeeping.estimate_context_tokens (F-04)
+session tree → TranscriptEstimator port → orchd F-04 estimator
+             → bookkeeping ContextUsageEstimate
                  └─ compact trigger / cut-point / tokens_before|after
 ```
 
@@ -63,9 +72,10 @@ fill, and remaining for future chrome that wants occupancy explicitly.
 
 ### 4. Compaction wiring
 
-`domain/compaction` deletes the `ceil(chars / 4)` estimator and re-exports
-bookkeeping occupancy. `find_cut_point` walks `estimate_entry_tokens` so the
-keep-recent tail uses the same per-entry basis as the trigger.
+`domain/compaction` deletes the `ceil(chars / 4)` estimator. Application
+supplies estimated totals to the trigger and injects the port operation into
+`find_cut_point`, so the pure domain decision and keep-recent tail use the
+same per-entry basis without importing an adapter.
 
 ### 5. Session state
 
@@ -78,7 +88,7 @@ holder, not the accounting owner.
 | Package | Change |
 |---|---|
 | `piko-orchd` | Public `transcript` estimator re-export |
-| `piko-hostd` | `domain/bookkeeping`; compaction consumes it; session usage impls move |
+| `piko-hostd` | `domain/bookkeeping`; estimator port/adapter; compaction consumes numeric estimates; session usage impls move |
 
 ## Reusable infrastructure
 
@@ -101,15 +111,16 @@ cannot invent cost or usage.
 - **New `piko-bookkeeping` crate.** Rejected: one consumer for the ledger;
   extracting a crate does not change the hostd → orchd dependency.
 - **Move estimator into protocol.** Rejected: protocol is DTO-only.
-- **hostd import `orchd::domain::transcript`.** Rejected: domain stays crate
-  private; the public `transcript` module is the contract.
+- **Host domain imports orchd's public `transcript` module.** Rejected: public
+  visibility does not make one runtime a valid dependency of another
+  runtime's domain; integration belongs behind a host port in adapters.
 - **Switch chrome `used` to occupancy.** Rejected for this slice: that
   changes the user-visible meter from last-call fill to a conservative tree
   estimate.
 
 ## Rollout
 
-1. Re-export the orchd estimator.
+1. Re-export the orchd estimator and implement the host estimator port in an adapter.
 2. Add hostd bookkeeping and move the incurred ledger.
-3. Point compaction occupancy at bookkeeping.
+3. Pass adapter-produced estimates into compaction domain policy.
 4. Keep chrome semantics; route it through bookkeeping projection.

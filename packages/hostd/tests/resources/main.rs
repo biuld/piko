@@ -1,5 +1,6 @@
 use std::fs;
 
+use piko_hostd::adapters::bookkeeping::estimate_context_tokens;
 use piko_hostd::adapters::prompts::{load_context_files, load_prompt_templates, load_skills};
 use piko_hostd::api::{Message, MessageContent, MessageEntry, SessionTreeEntry};
 use piko_hostd::domain::compaction::{

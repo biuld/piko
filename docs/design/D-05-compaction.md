@@ -25,7 +25,8 @@ hostd owns end-to-end:
 - The F-04 estimator (`text ≈ ceil(bytes / 3)`, serialized JSON, +16 framing)
   remains the single accounting basis for both the trigger and the budget
   tools, so decisions and dispatches cannot diverge. Hostd occupancy lives in
-  `domain/bookkeeping` and calls `piko_orchd::transcript` (F-32 / D-44).
+  the host `TranscriptEstimator` port, whose adapter calls
+  `piko_orchd::transcript` (F-32 / D-44).
 - Non-root AgentInstance shards are not compacted through root state
   (unchanged); `SessionCompact` still targets the root shard.
 - No compaction hooks, no compaction-specific events beyond

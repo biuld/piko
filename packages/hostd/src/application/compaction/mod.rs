@@ -2,9 +2,9 @@ use crate::api::SessionTreeEntry;
 use crate::application::host_app::HostApp;
 use crate::application::sessions::helpers::session_reconciled_message;
 use crate::domain::compaction::{
-    CompactTrigger, CompactionSettings, DEFAULT_MIN_GROWTH_FRACTION, DEFAULT_MIN_GROWTH_TOKENS,
-    active_branch_entries, compact_trigger, context_entries_after_compaction,
-    estimate_context_tokens, min_growth_default,
+    CompactTrigger, CompactionSettings, ContextUsageEstimate, DEFAULT_MIN_GROWTH_FRACTION,
+    DEFAULT_MIN_GROWTH_TOKENS, active_branch_entries, compact_trigger,
+    context_entries_after_compaction, min_growth_default,
 };
 use crate::util::{ClientEventSender, send_event};
 use piko_protocol::command::CompactMode;

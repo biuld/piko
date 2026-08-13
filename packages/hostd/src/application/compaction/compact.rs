@@ -98,7 +98,10 @@ impl HostApp {
         drop(state_lock);
 
         let context_entries = context_entries_after_compaction(&branch_entries);
-        let estimate = estimate_context_tokens(&context_entries);
+        let estimate = ContextUsageEstimate::from_tokens(
+            self.transcript_estimator
+                .estimate_entries_tokens(&context_entries),
+        );
 
         if !force {
             let state = {
@@ -182,6 +185,7 @@ impl HostApp {
                     0,
                     context_entries.len(),
                     settings.keep_recent_tokens,
+                    |entry| self.transcript_estimator.estimate_entry_tokens(entry),
                 );
                 let mut cut_index = cut_point.first_kept_entry_index;
                 // Manual compact forces a rewrite even when the keep_recent
@@ -316,8 +320,12 @@ impl HostApp {
             return Ok(());
         };
 
-        let tokens_before = estimate_context_tokens(context_entries).tokens;
-        let tokens_after = estimate_context_tokens(retained_entries).tokens;
+        let tokens_before = self
+            .transcript_estimator
+            .estimate_entries_tokens(context_entries);
+        let tokens_after = self
+            .transcript_estimator
+            .estimate_entries_tokens(retained_entries);
         let first_kept_id = retained_entries
             .first()
             .map(|entry| entry.id().to_string())

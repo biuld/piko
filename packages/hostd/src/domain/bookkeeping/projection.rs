@@ -18,13 +18,12 @@ impl HostState {
         size: Option<u64>,
     ) -> Result<ServerMessage, ProtocolError> {
         let session = self.session(session_id)?;
-        let occupancy = crate::domain::bookkeeping::occupancy(&session.entries, size, turn_usage);
         Ok(ServerMessage::Usage(crate::api::UsageEvent::Updated {
             session_id: session_id.to_string(),
             agent_instance_id,
             turn_id,
-            used: occupancy.last_provider_fill,
-            size: occupancy.window,
+            used: turn_usage.map(crate::api::Usage::context_fill).unwrap_or(0),
+            size: size.filter(|value| *value > 0),
             cumulative: Some(session.cumulative_usage.clone()),
             turn_usage: turn_usage.cloned(),
             timestamp: now_ms(),

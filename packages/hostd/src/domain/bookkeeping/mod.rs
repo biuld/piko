@@ -8,7 +8,4 @@ mod ledger;
 mod occupancy;
 mod projection;
 
-pub use occupancy::{
-    ContextOccupancy, ContextUsageEstimate, estimate_context_tokens, estimate_entry_tokens,
-    estimate_tokens, occupancy,
-};
+pub use occupancy::{ContextOccupancy, ContextUsageEstimate, occupancy};

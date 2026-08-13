@@ -6,10 +6,7 @@ mod file_ops;
 mod tree;
 mod trigger;
 
-pub use crate::domain::bookkeeping::{
-    ContextOccupancy, ContextUsageEstimate, estimate_context_tokens, estimate_entry_tokens,
-    estimate_tokens,
-};
+pub use crate::domain::bookkeeping::{ContextOccupancy, ContextUsageEstimate};
 pub use file_ops::{
     FileOperationLists, FileOperations, compute_file_lists, format_file_operations,
 };

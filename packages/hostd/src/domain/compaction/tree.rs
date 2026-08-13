@@ -2,8 +2,6 @@
 
 use crate::api::{ContentBlock, Message, MessageContent, SessionTreeEntry};
 
-use crate::domain::bookkeeping::estimate_entry_tokens;
-
 pub fn active_branch_entries(
     entries: &[SessionTreeEntry],
     leaf_id: Option<&str>,
@@ -90,6 +88,7 @@ pub fn find_cut_point(
     start_index: usize,
     end_index: usize,
     keep_recent_tokens: u64,
+    estimate_entry_tokens: impl Fn(&SessionTreeEntry) -> u64,
 ) -> CutPointResult {
     let cut_points = find_valid_cut_points(entries, start_index, end_index);
     if cut_points.is_empty() {

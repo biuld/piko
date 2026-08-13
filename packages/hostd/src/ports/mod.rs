@@ -6,6 +6,7 @@ pub mod prompt_materials;
 pub mod session_repository;
 pub mod session_store;
 pub mod storage_types;
+pub mod transcript_estimator;
 pub mod turn_runner;
 
 pub use prompt_materials::PromptMaterialLoader;
@@ -15,6 +16,7 @@ pub use storage_types::{
     AgentProjection, CommittedMessage, ExecutionProjection, PersistedSession, RecoveredAgent,
     SessionProjection, SessionStorageError,
 };
+pub use transcript_estimator::TranscriptEstimator;
 pub use turn_runner::{
     AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,
     AgentRunProcess, AgentRunRunner, ErrorAgentRunRunner, OperationRunCompletion, ResumeAgent,
