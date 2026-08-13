@@ -33,7 +33,7 @@ pub struct ApprovalSettings {
 ```
 
 - Default `120` (field-level merge like `retry`/`sandbox`).
-- `default_settings_template()` documents the new section.
+- `installed_settings_fixture()` documents the new section.
 - `orch_factory.rs` reads `settings.approvals` and passes the resolved
   `Duration` into `OrchAgentRunRunner::new_with_mcp`.
 
@@ -111,7 +111,7 @@ to consumers that need it.
 | `packages/orchd-api/src/approval.rs` | `ToolApprovalDecision::Expired`; fix `is_approval_accepted` |
 | `packages/orchd/src/adapters/tools/registry.rs` | decision-gate + error mapping |
 | `packages/hostd/src/domain/config/settings.rs` | `ApprovalSettings`, merge, defaults |
-| `packages/hostd/resources/settings.default.toml` | `[approvals]` section |
+| `packages/hostd/resources/settings.toml` | `[approvals]` section |
 | `packages/hostd/src/adapters/turns/orch_runner/mod.rs` | `approval_timeout` field + constructor param |
 | `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs` | deadline race, expired resolution |
 | `packages/hostd/src/adapters/turns/orch_runner/turn_runner.rs` | status mapping stays user-decision-only |

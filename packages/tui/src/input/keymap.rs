@@ -96,8 +96,11 @@ pub struct Keymap {
 impl Keymap {
     pub fn load(cwd: &Path) -> Self {
         let mut keymap = Self::default();
-        if let Some(home) = dirs::home_dir() {
-            keymap.load_file(&home.join(".piko").join("keybindings.json"));
+        let piko_dir = std::env::var_os("PIKO_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|home| home.join(".piko")));
+        if let Some(piko_dir) = piko_dir {
+            keymap.load_file(&piko_dir.join("keybindings.json"));
         }
         keymap.load_file(&cwd.join(".piko").join("keybindings.json"));
         keymap

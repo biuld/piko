@@ -87,7 +87,7 @@ tool family stays enabled exactly as today.
 - MCP integration: when `mcp` is disabled, hostd skips connecting MCP
   servers at session bootstrap (no server processes) and the catalog filter
   still denies any MCP tool that somehow registers.
-- `resources/settings.default.toml` documents the section.
+- `resources/settings.toml` documents the section.
 
 ## Out of scope
 

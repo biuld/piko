@@ -13,9 +13,9 @@ This matches the model used by Grok’s pager theme
 (`Theme` slots in xai-grok-pager-render): all colors come from the theme
 struct; render code never hard-codes RGB.
 
-Built-in paint lives under `packages/tui/resources/themes/`. Users and projects
-may override any subset of slots via TOML in `~/.piko/themes/` or
-`.piko/themes/`.
+Shipped paint is installed as editable TOML under `~/.piko/themes/`; the source
+fixtures live under `packages/tui/resources/themes/`. Projects may override
+any subset of slots via TOML in `.piko/themes/`.
 
 ## Design Principles
 
@@ -24,7 +24,7 @@ may override any subset of slots via TOML in `~/.piko/themes/` or
    concrete colors to the same slots.
 2. **Fixed catalog** — A theme always has
    [`Theme::SLOT_COUNT`](../../src/theme/slots.rs) (= **96**) color slots plus a
-   display `name`. Missing custom keys fall back to built-in `dark`.
+   display `name`. Missing custom keys fall back to the installed `dark`.
 3. **TOML authoring** — Theme files use TOML, consistent with other piko config.
    `[vars]` holds reusable palette colors; `[colors]` maps slots → values.
 4. **No hardcoded colors in UI** — Components read `theme.<slot>` (or
@@ -222,7 +222,7 @@ border = "gray"
 
 | Priority | Location | Scope |
 |----------|----------|-------|
-| low | built-in `dark` / `light` | shipped |
+| low | installed `dark` / `light` | shipped, user-editable |
 | mid | `~/.piko/themes/*.toml` | user |
 | high | `.piko/themes/*.toml` | project |
 
@@ -238,7 +238,7 @@ name = "dark"
 Flow:
 
 1. Read `tui.theme.name` from hostd at startup.
-2. If unset, auto-detect terminal background → built-in `dark` or `light`.
+2. If unset, auto-detect terminal background → installed `dark` or `light`.
 3. Invalid / missing theme falls back to `dark` with a notification.
 4. Custom theme files may hot-reload on save.
 
@@ -260,7 +260,7 @@ Full assignment: `resources/themes/light.toml`.
 Adding a slot requires:
 
 1. Field on `Theme` in `src/theme/slots.rs` and entry in the `theme_slots!` list.
-2. Assignment in both built-in TOML files.
+2. Assignment in both shipped TOML files.
 3. Doc row in this PRD.
 4. `Theme::SLOT_COUNT` / tests update.
 

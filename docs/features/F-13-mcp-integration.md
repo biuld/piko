@@ -105,7 +105,7 @@ slow or broken server can never block the session or the other servers.
   `CommandResult::McpStatusListed`), showing per-server connection state,
   counts, and errors (including configured-but-disabled servers).
 - **Settings/docs**: `McpSettings` (`[mcp]`) added to the settings model with
-  merge semantics and documented in `resources/settings.default.toml`;
+  merge semantics and documented in `resources/settings.toml`;
   `ToolApprovalRequest` carries the executing provider id so templates can be
   resolved per server; `ApprovalSnapshot` carries the optional rendered
   prompt.
@@ -222,7 +222,7 @@ generic question. No template → no `prompt` field → current generic renderin
 ## Acceptance criteria
 
 - [x] `McpServerConfig` deserializes `timeout-ms`; `[mcp]` settings
-      deserialize/merge across layers; `resources/settings.default.toml`
+      deserialize/merge across layers; `resources/settings.toml`
       documents `[mcp]` and `[mcp.approval-templates]`.
 - [x] A live MCP provider discovers `resources/list` + `resources/templates/list`
       at connect and caches them; a server that errors on `resources/list`

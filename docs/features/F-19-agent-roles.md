@@ -87,7 +87,7 @@ today. With no `[permissions.roles]` section, nothing changes.
   context. Profile resolution and all policy enforcement stay in hostd /
   the sandbox policy materialization (hostd authoritative); the role is
   identity metadata, never policy input from the model.
-- `resources/settings.default.toml` documents the section.
+- `resources/settings.toml` documents the section.
 
 ## Out of scope
 
@@ -183,7 +183,7 @@ whether built-in or user-defined).
       registered `AgentSpec` (identity, not model input); hostd resolves
       the profile.
 - [x] No `[permissions]` / no `[permissions.roles]` changes behavior;
-      `resources/settings.default.toml` documents the section.
+      `resources/settings.toml` documents the section.
 
 ## Product decisions
 

@@ -47,8 +47,8 @@ pub struct SafetySettings {
 }
 ```
 
-- Field-level merge like `approvals`/`guardian`; `default_settings_template()`
-  documents the section; `resources/settings.default.toml` gains `[safety]`.
+- Field-level merge like `approvals`/`guardian`; `installed_settings_fixture()`
+  documents the section; `resources/settings.toml` gains `[safety]`.
 - `OrchAgentRunRunner::new_with_mcp` gains an optional `SafetySettings`
   parameter and resolves a small `SafetyConfig { auto_approve_workspace_writes: bool }`
   (default `true`).
@@ -200,7 +200,7 @@ its own tools.
 | `packages/hostd/src/domain/safety/mod.rs` | assessment, normalization, tests |
 | `packages/hostd/src/domain/mod.rs` | export `safety` |
 | `packages/hostd/src/domain/config/settings.rs` | `SafetySettings`, merge, defaults template |
-| `packages/hostd/resources/settings.default.toml` | `[safety]` section |
+| `packages/hostd/resources/settings.toml` | `[safety]` section |
 | `packages/hostd/src/adapters/turns/orch_runner/mod.rs` | field + constructor param |
 | `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs` | assessment branch |
 | `packages/hostd/src/adapters/turns/orch_runner/tests.rs` | gateway acceptance tests |

@@ -79,7 +79,7 @@ price = 0.25
 
 #[test]
 fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
-    let provider = load_builtin_provider("deepseek").unwrap();
+    let provider = load_fixture_provider("deepseek").unwrap();
     let flash = provider
         .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-flash")
         .unwrap();
@@ -128,7 +128,7 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
 
 #[test]
 fn openai_catalog_includes_gpt_5_6_capabilities_and_surface_pricing() {
-    let provider = load_builtin_provider("openai").unwrap();
+    let provider = load_fixture_provider("openai").unwrap();
     let models = provider.list_models();
     for id in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
         let model = models.iter().find(|model| model.id == id).unwrap();

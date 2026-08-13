@@ -55,13 +55,6 @@ impl SettingsManager {
         let global_path = global_path.into();
         let project_path = project_path.into();
 
-        if !global_path.exists() && !global_path.as_os_str().is_empty() {
-            if let Some(parent) = global_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::write(&global_path, default_settings_template());
-        }
-
         let global_settings = load_from_file(&global_path)?;
         let project_settings = load_from_file(&project_path)?;
         let merged = merge(

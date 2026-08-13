@@ -5,6 +5,18 @@ use piko_llmd::auth::{AuthCredential, AuthStorage};
 use piko_llmd::providers::ProviderRegistry;
 use piko_protocol::model::ProviderAuthMethod;
 
+fn fixture_providers() -> ProviderRegistry {
+    let mut providers = ProviderRegistry::new();
+    providers.load_from_dir(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../llmd/resources/models"),
+    );
+    providers
+}
+
+fn registry_with_auth(auth: HashMap<String, AuthCredential>) -> ModelRegistry {
+    ModelRegistry::with_registry(AuthStorage::in_memory(auth), vec![], fixture_providers())
+}
+
 fn registry_with_openai_key() -> ModelRegistry {
     let mut auth = HashMap::new();
     auth.insert(
@@ -13,19 +25,16 @@ fn registry_with_openai_key() -> ModelRegistry {
             key: "openai-key".into(),
         },
     );
-    ModelRegistry::new(AuthStorage::in_memory(auth), vec![])
+    registry_with_auth(auth)
 }
 
 fn registry_with_deepseek_key() -> ModelRegistry {
-    ModelRegistry::new(
-        AuthStorage::in_memory(HashMap::from([(
-            "deepseek".into(),
-            AuthCredential::ApiKey {
-                key: "deepseek-key".into(),
-            },
-        )])),
-        vec![],
-    )
+    registry_with_auth(HashMap::from([(
+        "deepseek".into(),
+        AuthCredential::ApiKey {
+            key: "deepseek-key".into(),
+        },
+    )]))
 }
 
 #[test]
@@ -49,18 +58,15 @@ fn resolves_default_model_without_copying_auth_material() {
 
 #[test]
 fn oauth_selects_catalog_subscription_target_without_exposing_token() {
-    let registry = ModelRegistry::new(
-        AuthStorage::in_memory(HashMap::from([(
-            "openai".into(),
-            AuthCredential::OAuth {
-                access: "oauth-secret".into(),
-                refresh: Some("refresh-secret".into()),
-                expires: Some(u64::MAX),
-                extra: HashMap::new(),
-            },
-        )])),
-        vec![],
-    );
+    let registry = registry_with_auth(HashMap::from([(
+        "openai".into(),
+        AuthCredential::OAuth {
+            access: "oauth-secret".into(),
+            refresh: Some("refresh-secret".into()),
+            expires: Some(u64::MAX),
+            extra: HashMap::new(),
+        },
+    )]));
     let resolved = registry.resolve(Some("gpt-4o"), Some("openai")).unwrap();
     assert_eq!(
         resolved.target.as_ref().unwrap().base_url,

@@ -99,20 +99,32 @@ The global view of the codex-rs agent core and the sequencing plan live in
 
 ## Quick Start
 
-### Build
+### Install
 
 Ensure you have a stable [Rust toolchain](https://rustup.rs) installed:
 
 ```bash
-# Clone & build
+# Clone, build, and install
 git clone <repo-url> piko
 cd piko
-cargo build --release
+./scripts/install.sh
+
+# Restart the shell, then run
+piko
 ```
+
+The installer places executables in `~/.piko/bin` and initializes editable
+settings, agents, model catalogs, themes, keybindings, prompts, and skills
+under `~/.piko`. Reinstalling refreshes binaries but preserves every existing
+configuration file. Set `PIKO_HOME` to use a different installation root.
+The installer configures zsh, bash, or fish automatically; pass
+`--no-modify-path` to leave shell startup files untouched.
 
 ### Run
 
-Set your LLM provider API key and start the terminal user interface.
+Set your LLM provider API key and start the terminal user interface. Run the
+installer once before using source-tree development commands so the runtime
+catalogs exist.
 
 **Preferred (keeps hostd in sync):** the TUI talks to a separate
 `piko-hostd` process. `cargo run -p piko-tui` rebuilds the UI only and can

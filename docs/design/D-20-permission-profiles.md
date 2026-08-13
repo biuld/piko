@@ -72,7 +72,7 @@ pub struct PermissionProfileSettings {
 - Merge: `profile` is a scalar override; `profiles` merges per name — an
   override entry replaces the same-named base entry, base-only entries are
   kept (mirrors how override maps behave elsewhere in piko).
-- `default_settings_template()` and `resources/settings.default.toml` gain a
+- `installed_settings_fixture()` and `resources/settings.toml` gain a
   documented `[permissions]` section with a commented example profile.
 - `host_namespace_value()` exposes `permissions` in the `host` namespace.
 

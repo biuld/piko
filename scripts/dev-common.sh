@@ -65,5 +65,6 @@ piko_dev_build_and_run() {
 
   # Force the just-built hostd even if PATH has another piko-hostd.
   export PIKO_HOSTD_PATH="$hostd_bin"
+  export PIKO_HOME="${PIKO_HOME:-${HOME}/.piko}"
   exec "$client_path" "$@"
 }

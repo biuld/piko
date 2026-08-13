@@ -18,8 +18,8 @@ pub struct ModelRegistry {
 }
 
 impl ModelRegistry {
-    /// Create a registry backed by llmd's built-in Provider catalog plus any
-    /// user-defined providers found in `~/.piko/models/*.toml`.
+    /// Create a registry from installed provider catalogs in
+    /// `$PIKO_HOME/models` (default `~/.piko/models`).
     pub fn new(auth_storage: AuthStorage, scoped_models: Vec<String>) -> Self {
         let mut registry = ProviderRegistry::new();
         if let Some(models_dir) = piko_models_dir() {
@@ -203,6 +203,12 @@ impl ModelRegistry {
 
 /// Returns `~/.piko/models` if the home directory can be determined.
 fn piko_models_dir() -> Option<std::path::PathBuf> {
+    if let Some(root) = std::env::var_os("PIKO_HOME") {
+        return Some(std::path::PathBuf::from(root).join("models"));
+    }
+    #[cfg(debug_assertions)]
+    return Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../llmd/resources/models"));
+    #[cfg(not(debug_assertions))]
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .ok()

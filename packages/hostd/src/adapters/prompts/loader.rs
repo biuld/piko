@@ -128,6 +128,9 @@ pub(crate) fn home_dir() -> Option<PathBuf> {
 }
 
 fn piko_dir() -> PathBuf {
+    if let Some(root) = std::env::var_os("PIKO_HOME") {
+        return PathBuf::from(root);
+    }
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".piko")

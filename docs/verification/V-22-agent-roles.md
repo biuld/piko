@@ -32,7 +32,7 @@ All F-19 acceptance criteria pass:
 - **Settings merge + template**: `permissions_settings_merge_field_by_field`
   verifies `[permissions.roles]` merges per key across layers (override
   replaces the same-named base entry, base-only keys survive, new keys are
-  added); `permissions_defaults_are_documented_in_template` checks the
+  added); `permissions_defaults_are_documented_in_installed_settings` checks the
   defaults template documents `[permissions.roles]`.
 - **Role resolution semantics**: `role_mapped_to_defined_profile_resolves_command_and_sandbox_policy`
   proves a defined-profile mapping resolves the role's `PermissionConfig`

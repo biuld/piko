@@ -25,8 +25,8 @@ cargo fmt --all
 
 All F-12 slice 1 acceptance criteria pass:
 
-- **Settings**: `safety_defaults_are_documented_in_template` checks the
-  shipped `settings.default.toml` documents `[safety]` with
+- **Settings**: `safety_defaults_are_documented_in_installed_settings` checks the
+  shipped `settings.toml` documents `[safety]` with
   `auto-approve-workspace-writes = true`;
   `safety_settings_merge_field_by_field` proves override wins and missing
   overrides inherit base values; `SafetyConfig::from_settings` resolves the

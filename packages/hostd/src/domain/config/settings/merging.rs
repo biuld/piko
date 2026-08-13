@@ -246,12 +246,17 @@ pub(crate) fn load_from_file(path: &Path) -> Result<HostSettings, SettingsError>
 }
 
 pub(crate) fn piko_dir() -> PathBuf {
+    if let Some(root) = std::env::var_os("PIKO_HOME") {
+        return PathBuf::from(root);
+    }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".piko")
 }
 
-pub(crate) fn default_settings_template() -> &'static str {
-    include_str!("../../../../resources/settings.default.toml")
+#[cfg(test)]
+pub(crate) fn installed_settings_fixture() -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/settings.toml"))
+        .expect("installed settings fixture must be readable")
 }

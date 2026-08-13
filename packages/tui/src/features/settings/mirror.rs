@@ -7,7 +7,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Defaults match hostd resources/settings.default.toml where applicable.
+/// Defaults match hostd resources/settings.toml where applicable.
 #[derive(Clone, Debug)]
 pub struct HostRuntimeSettings {
     /// True after at least one successful host ConfigEntry apply.

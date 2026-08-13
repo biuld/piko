@@ -169,7 +169,7 @@ No match → `prompt` absent → existing generic rendering, unchanged.
 - `mcp_resource`'s `executor.kind == "mcp"` means the existing F-18 gate
   (`disabled_feature_for_tool_name`) covers it without new code; when `mcp`
   is disabled hostd never connects or registers the tool.
-- `resources/settings.default.toml` documents `[mcp]`, `[mcp.approval-templates]`,
+- `resources/settings.toml` documents `[mcp]`, `[mcp.approval-templates]`,
   and `timeout-ms` on `mcp-servers`.
 
 ## Package impact

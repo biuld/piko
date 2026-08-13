@@ -30,7 +30,7 @@ All F-17 slice 1 acceptance criteria pass:
 - **Settings merge + template**: `permissions_settings_merge_field_by_field`
   verifies `profile` scalar override and per-name `profiles` map replace
   (override profile replaces only its own name; base profiles are
-  preserved); `permissions_defaults_are_documented_in_template` checks the
+  preserved); `permissions_defaults_are_documented_in_installed_settings` checks the
   defaults template documents `[permissions]`.
 - **Resolution semantics**: `no_permissions_section_resolves_default_without_materialization`,
   `builtin_default_without_definition_never_materializes`, and

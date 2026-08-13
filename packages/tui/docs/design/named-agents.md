@@ -36,7 +36,7 @@ for the model is injected into spawn tool schemas (see §2); the TUI no longer
 exposes a dedicated agent-spec panel via `/agents`.
 
 1. **Protocol**: `AgentSpecList` returns `Vec<AgentSpec>` (templates).
-2. **Hostd**: The command handler returns the loaded built-in/workspace spec set.
+2. **Hostd**: The command handler returns the loaded installed/workspace spec set.
 3. **TUI**: Runtime instances use `SurfaceId::Agents` (viewed-agent switch).
 
 ## Non-Goals

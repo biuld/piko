@@ -126,11 +126,14 @@ pub struct ApprovalStore {
 impl ApprovalStore {
     pub fn new(cwd: &str) -> Self {
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let piko_dir = std::env::var_os("PIKO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir.join(".piko"));
         let cwd_path = Path::new(cwd)
             .canonicalize()
             .unwrap_or_else(|_| PathBuf::from(cwd));
         let workspace_path = cwd_path.join(".piko").join("approvals.json");
-        let permanent_path = home_dir.join(".piko").join("approvals.json");
+        let permanent_path = piko_dir.join("approvals.json");
 
         Self {
             session_approvals: Mutex::new(HashMap::new()),

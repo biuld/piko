@@ -11,8 +11,7 @@ mod pricing;
 // TomlProvider — TOML-configured provider (API key + URL + adapter kind)
 // ============================================================================
 
-/// A Provider backed by a TOML manifest. Used for built-in providers
-/// (shipped via include_str!) and user-configured custom endpoints.
+/// A Provider backed by an installed or project-supplied TOML manifest.
 pub struct TomlProvider {
     id: String,
     api_surfaces: HashMap<String, ApiSurface>,

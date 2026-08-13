@@ -34,8 +34,8 @@ All F-13 acceptance criteria pass:
   `mcp_settings_merge_wholesale_across_layers` proves the section replaces
   wholesale across layers and the base survives when the override omits it;
   `test_mcp_server_config_timeout_ms_deserialize` proves the per-server
-  `timeout-ms` override; `mcp_defaults_are_documented_in_template` pins
-  `resources/settings.default.toml`.
+  `timeout-ms` override; `mcp_defaults_are_documented_in_installed_settings` pins
+  `resources/settings.toml`.
 - **Provider + resources**: `provider_connects_and_discovers_tools_and_resources`
   runs the real stdio handshake against a fixture JSON-RPC server and proves
   `tools/list`, `resources/list`, and `resources/templates/list` discovery

@@ -178,7 +178,7 @@ discovery.
 
 ### 7. Defaults template
 
-`packages/hostd/resources/settings.default.toml` documents `[features]` and
+`packages/hostd/resources/settings.toml` documents `[features]` and
 `[features.managed]` with the canonical keys and defaults.
 
 ## Package impact

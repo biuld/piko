@@ -1,9 +1,8 @@
 // ---- llmd: catalog — TOML-based provider & model catalog loader ----
 //
-// Provider configs are stored as TOML files under resources/models/.
-// Each file defines a [provider] section plus [models.<id>] entries.
-// Built-in catalogs are embedded at compile time via include_str!.
-// Runtime loading from user-provided paths is supported via TomlProvider::from_toml().
+// Provider configs are TOML files. Each file defines a [provider] section plus
+// [models.<id>] entries. Production catalogs are loaded from the user
+// installation; repository resources are test fixtures only.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -62,13 +61,6 @@ struct ModelToml {
     #[serde(default)]
     pricing: Vec<super::pricing::PricingToml>,
 }
-
-// ---- Built-in catalogs (embedded at compile time) ----
-
-const OPENAI_TOML: &str = include_str!("../../../resources/models/openai.toml");
-const DEEPSEEK_TOML: &str = include_str!("../../../resources/models/deepseek.toml");
-
-const BUILTIN_PROVIDERS: &[(&str, &str)] = &[("openai", OPENAI_TOML), ("deepseek", DEEPSEEK_TOML)];
 
 // ---- Adapter kind mapping ----
 
@@ -320,23 +312,6 @@ fn build_provider(
 
 // ---- Public API ----
 
-/// Load all built-in providers from embedded TOML catalogs.
-pub fn load_builtin_providers() -> Vec<TomlProvider> {
-    let billing = crate::billing::BillingRegistry::standard();
-    BUILTIN_PROVIDERS
-        .iter()
-        .filter_map(|(id, toml)| {
-            parse_provider_toml(toml)
-                .ok()
-                .and_then(|parsed| build_provider(parsed, &billing).ok())
-                .or_else(|| {
-                    tracing::warn!("Failed to load built-in provider: {id}");
-                    None
-                })
-        })
-        .collect()
-}
-
 /// Load a provider from a TOML file path.
 pub fn load_provider_from_path(path: &Path) -> Result<TomlProvider, String> {
     let toml_str = std::fs::read_to_string(path)
@@ -368,19 +343,16 @@ mod tests {
 
     mod pricing_tests;
 
-    fn load_builtin_provider(provider_id: &str) -> Result<TomlProvider, String> {
-        let toml_str = BUILTIN_PROVIDERS
-            .iter()
-            .find(|(id, _)| *id == provider_id)
-            .map(|(_, toml)| *toml)
-            .ok_or_else(|| format!("No built-in provider: {provider_id}"))?;
-        let parsed = parse_provider_toml(toml_str)?;
-        build_provider(parsed, &crate::billing::BillingRegistry::standard())
+    fn load_fixture_provider(provider_id: &str) -> Result<TomlProvider, String> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/models")
+            .join(format!("{provider_id}.toml"));
+        load_provider_from_path(&path)
     }
 
     #[test]
     fn openai_catalog_owns_platform_and_subscription_targets() {
-        let provider = load_builtin_provider("openai").unwrap();
+        let provider = load_fixture_provider("openai").unwrap();
         let platform = provider
             .target_for_model(ProviderAuthMethod::ApiKey, "gpt-5.5")
             .unwrap();
@@ -403,17 +375,19 @@ mod tests {
     }
 
     fn load_models(provider: &str) -> Vec<ModelSummary> {
-        BUILTIN_PROVIDERS
-            .iter()
-            .find(|(id, _)| *id == provider)
-            .and_then(|(_, toml)| parse_provider_toml(toml).ok())
-            .map(|p| parse_models(p.models))
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/models")
+            .join(format!("{provider}.toml"));
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|toml| parse_provider_toml(&toml).ok())
+            .map(|parsed| parse_models(parsed.models))
             .unwrap_or_default()
     }
 
     #[test]
     fn unsupported_native_provider_is_not_bundled() {
-        assert!(load_builtin_provider("anthropic").is_err());
+        assert!(load_fixture_provider("anthropic").is_err());
     }
 
     #[test]
@@ -449,7 +423,7 @@ protocol = "chat_completions"
     #[test]
     fn test_load_builtin_provider() {
         use crate::providers::Provider;
-        let provider = load_builtin_provider("openai").unwrap();
+        let provider = load_fixture_provider("openai").unwrap();
         assert_eq!(provider.id(), "openai");
         let models = provider.list_models();
         assert!(models.len() > 10);

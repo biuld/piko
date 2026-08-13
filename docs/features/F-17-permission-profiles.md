@@ -98,7 +98,7 @@ or execution.
 - Command extraction: `bash` tool `command` argument; `process` tool with
   `action = "start"` reads its `command` argument (same identity as the
   F-08 approval fingerprint).
-- `resources/settings.default.toml` documents the section.
+- `resources/settings.toml` documents the section.
 
 ## Out of scope
 

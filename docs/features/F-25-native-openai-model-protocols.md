@@ -105,7 +105,7 @@ Bundled OpenAI Platform targets may provide product defaults. Custom targets
 must declare their protocol. Model names and endpoint shapes are not used as
 runtime heuristics.
 
-The bundled or explicitly configured local catalog is authoritative for which
+The installed or explicitly configured local catalog is authoritative for which
 models are executable and for their capabilities. Remote model-list responses
 do not create targets or select protocols; see ADR-012.
 

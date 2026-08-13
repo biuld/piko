@@ -26,8 +26,8 @@ All F-11 slice 1 acceptance criteria pass:
 
 - **Settings**: `guardian_settings_merge_field_by_field` merges
   `[guardian]` across base/overrides (override wins per field, missing
-  fields inherit); `guardian_defaults_are_documented_in_template` checks the
-  shipped `settings.default.toml`; `guardian_config_resolves_defaults_and_disablement`
+  fields inherit); `guardian_defaults_are_documented_in_installed_settings` checks the
+  shipped `settings.toml`; `guardian_config_resolves_defaults_and_disablement`
   resolves `enabled=false`/absent → no guardian, defaults 30s timeout and 3
   consecutive denials.
 - **Strict JSON**: `parses_strict_allow_and_deny` accepts exact

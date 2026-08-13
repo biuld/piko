@@ -29,7 +29,7 @@ All F-18 acceptance criteria pass:
 
 - **Settings merge + template**: `features_settings_merge_per_key` verifies
   both `enabled` and `managed` merge per key across layers (override wins
-  per key, untouched base keys survive); `features_defaults_are_documented_in_template`
+  per key, untouched base keys survive); `features_defaults_are_documented_in_installed_settings`
   checks the defaults template documents `[features]`, `[features.managed]`,
   and the `feature_disabled` fail-closed error.
 - **Resolution semantics**: `no_features_section_resolves_everything_enabled`

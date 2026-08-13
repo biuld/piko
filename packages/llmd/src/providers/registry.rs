@@ -24,11 +24,8 @@ impl ProviderRegistry {
             providers: std::collections::HashMap::new(),
             oauth_flows: std::collections::HashMap::new(),
         };
-        // Load built-in providers from TOML catalogs
-        for provider in super::toml_provider::loader::load_builtin_providers() {
-            registry.register(Box::new(provider));
-        }
-        // Register built-in OAuth flows
+        // OAuth implementations are executable behavior. Provider and model
+        // catalogs are data and are loaded from the installation by hostd.
         registry.register_oauth(std::sync::Arc::new(
             super::oauth::openai::OpenAIOAuthFlow::new(),
         ));

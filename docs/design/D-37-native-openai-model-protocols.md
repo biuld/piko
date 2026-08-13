@@ -196,7 +196,7 @@ Bundled target defaults are:
 - API-key targets: use the protocol declared by their catalog target;
 - provider catalogs may override protocol and continuation policy per model;
 - DeepSeek `deepseek-v4-flash`: Responses with stateless full-history replay;
-- other bundled DeepSeek models: Chat Completions until their Responses
+- other shipped DeepSeek models: Chat Completions until their Responses
   support is documented;
 - custom targets: require an explicit supported protocol.
 

@@ -14,6 +14,9 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-45: Local installer and filesystem configuration](D-45-local-installer.md)
+  implements F-33 with binaries under `~/.piko/bin`, idempotent config
+  initialization, and installed files as runtime catalog authority.
 - [D-44: Session bookkeeping](D-44-session-bookkeeping.md)
   implements F-32 with a hostd domain ledger for incurred usage/cost and
   F-04 occupancy consumed by compaction (implemented; V-43).

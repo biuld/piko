@@ -51,9 +51,18 @@ async fn agent_projection_is_emitted_only_after_durable_ack() {
 #[tokio::test]
 async fn direct_input_runs_the_addressed_recovered_child_agent() {
     let temp = tempfile::tempdir().unwrap();
-    let store =
-        SessionStore::create_session(temp.path(), "session-direct".into(), "/project".into(), 1)
-            .unwrap();
+    let workspace = temp.path().join("project");
+    let agents_dir = workspace.join(".piko/agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agents/main.toml"),
+        agents_dir.join("main.toml"),
+    )
+    .unwrap();
+    let cwd = workspace.to_string_lossy().into_owned();
+    let session_dir = temp.path().join("session");
+    let store = SessionStore::create_session(&session_dir, "session-direct".into(), cwd.clone(), 1)
+        .unwrap();
     let root = store.ensure_root_agent("main").unwrap();
     let child_id = "agent-child";
     store
@@ -122,9 +131,9 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             prompt: "follow up".into(),
             source_turn_id: Some("run-direct".into()),
             prompt_resources: None,
-            cwd: "/project".into(),
+            cwd: cwd.clone(),
             active_tool_names: Some(Vec::new()),
-            session_dir: temp.path().to_path_buf(),
+            session_dir: session_dir.clone(),
             resume_agent: None,
         })
         .await
@@ -150,9 +159,9 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             prompt: "duplicate".into(),
             source_turn_id: Some("run-duplicate".into()),
             prompt_resources: None,
-            cwd: "/project".into(),
+            cwd: cwd.clone(),
             active_tool_names: Some(Vec::new()),
-            session_dir: temp.path().to_path_buf(),
+            session_dir: session_dir.clone(),
             resume_agent: None,
         })
         .await
@@ -169,9 +178,9 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             prompt: "parallel".into(),
             source_turn_id: Some("run-second-child".into()),
             prompt_resources: None,
-            cwd: "/project".into(),
+            cwd,
             active_tool_names: Some(Vec::new()),
-            session_dir: temp.path().to_path_buf(),
+            session_dir,
             resume_agent: None,
         })
         .await

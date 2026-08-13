@@ -60,7 +60,7 @@ developer = "locked"
 
 - Merge (`merge_permissions`): `roles` merges per key — override wins per
   key, base-only keys survive (same pattern as `profiles`).
-- `default_settings_template()` and `resources/settings.default.toml`
+- `installed_settings_fixture()` and `resources/settings.toml`
   document the section.
 - `host_namespace_value()` already exposes the whole `permissions` section,
   so `roles` rides along in the `host` namespace.

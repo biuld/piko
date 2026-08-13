@@ -6,24 +6,8 @@ use piko_protocol::agents::AgentSpec;
 
 use crate::adapters::prompts::loader::find_workspace_root;
 
-const BUILT_IN_AGENT_RESOURCES: &[(&str, &str)] = &[
-    ("main", include_str!("../../../resources/agents/main.toml")),
-    (
-        "general",
-        include_str!("../../../resources/agents/general.toml"),
-    ),
-    (
-        "scout",
-        include_str!("../../../resources/agents/scout.toml"),
-    ),
-    (
-        "coder",
-        include_str!("../../../resources/agents/coder.toml"),
-    ),
-];
-
 pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
-    let mut agents = built_in_agents();
+    let mut agents = HashMap::new();
 
     let cwd = cwd
         .as_ref()
@@ -34,8 +18,8 @@ pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
     let global_dir = piko_dir().join("agents");
     let project_dir = workspace_root.join(".piko").join("agents");
 
-    // Load from global dir first
-    for spec in load_from_dir(&global_dir, "global-agent") {
+    // Installed global catalog first; workspace definitions override it.
+    for spec in load_from_dir(&global_dir, "installed-agent") {
         agents.insert(spec.id.clone(), spec);
     }
 
@@ -124,29 +108,24 @@ fn parse_agent_toml(fallback_id: &str, content: &str) -> Result<AgentSpec, toml:
     toml::from_str::<TomlAgentSpec>(content).map(|spec| spec.into_agent_spec(fallback_id))
 }
 
-fn built_in_agents() -> HashMap<String, AgentSpec> {
+#[cfg(test)]
+fn fixture_agents() -> HashMap<String, AgentSpec> {
     let mut map = HashMap::new();
-    for (agent_id, content) in BUILT_IN_AGENT_RESOURCES {
-        match parse_agent_toml(agent_id, content) {
-            Ok(mut spec) => {
-                spec.version =
-                    piko_orchd_api::stable_internal_id("agent-spec", &[agent_id, content]);
-                spec.provenance = piko_protocol::PromptSource::new(
-                    "built-in-agent",
-                    format!("agents/{agent_id}"),
-                )
+    let resource_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agents");
+    for spec in load_from_dir(&resource_dir, "test-agent") {
+        let agent_id = spec.id.clone();
+        let content = fs::read_to_string(resource_dir.join(format!("{agent_id}.toml"))).unwrap();
+        let mut spec = spec;
+        spec.version = piko_orchd_api::stable_internal_id("agent-spec", &[&agent_id, &content]);
+        spec.provenance =
+            piko_protocol::PromptSource::new("test-agent", format!("agents/{agent_id}"))
                 .with_version(spec.version.clone());
-                map.insert(spec.id.clone(), spec);
-            }
-            Err(error) => {
-                tracing::error!("Failed to parse built-in agent {agent_id}: {error}");
-            }
-        }
+        map.insert(spec.id.clone(), spec);
     }
-
     map
 }
 
+#[cfg(not(debug_assertions))]
 fn home_dir() -> Option<PathBuf> {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -155,6 +134,12 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 fn piko_dir() -> PathBuf {
+    if let Some(root) = std::env::var_os("PIKO_HOME") {
+        return PathBuf::from(root);
+    }
+    #[cfg(debug_assertions)]
+    return Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+    #[cfg(not(debug_assertions))]
     home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".piko")
@@ -165,8 +150,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn built_in_agents_are_loaded_from_toml_resources() {
-        let agents = built_in_agents();
+    fn fixture_agents_are_loaded_from_toml_resources() {
+        let agents = fixture_agents();
 
         assert!(agents.contains_key("main"));
         assert!(agents.contains_key("general"));
@@ -178,8 +163,8 @@ mod tests {
     }
 
     #[test]
-    fn built_in_agents_match_tool_set_matrix() {
-        let agents = built_in_agents();
+    fn fixture_agents_match_tool_set_matrix() {
+        let agents = fixture_agents();
         assert_eq!(
             agents["main"].tool_set_ids,
             vec![

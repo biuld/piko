@@ -4,10 +4,10 @@ use super::*;
 use crate::domain::guardian::GuardianConfig;
 
 #[test]
-fn guardian_defaults_are_documented_in_template() {
-    let template = default_settings_template();
-    assert!(template.contains("[guardian]"));
-    assert!(template.contains("enabled = false"));
+fn guardian_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[guardian]"));
+    assert!(settings.contains("enabled = false"));
 }
 
 #[test]
@@ -64,18 +64,18 @@ fn guardian_config_resolves_defaults_and_disablement() {
 }
 
 #[test]
-fn safety_defaults_are_documented_in_template() {
-    let template = default_settings_template();
-    assert!(template.contains("[safety]"));
-    assert!(template.contains("auto-approve-workspace-writes = true"));
+fn safety_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[safety]"));
+    assert!(settings.contains("auto-approve-workspace-writes = true"));
 }
 
 #[test]
-fn permissions_defaults_are_documented_in_template() {
-    let template = default_settings_template();
-    assert!(template.contains("[permissions]"));
-    assert!(template.contains("profile = \"default\""));
-    assert!(template.contains("[permissions.roles]"));
+fn permissions_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[permissions]"));
+    assert!(settings.contains("profile = \"default\""));
+    assert!(settings.contains("[permissions.roles]"));
 }
 
 #[test]
@@ -165,11 +165,11 @@ fn permissions_settings_merge_field_by_field() {
 }
 
 #[test]
-fn features_defaults_are_documented_in_template() {
-    let template = default_settings_template();
-    assert!(template.contains("[features]"));
-    assert!(template.contains("[features.managed]"));
-    assert!(template.contains("feature_disabled"));
+fn features_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[features]"));
+    assert!(settings.contains("[features.managed]"));
+    assert!(settings.contains("feature_disabled"));
 }
 
 #[test]
@@ -339,9 +339,9 @@ fn mcp_settings_merge_wholesale_across_layers() {
 }
 
 #[test]
-fn mcp_defaults_are_documented_in_template() {
-    let template = default_settings_template();
-    assert!(template.contains("[mcp]"));
-    assert!(template.contains("approval-templates"));
-    assert!(template.contains("timeout-ms"));
+fn mcp_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[mcp]"));
+    assert!(settings.contains("approval-templates"));
+    assert!(settings.contains("timeout-ms"));
 }

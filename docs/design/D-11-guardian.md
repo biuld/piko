@@ -53,8 +53,8 @@ pub struct GuardianSettings {
 }
 ```
 
-- Field-level merge like `approvals`/`retry`; `default_settings_template()`
-  documents the section; `resources/settings.default.toml` gains `[guardian]`.
+- Field-level merge like `approvals`/`retry`; `installed_settings_fixture()`
+  documents the section; `resources/settings.toml` gains `[guardian]`.
 - `orch_factory.rs` reads `settings.guardian` and passes the resolved values
   into `OrchAgentRunRunner::new_with_mcp` (new optional param), which builds
   a small resolved `GuardianConfig { enabled, timeout, max_consecutive_denials }`.
@@ -158,7 +158,7 @@ state so the loop re-arms.
 | File | Change |
 |---|---|
 | `packages/hostd/src/domain/config/settings.rs` | `GuardianSettings`, merge, defaults template |
-| `packages/hostd/resources/settings.default.toml` | `[guardian]` section |
+| `packages/hostd/resources/settings.toml` | `[guardian]` section |
 | `packages/orchd-api/src/approval.rs` | `GuardianDenied`/`GuardianUnavailable`; `is_approval_accepted` |
 | `packages/orchd/src/adapters/tools/registry.rs` | decision → error mapping |
 | `packages/hostd/src/domain/guardian/mod.rs` | decision parse, prompt, context builder, breaker state, review call |

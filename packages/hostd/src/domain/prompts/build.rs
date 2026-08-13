@@ -196,7 +196,7 @@ pub fn assemble_agent_run_prompt(
             piko_protocol::InstructionAuthority::Agent,
             if matches!(
                 request.agent_spec.provenance.kind.as_str(),
-                "built-in-agent" | "global-agent"
+                "built-in-agent" | "global-agent" | "installed-agent"
             ) {
                 piko_protocol::ContentTrust::Trusted
             } else {
