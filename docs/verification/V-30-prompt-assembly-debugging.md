@@ -16,6 +16,7 @@
 | Stable JSON-lines command shape | `prompt_debug_get_round_trips` |
 | Bodies absent from logs/OTel | Capture code contains no tracing or instrument recording; code review verifies only keyed in-memory storage |
 | Actual llmd input captured before dispatch | `captures_actual_model_input_before_provider_dispatch` asserts mapped message, options, and execution identity against a local stub |
+| Replaced-run isolation | `prompt_inputs_are_bound_to_the_latest_assembly_run` simulates a late old-run input and verifies it is discarded |
 
 ## Commands
 
@@ -24,6 +25,7 @@ cargo test -p piko-protocol prompt_debug_get
 cargo test -p piko-hostd captures_and_replaces_successful_assembly_per_agent
 cargo test -p piko-hostd --test server_jsonl prompt_debug
 cargo test -p piko-llmd --test gateway_retry captures_actual_model_input_before_provider_dispatch
+cargo test -p piko-hostd prompt_inputs_are_bound_to_the_latest_assembly_run
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
@@ -45,6 +47,6 @@ cargo test --workspace
   them until the next successful production assembly.
 - The llmd snapshot is the actual provider-neutral request immediately before
   adapter dispatch. Adapter-private HTTP serialization is not claimed.
-- The TUI tolerates the command result but has no prompt-debug panel or slash
-  command in this slice; protocol clients may issue `prompt_debug_get`
-  directly.
+- The TUI exposes `/prompt-debug` as a scrollable diagnostics panel. It shows
+  exact run identity and complete run-prompt, retained-resource, tool-catalog,
+  request, and options sections without presentation-layer truncation.

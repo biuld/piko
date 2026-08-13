@@ -35,6 +35,7 @@ pub struct HostRuntimeSettings {
     pub mcp_connect_timeout_ms: u64,
     pub prompt_cache_policy: String,
     pub observability_enabled: bool,
+    pub observability_capture_content: bool,
     pub otel_endpoint: String,
     /// `true` when active-tool-names is null/absent (all tools).
     pub all_tools: bool,
@@ -68,6 +69,7 @@ impl Default for HostRuntimeSettings {
             mcp_connect_timeout_ms: 10_000,
             prompt_cache_policy: "provider-default".to_string(),
             observability_enabled: false,
+            observability_capture_content: false,
             otel_endpoint: "http://localhost:4318".to_string(),
             all_tools: true,
             transport: None,
@@ -201,6 +203,13 @@ impl HostRuntimeSettings {
             if let Some(enabled) = o.get("enabled").and_then(|v| v.as_bool()) {
                 self.observability_enabled = enabled;
             }
+            if let Some(enabled) = o
+                .get("capture-content")
+                .and_then(|v| v.as_bool())
+                .or_else(|| o.get("capture_content").and_then(|v| v.as_bool()))
+            {
+                self.observability_capture_content = enabled;
+            }
             if let Some(ep) = o
                 .get("otel-endpoint")
                 .and_then(|v| v.as_str())
@@ -297,7 +306,12 @@ pub fn on_off(v: bool) -> &'static str {
 
 pub fn observability_summary(host: &HostRuntimeSettings) -> String {
     if host.observability_enabled {
-        format!("on · {}", host.otel_endpoint)
+        let content = if host.observability_capture_content {
+            "content on"
+        } else {
+            "content off"
+        };
+        format!("on · {content} · {}", host.otel_endpoint)
     } else {
         "off".to_string()
     }

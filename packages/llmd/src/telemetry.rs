@@ -7,9 +7,27 @@
 
 use piko_protocol::messages::Usage;
 
+/// Bounded OTel GenAI content attributes produced at the provider-neutral
+/// dispatch boundary. Values are JSON strings following the semantic schemas.
+pub struct GenAiContentAttributes {
+    pub system_instructions: Option<String>,
+    pub input_messages: Option<String>,
+    pub tool_definitions: Option<String>,
+    pub dropped: bool,
+}
+
 /// Metrics sink for model-gateway behavior. Hostd implements this with OTel
 /// meters; the default implementation records nothing.
 pub trait GatewayTelemetry: Send + Sync {
+    /// Whether sensitive GenAI content may be attached to trace spans.
+    fn capture_content(&self) -> bool {
+        false
+    }
+
+    /// Attach opted-in content to the currently active model-call span.
+    /// Exporter-free implementations may keep the default no-op.
+    fn record_genai_content(&self, _content: &GenAiContentAttributes) {}
+
     /// Capture the actual provider-neutral request for local prompt debugging.
     fn record_model_input(&self, _input: piko_protocol::ModelInputDebugSnapshot) {}
 

@@ -195,11 +195,14 @@ pub fn init(
     let observability_enabled = observability
         .map(|obs| obs.enabled.unwrap_or(false))
         .unwrap_or(false);
+    let capture_content = observability
+        .and_then(|obs| obs.capture_content)
+        .unwrap_or(false);
 
     // Build OTel providers first so the global meter is installed before
     // `telemetry::init` binds instruments (and so batch exporters start).
     let otel = init_otel(observability)?;
-    crate::telemetry::init(observability_enabled);
+    crate::telemetry::init(observability_enabled, capture_content);
 
     let console = fmt::layer().with_writer(io::stderr).with_ansi(config.ansi);
     if observability_enabled {

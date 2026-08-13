@@ -209,6 +209,7 @@ impl AgentExecutionRuntime {
         &self,
         request: &piko_protocol::SendAgentInputRequest,
         agent_spec: &AgentSpec,
+        run_id: &str,
     ) -> Result<PreparedRunContext, AgentApiError> {
         let active_tool_names = match (
             agent_spec.active_tool_names.as_ref(),
@@ -242,6 +243,7 @@ impl AgentExecutionRuntime {
         let assembly = piko_protocol::PromptAssemblyRequest {
             session_id: request.session_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
+            run_id: run_id.to_string(),
             agent_spec: agent_spec.clone(),
             resources: request.prompt_resources.clone().unwrap_or_default(),
             tool_catalog,

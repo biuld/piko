@@ -180,6 +180,9 @@ cache-policy = "provider-default"
 [observability]
 # End-to-end tracing + metrics export over OTLP HTTP (Jaeger/OTel collector).
 enabled = false
+# Sensitive GenAI bodies (prompts, transcript, tool definitions). This is a
+# separate opt-in and remains off even when OTLP export is enabled.
+capture-content = false
 # OTLP HTTP endpoint; /v1/traces and /v1/metrics are appended automatically
 otel-endpoint = "http://127.0.0.1:4318"
 # Prefer http://localhost:4318 when system HTTP proxies (e.g. Shadowrocket)

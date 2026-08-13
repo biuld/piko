@@ -33,6 +33,10 @@ fn expanded_host_actions_emit_minimal_merge_patches() {
         patch(SettingsAction::PromptCache("ephemeral")),
         json!({ "prompt": { "cache-policy": "ephemeral" } })
     );
+    assert_eq!(
+        patch(SettingsAction::ObservabilityCaptureContent(true)),
+        json!({ "observability": { "capture-content": true } })
+    );
 }
 
 #[test]

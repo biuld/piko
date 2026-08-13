@@ -23,8 +23,11 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .unwrap()
             .get(&(session_id.to_string(), agent_instance_id.to_string()))
             .cloned()?;
-        snapshot.model_inputs =
-            crate::telemetry::handle().model_inputs(session_id, agent_instance_id);
+        snapshot.model_inputs = crate::telemetry::handle().model_inputs(
+            session_id,
+            agent_instance_id,
+            &snapshot.run_id,
+        );
         Some(snapshot)
     }
 

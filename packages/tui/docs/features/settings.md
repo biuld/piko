@@ -440,6 +440,7 @@ Closed set for this PRD (labels can be refined in copy review; behavior is norm)
 | Automatic Compaction enable | `[compaction].enabled` | Live |
 | API Retries | `[retry].enabled` | Live |
 | Observability (OTLP export) | `[observability].enabled` | **Restart hostd** |
+| GenAI Content | `[observability].capture-content` | **Restart hostd**, sensitive; defaults Off |
 | Active Tools Mode | enable-all vs empty list via active-tool-names | Live |
 | Guardian review | `[guardian].enabled` | Live on subsequent runs |
 | Safe workspace writes | `[safety].auto-approve-workspace-writes` | Live on subsequent runs |
@@ -459,7 +460,8 @@ blocks only when clearer).
 | Live model events | may refresh thinking/model chrome; must not diverge from Settings thinking Active when both are shown |
 
 Defaults when a key is missing match hostd / TUI defaults (e.g. observability
-export **Off**, otel endpoint `http://127.0.0.1:4318`).
+export **Off**, GenAI content **Off**, otel endpoint
+`http://127.0.0.1:4318`).
 
 ## User journeys
 

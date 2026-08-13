@@ -16,9 +16,10 @@ model input derived from that assembly.
   debug assembler is introduced.
 - Snapshots are process-local and latest-only. They are not session facts and
   are never written to the v3 session store.
-- Provider-adapter-private HTTP wire JSON and a TUI panel remain
-  out of scope. The llmd capture includes the orchd transcript projection and
-  inter-agent context once mapped for each model step.
+- Provider-adapter-private HTTP wire JSON remains out of scope. TUI
+  presentation is specified separately in the package UI documentation. The
+  llmd capture includes the orchd transcript projection and inter-agent
+  context once mapped for each model step.
 - Prompt bodies must never be copied into tracing fields or log events.
 
 ## Proposed design
@@ -27,7 +28,7 @@ model input derived from that assembly.
 
 `piko-protocol::prompt` adds `PromptDebugSnapshot` with:
 
-- `session_id` and `agent_instance_id` identity;
+- `session_id`, `agent_instance_id`, and exact `run_id` identity;
 - the assembled `SemanticRunPrompt`;
 - `resource_messages`, ordered as world-state then mention messages;
 - the `ResolvedToolCatalog` used by assembly;
@@ -41,8 +42,10 @@ read-only and follows existing command-response correlation.
 ### Capture and ownership
 
 `OrchAgentRunRunner` owns an `Arc<Mutex<HashMap<(SessionId,
-AgentInstanceId), PromptDebugSnapshot>>>`. `HostPromptAssemblyPort` receives
-that store when the session execution ports are attached.
+AgentInstanceId), PromptDebugSnapshot>>>`. The latest snapshot remains keyed
+by session/agent for lookup, but carries the run id used to reject model inputs
+from a replaced run. `HostPromptAssemblyPort` receives that store when the
+session execution ports are attached.
 
 ```text
 orchd resolves tools
@@ -74,9 +77,11 @@ middleware, and resolves thinking/cache options, it records the serialized
 request and options immediately before opening the provider stream.
 
 The host-provided gateway sink stores these bodies in a separate local mutex
-map; it never exports them as metrics or logs. A new successful assembly
-clears earlier inputs for that session/agent, and each key retains at most 32
-model steps. The read path joins those inputs onto the latest assembly clone.
+map; it never exports them as metrics or logs. A new successful assembly starts
+a buffer for its run id, and each key retains at most 32 model steps. Recording
+checks the input run id against the active buffer, so a late step from the
+replaced run is discarded. The read path also joins only when the buffer run id
+matches the latest assembly clone.
 
 ## Package impact
 
@@ -101,6 +106,8 @@ No `island-rs` change required.
   assembly actually used to start that run.
 - Concurrent assemblies replace one map entry atomically; sessions and
   agents use distinct keys.
+- A model input finishing after its run was replaced cannot contaminate the
+  replacement snapshot.
 - Restart clears all snapshots by construction.
 
 ## Verification

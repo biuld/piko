@@ -335,6 +335,9 @@ impl AppState {
                 self.host_settings.prompt_cache_policy = (*policy).into();
             }
             SettingsAction::Observability(v) => self.host_settings.observability_enabled = *v,
+            SettingsAction::ObservabilityCaptureContent(v) => {
+                self.host_settings.observability_capture_content = *v;
+            }
             SettingsAction::ObservabilityEndpoint(ep) => {
                 self.host_settings.otel_endpoint = (*ep).to_string();
             }

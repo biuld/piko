@@ -1,4 +1,12 @@
 pub(crate) fn sanitize_diagnostic(message: &str) -> String {
+    sanitize_sensitive_text(message)
+        .chars()
+        .take(1_024)
+        .collect()
+}
+
+/// Redact common credential shapes without applying diagnostic-length limits.
+pub(crate) fn sanitize_sensitive_text(message: &str) -> String {
     let mut sanitized = message
         .chars()
         .map(|character| {
@@ -29,7 +37,7 @@ pub(crate) fn sanitize_diagnostic(message: &str) -> String {
         sanitized.replace_range(token_start..token_end, "[REDACTED]");
         search_from = token_start + "[REDACTED]".len();
     }
-    sanitized.chars().take(1_024).collect()
+    sanitized
 }
 
 /// Remove provider continuation resources and credential-shaped values from
@@ -139,6 +147,13 @@ mod tests {
     fn redacts_common_bearer_and_key_shapes() {
         let value = sanitize_diagnostic("Bearer secret-token sk-example");
         assert_eq!(value, "Bearer [REDACTED] [REDACTED]");
+    }
+
+    #[test]
+    fn sensitive_text_redaction_preserves_non_secret_tail() {
+        let value = sanitize_sensitive_text(&format!("Bearer secret {} tail", "x".repeat(2_000)));
+        assert!(value.starts_with("Bearer [REDACTED]"));
+        assert!(value.ends_with("tail"));
     }
 
     #[test]

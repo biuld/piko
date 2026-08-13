@@ -363,6 +363,9 @@ pub struct ObservabilitySettings {
     pub otel_endpoint: Option<String>,
     /// OTel `service.name` resource attribute. Default: `piko-hostd`.
     pub service_name: Option<String>,
+    /// Export prompt, transcript, and tool-definition bodies on GenAI spans.
+    /// Sensitive and independently opt-in; default: false.
+    pub capture_content: Option<bool>,
 }
 
 mod manager;

@@ -186,6 +186,9 @@ impl ResolvedToolCatalog {
 pub struct PromptAssemblyRequest {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
+    /// Execution identity used to correlate this immutable assembly with the
+    /// model steps that consume it.
+    pub run_id: String,
     pub agent_spec: AgentSpec,
     pub resources: PromptResourceSnapshot,
     pub tool_catalog: ResolvedToolCatalog,
@@ -199,6 +202,7 @@ pub struct PromptAssemblyRequest {
 pub struct PromptDebugSnapshot {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
+    pub run_id: String,
     pub run_prompt: SemanticRunPrompt,
     /// Retained prompt-resource messages in injection order: world-state,
     /// then mentions. Later orchd-owned context is outside this snapshot.

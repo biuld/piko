@@ -581,7 +581,7 @@ not new protocol variants.
 | Capability | Wire today | UX gap | Preferred fix |
 |------------|------------|--------|---------------|
 | Context / cost | Session/turn usage projection | BottomBar still placeholder when data exists | Project into BottomBar (no new command) |
-| Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel | Local presentation command |
+| Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel with exact run identity and complete run-prompt, resource, tool-catalog, request, and options sections | Local presentation command; content is scrollable rather than silently truncated |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
 | Queue steer | `QueueSteer` | No first-class user entry | Local slash or Editor mode only if product wants steer; else keep protocol for automation |
 | `model.set` / `thinking.set` in catalog | Catalog advertised | Selectors use other paths | Keep selectors; optional slash args later; no second set API |

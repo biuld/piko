@@ -1,4 +1,5 @@
 use super::*;
+use tracing::Instrument as _;
 
 impl AgentActor {
     /// Unread detached reports that still need a model-visible completion
@@ -62,7 +63,8 @@ impl AgentActor {
         self.publish_snapshot();
         let run_context = match self
             .execution
-            .prepare_run_context(&request, &self.spec)
+            .prepare_run_context(&request, &self.spec, &execution_id)
+            .instrument(run_span.clone())
             .await
         {
             Ok(context) => context,

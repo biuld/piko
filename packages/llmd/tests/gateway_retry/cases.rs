@@ -42,7 +42,7 @@ async fn captures_actual_model_input_before_provider_dispatch() {
         .unwrap();
     let _ = stream.events.collect::<Vec<_>>().await;
 
-    let inputs = capture.0.lock().unwrap();
+    let inputs = capture.inputs.lock().unwrap();
     assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].session_id, "session-1");
     assert_eq!(inputs[0].agent_instance_id, "agent-1");

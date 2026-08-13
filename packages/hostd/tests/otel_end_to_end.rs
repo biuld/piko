@@ -97,7 +97,7 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
         .with(tracing_subscriber::fmt::layer().with_ansi(false));
     use tracing_subscriber::layer::SubscriberExt;
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    piko_hostd::telemetry::init(true);
+    piko_hostd::telemetry::init(true, false);
 
     // ---- run one turn through the real hostd path ----
     let temp = tempfile::tempdir().unwrap();
@@ -193,6 +193,7 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     for expected in [
         "turn.run",
         "agent.run",
+        "piko.prompt.assemble",
         "model.step",
         "tool.batch",
         "tool.call",
@@ -214,6 +215,8 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     let turn = turn_spans.first().expect("turn.run span");
     let agent_spans = by_name("agent.run");
     let agent = agent_spans.first().expect("agent.run span");
+    let prompt_spans = by_name("piko.prompt.assemble");
+    let prompt = prompt_spans.first().expect("piko.prompt.assemble span");
     let step_spans = by_name("model.step");
     let step = step_spans.first().expect("model.step span");
     let batch_spans = by_name("tool.batch");
@@ -221,6 +224,7 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     let call_spans = by_name("tool.call");
     let call = call_spans.first().expect("tool.call span");
     assert_eq!(agent.parent_span_id, turn.span_context.span_id());
+    assert_eq!(prompt.parent_span_id, agent.span_context.span_id());
     assert_eq!(step.parent_span_id, agent.span_context.span_id());
     assert_eq!(batch.parent_span_id, step.span_context.span_id());
     assert_eq!(call.parent_span_id, batch.span_context.span_id());
@@ -238,6 +242,20 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     assert_eq!(step_model.as_deref(), Some("test-model"));
     let step_provider = attr(step, "provider");
     assert_eq!(step_provider.as_deref(), Some("test"));
+    assert_eq!(attr(prompt, "assembly_version").as_deref(), Some("5"));
+    let blocks = attr(prompt, "piko.prompt.blocks").expect("ordered prompt block metadata");
+    assert!(blocks.contains("platform.policy"));
+    assert!(!blocks.contains("coding agent operating inside piko"));
+    for sensitive in [
+        "gen_ai.system_instructions",
+        "gen_ai.input.messages",
+        "gen_ai.tool.definitions",
+    ] {
+        assert!(
+            attr(prompt, sensitive).is_none(),
+            "prompt assembly metadata span must not contain {sensitive}"
+        );
+    }
 
     // ---- turn metrics ----
     meter_provider.force_flush().unwrap();

@@ -34,6 +34,7 @@ pub enum SettingsAction {
     EnableAllTools,
     DisableTools,
     Observability(bool),
+    ObservabilityCaptureContent(bool),
     ObservabilityEndpoint(&'static str),
     Theme(&'static str),
     EditorMultiline(bool),
@@ -198,6 +199,20 @@ fn observability(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
                     SettingsAction::Observability(false),
                 ),
             ),
+            section_choice(
+                "GenAI Content",
+                on_off(host.observability_capture_content).into(),
+                Some("sensitive · restart hostd"),
+                None,
+                "GenAI Content",
+                binary_options(
+                    host.observability_capture_content,
+                    "Export prompt, transcript, and tool-definition bodies",
+                    "Export metadata only",
+                    SettingsAction::ObservabilityCaptureContent(true),
+                    SettingsAction::ObservabilityCaptureContent(false),
+                ),
+            ),
             presentation::otel_endpoint(snap),
         ],
     )
@@ -221,6 +236,7 @@ pub fn action_requires_hostd_restart(action: &SettingsAction) -> bool {
     matches!(
         action,
         SettingsAction::Observability(_)
+            | SettingsAction::ObservabilityCaptureContent(_)
             | SettingsAction::ObservabilityEndpoint(_)
             | SettingsAction::Transport(_)
     )

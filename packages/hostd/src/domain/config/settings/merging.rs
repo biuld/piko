@@ -226,6 +226,7 @@ pub(crate) fn merge_observability(
             enabled: overrides.enabled.or(base.enabled),
             otel_endpoint: overrides.otel_endpoint.or(base.otel_endpoint),
             service_name: overrides.service_name.or(base.service_name),
+            capture_content: overrides.capture_content.or(base.capture_content),
         }),
         (base, overrides) => overrides.or(base),
     }

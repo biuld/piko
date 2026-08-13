@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-46: OTel GenAI prompt inspection](D-46-otel-genai-prompt-inspection.md)
+  implements the first two stages of a vendor-neutral LangSmith-like trace
+  view with safe assembly metadata by default and separately opted-in GenAI
+  model-input export.
 - [D-45: Local installer and filesystem configuration](D-45-local-installer.md)
   implements F-33 with binaries under `~/.piko/bin`, idempotent config
   initialization, and installed files as runtime catalog authority.

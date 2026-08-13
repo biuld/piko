@@ -177,6 +177,39 @@ impl InferenceGateway for LlmdExecutor {
         let protocol_adapter = adapter(target.protocol.kind());
         let plan = crate::checkpoint::plan(&target, &request.conversation)?;
         let body = protocol_adapter.encode(&request, &target, &plan, true)?;
+        let content_attributes = self
+            .telemetry
+            .capture_content()
+            .then(|| crate::genai_telemetry::content_attributes(&request));
+
+        let span = tracing::info_span!(
+            "llm.request",
+            otel.kind = "client",
+            session_id = %request.context.session_id,
+            run_id = %request.context.run_id,
+            agent_instance_id = %request.context.agent_instance_id,
+            step_id = %request.context.step_id,
+            model = %request.model.model,
+            provider = %request.model.provider,
+            protocol = ?target.protocol.kind(),
+            streaming = true,
+            "gen_ai.operation.name" = "chat",
+            "gen_ai.provider.name" = %request.model.provider,
+            "gen_ai.conversation.id" = %request.context.session_id,
+            "gen_ai.request.model" = %request.model.model,
+            "gen_ai.request.stream" = true,
+            "gen_ai.request.max_tokens" = tracing::field::Empty,
+            "gen_ai.request.reasoning.level" = tracing::field::Empty,
+        );
+        if let Some(max_tokens) = request.options.max_output_tokens {
+            span.record("gen_ai.request.max_tokens", max_tokens as u64);
+        }
+        if let Some(reasoning) = request.options.reasoning_effort.as_ref() {
+            span.record("gen_ai.request.reasoning.level", reasoning.as_str());
+        }
+        if let Some(content) = content_attributes {
+            span.in_scope(|| self.telemetry.record_genai_content(&content));
+        }
         self.telemetry
             .record_model_input(piko_protocol::ModelInputDebugSnapshot {
                 session_id: request.context.session_id.clone(),
@@ -188,16 +221,6 @@ impl InferenceGateway for LlmdExecutor {
                 request: crate::redaction::semantic_model_input(&request),
                 options: crate::redaction::semantic_inference_options(&request.options),
             });
-
-        let span = tracing::info_span!(
-            "llm.request",
-            run_id = %request.context.run_id,
-            step_id = %request.context.step_id,
-            model = %request.model.model,
-            provider = %request.model.provider,
-            protocol = ?target.protocol.kind(),
-            streaming = true,
-        );
         let state = Arc::clone(&self.state);
         let middlewares = self.middlewares.clone();
         let telemetry = Arc::clone(&self.telemetry);

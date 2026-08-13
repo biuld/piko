@@ -85,6 +85,7 @@ impl AgentRunRunner for PromptDebugRunner {
             piko_protocol::PromptDebugSnapshot {
                 session_id: session_id.into(),
                 agent_instance_id: agent_instance_id.into(),
+                run_id: "run-debug".into(),
                 run_prompt: piko_protocol::SemanticRunPrompt::default(),
                 resource_messages: Vec::new(),
                 tool_catalog: piko_protocol::ResolvedToolCatalog::new(Vec::new(), "tools"),

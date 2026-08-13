@@ -174,24 +174,24 @@ fn format_prompt_debug(snapshot: &PromptDebugSnapshot) -> Vec<String> {
     let mut lines = vec![
         format!("session  {}", snapshot.session_id),
         format!("agent    {}", snapshot.agent_instance_id),
+        format!("run      {}", snapshot.run_id),
         format!("tools    {}", snapshot.tool_catalog.tools.len()),
         format!("resources {} message(s)", snapshot.resource_messages.len()),
         format!("model inputs {}", snapshot.model_inputs.len()),
         String::new(),
         "── run prompt ──".into(),
     ];
-    // SemanticRunPrompt is structured; serialize compactly for display.
-    match serde_json::to_string_pretty(&snapshot.run_prompt) {
-        Ok(text) => {
-            for line in text.lines().take(80) {
-                lines.push(line.to_string());
-            }
-            if text.lines().count() > 80 {
-                lines.push("… (truncated)".into());
-            }
-        }
-        Err(_) => lines.push("(failed to format run prompt)".into()),
+    push_pretty_json(&mut lines, &snapshot.run_prompt, "run prompt");
+
+    if !snapshot.resource_messages.is_empty() {
+        lines.push(String::new());
+        lines.push("── retained resources ──".into());
+        push_pretty_json(&mut lines, &snapshot.resource_messages, "resources");
     }
+
+    lines.push(String::new());
+    lines.push("── tool catalog ──".into());
+    push_pretty_json(&mut lines, &snapshot.tool_catalog, "tool catalog");
 
     if !snapshot.model_inputs.is_empty() {
         lines.push(String::new());
@@ -205,18 +205,30 @@ fn format_prompt_debug(snapshot: &PromptDebugSnapshot) -> Vec<String> {
                 short(&step.run_id),
                 short(&step.step_id)
             ));
-            if let Ok(req) = serde_json::to_string_pretty(&step.request) {
-                for line in req.lines().take(40) {
-                    lines.push(format!("  {line}"));
-                }
-                if req.lines().count() > 40 {
-                    lines.push("  … (truncated)".into());
-                }
-            }
+            lines.push("  request".into());
+            push_pretty_json_indented(&mut lines, &step.request, "request", "    ");
+            lines.push("  options".into());
+            push_pretty_json_indented(&mut lines, &step.options, "options", "    ");
             lines.push(String::new());
         }
     }
     lines
+}
+
+fn push_pretty_json<T: serde::Serialize>(lines: &mut Vec<String>, value: &T, label: &str) {
+    push_pretty_json_indented(lines, value, label, "");
+}
+
+fn push_pretty_json_indented<T: serde::Serialize>(
+    lines: &mut Vec<String>,
+    value: &T,
+    label: &str,
+    indent: &str,
+) {
+    match serde_json::to_string_pretty(value) {
+        Ok(text) => lines.extend(text.lines().map(|line| format!("{indent}{line}"))),
+        Err(_) => lines.push(format!("{indent}(failed to format {label})")),
+    }
 }
 
 fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme) -> Line<'a> {
@@ -265,6 +277,51 @@ mod tests {
         let lines = format_diff(&diff);
         assert!(lines.iter().any(|l| l.contains("a.rs")));
         assert!(lines.iter().any(|l| l == "+new"));
+    }
+
+    #[test]
+    fn prompt_debug_renders_complete_sections_without_truncation() {
+        let long_content = (0..100)
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let snapshot = PromptDebugSnapshot {
+            session_id: "s".into(),
+            agent_instance_id: "a".into(),
+            run_id: "run-exact".into(),
+            run_prompt: piko_protocol::SemanticRunPrompt {
+                blocks: vec![piko_protocol::PromptBlock {
+                    id: "project.context.0".into(),
+                    kind: piko_protocol::PromptBlockKind::Instruction,
+                    authority: piko_protocol::InstructionAuthority::Project,
+                    trust: piko_protocol::ContentTrust::WorkspaceControlled,
+                    source: piko_protocol::PromptSource::new("workspace-file", "AGENTS.md"),
+                    content: long_content,
+                    content_digest: "digest".into(),
+                    cache_scope: piko_protocol::CacheScope::ResourceSnapshot,
+                }],
+                ..Default::default()
+            },
+            resource_messages: Vec::new(),
+            tool_catalog: piko_protocol::ResolvedToolCatalog::new(Vec::new(), "tools"),
+            model_inputs: vec![piko_protocol::ModelInputDebugSnapshot {
+                session_id: "s".into(),
+                agent_instance_id: "a".into(),
+                run_id: "run-exact".into(),
+                step_id: "step-1".into(),
+                provider: "provider".into(),
+                model: "model".into(),
+                request: serde_json::json!({"input": "actual"}),
+                options: serde_json::json!({"reasoning": "high"}),
+            }],
+        };
+
+        let rendered = format_prompt_debug(&snapshot).join("\n");
+        assert!(rendered.contains("run      run-exact"));
+        assert!(rendered.contains("line-99"));
+        assert!(rendered.contains("── tool catalog ──"));
+        assert!(rendered.contains("\"reasoning\": \"high\""));
+        assert!(!rendered.contains("truncated"));
     }
 
     #[test]

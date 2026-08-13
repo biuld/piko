@@ -10,6 +10,7 @@ Slices:
 - Tracing + metrics (D-15 / V-15)
 - Per-turn usage accounting (D-29 / V-29)
 - Prompt assembly debugging (D-30 / V-30)
+- OTel GenAI prompt inspection (D-46 / V-46)
 - Durable rollout paging (D-31 / V-31)
 - Exact turn-diff tracking (D-32 / V-32)
 
@@ -135,6 +136,9 @@ causality makes regressions slow to localize.
   new assembly, the query fails explicitly with "snapshot unavailable".
 - New successful assembly atomically replaces the prior snapshot for that
   session/agent. Failed assembly leaves the previous successful snapshot.
+- Every snapshot is bound to the exact run that consumed it. Model inputs from
+  an older run that arrive after replacement must never be joined to the newer
+  snapshot.
 - Prompt bodies may contain workspace-controlled or user-mentioned content;
   the snapshot is returned only over the existing local hostd client
   channel and is never emitted to logs or OTel exporters.
@@ -142,6 +146,22 @@ causality makes regressions slow to localize.
   produced by llmd after prompt mapping, tool conversion, middleware,
   thinking, and cache policy, immediately before adapter dispatch.
 - Model inputs are bounded to the latest 32 steps for the captured assembly.
+
+### OTel prompt inspection (D-46)
+
+- OTel is the transport and correlation substrate for a LangSmith-like trace
+  view; it is not a product-state store and hostd does not query it back.
+- The trace topology and prompt-assembly provenance are safe metadata and may
+  be exported whenever observability is enabled.
+- Prompt, transcript, and tool-definition bodies are sensitive content. Model
+  input export is separately opt-in, defaults off, and uses the applicable
+  OTel GenAI semantic-convention fields at the model-call boundary. Thinking
+  blocks and model-output bodies are not exported in this slice.
+- Content attributes are size-bounded and must not be duplicated into stderr
+  or OTel log records.
+- The existing local prompt-debug snapshot remains an immediate diagnostic
+  surface until an OTLP backend provides equivalent inspection. Its fidelity
+  must not depend on OTel sampling or exporter availability.
 
 ### Durable rollout paging (D-31)
 
@@ -206,6 +226,17 @@ causality makes regressions slow to localize.
 - [x] Debug prompt bodies are absent from tracing/log events.
 - [x] Actual llmd request and options are captured before provider dispatch
       with the correct session, agent, run, and step identity.
+- [x] A late model input from a replaced run is not attached to the latest
+      prompt-debug snapshot.
+
+### OTel prompt inspection (D-46)
+
+- [x] One trace shows turn → agent → prompt assembly → model call → tool calls,
+      with run/step/agent correlation and assembly block provenance.
+- [x] Sensitive GenAI content is absent by default and exported only under a
+      separate explicit setting.
+- [x] The exported opted-in GenAI attributes contain the actual provider-neutral
+      model input without piko depending on a backend for correctness.
 
 ### Durable rollout paging (V-31)
 

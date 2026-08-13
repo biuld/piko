@@ -315,11 +315,44 @@ fn request() -> InferenceRequest {
 }
 
 #[derive(Default)]
-struct PromptCapture(Mutex<Vec<piko_protocol::ModelInputDebugSnapshot>>);
+struct PromptCapture {
+    inputs: Mutex<Vec<piko_protocol::ModelInputDebugSnapshot>>,
+    capture_content: std::sync::atomic::AtomicBool,
+}
 
 impl GatewayTelemetry for PromptCapture {
+    fn capture_content(&self) -> bool {
+        self.capture_content.load(Ordering::Relaxed)
+    }
+
+    fn record_genai_content(&self, content: &piko_llmd::telemetry::GenAiContentAttributes) {
+        use opentelemetry::trace::TraceContextExt as _;
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+        let context = tracing::Span::current().context();
+        let span = context.span();
+        if let Some(value) = content.system_instructions.as_ref() {
+            span.set_attribute(opentelemetry::KeyValue::new(
+                "gen_ai.system_instructions",
+                value.clone(),
+            ));
+        }
+        if let Some(value) = content.input_messages.as_ref() {
+            span.set_attribute(opentelemetry::KeyValue::new(
+                "gen_ai.input.messages",
+                value.clone(),
+            ));
+        }
+        if let Some(value) = content.tool_definitions.as_ref() {
+            span.set_attribute(opentelemetry::KeyValue::new(
+                "gen_ai.tool.definitions",
+                value.clone(),
+            ));
+        }
+    }
+
     fn record_model_input(&self, input: piko_protocol::ModelInputDebugSnapshot) {
-        self.0.lock().unwrap().push(input);
+        self.inputs.lock().unwrap().push(input);
     }
 
     fn record_ttft(&self, _model: &str, _provider: &str, _ttft_ms: u64) {}
@@ -370,7 +403,7 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     });
 
     let stub = Stub::start(Script {
-        steps: vec![Step::Status(503), Step::StreamSuccess],
+        steps: vec![Step::Status(503), Step::StreamSuccess, Step::StreamSuccess],
     })
     .await;
     let mut targets = HashMap::new();
@@ -382,7 +415,11 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     );
     target.base_url = Some(format!("http://{}", stub.addr));
     targets.insert("openai/gpt-test".to_string(), target);
-    let exec = piko_llmd::build_gateway(targets, retry_config());
+    let capture = Arc::new(PromptCapture {
+        capture_content: std::sync::atomic::AtomicBool::new(true),
+        ..Default::default()
+    });
+    let exec = piko_llmd::build_gateway_with_telemetry(targets, retry_config(), capture.clone());
     let mut req = request();
     req.context.run_id = "run-otel".to_string();
     let stream = exec
@@ -395,6 +432,18 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
             .iter()
             .any(|e| matches!(e, InferenceEvent::Completed(FinishReason::Completed { reason }) if reason == "stop"))
     );
+
+    capture.capture_content.store(false, Ordering::Relaxed);
+    let mut no_content_request = request();
+    no_content_request.context.run_id = "run-no-content".to_string();
+    let stream = exec
+        .start(
+            no_content_request,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("metadata-only execution should return a stream");
+    let _ = stream.events.collect::<Vec<_>>().await;
 
     tracer_provider.force_flush().unwrap();
     let mut spans = Vec::new();
@@ -434,6 +483,31 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     assert_eq!(provider.as_deref(), Some("openai"));
     let run_id = attrs("run_id");
     assert_eq!(run_id.as_deref(), Some("run-otel"));
+    assert_eq!(attrs("gen_ai.operation.name").as_deref(), Some("chat"));
+    assert_eq!(attrs("gen_ai.provider.name").as_deref(), Some("openai"));
+    assert!(attrs("gen_ai.input.messages").is_some_and(|value| value.contains("hi")));
+    let no_content = spans
+        .iter()
+        .find(|span| {
+            span.name.as_ref() == "llm.request"
+                && span.attributes.iter().any(|kv| {
+                    kv.key.as_str() == "run_id" && kv.value.to_string() == "run-no-content"
+                })
+        })
+        .expect("metadata-only llm.request span");
+    for sensitive in [
+        "gen_ai.system_instructions",
+        "gen_ai.input.messages",
+        "gen_ai.tool.definitions",
+    ] {
+        assert!(
+            no_content
+                .attributes
+                .iter()
+                .all(|kv| kv.key.as_str() != sensitive),
+            "{sensitive} must be absent when content capture is disabled"
+        );
+    }
 }
 
 #[tokio::test]
