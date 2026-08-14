@@ -54,6 +54,8 @@ pub enum HitId {
     Composer,
     /// The transient notice row (click → dismiss).
     Notice,
+    /// The Todos summary header (click → collapse / expand the dock strip).
+    TodosToggle,
     /// Copy one notification's complete original message.
     NotificationCopy(u64),
     /// One completion suggestion row (click → accept it).
@@ -121,6 +123,10 @@ pub struct AppState {
     /// Last pointer hover target (region + element), resolved from the hit
     /// map on `Moved` and consumed by product rendering as soft feedback.
     pub hovered: Option<(Region, Option<HitId>)>,
+    /// Whether a left-button press is waiting for its paired release. Some
+    /// terminal transports report only release events; paired releases are
+    /// suppressed because the press already activated the target.
+    pub pointer_left_down: bool,
 
     // core input
     pub editor: Editor,

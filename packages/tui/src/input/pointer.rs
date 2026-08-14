@@ -21,7 +21,18 @@ pub fn route_pointer(app: &mut AppState, terminal: Rect, event: MouseEvent) -> V
     let (x, y) = (event.column, event.row);
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            app.pointer_left_down = true;
             route_component(app, &map, x, y, PointerGesture::Activate)
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            // Crossterm normally reports press + release, while some terminal
+            // transports surface only release. Activate the latter, but never
+            // run a paired click twice (critical for disclosure toggles).
+            if std::mem::take(&mut app.pointer_left_down) {
+                Vec::new()
+            } else {
+                route_component(app, &map, x, y, PointerGesture::Activate)
+            }
         }
         MouseEventKind::Moved => {
             app.hovered = top_modal_hit(app, &map, x, y).map(|h| (h.region, h.element));
@@ -110,7 +121,14 @@ fn route_component(
             }
         }
         Region::Guidance => app.notifications.pointer_event(component_hit, gesture),
-        // v1 strip is read-only / non-focusable.
+        Region::Todos
+            if gesture == PointerGesture::Activate
+                && component_hit.element == Some(HitId::TodosToggle) =>
+        {
+            app.todo_lists.toggle_collapsed();
+            Vec::new()
+        }
+        // Todo rows are read-only / non-focusable.
         Region::DockBoundary | Region::Todos => Vec::new(),
         Region::Suggest => app
             .editor

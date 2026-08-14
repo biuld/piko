@@ -35,6 +35,7 @@ impl AppState {
             quit: false,
             last_tick: Instant::now(),
             hovered: None,
+            pointer_left_down: false,
             editor: Editor::default(),
             command_catalog: crate::app::command::merge_command_catalog(&[]),
             status: "starting hostd".to_string(),

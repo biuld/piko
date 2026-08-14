@@ -8,11 +8,13 @@ use piko_protocol::TodoList;
 #[derive(Clone, Debug, Default)]
 pub struct TodoListsState {
     by_agent: HashMap<String, TodoList>,
+    collapsed: bool,
 }
 
 impl TodoListsState {
     pub fn clear(&mut self) {
         self.by_agent.clear();
+        self.collapsed = false;
     }
 
     /// Replace all lists from a session snapshot.
@@ -40,6 +42,16 @@ impl TodoListsState {
         }
         let id = viewed_agent?;
         self.by_agent.get(id).filter(|list| !list.items.is_empty())
+    }
+
+    /// Whether the live dock strip is showing only its summary header.
+    pub fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    /// Toggle transient strip presentation without touching projected todos.
+    pub fn toggle_collapsed(&mut self) {
+        self.collapsed = !self.collapsed;
     }
 
     #[allow(dead_code)]

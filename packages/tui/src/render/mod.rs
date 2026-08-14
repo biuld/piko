@@ -88,7 +88,13 @@ fn paint_regions(
     }
     if let Some(area) = rects.get(&Region::Todos).copied() {
         let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-        crate::features::todos::render_todos_strip(frame, content, app, &app.theme);
+        crate::features::todos::render_todos_strip(
+            frame,
+            content,
+            app,
+            &app.theme,
+            interaction_state(app, Region::Todos),
+        );
         let separator = Rect::new(
             area.x,
             area.bottom().saturating_sub(1),

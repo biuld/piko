@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use piko_protocol::ApprovalDecision;
+use piko_protocol::{ApprovalDecision, TodoItem, TodoList, TodoStatus};
 use ratatui::layout::Rect;
 
 use crate::app::{
@@ -395,6 +395,187 @@ fn notice_click_clears_notifications() {
         actions.as_slice(),
         [Action::Notifications(NotificationAction::DismissVisible)]
     ));
+}
+
+#[test]
+fn todos_header_hitzone_toggles_one_line_summary() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    app.todo_lists.upsert(TodoList {
+        agent_instance_id: "agent-1".into(),
+        items: vec![
+            TodoItem {
+                id: "1".into(),
+                status: TodoStatus::InProgress,
+                content: "active item".into(),
+                detail: None,
+            },
+            TodoItem {
+                id: "2".into(),
+                status: TodoStatus::Pending,
+                content: "pending item".into(),
+                detail: None,
+            },
+        ],
+        updated_at: 1,
+        revision: 1,
+    });
+
+    let terminal = Rect::new(0, 0, 80, 24);
+    let expanded = compose_frame(&app, terminal).plan.rects[&Region::Todos];
+    assert_eq!(expanded.height, 4); // header + two items + separator
+
+    let header = build_surface_hitmap(&app, terminal)
+        .hits
+        .into_iter()
+        .find(|hit| hit.element == Some(HitId::TodosToggle))
+        .expect("todos header hitzone");
+    assert_eq!(header.rect.height, 1);
+    let actions = route_pointer(
+        &mut app,
+        terminal,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            header.rect.x,
+            header.rect.y,
+        ),
+    );
+    assert!(actions.is_empty());
+    assert!(app.todo_lists.is_collapsed());
+    assert_eq!(
+        compose_frame(&app, terminal).plan.rects[&Region::Todos].height,
+        2
+    );
+
+    let collapsed_header = build_surface_hitmap(&app, terminal)
+        .hits
+        .into_iter()
+        .find(|hit| hit.element == Some(HitId::TodosToggle))
+        .expect("collapsed todos header hitzone");
+    route_pointer(
+        &mut app,
+        terminal,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            collapsed_header.rect.x,
+            collapsed_header.rect.y,
+        ),
+    );
+    assert!(!app.todo_lists.is_collapsed());
+
+    // Item rows remain read-only and do not share the header toggle hitzone.
+    route_pointer(
+        &mut app,
+        terminal,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            expanded.x,
+            expanded.y + 1,
+        ),
+    );
+    assert!(!app.todo_lists.is_collapsed());
+}
+
+#[test]
+fn release_only_terminal_events_activate_timeline_and_todos() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.timeline.push(TimelineEntry::Tool(ToolEntry::new(
+        "tool-1".into(),
+        "bash".into(),
+        ToolStatus::Completed,
+        r#"{"cmd":"true"}"#.into(),
+        Some("done".into()),
+        None,
+    )));
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    app.todo_lists.upsert(TodoList {
+        agent_instance_id: "agent-1".into(),
+        items: vec![TodoItem {
+            id: "1".into(),
+            status: TodoStatus::Pending,
+            content: "pending item".into(),
+            detail: None,
+        }],
+        updated_at: 1,
+        revision: 1,
+    });
+
+    let terminal = Rect::new(0, 0, 80, 24);
+    let map = build_surface_hitmap(&app, terminal);
+    let tool = map
+        .hits
+        .iter()
+        .find(|hit| hit.element == Some(HitId::TimelineTool(0)))
+        .expect("timeline tool hitzone");
+    let actions = route_pointer(
+        &mut app,
+        terminal,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            tool.rect.x,
+            tool.rect.y,
+        ),
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Timeline(TimelineAction::ToggleTool(0))]
+    ));
+
+    let todo = build_surface_hitmap(&app, terminal)
+        .hits
+        .into_iter()
+        .find(|hit| hit.element == Some(HitId::TodosToggle))
+        .expect("todo hitzone");
+    let actions = route_pointer(
+        &mut app,
+        terminal,
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            todo.rect.x,
+            todo.rect.y,
+        ),
+    );
+    assert!(actions.is_empty());
+    assert!(app.todo_lists.is_collapsed());
+}
+
+#[test]
+fn paired_release_does_not_toggle_todos_twice() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    app.todo_lists.upsert(TodoList {
+        agent_instance_id: "agent-1".into(),
+        items: vec![TodoItem {
+            id: "1".into(),
+            status: TodoStatus::Pending,
+            content: "pending item".into(),
+            detail: None,
+        }],
+        updated_at: 1,
+        revision: 1,
+    });
+
+    let terminal = Rect::new(0, 0, 80, 24);
+    let todo = build_surface_hitmap(&app, terminal)
+        .hits
+        .into_iter()
+        .find(|hit| hit.element == Some(HitId::TodosToggle))
+        .expect("todo hitzone");
+    let (x, y) = (todo.rect.x, todo.rect.y);
+    route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Up(MouseButton::Left), x, y),
+    );
+    assert!(app.todo_lists.is_collapsed());
 }
 
 #[test]

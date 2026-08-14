@@ -12,15 +12,28 @@ use piko_protocol::{TodoList, TodoStatus};
 use super::project::{max_item_rows_for_grant, project_strip};
 use crate::theme::Theme;
 
-pub fn paint_strip(frame: &mut ratatui::Frame<'_>, area: Rect, list: &TodoList, theme: &Theme) {
+pub fn paint_strip(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    list: &TodoList,
+    collapsed: bool,
+    theme: &Theme,
+    header_hovered: bool,
+) {
     if area.height == 0 || area.width == 0 {
         return;
     }
     let max_items = max_item_rows_for_grant(area.height, list.items.len());
-    let view = project_strip(list, area.width, max_items);
+    let view = project_strip(list, area.width, max_items, collapsed);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    let header_style = Style::default().fg(theme.text).add_modifier(Modifier::BOLD);
+    let header_style = Style::default()
+        .fg(if header_hovered {
+            theme.accent
+        } else {
+            theme.text
+        })
+        .add_modifier(Modifier::BOLD);
     lines.push(Line::from(Span::styled(view.header, header_style)));
 
     for row in view.rows {

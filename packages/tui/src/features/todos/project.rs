@@ -4,7 +4,7 @@ use piko_protocol::{TodoList, TodoStatus};
 use unicode_width::UnicodeWidthStr;
 
 use crate::features::dock_stack::TODOS_MAX_ITEM_ROWS;
-use crate::ui::components::feedback::{DISCLOSURE_COLLAPSED, SUCCESS_GLYPH};
+use crate::ui::components::feedback::{DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, SUCCESS_GLYPH};
 
 /// Projected strip content for one paint frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,10 +22,13 @@ pub struct TodoStripRow {
 }
 
 /// Preferred dock height: content rows plus one Dock Stack separator row.
-pub fn strip_height_offer(list: &TodoList) -> u16 {
+pub fn strip_height_offer(list: &TodoList, collapsed: bool) -> u16 {
     let n = list.items.len() as u16;
     if n == 0 {
         return 0;
+    }
+    if collapsed {
+        return crate::features::dock_stack::TODOS_MIN_HEIGHT;
     }
     let max_items = TODOS_MAX_ITEM_ROWS;
     let shown = n.min(max_items);
@@ -34,7 +37,12 @@ pub fn strip_height_offer(list: &TodoList) -> u16 {
 }
 
 /// Project list into strip rows, truncating content to `width` and capping items.
-pub fn project_strip(list: &TodoList, width: u16, max_item_rows: usize) -> TodoStripView {
+pub fn project_strip(
+    list: &TodoList,
+    width: u16,
+    max_item_rows: usize,
+    collapsed: bool,
+) -> TodoStripView {
     let total = list.items.len();
     let mut done = 0usize;
     let mut active = 0usize;
@@ -47,12 +55,19 @@ pub fn project_strip(list: &TodoList, width: u16, max_item_rows: usize) -> TodoS
         }
     }
     let remaining = active + pending;
-    let header = format!("Todos  {done}/{total} done · {active} active · {remaining} remaining");
+    let disclosure = if collapsed {
+        DISCLOSURE_COLLAPSED
+    } else {
+        DISCLOSURE_EXPANDED
+    };
+    let header = format!(
+        "{disclosure} Todos  {done}/{total} done · {active} active · {remaining} remaining"
+    );
     let header = truncate_line(&header, width);
 
-    let max_item_rows = max_item_rows
+    let max_item_rows = if collapsed { 0 } else { max_item_rows }
         .min(TODOS_MAX_ITEM_ROWS as usize)
-        .max(if total > 0 { 1 } else { 0 }.min(total));
+        .max(if total > 0 && !collapsed { 1 } else { 0 }.min(total));
     let shown = total.min(max_item_rows);
     let rows: Vec<TodoStripRow> = list
         .items
@@ -70,7 +85,7 @@ pub fn project_strip(list: &TodoList, width: u16, max_item_rows: usize) -> TodoS
         })
         .collect();
 
-    let overflow = if total > shown {
+    let overflow = if !collapsed && total > shown {
         Some(format!("+{} more", total - shown))
     } else {
         None

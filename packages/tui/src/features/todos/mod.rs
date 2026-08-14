@@ -21,7 +21,7 @@ pub fn dock_band_offer(app: &AppState) -> Option<DockBandOffer> {
         app.agent_panel.active_agent_instance_id.as_deref(),
         app.todo_feature_enabled(),
     )?;
-    let preferred = strip_height_offer(list);
+    let preferred = strip_height_offer(list, app.todo_lists.is_collapsed());
     if preferred == 0 {
         return None;
     }
@@ -38,6 +38,7 @@ pub fn render_todos_strip(
     area: ratatui::layout::Rect,
     app: &AppState,
     theme: &crate::theme::Theme,
+    interaction: piko_tui_layout::InteractionState<crate::app::HitId>,
 ) {
     let Some(list) = app.todo_lists.viewed_list(
         app.agent_panel.active_agent_instance_id.as_deref(),
@@ -45,7 +46,14 @@ pub fn render_todos_strip(
     ) else {
         return;
     };
-    render::paint_strip(frame, area, list, theme);
+    render::paint_strip(
+        frame,
+        area,
+        list,
+        app.todo_lists.is_collapsed(),
+        theme,
+        interaction.hovered == Some(crate::app::HitId::TodosToggle),
+    );
 }
 
 #[cfg(test)]
@@ -83,27 +91,34 @@ mod tests {
             updated_at: 0,
             revision: 0,
         };
-        assert_eq!(strip_height_offer(&list), 0);
+        assert_eq!(strip_height_offer(&list, false), 0);
     }
 
     #[test]
     fn few_items_header_plus_rows() {
         let list = sample_list(3);
         // header + 3 items + Dock Stack separator, no overflow
-        assert_eq!(strip_height_offer(&list), 5);
+        assert_eq!(strip_height_offer(&list, false), 5);
     }
 
     #[test]
     fn over_cap_adds_overflow_row() {
         let list = sample_list(10);
         // header + 6 items + overflow + Dock Stack separator
-        assert_eq!(strip_height_offer(&list), 9);
+        assert_eq!(strip_height_offer(&list, false), 9);
+    }
+
+    #[test]
+    fn collapsed_list_is_header_plus_separator() {
+        let list = sample_list(10);
+        assert_eq!(strip_height_offer(&list, true), TODOS_MIN_HEIGHT);
     }
 
     #[test]
     fn project_strip_counts_and_marks() {
         let list = sample_list(3);
-        let view = project_strip(&list, 80, 6);
+        let view = project_strip(&list, 80, 6, false);
+        assert!(view.header.starts_with("▾ Todos"));
         assert!(view.header.contains("Todos"));
         assert!(view.header.contains("1/3 done"));
         assert_eq!(view.rows.len(), 3);
@@ -113,9 +128,18 @@ mod tests {
     #[test]
     fn project_strip_overflow() {
         let list = sample_list(8);
-        let view = project_strip(&list, 80, 3);
+        let view = project_strip(&list, 80, 3, false);
         assert_eq!(view.rows.len(), 3);
         assert_eq!(view.overflow.as_deref(), Some("+5 more"));
+    }
+
+    #[test]
+    fn collapsed_projection_keeps_only_summary() {
+        let list = sample_list(8);
+        let view = project_strip(&list, 80, 6, true);
+        assert!(view.header.starts_with("▸ Todos"));
+        assert!(view.rows.is_empty());
+        assert!(view.overflow.is_none());
     }
 
     #[test]
@@ -133,10 +157,20 @@ mod tests {
     }
 
     #[test]
+    fn clearing_session_state_also_resets_collapse() {
+        let mut state = TodoListsState::default();
+        state.upsert(sample_list(1));
+        state.toggle_collapsed();
+        state.clear();
+        assert!(!state.is_collapsed());
+        assert!(state.get("agent-a").is_none());
+    }
+
+    #[test]
     fn paint_respects_grant_height() {
         let list = sample_list(10);
         let grant_h = 3u16; // header + 1 item + maybe overflow forced by grant
-        let view = project_strip(&list, 40, grant_h.saturating_sub(1).max(1) as usize);
+        let view = project_strip(&list, 40, grant_h.saturating_sub(1).max(1) as usize, false);
         // projector never emits more content rows than max_item_rows
         assert!(view.rows.len() <= grant_h.saturating_sub(1) as usize);
     }

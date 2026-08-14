@@ -132,9 +132,10 @@ Feature doc ASCII is the target silhouette. Mapping:
 ### Header (one row when strip visible)
 
 ```text
-  Todos  {done}/{total} done · {active} active · {remaining} remaining
+  {▾|▸} Todos  {done}/{total} done · {active} active · {remaining} remaining
 ```
 
+- The expanded/collapsed disclosure mark owns a header-row pointer hit zone.
 - Leading label **Todos** (stable product word).
 - Counts from the projected list only.
 - Do **not** put model/cwd/cost here (BottomBar).
@@ -189,14 +190,19 @@ fallback when D-39 slice E lands.
 
 ## Interaction / hit testing
 
-v1: strip is **non-focusable, non-hit-action** (paint only).  
-Pointer scrolling still belongs to Stream / focused surfaces; strip does not
-steal keys.
+The whole Todos header row exposes `HitId::TodosToggle`. A primary click
+toggles transient `TodoListsState` presentation state directly and recomposes
+the Dock Stack on the next frame:
 
-Later (not this design’s first ship):
+- expanded offer: projected header + items + overflow + separator;
+- collapsed offer: header + separator (`TODOS_MIN_HEIGHT`);
+- `TodosToggle` hover paints the header text with the shared `accent` token in
+  both states; it does not add a row background;
+- item and separator rows have no element hit action;
+- the strip remains non-focusable and does not steal keys or pointer scrolling.
 
-- Expand long list in dock or read-only modal.
-- Hit targets only after host mutation commands exist.
+The collapse flag resets with session-local todo state. It is not included in
+host protocol, session snapshots, or settings, and does not mutate todo data.
 
 ## Reducers / events
 
@@ -232,6 +238,7 @@ Do **not** put multi-line checklist logic in BottomBar render.
 ## Verification
 
 - Empty / non-empty / cap / overflow height math (unit).
+- Collapsed offer is exactly header + separator; header hit toggles both ways.
 - Viewed-agent switch changes projection (unit).
 - Snapshot + live update replace list without Timeline dependency (unit).
 - Timeline force-body removed or gated once strip enabled (unit/regression).

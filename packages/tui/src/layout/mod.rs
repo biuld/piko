@@ -231,12 +231,19 @@ pub fn build_surface_hitmap(
             hits
         }
         Region::DockBoundary => Vec::new(),
-        // v1 strip is read-only / non-focusable — surface rect only, no elements.
-        Region::Todos => vec![HitRegion {
-            region: Region::Todos,
-            rect,
-            element: None,
-        }],
+        // Only the summary header toggles disclosure; rows remain read-only.
+        Region::Todos => vec![
+            HitRegion {
+                region: Region::Todos,
+                rect,
+                element: None,
+            },
+            HitRegion {
+                region: Region::Todos,
+                rect: ratatui::layout::Rect::new(rect.x, rect.y, rect.width, rect.height.min(1)),
+                element: Some(HitId::TodosToggle),
+            },
+        ],
         Region::Suggest => app
             .editor
             .auto_complete

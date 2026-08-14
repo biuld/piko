@@ -123,6 +123,26 @@ fn todos_paints_muted_separator_before_guidance() {
 }
 
 #[test]
+fn todos_header_hitzone_paints_accent_text_without_background() {
+    let mut app = app();
+    add_todo(&mut app);
+    app.hovered = Some((Region::Todos, Some(HitId::TodosToggle)));
+
+    let area = Rect::new(0, 0, 80, 24);
+    let todos = compose_frame(&app, area).plan.rects[&Region::Todos];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+
+    assert_eq!(buffer[(todos.x, todos.y)].fg, app.theme.accent);
+    assert_ne!(buffer[(todos.x, todos.y)].bg, app.theme.bg_hover);
+    assert_ne!(
+        buffer[(todos.x, todos.y + 1)].fg,
+        app.theme.accent,
+        "item rows must not inherit the header hitzone hover"
+    );
+}
+
+#[test]
 fn todos_separator_hosts_following_suggest_title_without_double_rule() {
     let mut app = app();
     add_todo(&mut app);

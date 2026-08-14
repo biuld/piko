@@ -45,7 +45,7 @@ and theme tokens stay in code; structure and information duties are normative.
 │                                                              │
 ├──────────────────────────────────────────────────────────────┤
 │ DOCK                                                         │
-│  Todos  1/3 done · 1 active · 1 remaining                    │  ┐
+│  ▾ Todos  1/3 done · 1 active · 1 remaining                  │  ┐
 │  ✓  Ship protocol serde                                      │  │ Todos
 │  ▸  Persist list with session                                │  │ strip
 │  ·  Dock strip + height budget                               │  ┘
@@ -77,7 +77,7 @@ and theme tokens stay in code; structure and information duties are normative.
 ### Dock strip anatomy
 
 ```text
-  Todos  1/3 done · 1 active · 1 remaining     ← header (1 row)
+  ▾ Todos  1/3 done · 1 active · 1 remaining   ← header + hitzone (1 row)
   ✓  Ship protocol serde                       ← completed (content may strike)
   ▸  Persist list with session                 ← in_progress (emphasis)
   ·  Dock strip + height budget                ← pending (muted)
@@ -91,6 +91,13 @@ Header **must** carry: product label (**Todos**) + progress counts.
 Each item row **must** carry: status + `content`.  
 v1: **no** `detail` second line on the strip; **no** serial numbers unless
 content itself includes them.
+
+Collapsed:
+
+```text
+  ▸ Todos  1/3 done · 1 active · 1 remaining
+  ────────────────────────────────────────
+```
 
 ### Overflow (height cap)
 
@@ -193,14 +200,19 @@ normative **structure**; paint details stay in code.
 - The Stream/Dock separator belongs to Dock Stack infrastructure, not to the
   Todos provider or its height grant.
 
-**Interaction (v1)**
+**Interaction**
 
 | Gesture | Behavior |
 |---------|----------|
-| Keyboard / mouse on strip | **Read-only** — no complete/reorder/edit |
+| Click header | Toggle between the expanded checklist and a one-line summary |
+| Hover header | Paint the header text with the shared accent color |
+| Click item | **Read-only** — no complete/reorder/edit |
 | Focus | Strip is **not** a focus owner in v1 (no Tab stop) |
-| Expand | Optional later; v1 cap + overflow is enough |
-| Click item | No host mutation |
+| Collapsed form | One summary header row; the Dock Stack separator remains below it |
+
+The header shows a disclosure mark so its hit action is discoverable. Collapse
+is transient TUI presentation state and never mutates or persists the
+host-authoritative todo list.
 
 ### B. Timeline tool cards (history)
 
@@ -258,7 +270,7 @@ catalog. The strip and timeline presenters should feel like **one family**.
 | Item | v1 |
 |------|-----|
 | User settings for strip on/off | None required; visibility follows non-empty + feature |
-| Keybinding | None required for read-only strip |
+| Keybinding | None required; the disclosure is pointer-only |
 | Height cap | Implementation constant in compose (document in design) |
 
 ## Non-goals
@@ -267,7 +279,7 @@ catalog. The strip and timeline presenters should feel like **one family**.
 - Client-only todo truth derived forever from replaying Timeline.
 - Session-global single list UI.
 - BottomBar multi-line checklist.
-- Human-editable strip without host commands.
+- Human-editable strip without host commands (collapse changes presentation only).
 - OS notifications for todo changes.
 - Documenting every glyph/codepoint used in checklist rows.
 
@@ -280,7 +292,9 @@ catalog. The strip and timeline presenters should feel like **one family**.
 - [ ] Feature `todo` off → no strip.
 - [ ] Timeline todo tools do not need force-expanded bodies once strip is live.
 - [ ] Strip never shows another agent’s items for the current view.
-- [ ] No mutations from strip clicks/keys in v1.
+- [ ] Clicking the Todos header collapses the strip to one summary row and
+      clicking it again restores the checklist.
+- [ ] Item clicks and all strip keys leave the host-projected list unchanged.
 
 ## Related
 
