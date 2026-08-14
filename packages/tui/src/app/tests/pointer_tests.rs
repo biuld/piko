@@ -511,7 +511,7 @@ fn workflow_inline_input_cursor_tracks_caret() {
         .expect("inline input cursor");
     let help = app.interactions.front().unwrap().workflow.help_text();
     let content = PaneSpec::new("")
-        .hints(&help)
+        .hints(help.as_str())
         .content_rect(host)
         .expect("content rect");
     // Single-question layout: choice row is content.y + 2 (prompt, blank).

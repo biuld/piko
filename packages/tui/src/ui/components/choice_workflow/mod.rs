@@ -224,7 +224,7 @@ impl ChoiceWorkflow {
     pub fn modal_content_area(&self, area: Rect) -> Rect {
         let help = self.help_text();
         PaneSpec::new("")
-            .hints(&help)
+            .hints(help.as_str())
             .content_rect(area)
             .unwrap_or(area)
     }
@@ -360,7 +360,7 @@ impl ChoiceWorkflow {
         // through; body bg stays terminal/base (not a second "card" layer).
         let spec = PaneSpec::new(title)
             .title_affixes(affixes)
-            .hints(&help)
+            .hints(help.as_str())
             .focused(true);
         if let Some(areas) = render_pane(frame, area, &spec, theme) {
             self.paint_body(frame, areas.content, theme, interaction);

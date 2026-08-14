@@ -9,6 +9,10 @@ to an interaction surface. Notice Row messages and Pane footer key hints use
 the same renderer, alignment, clipping, and optional hover backdrop while
 retaining their separate state, priority, and input behavior.
 
+Hint content follows the placement-independent
+[Interaction Hints](./interaction-hints.md) contract; this feature only paints
+one possible projection of that content.
+
 This is a **paint helper** (`ui::components::dock_line`), **not** the plane
 **Dock Stack** feature that coordinates multiple optional bands (Notice /
 Todos / Suggest heights). Stack coexistence:

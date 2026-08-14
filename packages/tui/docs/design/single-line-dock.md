@@ -12,9 +12,9 @@ the one-row paragraph. This keeps NotificationCenter responsible for notice
 projection and `PaneSpec` responsible for footer geometry.
 
 ```text
-NotificationCenter ──→ Notice renderer ──┐
-PaneSpec::Hints ─────→ Pane renderer ────┼→ dock_line::render
-                                         └→ one solved terminal row
+NotificationCenter ─────────→ Notice renderer ──┐
+InteractionHints → PaneSpec → Pane renderer ────┼→ dock_line::render
+                                                └→ one solved terminal row
 ```
 
 ## Rendering contract

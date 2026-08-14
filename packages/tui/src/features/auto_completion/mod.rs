@@ -18,6 +18,7 @@ use crate::ui::components::selectable_list::{
 };
 use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
+use crate::ui::interaction_hints::InteractionHints;
 
 pub mod file_browser;
 pub mod provider;
@@ -106,7 +107,7 @@ impl AutoComplete {
         let (label, hints) = if let Some(idx) = self.active_provider_idx {
             (self.providers[idx].label(), self.providers[idx].hints())
         } else {
-            ("suggestions", "Esc cancel")
+            ("suggestions", InteractionHints::new("Esc cancel"))
         };
         let total = self.list.len();
         let selected_one = usize::from(total > 0).saturating_mul(self.list.selected + 1);

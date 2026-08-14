@@ -36,6 +36,7 @@ use ratatui::{
 
 use crate::theme::Theme;
 use crate::ui::components::feedback::frame_border_style;
+use crate::ui::interaction_hints::InteractionHints;
 
 /// Search-row glyph (product convention: command-style `/` affordance).
 pub const SEARCH_GLYPH: &str = "/";
@@ -128,7 +129,7 @@ pub enum PaneFooter<'a> {
     #[default]
     None,
     /// Dim binding legend; multi-line if `text` contains `\n`.
-    Hints(&'a str),
+    Hints(InteractionHints<'a>),
     /// Reserve `height` rows; caller paints into [`PaneAreas::footer`].
     Reserved { height: u16 },
 }
@@ -350,7 +351,8 @@ impl<'a> PaneSpec<'a> {
         self
     }
 
-    pub fn hints(mut self, hints: &'a str) -> Self {
+    pub fn hints(mut self, hints: impl Into<InteractionHints<'a>>) -> Self {
+        let hints = hints.into();
         self.footer = if hints.is_empty() {
             PaneFooter::None
         } else {
@@ -649,8 +651,7 @@ fn inset_xy(area: Rect, pad: PanePadding) -> Rect {
 fn footer_height(footer: PaneFooter<'_>) -> u16 {
     match footer {
         PaneFooter::None => 0,
-        PaneFooter::Hints("") => 0,
-        PaneFooter::Hints(_) => 1,
+        PaneFooter::Hints(hints) => u16::from(!hints.is_empty()),
         PaneFooter::Reserved { height } => height.max(1),
     }
 }
@@ -730,8 +731,8 @@ fn paint_rule(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     );
 }
 
-fn paint_hints(frame: &mut Frame<'_>, area: Rect, hints: &str, theme: &Theme) {
-    let Some(hint) = hints.lines().find(|line| !line.is_empty()) else {
+fn paint_hints(frame: &mut Frame<'_>, area: Rect, hints: InteractionHints<'_>, theme: &Theme) {
+    let Some(hint) = hints.single_line() else {
         return;
     };
     crate::ui::components::dock_line::render(
@@ -783,7 +784,10 @@ mod tests {
             .focused(true);
         assert_eq!(s.title, "Settings");
         assert!(matches!(s.search, PaneSearch::Shown { filter: "", .. }));
-        assert!(matches!(s.footer, PaneFooter::Hints("Esc close")));
+        assert!(matches!(
+            s.footer,
+            PaneFooter::Hints(hints) if hints.single_line() == Some("Esc close")
+        ));
         assert!(s.search_rule);
         assert_eq!(s.mode, PaneMode::Standard);
         assert_eq!(s.padding, PanePadding::UNIFORM_1);
@@ -878,8 +882,8 @@ mod tests {
 
     #[test]
     fn footer_height_is_one_for_any_non_empty_hint() {
-        assert_eq!(footer_height(PaneFooter::Hints("a\nb")), 1);
-        assert_eq!(footer_height(PaneFooter::Hints("a")), 1);
-        assert_eq!(footer_height(PaneFooter::Hints("")), 0);
+        assert_eq!(footer_height(PaneFooter::Hints("a\nb".into())), 1);
+        assert_eq!(footer_height(PaneFooter::Hints("a".into())), 1);
+        assert_eq!(footer_height(PaneFooter::Hints("".into())), 0);
     }
 }

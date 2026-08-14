@@ -1,6 +1,7 @@
 use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::{CompletionRow, provider::AutoCompleteProvider};
 use crate::ui::components::selectable_list::ColumnCell;
+use crate::ui::interaction_hints::InteractionHints;
 use piko_protocol::HostCommandInvoke;
 use std::path::Path;
 pub struct SlashCommandProvider;
@@ -60,7 +61,7 @@ impl AutoCompleteProvider for SlashCommandProvider {
     fn label(&self) -> &'static str {
         "slash commands"
     }
-    fn hints(&self) -> &'static str {
-        "Tab cycle | Enter execute"
+    fn hints(&self) -> InteractionHints<'static> {
+        InteractionHints::new("Tab cycle | Enter execute")
     }
 }

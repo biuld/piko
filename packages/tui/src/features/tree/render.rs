@@ -201,7 +201,7 @@ impl TreePanel {
         let footer = if summary_prompt {
             PaneFooter::Reserved { height: 7 }
         } else {
-            PaneFooter::Hints("Enter confirm · Esc close")
+            PaneFooter::Hints("Enter confirm · Esc close".into())
         };
         let title = if self.show_label_timestamps {
             "Session Tree [+time]"
@@ -299,7 +299,7 @@ impl TreePanel {
         let footer = if summary_prompt.is_some() {
             PaneFooter::Reserved { height: 7 }
         } else {
-            PaneFooter::Hints("Enter confirm · Esc close")
+            PaneFooter::Hints("Enter confirm · Esc close".into())
         };
 
         let spec = PaneSpec::new(&left_title)

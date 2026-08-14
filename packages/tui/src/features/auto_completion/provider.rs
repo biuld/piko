@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::CompletionRow;
+use crate::ui::interaction_hints::InteractionHints;
 
 pub trait AutoCompleteProvider {
     /// Checks if this provider is triggered by the current token.
@@ -19,6 +20,6 @@ pub trait AutoCompleteProvider {
     /// Short left title for [`Pane`] chrome (selection counter is a title affix).
     fn label(&self) -> &'static str;
 
-    /// Footer key hints for the suggest dock pane.
-    fn hints(&self) -> &'static str;
+    /// Contextual guidance for the active suggestion interaction.
+    fn hints(&self) -> InteractionHints<'static>;
 }

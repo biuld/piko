@@ -10,6 +10,7 @@
 use crate::theme::Theme;
 use crate::ui::components::feedback::{default_list_hints, empty_line};
 use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
+use crate::ui::interaction_hints::InteractionHints;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -266,7 +267,7 @@ fn render_selectable_list_with_mode(
     filter: &str,
     focused: bool,
     theme: &Theme,
-    hints: &str,
+    hints: InteractionHints<'_>,
     mode: PaneMode,
 ) {
     let filtered_count = items
