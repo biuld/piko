@@ -86,7 +86,8 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
     assert_eq!(
         flash.protocol,
         ProtocolProfile::Responses {
-            continuation: ResponsesContinuationPolicy::StatelessReplay
+            continuation: ResponsesContinuationPolicy::StatelessReplay,
+            variant: ResponsesVariant::Standard,
         }
     );
     assert_eq!(

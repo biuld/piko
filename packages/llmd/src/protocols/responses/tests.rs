@@ -3,7 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::checkpoint::{ConversationPlan, encode as encode_checkpoint, plan};
 use crate::gateway::{FinishReason, InferenceEvent, InferenceItem};
-use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy};
+use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant};
 use crate::protocols::{ProtocolAdapter, ProtocolStream};
 use crate::target::{ModelTarget, ModelTargetConfig};
 
@@ -14,9 +14,24 @@ fn target_with_policy(policy: ResponsesContinuationPolicy) -> ModelTarget {
         piko_protocol::model::ProviderAuthMethod::ApiKey,
         ProtocolProfile::Responses {
             continuation: policy,
+            variant: ResponsesVariant::Standard,
         },
     );
     config.base_url = Some("https://example.test/v1".into());
+    ModelTarget::resolve("fixture/gpt", "gpt", &config, None).unwrap()
+}
+
+fn lite_target() -> ModelTarget {
+    let mut config = ModelTargetConfig::new(
+        "fixture/gpt@subscription",
+        "subscription",
+        piko_protocol::model::ProviderAuthMethod::OAuth,
+        ProtocolProfile::Responses {
+            continuation: ResponsesContinuationPolicy::EncryptedReasoning,
+            variant: ResponsesVariant::CodexLite,
+        },
+    );
+    config.base_url = Some("https://example.test/backend-api/codex".into());
     ModelTarget::resolve("fixture/gpt", "gpt", &config, None).unwrap()
 }
 
@@ -82,6 +97,106 @@ fn responses_encodes_the_same_typed_controls() {
     assert_eq!(body["tool_choice"], "required");
     assert_eq!(body["max_output_tokens"], 321);
     assert_eq!(body["text"]["format"]["type"], "json_schema");
+}
+
+#[test]
+fn codex_lite_uses_its_header_and_item_grammar() {
+    let target = lite_target();
+    let request = crate::protocols::tests_support::semantic_request();
+    let plan = plan(&target, &request.conversation).unwrap();
+    let body = ResponsesAdapter
+        .encode(&request, &target, &plan, true)
+        .unwrap();
+
+    assert_eq!(
+        target
+            .headers
+            .get("x-openai-internal-codex-responses-lite")
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
+    assert_eq!(body.get("instructions"), None);
+    assert_eq!(body.get("tools"), None);
+    assert_eq!(body["input"][0]["type"], "additional_tools");
+    assert_eq!(body["input"][0]["role"], "developer");
+    assert_eq!(body["input"][0]["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(body["input"][1]["type"], "message");
+    assert_eq!(body["input"][1]["role"], "developer");
+    assert_eq!(body["input"][1]["content"][0]["type"], "input_text");
+    assert_eq!(body["parallel_tool_calls"], false);
+    assert_eq!(body["tool_choice"], "auto");
+    assert_eq!(body["reasoning"]["context"], "all_turns");
+    assert_eq!(body["reasoning"]["summary"], "auto");
+    assert_eq!(body["store"], false);
+    assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+}
+
+#[test]
+fn codex_lite_requests_reasoning_summary_without_explicit_effort() {
+    let target = lite_target();
+    let mut request = crate::protocols::tests_support::semantic_request();
+    request.options.reasoning_effort = None;
+    let plan = plan(&target, &request.conversation).unwrap();
+    let body = ResponsesAdapter
+        .encode(&request, &target, &plan, true)
+        .unwrap();
+
+    assert_eq!(body["reasoning"]["context"], "all_turns");
+    assert_eq!(body["reasoning"]["summary"], "auto");
+    assert_eq!(body["reasoning"].get("effort"), None);
+}
+
+#[test]
+fn codex_lite_subsequent_call_remains_stateless_and_encrypted() {
+    let target = lite_target();
+    let request = request_with_checkpoint(&target);
+    let plan = plan(&target, &request.conversation).unwrap();
+    assert!(matches!(plan, ConversationPlan::OpaqueReplay { .. }));
+    let body = ResponsesAdapter
+        .encode(&request, &target, &plan, true)
+        .unwrap();
+
+    assert_eq!(body.get("previous_response_id"), None);
+    assert_eq!(body["store"], false);
+    assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+}
+
+#[test]
+fn standard_responses_keeps_top_level_tools_and_instructions() {
+    let target = target();
+    let request = crate::protocols::tests_support::semantic_request();
+    let plan = plan(&target, &request.conversation).unwrap();
+    let body = ResponsesAdapter
+        .encode(&request, &target, &plan, true)
+        .unwrap();
+
+    assert!(
+        body["instructions"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+    assert_ne!(body["input"][0]["type"], "additional_tools");
+    assert!(
+        target
+            .headers
+            .get("x-openai-internal-codex-responses-lite")
+            .is_none()
+    );
+}
+
+#[test]
+fn codex_lite_rejects_explicit_parallel_tool_calls() {
+    let target = lite_target();
+    let mut request = crate::protocols::tests_support::semantic_request();
+    request.options.parallel_tools = Some(true);
+
+    let error = target.validate(&request).unwrap_err();
+    assert_eq!(
+        error.class,
+        crate::gateway::ErrorClass::UnsupportedCapability
+    );
+    assert!(error.message.contains("Codex Responses Lite"));
 }
 
 #[test]

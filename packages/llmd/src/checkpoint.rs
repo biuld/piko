@@ -238,7 +238,7 @@ fn rejected(target: &ModelTarget) -> InferenceError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy};
+    use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant};
     use crate::target::ModelTargetConfig;
 
     fn target(policy: ResponsesContinuationPolicy) -> ModelTarget {
@@ -248,6 +248,7 @@ mod tests {
             piko_protocol::model::ProviderAuthMethod::ApiKey,
             ProtocolProfile::Responses {
                 continuation: policy,
+                variant: ResponsesVariant::Standard,
             },
         );
         config.base_url = Some("https://example.test/v1".into());

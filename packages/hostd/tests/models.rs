@@ -47,7 +47,8 @@ fn resolves_default_model_without_copying_auth_material() {
     assert_eq!(
         resolved.target.as_ref().unwrap().protocol,
         piko_llmd::modeling::ProtocolProfile::Responses {
-            continuation: Default::default()
+            continuation: Default::default(),
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
         }
     );
     assert_eq!(
@@ -75,7 +76,19 @@ fn oauth_selects_catalog_subscription_target_without_exposing_token() {
     assert_eq!(
         resolved.target.as_ref().unwrap().protocol,
         piko_llmd::modeling::ProtocolProfile::Responses {
-            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::EncryptedReasoning
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::EncryptedReasoning,
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
+        }
+    );
+
+    let lite = registry
+        .resolve(Some("gpt-5.6-terra"), Some("openai"))
+        .unwrap();
+    assert_eq!(
+        lite.target.as_ref().unwrap().protocol,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::EncryptedReasoning,
+            variant: piko_llmd::modeling::ResponsesVariant::CodexLite,
         }
     );
 }
@@ -89,7 +102,8 @@ fn deepseek_resolves_model_specific_responses_target() {
     assert_eq!(
         flash.target.as_ref().unwrap().protocol,
         piko_llmd::modeling::ProtocolProfile::Responses {
-            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::StatelessReplay
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::StatelessReplay,
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
         }
     );
 

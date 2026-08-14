@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use piko_protocol::model::ProviderAuthMethod;
 
 use super::*;
-use crate::modeling::ProtocolProfile;
+use crate::modeling::{ProtocolProfile, ResponsesVariant};
 
 fn config(protocol: ProtocolProfile) -> ModelTargetConfig {
     let mut config = ModelTargetConfig::new(
@@ -23,6 +23,7 @@ fn protocol_alone_selects_operation_path() {
         "same-model",
         &config(ProtocolProfile::Responses {
             continuation: Default::default(),
+            variant: ResponsesVariant::Standard,
         }),
         None,
     )
@@ -48,6 +49,7 @@ fn protocol_alone_selects_operation_path() {
 fn explicit_endpoint_is_not_rewritten() {
     let mut config = config(ProtocolProfile::Responses {
         continuation: Default::default(),
+        variant: ResponsesVariant::Standard,
     });
     config.endpoint = Some("https://example.test/custom/inference".into());
     let target = ModelTarget::resolve("custom/model", "gpt", &config, None).unwrap();
@@ -61,6 +63,7 @@ fn explicit_endpoint_is_not_rewritten() {
 fn custom_headers_cannot_override_auth() {
     let mut config = config(ProtocolProfile::Responses {
         continuation: Default::default(),
+        variant: ResponsesVariant::Standard,
     });
     config.headers = Some(HashMap::from([("Authorization".into(), "stolen".into())]));
     assert!(ModelTarget::resolve("custom", "gpt", &config, None).is_err());
@@ -70,6 +73,7 @@ fn custom_headers_cannot_override_auth() {
 fn capabilities_fail_before_dispatch() {
     let mut unsupported = config(ProtocolProfile::Responses {
         continuation: Default::default(),
+        variant: ResponsesVariant::Standard,
     });
     unsupported.capabilities = Some(ModelCapabilities {
         tools: false,
@@ -137,6 +141,7 @@ fn upstream_catalog_support_is_not_execution_authorization() {
 
     let mut config = config(ProtocolProfile::Responses {
         continuation: Default::default(),
+        variant: ResponsesVariant::Standard,
     });
     config.capabilities = Some(ModelCapabilities {
         upstream_tools: [UpstreamToolKind::Search].into_iter().collect(),
@@ -163,6 +168,7 @@ fn descriptor_separates_semantic_capabilities_from_target_configuration() {
         "gpt",
         &config(ProtocolProfile::Responses {
             continuation: Default::default(),
+            variant: ResponsesVariant::Standard,
         }),
         None,
     )

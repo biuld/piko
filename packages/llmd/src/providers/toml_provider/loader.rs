@@ -15,7 +15,7 @@ use serde::Deserialize;
 
 use super::TomlProvider;
 use crate::modeling::{
-    ApiSurface, ModelTargetProfile, ProtocolProfile, ResponsesContinuationPolicy,
+    ApiSurface, ModelTargetProfile, ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant,
 };
 
 // ---- TOML structures ----
@@ -45,6 +45,8 @@ struct TargetToml {
     protocol: String,
     #[serde(default)]
     continuation: ResponsesContinuationPolicy,
+    #[serde(default)]
+    variant: ResponsesVariant,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +71,7 @@ fn parse_protocol(target: &TargetToml) -> Option<ProtocolProfile> {
         "chat_completions" => Some(ProtocolProfile::ChatCompletions),
         "responses" => Some(ProtocolProfile::Responses {
             continuation: target.continuation,
+            variant: target.variant,
         }),
         _ => None,
     }
@@ -369,9 +372,33 @@ mod tests {
         assert_eq!(
             subscription.protocol,
             ProtocolProfile::Responses {
-                continuation: ResponsesContinuationPolicy::EncryptedReasoning
+                continuation: ResponsesContinuationPolicy::EncryptedReasoning,
+                variant: ResponsesVariant::Standard,
             }
         );
+
+        for model in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let platform = provider
+                .target_for_model(ProviderAuthMethod::ApiKey, model)
+                .unwrap();
+            assert_eq!(
+                platform.protocol,
+                ProtocolProfile::Responses {
+                    continuation: ResponsesContinuationPolicy::PreviousResponseId,
+                    variant: ResponsesVariant::Standard,
+                }
+            );
+            let subscription = provider
+                .target_for_model(ProviderAuthMethod::OAuth, model)
+                .unwrap();
+            assert_eq!(
+                subscription.protocol,
+                ProtocolProfile::Responses {
+                    continuation: ResponsesContinuationPolicy::EncryptedReasoning,
+                    variant: ResponsesVariant::CodexLite,
+                }
+            );
+        }
     }
 
     fn load_models(provider: &str) -> Vec<ModelSummary> {

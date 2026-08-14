@@ -128,3 +128,19 @@ gateway compatibility scans return no matches.
   capability implicitly.
 - `cargo test -p piko-protocol -p piko-llmd -p piko-tui` and
   `cargo clippy --workspace --all-targets -- -D warnings` pass.
+
+## 2026-08-15 Codex Responses Lite supplement
+
+- `ProtocolProfile::Responses` carries a closed, catalog-declared request
+  variant. There is no provider or model-name dispatch.
+- The bundled GPT-5.6 subscription targets select `codex_lite`; their Platform
+  targets remain standard Responses.
+- Request fixtures verify the Lite transport header, developer
+  `additional_tools` and instruction items, disabled parallel tool calls,
+  all-turn reasoning context, unconditional automatic summary selection,
+  stateless storage, encrypted-reasoning inclusion, and subsequent opaque
+  replay. A no-effort fixture verifies that summary visibility is independent
+  from explicit effort selection.
+- A standard Responses fixture verifies that top-level tools and instructions
+  remain unchanged when Lite is not selected.
+- `cargo test -p piko-llmd` and `cargo test -p piko-hostd --test models` pass.

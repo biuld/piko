@@ -54,6 +54,10 @@ without serving the current product scope.
 5. A user authenticates with an OpenAI API key or the supported OpenAI OAuth
    flow. Authentication supplies request credentials while the selected model
    target independently determines the endpoint and wire protocol.
+6. A user selects a ChatGPT subscription model whose catalog target declares
+   the Codex Responses Lite variant. piko uses that variant's request marker
+   and item grammar without changing ordinary Responses targets for the same
+   provider or model family.
 
 ## In scope
 
@@ -69,6 +73,8 @@ without serving the current product scope.
   including response, output-item, and tool-call identity when supplied.
 - Explicit model-target configuration for protocol, endpoint, model, headers,
   authentication method, and declared capabilities.
+- A target-declared Codex Responses Lite request variant for subscription
+  models that require its header and item-oriented tool/instruction grammar.
 - OpenAI Platform and other endpoints that conform to one selected protocol.
 - Existing bounded retry, fallback, cancellation, middleware, token usage, and
   cost behavior after it is moved onto the piko-owned contract.
@@ -142,6 +148,22 @@ produce exactly one terminal outcome.
 Unknown additive fields are tolerated. An unknown event or item type that is
 required to construct the agent result fails explicitly and includes a safe
 diagnostic; it is not coerced into text.
+
+Responses wire variants are explicit target-profile data. The ordinary
+variant uses public Responses request fields. A Codex Responses Lite target:
+
+- sends `x-openai-internal-codex-responses-lite: true`;
+- moves caller tool definitions into a leading `additional_tools` developer
+  input item and moves non-empty instructions into a following developer
+  message instead of using the top-level `tools` and `instructions` fields;
+- disables parallel tool calls and rejects an explicit request to enable them;
+- sends reasoning with `context: all_turns` and requests an automatic reasoning
+  summary even when the caller does not select an explicit effort; and
+- sends `store: false` and requests `reasoning.encrypted_content` on every
+  request.
+
+No provider or model-name heuristic may select this variant. A standard
+Responses target remains byte-shape compatible with its pre-variant behavior.
 
 ### Chat Completions behavior
 
@@ -217,6 +239,16 @@ successful completion.
 - [x] A provider catalog may select different explicit protocols per model.
       DeepSeek `deepseek-v4-flash` uses stateless Responses replay, while its
       models not documented for Responses remain Chat Completions targets.
+- [x] A Responses target may explicitly select the Codex Responses Lite
+      variant; bundled GPT-5.6 subscription targets select it while their
+      Platform targets remain ordinary Responses.
+- [x] Responses Lite requests carry the Lite header, encode tools and
+      instructions as developer input items, disable parallel tool calls, use
+      all-turn reasoning context, always request an automatic reasoning summary,
+      remain stateless, and request encrypted reasoning on the initial and
+      subsequent calls.
+- [x] Ordinary Responses request fixtures remain unchanged when the target
+      does not select Responses Lite.
 - [x] Hostd may use the selected auth method to choose a compatible catalog
       target, but authentication material changes request headers only and
       cannot mutate the frozen protocol, endpoint, model, or capabilities.
@@ -246,6 +278,7 @@ successful completion.
 | Is Chat Completions deprecated inside piko? | No; it remains a first-class supported protocol | Many interoperable services expose it, while Responses is the preferred OpenAI API for new work |
 | May piko silently omit unsupported request fields? | No | Silent degradation makes agent behavior and tool execution unpredictable |
 | Does native Responses support imply every Responses resource endpoint? | No; this feature owns create/stream inference and leaves resource lifecycle operations demand-driven | The agent runtime currently consumes model execution, not general Responses resource management |
+| How is Codex Responses Lite selected? | By an explicit Responses target variant | The wire contract differs from ordinary Responses and must not be inferred from provider or model names |
 
 ## Deferred questions
 

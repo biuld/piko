@@ -52,6 +52,14 @@ surface = "subscription"
 basis = "api_equivalent"
 copy_from = "platform"
 
+[models."gpt-5.6".targets.platform]
+protocol = "responses"
+
+[models."gpt-5.6".targets.subscription]
+protocol = "responses"
+continuation = "encrypted_reasoning"
+variant = "codex_lite"
+
 [models."gpt-5.6-sol"]
 name = "GPT-5.6 Sol"
 reasoning = true
@@ -82,6 +90,14 @@ output_multiplier = 1.5
 surface = "subscription"
 basis = "api_equivalent"
 copy_from = "platform"
+
+[models."gpt-5.6-sol".targets.platform]
+protocol = "responses"
+
+[models."gpt-5.6-sol".targets.subscription]
+protocol = "responses"
+continuation = "encrypted_reasoning"
+variant = "codex_lite"
 
 [models."gpt-5.6-terra"]
 name = "GPT-5.6 Terra"
@@ -114,6 +130,14 @@ surface = "subscription"
 basis = "api_equivalent"
 copy_from = "platform"
 
+[models."gpt-5.6-terra".targets.platform]
+protocol = "responses"
+
+[models."gpt-5.6-terra".targets.subscription]
+protocol = "responses"
+continuation = "encrypted_reasoning"
+variant = "codex_lite"
+
 [models."gpt-5.6-luna"]
 name = "GPT-5.6 Luna"
 reasoning = true
@@ -144,6 +168,14 @@ output_multiplier = 1.5
 surface = "subscription"
 basis = "api_equivalent"
 copy_from = "platform"
+
+[models."gpt-5.6-luna".targets.platform]
+protocol = "responses"
+
+[models."gpt-5.6-luna".targets.subscription]
+protocol = "responses"
+continuation = "encrypted_reasoning"
+variant = "codex_lite"
 
 [models."gpt-5.5"]
 name = "GPT-5.5"

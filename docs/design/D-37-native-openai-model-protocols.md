@@ -24,7 +24,8 @@ Credential + frozen AuthMethod -> request headers
 
 `ModelKey(provider_id, model_id)` is the only model identity used for target
 lookup. `ProtocolProfile` is a closed enum: Responses carries its continuation
-policy, while Chat Completions has no Responses fields. A resolved target owns
+policy and request variant, while Chat Completions has no Responses fields. A
+resolved target owns
 the target ID, API-surface ID, auth method, base URL/endpoint, and protocol
 profile. The executable gateway target is built from that frozen value before
 credentials are materialized.
@@ -49,6 +50,11 @@ name = "Model"
 [models."model-id".targets.platform]
 protocol = "chat_completions" # replaces defaults for this model
 ```
+
+Responses targets may additionally set `variant = "codex_lite"`; omission
+selects `standard`. The variant belongs to the model/surface target rather than
+the provider or model summary, so the same model can use ordinary Responses on
+Platform and Codex Responses Lite on a ChatGPT subscription surface.
 
 Catalog validation rejects a missing surface reference and more than one
 target compatible with the same auth method. Model-specific target maps
@@ -172,7 +178,10 @@ struct ModelTarget {
 }
 
 enum ProtocolProfile {
-    Responses { continuation: ResponsesContinuationPolicy },
+    Responses {
+        continuation: ResponsesContinuationPolicy,
+        variant: ResponsesVariant,
+    },
     ChatCompletions,
 }
 ```
@@ -296,6 +305,24 @@ Without retained continuation, the complete transcript is replayed. ChatGPT
 subscription targets use stateless encrypted-reasoning replay: requests set
 `store: false`, request `reasoning.encrypted_content`, and replay the retained
 opaque reasoning items with the transcript. The two modes are never combined.
+
+`ResponsesVariant::CodexLite` changes request materialization without creating
+a third semantic protocol. The transport adds
+`x-openai-internal-codex-responses-lite: true`. The adapter emits one leading
+`additional_tools` developer input item, followed by a developer message for
+non-empty instructions, and omits the equivalent top-level fields. It sets
+`parallel_tool_calls: false`, rejects semantic requests that explicitly require
+parallel calls, and sends reasoning with `context: "all_turns"` and
+`summary: "auto"`. Summary selection is unconditional for Lite; an optional
+semantic thinking level controls only the wire `effort`. Lite calls always send
+`store: false` and include `reasoning.encrypted_content`, including the initial
+full-replay call. These rules are selected only from the frozen target profile;
+the adapter does not inspect provider or model names.
+
+The bundled GPT-5.6 subscription targets select Codex Lite. Their Platform
+targets remain standard Responses so piko does not send the private Codex
+contract to the public API surface. Standard target request fixtures are kept
+as regression coverage for this separation.
 
 Stateless plaintext targets, including DeepSeek Responses, send neither
 `previous_response_id` nor unsupported `store`/`include` controls. They replay

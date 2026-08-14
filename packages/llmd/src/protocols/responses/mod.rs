@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use crate::checkpoint::ConversationPlan;
 use crate::gateway::{ConversationItem, ConversationItemKind};
 use crate::gateway::{ErrorClass, InferenceError, InferenceRequest, InferenceResult};
+use crate::modeling::ResponsesVariant;
 mod decode;
 mod decode_items;
 mod support;
@@ -45,7 +46,7 @@ impl ProtocolAdapter for ResponsesAdapter {
                 "Responses adapter received a non-Responses target",
             )
         })?;
-        let (previous_response_id, input, store, include_encrypted) = match plan {
+        let (previous_response_id, mut input, mut store, mut include_encrypted) = match plan {
             ConversationPlan::Resume { checkpoint, suffix } => {
                 let continuation = decode_continuation(checkpoint, target)?;
                 let input = suffix
@@ -74,26 +75,38 @@ impl ProtocolAdapter for ResponsesAdapter {
                 false,
             ),
         };
-        let tools = request
-            .tools
-            .iter()
-            .filter_map(crate::tools::InferenceTool::caller)
-            .map(|tool| {
-                json!({
-                    "type": "function",
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                    "strict": false
-                })
-            })
-            .collect::<Vec<_>>();
+        let tools = caller_tools(request);
+        let lite = target.responses_variant() == Some(ResponsesVariant::CodexLite);
+        let request_instructions = instructions(request);
+        if lite {
+            let mut prefix = vec![json!({
+                "type": "additional_tools",
+                "role": "developer",
+                "tools": tools
+            })];
+            if !request_instructions.is_empty() {
+                prefix.push(json!({
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{
+                        "type": "input_text",
+                        "text": request_instructions
+                    }]
+                }));
+            }
+            prefix.append(&mut input);
+            input = prefix;
+            store = Some(false);
+            include_encrypted = true;
+        }
         let mut body = json!({
             "model": target.model,
-            "instructions": instructions(request),
             "input": input,
             "stream": stream
         });
+        if !lite {
+            body["instructions"] = Value::String(request_instructions);
+        }
         if let Some(store) = store {
             body["store"] = Value::Bool(store);
         }
@@ -103,13 +116,16 @@ impl ProtocolAdapter for ResponsesAdapter {
         if include_encrypted {
             body["include"] = json!(["reasoning.encrypted_content"]);
         }
-        if !tools.is_empty() {
+        if !lite && !tools.is_empty() {
             body["tools"] = Value::Array(tools);
         }
-        if let Some(parallel) = request.options.parallel_tools {
+        if lite {
+            body["parallel_tool_calls"] = Value::Bool(false);
+        } else if let Some(parallel) = request.options.parallel_tools {
             body["parallel_tool_calls"] = Value::Bool(parallel);
         }
         match &request.options.tool_choice {
+            crate::gateway::ToolChoice::Auto if lite => body["tool_choice"] = json!("auto"),
             crate::gateway::ToolChoice::Auto => {}
             crate::gateway::ToolChoice::None => body["tool_choice"] = json!("none"),
             crate::gateway::ToolChoice::Required => body["tool_choice"] = json!("required"),
@@ -117,7 +133,18 @@ impl ProtocolAdapter for ResponsesAdapter {
                 body["tool_choice"] = json!({"type":"function","name":name});
             }
         }
-        if let Some(effort) = &request.options.reasoning_effort
+        if lite {
+            let mut reasoning = json!({
+                "context": "all_turns",
+                "summary": "auto"
+            });
+            if let Some(effort) = &request.options.reasoning_effort
+                && let Some(effort) = target.reasoning_effort(effort)
+            {
+                reasoning["effort"] = Value::String(effort);
+            }
+            body["reasoning"] = reasoning;
+        } else if let Some(effort) = &request.options.reasoning_effort
             && let Some(effort) = target.reasoning_effort(effort)
         {
             body["reasoning"] = json!({ "effort": effort, "summary": "auto" });
@@ -152,6 +179,23 @@ impl ProtocolAdapter for ResponsesAdapter {
     ) -> Box<dyn ProtocolStream> {
         Box::new(ResponsesStream::new(target.clone(), request.clone()))
     }
+}
+
+fn caller_tools(request: &InferenceRequest) -> Vec<Value> {
+    request
+        .tools
+        .iter()
+        .filter_map(crate::tools::InferenceTool::caller)
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+                "strict": false
+            })
+        })
+        .collect()
 }
 
 fn plaintext_replay_input(

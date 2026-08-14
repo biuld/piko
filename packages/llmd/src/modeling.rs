@@ -55,6 +55,14 @@ pub enum ResponsesContinuationPolicy {
     StatelessReplay,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesVariant {
+    #[default]
+    Standard,
+    CodexLite,
+}
+
 /// Closed protocol configuration. Protocol-specific policy cannot be attached
 /// to a different protocol variant.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,6 +71,8 @@ pub enum ProtocolProfile {
     Responses {
         #[serde(default)]
         continuation: ResponsesContinuationPolicy,
+        #[serde(default)]
+        variant: ResponsesVariant,
     },
     ChatCompletions,
 }
@@ -84,7 +94,14 @@ impl ProtocolProfile {
 
     pub fn responses_continuation(self) -> Option<ResponsesContinuationPolicy> {
         match self {
-            Self::Responses { continuation } => Some(continuation),
+            Self::Responses { continuation, .. } => Some(continuation),
+            Self::ChatCompletions => None,
+        }
+    }
+
+    pub fn responses_variant(self) -> Option<ResponsesVariant> {
+        match self {
+            Self::Responses { variant, .. } => Some(variant),
             Self::ChatCompletions => None,
         }
     }

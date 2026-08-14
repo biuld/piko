@@ -4,7 +4,11 @@ use piko_protocol::model::ProviderAuthMethod;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::gateway::{ErrorClass, InferenceError, InferenceRequest};
-use crate::modeling::{BillingPlan, ProtocolProfile, ResponsesContinuationPolicy};
+use crate::modeling::{
+    BillingPlan, ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant,
+};
+
+const CODEX_RESPONSES_LITE_HEADER: &str = "x-openai-internal-codex-responses-lite";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCapabilities {
@@ -193,6 +197,9 @@ impl ModelTarget {
                 insert_header(&mut headers, name, value, id)?;
             }
         }
+        if protocol.responses_variant() == Some(ResponsesVariant::CodexLite) {
+            insert_header(&mut headers, CODEX_RESPONSES_LITE_HEADER, "true", id)?;
+        }
 
         Ok(Self {
             id: config.target_id.clone(),
@@ -358,6 +365,16 @@ impl ModelTarget {
                 "parallel tool calls are not supported by this target",
             ));
         }
+        if request.options.parallel_tools == Some(true)
+            && self.responses_variant() == Some(ResponsesVariant::CodexLite)
+        {
+            return Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &self.id,
+                "validate",
+                "parallel tool calls are not supported by Codex Responses Lite",
+            ));
+        }
         if let Some(intent) = &request.options.structured_output
             && (!self.capabilities.structured_json_schema
                 || (intent.strict && !self.capabilities.strict_structured_output))
@@ -445,6 +462,10 @@ impl ModelTarget {
 impl ModelTarget {
     pub fn responses_continuation(&self) -> Option<ResponsesContinuationPolicy> {
         self.protocol.responses_continuation()
+    }
+
+    pub fn responses_variant(&self) -> Option<ResponsesVariant> {
+        self.protocol.responses_variant()
     }
 
     pub fn reasoning_effort(&self, effort: &piko_protocol::model::ThinkingLevel) -> Option<String> {

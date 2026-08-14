@@ -12,6 +12,7 @@ async fn responses_uses_native_stream_and_non_streaming_contracts() {
         None,
         piko_llmd::modeling::ProtocolProfile::Responses {
             continuation: Default::default(),
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
         },
     );
     let events = executor
@@ -71,6 +72,7 @@ async fn responses_falls_back_only_to_responses_non_streaming() {
         None,
         piko_llmd::modeling::ProtocolProfile::Responses {
             continuation: Default::default(),
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
         },
     )
     .start(request(), tokio_util::sync::CancellationToken::new())
@@ -90,6 +92,7 @@ async fn cancellation_is_typed_before_dispatch_for_both_protocols() {
     for protocol in [
         piko_llmd::modeling::ProtocolProfile::Responses {
             continuation: Default::default(),
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
         },
         piko_llmd::modeling::ProtocolProfile::ChatCompletions,
     ] {
@@ -145,6 +148,7 @@ async fn usage_and_cost_middleware_process_both_protocols() {
         (
             piko_llmd::modeling::ProtocolProfile::Responses {
                 continuation: Default::default(),
+                variant: piko_llmd::modeling::ResponsesVariant::Standard,
             },
             Step::ResponsesStreamSuccess,
             4,
