@@ -25,6 +25,11 @@ paths, fish `conf.d` integration, and `--no-modify-path` isolation.
 The Rust suites verify that provider catalogs parse from filesystem fixtures,
 agent definitions load from filesystem catalogs, installed-theme parsing
 retains complete semantic slots, and the host/TUI integration remains intact.
+They also verify the explicit development resource routing for agents, models,
+and themes independently from `PIKO_HOME`. `scripts/dev-tui.sh` exports the
+checkout root through `PIKO_DEV_SOURCE_ROOT`, so both debug and release-profile
+development builds use current source catalogs while retaining user settings,
+authentication, and sessions under `PIKO_HOME`.
 
 The previously recorded bookkeeping architecture failure is resolved:
 host domain now receives token estimates through `TranscriptEstimator`, whose

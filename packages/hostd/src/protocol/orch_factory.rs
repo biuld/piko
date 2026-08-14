@@ -25,7 +25,24 @@ pub(crate) async fn build_orch_turn_runner(
             settings.default_model.as_deref(),
             settings.default_provider.as_deref(),
         )
-        .ok_or_else(|| "no model available for hostd".to_string())?;
+        .ok_or_else(|| {
+            if registry.list_models().is_empty() {
+                let catalog = registry
+                    .catalog_dir()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<unresolved>".to_string());
+                format!("model catalog is empty: {catalog}")
+            } else {
+                format!(
+                    "configured model is unavailable: {}/{}",
+                    settings
+                        .default_provider
+                        .as_deref()
+                        .unwrap_or("<unspecified>"),
+                    settings.default_model.as_deref().unwrap_or("<unspecified>")
+                )
+            }
+        })?;
 
     let provider = &resolved.provider;
     let oauth_flow = registry.get_oauth(provider);

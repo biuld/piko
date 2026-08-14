@@ -40,6 +40,8 @@ configuration they require.
 - Runtime loading of shipped configuration from the installed files.
 - Idempotent upgrades that preserve existing user-authored configuration.
 - An explicit installation-root override for development and verification.
+- Explicit separation between checkout-owned base catalogs during source
+  development and `PIKO_HOME`-owned mutable user state.
 
 ## Out of scope
 
@@ -81,6 +83,7 @@ configuration they require.
 | Executable names | `bin/piko` and `bin/piko-hostd` | Gives users one product command while retaining the host/client split. |
 | Upgrade conflict policy | Never overwrite an existing config file | User-authored state remains authoritative. |
 | Missing installed config | Diagnose/fail for required catalogs; no compiled catalog fallback | Prevents two competing sources of truth. |
+| Development resource authority | Development launchers select checkout catalogs explicitly while retaining user state under `PIKO_HOME` | Prevents an incomplete or stale installation from shadowing the source being developed. |
 | PATH management | Configure the detected zsh/bash/fish startup files; support `--no-modify-path` | A successful install should produce a usable command while retaining an explicit no-mutation path. |
 
 ## Open questions

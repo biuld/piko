@@ -62,9 +62,13 @@ piko_dev_build_and_run() {
   fi
   echo "==> client: $client_path"
   echo "==> running (PIKO_HOSTD_PATH=$hostd_bin)"
+  echo "==> resources: $ROOT (development checkout)"
 
   # Force the just-built hostd even if PATH has another piko-hostd.
   export PIKO_HOSTD_PATH="$hostd_bin"
+  # Keep mutable user state under PIKO_HOME while loading shipped catalogs
+  # directly from this checkout, including for release-profile dev builds.
+  export PIKO_DEV_SOURCE_ROOT="$ROOT"
   export PIKO_HOME="${PIKO_HOME:-${HOME}/.piko}"
   exec "$client_path" "$@"
 }

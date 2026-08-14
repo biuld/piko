@@ -15,11 +15,11 @@ pub fn load_agents(cwd: impl AsRef<Path>) -> HashMap<String, AgentSpec> {
         .unwrap_or_else(|_| cwd.as_ref().to_path_buf());
     let workspace_root = find_workspace_root(&cwd);
 
-    let global_dir = piko_dir().join("agents");
+    let (global_dir, global_provenance) = global_agent_source();
     let project_dir = workspace_root.join(".piko").join("agents");
 
-    // Installed global catalog first; workspace definitions override it.
-    for spec in load_from_dir(&global_dir, "installed-agent") {
+    // The active base catalog comes first; workspace definitions override it.
+    for spec in load_from_dir(&global_dir, global_provenance) {
         agents.insert(spec.id.clone(), spec);
     }
 
@@ -125,22 +125,34 @@ fn fixture_agents() -> HashMap<String, AgentSpec> {
     map
 }
 
-#[cfg(not(debug_assertions))]
-fn home_dir() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
-        .map(PathBuf::from)
+fn global_agent_source() -> (PathBuf, &'static str) {
+    global_agent_source_from(
+        std::env::var_os("PIKO_DEV_SOURCE_ROOT").map(PathBuf::from),
+        piko_dir(),
+    )
+}
+
+fn global_agent_source_from(
+    dev_source_root: Option<PathBuf>,
+    piko_root: PathBuf,
+) -> (PathBuf, &'static str) {
+    match dev_source_root {
+        Some(root) => (
+            root.join("packages/hostd/resources/agents"),
+            "development-agent",
+        ),
+        None => (piko_root.join("agents"), "installed-agent"),
+    }
 }
 
 fn piko_dir() -> PathBuf {
     if let Some(root) = std::env::var_os("PIKO_HOME") {
         return PathBuf::from(root);
     }
-    #[cfg(debug_assertions)]
-    return Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
-    #[cfg(not(debug_assertions))]
-    home_dir()
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".piko")
 }
@@ -185,6 +197,26 @@ mod tests {
                 "{worker} tool_set_ids"
             );
         }
+    }
+
+    #[test]
+    fn development_agent_source_is_independent_from_piko_home() {
+        let (dir, provenance) =
+            global_agent_source_from(Some(PathBuf::from("checkout")), PathBuf::from("user-state"));
+
+        assert_eq!(
+            dir,
+            PathBuf::from("checkout/packages/hostd/resources/agents")
+        );
+        assert_eq!(provenance, "development-agent");
+    }
+
+    #[test]
+    fn installed_agent_source_uses_piko_home() {
+        let (dir, provenance) = global_agent_source_from(None, PathBuf::from("installation"));
+
+        assert_eq!(dir, PathBuf::from("installation/agents"));
+        assert_eq!(provenance, "installed-agent");
     }
 
     #[test]

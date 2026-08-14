@@ -173,13 +173,12 @@ fn read_theme(name: &str) -> Result<String, ThemeError> {
             .join("resources/themes")
             .join(&filename),
     );
-    candidates.push(piko_dir().join("themes").join(&filename));
-    #[cfg(all(debug_assertions, not(test)))]
-    candidates.push(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/themes")
-            .join(&filename),
-    );
+    let dev_source_root = std::env::var_os("PIKO_DEV_SOURCE_ROOT").map(PathBuf::from);
+    candidates.extend(theme_catalog_candidates(
+        &filename,
+        dev_source_root,
+        piko_dir(),
+    ));
 
     for path in candidates {
         match std::fs::read_to_string(&path) {
@@ -191,4 +190,18 @@ fn read_theme(name: &str) -> Result<String, ThemeError> {
         }
     }
     Err(ThemeError::Io(format!("theme '{name}' was not found")))
+}
+
+fn theme_catalog_candidates(
+    filename: &str,
+    dev_source_root: Option<PathBuf>,
+    piko_root: PathBuf,
+) -> Vec<PathBuf> {
+    match dev_source_root {
+        Some(root) => vec![
+            root.join("packages/tui/resources/themes").join(filename),
+            piko_root.join("themes").join(filename),
+        ],
+        None => vec![piko_root.join("themes").join(filename)],
+    }
 }

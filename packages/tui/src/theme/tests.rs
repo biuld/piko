@@ -164,3 +164,27 @@ fn test_md_heading_levels() {
     assert_eq!(theme.md_heading(0), theme.md_heading_h1);
     assert_eq!(theme.md_heading(99), theme.md_heading_h6);
 }
+
+#[test]
+fn development_theme_catalog_precedes_piko_home() {
+    let candidates =
+        theme_catalog_candidates("dark.toml", Some("checkout".into()), "user-state".into());
+
+    assert_eq!(
+        candidates,
+        vec![
+            std::path::PathBuf::from("checkout/packages/tui/resources/themes/dark.toml"),
+            std::path::PathBuf::from("user-state/themes/dark.toml"),
+        ]
+    );
+}
+
+#[test]
+fn installed_theme_catalog_uses_piko_home() {
+    let candidates = theme_catalog_candidates("dark.toml", None, "installation".into());
+
+    assert_eq!(
+        candidates,
+        vec![std::path::PathBuf::from("installation/themes/dark.toml")]
+    );
+}

@@ -39,10 +39,18 @@ agents from `$PIKO_HOME/agents`, provider/model catalogs from
 loads named themes from the project catalog first and the user catalog second.
 Project-local overrides retain their existing precedence.
 
-No editable resource is embedded in a production binary. Debug/test builds may
-read repository fixtures from `CARGO_MANIFEST_DIR` when no installation exists;
-that branch is excluded from release builds and does not create a production
-fallback.
+Development launchers additionally set the internal `PIKO_DEV_SOURCE_ROOT` to
+the active checkout. In that mode, mutable user state (`settings.toml`,
+`auth.json`, and sessions) remains under `PIKO_HOME`, while the shipped agent,
+model, and theme base catalogs load directly from their package resource
+directories in the checkout. This selection is explicit and works for both
+debug- and release-profile development builds. Installed binaries do not set
+the variable and remain fail-closed against their editable catalogs under
+`PIKO_HOME`; a missing installed catalog never falls back to the checkout.
+
+No editable resource is embedded in a production binary. Tests may read
+repository fixtures explicitly through `CARGO_MANIFEST_DIR`; runtime resource
+selection does not depend on `debug_assertions`.
 
 ## Package impact
 
@@ -73,6 +81,8 @@ No `island-rs` change required.
   tree and permissions, checks zsh/bash/fish and opt-out behavior, modifies a
   config, and verifies reinstall preservation.
 - Loader unit tests use temporary filesystem catalogs.
+- Path-selection tests verify that development catalogs are independent from
+  `PIKO_HOME` and installed catalogs remain rooted there.
 - `cargo test --workspace`, formatting, and clippy validate integration.
 
 ## Alternatives considered

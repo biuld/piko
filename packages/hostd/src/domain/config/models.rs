@@ -15,6 +15,7 @@ pub struct ModelRegistry {
     auth_storage: AuthStorage,
     scoped_models: Vec<String>,
     catalog: ModelCatalog,
+    catalog_dir: Option<std::path::PathBuf>,
 }
 
 impl ModelRegistry {
@@ -22,13 +23,15 @@ impl ModelRegistry {
     /// `$PIKO_HOME/models` (default `~/.piko/models`).
     pub fn new(auth_storage: AuthStorage, scoped_models: Vec<String>) -> Self {
         let mut registry = ProviderRegistry::new();
-        if let Some(models_dir) = piko_models_dir() {
-            registry.load_from_dir(&models_dir);
+        let models_dir = piko_models_dir();
+        if let Some(models_dir) = &models_dir {
+            registry.load_from_dir(models_dir);
         }
         Self {
             auth_storage,
             scoped_models,
             catalog: ModelCatalog::new(registry),
+            catalog_dir: models_dir,
         }
     }
 
@@ -42,6 +45,7 @@ impl ModelRegistry {
             auth_storage,
             scoped_models,
             catalog: ModelCatalog::new(registry),
+            catalog_dir: None,
         }
     }
 
@@ -185,6 +189,10 @@ impl ModelRegistry {
         &mut self.auth_storage
     }
 
+    pub fn catalog_dir(&self) -> Option<&std::path::Path> {
+        self.catalog_dir.as_deref()
+    }
+
     fn to_resolved(&self, model: ModelSummary, provider: &str) -> ResolvedModel {
         let catalog_provider = self.catalog.provider(provider);
         let auth_method = self
@@ -201,16 +209,56 @@ impl ModelRegistry {
     }
 }
 
-/// Returns `~/.piko/models` if the home directory can be determined.
+/// Returns the explicit development catalog or the installed model directory.
 fn piko_models_dir() -> Option<std::path::PathBuf> {
-    if let Some(root) = std::env::var_os("PIKO_HOME") {
-        return Some(std::path::PathBuf::from(root).join("models"));
+    model_catalog_dir_from(
+        std::env::var_os("PIKO_DEV_SOURCE_ROOT").map(std::path::PathBuf::from),
+        std::env::var_os("PIKO_HOME").map(std::path::PathBuf::from),
+        std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()
+            .map(std::path::PathBuf::from),
+    )
+}
+
+fn model_catalog_dir_from(
+    dev_source_root: Option<std::path::PathBuf>,
+    piko_root: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    if let Some(root) = dev_source_root {
+        return Some(root.join("packages/llmd/resources/models"));
     }
-    #[cfg(debug_assertions)]
-    return Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../llmd/resources/models"));
-    #[cfg(not(debug_assertions))]
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()
-        .map(|home| std::path::PathBuf::from(home).join(".piko").join("models"))
+    if let Some(root) = piko_root {
+        return Some(root.join("models"));
+    }
+    home.map(|root| root.join(".piko/models"))
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn development_catalog_is_independent_from_piko_home() {
+        let dir = model_catalog_dir_from(
+            Some("checkout".into()),
+            Some("user-state".into()),
+            Some("home".into()),
+        );
+
+        assert_eq!(
+            dir,
+            Some(std::path::PathBuf::from(
+                "checkout/packages/llmd/resources/models"
+            ))
+        );
+    }
+
+    #[test]
+    fn installed_catalog_uses_piko_home() {
+        let dir = model_catalog_dir_from(None, Some("installation".into()), None);
+
+        assert_eq!(dir, Some(std::path::PathBuf::from("installation/models")));
+    }
 }
