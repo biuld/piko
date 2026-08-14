@@ -80,9 +80,7 @@ pub struct McpPanel {
 impl McpPanel {
     fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
         let items = server_items(&self.servers.items);
-        let spec = PaneSpec::new("MCP servers")
-            .hints("↑/↓ browse · Esc close")
-            .focused(true);
+        let spec = PaneSpec::new("MCP servers").focused(true);
         selectable_row_regions(area, &spec, &items, self.servers.selected, "")
     }
     pub fn new() -> Self {
@@ -111,6 +109,10 @@ impl McpPanel {
         SelectBandBudget::standard_info(content_rows)
     }
 
+    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
+        "↑/↓ browse · Esc close".into()
+    }
+
     pub fn select_next(&mut self) {
         self.servers.select_next("", |_| true);
     }
@@ -132,9 +134,7 @@ impl McpPanel {
                 widths: None,
             }
         };
-        let spec = PaneSpec::new("MCP servers")
-            .hints("↑/↓ browse · Esc close")
-            .focused(true);
+        let spec = PaneSpec::new("MCP servers").focused(true);
         let _ = paint_selectable_panel(frame, area, theme, &spec, body);
     }
 }

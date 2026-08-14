@@ -220,13 +220,10 @@ impl ChoiceWorkflow {
         }
     }
 
-    /// Content rect for a standalone Decide dock (Standard pane + hints).
+    /// Content rect for a standalone Decide dock. Guidance is projected by
+    /// the resident row above the ComposerBand.
     pub fn modal_content_area(&self, area: Rect) -> Rect {
-        let help = self.help_text();
-        PaneSpec::new("")
-            .hints(help.as_str())
-            .content_rect(area)
-            .unwrap_or(area)
+        PaneSpec::new("").content_rect(area).unwrap_or(area)
     }
 
     /// Body lines (tabs, prompt, choices, confirm) — shared paint source.
@@ -354,14 +351,10 @@ impl ChoiceWorkflow {
         affixes: Vec<PaneTitleAffix>,
         interaction: InteractionState<HitId>,
     ) {
-        let help = self.help_text();
         // No elevated fill: Decide docks sit in the composer band like Models /
         // Agents. Pane still Clear's the host so the stream does not bleed
         // through; body bg stays terminal/base (not a second "card" layer).
-        let spec = PaneSpec::new(title)
-            .title_affixes(affixes)
-            .hints(help.as_str())
-            .focused(true);
+        let spec = PaneSpec::new(title).title_affixes(affixes).focused(true);
         if let Some(areas) = render_pane(frame, area, &spec, theme) {
             self.paint_body(frame, areas.content, theme, interaction);
         }

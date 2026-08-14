@@ -32,7 +32,7 @@ render/             match Region → feature paint(granted rect)
 
 | Layer | Responsibility |
 |-------|----------------|
-| `piko-tui-layout` | Unaware of Notice/Todos/Suggest |
+| `piko-tui-layout` | Unaware of Todos/Suggest/Guidance |
 | `features/dock_stack` | Band registry, `DockBandOffer` / `DockBandGrant`, `solve`, shrink policy |
 | `navigation/compose.rs` | Thin: `compose_plane(grants)` → `Node<Region>` |
 | Provider features | Domain state → offer; grant → paint |
@@ -65,9 +65,9 @@ File size: keep each file under the project ceiling; solver + tests may split.
 ```rust
 /// Stable band identity in the plane dock stack.
 pub enum BandId {
-    Notice,
     Todos,
     Suggest,
+    Guidance,
     Composer,
     // Stream is not a "band offer" — anchor grow handled beside solve
 }
@@ -75,7 +75,7 @@ pub enum BandId {
 pub enum Residency {
     /// Height 0 when inactive.
     Ephemeral,
-    /// Always participates (Composer).
+    /// Always participates (Guidance / Composer).
     Anchor,
 }
 
@@ -85,7 +85,7 @@ pub enum ShrinkClass {
     Transient,
     /// Todos strip — keep min header while active
     Durable,
-    /// Notice — 0 or full min only
+    /// Guidance — preserve its resident row
     Protect,
     /// Composer — shrink toward editor min after ephemeral classes
     Anchor,
@@ -135,9 +135,9 @@ registry update (explicit, reviewable).
 // layout/plane_metrics or dock_stack::collect
 fn collect_offers(app: &AppState, body: Rect) -> Vec<DockBandOffer> {
   vec![
-    notice_offer(app),
     todos_offer(app, body.width),   // 0 active until feature lands
     suggest_offer(app),             // active false if modal
+    guidance_offer(),               // resident, preferred=min=1
     composer_offer(app, body.width),
   ]
 }
@@ -163,7 +163,7 @@ solve(input):
   shrink_loop(Transient):  while sum > dock_max && can_shrink(Suggest)
   shrink_loop(Durable):    while sum > dock_max && can_shrink(Todos)
   shrink_loop(Anchor):     while sum > dock_max && composer > COMPOSER_MIN
-  // Protect: do not shrink Notice below min if active
+  // Protect: keep resident Guidance at one row in healthy frames
 
   return grants + diagnostics (stream_min, dock_max)
 ```
@@ -198,12 +198,12 @@ Add `Region::Todos` when the todos band ships. Registry maps `BandId::Todos`
 
 ## Provider integration patterns
 
-### Notice
+### Guidance
 
 ```text
-active = row_visible(...)
+active = true
 preferred = min = 1
-paint: existing notice row in Region::Notice if grant.h == 1
+paint: notice or active interaction hint in Region::Guidance
 ```
 
 ### Suggest (command palette / @)
@@ -211,7 +211,7 @@ paint: existing notice row in Region::Notice if grant.h == 1
 ```text
 active = has_visible_suggestions && modal.is_none()
 preferred = suggestion_height(count)  // existing formula as preferred only
-min = chrome + 1 content + footer (e.g. 5) while active
+min = chrome + 1 content while active
 paint: pass grant.height into pane layout so list rows = f(grant)
 ```
 
@@ -238,10 +238,10 @@ paint: unchanged, rect height = grant
 | Anti-pattern | Why |
 |--------------|-----|
 | Feature calls `FlexItem::fixed` for a new plane band outside solver | Breaks budget |
-| Hard-code Notice/Suggest/Todos heights only in `compose.rs` without offers | No abstraction |
+| Hard-code Guidance/Suggest/Todos heights only in `compose.rs` without offers | No abstraction |
 | Suggest auto-close on short terminal | Drops user mid-`/` without policy in PRD |
 | Using `SurfaceIntent::Dock` to host Todos | Wrong layer (modal vs plane) |
-| Dock Stack owning todo/notice domain state | Wrong ownership |
+| Dock Stack owning todo/guidance domain state | Wrong ownership |
 | Painting overflow outside granted `Rect` | Layout violation |
 
 ## Migration plan
@@ -249,7 +249,7 @@ paint: unchanged, rect height = grant
 | Step | Work | Shipable alone? |
 |------|------|-----------------|
 | **M1** | Introduce `features/dock_stack` types + `solve` + tests | yes |
-| **M2** | Wire Notice + Suggest + Composer through offers/grants; delete ad-hoc heights in compose | yes (behavior fix for short terminals) |
+| **M2** | Wire Guidance + Suggest + Composer through offers/grants; delete ad-hoc heights in compose | yes (behavior fix for short terminals) |
 | **M3** | `Region::Todos` + todos offers (0) wired | yes |
 | **M4** | Real todos strip provider + paint | depends F-27 projection |
 
@@ -258,11 +258,11 @@ paint: unchanged, rect height = grant
 ## Verification
 
 - Solver table tests: body 20/30/50 × offer matrices.
-- Shrink order: Suggest reduced before Todos below min; Notice stuck at 1.
-- Compose: region order Notice → Todos → Suggest → Composer when all granted.
+- Shrink order: Suggest reduced before Todos below min; Guidance stays at 1.
+- Compose: region order Todos → Suggest → Guidance → Composer when all granted.
 - Modal: Suggest offer inactive.
 - Integration: full stack preferred vs granted Stream height ≥ stream_min.
-- Regression: idle composer-only frame unchanged visually.
+- Regression: idle frame contains resident Guidance directly above Composer.
 
 ## Related
 

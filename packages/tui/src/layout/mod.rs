@@ -6,7 +6,7 @@
 use crate::{
     app::{AppState, HitId},
     features::dock_stack::{
-        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, NOTICE_HEIGHT,
+        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, GUIDANCE_HEIGHT,
         SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
     },
     navigation::{SelectBandBudget, compose_modals, compose_plane},
@@ -62,17 +62,6 @@ fn collect_dock_offers(
     body: ratatui::layout::Rect,
     modal_open: bool,
 ) -> Vec<DockBandOffer> {
-    let notice = app.notifications.has_row_visible_for(
-        app.last_tick,
-        app.session.id.as_deref(),
-        app.agent_panel.active_agent_instance_id.as_deref(),
-    );
-    let notice_offer = if notice {
-        DockBandOffer::active(BandId::Notice, NOTICE_HEIGHT, NOTICE_HEIGHT)
-    } else {
-        DockBandOffer::inactive(BandId::Notice)
-    };
-
     // Todos strip: offer when projection path has a non-empty viewed list.
     let todos_offer = todos_band_offer(app);
 
@@ -91,7 +80,12 @@ fn collect_dock_offers(
     let composer_offer =
         DockBandOffer::active(BandId::Composer, composer_preferred, COMPOSER_MIN_HEIGHT);
 
-    vec![notice_offer, todos_offer, suggest_offer, composer_offer]
+    vec![
+        todos_offer,
+        suggest_offer,
+        DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
+        composer_offer,
+    ]
 }
 
 fn todos_band_offer(app: &AppState) -> DockBandOffer {
@@ -235,11 +229,6 @@ pub fn build_surface_hitmap(
             );
             hits
         }
-        Region::Notice => vec![HitRegion {
-            region: Region::Notice,
-            rect,
-            element: Some(HitId::Notice),
-        }],
         // v1 strip is read-only / non-focusable — surface rect only, no elements.
         Region::Todos => vec![HitRegion {
             region: Region::Todos,
@@ -257,6 +246,14 @@ pub fn build_surface_hitmap(
                 element: Some(element),
             })
             .collect(),
+        Region::Guidance if crate::features::guidance_row::resolve(app).is_notice() => {
+            vec![HitRegion {
+                region: Region::Guidance,
+                rect,
+                element: Some(HitId::Notice),
+            }]
+        }
+        Region::Guidance => Vec::new(),
         Region::Composer => vec![HitRegion {
             region: Region::Composer,
             rect,
@@ -356,6 +353,10 @@ mod tests {
         assert_eq!(frame.modal_surface, None);
         assert!(frame.plan.rects.contains_key(&Region::Stream));
         assert!(frame.plan.rects.contains_key(&Region::Composer));
+        let guidance = frame.plan.rects[&Region::Guidance];
+        let composer = frame.plan.rects[&Region::Composer];
+        assert_eq!(guidance.height, 1);
+        assert_eq!(guidance.y + guidance.height, composer.y);
         assert_eq!(frame.shell.chrome.height, 1);
     }
 
@@ -439,13 +440,17 @@ mod tests {
             .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Approval)))
             .copied()
             .expect("approval layer host");
+        let guidance = composed.plan.layers[0].rects[&Region::Guidance];
         let rows = app
             .approvals
             .workflow()
             .unwrap()
             .dock_content_rows(&app.theme);
-        // Dock = workflow rows + Standard pane chrome (5), bottom-anchored.
-        assert_eq!(host.height, rows + 5);
+        // Surface = workflow rows + Standard pane chrome (4); Guidance is the
+        // preceding row in the same bottom-anchored modal tree.
+        assert_eq!(host.height, rows + 4);
+        assert_eq!(guidance.height, 1);
+        assert_eq!(guidance.y + guidance.height, host.y);
         assert_eq!(host.y + host.height, 23);
     }
 

@@ -4,7 +4,6 @@ use ratatui::{
     Frame,
     layout::{Position, Rect},
     style::Style,
-    text::{Line, Span},
     widgets::{Block, Borders},
 };
 
@@ -14,7 +13,7 @@ use crate::{
         agent_status::AgentPanelView,
         bottom_bar::{BottomBar, BottomBarView},
         model_selector::ModelCtx,
-        notifications::{NotificationLevel, NotificationPanelCtx, level_glyph},
+        notifications::NotificationPanelCtx,
         session_list::SessionListCtx,
         thinking::ThinkingCtx,
         tree::TreeCtx,
@@ -80,9 +79,6 @@ fn paint_regions(
             },
         );
     }
-    if let Some(area) = rects.get(&Region::Notice).copied() {
-        render_notification_row(frame, area, app, interaction_state(app, Region::Notice));
-    }
     if let Some(area) = rects.get(&Region::Todos).copied() {
         crate::features::todos::render_todos_strip(frame, area, app, &app.theme);
     }
@@ -92,6 +88,14 @@ fn paint_regions(
             area,
             &app.theme,
             interaction_state(app, Region::Suggest),
+        );
+    }
+    if let Some(area) = rects.get(&Region::Guidance).copied() {
+        crate::features::guidance_row::render(
+            frame,
+            area,
+            app,
+            interaction_state(app, Region::Guidance),
         );
     }
     if let Some(area) = rects.get(&Region::Composer).copied() {
@@ -302,34 +306,4 @@ fn render_editor(
         let cursor_y = area.y + 1 + row.min(visible_rows.saturating_sub(1));
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
-}
-
-fn render_notification_row(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &AppState,
-    interaction: InteractionState<HitId>,
-) {
-    let Some(notification) = app.notifications.row_visible_for(
-        app.last_tick,
-        app.session.id.as_deref(),
-        app.agent_panel.active_agent_instance_id.as_deref(),
-    ) else {
-        return;
-    };
-    let color = match notification.level {
-        NotificationLevel::Info => app.theme.info,
-        NotificationLevel::Warning => app.theme.warning,
-        NotificationLevel::Error => app.theme.error,
-    };
-    let glyph = level_glyph(notification.level);
-    let line = Line::from(vec![
-        Span::styled(format!(" {glyph}  "), Style::default().fg(color)),
-        Span::styled(&notification.message, Style::default().fg(color)),
-        Span::styled(" · F8 dismiss", Style::default().fg(app.theme.dim)),
-    ]);
-    let background = (interaction.hovered == Some(HitId::Notice))
-        .then(|| crate::ui::components::hover_bg(&app.theme))
-        .flatten();
-    crate::ui::components::dock_line::render(frame, area, line, background);
 }

@@ -74,6 +74,12 @@ impl AutoComplete {
         self.list.len()
     }
 
+    pub fn interaction_hints(&self) -> InteractionHints<'static> {
+        self.active_provider_idx
+            .map(|idx| self.providers[idx].hints())
+            .unwrap_or_else(|| InteractionHints::new("Esc cancel"))
+    }
+
     pub fn select_next(&mut self) {
         self.list.select_next_wrapped();
     }
@@ -104,17 +110,16 @@ impl AutoComplete {
     }
 
     fn pane_spec(&self) -> PaneSpec<'static> {
-        let (label, hints) = if let Some(idx) = self.active_provider_idx {
-            (self.providers[idx].label(), self.providers[idx].hints())
+        let label = if let Some(idx) = self.active_provider_idx {
+            self.providers[idx].label()
         } else {
-            ("suggestions", InteractionHints::new("Esc cancel"))
+            "suggestions"
         };
         let total = self.list.len();
         let selected_one = usize::from(total > 0).saturating_mul(self.list.selected + 1);
         PaneSpec::minimal(label)
             .no_search()
             .affix(PaneTitleAffix::selection(selected_one, total))
-            .hints(hints)
             .focused(true)
     }
 
@@ -308,7 +313,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(indices, vec![3, 4, 5, 6, 7, 8]);
+        assert_eq!(indices, vec![2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]

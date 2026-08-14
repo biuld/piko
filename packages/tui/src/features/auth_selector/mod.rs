@@ -153,9 +153,7 @@ impl AuthSelector {
             return None;
         };
         let title = format!("Configure {provider} API Key");
-        let spec = crate::ui::components::pane::PaneSpec::minimal(&title)
-            .hints("Enter save · Esc back")
-            .focused(true);
+        let spec = crate::ui::components::pane::PaneSpec::minimal(&title).focused(true);
         let content = spec.content_rect(area)?;
         let label_width = "Enter API key: ".chars().count() as u16;
         Some(Rect::new(
@@ -279,6 +277,13 @@ impl AuthSelector {
         }
     }
 
+    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
+        match self.state {
+            AuthSelectorState::Menu => crate::ui::components::feedback::default_list_hints(),
+            AuthSelectorState::ApiKeyInput { .. } => "Enter save · Esc back".into(),
+        }
+    }
+
     pub fn select_next(&mut self) {
         if let AuthSelectorState::Menu = self.state {
             self.menu.select_next(&self.filter);
@@ -328,9 +333,7 @@ impl AuthSelector {
                 use ratatui::widgets::Paragraph;
 
                 let title = format!("Configure {provider} API Key");
-                let spec = PaneSpec::minimal(&title)
-                    .hints("Enter save · Esc back")
-                    .focused(true);
+                let spec = PaneSpec::minimal(&title).focused(true);
                 let Some(areas) = render_pane(frame, area, &spec, theme) else {
                     return;
                 };

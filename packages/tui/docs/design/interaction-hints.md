@@ -21,8 +21,8 @@ policy. Those belong to the later projection/arbitration design.
 feature interaction state
         │
         └── InteractionHints
-                 ├── current Pane footer projection
-                 └── future guidance-row projection (not selected here)
+                 ├── Guidance Row (Chat / Select / Dock)
+                 └── Pane footer (CoverBody / Centered)
 ```
 
 ## Migration
@@ -32,11 +32,11 @@ feature interaction state
   existing static call sites stay concise.
 - Auto-completion providers return `InteractionHints` through their provider
   interface.
-- Existing rendering and geometry remain unchanged.
+- Guidance Row owns the selected projection policy; this contract remains
+  placement-independent.
 
 ## Verification
 
 - Empty and whitespace-only multi-line declarations reserve no footer row.
 - A compact projection selects the first non-empty line.
 - Existing pane and Suggest hint rendering remains one row.
-

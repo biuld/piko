@@ -8,9 +8,8 @@
 //! Table (`Columns`) — same interaction contract, different paint.
 
 use crate::theme::Theme;
-use crate::ui::components::feedback::{default_list_hints, empty_line};
+use crate::ui::components::feedback::empty_line;
 use crate::ui::components::pane::{PaneMode, PaneSpec, PaneTitleAffix, render_pane};
-use crate::ui::interaction_hints::InteractionHints;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -252,7 +251,6 @@ pub fn render_selectable_list_minimal(
         filter,
         focused,
         theme,
-        default_list_hints(),
         PaneMode::Minimal,
     );
 }
@@ -267,7 +265,6 @@ fn render_selectable_list_with_mode(
     filter: &str,
     focused: bool,
     theme: &Theme,
-    hints: InteractionHints<'_>,
     mode: PaneMode,
 ) {
     let filtered_count = items
@@ -296,7 +293,7 @@ fn render_selectable_list_with_mode(
     } else {
         spec = spec.affix(PaneTitleAffix::selection(0, 0));
     }
-    spec = spec.search_filter(filter).hints(hints).focused(focused);
+    spec = spec.search_filter(filter).focused(focused);
 
     paint_selectable_body(frame, area, &spec, items, selected, filter, theme);
 }

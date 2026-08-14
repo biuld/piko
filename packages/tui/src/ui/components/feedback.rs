@@ -152,7 +152,7 @@ pub fn empty_line(has_filter: bool, theme: &Theme) -> Line<'static> {
     Line::from(Span::styled(text, Style::default().fg(theme.dim)))
 }
 
-/// Default list/overlay footer hints.
+/// Default selectable-list interaction hints.
 pub fn default_list_hints() -> InteractionHints<'static> {
     InteractionHints::new("↑/↓ navigate · Enter confirm · Esc cancel")
 }

@@ -4,26 +4,27 @@
 
 ## Overview
 
-The Notice Row is the TUI's in-memory attention surface above the Composer. It
-shows transient feedback and unresolved warnings or errors without adding
-client-local records to the durable session Timeline. Hostd remains
-authoritative for approvals, interactions, sessions, and other user-visible
-product state; notices are a presentation projection of that state.
+The Notice Row is the notice projection shown in the resident
+[Guidance Row](./guidance-row.md) above the Composer. It shows transient
+feedback and unresolved warnings or errors without adding client-local records
+to the durable session Timeline. Hostd remains authoritative for approvals,
+interactions, sessions, and other user-visible product state; notices are a
+presentation projection of that state.
 
 ## Layout
 
 ```text
 Timeline
-Notice Row?    ⓘ/▲/✗  concise message · F8 dismiss
+Guidance Row   ⓘ/▲/✗ concise message · F8 dismiss | contextual hint
 Suggestions?
 Composer
 BottomBar
 ```
 
-The row occupies one line only while a notice is visible. Actionable notices
-take precedence over transient informational notices. Both the row and history
-panel use a distinct glyph and theme color for each severity instead of
-spelling out level names.
+Guidance always occupies one line. A visible notice replaces its contextual
+hint without changing geometry. Actionable notices take precedence over
+transient informational notices. Both the row and history panel use a distinct
+glyph and theme color for each severity instead of spelling out level names.
 
 `/noti` opens a centered modal containing the in-memory notice queue. Its title
 uses the shared mode-strip affix:

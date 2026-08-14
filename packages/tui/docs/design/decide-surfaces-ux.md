@@ -539,14 +539,14 @@ through [`Pane`](../features/pane-chrome.md) / `PaneSpec` / `render_pane`.
 
 | Path | Pane mode / zones | Body |
 |------|-------------------|------|
-| Standalone Decide (Approval, Tool Interaction) | `PaneMode::Standard` (or current default): title, affixes, content, `PaneFooter::Hints` | Choice body into `areas.content` |
+| Standalone Decide (Approval, Tool Interaction) | `PaneMode::Standard` (or current default): title, affixes, content; hints project through resident Guidance | Choice body into `areas.content` |
 | Embedded in Tree (SummaryPrompt) | **Outer** Tree already paints Standard Pane + `PaneFooter::Reserved`; workflow paints **only** into the reserved footer rect — no nested `Block`, no second title, help via parent tip/hints **or** a nested Minimal pane only if product wants a titled sub-frame (default: content-only into reserved footer) |
 | Content geometry | `PaneSpec::content_rect` / returned `PaneAreas` | Single geometry builder relative to content (or footer) rect |
 
 **Delete on implement:**
 
 - `InteractiveWorkflow::render`’s custom `Block { borders: TOP }` + `prompt_content_area` padding
-- Duplicated help line painted as body lines when `PaneFooter::Hints` already owns help
+- Duplicated help line painted as body lines when Guidance already owns help
 - Any parallel “frame_border_style only for workflow” path when Pane already applies focused border
 
 **Dock height:** keep `dock_content_rows` = body line count; compose still adds
@@ -952,7 +952,7 @@ cargo clippy -p piko-tui --all-targets -- -D warnings
 | K13 | **Rename to `ChoiceWorkflow` + required directory split** | Menu-like domain component; file ceiling 500 |
 | K14 | **PRD update before implementation** | Project PRD-first lifecycle |
 | K15 | **Reject Approval-only SelectableList hybrid** | Inconsistent Decide language; Ask User still needs shell |
-| K16 | **All chrome via Pane** — no private `Block`/inset/help frame in workflow | Pane already owns title/affix/footer/border; dual chrome drifts hit geometry |
+| K16 | **All local frame chrome via Pane** — no private `Block`/inset/help frame in workflow | Pane owns title/affix/border; resident Guidance owns standalone Decide help |
 
 
 ---

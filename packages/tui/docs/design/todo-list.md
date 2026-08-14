@@ -57,9 +57,9 @@ Stack order is owned by the Dock Stack registry ([dock-coexistence](../features/
 ┌─ plane ─────────────────────────────────────┐
 │ STREAM  (grow)                              │
 ├─────────────────────────────────────────────┤
-│ Notice?   0 | 1                             │
 │ Todos?    0 | 1+header + items + overflow?  │
 │ Suggest?  0 | budget                        │
+│ Guidance  1                                 │
 │ Composer  editor budget                     │
 └─────────────────────────────────────────────┘
 ```
@@ -67,11 +67,11 @@ Stack order is owned by the Dock Stack registry ([dock-coexistence](../features/
 Paint order in the dock band (top → bottom):
 
 ```text
-  [Notice row if any]
   [Todos header]
   [Todos item …]
   [Todos +N more if any]
   [Suggest rows if any]
+  [Guidance: notice or active hint]
   [Composer]
 ```
 

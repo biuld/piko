@@ -57,14 +57,68 @@ fn empty_stream_paints_welcome_banner() {
 }
 
 #[test]
+fn idle_guidance_row_paints_composer_hints_above_composer() {
+    let app = app();
+    let area = Rect::new(0, 0, 80, 24);
+    let composed = compose_frame(&app, area);
+    let guidance = composed.plan.rects[&Region::Guidance];
+    let composer = composed.plan.rects[&Region::Composer];
+    let terminal = draw(&app, area);
+    let text = (guidance.x..guidance.right())
+        .map(|x| terminal.backend().buffer()[(x, guidance.y)].symbol())
+        .collect::<String>();
+
+    assert_eq!(guidance.y + 1, composer.y);
+    assert!(text.contains("/ commands · @ files · Enter send"), "{text}");
+}
+
+#[test]
+fn select_surface_projects_its_hint_in_guidance_above_the_surface() {
+    let mut app = app();
+    app.push_surface(SurfaceId::Agents);
+    let area = Rect::new(0, 0, 80, 24);
+    let composed = compose_frame(&app, area);
+    let layer = &composed.plan.layers[0];
+    let guidance = layer.rects[&Region::Guidance];
+    let surface = layer.rects[&Region::Surface(SurfaceId::Agents)];
+    let terminal = draw(&app, area);
+    let text = (guidance.x..guidance.right())
+        .map(|x| terminal.backend().buffer()[(x, guidance.y)].symbol())
+        .collect::<String>();
+
+    assert_eq!(guidance.y + 1, surface.y);
+    assert!(
+        text.contains("↑/↓ navigate · Enter confirm · Esc cancel"),
+        "{text}"
+    );
+}
+
+#[test]
+fn notice_replaces_hint_without_moving_guidance() {
+    let mut app = app();
+    let area = Rect::new(0, 0, 80, 24);
+    let before = compose_frame(&app, area).plan.rects[&Region::Guidance];
+    app.notifications
+        .push(NotificationLevel::Warning, "needs attention");
+    let after = compose_frame(&app, area).plan.rects[&Region::Guidance];
+    let terminal = draw(&app, area);
+    let text = (after.x..after.right())
+        .map(|x| terminal.backend().buffer()[(x, after.y)].symbol())
+        .collect::<String>();
+
+    assert_eq!(before, after);
+    assert!(text.contains("needs attention · F8 dismiss"), "{text}");
+}
+
+#[test]
 fn notice_component_paints_its_hover_background() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.notifications
         .push(NotificationLevel::Warning, "click to dismiss");
-    app.hovered = Some((Region::Notice, Some(HitId::Notice)));
+    app.hovered = Some((Region::Guidance, Some(HitId::Notice)));
     let area = Rect::new(0, 0, 80, 24);
-    let notice = compose_frame(&app, area).plan.rects[&Region::Notice];
+    let notice = compose_frame(&app, area).plan.rects[&Region::Guidance];
 
     let terminal = draw(&app, area);
 
@@ -84,7 +138,7 @@ fn notice_row_uses_distinct_severity_glyphs_without_level_words() {
         let mut app = app();
         app.notifications.push(level, "notice body");
         let area = Rect::new(0, 0, 80, 24);
-        let notice = compose_frame(&app, area).plan.rects[&Region::Notice];
+        let notice = compose_frame(&app, area).plan.rects[&Region::Guidance];
         let terminal = draw(&app, area);
         let text = (notice.x..notice.right())
             .map(|x| terminal.backend().buffer()[(x, notice.y)].symbol())

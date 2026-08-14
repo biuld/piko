@@ -14,7 +14,7 @@ pub struct DockSolveInput {
 
 /// Arbitrate offers under Stream floor / dock max.
 ///
-/// Shrink order: Transient → Durable → Anchor (Composer). Protect (Notice)
+/// Shrink order: Transient → Durable → Anchor (Composer). Protect (Guidance)
 /// stays at min while active. Inactive bands grant 0.
 pub fn solve(input: DockSolveInput) -> DockSolveOutput {
     let specs = registry();
@@ -55,7 +55,7 @@ pub fn solve(input: DockSolveInput) -> DockSolveOutput {
 
     // Final clamp: if still over budget (pathological tiny body), compress
     // non-protect non-zero bands toward min, then protect last only if needed
-    // to fit (rare: body_height < notice+composer mins).
+    // to fit (rare: body_height < guidance+composer mins).
     if sum > dock_max {
         emergency_fit(&mut working, &mut sum, dock_max);
     }
@@ -114,7 +114,7 @@ fn emergency_fit(
     ] {
         shrink_class(working, sum, dock_max, class);
     }
-    // Only if still over: drop protect to 0 (body too small for notice+composer).
+    // Only if still over: drop protect to 0 (body too small for guidance+composer).
     if *sum > dock_max {
         for entry in working.iter_mut() {
             if entry.2 == ShrinkClass::Protect && entry.3 > 0 {

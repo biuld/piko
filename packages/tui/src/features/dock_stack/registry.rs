@@ -12,11 +12,12 @@ pub const STREAM_MIN_RATIO_DEN: u16 = 3;
 /// Composer content + chrome when empty (1 content row + top/bottom pad).
 pub const COMPOSER_MIN_HEIGHT: u16 = 3;
 
-/// Suggest chrome + one content row + footer while the palette is open.
-pub const SUGGEST_MIN_HEIGHT: u16 = 4;
+/// Suggest chrome + one content row while the palette is open. Its guidance
+/// projects through the resident Guidance row.
+pub const SUGGEST_MIN_HEIGHT: u16 = 3;
 
-/// Notice is a single protect row while active.
-pub const NOTICE_HEIGHT: u16 = 1;
+/// Resident Guidance row directly above Composer.
+pub const GUIDANCE_HEIGHT: u16 = 1;
 
 /// Todos header-only min while the strip is active.
 pub const TODOS_MIN_HEIGHT: u16 = 1;
@@ -24,29 +25,29 @@ pub const TODOS_MIN_HEIGHT: u16 = 1;
 /// Max item rows painted in the Todos strip (not counting header / overflow).
 pub const TODOS_MAX_ITEM_ROWS: u16 = 6;
 
-/// v1 registry: Notice → Todos → Suggest → Composer (top → bottom).
+/// v1 registry: Todos → Suggest → Guidance → Composer (top → bottom).
 pub fn registry() -> &'static [BandSpec] {
     &REGISTRY
 }
 
 const REGISTRY: [BandSpec; 4] = [
     BandSpec {
-        id: BandId::Notice,
-        order: 1,
-        residency: Residency::Ephemeral,
-        shrink: ShrinkClass::Protect,
-    },
-    BandSpec {
         id: BandId::Todos,
-        order: 2,
+        order: 1,
         residency: Residency::Ephemeral,
         shrink: ShrinkClass::Durable,
     },
     BandSpec {
         id: BandId::Suggest,
-        order: 3,
+        order: 2,
         residency: Residency::Ephemeral,
         shrink: ShrinkClass::Transient,
+    },
+    BandSpec {
+        id: BandId::Guidance,
+        order: 3,
+        residency: Residency::Anchor,
+        shrink: ShrinkClass::Protect,
     },
     BandSpec {
         id: BandId::Composer,
@@ -65,5 +66,5 @@ pub fn stream_min(body_height: u16) -> u16 {
 /// Preferred height for the Suggest band (existing palette formula).
 pub fn suggestion_preferred_height(count: usize) -> u16 {
     let rows = (count.max(1) as u16).min(6);
-    (rows + 3).min(10)
+    (rows + 2).min(9)
 }

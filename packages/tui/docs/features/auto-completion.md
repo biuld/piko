@@ -15,7 +15,7 @@ Filter typing lives in the editor — the pane uses **`.no_search()`**.
 **Slash suggestions are the command palette** (no separate palette surface).
 Suggest is a **Dock Stack** ephemeral band (`BandId::Suggest`, shrink class
 **transient**): this feature builds a [DockBandOffer](./dock-coexistence.md);
-the stack may grant less than preferred when Notice/Todos/Composer compete.
+the stack may grant less than preferred when Todos/Guidance/Composer compete.
 Paint must respect granted height (fewer list rows), not assume preferred.
 
 ### Slash Suggestions Layout
@@ -34,11 +34,12 @@ Tab cycle | Enter execute
   @packages/tui/src/main.rs       file (1.2 KB)
 ❯ @src/main.rs                    file (4.5 KB)
   @src/theme.rs                   file (8.1 KB)
-Tab cycle | Enter accept
 ──────────────────────────────────────────────
+⌨ Tab cycle · Enter accept             Guidance
 ```
 
-- **Height**: content rows (capped) + Minimal top/bottom + footer hints.
+- **Height**: content rows (capped) + Minimal top/bottom; interaction hints
+  project through the resident Guidance Row.
 - **Title**: provider label; selection counter is a Pane title affix.
 - **Borders**: Minimal pane (top + bottom).
 - **Alignment**: table columns — left labels (commands or paths), right details.

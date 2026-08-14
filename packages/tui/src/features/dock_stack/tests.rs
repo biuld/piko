@@ -12,25 +12,15 @@ fn offer(id: BandId, active: bool, preferred: u16, min: u16) -> DockBandOffer {
 
 fn idle_offers(composer: u16) -> Vec<DockBandOffer> {
     vec![
-        offer(BandId::Notice, false, 0, 0),
         offer(BandId::Todos, false, 0, 0),
         offer(BandId::Suggest, false, 0, 0),
+        offer(BandId::Guidance, true, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
         offer(BandId::Composer, true, composer, COMPOSER_MIN_HEIGHT),
     ]
 }
 
-fn full_offers(
-    notice: bool,
-    todos_pref: u16,
-    suggest_pref: u16,
-    composer: u16,
-) -> Vec<DockBandOffer> {
+fn full_offers(todos_pref: u16, suggest_pref: u16, composer: u16) -> Vec<DockBandOffer> {
     vec![
-        if notice {
-            offer(BandId::Notice, true, NOTICE_HEIGHT, NOTICE_HEIGHT)
-        } else {
-            offer(BandId::Notice, false, 0, 0)
-        },
         if todos_pref > 0 {
             offer(BandId::Todos, true, todos_pref, TODOS_MIN_HEIGHT)
         } else {
@@ -41,17 +31,18 @@ fn full_offers(
         } else {
             offer(BandId::Suggest, false, 0, 0)
         },
+        offer(BandId::Guidance, true, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
         offer(BandId::Composer, true, composer, COMPOSER_MIN_HEIGHT),
     ]
 }
 
 #[test]
-fn idle_composer_only_grants_preferred() {
+fn idle_resident_bands_get_preferred_grants() {
     let out = solve(DockSolveInput {
         body_height: 30,
         offers: idle_offers(5),
     });
-    assert_eq!(out.height(BandId::Notice), 0);
+    assert_eq!(out.height(BandId::Guidance), 1);
     assert_eq!(out.height(BandId::Todos), 0);
     assert_eq!(out.height(BandId::Suggest), 0);
     assert_eq!(out.height(BandId::Composer), 5);
@@ -60,25 +51,25 @@ fn idle_composer_only_grants_preferred() {
 }
 
 #[test]
-fn notice_and_composer_get_preferred_when_budget_allows() {
+fn guidance_and_composer_get_preferred_when_budget_allows() {
     let out = solve(DockSolveInput {
         body_height: 30,
-        offers: full_offers(true, 0, 0, 5),
+        offers: full_offers(0, 0, 5),
     });
-    assert_eq!(out.height(BandId::Notice), 1);
+    assert_eq!(out.height(BandId::Guidance), 1);
     assert_eq!(out.height(BandId::Composer), 5);
     assert_eq!(out.height(BandId::Suggest), 0);
     assert_eq!(out.height(BandId::Todos), 0);
 }
 
 #[test]
-fn notice_suggest_composer_preferred_when_fit() {
+fn guidance_suggest_composer_preferred_when_fit() {
     let suggest = suggestion_preferred_height(3);
     let out = solve(DockSolveInput {
         body_height: 40,
-        offers: full_offers(true, 0, suggest, 5),
+        offers: full_offers(0, suggest, 5),
     });
-    assert_eq!(out.height(BandId::Notice), 1);
+    assert_eq!(out.height(BandId::Guidance), 1);
     assert_eq!(out.height(BandId::Suggest), suggest);
     assert_eq!(out.height(BandId::Composer), 5);
     let dock_used = 1 + suggest + 5;
@@ -91,7 +82,7 @@ fn inactive_bands_grant_zero() {
         body_height: 24,
         offers: idle_offers(4),
     });
-    for id in [BandId::Notice, BandId::Todos, BandId::Suggest] {
+    for id in [BandId::Todos, BandId::Suggest] {
         assert_eq!(out.height(id), 0, "{id:?}");
     }
 }
@@ -101,33 +92,33 @@ fn modal_inactive_suggest_grants_zero() {
     // Product gate: modal open → Suggest offer active=false before solve.
     let out = solve(DockSolveInput {
         body_height: 30,
-        offers: full_offers(true, 0, 0, 5), // suggest pref 0 ⇒ inactive
+        offers: full_offers(0, 0, 5), // suggest pref 0 ⇒ inactive
     });
     assert_eq!(out.height(BandId::Suggest), 0);
-    assert_eq!(out.height(BandId::Notice), 1);
+    assert_eq!(out.height(BandId::Guidance), 1);
 }
 
 #[test]
 fn shrink_transient_before_durable_before_composer() {
     // Tight body: preferred sum exceeds dock_max.
-    // notice=1, todos=8, suggest=10, composer=8 → sum 27
+    // guidance=1, todos=8, suggest=10, composer=8 → sum 27
     // body=24 → stream_min = max(3, 8)=8 → dock_max=16
     let body = 24u16;
     let out = solve(DockSolveInput {
         body_height: body,
-        offers: full_offers(true, 8, 10, 8),
+        offers: full_offers(8, 10, 8),
     });
     let s_min = stream_min(body);
     assert_eq!(out.stream_min, s_min);
     assert_eq!(out.dock_max, body - s_min);
 
-    let notice = out.height(BandId::Notice);
+    let guidance = out.height(BandId::Guidance);
     let todos = out.height(BandId::Todos);
     let suggest = out.height(BandId::Suggest);
     let composer = out.height(BandId::Composer);
 
-    // Protect notice stays at full min while active.
-    assert_eq!(notice, 1);
+    // Resident Guidance stays at one row under normal pressure.
+    assert_eq!(guidance, 1);
     // Suggest (transient) shrinks first — at or above min.
     assert!(suggest >= SUGGEST_MIN_HEIGHT);
     assert!(suggest <= 10);
@@ -138,7 +129,7 @@ fn shrink_transient_before_durable_before_composer() {
     assert!(composer >= COMPOSER_MIN_HEIGHT);
     assert!(composer <= 8);
 
-    let sum = notice + todos + suggest + composer;
+    let sum = guidance + todos + suggest + composer;
     assert!(sum <= out.dock_max, "sum={sum} dock_max={}", out.dock_max);
 
     // Transient reduced before durable: if we still need room, suggest is
@@ -150,11 +141,11 @@ fn shrink_transient_before_durable_before_composer() {
     // Rebuild: after transient fully to min, durable shrinks next.
     let out2 = solve(DockSolveInput {
         body_height: 20,
-        offers: full_offers(true, 8, 10, 6),
+        offers: full_offers(8, 10, 6),
     });
     // dock_max for 20: stream_min=max(3,6)=6 → 14
     // preferred 1+8+10+6=25 → heavy pressure
-    assert_eq!(out2.height(BandId::Notice), 1);
+    assert_eq!(out2.height(BandId::Guidance), 1);
     assert_eq!(
         out2.height(BandId::Suggest),
         SUGGEST_MIN_HEIGHT,
@@ -165,7 +156,7 @@ fn shrink_transient_before_durable_before_composer() {
     assert!(todos2 >= TODOS_MIN_HEIGHT);
     assert!(composer2 >= COMPOSER_MIN_HEIGHT);
     // Durable shrinks before composer min: todos should be at min or composer still > min
-    // with remaining budget after notice+suggest min.
+    // with remaining budget after guidance+suggest min.
     assert!(
         todos2 < 8 || composer2 < 6,
         "durable or composer must yield under pressure"
@@ -173,13 +164,13 @@ fn shrink_transient_before_durable_before_composer() {
 }
 
 #[test]
-fn protect_notice_not_fractionally_shrunk() {
-    // Notice preferred=min=1; never 0 while active when dock fits.
+fn resident_guidance_not_fractionally_shrunk() {
+    // Guidance preferred=min=1; never 0 while active when dock fits.
     let out = solve(DockSolveInput {
         body_height: 30,
-        offers: full_offers(true, 6, 8, 5),
+        offers: full_offers(6, 8, 5),
     });
-    assert_eq!(out.height(BandId::Notice), 1);
+    assert_eq!(out.height(BandId::Guidance), 1);
 }
 
 #[test]
@@ -188,7 +179,7 @@ fn all_bands_preferred_over_budget_respects_stream_floor() {
     for body in cases {
         let out = solve(DockSolveInput {
             body_height: body,
-            offers: full_offers(true, 8, 10, 8),
+            offers: full_offers(8, 10, 8),
         });
         let dock_used: u16 = out.grants.iter().map(|g| g.height).sum();
         assert!(
@@ -210,15 +201,15 @@ fn all_bands_preferred_over_budget_respects_stream_floor() {
 fn grants_order_matches_registry() {
     let out = solve(DockSolveInput {
         body_height: 40,
-        offers: full_offers(true, 4, 6, 5),
+        offers: full_offers(4, 6, 5),
     });
     let ids: Vec<BandId> = out.grants.iter().map(|g| g.id).collect();
     assert_eq!(
         ids,
         vec![
-            BandId::Notice,
             BandId::Todos,
             BandId::Suggest,
+            BandId::Guidance,
             BandId::Composer
         ]
     );
@@ -228,22 +219,22 @@ fn grants_order_matches_registry() {
 fn active_grants_skip_zero_height() {
     let out = solve(DockSolveInput {
         body_height: 30,
-        offers: full_offers(true, 0, 0, 5),
+        offers: full_offers(0, 0, 5),
     });
     let active: Vec<BandId> = out.active_grants().map(|g| g.id).collect();
-    assert_eq!(active, vec![BandId::Notice, BandId::Composer]);
+    assert_eq!(active, vec![BandId::Guidance, BandId::Composer]);
 }
 
 #[test]
 fn registry_v1_catalog() {
     let specs = registry();
     assert_eq!(specs.len(), 4);
-    assert_eq!(specs[0].id, BandId::Notice);
-    assert_eq!(specs[0].shrink, ShrinkClass::Protect);
-    assert_eq!(specs[1].id, BandId::Todos);
-    assert_eq!(specs[1].shrink, ShrinkClass::Durable);
-    assert_eq!(specs[2].id, BandId::Suggest);
-    assert_eq!(specs[2].shrink, ShrinkClass::Transient);
+    assert_eq!(specs[0].id, BandId::Todos);
+    assert_eq!(specs[0].shrink, ShrinkClass::Durable);
+    assert_eq!(specs[1].id, BandId::Suggest);
+    assert_eq!(specs[1].shrink, ShrinkClass::Transient);
+    assert_eq!(specs[2].id, BandId::Guidance);
+    assert_eq!(specs[2].shrink, ShrinkClass::Protect);
     assert_eq!(specs[3].id, BandId::Composer);
     assert_eq!(specs[3].shrink, ShrinkClass::Anchor);
 }

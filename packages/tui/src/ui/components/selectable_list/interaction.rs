@@ -5,10 +5,7 @@ use super::{SelectableItem, SelectableRowLayout, item_matches_filter};
 use crate::{
     app::HitId,
     theme::Theme,
-    ui::components::{
-        feedback::default_list_hints,
-        pane::{PaneSpec, PaneTitleAffix},
-    },
+    ui::components::pane::{PaneSpec, PaneTitleAffix},
 };
 
 pub fn minimal_row_regions(
@@ -32,7 +29,6 @@ pub fn minimal_row_regions(
     let spec = PaneSpec::minimal(title)
         .affix(PaneTitleAffix::selection(selected_one, filtered_count))
         .search_filter(filter)
-        .hints(default_list_hints())
         .focused(true);
     selectable_row_regions(area, &spec, items, selected, filter)
 }

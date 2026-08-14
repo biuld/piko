@@ -31,8 +31,9 @@ one solved row and clips overflow rather than wrapping or changing layout.
 
 ## Behavior / interactions
 
-- A Notice Row remains a plane region above the Composer. Its visible record,
-  dismissal behavior, and hover hit target remain owned by NotificationCenter.
+- Notice content projects through the resident Guidance plane region above the
+  Composer. Its visible record, dismissal behavior, and hover hit target remain
+  owned by NotificationCenter.
 - A Pane footer remains pane-local passive key guidance. It has no pointer or
   keyboard action of its own.
 - Dock rendering does not decide which row is visible or arbitrates priority.

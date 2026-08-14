@@ -5,15 +5,15 @@
 //! `chrome_rows + content_rows` → band cells and body-clamps.
 
 /// Chrome for Minimal selectable list panes used by Models / Agents / Auth menu:
-/// top border · search · footer · bottom border.
-pub const MINIMAL_LIST_CHROME_ROWS: u16 = 4;
+/// top border · search · bottom border. Guidance is a separate resident row.
+pub const MINIMAL_LIST_CHROME_ROWS: u16 = 3;
 
-/// Chrome for Minimal form (no search): top · footer · bottom.
-pub const MINIMAL_FORM_CHROME_ROWS: u16 = 3;
+/// Chrome for Minimal form (no search): top · bottom.
+pub const MINIMAL_FORM_CHROME_ROWS: u16 = 2;
 
-/// Chrome for a Standard pane with footer, no search (MCP-style):
-/// all borders · vertical pad 1×2 · footer.
-pub const STANDARD_INFO_CHROME_ROWS: u16 = 5;
+/// Chrome for a Standard pane with no search/footer (MCP-style):
+/// all borders · vertical pad 1×2.
+pub const STANDARD_INFO_CHROME_ROWS: u16 = 4;
 
 /// Default cap: full items shown before list scrolling.
 pub const DEFAULT_MAX_VISIBLE_ITEMS: u16 = 6;
@@ -148,7 +148,7 @@ mod tests {
     fn stacked_content_rows_are_even() {
         let b = SelectBandBudget::minimal_stacked_list(3);
         assert_eq!(b.content_rows(), 6); // 3 items × 2
-        assert_eq!(b.preferred_band_rows(), 10); // 4 chrome + 6
+        assert_eq!(b.preferred_band_rows(), 9); // 3 chrome + 6
     }
 
     #[test]

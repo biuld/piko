@@ -294,6 +294,7 @@ impl NotificationCenter {
         self.items.len()
     }
 
+    #[cfg(test)]
     pub fn has_row_visible_for(
         &self,
         now: Instant,

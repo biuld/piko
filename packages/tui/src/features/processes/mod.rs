@@ -68,12 +68,7 @@ impl ProcessPanel {
             .as_ref()
             .map(|id| format!("stop {id}?"));
         let title = title.as_deref().unwrap_or("processes");
-        let hints = if self.confirming_process_id.is_some() {
-            "Enter confirm stop · Esc cancel"
-        } else {
-            "↑/↓ browse · Enter stop · Esc close"
-        };
-        let spec = PaneSpec::new(title).no_search().hints(hints).focused(true);
+        let spec = PaneSpec::new(title).no_search().focused(true);
         selectable_row_regions(
             area,
             &spec,
@@ -93,6 +88,14 @@ impl ProcessPanel {
 
     pub fn select_band_budget(&self) -> SelectBandBudget {
         SelectBandBudget::standard_info(self.processes.len().clamp(1, 10) as u16)
+    }
+
+    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
+        if self.confirming_process_id.is_some() {
+            "Enter confirm stop · Esc cancel".into()
+        } else {
+            "↑/↓ browse · Enter stop · Esc close".into()
+        }
     }
 
     pub fn select_next(&mut self) {
@@ -142,12 +145,7 @@ impl ProcessPanel {
             .as_ref()
             .map(|id| format!("stop {id}?"))
             .unwrap_or_else(|| "processes".into());
-        let hints = if self.confirming_process_id.is_some() {
-            "Enter confirm stop · Esc cancel"
-        } else {
-            "↑/↓ browse · Enter stop · Esc close"
-        };
-        let spec = PaneSpec::new(&title).no_search().hints(hints).focused(true);
+        let spec = PaneSpec::new(&title).no_search().focused(true);
         let items = self.display_items();
         let body = if items.is_empty() {
             SelectablePanelBody::Message(ratatui::widgets::Paragraph::new(

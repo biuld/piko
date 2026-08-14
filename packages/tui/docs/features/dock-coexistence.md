@@ -1,19 +1,19 @@
 # Dock Stack (plane coexistence)
 
-> Status: draft  
-> Design: [dock-coexistence.md](../design/dock-coexistence.md)  
-> Kind: **standalone TUI infrastructure feature** (not a product strip)  
-> Consumers: Notice, Todos, Suggest (command palette / `@`), Composer;  
+> Status: draft
+> Design: [dock-coexistence.md](../design/dock-coexistence.md)
+> Kind: **standalone TUI infrastructure feature** (not a product strip)
+> Consumers: Todos, Suggest (command palette / `@`), Guidance, Composer;
 > prerequisite for [todo-list.md](./todo-list.md)
 
 ## Overview
 
-**Dock Stack** is a first-class TUI feature that owns **how multiple
-non-resident (optional) plane bands appear together** above the composer,
+**Dock Stack** is a first-class TUI feature that owns **how optional and
+resident plane bands appear together** above the composer,
 without each feature independently `fixed()`-stacking itself into Stream.
 
 It is **infrastructure + policy**, not a user-facing product surface with its
-own slash command or modal. Product bands (Notice, Todos, slash palette, …)
+own slash command or modal. Product bands (Todos, slash palette, Guidance, …)
 keep their state, paint, and interaction; they **plug into** the dock stack
 via a small offer/grant contract.
 
@@ -22,7 +22,7 @@ via a small offer/grant contract.
 | Without Dock Stack | With Dock Stack |
 |--------------------|-----------------|
 | Each feature sets its own height in `compose_plane` | One solver owns joint budget |
-| Notice + palette + future Todos sum unboundedly | Stream keeps a minimum floor |
+| Guidance + palette + future Todos sum unboundedly | Stream keeps a minimum floor |
 | New optional band = ad-hoc `if` + layout bugs | Register band + shrink class |
 | “Command palette” confused with modals | Suggest is a **dock band**, not `SurfaceIntent::Dock` |
 
@@ -54,8 +54,8 @@ via a small offer/grant contract.
 
 | Class | Role | Examples |
 |-------|------|----------|
-| **Resident (anchor)** | Always participates in plane layout | **Stream** (grow), **Composer** (min height always) |
-| **Non-resident (ephemeral band)** | Height **0** when inactive; may appear without user opening a modal | **Notice**, **Todos**, **Suggest** |
+| **Resident (anchor)** | Always participates in plane layout | **Stream** (grow), **Guidance** (1), **Composer** (min height always) |
+| **Non-resident (ephemeral band)** | Height **0** when inactive; may appear without user opening a modal | **Todos**, **Suggest** |
 
 “Non-resident” means **not always occupying chrome**, not “stateless.” Todos
 are durable product state but the **strip is non-resident in the layout**
@@ -106,7 +106,7 @@ Provider feature          Dock Stack                 Layout / paint
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│ AppState / features (NoticeCenter, Todos, AutoComplete, …)  │
+│ AppState / features (Todos, AutoComplete, Guidance, …)      │
 │   each builds DockBandOffer for its BandId                  │
 └────────────────────────────┬────────────────────────────────┘
                              ▼
@@ -128,9 +128,9 @@ Provider feature          Dock Stack                 Layout / paint
 | Order (top→bottom) | BandId | Residency | Shrink class | Region | Provider |
 |--------------------|--------|-----------|--------------|--------|----------|
 | — | `Stream` | anchor grow | never shrink below floor | `Stream` | Timeline |
-| 1 | `Notice` | ephemeral | **protect** (0 or 1) | `Notice` | notifications |
-| 2 | `Todos` | ephemeral | **durable** (keep header if non-empty) | `Todos` (when added) | todos |
-| 3 | `Suggest` | ephemeral | **transient** (shrink first) | `Suggest` | auto_completion |
+| 1 | `Todos` | ephemeral | **durable** (keep header if non-empty) | `Todos` | todos |
+| 2 | `Suggest` | ephemeral | **transient** (shrink first) | `Suggest` | auto_completion |
+| 3 | `Guidance` | anchor fixed | **protect** (one row) | `Guidance` | guidance_row |
 | 4 | `Composer` | anchor fixed | shrink to editor min last | `Composer` | editor |
 
 Future ephemeral bands register a new `BandId` + order + shrink class; they do
@@ -144,7 +144,7 @@ Each provider supplies, every frame (or when metrics are built):
 |-------|---------|
 | `active` | Whether the band wants to participate (`false` → offer height 0) |
 | `preferred_height` | Ideal rows including internal chrome |
-| `min_height` | Minimum rows if `active` (e.g. Notice 1; Todos header; Suggest chrome+1+footer) |
+| `min_height` | Minimum rows if `active` (e.g. Guidance 1; Todos header; Suggest chrome+1) |
 | optional `priority_hint` | Only if registry needs tie-break (default = shrink class) |
 
 Dock Stack returns:
@@ -168,7 +168,7 @@ Default: **ephemeral bands are not mutually exclusive** by content.
 
 | Rule | Behavior |
 |------|----------|
-| Notice ∥ Todos ∥ Suggest ∥ Composer | **Allowed** |
+| Todos ∥ Suggest ∥ Guidance ∥ Composer | **Allowed** |
 | Slash vs `@` | Same `Suggest` band; providers mutually exclusive inside auto_completion |
 | Any product modal open | Suggest `active` forced false (existing gate) |
 | `SurfaceIntent::Dock` modal | Suggest off; other plane bands may still grant height |
@@ -182,14 +182,14 @@ silent one-off `if`s in random features).
 Let `body_h` be plane body height (excludes BottomBar).
 
 1. Compute `stream_min` and `dock_max = body_h - stream_min`.
-2. Sum preferred heights of Composer + all active ephemeral bands.
+2. Sum preferred heights of Guidance + Composer + all active ephemeral bands.
 3. If sum ≤ `dock_max`, grant preferred.
 4. Else shrink by **shrink class order**:
    1. **transient** (Suggest) down toward `min_height`
    2. **durable** (Todos) item rows toward `min_height` (header kept)
    3. **Composer** toward editor minimum
-   4. **protect** (Notice) never below min while active
-5. Never grant Composer below editor minimum; never grant active Notice 0;
+   4. **protect** (Guidance) never below min in healthy frames
+5. Never grant Composer below editor minimum; keep Guidance at one row;
    never grant active Todos 0 if product requires header visibility.
 
 Exact constants live in design; policy order is normative here.
@@ -203,9 +203,9 @@ Exact constants live in design; policy order is normative here.
 │ STREAM                                              grow    │
 │                                                             │
 │ ── dock stack (solver-owned fixed bands) ─────────────────  │
-│ Notice?     ephemeral · protect                             │
 │ Todos?      ephemeral · durable                             │
 │ Suggest?    ephemeral · transient  (/ palette or @)         │
+│ Guidance    anchor · protect                                │
 │ Composer    anchor                                          │
 └─────────────────────────────────────────────────────────────┘
   BottomBar   shell chrome — outside Dock Stack
@@ -218,6 +218,7 @@ Exact constants live in design; policy order is normative here.
 │ STREAM                                                       │
 │  …                                                           │
 ├──────────────────────────────────────────────────────────────┤
+│ ⌨ / commands · @ files · Enter send              Guidance  │
 │ › type a message…                                  Composer  │
 ├──────────────────────────────────────────────────────────────┤
 │ agent · model · …                                  BottomBar │
@@ -230,7 +231,6 @@ Exact constants live in design; policy order is normative here.
 ┌──────────────────────────────────────────────────────────────┐
 │ STREAM   (at risk without solver)                            │
 ├──────────────────────────────────────────────────────────────┤
-│ ▲  … · F8                                          Notice    │
 │ Todos  2/8 done · …                                Todos     │
 │ ✓  …                                                         │
 │ ▸  …                                                         │
@@ -239,7 +239,7 @@ Exact constants live in design; policy order is normative here.
 │ ─ slash commands ─────────────── [i/n] ─           Suggest   │
 │ ❯ /model …                                                   │
 │   … (command palette = this band, not a modal)               │
-│ Tab · Enter                                                  │
+│ ⌨ Tab cycle · Enter accept                        Guidance  │
 │ /mo                                                Composer  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -251,12 +251,12 @@ Exact constants live in design; policy order is normative here.
 │ STREAM   (≥ stream_min)                                      │
 │  … still readable …                                          │
 ├──────────────────────────────────────────────────────────────┤
-│ ▲  … · F8                                          Notice    │
 │ Todos  2/8 done · …                                Todos     │
 │ ▸  active item only…                                         │
 │ +6 more                                                      │
 │ ─ slash commands ─ [i/n] ─  (fewer rows)           Suggest   │
 │ ❯ /model …                                                   │
+│ ▲  … · F8                                        Guidance   │
 │ /mo                                                Composer  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -268,7 +268,7 @@ Dock Stack itself has **no keybindings** and **no focus owner**.
 | Concern | Owner after grant |
 |---------|-------------------|
 | Esc closes palette | Suggest / editor (existing Esc priority) |
-| F8 dismiss notice | Notice |
+| F8 dismiss notice | NotificationCenter via Guidance |
 | Type in composer | Composer |
 | Todo strip clicks | Todos feature (v1 none) |
 
@@ -294,10 +294,10 @@ Focus and hit-testing still use `Region::*` rects produced from **grants**.
 
 - [ ] Dock Stack is a **named module** with registry + solver + tests (not only
       comments in `compose.rs`).
-- [ ] Notice, Suggest, Composer go through offer → grant (Todos when added).
+- [ ] Guidance, Suggest, Composer go through offer → grant (Todos when added).
 - [ ] Adding a hypothetical band is documented as: register + provider offer;
       no third `if` pile-up without registry.
-- [ ] Coexistence: Notice+Suggest+Composer simultaneous; Stream ≥ floor on
+- [ ] Coexistence: Guidance+Suggest+Composer simultaneous; Stream ≥ floor on
       short `body_h`.
 - [ ] Shrink order unit-tested (transient before durable before composer min).
 - [ ] Modal open ⇒ Suggest grant 0.
@@ -312,7 +312,8 @@ Focus and hit-testing still use `Region::*` rects produced from **grants**.
 | [design/dock-coexistence.md](../design/dock-coexistence.md) | Module layout, types, algorithm, migration |
 | [todo-list.md](./todo-list.md) | Ephemeral durable band consumer |
 | [auto-completion.md](./auto-completion.md) | Transient Suggest / palette provider |
-| [notice-row.md](./notice-row.md) | Protect Notice provider |
+| [guidance-row.md](./guidance-row.md) | Resident Guidance provider and notice/hint arbitration |
+| [notice-row.md](./notice-row.md) | Notice projection policy |
 | [editor.md](./editor.md) | Composer anchor |
 | [ui-ux.md](./ui-ux.md) | Shell IA parent |
 | [base-frame-layout.md](./base-frame-layout.md) | Frame recipe |

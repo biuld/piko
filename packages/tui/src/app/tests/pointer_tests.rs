@@ -379,7 +379,7 @@ fn notice_click_clears_notifications() {
     let notice = compose_frame(&app, Rect::new(0, 0, 80, 24))
         .plan
         .rects
-        .get(&Region::Notice)
+        .get(&Region::Guidance)
         .copied()
         .expect("notice rect");
     let actions = route_pointer(

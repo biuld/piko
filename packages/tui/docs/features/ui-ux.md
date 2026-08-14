@@ -133,9 +133,9 @@ Workspace + shell chrome (not A–E slots):
 │ STREAM            conversation / tools (plane, grow)         │
 ├──────────────────────────────────────────────────────────────┤
 │ DOCK (plane bottom stack)                                    │
-│   Notice?         ephemeral warning/error                    │
 │   Todos?          viewed agent todo list when non-empty (F-27) │
 │   Suggest?        / command palette or @ file browser        │
+│   Guidance        resident notice / active interaction hint  │
 │   Composer        editor                                     │
 ├──────────────────────────────────────────────────────────────┤
 │ CHROME            agent · model · cwd · context · cost       │
@@ -144,7 +144,7 @@ Workspace + shell chrome (not A–E slots):
 These dock bands **may all be visible together**. Coordination is a standalone
 TUI infrastructure feature — **Dock Stack**
 ([dock-coexistence.md](./dock-coexistence.md)): band registry, offer/grant,
-joint height solver. Product bands (Notice, Todos, Suggest) do not own plane
+joint height solver. Product bands (Todos, Suggest, Guidance) do not own plane
 stacking. Suggest is not a separate “command palette” modal — `/` paints in
 `Region::Suggest`. `SurfaceIntent::Dock` (approval / tool workflow) is a
 **ComposerBand modal**, not a Dock Stack band.
@@ -699,7 +699,7 @@ product decision rather than a missing-surface repair:
 | Grok Build pattern | piko adoption |
 |--------------------|---------------|
 | Dense status + usage in chrome | BottomBar model/cwd/context/cost |
-| List + live filter + footer hints | All selector overlays |
+| List + live filter + contextual guidance | All selector overlays |
 | Expand/collapse blocks | Tools, thinking |
 | State glyphs + spinner for working | Agent strip + turn running |
 | Esc layered step-back | Global Esc priority table |

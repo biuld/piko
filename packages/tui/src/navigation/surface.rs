@@ -7,8 +7,12 @@
 //!   interaction replace the composer)
 //! - **Modal** → [`ModalPlacement::Centered`] (settings dialog)
 
-use piko_tui_layout::{ModalLayer, ModalPlacement, cells_from_percent, leaf};
+use piko_tui_layout::{
+    FlexItem, ModalLayer, ModalPlacement, cells_from_percent, flex_column, leaf,
+};
 use ratatui::layout::Rect;
+
+use crate::features::dock_stack::GUIDANCE_HEIGHT;
 
 use super::Region;
 
@@ -95,8 +99,9 @@ impl SurfaceId {
 
     /// Build a single-leaf modal layer for this surface.
     ///
-    /// `composer_band_height` applies to ComposerBand surfaces (Select / Dock).
-    /// Height is computed from feature **content-row** budgets (see
+    /// `composer_band_height` is the Select / Dock surface height. Its modal
+    /// host also prepends the resident Guidance row. Surface height is computed
+    /// from feature **content-row** budgets (see
     /// [`crate::navigation::SelectBandBudget`]), not a fixed body percent.
     pub fn modal_layer(
         self,
@@ -106,13 +111,20 @@ impl SurfaceId {
     ) -> ModalLayer<Region> {
         let placement = self.modal_placement(body, centered_size);
         let host_band_height = match placement {
-            ModalPlacement::ComposerBand => composer_band_height,
+            ModalPlacement::ComposerBand => composer_band_height.saturating_add(GUIDANCE_HEIGHT),
             _ => 0,
+        };
+        let tree = match placement {
+            ModalPlacement::ComposerBand => flex_column(vec![
+                FlexItem::fixed(GUIDANCE_HEIGHT, leaf(Region::Guidance)),
+                FlexItem::fixed(composer_band_height, leaf(Region::Surface(self))),
+            ]),
+            _ => leaf(Region::Surface(self)),
         };
         ModalLayer {
             placement,
             host_band_height,
-            tree: leaf(Region::Surface(self)),
+            tree,
         }
     }
 

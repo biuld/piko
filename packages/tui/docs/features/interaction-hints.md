@@ -12,8 +12,9 @@ Interaction surfaces use the same contract even when their hints are painted
 in different locations.
 
 The contract separates **what guidance is available** from **where it is
-rendered**. A pane footer, a future resident guidance row, or another chrome
-projection may consume the same hint value without changing feature state.
+rendered**. The resident [Guidance Row](./guidance-row.md) consumes Chat,
+Select, and Dock hints; CoverBody and Centered surfaces consume the same
+contract in pane-local footers.
 
 ## Content
 
@@ -46,8 +47,6 @@ not define the bindings.
 
 ## Non-goals
 
-- Selecting one global or local rendering location.
+- Defining layout geometry for Guidance Row or pane-local projections.
 - Defining arbitration between notices and hints.
-- Moving all existing pane footers into a resident row.
 - Storing hint history or mixing hints into `NotificationCenter`.
-

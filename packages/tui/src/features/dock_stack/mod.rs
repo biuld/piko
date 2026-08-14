@@ -26,8 +26,8 @@ pub use grant::DockBandGrant;
 pub use grant::DockSolveOutput;
 pub use offer::DockBandOffer;
 pub use registry::{
-    COMPOSER_MIN_HEIGHT, NOTICE_HEIGHT, SUGGEST_MIN_HEIGHT, TODOS_MAX_ITEM_ROWS, TODOS_MIN_HEIGHT,
-    suggestion_preferred_height,
+    COMPOSER_MIN_HEIGHT, GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, TODOS_MAX_ITEM_ROWS,
+    TODOS_MIN_HEIGHT, suggestion_preferred_height,
 };
 #[allow(unused_imports)] // public API + tests
 pub use registry::{STREAM_MIN_ABS, registry, stream_min};

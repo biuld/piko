@@ -7,9 +7,9 @@ use crate::navigation::Region;
 /// Stream is not a band offer — it is the grow anchor handled beside solve.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum BandId {
-    Notice,
     Todos,
     Suggest,
+    Guidance,
     Composer,
 }
 
@@ -31,7 +31,7 @@ pub enum ShrinkClass {
     Durable,
     /// Composer — shrink toward editor min after ephemeral classes.
     Anchor,
-    /// Notice — 0 or full min only (never fractional shrink).
+    /// Single-row resident guidance — preserved unless the body is pathological.
     Protect,
 }
 
@@ -49,9 +49,9 @@ impl BandId {
     /// Map band id to the paint [`Region`] leaf.
     pub fn region(self) -> Region {
         match self {
-            BandId::Notice => Region::Notice,
             BandId::Todos => Region::Todos,
             BandId::Suggest => Region::Suggest,
+            BandId::Guidance => Region::Guidance,
             BandId::Composer => Region::Composer,
         }
     }
