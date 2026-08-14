@@ -3,7 +3,8 @@
 > Feature: [F-31](../features/F-31-durable-session-journal.md)
 > Design: [D-43](../design/D-43-event-sourced-session-store.md)
 > Decision: [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
-> Date: 2026-08-13
+> Async boundary: [ADR-017](../decisions/ADR-017-bounded-blocking-session-storage.md)
+> Date: 2026-08-15
 
 ## Automated evidence
 
@@ -20,6 +21,10 @@
 - `rolls_segment_at_one_thousand_commits` verifies that revision 1,000 seals
   the `1-1000` segment, opens `1001-open`, and publishes only the revision-1000
   snapshot.
+- `piko-session-store/tests/crash_recovery.rs` verifies that a synchronized
+  revision-1,000 commit left in the open segment is retained and normalized on
+  reopen, that a published session without its genesis commit is rejected, and
+  that parallel session creation safely shares the staging container.
 - `snapshot_plus_tail_matches_full_replay_and_corrupt_snapshot_is_disposable`
   verifies snapshot+tail/full replay equivalence and that journal replay does
   not depend on the snapshot cache. Closed-boundary snapshots are rebuilt when
@@ -43,16 +48,24 @@
 - Host open integration verifies the first reconciled snapshot already
   contains the atomic interrupted-execution report, terminal state, and
   model-visible abort marker.
+- Host repository integration verifies that schema-v4 import validates a
+  synchronized staging copy, publishes it atomically, and refuses to merge a
+  second import into the existing destination.
+- Host storage-adapter coverage verifies that one shared semaphore bounds
+  complete blocking operations and that cancelling an async waiter does not
+  cancel an already-started synchronous filesystem transaction. All session
+  repository/query ports are async and execute whole operations outside Tokio
+  runtime workers; low-level journal code remains synchronous.
 
 ## Commands
 
 ```text
 cargo fmt --all
-cargo test --workspace
+PIKO_DEV_SOURCE_ROOT=$PWD cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-All commands passed on 2026-08-13.
+All commands passed on 2026-08-15.
 
 ## Invariants
 
@@ -65,3 +78,5 @@ All commands passed on 2026-08-13.
   the previous commit.
 - Schema-v3 readers, writers, shard files, migration, import, and dual-write
   paths are absent from the production storage graph.
+- Async host callers never execute session journal filesystem work directly;
+  the shared blocking boundary limits cross-session concurrency to eight.

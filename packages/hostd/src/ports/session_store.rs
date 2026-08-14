@@ -10,47 +10,53 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use super::storage_types::{
     AgentProjection, CommittedMessage, RecoveredAgent, SessionProjection, SessionStorageError,
 };
 
-/// Narrow, synchronous read/query surface of the durable session store that
-/// `application` actually calls.
+/// Narrow async read/query surface used by the application. The filesystem
+/// adapter keeps the underlying store synchronous and offloads whole calls.
+#[async_trait]
 pub trait SessionStorePort: Send + Sync {
-    fn load_projection(&self) -> Result<SessionProjection, SessionStorageError>;
+    async fn load_projection(&self) -> Result<SessionProjection, SessionStorageError>;
 
-    fn load_agent(
+    async fn load_agent(
         &self,
         session_id: &str,
         agent_instance_id: &str,
     ) -> Result<RecoveredAgent, SessionStorageError>;
 
-    fn agent_instances(&self) -> Result<Vec<AgentProjection>, SessionStorageError>;
+    async fn agent_instances(&self) -> Result<Vec<AgentProjection>, SessionStorageError>;
 
-    fn find_committed_message(
+    async fn find_committed_message(
         &self,
         session_id: &str,
         agent_instance_id: &str,
         message_id: &str,
     ) -> Result<Option<CommittedMessage>, SessionStorageError>;
 
-    fn agent_report_for_turn(
+    async fn agent_report_for_turn(
         &self,
         turn_id: &str,
     ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError>;
 
-    fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError>;
+    async fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError>;
 }
 
 /// Opens or creates a [`SessionStorePort`] for a given session directory.
+#[async_trait]
 pub trait SessionStoreFactory: Send + Sync {
     fn open(&self, session_dir: &Path) -> Arc<dyn SessionStorePort>;
 
-    fn create(
+    async fn create(
         &self,
         session_dir: &Path,
         session_id: String,
         cwd: String,
         created_at: i64,
     ) -> Result<Arc<dyn SessionStorePort>, SessionStorageError>;
+
+    async fn delete(&self, session_dir: &Path) -> Result<(), SessionStorageError>;
 }

@@ -7,9 +7,9 @@ use piko_protocol::AgentInstanceIdentity;
 use serde::{Deserialize, Serialize};
 
 use crate::error::io_error;
-use crate::journal_io::{atomic_json, checksum, proposal_matches, sync_dir};
+use crate::journal_io::{checksum, proposal_matches, sync_dir};
 use crate::replay::read_all;
-use crate::schema::{EventData, RawEvent};
+use crate::schema::RawEvent;
 use crate::segments::{
     append_line, create_open_segment, normalize_segment_boundary, open_path, segment_start,
 };
@@ -94,14 +94,14 @@ pub struct Checksum {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionIdentityFile {
-    schema_version: u32,
-    session_id: String,
-    cwd: String,
-    created_at: i64,
-    journal_generation: String,
+pub(crate) struct SessionIdentityFile {
+    pub(crate) schema_version: u32,
+    pub(crate) session_id: String,
+    pub(crate) cwd: String,
+    pub(crate) created_at: i64,
+    pub(crate) journal_generation: String,
     #[serde(default)]
-    extensions: BTreeMap<String, serde_json::Value>,
+    pub(crate) extensions: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -176,57 +176,15 @@ impl SessionStore {
         })
     }
 
-    pub fn create(path: &Path, session: NewSession) -> Result<OpenedSession> {
-        match fs::create_dir(path) {
-            Ok(()) => {}
-            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
-                let mut entries = fs::read_dir(path).map_err(|source| io_error(path, source))?;
-                if entries.next().is_some() {
-                    return Err(StoreError::InvalidEvent(format!(
-                        "session directory is not empty: {}",
-                        path.display()
-                    )));
-                }
-            }
-            Err(source) => return Err(io_error(path, source)),
-        }
-        fs::create_dir(path.join("events")).map_err(|source| io_error(path, source))?;
-        fs::create_dir(path.join("snapshots")).map_err(|source| io_error(path, source))?;
-        let identity = SessionIdentityFile {
-            schema_version: SCHEMA_VERSION,
-            session_id: session.session_id.clone(),
-            cwd: session.cwd.clone(),
-            created_at: session.created_at,
-            journal_generation: uuid::Uuid::new_v4().to_string(),
-            extensions: BTreeMap::new(),
-        };
-        atomic_json(&path.join("session.json"), &identity)?;
-        create_open_segment(path, 1)?;
-        sync_dir(path)?;
-        let opened = Self::open(path, OpenOptions::default())?;
-        let event = RawEvent::new(
-            uuid::Uuid::new_v4().to_string(),
-            EventData::SessionCreated {
-                session_id: session.session_id,
-                cwd: session.cwd,
-                root: session.root,
-                created_at: session.created_at,
-            },
-        )?;
-        let committed = opened.store.append(
-            0,
-            ProposedCommit::one(uuid::Uuid::new_v4().to_string(), session.created_at, event),
-        )?;
-        let mut aggregate = SessionAggregate::default();
-        aggregate.apply(&committed)?;
-        Ok(OpenedSession {
-            store: opened.store,
-            aggregate,
-            recovery: opened.recovery,
-        })
+    pub fn open(path: &Path, options: OpenOptions) -> Result<OpenedSession> {
+        Self::open_internal(path, options, false)
     }
 
-    pub fn open(path: &Path, options: OpenOptions) -> Result<OpenedSession> {
+    pub(crate) fn open_internal(
+        path: &Path,
+        options: OpenOptions,
+        allow_empty_genesis: bool,
+    ) -> Result<OpenedSession> {
         let path = path
             .canonicalize()
             .map_err(|source| io_error(path, source))?;
@@ -273,7 +231,12 @@ impl SessionStore {
             std::fs::TryLockError::WouldBlock => StoreError::WriterLocked(lock_path.clone()),
             std::fs::TryLockError::Error(source) => io_error(&lock_path, source),
         })?;
-        let (commits, recovery, _) = read_all(&path, options.repair_incomplete_tail)?;
+        let (commits, mut recovery, _) = read_all(&path, options.repair_incomplete_tail)?;
+        if commits.is_empty() && !allow_empty_genesis {
+            return Err(StoreError::InvalidEvent(
+                "journal is missing the session_created genesis commit".into(),
+            ));
+        }
         let last_checksum = commits.last().map(|commit| commit.checksum.value.clone());
         if commits.iter().any(|commit| {
             commit.session_id != identity.session_id
@@ -313,7 +276,9 @@ impl SessionStore {
                 "journal aggregate does not match session identity".into(),
             ));
         }
-        normalize_segment_boundary(&path, aggregate.revision)?;
+        if normalize_segment_boundary(&path, aggregate.revision)? {
+            recovery.repaired = true;
+        }
         let boundary_revision = (aggregate.revision / COMMITS_PER_SEGMENT) * COMMITS_PER_SEGMENT;
         let boundary_snapshot = if boundary_revision == 0 {
             None
@@ -380,7 +345,7 @@ impl SessionStore {
             .unwrap_or_else(|error| error.into_inner());
         if let Some(revision) = aggregate.commit_revision(&proposed.commit_id) {
             if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
-                normalize_segment_boundary(&self.inner.path, revision)?;
+                let _ = normalize_segment_boundary(&self.inner.path, revision)?;
             }
             let existing = self.commit_at(revision)?;
             if proposal_matches(&proposed, &existing) {

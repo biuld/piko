@@ -38,7 +38,9 @@ pub(super) fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), std::io::Error>
             copy_dir_all(&e.path(), &t)?;
         } else {
             fs::copy(e.path(), &t)?;
+            fs::File::open(&t)?.sync_all()?;
         }
     }
+    fs::File::open(dst)?.sync_all()?;
     Ok(())
 }

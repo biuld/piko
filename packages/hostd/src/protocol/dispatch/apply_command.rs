@@ -421,6 +421,7 @@ impl HostServer {
                         .ok_or_else(|| ProtocolError::SessionNotFound(session_id.clone()))?;
                     storage
                         .set_selected_agent(&session_dir, &agent_instance_id, now_ms())
+                        .await
                         .map_err(crate::util::storage_error)?;
                 }
                 let (snapshot, replay) = {

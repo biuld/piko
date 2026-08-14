@@ -8,6 +8,7 @@ mod aggregate;
 mod aggregate_queries;
 mod error;
 mod journal;
+mod journal_create;
 mod journal_io;
 mod journal_queries;
 mod projection;

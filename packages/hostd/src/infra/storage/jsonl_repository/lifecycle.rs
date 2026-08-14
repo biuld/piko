@@ -18,6 +18,13 @@ impl JsonlSessionRepository {
         load_session_dir(path)
     }
 
+    pub fn delete(&self, session_dir: &Path) -> Result<(), SessionStorageError> {
+        fs::remove_dir_all(session_dir).map_err(|source| SessionStorageError::Io {
+            path: session_dir.to_path_buf(),
+            source,
+        })
+    }
+
     pub fn default_root() -> PathBuf {
         if let Some(root) = std::env::var_os("PIKO_HOME") {
             return PathBuf::from(root).join("agent").join("sessions");
@@ -43,10 +50,6 @@ impl JsonlSessionRepository {
             created_at.replace([':', '.'], "-"),
             session_id
         ));
-        fs::create_dir(&dir).map_err(|source| SessionStorageError::Io {
-            path: dir.clone(),
-            source,
-        })?;
         SessionStore::create_session(
             dir.clone(),
             session_id,

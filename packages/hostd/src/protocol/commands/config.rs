@@ -130,18 +130,21 @@ impl ConfigObserver for SessionStorageObserver {
                     // writes only persist the thinking-level marker; a model
                     // setting change without an executing turn is a live
                     // `ModelEvent::ConfigChanged`, not a session timeline fact.
-                    match storage.append_config_metadata(
-                        &path,
-                        parent_id.as_deref(),
-                        None,
-                        None,
-                        if thinking_changed {
-                            thinking_level.as_ref().map(|t| t.as_str())
-                        } else {
-                            None
-                        },
-                        None,
-                    ) {
+                    match storage
+                        .append_config_metadata(
+                            &path,
+                            parent_id.as_deref(),
+                            None,
+                            None,
+                            if thinking_changed {
+                                thinking_level.as_ref().map(|t| t.as_str())
+                            } else {
+                                None
+                            },
+                            None,
+                        )
+                        .await
+                    {
                         Ok(entries) => {
                             {
                                 let mut state = server.state.lock().await;

@@ -17,21 +17,23 @@ impl JsonlSessionRepository {
         updated_at: i64,
     ) -> Result<(), SessionStorageError> {
         let store = SessionStore::new(session_dir);
-        let projection = store.load_projection()?;
-        if projection.selected_agent_instance_id.as_deref() == Some(agent_instance_id) {
-            return Ok(());
-        }
-        let seed = format!("{agent_instance_id}:{}", projection.journal_revision);
-        commit_events(
-            &store,
-            "agent-selected",
-            &seed,
-            updated_at,
-            vec![EventData::AgentSelected {
-                agent_instance_id: agent_instance_id.to_string(),
-                selected_at: updated_at,
-            }],
-        )
+        store.with_io(|| {
+            let projection = store.load_projection()?;
+            if projection.selected_agent_instance_id.as_deref() == Some(agent_instance_id) {
+                return Ok(());
+            }
+            let seed = format!("{agent_instance_id}:{}", projection.journal_revision);
+            commit_events(
+                &store,
+                "agent-selected",
+                &seed,
+                updated_at,
+                vec![EventData::AgentSelected {
+                    agent_instance_id: agent_instance_id.to_string(),
+                    selected_at: updated_at,
+                }],
+            )
+        })
     }
 
     pub fn append_entry(
@@ -111,7 +113,7 @@ impl JsonlSessionRepository {
                     .map_err(commit_storage_error)?;
                 Ok(())
             }
-            _ => append_tree_entry(&store, entry),
+            _ => store.with_io(|| append_tree_entry(&store, entry)),
         }
     }
 
@@ -130,18 +132,14 @@ impl JsonlSessionRepository {
         });
         let store = SessionStore::new(session_dir);
         let committed_at = entry.timestamp().parse().unwrap_or_default();
-        commit_events(
-            &store,
-            "session-info",
-            entry.id(),
-            committed_at,
-            vec![
-                EventData::SessionMetadataChanged {
-                    name: Some(name.to_string()),
-                },
-                tree_entry_event(&entry)?,
-            ],
-        )?;
+        let events = vec![
+            EventData::SessionMetadataChanged {
+                name: Some(name.to_string()),
+            },
+            tree_entry_event(&entry)?,
+        ];
+        store
+            .with_io(|| commit_events(&store, "session-info", entry.id(), committed_at, events))?;
         Ok(entry)
     }
 
@@ -191,13 +189,15 @@ impl JsonlSessionRepository {
                     },
                 );
             }
-            commit_events(
-                &store,
-                "config-metadata",
-                last.id(),
-                last.timestamp().parse().unwrap_or_default(),
-                events,
-            )?;
+            store.with_io(|| {
+                commit_events(
+                    &store,
+                    "config-metadata",
+                    last.id(),
+                    last.timestamp().parse().unwrap_or_default(),
+                    events,
+                )
+            })?;
         }
         Ok(entries)
     }
@@ -208,24 +208,26 @@ impl JsonlSessionRepository {
         model: Option<&crate::domain::sessions::SessionModelRef>,
     ) -> Result<(), SessionStorageError> {
         let store = SessionStore::new(session_dir);
-        let projection = store.load_projection()?;
-        if projection.last_model.as_ref() == model {
-            return Ok(());
-        }
-        let value_seed = model
-            .map(|value| format!("{}:{}", value.provider, value.model_id))
-            .unwrap_or_else(|| "cleared".into());
-        let seed = format!("{value_seed}:{}", projection.journal_revision);
-        commit_events(
-            &store,
-            "model-continuity",
-            &seed,
-            now_millis(),
-            vec![EventData::ModelContinuityChanged {
-                provider: model.map(|value| value.provider.clone()),
-                model_id: model.map(|value| value.model_id.clone()),
-            }],
-        )
+        store.with_io(|| {
+            let projection = store.load_projection()?;
+            if projection.last_model.as_ref() == model {
+                return Ok(());
+            }
+            let value_seed = model
+                .map(|value| format!("{}:{}", value.provider, value.model_id))
+                .unwrap_or_else(|| "cleared".into());
+            let seed = format!("{value_seed}:{}", projection.journal_revision);
+            commit_events(
+                &store,
+                "model-continuity",
+                &seed,
+                now_millis(),
+                vec![EventData::ModelContinuityChanged {
+                    provider: model.map(|value| value.provider.clone()),
+                    model_id: model.map(|value| value.model_id.clone()),
+                }],
+            )
+        })
     }
 
     /// Persist the session's world-state baseline (F-04 slice 2). `None`
@@ -236,30 +238,32 @@ impl JsonlSessionRepository {
         facts: Option<&crate::domain::prompts::WorldStateFacts>,
     ) -> Result<(), SessionStorageError> {
         let store = SessionStore::new(session_dir);
-        let projection = store.load_projection()?;
-        if projection.world_state_baseline.as_ref() == facts {
-            return Ok(());
-        }
-        let value = facts
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(|source| SessionStorageError::Json {
-                path: session_dir.to_path_buf(),
-                source,
-            })?;
-        let value_seed =
-            serde_json::to_string(&value).map_err(|source| SessionStorageError::Json {
-                path: session_dir.to_path_buf(),
-                source,
-            })?;
-        let seed = format!("{value_seed}:{}", projection.journal_revision);
-        commit_events(
-            &store,
-            "world-state",
-            &seed,
-            now_millis(),
-            vec![EventData::WorldStateAdvanced { facts: value }],
-        )
+        store.with_io(|| {
+            let projection = store.load_projection()?;
+            if projection.world_state_baseline.as_ref() == facts {
+                return Ok(());
+            }
+            let value = facts
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(|source| SessionStorageError::Json {
+                    path: session_dir.to_path_buf(),
+                    source,
+                })?;
+            let value_seed =
+                serde_json::to_string(&value).map_err(|source| SessionStorageError::Json {
+                    path: session_dir.to_path_buf(),
+                    source,
+                })?;
+            let seed = format!("{value_seed}:{}", projection.journal_revision);
+            commit_events(
+                &store,
+                "world-state",
+                &seed,
+                now_millis(),
+                vec![EventData::WorldStateAdvanced { facts: value }],
+            )
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

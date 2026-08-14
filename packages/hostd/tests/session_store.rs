@@ -60,6 +60,26 @@ fn repository_create_returns_the_persisted_root_agent_selected() {
     );
 }
 
+#[test]
+fn import_validates_then_atomically_publishes_without_merging_existing_destination() {
+    let source_root = tempdir().unwrap();
+    let destination_root = tempdir().unwrap();
+    let source = JsonlSessionRepository::new(source_root.path())
+        .create("/project")
+        .unwrap();
+    let destination_repo = JsonlSessionRepository::new(destination_root.path());
+
+    let imported = destination_repo.import(&source.path).unwrap();
+    assert_eq!(imported.state.session_id, source.state.session_id);
+    assert_eq!(imported.state.cwd, source.state.cwd);
+    assert!(imported.path.join("session.json").is_file());
+
+    let error = destination_repo.import(&source.path).unwrap_err();
+    assert!(error.to_string().contains("destination already exists"));
+    let reopened = destination_repo.load_by_path(&imported.path).unwrap();
+    assert_eq!(reopened.state.session_id, source.state.session_id);
+}
+
 #[tokio::test]
 async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
     let temp = tempdir().unwrap();

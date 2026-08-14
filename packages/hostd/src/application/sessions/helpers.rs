@@ -74,7 +74,8 @@ impl HostApp {
             &agents,
             self.session_paths.lock().await.get(session_id).cloned(),
             &self.session_store_factory,
-        );
+        )
+        .await;
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
@@ -151,7 +152,7 @@ impl HostApp {
     }
 }
 
-fn merge_agent_usage_runtime(
+async fn merge_agent_usage_runtime(
     snapshot: &mut SessionSnapshot,
     agents: &[AgentInfo],
     session_dir: Option<std::path::PathBuf>,
@@ -176,7 +177,7 @@ fn merge_agent_usage_runtime(
     }
 
     if let Some(session_dir) = session_dir
-        && let Ok(projection) = store_factory.open(&session_dir).load_projection()
+        && let Ok(projection) = store_factory.open(&session_dir).load_projection().await
     {
         for row in row_by_instance.values_mut() {
             row.run_count = Some(0);

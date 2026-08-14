@@ -159,9 +159,12 @@ impl HostApp {
             && let Some(path) = path.as_ref()
         {
             if let Some(b) = &branch_summary {
-                storage.append_entry(path, b, None).map_err(storage_error)?;
+                storage
+                    .append_entry(path, b, None)
+                    .await
+                    .map_err(storage_error)?;
                 target_id = Some(b.id().to_string());
-                let persisted = storage.load_by_path(path).map_err(storage_error)?;
+                let persisted = storage.load_by_path(path).await.map_err(storage_error)?;
                 state.insert_session(persisted.state);
             }
 
@@ -174,9 +177,10 @@ impl HostApp {
                     leaf_target.as_deref(),
                     None,
                 )
+                .await
                 .map_err(storage_error)?;
 
-            let persisted = storage.load_by_path(path).map_err(storage_error)?;
+            let persisted = storage.load_by_path(path).await.map_err(storage_error)?;
             state.insert_session(persisted.state);
             persisted_via_storage = true;
         }

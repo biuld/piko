@@ -20,6 +20,7 @@ impl HostApp {
             .session_store_factory
             .open(&session_dir)
             .load_projection()
+            .await
             .map_err(storage_error)?;
         let target = projection
             .agents

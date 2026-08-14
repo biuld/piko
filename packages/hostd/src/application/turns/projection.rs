@@ -19,7 +19,7 @@ use crate::ports::storage_types::SessionStorageError;
 /// publishing `MessageCommitted`, so prefer in-memory HostState (already
 /// projected by [`record_committed_message`]) and fall back to durable
 /// storage for the first observation or during session recovery.
-pub fn project_committed_message(
+pub async fn project_committed_message(
     state: &HostState,
     store: Option<&dyn SessionStorePort>,
     session_id: &str,
@@ -31,14 +31,18 @@ pub fn project_committed_message(
     {
         return Some(projected);
     }
-    store.and_then(|store| {
-        project_committed_message_from_store(store, session_id, agent_instance_id, message_id)
-    })
+    match store {
+        Some(store) => {
+            project_committed_message_from_store(store, session_id, agent_instance_id, message_id)
+                .await
+        }
+        None => None,
+    }
 }
 
 /// Project a durably committed message and record it into HostState so a
 /// subsequent `StateSnapshot` reflects it without a disk reload.
-pub fn record_committed_message(
+pub async fn record_committed_message(
     state: &mut HostState,
     store: Option<&dyn SessionStorePort>,
     session_id: &str,
@@ -46,17 +50,19 @@ pub fn record_committed_message(
     message_id: &str,
 ) -> Result<Option<TranscriptCommittedEvent>, ProtocolError> {
     let Some(projected) =
-        project_committed_message(state, store, session_id, agent_instance_id, message_id)
+        project_committed_message(state, store, session_id, agent_instance_id, message_id).await
     else {
         return Ok(None);
     };
-    let tree_parent_id = store.and_then(|store| {
-        store
+    let tree_parent_id = match store {
+        Some(store) => store
             .find_committed_message(session_id, agent_instance_id, message_id)
+            .await
             .ok()
             .flatten()
-            .and_then(|message| message.tree_parent_id)
-    });
+            .and_then(|message| message.tree_parent_id),
+        None => None,
+    };
     append_committed_message(
         state,
         session_id,
@@ -72,19 +78,19 @@ pub fn record_committed_message(
 
 /// Rebuild the in-memory committed projection from the durable aggregate.
 /// This is used when reliable observation cannot replay the full cursor range.
-pub fn reconcile_committed_messages(
+pub async fn reconcile_committed_messages(
     state: &mut HostState,
     store: &dyn SessionStorePort,
     session_id: &str,
 ) -> Result<(), ProtocolError> {
-    let agents = match store.agent_instances() {
+    let agents = match store.agent_instances().await {
         Ok(agents) => agents,
         Err(SessionStorageError::NotFound(_)) => return Ok(()),
         Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
     };
     for agent in agents {
         let agent_instance_id = agent.identity.agent_instance_id;
-        let recovered = match store.load_agent(session_id, &agent_instance_id) {
+        let recovered = match store.load_agent(session_id, &agent_instance_id).await {
             Ok(recovered) => recovered,
             Err(SessionStorageError::NotFound(_)) => continue,
             Err(SessionStorageError::Io { source, .. })
@@ -101,7 +107,8 @@ pub fn reconcile_committed_messages(
                 session_id,
                 &agent_instance_id,
                 &message.id,
-            )?;
+            )
+            .await?;
         }
     }
     Ok(())
@@ -135,7 +142,7 @@ fn project_committed_message_from_state(
     })
 }
 
-fn project_committed_message_from_store(
+async fn project_committed_message_from_store(
     store: &dyn SessionStorePort,
     session_id: &str,
     agent_instance_id: &str,
@@ -143,6 +150,7 @@ fn project_committed_message_from_store(
 ) -> Option<TranscriptCommittedEvent> {
     let message = store
         .find_committed_message(session_id, agent_instance_id, message_id)
+        .await
         .ok()
         .flatten()?;
     Some(TranscriptCommittedEvent {

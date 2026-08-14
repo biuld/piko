@@ -9,7 +9,7 @@ use crate::util::{now_ms, storage_error};
 use super::helpers::{server_response_ok, session_opened_messages, session_reconciled_message};
 
 impl HostApp {
-    pub(super) fn session_open_response(
+    pub(super) async fn session_open_response(
         state: &mut crate::domain::sessions::HostState,
         command_id: &str,
         session_id: String,
@@ -19,7 +19,7 @@ impl HostApp {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         if let Some(path) = session_path {
             let store = session_store_factory.open(path);
-            let projection = store.load_projection().map_err(storage_error)?;
+            let projection = store.load_projection().await.map_err(storage_error)?;
             for queued in projection.agent_input_queue {
                 let Some(turn_id) = queued.request.source_turn_id.as_deref() else {
                     continue;
@@ -72,12 +72,14 @@ impl HostApp {
                     turn_id.clone(),
                     store
                         .agent_report_for_turn(turn_id)
+                        .await
                         .map_err(storage_error)?,
                 ));
             }
             if reports.iter().any(|(_, report)| report.is_none()) {
                 store
                     .interrupt_incomplete_agent_executions()
+                    .await
                     .map_err(storage_error)?;
             }
             let mut events = Vec::with_capacity(reports.len());
@@ -86,6 +88,7 @@ impl HostApp {
                     Some(report) => Some(report),
                     None => store
                         .agent_report_for_turn(&turn_id)
+                        .await
                         .map_err(storage_error)?,
                 };
                 let event = match report.map(|report| report.outcome) {
@@ -116,7 +119,8 @@ impl HostApp {
                 state,
                 store.as_ref(),
                 &session_id,
-            )?;
+            )
+            .await?;
         }
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
@@ -134,17 +138,15 @@ impl HostApp {
         command_id: &str,
         cwd: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let mut state = self.state.lock().await;
         if let Some(storage) = &self.storage {
-            let persisted = storage.create(&cwd).map_err(storage_error)?;
+            let persisted = storage.create(&cwd).await.map_err(storage_error)?;
             let session_id = persisted.state.session_id.clone();
             let session_path = persisted.path.clone();
             self.session_paths
                 .lock()
                 .await
                 .insert(session_id.clone(), session_path.clone());
-            state.insert_session(persisted.state);
-            drop(state);
+            self.state.lock().await.insert_session(persisted.state);
             let (snapshot, agents) = self.session_view(&session_id).await?;
             Ok(vec![
                 server_response_ok(
@@ -163,7 +165,8 @@ impl HostApp {
                 ),
             ])
         } else {
-            let created = state.create_session(cwd);
+            let mut state = self.state.lock().await;
+            let created = state.create_session(cwd.clone());
             let session_id = match &created {
                 crate::api::CommandResult::SessionCreated { session_id, .. } => session_id.clone(),
                 other => {
@@ -173,6 +176,11 @@ impl HostApp {
                 }
             };
             drop(state);
+            // In-memory host configurations still use an ephemeral journal
+            // for Turn execution. Create it with the session itself so the
+            // first chat does not pay genesis durability latency before its
+            // acceptance response.
+            self.ensure_turn_session_dir(&session_id, &cwd).await?;
             let (snapshot, agents) = self.session_view(&session_id).await?;
             Ok(vec![
                 server_response_ok(command_id, created),
@@ -212,7 +220,8 @@ impl HostApp {
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
                 true,
-            )?;
+            )
+            .await?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
@@ -220,7 +229,7 @@ impl HostApp {
         // 1. If session_path is provided, load that session directory.
         if let (Some(path_str), Some(storage)) = (session_path, &self.storage) {
             let path = PathBuf::from(path_str);
-            let persisted = storage.load_by_path(&path).map_err(|err| match err {
+            let persisted = storage.load_by_path(&path).await.map_err(|err| match err {
                 SessionStorageError::NotFound(_) => {
                     ProtocolError::SessionNotFound(session_id.clone())
                 }
@@ -246,7 +255,8 @@ impl HostApp {
                 Some(&path),
                 self.session_store_factory.as_ref(),
                 false,
-            )?;
+            )
+            .await?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
         }
@@ -260,14 +270,15 @@ impl HostApp {
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
                 false,
-            )?;
+            )
+            .await?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
 
         // 3. Search all known sessions.
         if let Some(storage) = &self.storage {
-            let all_sessions = storage.list(None).map_err(storage_error)?;
+            let all_sessions = storage.list(None).await.map_err(storage_error)?;
             let exact_match = all_sessions
                 .iter()
                 .find(|s| s.state.session_id == session_id);
@@ -286,7 +297,8 @@ impl HostApp {
                     Some(&path),
                     self.session_store_factory.as_ref(),
                     false,
-                )?;
+                )
+                .await?;
                 drop(state);
                 return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
             }
@@ -317,7 +329,8 @@ impl HostApp {
                     Some(&path),
                     self.session_store_factory.as_ref(),
                     false,
-                )?;
+                )
+                .await?;
                 drop(state);
                 return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
             }
@@ -349,6 +362,7 @@ impl HostApp {
         let sessions = if let Some(storage) = &self.storage {
             storage
                 .summaries(list_cwd.as_deref())
+                .await
                 .map_err(storage_error)?
         } else {
             let state = self.state.lock().await;
@@ -451,6 +465,7 @@ mod tests {
             &factory,
             false,
         )
+        .await
         .unwrap();
 
         assert!(events.iter().any(|event| matches!(
@@ -470,6 +485,7 @@ mod tests {
             &factory,
             false,
         )
+        .await
         .unwrap();
         assert!(
             replay

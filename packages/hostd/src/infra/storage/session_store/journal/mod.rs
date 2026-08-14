@@ -130,16 +130,10 @@ impl SessionStore {
             events: raw,
             extensions: BTreeMap::new(),
         };
-        let mut expected_revision = revision;
-        loop {
-            match journal.append(expected_revision, proposed.clone()) {
-                Ok(commit) => return Ok(commit.revision),
-                Err(piko_session_store::StoreError::RevisionConflict { current, .. }) => {
-                    expected_revision = current;
-                }
-                Err(error) => return Err(self.storage_error(error)),
-            }
-        }
+        journal
+            .append(revision, proposed)
+            .map(|commit| commit.revision)
+            .map_err(|error| self.storage_error(error))
     }
 
     fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {

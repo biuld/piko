@@ -17,7 +17,7 @@ impl HostApp {
         let Some(storage) = &self.storage else {
             return Err(ProtocolError::SessionNotFound(session_id.into()));
         };
-        let summaries = storage.summaries(None).map_err(storage_error)?;
+        let summaries = storage.summaries(None).await.map_err(storage_error)?;
         let Some(summary) = summaries.iter().find(|s| s.session_id == session_id) else {
             return Err(ProtocolError::SessionNotFound(session_id.into()));
         };
@@ -33,19 +33,24 @@ impl HostApp {
         session_id: &str,
         path: &Path,
     ) -> Result<(), ProtocolError> {
-        let mut state = self.state.lock().await;
-        if state.has_session(session_id) {
-            return Ok(());
+        {
+            let state = self.state.lock().await;
+            if state.has_session(session_id) {
+                return Ok(());
+            }
         }
         let Some(storage) = &self.storage else {
             return Err(ProtocolError::SessionNotFound(session_id.into()));
         };
-        let persisted = storage.load_by_path(path).map_err(storage_error)?;
+        let persisted = storage.load_by_path(path).await.map_err(storage_error)?;
         self.session_paths
             .lock()
             .await
             .insert(session_id.to_string(), path.to_path_buf());
-        state.insert_session(persisted.state);
+        let mut state = self.state.lock().await;
+        if !state.has_session(session_id) {
+            state.insert_session(persisted.state);
+        }
         Ok(())
     }
 
@@ -77,6 +82,7 @@ impl HostApp {
         }
         let persisted = storage
             .fork(&session_id, &source_path, entry_id.as_deref())
+            .await
             .map_err(storage_error)?;
         let forked_id = persisted.state.session_id.clone();
 
@@ -94,7 +100,8 @@ impl HostApp {
             Some(&path),
             self.session_store_factory.as_ref(),
             false,
-        )?;
+        )
+        .await?;
         drop(state);
         events = self.enrich_reconcile_messages(&forked_id, events).await;
         Ok(events)
@@ -112,6 +119,7 @@ impl HostApp {
         };
         let persisted = storage
             .import(&PathBuf::from(path))
+            .await
             .map_err(storage_error)?;
         let imported_id = persisted.state.session_id.clone();
 
@@ -129,7 +137,8 @@ impl HostApp {
             Some(&path),
             self.session_store_factory.as_ref(),
             false,
-        )?;
+        )
+        .await?;
         drop(state);
         events = self.enrich_reconcile_messages(&imported_id, events).await;
         Ok(events)
@@ -156,6 +165,7 @@ impl HostApp {
             Some(
                 storage
                     .append_session_info(&path, parent_id.as_deref(), &name, None)
+                    .await
                     .map_err(storage_error)?,
             )
         } else {
@@ -189,9 +199,14 @@ impl HostApp {
         let mapped = self.session_paths.lock().await.get(&session_id).cloned();
         let path = path.or(mapped);
         if let Some(path) = path {
-            std::fs::remove_dir_all(path).map_err(|error| {
-                ProtocolError::InvalidCommand(format!("delete session storage: {error}"))
-            })?;
+            if let Some(storage) = &self.storage {
+                storage.delete(&path).await.map_err(storage_error)?;
+            } else {
+                self.session_store_factory
+                    .delete(&path)
+                    .await
+                    .map_err(storage_error)?;
+            }
         }
         self.state.lock().await.delete_session(&session_id);
         self.session_paths.lock().await.remove(&session_id);
@@ -210,14 +225,19 @@ impl HostApp {
         entry_id: String,
         label: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let mut state = self.state.lock().await;
         if let Some(storage) = &self.storage {
             let path = {
                 let paths = self.session_paths.lock().await;
                 paths.get(&session_id).cloned()
             };
             if let Some(path) = path {
-                let parent_id = state.session(&session_id)?.current_leaf_id.clone();
+                let parent_id = self
+                    .state
+                    .lock()
+                    .await
+                    .session(&session_id)?
+                    .current_leaf_id
+                    .clone();
                 let label_entry = crate::api::SessionTreeEntry::Label(piko_protocol::LabelEntry {
                     id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
                     parent_id: parent_id.clone(),
@@ -228,13 +248,13 @@ impl HostApp {
 
                 storage
                     .append_entry(&path, &label_entry, None)
+                    .await
                     .map_err(storage_error)?;
-                let persisted = storage.load_by_path(&path).map_err(storage_error)?;
-                state.insert_session(persisted.state);
+                let persisted = storage.load_by_path(&path).await.map_err(storage_error)?;
+                self.state.lock().await.insert_session(persisted.state);
             }
         }
 
-        drop(state);
         let (snapshot, agents) = self.session_view(&session_id).await?;
         Ok(vec![
             server_response_ok(command_id, crate::api::CommandResult::Empty),

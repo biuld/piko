@@ -8,37 +8,46 @@
 
 use std::path::Path;
 
+use async_trait::async_trait;
+
 use super::storage_types::{PersistedSession, SessionStorageError};
 use crate::api::{SessionSummary, SessionTreeEntry};
 use crate::domain::prompts::WorldStateFacts;
 use crate::domain::sessions::SessionModelRef;
 
+#[async_trait]
 pub trait SessionRepositoryPort: Send + Sync {
-    fn create(&self, cwd: &str) -> Result<PersistedSession, SessionStorageError>;
+    async fn create(&self, cwd: &str) -> Result<PersistedSession, SessionStorageError>;
 
-    fn load_by_path(&self, path: &Path) -> Result<PersistedSession, SessionStorageError>;
+    async fn load_by_path(&self, path: &Path) -> Result<PersistedSession, SessionStorageError>;
 
-    fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError>;
+    async fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError>;
 
-    fn summaries(&self, cwd: Option<&str>) -> Result<Vec<SessionSummary>, SessionStorageError>;
+    async fn summaries(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<Vec<SessionSummary>, SessionStorageError>;
 
-    fn fork(
+    async fn fork(
         &self,
         source_id: &str,
         source_dir: &Path,
         entry_id: Option<&str>,
     ) -> Result<PersistedSession, SessionStorageError>;
 
-    fn import(&self, input_path: &Path) -> Result<PersistedSession, SessionStorageError>;
+    async fn import(&self, input_path: &Path) -> Result<PersistedSession, SessionStorageError>;
 
-    fn append_entry(
+    /// Remove one resolved session directory.
+    async fn delete(&self, session_dir: &Path) -> Result<(), SessionStorageError>;
+
+    async fn append_entry(
         &self,
         session_dir: &Path,
         entry: &SessionTreeEntry,
         agent_id: Option<&str>,
     ) -> Result<(), SessionStorageError>;
 
-    fn append_session_info(
+    async fn append_session_info(
         &self,
         session_dir: &Path,
         parent_id: Option<&str>,
@@ -46,7 +55,7 @@ pub trait SessionRepositoryPort: Send + Sync {
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError>;
 
-    fn append_config_metadata(
+    async fn append_config_metadata(
         &self,
         session_dir: &Path,
         parent_id: Option<&str>,
@@ -57,7 +66,7 @@ pub trait SessionRepositoryPort: Send + Sync {
     ) -> Result<Vec<SessionTreeEntry>, SessionStorageError>;
 
     /// Persist the session's last executed model record.
-    fn set_last_model(
+    async fn set_last_model(
         &self,
         session_dir: &Path,
         model: Option<&SessionModelRef>,
@@ -65,14 +74,14 @@ pub trait SessionRepositoryPort: Send + Sync {
 
     /// Persist the session's world-state baseline (F-04 slice 2). `None`
     /// clears it, forcing full re-injection on the next run.
-    fn set_world_state_baseline(
+    async fn set_world_state_baseline(
         &self,
         session_dir: &Path,
         facts: Option<&WorldStateFacts>,
     ) -> Result<(), SessionStorageError>;
 
     #[allow(clippy::too_many_arguments)]
-    fn append_compaction(
+    async fn append_compaction(
         &self,
         session_dir: &Path,
         parent_id: Option<&str>,
@@ -83,7 +92,7 @@ pub trait SessionRepositoryPort: Send + Sync {
         details: Option<serde_json::Value>,
     ) -> Result<SessionTreeEntry, SessionStorageError>;
 
-    fn navigate(
+    async fn navigate(
         &self,
         session_dir: &Path,
         parent_id: Option<&str>,
@@ -91,7 +100,7 @@ pub trait SessionRepositoryPort: Send + Sync {
         agent_id: Option<&str>,
     ) -> Result<SessionTreeEntry, SessionStorageError>;
 
-    fn set_selected_agent(
+    async fn set_selected_agent(
         &self,
         session_dir: &Path,
         agent_instance_id: &str,

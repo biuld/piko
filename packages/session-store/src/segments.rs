@@ -68,7 +68,11 @@ pub(crate) fn validate_segment(
                 "closed segment does not match its fixed range",
             ));
         }
-    } else if record_count >= COMMITS_PER_SEGMENT as usize
+    // A crash can happen after the boundary commit is synced but before the
+    // open segment is renamed to its closed range. Accept that one exact,
+    // verified boundary here; `SessionStore::open` normalizes its filename
+    // before admitting another append.
+    } else if record_count > COMMITS_PER_SEGMENT as usize
         || first_revision.is_some_and(|revision| revision != descriptor.start)
     {
         return Err(corrupt(path, "invalid open segment range"));
@@ -96,17 +100,19 @@ pub(crate) fn create_open_segment(path: &Path, start: u64) -> Result<()> {
     sync_dir(&path.join("events"))
 }
 
-pub(crate) fn normalize_segment_boundary(path: &Path, revision: u64) -> Result<()> {
+pub(crate) fn normalize_segment_boundary(path: &Path, revision: u64) -> Result<bool> {
     let events = path.join("events");
+    let mut repaired = false;
     if revision == 0 {
         let open = events.join(format!("{:020}-open.jsonl", 1));
         if !open.exists() {
             create_open_segment(path, 1)?;
+            repaired = true;
         }
-        return Ok(());
+        return Ok(repaired);
     }
     if !revision.is_multiple_of(COMMITS_PER_SEGMENT) {
-        return Ok(());
+        return Ok(false);
     }
     let start = segment_start(revision);
     let open = events.join(format!("{start:020}-open.jsonl"));
@@ -114,12 +120,14 @@ pub(crate) fn normalize_segment_boundary(path: &Path, revision: u64) -> Result<(
     if open.exists() && !closed.exists() {
         fs::rename(&open, &closed).map_err(|source| io_error(&open, source))?;
         sync_dir(&events)?;
+        repaired = true;
     }
     let next = events.join(format!("{:020}-open.jsonl", revision + 1));
     if !next.exists() {
         create_open_segment(path, revision + 1)?;
+        repaired = true;
     }
-    Ok(())
+    Ok(repaired)
 }
 
 pub(crate) fn append_line(path: &Path, commit: &DurableCommit) -> Result<()> {

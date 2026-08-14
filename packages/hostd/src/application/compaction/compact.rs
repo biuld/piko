@@ -356,6 +356,7 @@ impl HostApp {
                     tokens_before,
                     Some(details),
                 )
+                .await
                 .map_err(|error| error.to_string())?;
             state
                 .append_entry(session_id, entry)

@@ -27,29 +27,31 @@ impl HostApp {
                 return Ok(path.clone());
             }
         }
-        let mut paths = self.session_paths.lock().await;
-        if let Some(path) = paths.get(session_id) {
-            return Ok(path.clone());
+        {
+            let paths = self.session_paths.lock().await;
+            if let Some(path) = paths.get(session_id) {
+                return Ok(path.clone());
+            }
         }
         let dir = std::env::temp_dir()
             .join("piko-ephemeral-sessions")
             .join(session_id);
-        std::fs::create_dir_all(&dir).map_err(|error| {
-            ProtocolError::InvalidCommand(format!(
-                "failed to create ephemeral session directory: {error}"
-            ))
-        })?;
         if self
             .session_store_factory
             .open(&dir)
             .load_projection()
+            .await
             .is_err()
         {
             self.session_store_factory
                 .create(&dir, session_id.to_string(), cwd.to_string(), now_ms())
+                .await
                 .map_err(storage_error)?;
         }
-        paths.insert(session_id.to_string(), dir.clone());
+        self.session_paths
+            .lock()
+            .await
+            .insert(session_id.to_string(), dir.clone());
         Ok(dir)
     }
 
@@ -206,6 +208,7 @@ impl HostApp {
             if let Some(storage) = &self.storage {
                 storage
                     .set_world_state_baseline(&session_dir, Some(&world_state_facts))
+                    .await
                     .map_err(storage_error)?;
             }
             self.state
@@ -237,10 +240,12 @@ impl HostApp {
                             None,
                             None,
                         )
+                        .await
                         .map_err(storage_error)?;
                 } else if previous_model.is_none() {
                     storage
                         .set_last_model(&session_dir, Some(current))
+                        .await
                         .map_err(storage_error)?;
                 }
             }

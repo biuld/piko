@@ -38,6 +38,7 @@ impl HostApp {
             .session_store_factory
             .open(&session_dir)
             .load_agent(session_id, agent_instance_id)
+            .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
         let mut matching = recovered
             .transcript
@@ -98,11 +99,13 @@ impl HostApp {
         let store = self.session_store_factory.open(&session_dir);
         let agents = store
             .agent_instances()
+            .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
         let mut changes = Vec::new();
         for agent in agents {
             let recovered = store
                 .load_agent(session_id, &agent.identity.agent_instance_id)
+                .await
                 .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
             for committed in recovered.transcript {
                 if committed.source_turn_id.as_deref() != Some(turn_id) {

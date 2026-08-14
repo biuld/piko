@@ -14,9 +14,12 @@ impl HostApp {
         session_dir: &Path,
         root_agent_instance_id: &str,
     ) -> Option<ResumeAgent> {
-        let state = self.state.lock().await;
-        match state.session(session_id) {
-            Ok(session) => {
+        let session = {
+            let state = self.state.lock().await;
+            state.session(session_id).ok().cloned()
+        };
+        match session {
+            Some(session) => {
                 let session_transcript = transcript_messages_from_session_entries(
                     &session.entries,
                     session.current_leaf_id.as_deref(),
@@ -26,6 +29,7 @@ impl HostApp {
                         .session_store_factory
                         .open(session_dir)
                         .load_agent(session_id, root_agent_instance_id)
+                        .await
                         .ok()
                         .map(|recovered| recovered.last_transcript_seq)
                         .unwrap_or_else(|| {
@@ -70,6 +74,7 @@ impl HostApp {
                     self.session_store_factory
                         .open(session_dir)
                         .load_agent(session_id, root_agent_instance_id)
+                        .await
                         .ok()
                         .filter(|recovered| !recovered.transcript.is_empty())
                         .map(|recovered| ResumeAgent {
@@ -91,7 +96,7 @@ impl HostApp {
                         })
                 }
             }
-            Err(_) => None,
+            None => None,
         }
     }
 }

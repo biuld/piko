@@ -54,6 +54,7 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
         &crate::adapters::storage::FsSessionStoreFactory,
         false,
     )
+    .await
     .unwrap();
 
     let turn = state.turn(&session_id, "turn-queued").unwrap();
@@ -61,8 +62,8 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
     assert_eq!(turn.message, "follow up");
 }
 
-#[test]
-fn same_process_open_preserves_live_turn_for_reconcile() {
+#[tokio::test]
+async fn same_process_open_preserves_live_turn_for_reconcile() {
     let mut state = crate::domain::sessions::HostState::new();
     let crate::api::CommandResult::SessionCreated { session_id, .. } =
         state.create_session("/project")
@@ -90,6 +91,7 @@ fn same_process_open_preserves_live_turn_for_reconcile() {
         &factory,
         true,
     )
+    .await
     .unwrap();
 
     assert_eq!(

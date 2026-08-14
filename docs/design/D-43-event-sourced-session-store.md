@@ -115,6 +115,14 @@ The store rolls the journal at fixed 1,000-commit boundaries. After revision
 Segment and snapshot names use zero-padded revisions so lexical and numeric
 order match.
 
+Session creation is staged beneath a sibling `.staging/` directory. The store
+writes and synchronizes identity, the first open segment, and the
+`session_created` genesis commit there, drops the staging writer, atomically
+renames the complete directory to its final name, and synchronizes both parent
+directories.
+Normal open rejects a journal with no genesis commit; only the private staging
+creation path may open revision zero long enough to append genesis.
+
 ### Commit record
 
 One JSONL line is one atomic logical commit. A commit may contain several
@@ -474,11 +482,22 @@ asynchronous. Snapshot failure keeps the previous snapshot, reports a
 diagnostic, and retries without blocking later commits or changing journal
 correctness.
 
+Replay permits the last open segment to contain exactly 1,000 verified commits
+because this is the durable state left by a stop between boundary sync and
+rollover rename. Open normalizes that state to a closed segment, synchronizes
+the events directory, creates/synchronizes the next open segment, and marks the
+recovery report. An open segment above the fixed boundary still fails
+validation.
+
 ### Filesystem durability and discovery
 
 The adapter applies these rules:
 
 - Use unique temporary names for identity and snapshot creation.
+- Publish newly created and imported sessions from same-filesystem staging only
+  after their journal has been validated and all copied content synchronized;
+  synchronize both source-staging and destination parents after cross-directory
+  rename.
 - Synchronize content before rename and the containing directory after a
   durability-sensitive create or rename.
 - A final byte sequence without newline can be truncated to the previous
@@ -492,7 +511,37 @@ The adapter applies these rules:
   revision, and reason. Hostd may surface it without injecting filesystem
   details into model input.
 
+Schema-v4 directory import holds both the in-process session IO lock and the
+filesystem journal writer lock while copying the source. It validates the
+staged destination, refuses to merge with an existing directory, atomically
+renames the staging directory, and synchronizes the destination parent.
+
 ### Hostd integration
+
+Application-facing session repository and session-store query ports are async.
+The concrete adapter owns a shared `StorageBlockingPool`, implemented with a
+Tokio semaphore in front of `spawn_blocking`. Every adapter method first owns
+its arguments, acquires a permit asynchronously, and then moves one complete
+synchronous storage operation into the blocking closure. The permit is held by
+that closure until the operation returns.
+
+All adapter instances use the same process-wide pool, with a fixed initial
+limit of eight concurrent filesystem operations. Per-session journal and IO
+locks continue to serialize conflicting work; the process-wide limit protects
+Tokio's blocking pool from unbounded cross-session replay, fork, import, and
+snapshot-adjacent load pressure. A later settings feature may make the limit
+configurable without changing the port contract.
+
+The adapter maps worker join failure and semaphore closure to a typed storage
+failure. Dropping the async waiter after `spawn_blocking` begins does not abort
+the filesystem closure. This is intentional: cancellation cannot interrupt a
+journal transaction between append, sync, rollover, and acknowledgement.
+
+`piko-session-store` remains synchronous and Tokio-independent. Replacing
+`std::fs` with `tokio::fs` is explicitly not part of this design because
+regular-file operations, directory sync, rename, and file locking still rely
+on blocking operating-system work, while async suspension inside the journal
+critical section would complicate cancellation safety.
 
 Hostd wraps the store in a session application service:
 

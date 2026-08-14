@@ -109,23 +109,72 @@ impl JsonlSessionRepository {
                 message: "import requires a session directory".into(),
             });
         }
-        let src_session = load_session_dir(input_path)?;
-        let dest_dir = self.session_dir(&src_session.state.cwd);
-        fs::create_dir_all(&dest_dir).map_err(|e| SessionStorageError::Io {
-            path: dest_dir.clone(),
-            source: e,
-        })?;
-        let name = input_path.file_name().ok_or(SessionStorageError::Invalid {
-            path: input_path.to_path_buf(),
-            message: "missing name".into(),
-        })?;
-        let dest = dest_dir.join(name);
-        if dest != input_path {
-            copy_dir_all(input_path, &dest).map_err(|e| SessionStorageError::Io {
-                path: dest.clone(),
-                source: e,
+        let source = SessionStore::new(input_path);
+        source.with_io(|| {
+            // Loading through `source` populates and retains its Journal
+            // handle, so the filesystem writer lock remains held throughout
+            // the copy as well as the in-process session IO lock.
+            source.load_projection()?;
+            let src_session = load_session_dir(input_path)?;
+            let dest_dir = self.session_dir(&src_session.state.cwd);
+            fs::create_dir_all(&dest_dir).map_err(|source| SessionStorageError::Io {
+                path: dest_dir.clone(),
+                source,
             })?;
-        }
-        load_session_dir(&dest)
+            let name = input_path.file_name().ok_or(SessionStorageError::Invalid {
+                path: input_path.to_path_buf(),
+                message: "missing name".into(),
+            })?;
+            let dest = dest_dir.join(name);
+            if dest == input_path {
+                return Ok(src_session);
+            }
+            if dest.exists() {
+                return Err(SessionStorageError::Invalid {
+                    path: dest,
+                    message: "import destination already exists".into(),
+                });
+            }
+
+            let staging_root = dest_dir.join(".staging");
+            fs::create_dir_all(&staging_root).map_err(|source| SessionStorageError::Io {
+                path: staging_root.clone(),
+                source,
+            })?;
+            let staging = staging_root.join(format!(
+                "{}-{}",
+                name.to_string_lossy(),
+                uuid::Uuid::new_v4()
+            ));
+            let result = (|| {
+                copy_dir_all(input_path, &staging).map_err(|source| SessionStorageError::Io {
+                    path: staging.clone(),
+                    source,
+                })?;
+                // Validate the complete copied journal before publication.
+                load_session_dir(&staging)?;
+                fs::rename(&staging, &dest).map_err(|source| SessionStorageError::Io {
+                    path: dest.clone(),
+                    source,
+                })?;
+                fs::File::open(&staging_root)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|source| SessionStorageError::Io {
+                        path: staging_root.clone(),
+                        source,
+                    })?;
+                fs::File::open(&dest_dir)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|source| SessionStorageError::Io {
+                        path: dest_dir.clone(),
+                        source,
+                    })?;
+                load_session_dir(&dest)
+            })();
+            if result.is_err() {
+                let _ = fs::remove_dir_all(&staging);
+            }
+            result
+        })
     }
 }

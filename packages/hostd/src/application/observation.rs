@@ -130,7 +130,8 @@ impl HostApp {
                                 session_id,
                                 &event.agent_instance_id,
                                 &message_id,
-                            )?;
+                            )
+                            .await?;
                             let turn_diff = committed.as_ref().and_then(|committed| {
                                 crate::domain::sessions::file_change_from_message(
                                     &committed.message,
@@ -284,7 +285,7 @@ impl HostApp {
         let (snapshot, agents) = {
             let mut state = self.state.lock().await;
             let store = self.session_store_factory.open(session_dir);
-            reconcile_committed_messages(&mut state, store.as_ref(), session_id)?;
+            reconcile_committed_messages(&mut state, store.as_ref(), session_id).await?;
             (
                 state.snapshot(session_id)?,
                 state.get_agent_list(session_id),

@@ -62,18 +62,21 @@ impl SessionStore {
         let staging = staging_root.join(format!("{name}-{}", uuid::Uuid::new_v4()));
         if let Err(error) = self.fork_projected_into(&staging, session_id, created_at, retained) {
             let _ = fs::remove_dir_all(&staging);
-            let _ = fs::remove_dir(&staging_root);
             return Err(error);
         }
         if let Err(source) = fs::rename(&staging, target) {
             let _ = fs::remove_dir_all(&staging);
-            let _ = fs::remove_dir(&staging_root);
             return Err(SessionStorageError::Io {
                 path: target.to_path_buf(),
                 source,
             });
         }
-        let _ = fs::remove_dir(&staging_root);
+        fs::File::open(&staging_root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|source| SessionStorageError::Io {
+                path: staging_root,
+                source,
+            })?;
         fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
             .map_err(|source| SessionStorageError::Io {

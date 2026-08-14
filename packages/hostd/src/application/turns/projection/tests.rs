@@ -1,60 +1,17 @@
 #[cfg(test)]
 use piko_protocol::Message;
-use piko_protocol::agent_runtime::{RealtimeDelta, RealtimeDeltaEnvelope};
 
 use crate::domain::sessions::HostState;
 use crate::infra::storage::SessionStore;
+use crate::ports::SessionStoreFactory;
 
 use super::*;
 
-#[test]
-fn stream_projection_preserves_message_identity_and_delta_seq() {
-    let events = stream_items_from_delta(
-        "session-1",
-        &RealtimeDeltaEnvelope {
-            agent_instance_id: "root".into(),
-            execution_id: "exec-1".into(),
-            agent_id: "main".into(),
-            message_id: Some("message-1".into()),
-            delta_seq: 7,
-            delta: RealtimeDelta::Text {
-                content_index: 0,
-                delta: "hello".into(),
-            },
-        },
-    );
-    assert_eq!(events.len(), 1);
-    let crate::api::ServerMessage::StreamItem(patch) = &events[0] else {
-        panic!("expected StreamItem");
-    };
-    assert_eq!(patch.session_id.as_deref(), Some("session-1"));
-    assert_eq!(patch.item_id, "message-1");
-    assert_eq!(patch.delta_seq, Some(7));
-    assert_eq!(patch.text.as_deref(), Some("hello"));
-}
+#[path = "projection_stream_tests.rs"]
+mod stream_tests;
 
-#[test]
-fn stream_projection_rejects_missing_message_identity() {
-    assert!(
-        stream_items_from_delta(
-            "session-1",
-            &RealtimeDeltaEnvelope {
-                agent_instance_id: "root".into(),
-                execution_id: "exec-1".into(),
-                agent_id: "main".into(),
-                message_id: None,
-                delta_seq: 0,
-                delta: RealtimeDelta::MessageStarted {
-                    role: piko_protocol::MessageRole::Assistant,
-                },
-            },
-        )
-        .is_empty()
-    );
-}
-
-#[test]
-fn project_committed_message_reads_session_store() {
+#[tokio::test]
+async fn project_committed_message_reads_session_store() {
     use piko_protocol::MessageContent;
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
@@ -83,20 +40,22 @@ fn project_committed_message_reads_session_store() {
         )
         .unwrap();
     let state = HostState::default();
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
     let projection = project_committed_message(
         &state,
-        Some(&store),
+        Some(async_store.as_ref()),
         "session-1",
         &root.agent_instance_id,
         "msg-followup",
     )
+    .await
     .expect("projection should load from store");
     assert_eq!(projection.message_id, "msg-followup");
     assert_eq!(projection.transcript_seq, 1);
 }
 
-#[test]
-fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
+#[tokio::test]
+async fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
     use piko_protocol::MessageContent;
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
@@ -130,15 +89,18 @@ fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
         "/project".into(),
     ));
 
-    reconcile_committed_messages(&mut state, &store, "session-1").unwrap();
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
+    reconcile_committed_messages(&mut state, async_store.as_ref(), "session-1")
+        .await
+        .unwrap();
 
     assert!(state.session("session-1").unwrap().entries.iter().any(
         |entry| matches!(entry, SessionTreeEntry::Message(message) if message.id == "message-rebuild")
     ));
 }
 
-#[test]
-fn record_committed_message_projects_into_host_state() {
+#[tokio::test]
+async fn record_committed_message_projects_into_host_state() {
     use piko_protocol::MessageContent;
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
@@ -172,13 +134,15 @@ fn record_committed_message_projects_into_host_state() {
         "session-1".into(),
         "/project".into(),
     ));
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
     let projection = record_committed_message(
         &mut state,
-        Some(&store),
+        Some(async_store.as_ref()),
         "session-1",
         &root.agent_instance_id,
         "msg-followup",
     )
+    .await
     .unwrap()
     .expect("projection should load from store");
     assert_eq!(projection.message_id, "msg-followup");
@@ -191,13 +155,14 @@ fn record_committed_message_projects_into_host_state() {
         &root.agent_instance_id,
         "msg-followup",
     )
+    .await
     .expect("projection should load from barrier-updated host state");
     assert_eq!(again.message_id, "msg-followup");
     assert_eq!(again.transcript_seq, 1);
 }
 
-#[test]
-fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
+#[tokio::test]
+async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
 
@@ -252,13 +217,15 @@ fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
             crate::api::TurnStatus::Running,
         )
         .unwrap();
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
     record_committed_message(
         &mut state,
-        Some(&store),
+        Some(async_store.as_ref()),
         "session-1",
         &root.agent_instance_id,
         "tool-result-1",
     )
+    .await
     .unwrap();
 
     let diff = state.turn_diff("session-1", "turn-1").unwrap();
@@ -267,8 +234,8 @@ fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
     assert!(diff.unified_diff.contains("+new"));
 }
 
-#[test]
-fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
+#[tokio::test]
+async fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
 
@@ -328,9 +295,17 @@ fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
         )
         .unwrap();
 
-    record_committed_message(&mut state, Some(&store), "session-1", &agent, "todo-clear")
-        .unwrap()
-        .expect("committed projection");
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
+    record_committed_message(
+        &mut state,
+        Some(async_store.as_ref()),
+        "session-1",
+        &agent,
+        "todo-clear",
+    )
+    .await
+    .unwrap()
+    .expect("committed projection");
 
     let session = state.session_mut("session-1").unwrap();
     // Durable map cleared.
@@ -347,8 +322,8 @@ fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
     assert_eq!(pending.revision, 2); // bumped from previous revision 1
 }
 
-#[test]
-fn todo_write_nonempty_sets_map_and_pending() {
+#[tokio::test]
+async fn todo_write_nonempty_sets_map_and_pending() {
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
 
@@ -402,13 +377,15 @@ fn todo_write_nonempty_sets_map_and_pending() {
         "session-1".into(),
         "/project".into(),
     ));
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
     record_committed_message(
         &mut state,
-        Some(&store),
+        Some(async_store.as_ref()),
         "session-1",
         &agent,
         "todo-write-1",
     )
+    .await
     .unwrap();
 
     let session = state.session_mut("session-1").unwrap();

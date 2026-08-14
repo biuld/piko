@@ -112,6 +112,21 @@ Publication may be retried or reconstructed. It cannot precede the committed
 state. A durable success followed by a process crash before publication is
 replayed on reopen.
 
+### Async host boundary
+
+Hostd command and turn handlers never execute session filesystem work directly
+on Tokio runtime workers. Their repository and session-store ports are async;
+the filesystem adapter runs each complete synchronous journal operation on a
+bounded blocking executor and awaits its result. The permit covers the whole
+operation, including lock acquisition, reducer preflight, append, sync,
+rollover, replay, import, or fork as applicable.
+
+Cancellation of the awaiting host task does not cancel a blocking operation
+after it has started. The durable operation finishes according to the journal
+contract, and idempotent retry or replay observes its result. Queueing is
+bounded so concurrent recovery/import work cannot grow the blocking pool
+without limit.
+
 ### Replay and snapshots
 
 Replaying all recognized required events in revision order produces the same
@@ -125,6 +140,12 @@ revision, opens the next segment, and schedules a snapshot through the same
 revision. Segment boundaries and snapshot boundaries therefore align. Snapshot
 work does not delay or weaken commit acknowledgement; a failed snapshot is
 retried and replay from the closed segments remains the fallback.
+
+If the host stops after synchronizing the boundary commit but before publishing
+the closed segment name, reopen recognizes the exact full open segment as a
+verified rollover-in-progress state, closes it, opens the next segment, and
+reports recovery. More than 1,000 records in an open segment remains
+corruption.
 
 The following equality is normative:
 
@@ -173,6 +194,9 @@ that resend inherited context record their own real input usage normally.
   the last verified boundary.
 - A complete and verified final record is retained even if no client observed
   its publication.
+- A session directory is published only after its `session_created` genesis
+  commit is durable. A published directory without genesis is invalid rather
+  than an empty session.
 - Corruption before the recoverable tail prevents normal replay. The session
   remains listable with an integrity-error state and its files are not silently
   deleted or skipped.
@@ -207,6 +231,10 @@ ordinary open or resume.
       acknowledgement and appears exactly once after replay.
 - [x] A crash at every byte boundary of an unacknowledged final append retains
       all prior commits and safely removes only the incomplete tail.
+- [x] A crash after synchronizing commit 1,000 but before segment rollover
+      retains that commit and completes rollover during reopen.
+- [x] Session creation publishes no final directory before the durable genesis
+      commit, and open rejects a published journal with no genesis.
 - [x] Middle corruption leaves the session discoverable and produces an
       explicit integrity error rather than `not found`.
 - [x] Applying a generated event sequence live, replaying it from the
@@ -229,6 +257,9 @@ ordinary open or resume.
 - [x] Removing every snapshot and index still permits complete session replay.
 - [x] No client-visible committed entry lacks a durable event identity and
       revision.
+- [x] Async host command and turn paths execute no session filesystem operation
+      directly on Tokio runtime workers, and blocking storage concurrency is
+      bounded.
 
 ## Product decisions
 
