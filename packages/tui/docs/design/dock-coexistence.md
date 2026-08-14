@@ -65,6 +65,7 @@ File size: keep each file under the project ceiling; solver + tests may split.
 ```rust
 /// Stable band identity in the plane dock stack.
 pub enum BandId {
+    Boundary,
     Todos,
     Suggest,
     Guidance,
@@ -75,7 +76,7 @@ pub enum BandId {
 pub enum Residency {
     /// Height 0 when inactive.
     Ephemeral,
-    /// Always participates (Guidance / Composer).
+    /// Always participates (Boundary / Guidance / Composer).
     Anchor,
 }
 
@@ -85,7 +86,7 @@ pub enum ShrinkClass {
     Transient,
     /// Todos strip — keep min header while active
     Durable,
-    /// Guidance — preserve its resident row
+    /// Boundary / Guidance — preserve resident rows
     Protect,
     /// Composer — shrink toward editor min after ephemeral classes
     Anchor,
@@ -116,7 +117,7 @@ pub struct DockBandGrant {
 
 pub struct DockSolveInput {
     pub body_height: u16,
-    pub offers: Vec<DockBandOffer>, // or fixed struct of four
+    pub offers: Vec<DockBandOffer>, // or fixed struct of five
 }
 
 pub struct DockSolveOutput {
@@ -135,6 +136,7 @@ registry update (explicit, reviewable).
 // layout/plane_metrics or dock_stack::collect
 fn collect_offers(app: &AppState, body: Rect) -> Vec<DockBandOffer> {
   vec![
+    boundary_offer(),                 // resident, preferred=min=1
     todos_offer(app, body.width),   // 0 active until feature lands
     suggest_offer(app),             // active false if modal
     guidance_offer(),               // resident, preferred=min=1
@@ -163,7 +165,7 @@ solve(input):
   shrink_loop(Transient):  while sum > dock_max && can_shrink(Suggest)
   shrink_loop(Durable):    while sum > dock_max && can_shrink(Todos)
   shrink_loop(Anchor):     while sum > dock_max && composer > COMPOSER_MIN
-  // Protect: keep resident Guidance at one row in healthy frames
+  // Protect: keep resident Boundary and Guidance at one row in healthy frames
 
   return grants + diagnostics (stream_min, dock_max)
 ```
@@ -171,7 +173,7 @@ solve(input):
 `can_shrink(band)` = `height > min_height` while active.
 
 **v1:** never set Suggest grant to 0 solely due to budget if `active` (user is
-mid-command); only reduce toward `min_height`. Same for Todos header.
+mid-command); only reduce toward `min_height`. Same for the Todos header.
 
 Pure functions — unit test without AppState.
 
@@ -210,10 +212,16 @@ paint: notice or active interaction hint in Region::Guidance
 
 ```text
 active = has_visible_suggestions && modal.is_none()
-preferred = suggestion_height(count)  // existing formula as preferred only
-min = chrome + 1 content while active
+shares_boundary = Todos is inactive
+preferred = suggestion_height(count, shares_boundary)
+min = bottom + 1 content when shared; top + bottom + 1 content otherwise
 paint: pass grant.height into pane layout so list rows = f(grant)
 ```
+
+If `shares_boundary`, DockBoundary paints the provider label and selection
+affix; Suggest uses bottom-only Pane chrome. Rendering and pointer geometry must
+use the same flag. This is a chrome projection contract, not ownership transfer:
+Boundary remains a Dock Stack band.
 
 ### Todos
 
@@ -258,8 +266,9 @@ paint: unchanged, rect height = grant
 ## Verification
 
 - Solver table tests: body 20/30/50 × offer matrices.
-- Shrink order: Suggest reduced before Todos below min; Guidance stays at 1.
-- Compose: region order Todos → Suggest → Guidance → Composer when all granted.
+- Shrink order: Suggest reduced before Todos below min; Boundary and Guidance
+  stay at 1.
+- Compose: region order Boundary → Todos → Suggest → Guidance → Composer when all granted.
 - Modal: Suggest offer inactive.
 - Integration: full stack preferred vs granted Stream height ≥ stream_min.
 - Regression: idle frame contains resident Guidance directly above Composer.

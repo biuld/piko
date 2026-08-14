@@ -57,7 +57,8 @@ Stack order is owned by the Dock Stack registry ([dock-coexistence](../features/
 ┌─ plane ─────────────────────────────────────┐
 │ STREAM  (grow)                              │
 ├─────────────────────────────────────────────┤
-│ Todos?    0 | 1+header + items + overflow?  │
+│ Boundary  1 | Dock Stack-owned, border_muted │
+│ Todos?    0 | header + items + overflow?     │
 │ Suggest?  0 | budget                        │
 │ Guidance  1                                 │
 │ Composer  editor budget                     │

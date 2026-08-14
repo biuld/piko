@@ -527,14 +527,16 @@ pub fn render_pane(
 
     let mut block = Block::default()
         .borders(spec.borders)
-        .border_style(frame_border_style(spec.focused, theme))
-        .title(
+        .border_style(frame_border_style(spec.focused, theme));
+    if !spec.title.is_empty() {
+        block = block.title(
             Line::from(Span::styled(
                 format!(" {} ", spec.title),
                 Style::default().fg(theme.text),
             ))
             .alignment(Alignment::Left),
         );
+    }
     if !spec.title_affixes.is_empty() {
         let right = format_title_affixes(&spec.title_affixes);
         if !right.is_empty() {

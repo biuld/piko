@@ -9,8 +9,9 @@ Auto-completion is a highly self-contained feature designed to plug into input c
 ## Layout
 
 Auto-completion paints in workspace `Region::Suggest` (directly above
-`Region::Composer`), with **Minimal** [`Pane`](./pane-chrome.md) chrome.
-Filter typing lives in the editor — the pane uses **`.no_search()`**.
+`Region::Composer`), using [`Pane`](./pane-chrome.md) chrome coordinated with
+Dock Stack. Filter typing lives in the editor — the pane uses
+**`.no_search()`**.
 
 **Slash suggestions are the command palette** (no separate palette surface).
 Suggest is a **Dock Stack** ephemeral band (`BandId::Suggest`, shrink class
@@ -38,10 +39,14 @@ Tab cycle | Enter execute
 ⌨ Tab cycle · Enter accept             Guidance
 ```
 
-- **Height**: content rows (capped) + Minimal top/bottom; interaction hints
-  project through the resident Guidance Row.
-- **Title**: provider label; selection counter is a Pane title affix.
-- **Borders**: Minimal pane (top + bottom).
+- **Height**: content rows (capped) + bottom border, plus a top border only
+  when another band (such as Todos) precedes Suggest. Interaction hints project
+  through the resident Guidance Row.
+- **Title**: provider label and selection counter project into the DockBoundary
+  when Suggest is the first optional band; otherwise they remain on Suggest's
+  own top border.
+- **Borders**: never paint Suggest's top border immediately below a titled
+  DockBoundary; the two chrome rows must collapse into one visual rule.
 - **Alignment**: table columns — left labels (commands or paths), right details.
 
 ## Behavior / interactions

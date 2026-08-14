@@ -5,7 +5,7 @@ use piko_protocol::ApprovalDecision;
 use ratatui::layout::Rect;
 
 use crate::app::{
-    AppState, InitialOptions, SurfaceId, ToolStatus,
+    AppState, HitId, InitialOptions, SurfaceId, ToolStatus,
     command::{
         Action, ApprovalAction, EditorAction, NotificationAction, SurfaceAction, TimelineAction,
         ToolInteractionAction,
@@ -447,20 +447,16 @@ fn suggestion_click_accepts_that_row() {
     app.refresh_suggestions();
     assert!(app.editor.auto_complete.is_active());
 
-    let suggest = compose_frame(&app, Rect::new(0, 0, 80, 24))
-        .plan
-        .rects
-        .get(&Region::Suggest)
-        .copied()
-        .expect("suggest rect");
+    let row = build_surface_hitmap(&app, Rect::new(0, 0, 80, 24))
+        .hits
+        .into_iter()
+        .find(|hit| hit.element == Some(HitId::Suggest(0)))
+        .expect("first suggestion hit row")
+        .rect;
     let actions = route_pointer(
         &mut app,
         Rect::new(0, 0, 80, 24),
-        mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            suggest.x + 1,
-            suggest.y + 1,
-        ),
+        mouse(MouseEventKind::Down(MouseButton::Left), row.x, row.y),
     );
     assert!(matches!(
         actions.as_slice(),

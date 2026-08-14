@@ -6,8 +6,9 @@
 use crate::{
     app::{AppState, HitId},
     features::dock_stack::{
-        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, GUIDANCE_HEIGHT,
-        SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+        BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
+        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT, solve,
+        suggestion_preferred_height,
     },
     navigation::{SelectBandBudget, compose_modals, compose_plane},
 };
@@ -68,8 +69,15 @@ fn collect_dock_offers(
     // Suggest forced inactive while any product modal is open.
     let suggest = has_visible_suggestions(app) && !modal_open;
     let suggest_offer = if suggest {
-        let preferred = suggestion_preferred_height(app.editor.auto_complete.len());
-        DockBandOffer::active(BandId::Suggest, preferred, SUGGEST_MIN_HEIGHT)
+        let shares_boundary = !todos_offer.active;
+        let preferred =
+            suggestion_preferred_height(app.editor.auto_complete.len(), shares_boundary);
+        let min_height = if shares_boundary {
+            SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT
+        } else {
+            SUGGEST_MIN_HEIGHT
+        };
+        DockBandOffer::active(BandId::Suggest, preferred, min_height)
     } else {
         DockBandOffer::inactive(BandId::Suggest)
     };
@@ -81,6 +89,7 @@ fn collect_dock_offers(
         DockBandOffer::active(BandId::Composer, composer_preferred, COMPOSER_MIN_HEIGHT);
 
     vec![
+        DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
         todos_offer,
         suggest_offer,
         DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
@@ -210,6 +219,8 @@ pub fn build_surface_hitmap(
             })
             .collect()
     };
+    let suggest_shares_boundary = composed.plan.rects.contains_key(&Region::DockBoundary)
+        && !composed.plan.rects.contains_key(&Region::Todos);
     build_hitmap(&composed.plan, |region, rect| match region {
         Region::Stream => {
             let mut hits = vec![HitRegion {
@@ -229,6 +240,7 @@ pub fn build_surface_hitmap(
             );
             hits
         }
+        Region::DockBoundary => Vec::new(),
         // v1 strip is read-only / non-focusable — surface rect only, no elements.
         Region::Todos => vec![HitRegion {
             region: Region::Todos,
@@ -238,7 +250,7 @@ pub fn build_surface_hitmap(
         Region::Suggest => app
             .editor
             .auto_complete
-            .pointer_regions(rect)
+            .pointer_regions(rect, suggest_shares_boundary)
             .into_iter()
             .map(|(row_rect, element)| HitRegion {
                 region: Region::Suggest,
@@ -352,6 +364,7 @@ mod tests {
         let frame = compose_frame(&app_state(), Rect::new(0, 0, 80, 24));
         assert_eq!(frame.modal_surface, None);
         assert!(frame.plan.rects.contains_key(&Region::Stream));
+        assert!(frame.plan.rects.contains_key(&Region::DockBoundary));
         assert!(frame.plan.rects.contains_key(&Region::Composer));
         let guidance = frame.plan.rects[&Region::Guidance];
         let composer = frame.plan.rects[&Region::Composer];

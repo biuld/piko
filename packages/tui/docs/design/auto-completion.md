@@ -118,6 +118,18 @@ During `AutoComplete::update`, the controller iterates through its registered `p
 - If none matches, it clears state and sets `active = false`.
 
 ### Multi-Column Table Rendering
+
+### Dock boundary chrome
+
+When Suggest is the first optional Dock Stack band, `Region::DockBoundary`
+paints the provider label and selection affix. `Region::Suggest` then uses a
+bottom-only `PaneSpec`, so its first row is content rather than a duplicate top
+rule. If Todos precedes Suggest, Suggest retains its normal Minimal top/bottom
+chrome because the shared boundary is no longer adjacent.
+
+Height offers mirror paint: shared-boundary Suggest reserves content + bottom;
+non-shared Suggest reserves top + content + bottom. Pointer row projection uses
+the same chrome mode as rendering.
 In `AutoComplete::render()`, we dynamically compute the maximum width of each column (except the last one) across all items in `self.items`.
 Rows are rendered with ratatui's `Table` widget, using a small marker column for the selected row and provider-defined cells for the completion columns. This allows multi-column layouts like:
 ```

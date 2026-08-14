@@ -73,6 +73,46 @@ fn idle_guidance_row_paints_composer_hints_above_composer() {
 }
 
 #[test]
+fn dock_stack_paints_muted_boundary_below_stream() {
+    let app = app();
+    let area = Rect::new(0, 0, 80, 24);
+    let composed = compose_frame(&app, area);
+    let stream = composed.plan.rects[&Region::Stream];
+    let boundary = composed.plan.rects[&Region::DockBoundary];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+
+    assert_eq!(stream.bottom(), boundary.y);
+    assert_eq!(boundary.height, 1);
+    assert_eq!(buffer[(boundary.x, boundary.y)].symbol(), "─");
+    assert_eq!(buffer[(boundary.x, boundary.y)].fg, app.theme.border_muted);
+}
+
+#[test]
+fn topmost_suggest_shares_dock_boundary_title_without_a_second_top_rule() {
+    let mut app = app();
+    app.editor.insert_char('/');
+    app.refresh_suggestions();
+    let area = Rect::new(0, 0, 80, 24);
+    let composed = compose_frame(&app, area);
+    let boundary = composed.plan.rects[&Region::DockBoundary];
+    let suggest = composed.plan.rects[&Region::Suggest];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let boundary_text = (boundary.x..boundary.right())
+        .map(|x| buffer[(x, boundary.y)].symbol())
+        .collect::<String>();
+    let first_suggest_row = (suggest.x..suggest.right())
+        .map(|x| buffer[(x, suggest.y)].symbol())
+        .collect::<String>();
+
+    assert_eq!(boundary.bottom(), suggest.y);
+    assert!(boundary_text.contains("slash commands"), "{boundary_text}");
+    assert!(first_suggest_row.contains("/resume"), "{first_suggest_row}");
+    assert!(!first_suggest_row.contains("slash commands"));
+}
+
+#[test]
 fn select_surface_projects_its_hint_in_guidance_above_the_surface() {
     let mut app = app();
     app.push_surface(SurfaceId::Agents);

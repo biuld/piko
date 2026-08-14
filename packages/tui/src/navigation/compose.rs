@@ -1,6 +1,7 @@
 //! Product layout trees with `piko-tui-layout` primitives only.
 //!
-//! Workspace plane = Stream + dock stack grants (Todos/Suggest/Guidance/Composer).
+//! Workspace plane = Stream + dock stack grants
+//! (Boundary/Todos/Suggest/Guidance/Composer).
 //! Surfaces = modal z-stack (Browse / Select / Dock / Modal).
 //!
 //! Dock band heights come only from [`crate::features::dock_stack`] grants —
@@ -17,7 +18,7 @@ use super::{Region, SurfaceId, SurfaceIntent};
 /// Per-frame sizes from feature state + dock stack solution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlaneMetrics {
-    /// Dock stack grants (Todos / Suggest / Guidance / Composer heights).
+    /// Dock stack grants (Boundary / Todos / Suggest / Guidance / Composer).
     pub dock: DockSolveOutput,
     pub body_height: u16,
     /// When the active modal is Select / Dock: content-row budget for
@@ -93,8 +94,8 @@ fn select_band_height(surface: SurfaceId, m: &PlaneMetrics) -> u16 {
 mod tests {
     use super::*;
     use crate::features::dock_stack::{
-        BandId, COMPOSER_MIN_HEIGHT, DockBandOffer, DockSolveInput, GUIDANCE_HEIGHT,
-        SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+        BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
+        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
     };
     use piko_tui_layout::{ModalPlacement, solve as layout_solve, solve_flex};
     use ratatui::layout::Rect;
@@ -116,6 +117,7 @@ mod tests {
         metrics_from_offers(
             30,
             vec![
+                DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
                 DockBandOffer::inactive(BandId::Todos),
                 DockBandOffer::inactive(BandId::Suggest),
                 DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
@@ -138,16 +140,21 @@ mod tests {
         assert!(rects.contains_key(&Region::Composer));
         assert_eq!(rects.get(&Region::Guidance).map(|r| r.height), Some(1));
         assert!(!rects.keys().any(|r| matches!(r, Region::Surface(_))));
-        assert_eq!(rects.get(&Region::Stream).map(|r| r.height), Some(24));
+        assert_eq!(
+            rects.get(&Region::DockBoundary).map(|r| r.height),
+            Some(DOCK_BOUNDARY_HEIGHT)
+        );
+        assert_eq!(rects.get(&Region::Stream).map(|r| r.height), Some(23));
         assert_eq!(rects.get(&Region::Composer).map(|r| r.height), Some(5));
     }
 
     #[test]
     fn plane_grants_drive_fixed_heights_and_order() {
-        let suggest = suggestion_preferred_height(2);
+        let suggest = suggestion_preferred_height(2, false);
         let m = metrics_from_offers(
             40,
             vec![
+                DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
                 DockBandOffer::active(BandId::Todos, 4, 1),
                 DockBandOffer::active(BandId::Suggest, suggest, SUGGEST_MIN_HEIGHT),
                 DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
@@ -161,15 +168,16 @@ mod tests {
         assert_eq!(rects[&Region::Suggest].height, suggest);
         assert_eq!(rects[&Region::Guidance].height, 1);
         assert_eq!(rects[&Region::Composer].height, 5);
-        // Order: Stream y < Todos y < Suggest y < Guidance y < Composer y
+        // Order: Stream < Boundary < Todos < Suggest < Guidance < Composer.
         let ys = [
             rects[&Region::Stream].y,
+            rects[&Region::DockBoundary].y,
             rects[&Region::Todos].y,
             rects[&Region::Suggest].y,
             rects[&Region::Guidance].y,
             rects[&Region::Composer].y,
         ];
-        assert!(ys[0] < ys[1] && ys[1] < ys[2] && ys[2] < ys[3] && ys[3] < ys[4]);
+        assert!(ys.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
@@ -178,6 +186,7 @@ mod tests {
         let rects = solve_flex(Rect::new(0, 0, 80, 30), &compose_plane(&m));
         assert!(!rects.contains_key(&Region::Todos));
         assert!(!rects.contains_key(&Region::Suggest));
+        assert!(rects.contains_key(&Region::DockBoundary));
         assert!(rects.contains_key(&Region::Guidance));
     }
 
@@ -186,6 +195,7 @@ mod tests {
         let m = metrics_from_offers(
             20,
             vec![
+                DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
                 DockBandOffer::active(BandId::Todos, 8, 1),
                 DockBandOffer::active(BandId::Suggest, 10, SUGGEST_MIN_HEIGHT),
                 DockBandOffer::active(BandId::Guidance, 1, 1),
@@ -200,6 +210,7 @@ mod tests {
             m.dock.stream_min
         );
         let dock_h: u16 = [
+            Region::DockBoundary,
             Region::Todos,
             Region::Suggest,
             Region::Guidance,

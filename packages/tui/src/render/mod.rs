@@ -2,11 +2,13 @@
 
 use ratatui::{
     Frame,
-    layout::{Position, Rect},
+    layout::{Alignment, Position, Rect},
     style::Style,
+    text::{Line, Span},
     widgets::{Block, Borders},
 };
 
+use crate::ui::components::pane::format_title_affixes;
 use crate::{
     app::{AppMode, AppState, HitId},
     features::{
@@ -66,6 +68,9 @@ fn paint_regions(
     app: &AppState,
     rects: &std::collections::HashMap<Region, Rect>,
 ) {
+    let suggest_shares_boundary = rects.contains_key(&Region::DockBoundary)
+        && rects.contains_key(&Region::Suggest)
+        && !rects.contains_key(&Region::Todos);
     if let Some(area) = rects.get(&Region::Stream).copied() {
         app.timeline.render_with_state(
             frame,
@@ -79,6 +84,9 @@ fn paint_regions(
             },
         );
     }
+    if let Some(area) = rects.get(&Region::DockBoundary).copied() {
+        render_dock_boundary(frame, area, app, suggest_shares_boundary);
+    }
     if let Some(area) = rects.get(&Region::Todos).copied() {
         crate::features::todos::render_todos_strip(frame, area, app, &app.theme);
     }
@@ -88,6 +96,7 @@ fn paint_regions(
             area,
             &app.theme,
             interaction_state(app, Region::Suggest),
+            suggest_shares_boundary,
         );
     }
     if let Some(area) = rects.get(&Region::Guidance).copied() {
@@ -107,6 +116,37 @@ fn paint_regions(
             render_surface(frame, app, *area, surface);
         }
     }
+}
+
+fn render_dock_boundary(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &AppState,
+    hosts_suggest_title: bool,
+) {
+    let mut block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(app.theme.border_muted));
+    if hosts_suggest_title {
+        block = block.title(
+            Line::from(Span::styled(
+                format!(" {} ", app.editor.auto_complete.boundary_title()),
+                Style::default().fg(app.theme.text),
+            ))
+            .alignment(Alignment::Left),
+        );
+        let affixes = format_title_affixes(&app.editor.auto_complete.boundary_affixes());
+        if !affixes.is_empty() {
+            block = block.title(
+                Line::from(Span::styled(
+                    format!(" {affixes} "),
+                    Style::default().fg(app.theme.dim),
+                ))
+                .alignment(Alignment::Right),
+            );
+        }
+    }
+    frame.render_widget(block, area);
 }
 
 fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {

@@ -188,6 +188,8 @@ normative **structure**; paint details stay in code.
 - Budgeted in plane compose. Never steals the whole stream.
 - Cap = header + ≤ N items + optional overflow row (N is an implementation
   constant; design doc names it).
+- The Stream/Dock separator belongs to Dock Stack infrastructure, not to the
+  Todos provider or its height grant.
 
 **Interaction (v1)**
 

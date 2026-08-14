@@ -128,6 +128,7 @@ Provider feature          Dock Stack                 Layout / paint
 | Order (top→bottom) | BandId | Residency | Shrink class | Region | Provider |
 |--------------------|--------|-----------|--------------|--------|----------|
 | — | `Stream` | anchor grow | never shrink below floor | `Stream` | Timeline |
+| 0 | `Boundary` | anchor fixed | **protect** (one row) | `DockBoundary` | dock_stack |
 | 1 | `Todos` | ephemeral | **durable** (keep header if non-empty) | `Todos` | todos |
 | 2 | `Suggest` | ephemeral | **transient** (shrink first) | `Suggest` | auto_completion |
 | 3 | `Guidance` | anchor fixed | **protect** (one row) | `Guidance` | guidance_row |
@@ -182,15 +183,15 @@ silent one-off `if`s in random features).
 Let `body_h` be plane body height (excludes BottomBar).
 
 1. Compute `stream_min` and `dock_max = body_h - stream_min`.
-2. Sum preferred heights of Guidance + Composer + all active ephemeral bands.
+2. Sum preferred heights of Boundary + Guidance + Composer + all active ephemeral bands.
 3. If sum ≤ `dock_max`, grant preferred.
 4. Else shrink by **shrink class order**:
    1. **transient** (Suggest) down toward `min_height`
    2. **durable** (Todos) item rows toward `min_height` (header kept)
    3. **Composer** toward editor minimum
-   4. **protect** (Guidance) never below min in healthy frames
-5. Never grant Composer below editor minimum; keep Guidance at one row;
-   never grant active Todos 0 if product requires header visibility.
+   4. **protect** (Boundary and Guidance) never below min in healthy frames
+5. Never grant Composer below editor minimum; keep Boundary and Guidance at
+   one row; never grant active Todos 0 if product requires header visibility.
 
 Exact constants live in design; policy order is normative here.
 
@@ -202,7 +203,7 @@ Exact constants live in design; policy order is normative here.
 ┌─ plane (Dock Stack + Stream) ───────────────────────────────┐
 │ STREAM                                              grow    │
 │                                                             │
-│ ── dock stack (solver-owned fixed bands) ─────────────────  │
+│ ── Boundary (dock-owned, border_muted) ───────────────────  │
 │ Todos?      ephemeral · durable                             │
 │ Suggest?    ephemeral · transient  (/ palette or @)         │
 │ Guidance    anchor · protect                                │
@@ -210,6 +211,11 @@ Exact constants live in design; policy order is normative here.
 └─────────────────────────────────────────────────────────────┘
   BottomBar   shell chrome — outside Dock Stack
 ```
+
+Boundary is the Dock Stack's single outer separator. When Suggest is the first
+optional band, Boundary hosts its provider title and selection counter instead
+of painting a second Suggest top rule on the following row. When Todos is
+first, Boundary remains an unlabeled rule and Suggest keeps its internal title.
 
 ### Idle (only anchors)
 
