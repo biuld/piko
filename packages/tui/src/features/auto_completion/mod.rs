@@ -121,23 +121,10 @@ impl AutoComplete {
         vec![PaneTitleAffix::selection(selected_one, total)]
     }
 
-    fn pane_spec(&self, shares_boundary: bool) -> PaneSpec<'static> {
-        if shares_boundary {
-            return PaneSpec::minimal("")
-                .no_search()
-                .borders(Borders::BOTTOM)
-                .focused(true);
-        }
-        let label = if let Some(idx) = self.active_provider_idx {
-            self.providers[idx].label()
-        } else {
-            "suggestions"
-        };
-        let total = self.list.len();
-        let selected_one = usize::from(total > 0).saturating_mul(self.list.selected + 1);
-        PaneSpec::minimal(label)
+    fn pane_spec(&self) -> PaneSpec<'static> {
+        PaneSpec::minimal("")
             .no_search()
-            .affix(PaneTitleAffix::selection(selected_one, total))
+            .borders(Borders::BOTTOM)
             .focused(true)
     }
 
@@ -149,10 +136,10 @@ impl AutoComplete {
             .collect()
     }
 
-    fn row_regions(&self, area: Rect, shares_boundary: bool) -> Vec<(Rect, usize)> {
+    fn row_regions(&self, area: Rect) -> Vec<(Rect, usize)> {
         selectable_row_regions(
             area,
-            &self.pane_spec(shares_boundary),
+            &self.pane_spec(),
             &self.display_items(),
             self.list.selected,
             "",
@@ -160,8 +147,8 @@ impl AutoComplete {
     }
 
     /// Paint-aligned pointer rows using stable source indices from the shared list viewport.
-    pub(crate) fn pointer_regions(&self, area: Rect, shares_boundary: bool) -> Vec<(Rect, HitId)> {
-        self.row_regions(area, shares_boundary)
+    pub(crate) fn pointer_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
+        self.row_regions(area)
             .into_iter()
             .map(|(rect, index)| (rect, HitId::Suggest(index)))
             .collect()
@@ -198,9 +185,8 @@ impl AutoComplete {
         area: Rect,
         theme: &crate::theme::Theme,
         interaction: InteractionState<HitId>,
-        shares_boundary: bool,
     ) {
-        let spec = self.pane_spec(shares_boundary);
+        let spec = self.pane_spec();
         let items = self.display_items();
 
         let body = if items.is_empty() {
@@ -223,7 +209,7 @@ impl AutoComplete {
         };
         paint_index_hover(
             frame,
-            &self.row_regions(area, shares_boundary),
+            &self.row_regions(area),
             hovered,
             self.list.selected,
             theme,
@@ -324,7 +310,7 @@ mod tests {
         ac.list.selected = 8;
 
         let indices: Vec<_> = ac
-            .pointer_regions(Rect::new(0, 0, 40, 9), false)
+            .pointer_regions(Rect::new(0, 0, 40, 9))
             .into_iter()
             .filter_map(|(_, hit)| match hit {
                 HitId::Suggest(index) => Some(index),
@@ -332,7 +318,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(indices, vec![2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(indices, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]

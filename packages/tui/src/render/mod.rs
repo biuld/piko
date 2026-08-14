@@ -68,9 +68,8 @@ fn paint_regions(
     app: &AppState,
     rects: &std::collections::HashMap<Region, Rect>,
 ) {
-    let suggest_shares_boundary = rects.contains_key(&Region::DockBoundary)
-        && rects.contains_key(&Region::Suggest)
-        && !rects.contains_key(&Region::Todos);
+    let has_suggest = rects.contains_key(&Region::Suggest);
+    let has_todos = rects.contains_key(&Region::Todos);
     if let Some(area) = rects.get(&Region::Stream).copied() {
         app.timeline.render_with_state(
             frame,
@@ -85,10 +84,18 @@ fn paint_regions(
         );
     }
     if let Some(area) = rects.get(&Region::DockBoundary).copied() {
-        render_dock_boundary(frame, area, app, suggest_shares_boundary);
+        render_dock_separator(frame, area, app, has_suggest && !has_todos);
     }
     if let Some(area) = rects.get(&Region::Todos).copied() {
-        crate::features::todos::render_todos_strip(frame, area, app, &app.theme);
+        let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+        crate::features::todos::render_todos_strip(frame, content, app, &app.theme);
+        let separator = Rect::new(
+            area.x,
+            area.bottom().saturating_sub(1),
+            area.width,
+            u16::from(area.height > 0),
+        );
+        render_dock_separator(frame, separator, app, has_suggest);
     }
     if let Some(area) = rects.get(&Region::Suggest).copied() {
         app.editor.auto_complete.render(
@@ -96,7 +103,6 @@ fn paint_regions(
             area,
             &app.theme,
             interaction_state(app, Region::Suggest),
-            suggest_shares_boundary,
         );
     }
     if let Some(area) = rects.get(&Region::Guidance).copied() {
@@ -118,7 +124,7 @@ fn paint_regions(
     }
 }
 
-fn render_dock_boundary(
+fn render_dock_separator(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &AppState,

@@ -35,7 +35,9 @@ via a small offer/grant contract.
 3. **Height arbitration** (preferred → granted under `STREAM_MIN` / `DOCK_MAX`).
 4. **Composition of plane regions** for dock slots (what `compose_plane` builds
    for optional bands + how Composer/Stream relate).
-5. **Extension rules** for adding a new non-resident band without forking
+5. **Separator ownership** between adjacent visible bands, with exactly one
+   muted rule at each component boundary.
+6. **Extension rules** for adding a new non-resident band without forking
    layout.
 
 **Does not own**
@@ -187,11 +189,11 @@ Let `body_h` be plane body height (excludes BottomBar).
 3. If sum ≤ `dock_max`, grant preferred.
 4. Else shrink by **shrink class order**:
    1. **transient** (Suggest) down toward `min_height`
-   2. **durable** (Todos) item rows toward `min_height` (header kept)
+   2. **durable** (Todos) item rows toward `min_height` (header + separator kept)
    3. **Composer** toward editor minimum
    4. **protect** (Boundary and Guidance) never below min in healthy frames
 5. Never grant Composer below editor minimum; keep Boundary and Guidance at
-   one row; never grant active Todos 0 if product requires header visibility.
+   one row; keep active Todos' header and bottom separator visible.
 
 Exact constants live in design; policy order is normative here.
 
@@ -212,10 +214,12 @@ Exact constants live in design; policy order is normative here.
   BottomBar   shell chrome — outside Dock Stack
 ```
 
-Boundary is the Dock Stack's single outer separator. When Suggest is the first
-optional band, Boundary hosts its provider title and selection counter instead
-of painting a second Suggest top rule on the following row. When Todos is
-first, Boundary remains an unlabeled rule and Suggest keeps its internal title.
+Boundary is the Dock Stack's outer separator. Adjacent visible dock components
+also have exactly one `border_muted` separator: the preceding component owns
+the shared rule, and the following component must not paint a duplicate top
+rule. Todos therefore reserves a bottom separator row. When Suggest follows
+either Boundary or Todos, that preceding separator hosts Suggest's provider
+title and selection counter; Suggest paints only its bottom rule.
 
 ### Idle (only anchors)
 

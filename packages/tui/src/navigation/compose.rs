@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     use crate::features::dock_stack::{
         BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
-        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, TODOS_MIN_HEIGHT, solve, suggestion_preferred_height,
     };
     use piko_tui_layout::{ModalPlacement, solve as layout_solve, solve_flex};
     use ratatui::layout::Rect;
@@ -150,12 +150,12 @@ mod tests {
 
     #[test]
     fn plane_grants_drive_fixed_heights_and_order() {
-        let suggest = suggestion_preferred_height(2, false);
+        let suggest = suggestion_preferred_height(2);
         let m = metrics_from_offers(
             40,
             vec![
                 DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
-                DockBandOffer::active(BandId::Todos, 4, 1),
+                DockBandOffer::active(BandId::Todos, 4, TODOS_MIN_HEIGHT),
                 DockBandOffer::active(BandId::Suggest, suggest, SUGGEST_MIN_HEIGHT),
                 DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
                 DockBandOffer::active(BandId::Composer, 5, COMPOSER_MIN_HEIGHT),

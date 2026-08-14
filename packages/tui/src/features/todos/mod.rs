@@ -89,15 +89,15 @@ mod tests {
     #[test]
     fn few_items_header_plus_rows() {
         let list = sample_list(3);
-        // header + 3 items, no overflow
-        assert_eq!(strip_height_offer(&list), 4);
+        // header + 3 items + Dock Stack separator, no overflow
+        assert_eq!(strip_height_offer(&list), 5);
     }
 
     #[test]
     fn over_cap_adds_overflow_row() {
         let list = sample_list(10);
-        // header + 6 items + overflow
-        assert_eq!(strip_height_offer(&list), 8);
+        // header + 6 items + overflow + Dock Stack separator
+        assert_eq!(strip_height_offer(&list), 9);
     }
 
     #[test]

@@ -7,8 +7,7 @@ use crate::{
     app::{AppState, HitId},
     features::dock_stack::{
         BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
-        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT, solve,
-        suggestion_preferred_height,
+        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
     },
     navigation::{SelectBandBudget, compose_modals, compose_plane},
 };
@@ -69,15 +68,8 @@ fn collect_dock_offers(
     // Suggest forced inactive while any product modal is open.
     let suggest = has_visible_suggestions(app) && !modal_open;
     let suggest_offer = if suggest {
-        let shares_boundary = !todos_offer.active;
-        let preferred =
-            suggestion_preferred_height(app.editor.auto_complete.len(), shares_boundary);
-        let min_height = if shares_boundary {
-            SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT
-        } else {
-            SUGGEST_MIN_HEIGHT
-        };
-        DockBandOffer::active(BandId::Suggest, preferred, min_height)
+        let preferred = suggestion_preferred_height(app.editor.auto_complete.len());
+        DockBandOffer::active(BandId::Suggest, preferred, SUGGEST_MIN_HEIGHT)
     } else {
         DockBandOffer::inactive(BandId::Suggest)
     };
@@ -219,8 +211,6 @@ pub fn build_surface_hitmap(
             })
             .collect()
     };
-    let suggest_shares_boundary = composed.plan.rects.contains_key(&Region::DockBoundary)
-        && !composed.plan.rects.contains_key(&Region::Todos);
     build_hitmap(&composed.plan, |region, rect| match region {
         Region::Stream => {
             let mut hits = vec![HitRegion {
@@ -250,7 +240,7 @@ pub fn build_surface_hitmap(
         Region::Suggest => app
             .editor
             .auto_complete
-            .pointer_regions(rect, suggest_shares_boundary)
+            .pointer_regions(rect)
             .into_iter()
             .map(|(row_rect, element)| HitRegion {
                 region: Region::Suggest,

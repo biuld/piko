@@ -49,6 +49,7 @@ and theme tokens stay in code; structure and information duties are normative.
 │  ✓  Ship protocol serde                                      │  │ Todos
 │  ▸  Persist list with session                                │  │ strip
 │  ·  Dock strip + height budget                               │  ┘
+│  ──────────────────────────────────────────────────────────  │
 │  /resume  /rename  …                                         │  Suggest?
 │  ▲  something optional notice · F8                           │  Guidance
 │  ──────────────────────────────────────────────────────────  │
@@ -80,6 +81,7 @@ and theme tokens stay in code; structure and information duties are normative.
   ✓  Ship protocol serde                       ← completed (content may strike)
   ▸  Persist list with session                 ← in_progress (emphasis)
   ·  Dock strip + height budget                ← pending (muted)
+  ──────────────────────────────────────────   ← Dock Stack separator
   ^  ^
   |  content (truncate to width; no id prefix required on strip)
   status mark (family shared with timeline)
@@ -186,8 +188,8 @@ normative **structure**; paint details stay in code.
 **Height**
 
 - Budgeted in plane compose. Never steals the whole stream.
-- Cap = header + ≤ N items + optional overflow row (N is an implementation
-  constant; design doc names it).
+- Cap = header + ≤ N items + optional overflow row + one shared bottom
+  separator (N is an implementation constant; design doc names it).
 - The Stream/Dock separator belongs to Dock Stack infrastructure, not to the
   Todos provider or its height grant.
 

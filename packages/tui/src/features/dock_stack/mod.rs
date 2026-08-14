@@ -27,8 +27,7 @@ pub use grant::DockSolveOutput;
 pub use offer::DockBandOffer;
 pub use registry::{
     COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT,
-    SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT, TODOS_MAX_ITEM_ROWS, TODOS_MIN_HEIGHT,
-    suggestion_preferred_height,
+    TODOS_MAX_ITEM_ROWS, TODOS_MIN_HEIGHT, suggestion_preferred_height,
 };
 #[allow(unused_imports)] // public API + tests
 pub use registry::{STREAM_MIN_ABS, registry, stream_min};

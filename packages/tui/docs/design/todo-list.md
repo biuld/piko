@@ -58,7 +58,7 @@ Stack order is owned by the Dock Stack registry ([dock-coexistence](../features/
 │ STREAM  (grow)                              │
 ├─────────────────────────────────────────────┤
 │ Boundary  1 | Dock Stack-owned, border_muted │
-│ Todos?    0 | header + items + overflow?     │
+│ Todos?    0 | header + items + overflow? + rule │
 │ Suggest?  0 | budget                        │
 │ Guidance  1                                 │
 │ Composer  editor budget                     │
@@ -71,6 +71,7 @@ Paint order in the dock band (top → bottom):
   [Todos header]
   [Todos item …]
   [Todos +N more if any]
+  [Dock Stack separator; hosts Suggest title when active]
   [Suggest rows if any]
   [Guidance: notice or active hint]
   [Composer]
@@ -217,7 +218,7 @@ Prefer a cohesive unit under ~300–400 lines (split if larger):
 packages/tui/src/features/todos/
   mod.rs          // public strip API + tests
   state.rs        // optional: projection helpers
-  render.rs       // header + rows + overflow
+  render.rs       // header + rows + overflow (separator remains stack chrome)
 ```
 
 Wire:

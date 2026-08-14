@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use piko_protocol::{TodoItem, TodoList, TodoStatus};
 use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 
 use super::*;
@@ -16,6 +17,21 @@ fn app() -> AppState {
         false,
         InitialOptions::default(),
     )
+}
+
+fn add_todo(app: &mut AppState) {
+    app.agent_panel.active_agent_instance_id = Some("agent-a".into());
+    app.todo_lists.upsert(TodoList {
+        agent_instance_id: "agent-a".into(),
+        items: vec![TodoItem {
+            id: "1".into(),
+            status: TodoStatus::Pending,
+            content: "keep dock components distinct".into(),
+            detail: None,
+        }],
+        updated_at: 1,
+        revision: 1,
+    });
 }
 
 fn draw(app: &AppState, area: Rect) -> Terminal<TestBackend> {
@@ -86,6 +102,54 @@ fn dock_stack_paints_muted_boundary_below_stream() {
     assert_eq!(boundary.height, 1);
     assert_eq!(buffer[(boundary.x, boundary.y)].symbol(), "─");
     assert_eq!(buffer[(boundary.x, boundary.y)].fg, app.theme.border_muted);
+}
+
+#[test]
+fn todos_paints_muted_separator_before_guidance() {
+    let mut app = app();
+    add_todo(&mut app);
+
+    let area = Rect::new(0, 0, 80, 24);
+    let composed = compose_frame(&app, area);
+    let todos = composed.plan.rects[&Region::Todos];
+    let guidance = composed.plan.rects[&Region::Guidance];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let separator_y = todos.bottom() - 1;
+
+    assert_eq!(separator_y + 1, guidance.y);
+    assert_eq!(buffer[(todos.x, separator_y)].symbol(), "─");
+    assert_eq!(buffer[(todos.x, separator_y)].fg, app.theme.border_muted);
+}
+
+#[test]
+fn todos_separator_hosts_following_suggest_title_without_double_rule() {
+    let mut app = app();
+    add_todo(&mut app);
+    app.editor.insert_char('/');
+    app.refresh_suggestions();
+
+    let area = Rect::new(0, 0, 80, 30);
+    let composed = compose_frame(&app, area);
+    let todos = composed.plan.rects[&Region::Todos];
+    let suggest = composed.plan.rects[&Region::Suggest];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let separator_y = todos.bottom() - 1;
+    let separator_text = (todos.x..todos.right())
+        .map(|x| buffer[(x, separator_y)].symbol())
+        .collect::<String>();
+    let first_suggest_row = (suggest.x..suggest.right())
+        .map(|x| buffer[(x, suggest.y)].symbol())
+        .collect::<String>();
+
+    assert_eq!(todos.bottom(), suggest.y);
+    assert!(
+        separator_text.contains("slash commands"),
+        "{separator_text}"
+    );
+    assert!(first_suggest_row.contains("/resume"), "{first_suggest_row}");
+    assert!(!first_suggest_row.contains("slash commands"));
 }
 
 #[test]

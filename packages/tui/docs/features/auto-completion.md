@@ -39,14 +39,13 @@ Tab cycle | Enter execute
 ⌨ Tab cycle · Enter accept             Guidance
 ```
 
-- **Height**: content rows (capped) + bottom border, plus a top border only
-  when another band (such as Todos) precedes Suggest. Interaction hints project
-  through the resident Guidance Row.
-- **Title**: provider label and selection counter project into the DockBoundary
-  when Suggest is the first optional band; otherwise they remain on Suggest's
-  own top border.
-- **Borders**: never paint Suggest's top border immediately below a titled
-  DockBoundary; the two chrome rows must collapse into one visual rule.
+- **Height**: content rows (capped) + bottom border. The preceding DockBoundary
+  or Todos separator supplies the top rule. Interaction hints project through
+  the resident Guidance Row.
+- **Title**: provider label and selection counter project into the immediately
+  preceding shared separator (DockBoundary or Todos bottom separator).
+- **Borders**: Suggest never paints a duplicate top border; adjacent component
+  chrome collapses into one visual rule.
 - **Alignment**: table columns — left labels (commands or paths), right details.
 
 ## Behavior / interactions

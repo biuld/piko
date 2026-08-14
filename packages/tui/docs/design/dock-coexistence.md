@@ -212,24 +212,25 @@ paint: notice or active interaction hint in Region::Guidance
 
 ```text
 active = has_visible_suggestions && modal.is_none()
-shares_boundary = Todos is inactive
-preferred = suggestion_height(count, shares_boundary)
-min = bottom + 1 content when shared; top + bottom + 1 content otherwise
+preferred = bottom + capped content rows
+min = bottom + 1 content
 paint: pass grant.height into pane layout so list rows = f(grant)
 ```
 
-If `shares_boundary`, DockBoundary paints the provider label and selection
-affix; Suggest uses bottom-only Pane chrome. Rendering and pointer geometry must
-use the same flag. This is a chrome projection contract, not ownership transfer:
-Boundary remains a Dock Stack band.
+The immediately preceding separator paints Suggest's provider label and
+selection affix: DockBoundary when Todos is inactive, otherwise Todos' reserved
+bottom separator. Suggest uses bottom-only Pane chrome. Rendering and pointer
+geometry must use the same chrome contract. This is projection, not ownership
+transfer: the separator remains Dock Stack chrome.
 
 ### Todos
 
 ```text
 active = feature on && viewed list non-empty
-preferred = 1 + min(items, TODOS_MAX_ITEMS) + overflow?
-min = 1 (header only) or 1+1 (header + one item) — product pick in todo-list
-paint: TodoStripView { max_items derived from grant }
+preferred = 1 header + min(items, TODOS_MAX_ITEMS) + overflow? + 1 separator
+min = 1 header + 1 separator
+paint: TodoStripView { max_items derived from grant }; Dock Stack paints the
+       final row as the shared separator
 ```
 
 ### Composer

@@ -21,7 +21,7 @@ pub struct TodoStripRow {
     pub status: TodoStatus,
 }
 
-/// Preferred dock height: 0 when empty; else header + min(items, max) + overflow.
+/// Preferred dock height: content rows plus one Dock Stack separator row.
 pub fn strip_height_offer(list: &TodoList) -> u16 {
     let n = list.items.len() as u16;
     if n == 0 {
@@ -30,7 +30,7 @@ pub fn strip_height_offer(list: &TodoList) -> u16 {
     let max_items = TODOS_MAX_ITEM_ROWS;
     let shown = n.min(max_items);
     let overflow = u16::from(n > max_items);
-    1 + shown + overflow
+    1 + shown + overflow + 1
 }
 
 /// Project list into strip rows, truncating content to `width` and capping items.

@@ -77,7 +77,7 @@ fn guidance_and_composer_get_preferred_when_budget_allows() {
 
 #[test]
 fn guidance_suggest_composer_preferred_when_fit() {
-    let suggest = suggestion_preferred_height(3, false);
+    let suggest = suggestion_preferred_height(3);
     let out = solve(DockSolveInput {
         body_height: 40,
         offers: full_offers(0, suggest, 5),
@@ -90,12 +90,9 @@ fn guidance_suggest_composer_preferred_when_fit() {
 }
 
 #[test]
-fn shared_boundary_replaces_suggest_top_chrome_without_changing_total_height() {
-    let full = suggestion_preferred_height(3, false);
-    let shared = suggestion_preferred_height(3, true);
-
-    assert_eq!(full, shared + DOCK_BOUNDARY_HEIGHT);
-    assert_eq!(SUGGEST_MIN_HEIGHT, SUGGEST_SHARED_BOUNDARY_MIN_HEIGHT + 1);
+fn suggest_height_counts_content_and_bottom_rule_only() {
+    assert_eq!(suggestion_preferred_height(3), 4);
+    assert_eq!(SUGGEST_MIN_HEIGHT, 2);
 }
 
 #[test]
