@@ -59,7 +59,6 @@ pub enum SurfaceAction {
     OpenUsage,
     OpenNotifications,
     OpenTree,
-    OpenThinking,
     /// Session agent list → switch viewed agent (ComposerBand).
     OpenAgents,
     Close,
@@ -241,7 +240,6 @@ pub enum LocalCommandId {
     Notifications,
     Sessions,
     Models,
-    Thinking,
     Agents,
     /// Open last/active turn workspace diff.
     Diff,
@@ -285,10 +283,10 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "Inspect and navigate the current session branch tree",
     ),
     (
-        "/models",
+        "/model",
         LocalCommandId::Models,
-        "Models",
-        "List and set default model",
+        "Model",
+        "Select a model and compatible thinking level",
     ),
     (
         "/settings",
@@ -307,12 +305,6 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         LocalCommandId::Notifications,
         "Notifications",
         "Show the in-memory notification queue",
-    ),
-    (
-        "/thinking",
-        LocalCommandId::Thinking,
-        "Thinking level",
-        "List and set default thinking/reasoning level",
     ),
     (
         "/agents",
@@ -391,7 +383,6 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Sessions => SessionAction::RequestList.into(),
         LocalCommandId::Models => ModelAction::RequestList.into(),
         LocalCommandId::Agents => SurfaceAction::OpenAgents.into(),
-        LocalCommandId::Thinking => SurfaceAction::OpenThinking.into(),
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
         LocalCommandId::Usage => SurfaceAction::OpenUsage.into(),

@@ -1,42 +1,59 @@
-# Thinking Level Selector
+# Model and thinking selector
+
+> Status: implemented
+>
+> Design: [model-thinking-selection.md](../design/model-thinking-selection.md)
 
 ## Overview
 
-The Thinking Level Selector allows the user to select and configure the reasoning/thinking level of the active assistant model. The selector displays all supported thinking levels in a list view.
+`/model` is one two-stage configuration workflow: first choose a
+provider-scoped model, then choose a thinking level supported by that exact
+target. The model and thinking level are committed together, so changing a
+model cannot accidentally retain an incompatible reasoning effort.
+
+There is no standalone `/thinking` command. Thinking remains visible in the
+Bottom Bar and host-backed settings, but the quick selection path always
+starts from a model target and its authoritative capability catalog.
 
 ## Layout
 
-The selector opens as a **ComposerBand** (Select intent) above the composer,
-next to the editor — the same placement family as Models / Agents. It displays:
-- A search row (`/` + live filter).
-- A list of all available thinking levels.
-- The currently active thinking level highlighted in the list.
-- A brief description of each level next to its label.
+Both stages use a **ComposerBand** Select surface above the composer:
 
-## Behavior / Interactions
+1. **Model** — filterable provider/model rows with name and auth state.
+2. **Thinking** — filterable rows derived from the selected model's
+   `reasoningEfforts`, with a short description for each level.
 
-- **Opening**: The selector is opened by running the `/thinking` slash command.
-- **Filtering**: Typing character keys dynamically filters the thinking levels list by their label or description.
-- **Navigation**:
-  - `Up` / `Down` arrows select the previous/next visible option.
-  - `Esc` closes the selector and returns to the chat view.
-- **Confirmation**: Pressing `Enter` applies the selected thinking level to the host, closes the selector, and updates the active settings.
+The active value is marked when it is present in the current stage. If the
+active thinking level is unsupported by the newly selected model, the first
+supported option is selected and the user must still confirm it.
 
-The same levels remain editable at any time from Settings → Thinking → Level;
-`/thinking` is the quick band-mode shortcut.
+## Behavior / interactions
+
+- `/model`, `Ctrl+L`, or `F3` opens the model stage and refreshes the catalog.
+- `Up` / `Down` moves through visible rows; typing filters the active stage.
+- `Enter` on a model enters the thinking stage without changing host state.
+- The thinking stage contains only the selected target's advertised efforts.
+- A target with no advertised reasoning efforts contains only `off`.
+- `Enter` on thinking sends one config update containing provider, model, and
+  thinking level, then closes the workflow.
+- `Esc` in the thinking stage returns to the model stage without applying.
+- `Esc` in the model stage closes the workflow without applying.
+- Pointer activation follows the same two confirmations as keyboard input.
 
 ## Configuration
 
-The thinking levels supported are:
-- `off`: Disable assistant thinking/reasoning entirely.
-- `minimal`: Use minimal reasoning budget.
-- `low`: Use low reasoning budget.
-- `medium`: Use medium reasoning budget.
-- `high`: Use high reasoning budget.
-- `xhigh`: Use extra high reasoning budget.
-- `max`: Use the maximum reasoning budget on models that support it.
+The final confirmation updates these host-owned settings atomically:
+
+- `default-provider`
+- `default-model`
+- `default-thinking-level`
+
+Supported thinking values remain `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`, but any individual target may advertise only a subset.
 
 ## Non-goals
 
-- Restricting selection based on whether the active model natively supports reasoning; the user can select any level, and the host will map or ignore it as appropriate.
-- Persisting session-specific thinking overrides beyond standard host configuration changes.
+- Guessing capabilities from provider or model names.
+- Silently mapping one unsupported effort to another.
+- Changing host configuration after only the model-stage confirmation.
+- Removing file-based or Settings-based editing of the host defaults.

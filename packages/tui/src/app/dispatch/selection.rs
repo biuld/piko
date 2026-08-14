@@ -175,6 +175,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
             AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
+            AppMode::Surface(SurfaceId::Thinking) => self.thinking.list.selected = 0,
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
             _ => {}
@@ -198,6 +199,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Sessions) => self.sessions.list.selected = 0,
             AppMode::Surface(SurfaceId::Agents) => self.agent_panel.reset_selection(),
             AppMode::Surface(SurfaceId::Models) => self.models.reset(),
+            AppMode::Surface(SurfaceId::Thinking) => self.thinking.list.selected = 0,
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
             _ => {}

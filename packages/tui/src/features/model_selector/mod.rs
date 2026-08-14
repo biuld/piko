@@ -1,5 +1,6 @@
 use ratatui::{Frame, layout::Rect};
 
+use piko_protocol::model::ThinkingLevel;
 use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
@@ -96,6 +97,8 @@ pub struct ModelOption {
     pub id: String,
     pub name: String,
     pub has_auth: bool,
+    /// Closed reasoning choices advertised for this exact target.
+    pub reasoning_efforts: Vec<ThinkingLevel>,
 }
 
 impl ModelOption {
@@ -253,6 +256,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             has_auth: true,
+            reasoning_efforts: vec![ThinkingLevel::Off, ThinkingLevel::Medium],
         }
     }
 

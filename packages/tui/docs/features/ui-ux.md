@@ -461,7 +461,7 @@ Detail ownership: [tool-interactive-workflow.md](./tool-interactive-workflow.md)
 Detail ownership: [resume-session.md](./resume-session.md),
 [session-tree.md](./session-tree.md).
 
-### Model selector / thinking selector / settings
+### Model-and-thinking selector / settings
 
 **Must show**
 
@@ -500,7 +500,7 @@ Wire protocol design stays in system/feature design docs.
 
 | Layer | Owner | Purpose |
 |-------|--------|---------|
-| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Models, Thinking, Usage, Notifications, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
+| **Presentation commands** | TUI (local) | Open Settings, Tree, Sessions, Model configuration, Usage, Notifications, Agents, diagnostics, and Quit. Never sent as host catalog ids. |
 | **Host product commands** | hostd catalog + wire | Session/auth/runtime/model intents (`session.new`, `auth.login`, `session.compact`, `process.list`, …). Frontends map stable dotted ids to wire calls and local slash names. |
 
 Rules:
@@ -541,8 +541,7 @@ Each slash entry **must** expose:
 |----------------------|--------------|----------------------|
 | `/resume` | Session list | Openable sessions; select opens session |
 | `/tree` | Session tree | Branch navigation / labels as feature allows |
-| `/models` | Model selector | Apply model; BottomBar model text updates |
-| `/thinking` | Thinking selector (ComposerBand) | Apply level; BottomBar thinking text updates |
+| `/model` | Model → compatible thinking selector | Apply both values atomically; BottomBar model/thinking text updates |
 | `/settings` | Settings panel | Editable host-backed settings |
 | `/usage` | Centered Usage modal | Per-agent runs, active time, tokens, and cost; session token/cost total |
 | `/noti` | Centered Notifications modal | In-memory notices; Current/All title-affix scope |
@@ -564,7 +563,7 @@ Each slash entry **must** expose:
 | `session.compact` | `/compact` | Compaction progress/result via host events; Timeline keeps live rules |
 | `process.list` / `process.stop` | `/top` | Selectable process table in ComposerBand; Enter arms stop, second Enter confirms |
 | `mcp.status` | `/mcp` | ComposerBand with per-server state, counts, and errors |
-| `model.set` / `thinking.set` | (via selectors or future slash) | BottomBar + settings reflect new defaults |
+| `model.set` / `thinking.set` | (via the combined selector or future slash) | BottomBar + settings reflect new defaults |
 
 Background/internal wire commands (`ChatSubmit`, `TurnCancel`,
 `ApprovalRespond`, `StateSnapshot`, `AgentList`/`Subscribe`, `ConfigGet`,
@@ -584,7 +583,7 @@ not new protocol variants.
 | Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel with exact run identity and complete run-prompt, resource, tool-catalog, request, and options sections | Local presentation command; content is scrollable rather than silently truncated |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
 | Queue steer | `QueueSteer` | No first-class user entry | Local slash or Editor mode only if product wants steer; else keep protocol for automation |
-| `model.set` / `thinking.set` in catalog | Catalog advertised | Selectors use other paths | Keep selectors; optional slash args later; no second set API |
+| `model.set` / `thinking.set` in catalog | Catalog advertised | Combined selector uses another path | Keep the selector; optional slash args later; no second set API |
 
 ### When to add a **new** host wire command
 

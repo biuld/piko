@@ -237,7 +237,7 @@ Exact constants live in design; policy order is normative here.
 │ ·  … × N                                                     │
 │ +k more                                                      │
 │ ─ slash commands ─────────────── [i/n] ─           Suggest   │
-│ ❯ /models …                                                  │
+│ ❯ /model …                                                   │
 │   … (command palette = this band, not a modal)               │
 │ Tab · Enter                                                  │
 │ /mo                                                Composer  │
@@ -256,7 +256,7 @@ Exact constants live in design; policy order is normative here.
 │ ▸  active item only…                                         │
 │ +6 more                                                      │
 │ ─ slash commands ─ [i/n] ─  (fewer rows)           Suggest   │
-│ ❯ /models …                                                  │
+│ ❯ /model …                                                   │
 │ /mo                                                Composer  │
 └──────────────────────────────────────────────────────────────┘
 ```

@@ -116,7 +116,7 @@ frame border, list filter, footer hints, loading placeholder.
 | On/Off | Two parallel “Enable/Disable …” actions | binary options with short labels |
 | Restart vs live | Free-text in detail | `badge` (`restart hostd`) on summary |
 | Intermediate section | Same node type as leaf action | `Branch` vs `Choice` children |
-| Thinking selector | Band-mode picker (`/thinking`) | Settings → Thinking shares level copy/actions |
+| Model configuration | Two-stage picker (`/model`) | Settings → Thinking shares level copy/actions |
 
 New catalog keys must land as **`MenuRow` compositions**, not one more
 static-string action row.
@@ -321,8 +321,8 @@ Footer hints may distinguish **open** (catalog/branch) vs **apply**
   refresh channel exists (`ConfigGet` for relevant namespaces). Stale disk
   from an external editor is not a hard guarantee if the user never reopens;
   reopen/open must re-fetch or rehydrate.
-- `/thinking` opens the band-mode Thinking Selector (ComposerBand) with the
-  **same** level set and Active/value rules as the Settings → Thinking branch.
+- `/model` opens the two-stage Model → Thinking selector (ComposerBand); the
+  second stage is restricted to levels advertised by the selected target.
 
 ### Navigation and confirm
 

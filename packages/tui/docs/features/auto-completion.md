@@ -22,7 +22,7 @@ Paint must respect granted height (fewer list rows), not assume preferred.
 ```
 ─ slash commands ───────────────────── [1/15] ─
 ❯ /resume             List and open hostd sessions
-  /models             List and set default model
+  /model              Select model and compatible thinking
   /resume             List and open sessions
 Tab cycle | Enter execute
 ──────────────────────────────────────────────

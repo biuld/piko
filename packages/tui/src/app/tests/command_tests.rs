@@ -209,12 +209,65 @@ fn command_catalog_retains_invoke_and_hides_unsupported_aliases() {
     assert!(!entries.iter().any(|entry| entry.slash == "/clone"));
     assert!(!entries.iter().any(|entry| entry.slash == "/login-device"));
     assert!(!entries.iter().any(|entry| entry.slash == "/login-cancel"));
+    assert!(entries.iter().any(|entry| entry.slash == "/model"));
+    assert!(!entries.iter().any(|entry| entry.slash == "/models"));
+    assert!(!entries.iter().any(|entry| entry.slash == "/thinking"));
 }
 
 #[test]
 fn removed_compatibility_alias_is_not_a_command() {
     let mut app = live_app();
     assert!(app.try_slash_command("/clear").is_none());
+}
+
+#[test]
+fn model_selection_drills_into_only_supported_thinking_levels() {
+    use piko_protocol::model::ThinkingLevel;
+
+    let mut app = live_app();
+    app.models
+        .load(vec![crate::features::model_selector::ModelOption {
+            provider: "deepseek".into(),
+            id: "deepseek-v4-flash@platform".into(),
+            name: "DeepSeek V4 Flash".into(),
+            has_auth: true,
+            reasoning_efforts: vec![ThinkingLevel::Off, ThinkingLevel::High],
+        }]);
+    app.push_surface(SurfaceId::Models);
+
+    let effects = app.dispatch(crate::app::command::SurfaceAction::Confirm.into());
+
+    assert!(effects.is_empty());
+    assert_eq!(app.mode, AppMode::Surface(SurfaceId::Thinking));
+    assert_eq!(app.thinking.list.len(), 2);
+    assert_eq!(app.thinking.confirm(), Some(ThinkingLevel::Off));
+}
+
+#[test]
+fn model_and_thinking_are_applied_in_one_config_patch() {
+    use piko_protocol::{Command, model::ThinkingLevel};
+
+    let mut app = live_app();
+    app.models
+        .load(vec![crate::features::model_selector::ModelOption {
+            provider: "deepseek".into(),
+            id: "deepseek-v4-flash@platform".into(),
+            name: "DeepSeek V4 Flash".into(),
+            has_auth: true,
+            reasoning_efforts: vec![ThinkingLevel::High],
+        }]);
+    app.push_surface(SurfaceId::Models);
+    app.dispatch(crate::app::command::SurfaceAction::Confirm.into());
+
+    let effects = app.dispatch(crate::app::command::SurfaceAction::Confirm.into());
+
+    let [Effect::Send(Command::ConfigUpdate { patch, .. })] = effects.as_slice() else {
+        panic!("expected one atomic config update")
+    };
+    assert_eq!(patch["default-provider"], "deepseek");
+    assert_eq!(patch["default-model"], "deepseek-v4-flash@platform");
+    assert_eq!(patch["default-thinking-level"], "high");
+    assert_eq!(app.mode, AppMode::Chat);
 }
 
 #[test]

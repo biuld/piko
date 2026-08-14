@@ -151,6 +151,8 @@ pub struct AppState {
     pub sessions: SessionList,
     pub models: ModelSelector,
     pub thinking: ThinkingSelector,
+    /// Model chosen in stage one of the model → thinking workflow.
+    pub pending_model: Option<ModelOption>,
     pub settings: SettingsPanel,
     pub tree: TreePanel,
     pub summary_prompt: Option<ChoiceWorkflow>,
@@ -289,6 +291,7 @@ fn flatten_models(providers: Vec<ProviderInfo>) -> Vec<ModelOption> {
                 id: model.id,
                 name: model.name,
                 has_auth: provider.has_auth,
+                reasoning_efforts: model.reasoning_efforts,
             })
         })
         .collect()

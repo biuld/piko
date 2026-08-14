@@ -127,16 +127,6 @@ impl AppState {
                 self.tree.rebuild_visible_for_filter();
                 self.status = format!("{} session entries", self.tree.visible.rows.len());
             }
-            SurfaceAction::OpenThinking => {
-                let active = self
-                    .model
-                    .active_thinking_level
-                    .clone()
-                    .or_else(|| self.host_settings.thinking_level.clone());
-                self.thinking.prepare(active.as_deref());
-                self.push_surface(SurfaceId::Thinking);
-                self.status = "thinking level".to_string();
-            }
             SurfaceAction::OpenAgents => {
                 self.agent_panel.prepare_for_switch();
                 self.push_surface(SurfaceId::Agents);

@@ -29,7 +29,7 @@ product capabilities and invocation metadata.
 
 ## Command inventory
 
-- Presentation: sessions, tree, models, thinking, settings, status, agents,
+- Presentation: sessions, tree, model configuration, settings, status, agents,
   turn diff, prompt debug, quit.
 - Host-owned: new, fork, rename, import, delete, login, logout, compact,
   process management, and MCP status when advertised by hostd.

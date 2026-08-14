@@ -27,6 +27,7 @@ impl AppState {
     }
 
     pub(crate) fn request_models(&mut self) -> Vec<Effect> {
+        self.pending_model = None;
         let command_id = command_id();
         self.session.pending.track(
             command_id.clone(),
@@ -83,38 +84,47 @@ impl AppState {
     }
 
     pub(crate) fn apply_selected_model(&mut self) -> Vec<Effect> {
-        let mut effects = Vec::new();
         if let Some(model) = self.models.confirm() {
-            let provider = model.provider.clone();
-            let model_id = model.id.clone();
-            effects.push(Effect::send(Command::ConfigUpdate {
-                command_id: command_id(),
-                patch: serde_json::json!({
-                    "default-provider": provider,
-                    "default-model": model_id,
-                }),
-            }));
-            self.clear_focus();
-            self.status = format!("switching model to {provider}/{model_id}");
+            let active = self
+                .model
+                .active_thinking_level
+                .clone()
+                .or_else(|| self.host_settings.thinking_level.clone());
+            self.thinking
+                .prepare(&model.reasoning_efforts, active.as_deref());
+            self.status = format!("thinking for {}/{}", model.provider, model.id);
+            self.pending_model = Some(model);
+            self.push_surface(SurfaceId::Thinking);
         } else {
             self.status = "no model selected".to_string();
         }
-        effects
+        Vec::new()
     }
 
     pub(crate) fn apply_selected_thinking(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        if let Some(level) = self.thinking.confirm() {
-            self.model.active_thinking_level = Some(level.to_string());
-            self.host_settings.thinking_level = Some(level.to_string());
-            effects.push(Effect::send(config_command_for_setting(
-                crate::features::settings::SettingsAction::Thinking(level),
-            )));
-            self.clear_focus();
-            self.status = format!("thinking level {level}");
-        } else {
+        let Some(level) = self.thinking.confirm() else {
             self.status = "no thinking level selected".to_string();
-        }
+            return effects;
+        };
+        let Some(model) = self.pending_model.take() else {
+            self.status = "model configuration is incomplete".to_string();
+            return effects;
+        };
+        let provider = model.provider;
+        let model_id = model.id;
+        let level_name = level.as_str().to_string();
+        effects.push(Effect::send(Command::ConfigUpdate {
+            command_id: command_id(),
+            patch: serde_json::json!({
+                "default-provider": provider,
+                "default-model": model_id,
+                "default-thinking-level": level,
+            }),
+        }));
+        self.clear_focus();
+        self.status =
+            format!("switching model to {provider}/{model_id} with thinking {level_name}");
         effects
     }
 

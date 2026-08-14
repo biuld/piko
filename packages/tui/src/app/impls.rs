@@ -55,6 +55,7 @@ impl AppState {
             sessions: SessionList::new(),
             models: ModelSelector::new(),
             thinking: ThinkingSelector::new(),
+            pending_model: None,
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
             summary_prompt: None,
@@ -242,6 +243,7 @@ impl AppState {
         self.agent_panel.filter.clear();
         self.tree.filter.clear();
         self.models.filter.clear();
+        self.thinking.filter.clear();
         self.settings.filter.clear();
         self.auth_selector.filter.clear();
     }
@@ -252,6 +254,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Agents) => Some(&mut self.agent_panel.filter),
             AppMode::Surface(SurfaceId::Tree) => Some(&mut self.tree.filter),
             AppMode::Surface(SurfaceId::Models) => Some(&mut self.models.filter),
+            AppMode::Surface(SurfaceId::Thinking) => Some(&mut self.thinking.filter),
             AppMode::Surface(SurfaceId::Settings) => Some(&mut self.settings.filter),
             AppMode::Surface(SurfaceId::AuthSelector) => match self.auth_selector.state {
                 crate::features::auth_selector::AuthSelectorState::Menu => {

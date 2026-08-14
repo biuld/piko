@@ -1,12 +1,12 @@
-//! Thinking level selector — Select surface (`SurfaceId::Thinking`,
-//! ComposerBand).
+//! Model configuration's second-stage thinking selector.
 //!
-//! Band-mode picker for the default reasoning/thinking level, mirroring the
-//! Settings catalog "Level" row. Options and copy are shared with the catalog;
-//! applying sends the same `default-thinking-level` config patch.
+//! Options come from the selected model's catalog capabilities. Non-reasoning
+//! targets expose only `off`, so the workflow cannot create an unsupported
+//! model/effort pair.
 
 use ratatui::{Frame, layout::Rect};
 
+use piko_protocol::model::ThinkingLevel;
 use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
@@ -86,12 +86,9 @@ impl SurfacePanel<SurfaceId, HitId, ThinkingCtx<'_>> for ThinkingSelector {
 
 use super::settings::thinking_level_detail;
 
-/// Thinking levels, ordered by reasoning budget.
-pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 #[derive(Clone, Debug)]
 pub struct ThinkingOption {
-    level: &'static str,
+    level: ThinkingLevel,
     detail: &'static str,
 }
 
@@ -108,10 +105,10 @@ impl ThinkingSelector {
             .iter()
             .map(|option| {
                 SelectableItem::columns([
-                    ColumnCell::primary(option.level),
+                    ColumnCell::primary(option.level.as_str()),
                     ColumnCell::secondary(option.detail),
                 ])
-                .active(active_level == Some(option.level))
+                .active(active_level == Some(option.level.as_str()))
             })
             .collect()
     }
@@ -122,19 +119,29 @@ impl ThinkingSelector {
         }
     }
 
-    /// Rebuild the option list around the current active level (if any).
-    pub fn prepare(&mut self, active: Option<&str>) {
+    /// Rebuild the list from the exact target's advertised capabilities.
+    pub fn prepare(&mut self, supported: &[ThinkingLevel], active: Option<&str>) {
         self.filter.clear();
+        let levels = if supported.is_empty() {
+            vec![ThinkingLevel::Off]
+        } else {
+            supported.to_vec()
+        };
         self.list = SelectableList::new(
-            THINKING_LEVELS
-                .iter()
+            levels
+                .into_iter()
                 .map(|level| ThinkingOption {
+                    detail: thinking_level_detail(level.as_str()),
                     level,
-                    detail: thinking_level_detail(level),
                 })
                 .collect(),
         );
-        if let Some(idx) = THINKING_LEVELS.iter().position(|l| active == Some(l)) {
+        if let Some(idx) = self
+            .list
+            .items
+            .iter()
+            .position(|option| active == Some(option.level.as_str()))
+        {
             self.list.selected = idx;
         }
     }
@@ -157,7 +164,7 @@ impl ThinkingSelector {
     }
 
     /// Confirm the highlighted level (already filtered list).
-    pub fn confirm(&self) -> Option<&'static str> {
+    pub fn confirm(&self) -> Option<ThinkingLevel> {
         let filter = self.filter.as_str();
         let filtered = self
             .list
@@ -173,7 +180,7 @@ impl ThinkingSelector {
         filtered
             .get(selected_filtered_idx)
             .and_then(|&idx| self.list.items.get(idx))
-            .map(|o| o.level)
+            .map(|o| o.level.clone())
     }
 
     fn filtered_count(&self) -> usize {
@@ -206,7 +213,11 @@ impl ThinkingSelector {
 
 fn level_matches(option: &ThinkingOption, filter: &str) -> bool {
     filter.is_empty()
-        || option.level.to_lowercase().contains(&filter.to_lowercase())
+        || option
+            .level
+            .as_str()
+            .to_lowercase()
+            .contains(&filter.to_lowercase())
         || option
             .detail
             .to_lowercase()
@@ -220,17 +231,29 @@ mod tests {
     #[test]
     fn prepare_selects_active_level() {
         let mut picker = ThinkingSelector::new();
-        picker.prepare(Some("high"));
-        assert_eq!(picker.list.len(), THINKING_LEVELS.len());
-        assert_eq!(picker.list.items[picker.list.selected].level, "high");
-        assert_eq!(picker.confirm(), Some("high"));
+        let supported = vec![ThinkingLevel::Off, ThinkingLevel::High];
+        picker.prepare(&supported, Some("high"));
+        assert_eq!(picker.list.len(), 2);
+        assert_eq!(
+            picker.list.items[picker.list.selected].level,
+            ThinkingLevel::High
+        );
+        assert_eq!(picker.confirm(), Some(ThinkingLevel::High));
     }
 
     #[test]
     fn confirm_filters_by_level() {
         let mut picker = ThinkingSelector::new();
-        picker.prepare(None);
+        picker.prepare(&[ThinkingLevel::Low, ThinkingLevel::Medium], None);
         picker.filter = "med".to_string();
-        assert_eq!(picker.confirm(), Some("medium"));
+        assert_eq!(picker.confirm(), Some(ThinkingLevel::Medium));
+    }
+
+    #[test]
+    fn empty_capabilities_offer_only_off() {
+        let mut picker = ThinkingSelector::new();
+        picker.prepare(&[], Some("low"));
+        assert_eq!(picker.list.len(), 1);
+        assert_eq!(picker.confirm(), Some(ThinkingLevel::Off));
     }
 }

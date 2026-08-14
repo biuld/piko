@@ -548,12 +548,14 @@ fn model_row_click_selects_and_uses_confirm_action() {
             id: "a".into(),
             name: "A".into(),
             has_auth: true,
+            reasoning_efforts: vec![],
         },
         ModelOption {
             provider: "two".into(),
             id: "b".into(),
             name: "B".into(),
             has_auth: true,
+            reasoning_efforts: vec![],
         },
     ]);
     app.push_surface(SurfaceId::Models);
