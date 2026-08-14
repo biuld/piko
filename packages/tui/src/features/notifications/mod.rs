@@ -1,4 +1,5 @@
 use std::{
+    cell::{Cell, RefCell},
     collections::VecDeque,
     time::{Duration, Instant},
 };
@@ -13,12 +14,21 @@ mod panel;
 pub use panel::NotificationPanelCtx;
 
 const INFO_TTL: Duration = Duration::from_secs(3);
+const COPY_FEEDBACK_TTL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotificationLevel {
     Info,
     Warning,
     Error,
+}
+
+pub(crate) fn level_glyph(level: NotificationLevel) -> &'static str {
+    match level {
+        NotificationLevel::Info => "ⓘ",
+        NotificationLevel::Warning => "▲",
+        NotificationLevel::Error => "✗",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +82,12 @@ pub struct NotificationCenter {
     next_id: u64,
     view_scope: NotificationViewScope,
     scroll: usize,
+    max_scroll: Cell<usize>,
+    selected: Cell<usize>,
+    visible_count: Cell<usize>,
+    viewport_height: Cell<usize>,
+    item_offsets: RefCell<Vec<(u64, usize, usize)>>,
+    copied: Option<(u64, Instant)>,
 }
 
 impl NotificationCenter {
@@ -189,11 +205,15 @@ impl NotificationCenter {
     pub fn open_modal(&mut self) {
         self.view_scope = NotificationViewScope::Current;
         self.scroll = 0;
+        self.max_scroll.set(0);
+        self.selected.set(0);
     }
 
     pub fn set_view_scope(&mut self, scope: NotificationViewScope) {
         self.view_scope = scope;
         self.scroll = 0;
+        self.max_scroll.set(0);
+        self.selected.set(0);
     }
 
     pub fn toggle_view_scope(&mut self) {
@@ -211,7 +231,58 @@ impl NotificationCenter {
         self.scroll = self
             .scroll
             .saturating_add(amount)
-            .min(self.modal_len().saturating_sub(1));
+            .min(self.max_scroll.get());
+    }
+
+    pub fn select_prev(&mut self) {
+        self.selected.set(self.selected.get().saturating_sub(1));
+        self.ensure_selected_visible();
+    }
+
+    pub fn select_next(&mut self) {
+        let last = self.visible_count.get().saturating_sub(1);
+        self.selected
+            .set(self.selected.get().saturating_add(1).min(last));
+        self.ensure_selected_visible();
+    }
+
+    pub fn selected_copy_payload(&self, session_id: Option<&str>) -> Option<(u64, String)> {
+        self.modal_items(session_id)
+            .get(self.selected.get())
+            .map(|notice| (notice.id, notice.message.clone()))
+    }
+
+    pub fn message(&self, id: u64) -> Option<String> {
+        self.items
+            .iter()
+            .find(|notice| notice.id == id)
+            .map(|notice| notice.message.clone())
+    }
+
+    pub fn mark_copied(&mut self, id: u64, now: Instant) {
+        self.copied = Some((id, now + COPY_FEEDBACK_TTL));
+    }
+
+    pub(super) fn is_copied(&self, id: u64, now: Instant) -> bool {
+        matches!(self.copied, Some((copied_id, until)) if copied_id == id && until > now)
+    }
+
+    fn ensure_selected_visible(&mut self) {
+        let selected = self.selected.get();
+        let Some((_, start, end)) = self.item_offsets.borrow().get(selected).copied() else {
+            return;
+        };
+        let height = self.viewport_height.get().max(1);
+        if start < self.scroll {
+            self.scroll = start;
+        } else if end > self.scroll.saturating_add(height) {
+            self.scroll = if end.saturating_sub(start) >= height {
+                start
+            } else {
+                end.saturating_sub(height)
+            };
+        }
+        self.scroll = self.scroll.min(self.max_scroll.get());
     }
 
     #[cfg(test)]
@@ -305,6 +376,25 @@ impl PointerComponent<HitId> for NotificationCenter {
             (PointerGesture::ScrollDown, Some(HitId::Content)) => {
                 self.scroll_down(3);
                 Vec::new()
+            }
+            (PointerGesture::ScrollUp, Some(HitId::NotificationCopy(_))) => {
+                self.scroll_up(3);
+                Vec::new()
+            }
+            (PointerGesture::ScrollDown, Some(HitId::NotificationCopy(_))) => {
+                self.scroll_down(3);
+                Vec::new()
+            }
+            (PointerGesture::Activate, Some(HitId::NotificationCopy(id))) => {
+                if let Some(index) = self
+                    .item_offsets
+                    .borrow()
+                    .iter()
+                    .position(|(item_id, _, _)| *item_id == id)
+                {
+                    self.selected.set(index);
+                }
+                vec![NotificationAction::Copy(id).into()]
             }
             (PointerGesture::Activate, Some(HitId::Notice)) => {
                 vec![NotificationAction::DismissVisible.into()]
@@ -483,5 +573,19 @@ mod tests {
         }
 
         assert_eq!(center.items.len(), 40);
+    }
+
+    #[test]
+    fn copied_feedback_is_scoped_to_one_notice_and_expires() {
+        let mut center = NotificationCenter::default();
+        let first = center.push(NotificationLevel::Info, "first");
+        let second = center.push(NotificationLevel::Info, "second");
+        let now = Instant::now();
+
+        center.mark_copied(first, now);
+
+        assert!(center.is_copied(first, now));
+        assert!(!center.is_copied(second, now));
+        assert!(!center.is_copied(first, now + COPY_FEEDBACK_TTL));
     }
 }

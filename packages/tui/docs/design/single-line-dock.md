@@ -23,7 +23,7 @@ PaneSpec::Hints ─────→ Pane renderer ────┼→ dock_line::r
 - It paints one `Paragraph` without wrapping, so narrow terminals clip the
   trailing text consistently for notices and hints.
 - `hint_line` returns the common keyboard glyph plus the standard dim hint
-  style. Notice-specific severity labels remain constructed at the notice
+  style. Notice-specific severity glyphs remain constructed at the notice
   call site, because severity belongs to the Notification model, not shared
   chrome.
 - Pane hint rendering selects the first non-empty line. `PaneFooter::Hints`

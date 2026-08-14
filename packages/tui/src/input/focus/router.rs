@@ -298,9 +298,12 @@ impl InputRouter {
                 if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
                     return Some(NotificationAction::ToggleScope.into());
                 }
+                if matches!(key.code, KeyCode::Enter | KeyCode::Char('c')) {
+                    return Some(NotificationAction::CopySelected.into());
+                }
                 match ka {
-                    Some(KeyAction::SelectPrev) => Some(NotificationAction::ScrollUp(1).into()),
-                    Some(KeyAction::SelectNext) => Some(NotificationAction::ScrollDown(1).into()),
+                    Some(KeyAction::SelectPrev) => Some(NotificationAction::SelectPrev.into()),
+                    Some(KeyAction::SelectNext) => Some(NotificationAction::SelectNext.into()),
                     Some(KeyAction::TimelinePageUp) => {
                         Some(NotificationAction::ScrollUp(10).into())
                     }

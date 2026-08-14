@@ -119,6 +119,10 @@ pub enum ToolInteractionAction {
 pub enum NotificationAction {
     DismissVisible,
     ToggleScope,
+    SelectPrev,
+    SelectNext,
+    CopySelected,
+    Copy(u64),
     ScrollUp(usize),
     ScrollDown(usize),
 }

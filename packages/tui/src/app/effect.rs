@@ -13,6 +13,7 @@ pub enum Msg {
 pub enum Effect {
     Send(Command),
     OpenUrl(String),
+    CopyToClipboard { notification_id: u64, text: String },
 }
 
 impl Effect {
@@ -22,5 +23,12 @@ impl Effect {
 
     pub fn open_url(url: impl Into<String>) -> Self {
         Self::OpenUrl(url.into())
+    }
+
+    pub fn copy_to_clipboard(notification_id: u64, text: impl Into<String>) -> Self {
+        Self::CopyToClipboard {
+            notification_id,
+            text: text.into(),
+        }
     }
 }

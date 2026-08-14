@@ -14,7 +14,7 @@ use crate::{
         agent_status::AgentPanelView,
         bottom_bar::{BottomBar, BottomBarView},
         model_selector::ModelCtx,
-        notifications::{NotificationLevel, NotificationPanelCtx},
+        notifications::{NotificationLevel, NotificationPanelCtx, level_glyph},
         session_list::SessionListCtx,
         thinking::ThinkingCtx,
         tree::TreeCtx,
@@ -317,13 +317,14 @@ fn render_notification_row(
     ) else {
         return;
     };
-    let (label, color) = match notification.level {
-        NotificationLevel::Info => ("info", app.theme.info),
-        NotificationLevel::Warning => ("warning", app.theme.warning),
-        NotificationLevel::Error => ("error", app.theme.error),
+    let color = match notification.level {
+        NotificationLevel::Info => app.theme.info,
+        NotificationLevel::Warning => app.theme.warning,
+        NotificationLevel::Error => app.theme.error,
     };
+    let glyph = level_glyph(notification.level);
     let line = Line::from(vec![
-        Span::styled(format!(" ● {label} · "), Style::default().fg(color)),
+        Span::styled(format!(" {glyph}  "), Style::default().fg(color)),
         Span::styled(&notification.message, Style::default().fg(color)),
         Span::styled(" · F8 dismiss", Style::default().fg(app.theme.dim)),
     ]);

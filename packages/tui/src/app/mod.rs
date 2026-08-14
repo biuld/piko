@@ -54,6 +54,8 @@ pub enum HitId {
     Composer,
     /// The transient notice row (click → dismiss).
     Notice,
+    /// Copy one notification's complete original message.
+    NotificationCopy(u64),
     /// One completion suggestion row (click → accept it).
     Suggest(usize),
     /// One visible Timeline tool component (click → toggle this block only).

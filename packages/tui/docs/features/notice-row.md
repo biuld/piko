@@ -14,27 +14,37 @@ product state; notices are a presentation projection of that state.
 
 ```text
 Timeline
-Notice Row?    ● warning/error/info · concise message · F8 dismiss
+Notice Row?    ⓘ/▲/✗  concise message · F8 dismiss
 Suggestions?
 Composer
 BottomBar
 ```
 
 The row occupies one line only while a notice is visible. Actionable notices
-take precedence over transient informational notices. Severity is expressed by
-both a glyph/word and a theme color.
+take precedence over transient informational notices. Both the row and history
+panel use a distinct glyph and theme color for each severity instead of
+spelling out level names.
 
-`/noti` opens a centered read-only modal containing the in-memory notice
-queue. Its title uses the shared mode-strip affix:
+`/noti` opens a centered modal containing the in-memory notice queue. Its title
+uses the shared mode-strip affix:
 
 ```text
 ┌─ Notifications                 [Current] | All ─┐
-│ ● warning  current session  approval requested  │
-│ ● info     global           setting applied     │
+│ ▲ session:a1b2c3d4 · pending · active     [Copy] │
+│   Approval requested for a command that is too   │
+│   long to fit on one line                        │
+│ ⓘ global · transient · elapsed            [Copy] │
+│   Setting applied                                │
 │                                              │
-│ Tab scope · ↑/↓ scroll · Esc close           │
+│ ↑/↓ select · c/Enter copy · PgUp/PgDn scroll │
 └──────────────────────────────────────────────┘
 ```
+
+Each notice is a two-row minimum unit. Its first row contains the severity
+glyph, scope, policy, lifecycle status, and a right-aligned `[Copy]` action.
+The second row begins the original message; longer messages wrap to aligned
+continuation rows. Info, warning, and error use `ⓘ`, `▲`, and `✗` respectively;
+level names are not rendered.
 
 `Current` is selected whenever the modal opens and shows global notices plus
 notices scoped to the currently viewed session. `All` includes notices scoped
@@ -56,8 +66,12 @@ to other sessions. Clicking the title affix or pressing Tab changes scope.
 - `/noti` shows active, elapsed, dismissed, and resolved records.
 - Applying an authoritative snapshot may recreate state-derived notices from
   pending host state. The notice queue itself is never persisted.
-- `/noti` does not dismiss or resolve items. Up/Down, PageUp/PageDown, and the
-  mouse wheel scroll the modal; Esc or outside click closes it.
+- `/noti` does not dismiss or resolve items. Up/Down selects a notice; `c`,
+  Enter, or its `[Copy]` action copies the complete original message without
+  severity or lifecycle metadata. After the platform clipboard confirms
+  success, that row shows a success-colored `[Copied]` label for a short
+  interval. PageUp/PageDown and the mouse wheel scroll the modal; Esc or outside
+  click closes it.
 
 ## Configuration
 

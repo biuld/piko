@@ -10,6 +10,7 @@ use crate::app::{
         Action, ApprovalAction, EditorAction, NotificationAction, SurfaceAction, TimelineAction,
         ToolInteractionAction,
     },
+    effect::Effect,
 };
 use crate::features::approval::PendingApproval;
 use crate::features::notifications::NotificationLevel;
@@ -393,6 +394,34 @@ fn notice_click_clears_notifications() {
     assert!(matches!(
         actions.as_slice(),
         [Action::Notifications(NotificationAction::DismissVisible)]
+    ));
+}
+
+#[test]
+fn notification_copy_button_targets_the_complete_original_message() {
+    let mut app = app();
+    let id = app
+        .notifications
+        .push(NotificationLevel::Error, "first line\nsecond line");
+    app.notifications.open_modal();
+    app.push_surface(SurfaceId::Notifications);
+    let (x, y) = element_point(
+        &app,
+        SurfaceId::Notifications,
+        crate::app::HitId::NotificationCopy(id),
+    );
+
+    let mut actions = route_pointer(
+        &mut app,
+        Rect::new(0, 0, 80, 24),
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    let effects = app.dispatch(actions.pop().expect("copy action"));
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::CopyToClipboard { notification_id, text }]
+            if *notification_id == id && text == "first line\nsecond line"
     ));
 }
 

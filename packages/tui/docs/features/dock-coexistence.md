@@ -230,7 +230,7 @@ Exact constants live in design; policy order is normative here.
 ┌──────────────────────────────────────────────────────────────┐
 │ STREAM   (at risk without solver)                            │
 ├──────────────────────────────────────────────────────────────┤
-│ ● warning  … · F8                                  Notice    │
+│ ▲  … · F8                                          Notice    │
 │ Todos  2/8 done · …                                Todos     │
 │ ✓  …                                                         │
 │ ▸  …                                                         │
@@ -251,7 +251,7 @@ Exact constants live in design; policy order is normative here.
 │ STREAM   (≥ stream_min)                                      │
 │  … still readable …                                          │
 ├──────────────────────────────────────────────────────────────┤
-│ ● warning  … · F8                                  Notice    │
+│ ▲  … · F8                                          Notice    │
 │ Todos  2/8 done · …                                Todos     │
 │ ▸  active item only…                                         │
 │ +6 more                                                      │

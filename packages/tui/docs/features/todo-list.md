@@ -45,7 +45,7 @@ and theme tokens stay in code; structure and information duties are normative.
 │                                                              │
 ├──────────────────────────────────────────────────────────────┤
 │ DOCK                                                         │
-│  ● warning  something optional notice · F8                   │  Notice?
+│  ▲  something optional notice · F8                           │  Notice?
 │  Todos  1/3 done · 1 active · 1 remaining                    │  ┐
 │  ✓  Ship protocol serde                                      │  │ Todos
 │  ▸  Persist list with session                                │  │ strip

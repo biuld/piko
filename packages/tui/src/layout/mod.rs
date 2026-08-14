@@ -120,7 +120,11 @@ fn usage_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16
 }
 
 fn notifications_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
-    let content_rows = (app.notifications.modal_len().max(1) as u16).min(18);
+    // Each notice has at least one message row and one metadata row. Longer
+    // messages wrap inside the viewport and contribute to panel scrolling.
+    let content_rows = (app.notifications.modal_len().max(1) as u16)
+        .saturating_mul(2)
+        .min(18);
     let width = cells_from_percent(body.width, 88)
         .clamp(52, 120)
         .min(body.width);
@@ -295,13 +299,25 @@ pub fn build_surface_hitmap(
                 &crate::features::usage::UsagePanel, rect
             ))
         }
-        Region::Surface(SurfaceId::Notifications) => stamp(
-            <crate::features::notifications::NotificationCenter as SurfacePanel<
-                SurfaceId,
-                HitId,
-                crate::features::notifications::NotificationPanelCtx<'_>,
-            >>::hit_regions(&app.notifications, rect),
-        ),
+        Region::Surface(SurfaceId::Notifications) => {
+            let mut regions =
+                <crate::features::notifications::NotificationCenter as SurfacePanel<
+                    SurfaceId,
+                    HitId,
+                    crate::features::notifications::NotificationPanelCtx<'_>,
+                >>::hit_regions(&app.notifications, rect);
+            regions.extend(
+                app.notifications
+                    .copy_regions(rect, app.session.id.as_deref())
+                    .into_iter()
+                    .map(|(rect, element)| HitRegion {
+                        region: SurfaceId::Notifications,
+                        rect,
+                        element: Some(element),
+                    }),
+            );
+            stamp(regions)
+        }
         Region::Surface(SurfaceId::Diagnostics) => stamp(app.diagnostics.hit_regions(rect)),
         Region::Surface(SurfaceId::Settings) => stamp(app.settings.hit_regions(rect)),
         Region::Surface(SurfaceId::Models) => stamp(app.models.hit_regions(rect)),

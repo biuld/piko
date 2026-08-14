@@ -74,6 +74,58 @@ fn notice_component_paints_its_hover_background() {
     );
 }
 
+#[test]
+fn notice_row_uses_distinct_severity_glyphs_without_level_words() {
+    for (level, glyph, level_word) in [
+        (NotificationLevel::Info, "ⓘ", "info"),
+        (NotificationLevel::Warning, "▲", "warning"),
+        (NotificationLevel::Error, "✗", "error"),
+    ] {
+        let mut app = app();
+        app.notifications.push(level, "notice body");
+        let area = Rect::new(0, 0, 80, 24);
+        let notice = compose_frame(&app, area).plan.rects[&Region::Notice];
+        let terminal = draw(&app, area);
+        let text = (notice.x..notice.right())
+            .map(|x| terminal.backend().buffer()[(x, notice.y)].symbol())
+            .collect::<String>();
+
+        assert!(text.contains(&format!("{glyph}  notice body")), "{text}");
+        assert!(!text.contains(level_word), "{text}");
+    }
+}
+
+#[test]
+fn notification_panel_renders_metadata_then_wrapped_body() {
+    let mut app = app();
+    app.notifications.push(
+        NotificationLevel::Error,
+        "a notification body that remains separate from its status metadata",
+    );
+    app.notifications.open_modal();
+    app.push_surface(SurfaceId::Notifications);
+    let area = Rect::new(0, 0, 100, 30);
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let rows = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+    let header = rows
+        .iter()
+        .position(|row| row.contains("✗ global · dismissible · active") && row.contains("[Copy]"))
+        .expect("notification metadata header");
+
+    assert!(
+        rows[header + 1].contains("a notification body"),
+        "{}",
+        rows.join("\n")
+    );
+}
+
 fn assert_editor_focus_feedback(mut app: AppState) {
     let area = Rect::new(0, 0, 80, 24);
     let composer = compose_frame(&app, area).plan.rects[&Region::Composer];

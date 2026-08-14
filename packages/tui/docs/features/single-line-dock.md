@@ -17,7 +17,7 @@ Todos / Suggest heights). Stack coexistence:
 ## Layout
 
 ```text
-● warning · approval requested · F8 dismiss
+▲  approval requested · F8 dismiss
 ⌨ ↑/↓ navigate · Enter confirm · Esc cancel
 ```
 

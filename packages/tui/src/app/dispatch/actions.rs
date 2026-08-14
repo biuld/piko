@@ -304,6 +304,21 @@ impl AppState {
                 self.agent_panel.active_agent_instance_id.as_deref(),
             ),
             NotificationAction::ToggleScope => self.notifications.toggle_view_scope(),
+            NotificationAction::SelectPrev => self.notifications.select_prev(),
+            NotificationAction::SelectNext => self.notifications.select_next(),
+            NotificationAction::CopySelected => {
+                if let Some((id, message)) = self
+                    .notifications
+                    .selected_copy_payload(self.session.id.as_deref())
+                {
+                    return vec![Effect::copy_to_clipboard(id, message)];
+                }
+            }
+            NotificationAction::Copy(id) => {
+                if let Some(message) = self.notifications.message(id) {
+                    return vec![Effect::copy_to_clipboard(id, message)];
+                }
+            }
             NotificationAction::ScrollUp(amount) => self.notifications.scroll_up(amount),
             NotificationAction::ScrollDown(amount) => self.notifications.scroll_down(amount),
         }
