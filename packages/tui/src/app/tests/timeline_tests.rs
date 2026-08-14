@@ -52,6 +52,42 @@ fn committed_messages_use_task_seq_not_arrival_order() {
 }
 
 #[test]
+fn late_turn_failure_is_placed_before_a_subsequent_session_fact() {
+    let mut app = live_app();
+    app.apply_event(committed("assistant-1", 1, assistant("provider error")));
+    app.apply_event(Event::SessionEntryCommitted(
+        piko_protocol::SessionEntryCommittedEvent {
+            session_id: "session-1".into(),
+            entry: piko_protocol::SessionTreeEntry::ThinkingLevelChange(
+                piko_protocol::ThinkingLevelChangeEntry {
+                    id: "thinking-low".into(),
+                    parent_id: Some("assistant-1".into()),
+                    timestamp: "2026-08-14T14:23:51Z".into(),
+                    thinking_level: "low".into(),
+                },
+            ),
+        },
+    ));
+    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Failed {
+        session_id: "session-1".into(),
+        turn_id: "work-1".into(),
+        agent_instance_id: "task-1".into(),
+        error: "agent run failed".into(),
+        usage: Default::default(),
+        timestamp: 1,
+    }));
+
+    assert_eq!(
+        app.timeline.component_kinds(),
+        vec![
+            TimelineKind::Assistant,
+            TimelineKind::Error,
+            TimelineKind::SessionFact,
+        ]
+    );
+}
+
+#[test]
 fn commit_before_realtime_never_creates_a_second_draft() {
     let mut app = live_app();
     app.apply_event(committed("assistant-1", 2, assistant("complete")));

@@ -89,7 +89,7 @@ impl AppState {
                 self.status = format!("turn {turn_id} failed");
                 self.with_agent_timeline(&agent_instance_id, |timeline| {
                     timeline.finish_turn(&turn_id, crate::app::ToolStatus::Failed);
-                    timeline.push_error(error);
+                    timeline.push_turn_error(&turn_id, error);
                 });
             }
             piko_protocol::TurnEvent::Cancelled {

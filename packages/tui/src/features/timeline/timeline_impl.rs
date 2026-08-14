@@ -83,8 +83,24 @@ impl Timeline {
     }
 
     pub fn push_error(&mut self, text: String) {
+        self.push_anchored_error(text, None);
+    }
+
+    pub fn push_turn_error(&mut self, turn_id: &str, text: String) {
+        self.push_anchored_error(text, Some(turn_id.to_string()));
+    }
+
+    fn push_anchored_error(&mut self, text: String, after_turn_id: Option<String>) {
+        let anchored = after_turn_id.is_some();
         let id = self.local_id();
-        self.push_component(TimelineComponent::Error(ErrorComponent { id, text }));
+        self.push_component(TimelineComponent::Error(ErrorComponent {
+            id,
+            text,
+            after_turn_id,
+        }));
+        if anchored {
+            self.sync_projection();
+        }
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
@@ -157,7 +173,13 @@ impl Timeline {
         self.components.clear();
         self.tool_calls.clear();
 
+        let mut last_component_by_turn = HashMap::new();
         for item in self.projection.items() {
+            let source_turn_id = match item {
+                CoreItem::Committed(committed) => Some(committed.source_turn_id.clone()),
+                CoreItem::Tool(tool) => tool.source_turn_id.clone(),
+                CoreItem::RealtimeDraft(_) | CoreItem::SessionEntry(_) => None,
+            };
             let component = match item {
                 CoreItem::Committed(committed) => {
                     component_from_message(committed.message_id.clone(), &committed.message)
@@ -215,9 +237,31 @@ impl Timeline {
             };
             if let Some(component) = component {
                 self.components.push_back(component);
+                if let Some(turn_id) = source_turn_id {
+                    last_component_by_turn.insert(turn_id, self.components.len() - 1);
+                }
             }
         }
-        self.components.extend(local_errors);
+        for error in local_errors {
+            let insertion_index = match &error {
+                TimelineComponent::Error(error) => error
+                    .after_turn_id
+                    .as_ref()
+                    .and_then(|turn_id| last_component_by_turn.get(turn_id))
+                    .map(|index| index + 1),
+                _ => None,
+            };
+            if let Some(index) = insertion_index {
+                self.components.insert(index, error);
+                for last_index in last_component_by_turn.values_mut() {
+                    if *last_index >= index {
+                        *last_index += 1;
+                    }
+                }
+            } else {
+                self.components.push_back(error);
+            }
+        }
         while self.components.len() > MAX_COMPONENTS {
             self.components.pop_front();
         }
