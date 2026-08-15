@@ -2,7 +2,7 @@ use ratatui::{layout::Rect, text::Line};
 
 use crate::{app::HitId, layout::DEFAULT_HORIZONTAL_INSET, theme::Theme};
 
-use super::{Timeline, TimelineComponent, render::component_lines};
+use super::{Timeline, TimelineComponent};
 
 pub(crate) struct TimelineRenderPlan {
     pub lines: Vec<Line<'static>>,
@@ -36,8 +36,11 @@ impl Timeline {
         // Hit targets are title-row only (not the full expanded body).
         // tool_lines always lays out: pad · title · … so title is start+1.
         let mut tool_title_rows: Vec<(usize, usize)> = Vec::new();
+        let mut seen_ids = Vec::with_capacity(self.components.len());
+        let mut cache = self.line_cache.borrow_mut();
         for (source_index, component) in self.components.iter().enumerate() {
-            let body = component_lines(
+            seen_ids.push(component.id().clone());
+            let body = cache.lines_for(
                 component,
                 self.thinking_visible,
                 hovered_tool == Some(source_index),
@@ -60,6 +63,8 @@ impl Timeline {
                 }
             }
         }
+        cache.retain_ids(&seen_ids);
+        drop(cache);
 
         let has_pending = self.viewport.pending_new_items() > 0;
         let visible_height =
@@ -233,5 +238,71 @@ mod tests {
         let (rect, id) = regions[0];
         assert_eq!(id, HitId::TimelineTool(0));
         assert_eq!(rect.height, 1, "hit must be title-row only, got {rect:?}");
+    }
+
+    fn apply_text_delta(timeline: &mut Timeline, seq: u64, text: &str) {
+        let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+            Some("s".into()),
+            Some("root".into()),
+            "msg",
+            Some(seq),
+            &piko_protocol::agent_runtime::RealtimeDelta::Text {
+                content_index: 0,
+                delta: text.into(),
+            },
+        )
+        .pop()
+        .unwrap();
+        timeline.apply_stream_item(&patch);
+    }
+
+    #[test]
+    fn projection_batch_rebuilds_components_once_at_end() {
+        let mut timeline = Timeline::new();
+        timeline.begin_projection_batch();
+        apply_text_delta(&mut timeline, 1, "hello");
+        assert!(
+            timeline.components.is_empty(),
+            "batch must defer presentation rebuild"
+        );
+        apply_text_delta(&mut timeline, 2, " world");
+        assert!(timeline.components.is_empty());
+        timeline.end_projection_batch();
+        assert_eq!(
+            timeline.assistant_text("msg").as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn render_plan_is_stable_when_line_cache_hits() {
+        let theme = Theme::dark();
+        let mut timeline = Timeline::new();
+        apply_text_delta(&mut timeline, 1, "cached body");
+        let area = Rect::new(0, 0, 40, 12);
+        let first = timeline.render_plan(area, &theme, None);
+        let second = timeline.render_plan(area, &theme, None);
+        assert_eq!(first.lines.len(), second.lines.len());
+        assert_eq!(first.top_offset, second.top_offset);
+        assert_eq!(
+            first
+                .lines
+                .iter()
+                .map(|line| line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>())
+                .collect::<Vec<_>>(),
+            second
+                .lines
+                .iter()
+                .map(|line| line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>())
+                .collect::<Vec<_>>(),
+        );
     }
 }

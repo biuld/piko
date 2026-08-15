@@ -1,4 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+};
 
 use piko_protocol::TranscriptCommittedEvent;
 
@@ -10,6 +13,7 @@ use crate::{
 mod component;
 mod highlight;
 mod layout;
+mod line_cache;
 mod markdown;
 mod render;
 mod render_diff;
@@ -40,6 +44,9 @@ pub struct Timeline {
     pub tool_calls: Vec<ToolEntry>,
     projection: piko_client_core::AgentTimeline,
     next_local_id: u64,
+    line_cache: RefCell<line_cache::LineCache>,
+    projection_dirty: bool,
+    defer_projection_sync: bool,
 }
 
 mod internals;

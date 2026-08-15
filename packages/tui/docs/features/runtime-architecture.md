@@ -42,6 +42,12 @@ geometry.
 - Pointer events use the last painted hit map; they do not rebuild layout.
 - Terminal input processing has a per-frame event/time budget.
 - Host input processing has a per-frame line-count budget.
+- Each cycle is serialized: input, then host, then tick, then at most one
+  paint. Composer keys are applied before host work in the same cycle.
+- Host-only Timeline paints are coalesced to a short interval; a cycle with
+  input always paints.
+- Timeline component lines are cached across frames by content revision, width,
+  theme, thinking visibility, and hover.
 - Consecutive Timeline wheel events may be coalesced into one line delta.
 - Keyboard and pointer adapters emit actions without mutating `AppState`.
 - The focus stack is the sole current-mode authority.
@@ -66,6 +72,10 @@ geometry.
   painted snapshot.
 - A bounded batch yields to paint even when terminal events remain queued.
 - A bounded host batch yields to paint even when host events remain queued.
+- Keyboard and paste are applied in the input slot of the current cycle, then
+  host and tick run, then the cycle paints. Host-only cycles may wait up to one
+  paint interval so stream tokens cannot monopolize the loop.
+- One host drain rebuilds Timeline presentation once, not once per line.
 - Consecutive wheel events over Timeline accumulate their existing three-row
   wheel steps; direction changes preserve the net ordered delta.
 - Non-Timeline wheel events retain their component-specific behavior.
@@ -88,6 +98,8 @@ No user-facing configuration. Frame and event budgets are runtime constants.
 - [x] A continuous terminal event queue cannot prevent the next paint
       indefinitely.
 - [x] A continuous host event queue cannot prevent the next paint indefinitely.
+- [x] Pending composer input is applied before host work in the same cycle and
+      that cycle paints.
 - [x] Consecutive Timeline wheel events produce one accumulated scroll action.
 - [x] Existing pointer behavior and modal barriers remain covered by tests.
 - [x] Keyboard and pointer production routers accept immutable `AppState` and

@@ -9,6 +9,33 @@ impl Timeline {
             tool_calls: Vec::new(),
             projection: piko_client_core::AgentTimeline::new(),
             next_local_id: 1,
+            line_cache: std::cell::RefCell::new(super::line_cache::LineCache::default()),
+            projection_dirty: false,
+            defer_projection_sync: false,
+        }
+    }
+
+    pub fn begin_projection_batch(&mut self) {
+        self.defer_projection_sync = true;
+    }
+
+    pub fn end_projection_batch(&mut self) {
+        self.defer_projection_sync = false;
+        self.flush_projection();
+    }
+
+    fn mark_projection_applied(&mut self) {
+        if self.defer_projection_sync {
+            self.projection_dirty = true;
+        } else {
+            self.sync_projection();
+        }
+    }
+
+    fn flush_projection(&mut self) {
+        if self.projection_dirty {
+            self.projection_dirty = false;
+            self.sync_projection();
         }
     }
 
@@ -30,7 +57,7 @@ impl Timeline {
     ) -> piko_client_core::ApplyOutcome {
         let outcome = self.projection.apply_stream_item(patch);
         if outcome == piko_client_core::ApplyOutcome::Applied {
-            self.sync_projection();
+            self.mark_projection_applied();
         }
         outcome
     }
@@ -43,7 +70,7 @@ impl Timeline {
             event.source_turn_id,
         );
         if outcome == piko_client_core::ApplyOutcome::Applied {
-            self.sync_projection();
+            self.mark_projection_applied();
         }
         outcome != piko_client_core::ApplyOutcome::Inconsistent
     }
@@ -55,7 +82,7 @@ impl Timeline {
     ) -> piko_client_core::ApplyOutcome {
         let outcome = self.projection.apply_session_entry(entry, branch_order);
         if outcome == piko_client_core::ApplyOutcome::Applied {
-            self.sync_projection();
+            self.mark_projection_applied();
         }
         outcome
     }
@@ -69,7 +96,7 @@ impl Timeline {
     ) {
         self.projection
             .apply_tool_started(tool_call_id, tool_name, args, parent_message_id);
-        self.sync_projection();
+        self.mark_projection_applied();
     }
 
     pub fn finish_turn(&mut self, turn_id: &str, status: crate::app::ToolStatus) {
@@ -79,7 +106,7 @@ impl Timeline {
             _ => return,
         };
         self.projection.finish_turn(turn_id, status);
-        self.sync_projection();
+        self.mark_projection_applied();
     }
 
     pub fn push_error(&mut self, text: String) {
@@ -99,7 +126,7 @@ impl Timeline {
             after_turn_id,
         }));
         if anchored {
-            self.sync_projection();
+            self.mark_projection_applied();
         }
     }
 
@@ -132,6 +159,9 @@ impl Timeline {
         self.tool_calls.clear();
         self.viewport.jump_latest();
         self.projection.clear();
+        self.line_cache.borrow_mut().clear();
+        self.projection_dirty = false;
+        self.defer_projection_sync = false;
     }
 
     /// Update or insert a presentation-only tool. Host-authored tools enter

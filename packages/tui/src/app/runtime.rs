@@ -21,6 +21,14 @@ impl AppState {
         }
     }
 
+    pub fn begin_host_batch(&mut self) {
+        self.timelines.begin_projection_batch();
+    }
+
+    pub fn end_host_batch(&mut self) {
+        self.timelines.end_projection_batch();
+    }
+
     pub fn handle_host_line(&mut self, line: HostLine) -> Vec<effect::Effect> {
         match line {
             HostLine::Message(message) => match *message {

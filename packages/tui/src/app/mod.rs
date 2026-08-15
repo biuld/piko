@@ -82,7 +82,7 @@ pub enum HitId {
 }
 
 /// Tool status shared between surfaces.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ToolStatus {
     Running,
     Completed,

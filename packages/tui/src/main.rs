@@ -3,6 +3,7 @@ mod app;
 mod architecture_tests;
 mod cli;
 mod config;
+mod event_loop;
 mod features;
 mod host;
 mod input;
@@ -14,26 +15,13 @@ mod theme;
 mod tui;
 mod ui;
 
-use std::{
-    env,
-    io::Stdout,
-    time::{Duration, Instant},
-};
+use std::{env, time::Duration};
 
 use anyhow::{Context, Result};
-use app::{
-    AppState, InitialOptions,
-    command::{Action, EditorAction, TimelineAction},
-    effect::{Effect, Msg},
-};
+use app::{AppState, InitialOptions};
 use cli::CliArgs;
-use crossterm::{
-    SynchronizedUpdate,
-    event::{self, Event as CrosstermEvent},
-};
 use host::HostdClient;
-use input::{batch::TimelineScrollBatch, keymap::Keymap};
-use ratatui::{Terminal, backend::CrosstermBackend};
+use input::keymap::Keymap;
 use tui::TerminalGuard;
 
 fn main() -> Result<()> {
@@ -69,9 +57,9 @@ fn main() -> Result<()> {
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_millis);
     let effects = app.bootstrap();
-    run_effects(&mut app, &mut host, effects);
+    event_loop::run_bootstrap_effects(&mut app, &mut host, effects);
 
-    let result = run_app(
+    let result = event_loop::run(
         &mut terminal.terminal,
         &mut app,
         &mut host,
@@ -82,246 +70,4 @@ fn main() -> Result<()> {
     terminal.exit()?;
     host.shutdown();
     result
-}
-
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &mut AppState,
-    host: &mut HostdClient,
-    keymap: &Keymap,
-    exit_after: Option<Duration>,
-) -> Result<()> {
-    const MAX_HOST_LINES_PER_FRAME: usize = 64;
-    const MAX_EVENTS_PER_FRAME: usize = 64;
-    const EVENT_BUDGET: Duration = Duration::from_millis(8);
-
-    let started = Instant::now();
-    loop {
-        for line in host.drain_up_to(MAX_HOST_LINES_PER_FRAME) {
-            let effects = app.update(Msg::HostLine(line));
-            run_effects(app, host, effects);
-        }
-
-        let size = terminal.size().context("read terminal size")?;
-        let terminal_rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-        let mut prepared = layout::prepare_frame(app, terminal_rect);
-        std::io::stdout()
-            .sync_update(|_| {
-                terminal.draw(|frame| render::render_prepared(frame, app, &mut prepared))
-            })
-            .context("sync update terminal")?
-            .context("draw terminal")?;
-
-        if app.quit {
-            return Ok(());
-        }
-        if let Some(exit_after) = exit_after
-            && started.elapsed() >= exit_after
-        {
-            return Ok(());
-        }
-
-        if event::poll(Duration::from_millis(50)).context("poll terminal events")? {
-            let batch_started = Instant::now();
-            let mut processed = 0usize;
-            let mut timeline_scroll = TimelineScrollBatch::default();
-            loop {
-                let mut repaint_after_event = false;
-                match event::read().context("read terminal event")? {
-                    CrosstermEvent::Key(key) => {
-                        flush_timeline_scroll(app, host, &mut timeline_scroll);
-                        if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
-                        {
-                            apply_action(app, host, action);
-                            repaint_after_event = true;
-                        }
-                    }
-                    CrosstermEvent::Paste(text) => {
-                        flush_timeline_scroll(app, host, &mut timeline_scroll);
-                        apply_action(app, host, EditorAction::InsertPaste(text).into());
-                        repaint_after_event = true;
-                    }
-                    CrosstermEvent::Mouse(event) => {
-                        for action in
-                            input::pointer::route_pointer_with_hitmap(app, &prepared.hit_map, event)
-                        {
-                            match action {
-                                Action::Timeline(
-                                    action @ (TimelineAction::ScrollUp(_)
-                                    | TimelineAction::ScrollDown(_)),
-                                ) => {
-                                    if let Some(flushed) = timeline_scroll.push(action) {
-                                        apply_action(app, host, flushed.into());
-                                    }
-                                }
-                                action => {
-                                    flush_timeline_scroll(app, host, &mut timeline_scroll);
-                                    apply_action(app, host, action);
-                                    repaint_after_event = true;
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                processed = processed.saturating_add(1);
-
-                if app.quit {
-                    break;
-                }
-
-                if repaint_after_event
-                    || processed >= MAX_EVENTS_PER_FRAME
-                    || batch_started.elapsed() >= EVENT_BUDGET
-                {
-                    break;
-                }
-
-                // Batch events: if there are more events instantly available, process them before the next draw
-                if !event::poll(Duration::from_millis(0)).unwrap_or(false) {
-                    break;
-                }
-            }
-            flush_timeline_scroll(app, host, &mut timeline_scroll);
-        }
-
-        if app.last_tick.elapsed() > Duration::from_millis(80) {
-            let effects = app.update(Msg::Tick);
-            run_effects(app, host, effects);
-        }
-    }
-}
-
-fn apply_action(app: &mut AppState, host: &mut HostdClient, action: Action) {
-    let effects = app.update(Msg::Action(action));
-    run_effects(app, host, effects);
-}
-
-fn flush_timeline_scroll(
-    app: &mut AppState,
-    host: &mut HostdClient,
-    batch: &mut TimelineScrollBatch,
-) {
-    if let Some(action) = batch.take() {
-        apply_action(app, host, action.into());
-    }
-}
-
-fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: Vec<Effect>) {
-    for effect in effects {
-        match effect {
-            Effect::Send(command) => {
-                if let Err(err) = host.send(command) {
-                    app.push_error(err.to_string());
-                }
-            }
-            Effect::OpenUrl(url) => {
-                if let Err(err) = open_url(&url) {
-                    app.push_error(format!(
-                        "could not open browser: {err}; open this URL manually: {url}"
-                    ));
-                }
-            }
-            Effect::CopyToClipboard {
-                notification_id,
-                text,
-            } => match copy_to_clipboard(&text) {
-                Ok(()) => {
-                    app.notifications
-                        .mark_copied(notification_id, Instant::now());
-                    app.status = "notification copied".to_string();
-                }
-                Err(err) => app.push_error(format!("could not copy notification: {err}")),
-            },
-        }
-    }
-}
-
-fn copy_to_clipboard(text: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    return write_to_clipboard_command("pbcopy", &[], text);
-
-    #[cfg(target_os = "windows")]
-    return write_to_clipboard_command("clip.exe", &[], text);
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let candidates: &[(&str, &[&str])] = &[
-            ("wl-copy", &[]),
-            ("xclip", &["-selection", "clipboard"]),
-            ("xsel", &["--clipboard", "--input"]),
-        ];
-        let mut last_error = None;
-        for (program, args) in candidates {
-            match write_to_clipboard_command(program, args, text) {
-                Ok(()) => return Ok(()),
-                Err(err) => last_error = Some(err),
-            }
-        }
-        return Err(last_error.unwrap_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "no supported clipboard command found",
-            )
-        }));
-    }
-
-    #[allow(unreachable_code)]
-    Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "clipboard is unsupported on this platform",
-    ))
-}
-
-fn write_to_clipboard_command(program: &str, args: &[&str], text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("clipboard command stdin unavailable"))?
-        .write_all(text.as_bytes())?;
-    let status = child.wait()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "{program} exited with {status}"
-        )))
-    }
-}
-
-fn open_url(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg(url);
-        command
-    };
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("powershell.exe");
-        command.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Start-Process -FilePath $args[0]",
-            url,
-        ]);
-        command
-    };
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(url);
-        command
-    };
-    command.spawn().map(|_| ())
 }

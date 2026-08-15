@@ -56,7 +56,6 @@ impl TimelineComponent {
     }
 }
 
-#[cfg(test)]
 impl TimelineComponent {
     pub fn id(&self) -> &ComponentId {
         match self {

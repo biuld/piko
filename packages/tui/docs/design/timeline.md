@@ -436,8 +436,11 @@ Render flow:
 1. Build render blocks for all visible components at the current width.
 2. Flatten blocks into measured lines while preserving component boundaries.
 3. Update `ScrollViewport` with content height and viewport height.
-4. Clamp `offset_from_bottom` to the current maximum scroll.
-5. Convert bottom-origin offset into ratatui's top-origin paragraph scroll.
+4. Convert bottom-origin offset into ratatui's top-origin paragraph scroll,
+   including any content/viewport growth not yet committed by Tick. This keeps
+   a scrolled-up view still while streaming; Tick later writes the same delta
+   into `offset_from_bottom`.
+5. Clamp `offset_from_bottom` to the current maximum scroll on Tick.
 6. Render Slot A with `Paragraph::scroll`.
 7. Render a right-side `Scrollbar` when content exceeds the viewport.
 

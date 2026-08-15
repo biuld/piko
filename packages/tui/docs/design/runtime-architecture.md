@@ -13,10 +13,23 @@ prevent terminal input bursts from starving paint.
 
 ## Runtime flow
 
+One serialized cycle (input → host → tick → paint). Immediate-mode TUIs
+and game/UI frame loops use the same shape: drain bounded input, apply
+updates, paint at most once.
+
 ```text
-host drain / state update
-        |
-        v
+input  (≤ N events / T ms)     composer keys first
+  →
+host   (≤ N lines, one Timeline rebuild)
+  →
+tick   (spinner / viewport, on interval)
+  →
+paint  if input or tick or (host and interval elapsed)
+  →
+wait   only when no pending terminal events
+```
+
+```text
 prepare_frame(app, terminal rect)
   - compose shell + plane + modal layout once
   - prepare Timeline lines and visible tool hits once
@@ -69,10 +82,10 @@ Timeline preparation already needs to flatten components into terminal lines
 to derive content height and tool title rows. The prepared plan is retained in
 the frame and passed to paint instead of invoking `render_plan` a second time.
 
-The cache lifetime is one frame in this slice. A later revision-based cache can
-retain component lines across frames, keyed by content, width, theme, thinking
-visibility, and expansion revisions. Scroll offset alone must not invalidate
-component formatting.
+Component lines are cached across frames, keyed by component id, content
+fingerprint, width, theme name, thinking visibility, and hover. Scroll offset
+alone does not invalidate component formatting. A host drain applies every
+queued stream item, then rebuilds the presentation list once.
 
 ## Pointer routing
 
@@ -86,10 +99,11 @@ change only the viewport offset and retain the Stream host rectangle.
 
 ## Event budget
 
-The main loop processes at most a small fixed number of immediately available
-terminal events or a short wall-clock budget before returning to paint. Host
-input is independently capped by a fixed line count per frame. Neither ingress
-path drains an unbounded queue.
+`CycleBudget` is the clock. Each cycle applies at most a fixed number of
+terminal events (or a short wall-clock slice) and a fixed number of host
+lines, then paints at most once. Input always paints that cycle. Host-only
+stream updates wait for `host_paint_interval`. Neither ingress path drains
+an unbounded queue.
 
 Consecutive wheel events whose hit resolves to `Region::Stream` accumulate a
 signed number of rows using Timeline's existing three-row wheel step. The
@@ -108,8 +122,8 @@ presentation state.
 
 ## Deliberate extension points
 
-- Longer-lived Timeline formatting caches may build on `PreparedFrame` with
-  explicit content/width/theme revisions.
+- Longer-lived Timeline formatting caches are keyed by component revision and
+  live on `Timeline`, not on `PreparedFrame`.
 - A dynamic surface registry remains out of scope; `SurfaceSpec` is an
   exhaustive static product catalog.
 - Feature reducers can be extracted from `AppState` when a domain grows, while

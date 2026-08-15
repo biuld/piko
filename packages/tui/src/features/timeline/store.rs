@@ -47,6 +47,20 @@ impl TimelineStore {
         self.session_entries.clear();
     }
 
+    pub fn begin_projection_batch(&mut self) {
+        self.active.begin_projection_batch();
+        for timeline in self.inactive.values_mut() {
+            timeline.begin_projection_batch();
+        }
+    }
+
+    pub fn end_projection_batch(&mut self) {
+        self.active.end_projection_batch();
+        for timeline in self.inactive.values_mut() {
+            timeline.end_projection_batch();
+        }
+    }
+
     pub fn ensure_inactive(&mut self, agent_instance_id: impl Into<String>) {
         let agent_instance_id = agent_instance_id.into();
         if !self.inactive.contains_key(&agent_instance_id) {
