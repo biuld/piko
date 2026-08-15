@@ -1,4 +1,6 @@
 mod app;
+#[cfg(test)]
+mod architecture_tests;
 mod cli;
 mod config;
 mod features;
@@ -21,7 +23,7 @@ use std::{
 use anyhow::{Context, Result};
 use app::{
     AppState, InitialOptions,
-    command::EditorAction,
+    command::{Action, EditorAction, TimelineAction},
     effect::{Effect, Msg},
 };
 use cli::CliArgs;
@@ -30,7 +32,7 @@ use crossterm::{
     event::{self, Event as CrosstermEvent},
 };
 use host::HostdClient;
-use input::keymap::Keymap;
+use input::{batch::TimelineScrollBatch, keymap::Keymap};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tui::TerminalGuard;
 
@@ -89,15 +91,24 @@ fn run_app(
     keymap: &Keymap,
     exit_after: Option<Duration>,
 ) -> Result<()> {
+    const MAX_HOST_LINES_PER_FRAME: usize = 64;
+    const MAX_EVENTS_PER_FRAME: usize = 64;
+    const EVENT_BUDGET: Duration = Duration::from_millis(8);
+
     let started = Instant::now();
     loop {
-        for line in host.drain() {
+        for line in host.drain_up_to(MAX_HOST_LINES_PER_FRAME) {
             let effects = app.update(Msg::HostLine(line));
             run_effects(app, host, effects);
         }
 
+        let size = terminal.size().context("read terminal size")?;
+        let terminal_rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
+        let mut prepared = layout::prepare_frame(app, terminal_rect);
         std::io::stdout()
-            .sync_update(|_| terminal.draw(|frame| render::render(frame, app)))
+            .sync_update(|_| {
+                terminal.draw(|frame| render::render_prepared(frame, app, &mut prepared))
+            })
             .context("sync update terminal")?
             .context("draw terminal")?;
 
@@ -111,32 +122,58 @@ fn run_app(
         }
 
         if event::poll(Duration::from_millis(50)).context("poll terminal events")? {
+            let batch_started = Instant::now();
+            let mut processed = 0usize;
+            let mut timeline_scroll = TimelineScrollBatch::default();
             loop {
+                let mut repaint_after_event = false;
                 match event::read().context("read terminal event")? {
                     CrosstermEvent::Key(key) => {
+                        flush_timeline_scroll(app, host, &mut timeline_scroll);
                         if let Some(action) = input::focus::InputRouter::route_key(app, keymap, key)
                         {
-                            let effects = app.update(Msg::Action(action));
-                            run_effects(app, host, effects);
+                            apply_action(app, host, action);
+                            repaint_after_event = true;
                         }
                     }
                     CrosstermEvent::Paste(text) => {
-                        let effects =
-                            app.update(Msg::Action(EditorAction::InsertPaste(text).into()));
-                        run_effects(app, host, effects);
+                        flush_timeline_scroll(app, host, &mut timeline_scroll);
+                        apply_action(app, host, EditorAction::InsertPaste(text).into());
+                        repaint_after_event = true;
                     }
                     CrosstermEvent::Mouse(event) => {
-                        let size = terminal.size().context("read terminal size")?;
-                        let rect = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        for action in input::pointer::route_pointer(app, rect, event) {
-                            let effects = app.update(Msg::Action(action));
-                            run_effects(app, host, effects);
+                        for action in
+                            input::pointer::route_pointer_with_hitmap(app, &prepared.hit_map, event)
+                        {
+                            match action {
+                                Action::Timeline(
+                                    action @ (TimelineAction::ScrollUp(_)
+                                    | TimelineAction::ScrollDown(_)),
+                                ) => {
+                                    if let Some(flushed) = timeline_scroll.push(action) {
+                                        apply_action(app, host, flushed.into());
+                                    }
+                                }
+                                action => {
+                                    flush_timeline_scroll(app, host, &mut timeline_scroll);
+                                    apply_action(app, host, action);
+                                    repaint_after_event = true;
+                                }
+                            }
                         }
                     }
                     _ => {}
                 }
+                processed = processed.saturating_add(1);
 
                 if app.quit {
+                    break;
+                }
+
+                if repaint_after_event
+                    || processed >= MAX_EVENTS_PER_FRAME
+                    || batch_started.elapsed() >= EVENT_BUDGET
+                {
                     break;
                 }
 
@@ -145,12 +182,28 @@ fn run_app(
                     break;
                 }
             }
+            flush_timeline_scroll(app, host, &mut timeline_scroll);
         }
 
         if app.last_tick.elapsed() > Duration::from_millis(80) {
             let effects = app.update(Msg::Tick);
             run_effects(app, host, effects);
         }
+    }
+}
+
+fn apply_action(app: &mut AppState, host: &mut HostdClient, action: Action) {
+    let effects = app.update(Msg::Action(action));
+    run_effects(app, host, effects);
+}
+
+fn flush_timeline_scroll(
+    app: &mut AppState,
+    host: &mut HostdClient,
+    batch: &mut TimelineScrollBatch,
+) {
+    if let Some(action) = batch.take() {
+        apply_action(app, host, action.into());
     }
 }
 

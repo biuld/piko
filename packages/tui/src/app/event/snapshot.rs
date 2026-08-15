@@ -5,9 +5,7 @@ impl AppState {
         let snapshot_session_id = snapshot.session_id.clone();
         self.notifications
             .clear_state_derived_for_session(&snapshot_session_id);
-        self.timeline.clear();
-        self.agent_timelines.clear();
-        self.session_timeline_entries.clear();
+        self.timelines.clear();
         self.agent_panel.active_agent_instance_id = None;
         self.tree.set_agent_filter(None);
         self.queue_status = QueueStatus::default();
@@ -59,10 +57,7 @@ impl AppState {
         self.agent_panel.active_agent_instance_id = selected_timeline.clone();
         for agent_instance_id in timeline_agent_ids {
             if Some(&agent_instance_id) != selected_timeline.as_ref() {
-                self.agent_timelines.insert(
-                    agent_instance_id,
-                    crate::features::timeline::Timeline::new(),
-                );
+                self.timelines.ensure_inactive(agent_instance_id);
             }
         }
 
@@ -99,7 +94,7 @@ impl AppState {
                             );
                         });
                     } else {
-                        self.timeline.project_tool_started(
+                        self.timeline_mut().project_tool_started(
                             tool_call_id,
                             tool_name,
                             arguments,
@@ -114,17 +109,7 @@ impl AppState {
                     } else if let SessionTreeEntry::ThinkingLevelChange(change) = &entry {
                         self.model.active_thinking_level = Some(change.thinking_level.clone());
                     }
-                    let applied_entry = entry.clone();
-                    let outcome = super::events::merge_session_entry(
-                        &mut self.timeline,
-                        &mut self.agent_timelines,
-                        entry,
-                        order as u64,
-                    );
-                    if outcome != piko_client_core::ApplyOutcome::Ignored {
-                        self.session_timeline_entries
-                            .push((applied_entry, order as u64));
-                    }
+                    self.timelines.apply_session_entry(entry, order as u64);
                 }
             }
         }

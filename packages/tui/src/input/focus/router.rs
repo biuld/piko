@@ -15,7 +15,7 @@ impl InputRouter {
     /// P3: Editor → handle_editor_key()
     ///   └─ Text input, cursor movement, history, timeline scroll, keyboard commands
     /// ```
-    pub fn route_key(app: &mut AppState, keymap: &Keymap, key: KeyEvent) -> Option<Action> {
+    pub fn route_key(app: &AppState, keymap: &Keymap, key: KeyEvent) -> Option<Action> {
         let ka = keymap.action_for(key);
 
         // ═══ P1: Global Esc/Enter ═══
@@ -40,15 +40,7 @@ impl InputRouter {
             if active.is_surface(SurfaceId::SummaryPrompt) {
                 match key.code {
                     KeyCode::Esc => {
-                        if let Some(state) = &mut app.summary_prompt
-                            && state.input_active()
-                        {
-                            state.set_input_active(false);
-                            return None;
-                        }
-                        app.summary_prompt = None;
-                        app.pop_focus();
-                        return None;
+                        return Some(SurfaceAction::Close.into());
                     }
                     KeyCode::Enter => {
                         if app.summary_prompt.is_some() {
@@ -64,11 +56,9 @@ impl InputRouter {
                     KeyCode::Backspace => return Some(SurfaceAction::FilterBackspace.into()),
                     KeyCode::Char(ch) => {
                         if ch == 'C' && key.modifiers.contains(KeyModifiers::CONTROL) {
-                            app.summary_prompt = None;
-                            app.pop_focus();
-                            return None;
+                            return Some(SurfaceAction::Close.into());
                         }
-                        if let Some(state) = &mut app.summary_prompt
+                        if let Some(state) = &app.summary_prompt
                             && state.input_active()
                         {
                             return Some(SurfaceAction::FilterAppend(ch).into());
@@ -95,7 +85,7 @@ impl InputRouter {
     // ── P1: Global Esc/Enter ────────────────────────────────────────────────
 
     pub(super) fn handle_global_key(
-        app: &mut AppState,
+        app: &AppState,
         ka: Option<KeyAction>,
         key: KeyEvent,
     ) -> Option<Action> {
@@ -129,17 +119,7 @@ impl InputRouter {
             }
             // 4. Editor empty + double-Esc → open tree
             if app.editor.is_empty() {
-                let now = Instant::now();
-                let double_esc = app
-                    .focus_manager
-                    .last_esc_pressed
-                    .map(|last| now.duration_since(last).as_millis() < 500)
-                    .unwrap_or(false);
-                if double_esc {
-                    app.focus_manager.last_esc_pressed = None;
-                    return Some(SurfaceAction::OpenTree.into());
-                }
-                app.focus_manager.last_esc_pressed = Some(now);
+                return Some(AppAction::IdleEscape(Instant::now()).into());
             }
             return None;
         }
@@ -208,17 +188,10 @@ impl InputRouter {
             };
         }
 
-        match active.as_surface() {
+        let surface = active.as_surface()?;
+        match surface.spec().input {
             // Selectable list surfaces (filter + keyboard nav)
-            Some(
-                surface @ (SurfaceId::Tree
-                | SurfaceId::Sessions
-                | SurfaceId::Agents
-                | SurfaceId::Settings
-                | SurfaceId::Models
-                | SurfaceId::Thinking
-                | SurfaceId::AuthSelector),
-            ) => {
+            SurfaceInputProfile::FilteredSelection => {
                 if surface == SurfaceId::Tree {
                     if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
                         return Some(if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -294,7 +267,7 @@ impl InputRouter {
                 }
                 Self::handle_selectable_surface(key, ka)
             }
-            Some(SurfaceId::Notifications) => {
+            SurfaceInputProfile::NotificationList => {
                 if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
                     return Some(NotificationAction::ToggleScope.into());
                 }
@@ -319,9 +292,7 @@ impl InputRouter {
                 }
             }
             // Info panels
-            Some(
-                SurfaceId::Usage | SurfaceId::Mcp | SurfaceId::Processes | SurfaceId::Diagnostics,
-            ) => match ka {
+            SurfaceInputProfile::ReadOnlyViewport => match ka {
                 Some(KeyAction::SelectPrev) => Some(SurfaceAction::SelectPrev.into()),
                 Some(KeyAction::SelectNext) => Some(SurfaceAction::SelectNext.into()),
                 Some(KeyAction::Submit | KeyAction::Confirm) => Some(SurfaceAction::Confirm.into()),
@@ -331,11 +302,9 @@ impl InputRouter {
                 _ => None,
             },
             // Handled above; fall through if focus somehow reached here.
-            Some(SurfaceId::Approval | SurfaceId::ToolInteraction | SurfaceId::SummaryPrompt) => {
-                None
-            }
-            // Editor chrome never reaches filter routing via this path.
-            None => None,
+            SurfaceInputProfile::ApprovalWorkflow
+            | SurfaceInputProfile::ToolWorkflow
+            | SurfaceInputProfile::SummaryWorkflow => None,
         }
     }
 

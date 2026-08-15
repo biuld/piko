@@ -70,10 +70,10 @@ impl AppState {
 
     pub(super) fn dispatch_timeline_action(&mut self, action: TimelineAction) -> Vec<Effect> {
         match action {
-            TimelineAction::ScrollUp(n) => self.timeline.scroll_up(n),
-            TimelineAction::ScrollDown(n) => self.timeline.scroll_down(n),
-            TimelineAction::JumpLatest => self.timeline.jump_latest(),
-            TimelineAction::ToggleTool(index) => self.timeline.toggle_tool(index),
+            TimelineAction::ScrollUp(n) => self.timeline_mut().scroll_up(n),
+            TimelineAction::ScrollDown(n) => self.timeline_mut().scroll_down(n),
+            TimelineAction::JumpLatest => self.timeline_mut().jump_latest(),
+            TimelineAction::ToggleTool(index) => self.timeline_mut().toggle_tool(index),
         }
         Vec::new()
     }
@@ -154,7 +154,7 @@ impl AppState {
         match action {
             SessionAction::RequestList => effects.extend(self.request_sessions()),
             SessionAction::ToggleScope => {
-                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
+                if self.mode() == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.scope = match self.sessions.scope {
                         crate::features::session_list::SessionScope::CurrentFolder => {
                             crate::features::session_list::SessionScope::All
@@ -167,13 +167,13 @@ impl AppState {
                 }
             }
             SessionAction::ToggleNamed => {
-                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
+                if self.mode() == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.named_only = !self.sessions.named_only;
                     self.reset_overlay_selection();
                 }
             }
             SessionAction::TogglePath => {
-                if self.mode == AppMode::Surface(SurfaceId::Sessions) {
+                if self.mode() == AppMode::Surface(SurfaceId::Sessions) {
                     self.sessions.show_path = !self.sessions.show_path;
                 }
             }

@@ -21,32 +21,12 @@ impl AppState {
         agent_instance_id: &str,
         apply: impl FnOnce(&mut crate::features::timeline::Timeline),
     ) {
-        let is_active = self
-            .agent_panel
-            .active_agent_instance_id
-            .as_deref()
-            .is_none_or(|active| active == agent_instance_id);
-        if is_active {
-            if self.agent_panel.active_agent_instance_id.is_none() {
-                self.agent_panel.active_agent_instance_id = Some(agent_instance_id.to_string());
-                self.tree.set_agent_filter(Some(agent_instance_id));
-            }
-            apply(&mut self.timeline);
-        } else {
-            if !self.agent_timelines.contains_key(agent_instance_id) {
-                let mut timeline = crate::features::timeline::Timeline::new();
-                for (entry, order) in &self.session_timeline_entries {
-                    let _ = timeline.apply_session_entry(entry.clone(), *order);
-                }
-                self.agent_timelines
-                    .insert(agent_instance_id.to_string(), timeline);
-            }
-            apply(
-                self.agent_timelines
-                    .entry(agent_instance_id.to_string())
-                    .or_insert_with(crate::features::timeline::Timeline::new),
-            );
+        if self.agent_panel.active_agent_instance_id.is_none() {
+            self.agent_panel.active_agent_instance_id = Some(agent_instance_id.to_string());
+            self.tree.set_agent_filter(Some(agent_instance_id));
         }
+        let active = self.agent_panel.active_agent_instance_id.as_deref();
+        self.timelines.with_agent(active, agent_instance_id, apply);
     }
 
     fn accepts_session(&self, session_id: &str) -> bool {
@@ -65,35 +45,9 @@ impl AppState {
             self.tree.set_agent_filter(Some(agent_instance_id));
             return;
         }
-        if let Some(previous) = self
-            .agent_panel
-            .active_agent_instance_id
-            .replace(agent_instance_id.to_string())
-        {
-            let mut next_timeline = self.agent_timelines.remove(agent_instance_id);
-            if next_timeline.is_none() {
-                let mut timeline = crate::features::timeline::Timeline::new();
-                for (entry, order) in &self.session_timeline_entries {
-                    let _ = timeline.apply_session_entry(entry.clone(), *order);
-                }
-                next_timeline = Some(timeline);
-            }
-            let previous_timeline = std::mem::replace(
-                &mut self.timeline,
-                next_timeline.expect("timeline constructed above"),
-            );
-            self.agent_timelines.insert(previous, previous_timeline);
-        } else {
-            self.timeline = if let Some(timeline) = self.agent_timelines.remove(agent_instance_id) {
-                timeline
-            } else {
-                let mut timeline = crate::features::timeline::Timeline::new();
-                for (entry, order) in &self.session_timeline_entries {
-                    let _ = timeline.apply_session_entry(entry.clone(), *order);
-                }
-                timeline
-            };
-        }
+        let previous = self.agent_panel.active_agent_instance_id.as_deref();
+        self.timelines.select(previous, agent_instance_id);
+        self.agent_panel.active_agent_instance_id = Some(agent_instance_id.to_string());
         self.tree.set_agent_filter(Some(agent_instance_id));
     }
 

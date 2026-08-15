@@ -13,6 +13,7 @@ mod layout;
 mod markdown;
 mod render;
 mod render_diff;
+mod store;
 mod tool_format;
 mod viewport;
 
@@ -23,9 +24,12 @@ pub use component::{
     SessionFactComponent, SummaryComponent, SummaryKind, TimelineComponent, TimelineEntry,
     ToolEntry, UserMessageComponent,
 };
+pub(crate) use layout::TimelineRenderPlan;
+pub use store::TimelineStore;
 pub use viewport::ScrollViewport;
 
 const MAX_COMPONENTS: usize = 500;
+pub(crate) const WHEEL_STEP: usize = 3;
 
 /// In-memory component stream plus viewport/presentation state.
 pub struct Timeline {
@@ -47,7 +51,6 @@ impl PointerComponent<HitId> for Timeline {
         hit: ComponentHit<HitId>,
         gesture: PointerGesture,
     ) -> Vec<crate::app::command::Action> {
-        const WHEEL_STEP: usize = 3;
         match (gesture, hit.element) {
             (PointerGesture::ScrollUp, _) => {
                 vec![TimelineAction::ScrollUp(WHEEL_STEP).into()]

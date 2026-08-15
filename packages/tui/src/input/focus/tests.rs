@@ -14,10 +14,10 @@ fn app() -> AppState {
 
 #[test]
 fn plain_j_reaches_editor_as_text() {
-    let mut app = app();
+    let app = app();
     let keymap = Keymap::default();
     let action = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         KeyEvent {
             code: KeyCode::Char('j'),
@@ -47,15 +47,15 @@ fn notification_panel_routes_selection_and_copy_keys() {
     };
 
     assert!(matches!(
-        InputRouter::route_key(&mut app, &keymap, event(KeyCode::Down)),
+        InputRouter::route_key(&app, &keymap, event(KeyCode::Down)),
         Some(Action::Notifications(NotificationAction::SelectNext))
     ));
     assert!(matches!(
-        InputRouter::route_key(&mut app, &keymap, event(KeyCode::Char('c'))),
+        InputRouter::route_key(&app, &keymap, event(KeyCode::Char('c'))),
         Some(Action::Notifications(NotificationAction::CopySelected))
     ));
     assert!(matches!(
-        InputRouter::route_key(&mut app, &keymap, event(KeyCode::Enter)),
+        InputRouter::route_key(&app, &keymap, event(KeyCode::Enter)),
         Some(Action::Notifications(NotificationAction::CopySelected))
     ));
 }

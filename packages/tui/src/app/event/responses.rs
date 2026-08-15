@@ -140,8 +140,8 @@ impl AppState {
                     }
                     _ => {
                         // Untracked ModelList (e.g. /login provider probe).
-                        if self.mode != AppMode::Surface(SurfaceId::AuthSelector)
-                            && !matches!(self.mode, AppMode::Surface(SurfaceId::Models))
+                        if self.mode() != AppMode::Surface(SurfaceId::AuthSelector)
+                            && !matches!(self.mode(), AppMode::Surface(SurfaceId::Models))
                         {
                             self.push_surface(SurfaceId::Models);
                         }
@@ -237,9 +237,10 @@ impl AppState {
                 // have already marked this agent active without swapping/clearing,
                 // so select + clear before applying replay.
                 self.select_agent_timeline(&agent_instance_id);
-                self.timeline.clear();
-                for (entry, order) in &self.session_timeline_entries {
-                    let _ = self.timeline.apply_session_entry(entry.clone(), *order);
+                self.timeline_mut().clear();
+                let session_entries = self.timelines.session_entries().to_vec();
+                for (entry, order) in session_entries {
+                    let _ = self.timeline_mut().apply_session_entry(entry, order);
                 }
                 let events = if snapshot.events.is_empty() {
                     replay
@@ -255,7 +256,8 @@ impl AppState {
                 if namespace == "tui" {
                     self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
                     self.editor.configure(&self.tui_config.editor);
-                    self.timeline.thinking_visible = !self.tui_config.hide_thinking_block;
+                    self.timelines
+                        .set_thinking_visible(!self.tui_config.hide_thinking_block);
                     self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                     if let Some(name) = value
                         .get("theme")
@@ -272,7 +274,7 @@ impl AppState {
                         self.model.active_thinking_level = Some(level);
                     }
                     // Refresh open Settings so ValueSummaries track host authority.
-                    if self.mode == AppMode::Surface(SurfaceId::Settings) {
+                    if self.mode() == AppMode::Surface(SurfaceId::Settings) {
                         let snap = self.settings_snapshot();
                         // Rebuild without collapsing depth would need path restore;
                         // open-time refresh rebuilds from root with fresh summaries.

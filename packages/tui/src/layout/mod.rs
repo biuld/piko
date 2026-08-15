@@ -5,11 +5,17 @@
 
 use crate::{
     app::{AppState, HitId},
-    features::dock_stack::{
-        BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
-        GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+    features::{
+        dock_stack::{
+            BandId, COMPOSER_MIN_HEIGHT, DOCK_BOUNDARY_HEIGHT, DockBandOffer, DockSolveInput,
+            GUIDANCE_HEIGHT, SUGGEST_MIN_HEIGHT, solve, suggestion_preferred_height,
+        },
+        timeline::TimelineRenderPlan,
     },
-    navigation::{SelectBandBudget, compose_modals, compose_plane},
+    navigation::{
+        CenteredSizePolicy, SelectBandBudget, SurfaceIntent, SurfaceSizing, compose_modals,
+        compose_plane,
+    },
 };
 use piko_tui_layout::{
     FramePlan, HitMap, HitRegion, ShellChrome, ShellSplit, SurfacePanel, build_hitmap,
@@ -28,6 +34,14 @@ pub struct ProductFrame {
     pub plan: FramePlan<Region>,
 }
 
+/// Geometry and expensive feature projections shared by one paint and all
+/// pointer events routed before the next paint.
+pub struct PreparedFrame {
+    pub product: ProductFrame,
+    pub hit_map: HitMap<Region, HitId>,
+    pub(crate) timeline: Option<TimelineRenderPlan>,
+}
+
 pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
     app.modal_surface()
 }
@@ -35,10 +49,16 @@ pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
 /// Collect per-band offers and solve joint height under Stream floor.
 pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetrics {
     let modal = resolve_modal_surface(app);
-    let centered_size = match modal {
-        Some(SurfaceId::Settings) => Some(settings_centered_size(app, body)),
-        Some(SurfaceId::Usage) => Some(usage_centered_size(app, body)),
-        Some(SurfaceId::Notifications) => Some(notifications_centered_size(app, body)),
+    let centered_size = match modal.map(|surface| surface.spec().sizing) {
+        Some(SurfaceSizing::Centered(CenteredSizePolicy::SettingsViewport)) => {
+            Some(settings_centered_size(app, body))
+        }
+        Some(SurfaceSizing::Centered(CenteredSizePolicy::UsageContent)) => {
+            Some(usage_centered_size(app, body))
+        }
+        Some(SurfaceSizing::Centered(CenteredSizePolicy::NotificationContent)) => {
+            Some(notifications_centered_size(app, body))
+        }
         _ => None,
     };
 
@@ -143,7 +163,6 @@ fn settings_centered_size(_app: &AppState, body: ratatui::layout::Rect) -> (u16,
 
 /// Feature-declared content-row budget for Select / ComposerBand only.
 fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBudget> {
-    use crate::navigation::SurfaceIntent;
     if !matches!(
         surface.intent(),
         SurfaceIntent::Select | SurfaceIntent::Dock
@@ -193,6 +212,32 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
     }
 }
 
+pub fn prepare_frame(app: &AppState, terminal: ratatui::layout::Rect) -> PreparedFrame {
+    let product = compose_frame(app, terminal);
+    let plane_is_blocked = product.modal_surface.is_some();
+    let hovered_tool = (!plane_is_blocked)
+        .then_some(app.hovered)
+        .flatten()
+        .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten())
+        .and_then(|element| match element {
+            HitId::TimelineTool(index) => Some(index),
+            _ => None,
+        });
+    let timeline = product
+        .plan
+        .rects
+        .get(&Region::Stream)
+        .copied()
+        .filter(|_| !product.modal_surface.is_some_and(SurfaceId::covers_body))
+        .map(|area| app.timeline().render_plan(area, &app.theme, hovered_tool));
+    let hit_map = build_surface_hitmap_for_frame(app, &product, timeline.as_ref());
+    PreparedFrame {
+        product,
+        hit_map,
+        timeline,
+    }
+}
+
 /// Build the per-frame hit map for the current composition: plane regions at
 /// `z = 0`, modal layers above. Surfaces that implement [`SurfacePanel`]
 /// contribute element hit regions; the rest are non-interactive for now.
@@ -201,7 +246,14 @@ pub fn build_surface_hitmap(
     app: &AppState,
     terminal: ratatui::layout::Rect,
 ) -> HitMap<Region, HitId> {
-    let composed = compose_frame(app, terminal);
+    prepare_frame(app, terminal).hit_map
+}
+
+fn build_surface_hitmap_for_frame(
+    app: &AppState,
+    composed: &ProductFrame,
+    timeline: Option<&TimelineRenderPlan>,
+) -> HitMap<Region, HitId> {
     let stamp = |hrs: Vec<HitRegion<SurfaceId, HitId>>| -> Vec<HitRegion<Region, HitId>> {
         hrs.into_iter()
             .map(|hr| HitRegion {
@@ -219,9 +271,9 @@ pub fn build_surface_hitmap(
                 element: Some(HitId::Stream),
             }];
             hits.extend(
-                app.timeline
-                    .pointer_regions(rect, &app.theme)
+                timeline
                     .into_iter()
+                    .flat_map(|plan| plan.tool_regions.iter().cloned())
                     .map(|(rect, element)| HitRegion {
                         region: Region::Stream,
                         rect,
@@ -337,190 +389,8 @@ pub fn build_surface_hitmap(
 }
 
 pub fn has_visible_suggestions(app: &AppState) -> bool {
-    app.mode.is_editor_base() && app.editor.auto_complete.is_active()
+    app.mode().is_editor_base() && app.editor.auto_complete.is_active()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::{AppState, InitialOptions};
-    use ratatui::layout::Rect;
-    use std::path::PathBuf;
-
-    fn app_state() -> AppState {
-        AppState::new(
-            PathBuf::from("/tmp/piko-layout-test"),
-            None,
-            false,
-            InitialOptions::default(),
-        )
-    }
-
-    #[test]
-    fn idle_workspace_only() {
-        let frame = compose_frame(&app_state(), Rect::new(0, 0, 80, 24));
-        assert_eq!(frame.modal_surface, None);
-        assert!(frame.plan.rects.contains_key(&Region::Stream));
-        assert!(frame.plan.rects.contains_key(&Region::DockBoundary));
-        assert!(frame.plan.rects.contains_key(&Region::Composer));
-        let guidance = frame.plan.rects[&Region::Guidance];
-        let composer = frame.plan.rects[&Region::Composer];
-        assert_eq!(guidance.height, 1);
-        assert_eq!(guidance.y + guidance.height, composer.y);
-        assert_eq!(frame.shell.chrome.height, 1);
-    }
-
-    #[test]
-    fn approval_modal_hitmap_has_z_order_and_choice_rows() {
-        use crate::features::approval::PendingApproval;
-
-        let mut app = app_state();
-        app.session.id = Some("s1".into());
-        app.approvals.push(PendingApproval {
-            id: "a1".into(),
-            agent_instance_id: "agent-1".into(),
-            tool_name: "bash".into(),
-            args: serde_json::json!({ "command": "cargo test" }),
-            prompt: None,
-            selected_idx: 0,
-        });
-        app.push_surface(SurfaceId::Approval);
-
-        let terminal = Rect::new(0, 0, 80, 24);
-        let composed = compose_frame(&app, terminal);
-        let host = composed
-            .plan
-            .layers
-            .first()
-            .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Approval)))
-            .copied()
-            .expect("approval layer host");
-        let map = build_surface_hitmap(&app, terminal);
-        assert!(!map.hits.is_empty());
-
-        // Standard pane chrome: border(1) + padding(1) → content.y = host.y+2;
-        // single-question layout → prompt(0), blank(1), choices at +2.
-        let hit = map
-            .hit_test(host.x.saturating_add(2), host.y.saturating_add(4))
-            .expect("choice row cell");
-        assert_eq!(hit.region, Region::Surface(SurfaceId::Approval));
-        assert_eq!(hit.z, 1);
-        assert!(matches!(
-            hit.element,
-            Some(HitId::Choice {
-                question: 0,
-                choice: 0
-            })
-        ));
-
-        // Below the choices the surface-default entry still owns the cell —
-        // never a fall-through to the plane.
-        let bottom = map
-            .hit_test(
-                host.x.saturating_add(2),
-                host.y.saturating_add(host.height.saturating_sub(1)),
-            )
-            .expect("surface default cell");
-        assert_eq!(bottom.region, Region::Surface(SurfaceId::Approval));
-        assert_eq!(bottom.element, None);
-    }
-
-    #[test]
-    fn approval_dock_height_follows_workflow_content() {
-        use crate::features::approval::PendingApproval;
-
-        let mut app = app_state();
-        app.session.id = Some("s1".into());
-        app.approvals.push(PendingApproval {
-            id: "a1".into(),
-            agent_instance_id: "agent-1".into(),
-            tool_name: "bash".into(),
-            args: serde_json::json!({ "command": "cargo test" }),
-            prompt: None,
-            selected_idx: 0,
-        });
-        app.push_surface(SurfaceId::Approval);
-
-        let terminal = Rect::new(0, 0, 80, 24);
-        let composed = compose_frame(&app, terminal);
-        let host = composed
-            .plan
-            .layers
-            .first()
-            .and_then(|layer| layer.rects.get(&Region::Surface(SurfaceId::Approval)))
-            .copied()
-            .expect("approval layer host");
-        let guidance = composed.plan.layers[0].rects[&Region::Guidance];
-        let rows = app
-            .approvals
-            .workflow()
-            .unwrap()
-            .dock_content_rows(&app.theme);
-        // Surface = workflow rows + Standard pane chrome (4); Guidance is the
-        // preceding row in the same bottom-anchored modal tree.
-        assert_eq!(host.height, rows + 4);
-        assert_eq!(guidance.height, 1);
-        assert_eq!(guidance.y + guidance.height, host.y);
-        assert_eq!(host.y + host.height, 23);
-    }
-
-    #[test]
-    fn agents_surface_uses_composer_band() {
-        let mut app = app_state();
-        app.push_surface(SurfaceId::Agents);
-        let frame = compose_frame(&app, Rect::new(0, 0, 80, 24));
-        assert_eq!(frame.modal_surface, Some(SurfaceId::Agents));
-        assert_eq!(frame.plan.layers.len(), 1);
-        // Stream remains visible under the select band (not CoverBody).
-        assert!(frame.plan.rects.contains_key(&Region::Stream));
-    }
-
-    #[test]
-    fn usage_surface_uses_content_sized_centered_modal() {
-        let mut app = app_state();
-        app.push_surface(SurfaceId::Usage);
-        let frame = compose_frame(&app, Rect::new(0, 0, 100, 30));
-        let layer = frame.plan.layers.first().expect("usage layer");
-        assert!(matches!(
-            layer.placement,
-            piko_tui_layout::ModalPlacement::Centered {
-                max_width: 90,
-                max_height: 9
-            }
-        ));
-        let usage = layer
-            .rects
-            .get(&Region::Surface(SurfaceId::Usage))
-            .expect("usage rect");
-        assert_eq!((usage.width, usage.height), (90, 9));
-    }
-
-    #[test]
-    fn settings_surface_uses_stable_viewport_sized_modal() {
-        let mut app = app_state();
-        app.push_surface(SurfaceId::Settings);
-
-        let frame = compose_frame(&app, Rect::new(0, 0, 100, 40));
-        let layer = frame.plan.layers.first().expect("settings layer");
-        assert!(matches!(
-            layer.placement,
-            piko_tui_layout::ModalPlacement::Centered {
-                max_width: 88,
-                max_height: 31
-            }
-        ));
-        let settings = layer
-            .rects
-            .get(&Region::Surface(SurfaceId::Settings))
-            .expect("settings rect");
-        assert_eq!((settings.width, settings.height), (88, 31));
-
-        // Small terminals preserve one row of backdrop above and below.
-        let compact = compose_frame(&app, Rect::new(0, 0, 50, 16));
-        let settings = compact.plan.layers[0]
-            .rects
-            .get(&Region::Surface(SurfaceId::Settings))
-            .expect("compact settings rect");
-        assert_eq!((settings.width, settings.height), (50, 13));
-    }
-}
+mod tests;

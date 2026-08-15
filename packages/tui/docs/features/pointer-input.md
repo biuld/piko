@@ -6,8 +6,8 @@
 
 ## Overview
 
-Mouse input is dispatched through the same per-frame hit map that the layout
-already produces: a pointer event becomes a coordinate, the coordinate
+Mouse input is dispatched through the hit map retained by the last painted
+prepared frame: a pointer event becomes a coordinate, the coordinate
 resolves to a region + element, and the element maps to the **same actions the
 keyboard uses**. Wheel scrolling and cursor placement are handled directly by
 the owning region. Hover gives soft visual feedback on actionable targets;
@@ -107,8 +107,8 @@ modal surfaces
 
 ### Hover
 
-- Mouse movement updates `AppState::hovered` to the resolved
-  `(region, element)`.
+- Mouse movement emits a pointer action; the pointer reducer updates
+  `AppState::hovered` to the resolved `(region, element)`.
 - Actionable row targets use `theme.bg_hover`. Composer hover is intentionally
   inert: focus border and caret already communicate its input
   state; pointer click only places the cursor.
@@ -169,6 +169,8 @@ runs and disabled on exit.
 - [x] Diagnostics and list surfaces handle wheel input without fall-through.
 - [x] SummaryPrompt and AuthSelector form input expose their component-specific
       pointer behavior.
+- [x] Production pointer routing borrows `AppState` immutably; all pointer-owned
+      mutation occurs in the reducer.
 
 ## Implementation status
 

@@ -21,18 +21,24 @@ the text cursor, and hover gives soft feedback on actionable targets. No drag.
 
 ```text
 CrosstermEvent::Mouse(event)          (main.rs)
-  → input::pointer::route_pointer(app, terminal_rect, event)
-  → build_surface_hitmap(app, terminal_rect)     (per event; cheap)
+  → use the HitMap retained by the last painted PreparedFrame
+  → input::pointer::route_pointer_with_hitmap(app, hit_map, event)
   → HitMap::hit_test(event.column, event.row)    (0-based, ratatui coords)
-  → Vec<Action>                                  (same actions as keyboard)
-  → app.update(Msg::Action(a)) + run_effects
+  → PointerAction / TimelineAction               (same root action pipeline)
+  → app.update(Msg::Action(a))
+  → AppState reducer mutation + run_effects
 ```
 
-`route_pointer` owns terminal-event normalization, modal-layer authority, and
-Region-to-component delegation. Each component interprets its element through
-the product-layer `PointerComponent` contract, may mutate state it owns, and
-returns keyboard-equivalent `Action`s for the normal effect pipeline. See
+`route_pointer_with_hitmap` owns terminal-event normalization and modal-layer
+authority. It borrows `AppState` immutably and resolves a `PointerTarget`; the
+pointer reducer performs Region-to-component delegation. Each component then
+interprets its element through the product-layer `PointerComponent` contract
+and returns keyboard-equivalent `Action`s for the normal effect pipeline. See
 [component-interaction.md](component-interaction.md).
+
+The production path never rebuilds layout per pointer event. The
+state-to-hitmap `route_pointer` wrapper exists only for focused tests and
+one-shot callers. See [runtime-architecture.md](runtime-architecture.md).
 
 ### Hover paint
 
@@ -171,8 +177,9 @@ Landed as designed:
 
 - Plane hit specs in `build_surface_hitmap`; `HitId::{Stream, Composer,
   Notice, Suggest(usize)}`.
-- `input/pointer.rs` (click / hover / wheel → `Vec<Action>` or direct state
-  updates), mouse capture in `TerminalGuard`, `CrosstermEvent::Mouse` branch
+- `input/pointer.rs` (click / hover / wheel → root `Action` with no direct state
+  updates), pointer reducer in `app/dispatch/pointer.rs`, mouse capture in
+  `TerminalGuard`, `CrosstermEvent::Mouse` branch
   in `main.rs`.
 - New APIs: `GotoStep`, `goto_step`, `move_to_column`, `select_index`,
   `AppState::hovered`.

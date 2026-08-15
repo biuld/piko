@@ -51,14 +51,14 @@ fn pending_approval_rejects_other_surface_pushes() {
 
     // A Decide surface is a focus barrier: opening the tree is rejected.
     app.push_surface(SurfaceId::Tree);
-    assert_eq!(app.mode, AppMode::Surface(SurfaceId::Approval));
+    assert_eq!(app.mode(), AppMode::Surface(SurfaceId::Approval));
 
     // A queued Tool Interaction does not steal focus either.
     app.interactions = ToolInteractionPanel::new();
     app.interactions
         .push("i1".into(), "agent-1".into(), None, Vec::new(), false, true);
     app.push_surface(SurfaceId::ToolInteraction);
-    assert_eq!(app.mode, AppMode::Surface(SurfaceId::Approval));
+    assert_eq!(app.mode(), AppMode::Surface(SurfaceId::Approval));
     assert_eq!(app.modal_surface(), Some(SurfaceId::Approval));
 }
 
@@ -70,7 +70,7 @@ fn f4_does_not_steal_focus_from_pending_decide() {
 
     let keymap = Keymap::default();
     let action = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::F(4),
@@ -96,7 +96,7 @@ fn approval_list_nav_enter_confirms_selected() {
     let keymap = Keymap::default();
     // Letter shortcuts are removed — plain 'a' does not accept session.
     let action = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::Char('a'),
@@ -106,7 +106,7 @@ fn approval_list_nav_enter_confirms_selected() {
     assert!(action.is_none());
 
     let down = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::Down,
@@ -122,7 +122,7 @@ fn approval_list_nav_enter_confirms_selected() {
     assert_eq!(app.approvals.front().unwrap().selected_idx, 1);
 
     let enter = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::Enter,
@@ -189,7 +189,7 @@ fn tool_interaction_arrows_move_choices_tab_moves_steps() {
     let keymap = Keymap::default();
     // Down moves to the next choice within the question.
     let action = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::Down,
@@ -207,7 +207,7 @@ fn tool_interaction_arrows_move_choices_tab_moves_steps() {
 
     // Tab moves to the next question.
     let action = InputRouter::route_key(
-        &mut app,
+        &app,
         &keymap,
         key(
             crossterm::event::KeyCode::Tab,

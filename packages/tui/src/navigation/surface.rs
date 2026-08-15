@@ -37,20 +37,6 @@ pub enum SurfaceId {
     AuthSelector,
 }
 
-/// How a surface is intended to mount (product policy).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum SurfaceIntent {
-    /// Explore / configure / blocking decision: covers the body above chrome.
-    Browse,
-    /// Pick a value near the composer.
-    Select,
-    /// Blocking prompt that replaces the composer dock (approval, tool
-    /// interaction).
-    Dock,
-    /// Centered dialog.
-    Modal,
-}
-
 /// Pointer policy when a click resolves below the active modal layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum OutsideClickPolicy {
@@ -60,33 +46,146 @@ pub enum OutsideClickPolicy {
     Block,
 }
 
+/// Product-facing mount intent derived from sizing and modal barrier policy.
+/// It is not stored separately in [`SurfaceSpec`], so it cannot disagree with
+/// the concrete placement contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SurfaceIntent {
+    Browse,
+    Select,
+    Dock,
+    Modal,
+}
+
+/// Static sizing contract; feature state only supplies the dimensions inside
+/// the declared placement class.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SurfaceSizing {
+    CoverBody,
+    ComposerBand,
+    Centered(CenteredSizePolicy),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum CenteredSizePolicy {
+    SettingsViewport,
+    UsageContent,
+    NotificationContent,
+}
+
+/// Keyboard routing family. Surface-specific commands remain with the feature,
+/// while the router no longer rediscovers which interaction family it belongs
+/// to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SurfaceInputProfile {
+    FilteredSelection,
+    NotificationList,
+    ReadOnlyViewport,
+    ApprovalWorkflow,
+    ToolWorkflow,
+    SummaryWorkflow,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum SurfaceGuidance {
+    None,
+    DefaultList,
+    Feature,
+    Workflow,
+}
+
+/// One catalog row consumed by focus, layout, pointer, and guidance policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct SurfaceSpec {
+    pub sizing: SurfaceSizing,
+    pub input: SurfaceInputProfile,
+    pub guidance: SurfaceGuidance,
+    pub outside_click: OutsideClickPolicy,
+}
+
 impl SurfaceId {
-    pub fn intent(self) -> SurfaceIntent {
+    pub const fn spec(self) -> SurfaceSpec {
+        use CenteredSizePolicy as Centered;
+        use OutsideClickPolicy as Outside;
+        use SurfaceGuidance as Guidance;
+        use SurfaceInputProfile as Input;
+        use SurfaceSizing as Sizing;
+
         match self {
-            Self::Sessions | Self::Tree | Self::Diagnostics | Self::SummaryPrompt => {
-                SurfaceIntent::Browse
-            }
-
-            // Session agent picker (viewed-agent switch) sits near the composer,
-            // same as Models / Thinking / Auth.
-            Self::Agents
-            | Self::Models
-            | Self::Thinking
-            | Self::AuthSelector
-            | Self::Mcp
-            | Self::Processes => SurfaceIntent::Select,
-
-            Self::Approval | Self::ToolInteraction => SurfaceIntent::Dock,
-
-            Self::Settings | Self::Usage | Self::Notifications => SurfaceIntent::Modal,
+            Self::Sessions | Self::Tree => SurfaceSpec {
+                sizing: Sizing::CoverBody,
+                input: Input::FilteredSelection,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Diagnostics => SurfaceSpec {
+                sizing: Sizing::CoverBody,
+                input: Input::ReadOnlyViewport,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::SummaryPrompt => SurfaceSpec {
+                sizing: Sizing::CoverBody,
+                input: Input::SummaryWorkflow,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Agents | Self::Models | Self::Thinking => SurfaceSpec {
+                sizing: Sizing::ComposerBand,
+                input: Input::FilteredSelection,
+                guidance: Guidance::DefaultList,
+                outside_click: Outside::Dismiss,
+            },
+            Self::AuthSelector => SurfaceSpec {
+                sizing: Sizing::ComposerBand,
+                input: Input::FilteredSelection,
+                guidance: Guidance::Feature,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Mcp | Self::Processes => SurfaceSpec {
+                sizing: Sizing::ComposerBand,
+                input: Input::ReadOnlyViewport,
+                guidance: Guidance::Feature,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Approval => SurfaceSpec {
+                sizing: Sizing::ComposerBand,
+                input: Input::ApprovalWorkflow,
+                guidance: Guidance::Workflow,
+                outside_click: Outside::Block,
+            },
+            Self::ToolInteraction => SurfaceSpec {
+                sizing: Sizing::ComposerBand,
+                input: Input::ToolWorkflow,
+                guidance: Guidance::Workflow,
+                outside_click: Outside::Block,
+            },
+            Self::Settings => SurfaceSpec {
+                sizing: Sizing::Centered(Centered::SettingsViewport),
+                input: Input::FilteredSelection,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Usage => SurfaceSpec {
+                sizing: Sizing::Centered(Centered::UsageContent),
+                input: Input::ReadOnlyViewport,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Notifications => SurfaceSpec {
+                sizing: Sizing::Centered(Centered::NotificationContent),
+                input: Input::NotificationList,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
         }
     }
 
     pub fn modal_placement(self, body: Rect, centered_size: Option<(u16, u16)>) -> ModalPlacement {
-        match self.intent() {
-            SurfaceIntent::Browse => ModalPlacement::CoverBody,
-            SurfaceIntent::Select | SurfaceIntent::Dock => ModalPlacement::ComposerBand,
-            SurfaceIntent::Modal => ModalPlacement::Centered {
+        match self.spec().sizing {
+            SurfaceSizing::CoverBody => ModalPlacement::CoverBody,
+            SurfaceSizing::ComposerBand => ModalPlacement::ComposerBand,
+            SurfaceSizing::Centered(_) => ModalPlacement::Centered {
                 max_width: centered_size
                     .map(|(w, _)| w)
                     .unwrap_or_else(|| cells_from_percent(body.width, 88).max(40)),
@@ -94,6 +193,15 @@ impl SurfaceId {
                     .map(|(_, h)| h)
                     .unwrap_or_else(|| cells_from_percent(body.height, 70).max(8)),
             },
+        }
+    }
+
+    pub fn intent(self) -> SurfaceIntent {
+        match (self.spec().sizing, self.spec().outside_click) {
+            (SurfaceSizing::CoverBody, _) => SurfaceIntent::Browse,
+            (SurfaceSizing::Centered(_), _) => SurfaceIntent::Modal,
+            (SurfaceSizing::ComposerBand, OutsideClickPolicy::Block) => SurfaceIntent::Dock,
+            (SurfaceSizing::ComposerBand, OutsideClickPolicy::Dismiss) => SurfaceIntent::Select,
         }
     }
 
@@ -129,15 +237,10 @@ impl SurfaceId {
     }
 
     pub fn covers_body(self) -> bool {
-        matches!(self.intent(), SurfaceIntent::Browse)
+        matches!(self.spec().sizing, SurfaceSizing::CoverBody)
     }
 
     pub fn outside_click_policy(self) -> OutsideClickPolicy {
-        match self.intent() {
-            SurfaceIntent::Dock => OutsideClickPolicy::Block,
-            SurfaceIntent::Browse | SurfaceIntent::Select | SurfaceIntent::Modal => {
-                OutsideClickPolicy::Dismiss
-            }
-        }
+        self.spec().outside_click
     }
 }

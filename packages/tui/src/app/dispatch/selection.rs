@@ -2,11 +2,11 @@ use super::*;
 
 impl AppState {
     pub fn has_suggestions(&self) -> bool {
-        self.editor.auto_complete.is_active() && self.mode == AppMode::Chat
+        self.editor.auto_complete.is_active() && self.mode() == AppMode::Chat
     }
 
     pub(super) fn select_next(&mut self) {
-        match self.mode.as_surface() {
+        match self.mode().as_surface() {
             Some(SurfaceId::Tree) => self.tree.select_next_filtered(),
             Some(SurfaceId::Settings) => self.settings.select_next(),
             Some(SurfaceId::Sessions) => self.sessions.select_next(),
@@ -28,7 +28,7 @@ impl AppState {
     }
 
     pub(super) fn select_prev(&mut self) {
-        match self.mode.as_surface() {
+        match self.mode().as_surface() {
             Some(SurfaceId::Tree) => self.tree.select_prev_filtered(),
             Some(SurfaceId::Settings) => self.settings.select_prev(),
             Some(SurfaceId::Sessions) => self.sessions.select_prev(),
@@ -100,7 +100,7 @@ impl AppState {
     }
 
     pub(super) fn close_surface(&mut self) {
-        match self.mode {
+        match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 self.summary_prompt = None;
                 self.pop_focus();
@@ -137,7 +137,7 @@ impl AppState {
     }
 
     pub(super) fn select_surface_next(&mut self) {
-        match self.mode {
+        match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.select_next();
@@ -148,7 +148,7 @@ impl AppState {
     }
 
     pub(super) fn select_surface_prev(&mut self) {
-        match self.mode {
+        match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 if let Some(workflow) = self.summary_prompt.as_mut() {
                     workflow.select_prev();
@@ -168,7 +168,7 @@ impl AppState {
             filter.push(ch);
         }
 
-        match self.mode {
+        match self.mode() {
             AppMode::Surface(SurfaceId::Tree) => {
                 self.tree.rebuild_visible_for_filter();
             }
@@ -192,7 +192,7 @@ impl AppState {
             filter.pop();
         }
 
-        match self.mode {
+        match self.mode() {
             AppMode::Surface(SurfaceId::Tree) => {
                 self.tree.rebuild_visible_for_filter();
             }
@@ -233,11 +233,11 @@ impl AppState {
             return self.confirm_summary_prompt();
         }
 
-        if self.mode.is_surface(SurfaceId::Tree) && self.tree.label_editor.is_some() {
+        if self.mode().is_surface(SurfaceId::Tree) && self.tree.label_editor.is_some() {
             return self.confirm_tree_label_edit();
         }
 
-        match self.mode.as_surface() {
+        match self.mode().as_surface() {
             Some(SurfaceId::Tree) if self.tree_fork_mode => {
                 let entry_id = self.tree.selected_filtered_entry_id();
                 self.tree_fork_mode = false;

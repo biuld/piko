@@ -21,15 +21,25 @@ use crate::{
         tree::TreeCtx,
         usage::{UsageCtx, UsagePanel},
     },
-    layout::{Region, SurfaceId, compose_frame},
+    layout::{PreparedFrame, Region, SurfaceId},
 };
 use piko_tui_layout::{Component, InteractionState};
 
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub fn render(frame: &mut Frame<'_>, app: &AppState) {
-    let composed = compose_frame(app, frame.area());
+    let mut prepared = crate::layout::prepare_frame(app, frame.area());
+    render_prepared(frame, app, &mut prepared);
+}
+
+pub fn render_prepared(frame: &mut Frame<'_>, app: &AppState, prepared: &mut PreparedFrame) {
+    let PreparedFrame {
+        product: composed,
+        timeline,
+        ..
+    } = prepared;
     let plan = &composed.plan;
 
     render_bottom_bar(frame, composed.shell.chrome, app);
@@ -40,17 +50,17 @@ pub fn render(frame: &mut Frame<'_>, app: &AppState) {
         .unwrap_or(false);
 
     if !cover_body {
-        paint_regions(frame, app, &plan.rects);
+        paint_regions(frame, app, &plan.rects, timeline);
     }
 
     for layer in &plan.layers {
-        paint_regions(frame, app, &layer.rects);
+        paint_regions(frame, app, &layer.rects, timeline);
     }
 
     // Real terminal caret while inline-editing a tool-interaction workflow.
     // Ratatui hides the cursor on any frame that does not call
     // `set_cursor_position`, so non-editing frames stay caret-free.
-    if app.mode == AppMode::Surface(SurfaceId::ToolInteraction)
+    if app.mode() == AppMode::Surface(SurfaceId::ToolInteraction)
         && let Some(area) = plan
             .layers
             .first()
@@ -67,21 +77,28 @@ fn paint_regions(
     frame: &mut Frame<'_>,
     app: &AppState,
     rects: &std::collections::HashMap<Region, Rect>,
+    timeline_plan: &mut Option<crate::features::timeline::TimelineRenderPlan>,
 ) {
     let has_suggest = rects.contains_key(&Region::Suggest);
     let has_todos = rects.contains_key(&Region::Todos);
     if let Some(area) = rects.get(&Region::Stream).copied() {
-        app.timeline.render_with_state(
-            frame,
-            area,
-            &app.theme,
-            interaction_state(app, Region::Stream),
-            crate::features::welcome::WelcomeView {
-                version: env!("CARGO_PKG_VERSION"),
-                cwd: &app.cwd,
-                spinner_frame: app.spinner_frame,
-            },
-        );
+        let welcome = crate::features::welcome::WelcomeView {
+            version: env!("CARGO_PKG_VERSION"),
+            cwd: &app.cwd,
+            spinner_frame: app.spinner_frame,
+        };
+        if let Some(plan) = timeline_plan.take() {
+            app.timeline()
+                .render_prepared(frame, area, &app.theme, welcome, plan);
+        } else {
+            app.timeline().render_with_state(
+                frame,
+                area,
+                &app.theme,
+                interaction_state(app, Region::Stream),
+                welcome,
+            );
+        }
     }
     if let Some(area) = rects.get(&Region::DockBoundary).copied() {
         render_dock_separator(frame, area, app, has_suggest && !has_todos);
@@ -339,7 +356,7 @@ fn render_editor(
     area: Rect,
     _interaction: InteractionState<HitId>,
 ) {
-    let focused = app.mode == AppMode::Chat;
+    let focused = app.mode() == AppMode::Chat;
     let border_color = if focused {
         app.theme.prompt_border_active
     } else {

@@ -24,3 +24,7 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-013](ADR-013-provider-native-cost-ledger.md) | Preserve provider-native currencies in a typed cost ledger | accepted |
 | [ADR-014](ADR-014-registered-billing-policies.md) | Use registered billing adapters and policies | accepted |
 | [ADR-015](ADR-015-host-owned-session-journal.md) | Use a host-owned canonical session journal in a dedicated session-store crate | accepted |
+| [ADR-016](ADR-016-installed-config-authority.md) | Treat installed files as configuration authority | accepted |
+| [ADR-017](ADR-017-bounded-blocking-session-storage.md) | Use a bounded blocking boundary for session storage | accepted |
+| [ADR-018](ADR-018-tui-prepared-frame-runtime.md) | Make painted TUI frames the pointer geometry authority | accepted |
+| [ADR-019](ADR-019-tui-runtime-authorities.md) | Give TUI runtime state explicit authorities | accepted |

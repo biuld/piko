@@ -14,7 +14,7 @@ use crate::{
         session_list::SessionList,
         settings::{HostRuntimeSettings, SettingsAction, SettingsPanel},
         thinking::ThinkingSelector,
-        timeline::Timeline,
+        timeline::{Timeline, TimelineStore},
         todos::TodoListsState,
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
@@ -116,7 +116,6 @@ pub struct AppState {
     pub initial_options: InitialOptions,
     pub session: SessionUiState,
     pub model: ModelUiState,
-    pub mode: AppMode,
     pub focus_manager: FocusManager,
     pub quit: bool,
     pub last_tick: Instant,
@@ -141,10 +140,8 @@ pub struct AppState {
     pub spinner_frame: usize,
 
     // panels (each owns its own state + render)
-    pub timeline: Timeline,
-    pub agent_timelines: HashMap<String, Timeline>,
-    /// Session-scoped durable Timeline entries merged into every agent view.
-    pub session_timeline_entries: Vec<(piko_protocol::SessionTreeEntry, u64)>,
+    /// All per-agent projections plus session-wide durable entries.
+    pub timelines: TimelineStore,
     pub approvals: ApprovalPanel,
     pub mcp: crate::features::mcp::McpPanel,
     pub processes: crate::features::processes::ProcessPanel,

@@ -22,6 +22,7 @@ use crate::{
         },
     },
     input::keymap::{KeyAction, Keymap},
+    navigation::SurfaceInputProfile,
 };
 
 pub use crate::navigation::FocusManager;

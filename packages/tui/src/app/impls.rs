@@ -30,7 +30,6 @@ impl AppState {
             initial_options,
             session,
             model,
-            mode: AppMode::Chat,
             focus_manager: FocusManager::new(AppMode::Chat),
             quit: false,
             last_tick: Instant::now(),
@@ -43,9 +42,7 @@ impl AppState {
             agent_usage: Vec::new(),
             usage_scroll: 0,
             spinner_frame: 0,
-            timeline: Timeline::new(),
-            agent_timelines: HashMap::new(),
-            session_timeline_entries: Vec::new(),
+            timelines: TimelineStore::new(),
             approvals: ApprovalPanel::new(),
             mcp: crate::features::mcp::McpPanel::new(),
             processes: crate::features::processes::ProcessPanel::new(),
@@ -84,6 +81,19 @@ impl AppState {
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
+
+    /// Current input owner, derived from the sole authoritative focus stack.
+    pub fn mode(&self) -> AppMode {
+        self.focus_manager.active_mode()
+    }
+
+    pub fn timeline(&self) -> &Timeline {
+        self.timelines.active()
+    }
+
+    pub fn timeline_mut(&mut self) -> &mut Timeline {
+        self.timelines.active_mut()
+    }
 
     pub fn active_text_box(&mut self) -> Option<&mut TextBox> {
         match self.focus_manager.active_mode() {
@@ -168,7 +178,6 @@ impl AppState {
 
     pub fn push_focus(&mut self, mode: AppMode) {
         self.focus_manager.push(mode);
-        self.mode = self.focus_manager.active_mode();
         if !mode.is_surface(SurfaceId::SummaryPrompt) {
             self.clear_filter_for_mode(mode);
         }
@@ -212,7 +221,6 @@ impl AppState {
 
     pub fn pop_focus(&mut self) {
         let popped = self.focus_manager.pop();
-        self.mode = self.focus_manager.active_mode();
         if !popped.is_some_and(|m| m.is_surface(SurfaceId::SummaryPrompt))
             && let Some(mode) = popped
         {
@@ -222,7 +230,6 @@ impl AppState {
 
     pub fn clear_focus(&mut self) {
         self.focus_manager.clear_to_chat();
-        self.mode = self.focus_manager.active_mode();
         self.clear_all_filters();
         self.agent_panel.focus = false;
     }
@@ -250,7 +257,7 @@ impl AppState {
     }
 
     pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
-        match self.mode {
+        match self.focus_manager.active_mode() {
             AppMode::Surface(SurfaceId::Sessions) => Some(&mut self.sessions.filter),
             AppMode::Surface(SurfaceId::Agents) => Some(&mut self.agent_panel.filter),
             AppMode::Surface(SurfaceId::Tree) => Some(&mut self.tree.filter),
@@ -276,7 +283,7 @@ impl AppState {
                 .active_thinking_level
                 .clone()
                 .or_else(|| self.host_settings.thinking_level.clone()),
-            thinking_visible: self.timeline.thinking_visible,
+            thinking_visible: self.timeline().thinking_visible,
             theme_name: self.theme.name.clone(),
             no_tools: self.initial_options.no_tools || !self.host_settings.all_tools,
         }
@@ -293,7 +300,7 @@ impl AppState {
                 self.host_settings.thinking_level = Some((*level).to_string());
             }
             SettingsAction::HideThinking(hide) => {
-                self.timeline.thinking_visible = !*hide;
+                self.timelines.set_thinking_visible(!*hide);
                 self.tui_config.hide_thinking_block = *hide;
             }
             SettingsAction::Compaction(v) => self.host_settings.compaction_enabled = *v,

@@ -69,7 +69,7 @@ fn submit_with_session_waits_for_server_committed_user_message() {
         &effects[0],
         Effect::Send(piko_protocol::Command::ChatSubmit { text, .. }) if text == "hello"
     ));
-    assert!(app.timeline.message_ids().is_empty());
+    assert!(app.timeline().message_ids().is_empty());
 }
 
 #[test]

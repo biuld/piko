@@ -12,6 +12,7 @@ use crate::app::{
 };
 
 mod actions;
+mod pointer;
 mod selection;
 mod slash;
 
@@ -34,12 +35,25 @@ impl AppState {
             Action::Notifications(action) => self.dispatch_notification_action(action),
             Action::Slash(action) => self.dispatch_slash_action(action),
             Action::AgentPanel(action) => self.dispatch_agent_panel_action(action),
+            Action::Pointer(action) => self.dispatch_pointer_action(action),
         }
     }
 
     fn dispatch_app_action(&mut self, action: AppAction) -> Vec<Effect> {
         match action {
             AppAction::Quit => self.quit = true,
+            AppAction::IdleEscape(now) => {
+                let double_esc = self
+                    .focus_manager
+                    .last_esc_pressed
+                    .is_some_and(|last| now.duration_since(last).as_millis() < 500);
+                if double_esc {
+                    self.focus_manager.last_esc_pressed = None;
+                    self.push_surface(SurfaceId::Tree);
+                } else {
+                    self.focus_manager.last_esc_pressed = Some(now);
+                }
+            }
         }
         Vec::new()
     }

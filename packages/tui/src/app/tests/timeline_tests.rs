@@ -28,9 +28,9 @@ fn committed_message_replaces_draft_and_rejects_late_delta() {
         },
     ));
 
-    assert_eq!(app.timeline.message_ids(), vec!["assistant-1"]);
+    assert_eq!(app.timeline().message_ids(), vec!["assistant-1"]);
     assert_eq!(
-        app.timeline.assistant_text("assistant-1").as_deref(),
+        app.timeline().assistant_text("assistant-1").as_deref(),
         Some("complete")
     );
 }
@@ -48,7 +48,7 @@ fn committed_messages_use_task_seq_not_arrival_order() {
         },
     ));
 
-    assert_eq!(app.timeline.message_ids(), vec!["user-1", "assistant-1"]);
+    assert_eq!(app.timeline().message_ids(), vec!["user-1", "assistant-1"]);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn late_turn_failure_is_placed_before_a_subsequent_session_fact() {
     }));
 
     assert_eq!(
-        app.timeline.component_kinds(),
+        app.timeline().component_kinds(),
         vec![
             TimelineKind::Assistant,
             TimelineKind::Error,
@@ -107,9 +107,9 @@ fn commit_before_realtime_never_creates_a_second_draft() {
         },
     ));
 
-    assert_eq!(app.timeline.message_ids(), vec!["assistant-1"]);
+    assert_eq!(app.timeline().message_ids(), vec!["assistant-1"]);
     assert_eq!(
-        app.timeline.assistant_text("assistant-1").as_deref(),
+        app.timeline().assistant_text("assistant-1").as_deref(),
         Some("complete")
     );
 }
@@ -128,7 +128,7 @@ fn conflicting_duplicate_commit_requests_authoritative_snapshot() {
             if session_id == "session-1"
     ));
     assert_eq!(
-        app.timeline.assistant_text("assistant-1").as_deref(),
+        app.timeline().assistant_text("assistant-1").as_deref(),
         Some("first")
     );
 }
@@ -172,9 +172,9 @@ fn tool_start_and_end_update_one_timeline_item() {
         .expect("tool stream item"),
     ));
 
-    assert_eq!(app.timeline.tool_calls.len(), 1);
-    assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Completed);
-    assert_eq!(app.timeline.tool_call_count(), 1);
+    assert_eq!(app.timeline().tool_calls.len(), 1);
+    assert_eq!(app.timeline().tool_calls[0].status, ToolStatus::Completed);
+    assert_eq!(app.timeline().tool_call_count(), 1);
 }
 
 #[test]
@@ -216,10 +216,10 @@ fn committed_tool_result_updates_existing_tool_call() {
         .expect("tool stream item"),
     ));
 
-    assert_eq!(app.timeline.tool_calls.len(), 1);
-    assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Failed);
+    assert_eq!(app.timeline().tool_calls.len(), 1);
+    assert_eq!(app.timeline().tool_calls[0].status, ToolStatus::Failed);
     assert_eq!(
-        app.timeline.tool_calls[0].result.as_deref(),
+        app.timeline().tool_calls[0].result.as_deref(),
         Some("{\"done\":true}")
     );
 }
@@ -261,7 +261,7 @@ fn assistant_streaming_updates_one_component() {
     ));
 
     assert_eq!(
-        app.timeline.component_kinds(),
+        app.timeline().component_kinds(),
         vec![TimelineKind::Assistant]
     );
 }
@@ -291,7 +291,7 @@ fn realtime_gap_requests_authoritative_snapshot() {
             if session_id == "session-1"
     ));
     assert_eq!(
-        app.timeline.assistant_text("message-gap").as_deref(),
+        app.timeline().assistant_text("message-gap").as_deref(),
         Some("a")
     );
 }
@@ -323,7 +323,9 @@ fn replace_and_clear_content_flow_through_canonical_projection() {
         }));
     }
     assert_eq!(
-        app.timeline.assistant_text("message-correction").as_deref(),
+        app.timeline()
+            .assistant_text("message-correction")
+            .as_deref(),
         Some("")
     );
 }
@@ -355,7 +357,7 @@ fn cancelled_turn_finalizes_running_tool() {
         usage: Default::default(),
         timestamp: 1,
     }));
-    assert_eq!(app.timeline.tool_calls[0].status, ToolStatus::Cancelled);
+    assert_eq!(app.timeline().tool_calls[0].status, ToolStatus::Cancelled);
 }
 
 #[test]
@@ -477,7 +479,7 @@ fn agent_subscribe_replaces_timeline_with_agent_replay() {
     });
 
     assert_eq!(
-        app.timeline.component_kinds(),
+        app.timeline().component_kinds(),
         vec![TimelineKind::Assistant]
     );
     assert_eq!(

@@ -52,12 +52,13 @@ summary only.
 
 | Intent | Placement | Surfaces |
 |--------|-----------|----------|
-| Browse | `CoverBody` | Sessions, Tree, Help, Diagnostics, SummaryPrompt |
-| Select | `ComposerBand` | Agents, Models, AuthSelector, MCP, Processes |
+| Browse | `CoverBody` | Sessions, Tree, Diagnostics, SummaryPrompt |
+| Select | `ComposerBand` | Agents, Models, Thinking, AuthSelector, MCP, Processes |
 | Dock | `ComposerBand` | Approval, ToolInteraction |
-| Modal | `Centered` | Settings, Usage |
+| Modal | `Centered` | Settings, Usage, Notifications |
 
-Define via `SurfaceId::intent()` / `modal_layer(body, band_h)`.
+Define once via `SurfaceId::spec()`; layout, keyboard routing, guidance, and
+outside-click handling consume that catalog row.
 
 Select band height comes from feature **content-row** budgets
 (`SelectBandBudget` in `navigation/select_band.rs`), not a fixed body fraction.
@@ -68,18 +69,23 @@ Overflow list items scroll.
 | Concern | Module |
 |---------|--------|
 | Region leaves | `navigation/region.rs` |
-| Surface catalog + intent | `navigation/surface.rs` |
+| Surface catalog + capabilities | `navigation/surface.rs` (`SurfaceSpec`) |
 | `compose_plane` / `compose_modals` | `navigation/compose.rs` |
 | AppState → solve | `layout/` |
 | Paint | `render/` |
 | Panels | `features/*` |
+| Per-agent Timeline projections | `features/timeline/store.rs` |
 
 ## Design rules
 
 1. Plane stays stable; surfaces only add modal layers.
 2. No floaters outside solved rects / chrome.
 3. Layout crate has no product ids.
-4. Focus is LIFO (`AppMode::Chat` | `Surface`).
+4. Focus is LIFO (`AppMode::Chat` | `Surface`) and `FocusManager` is the only
+   current-mode authority.
+5. Input adapters are pure event-to-`Action` translators; mutations occur in
+   `AppState::dispatch` reducers.
+6. A painted `PreparedFrame` is the pointer geometry authority until repaint.
 
 ## TUI config
 

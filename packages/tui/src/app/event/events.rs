@@ -59,22 +59,9 @@ impl AppState {
         if !self.accepts_session(&committed.session_id) {
             return Vec::new();
         }
-        let order = self.timeline.components.len() as u64;
+        let order = self.timeline().components.len() as u64;
         let entry = committed.entry;
-        let outcome = merge_session_entry(
-            &mut self.timeline,
-            &mut self.agent_timelines,
-            entry.clone(),
-            order,
-        );
-        if outcome != piko_client_core::ApplyOutcome::Ignored
-            && self
-                .session_timeline_entries
-                .iter()
-                .all(|(existing, _)| existing.id() != entry.id())
-        {
-            self.session_timeline_entries.push((entry, order));
-        }
+        let outcome = self.timelines.apply_session_entry(entry, order);
         if outcome == piko_client_core::ApplyOutcome::Inconsistent {
             vec![Effect::send(Command::StateSnapshot {
                 command_id: command_id(),
@@ -293,20 +280,4 @@ impl AppState {
         );
         effects
     }
-}
-
-pub(super) fn merge_session_entry(
-    visible: &mut crate::features::timeline::Timeline,
-    agents: &mut std::collections::HashMap<String, crate::features::timeline::Timeline>,
-    entry: piko_protocol::SessionTreeEntry,
-    order: u64,
-) -> piko_client_core::ApplyOutcome {
-    let mut outcome = visible.apply_session_entry(entry.clone(), order);
-    for timeline in agents.values_mut() {
-        let next = timeline.apply_session_entry(entry.clone(), order);
-        if next == piko_client_core::ApplyOutcome::Inconsistent {
-            outcome = next;
-        }
-    }
-    outcome
 }

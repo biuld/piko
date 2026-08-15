@@ -13,7 +13,7 @@ use ratatui::{
 use crate::{
     app::{AppState, HitId},
     features::notifications::{Notification, NotificationLevel, level_glyph},
-    navigation::{SurfaceId, SurfaceIntent},
+    navigation::{SurfaceGuidance, SurfaceId},
     ui::components::{dock_line, feedback::default_list_hints, hover_bg},
 };
 
@@ -54,43 +54,40 @@ pub fn resolve(app: &AppState) -> GuidanceContent<'_> {
         return GuidanceContent::Hint(Cow::Borrowed(COMPOSER_HINTS));
     };
 
-    if !matches!(
-        surface.intent(),
-        SurfaceIntent::Select | SurfaceIntent::Dock
-    ) {
-        return GuidanceContent::Empty;
-    }
-
     surface_hint(app, surface)
         .map(GuidanceContent::Hint)
         .unwrap_or(GuidanceContent::Empty)
 }
 
 fn surface_hint<'a>(app: &'a AppState, surface: SurfaceId) -> Option<Cow<'a, str>> {
-    match surface {
-        SurfaceId::Agents | SurfaceId::Models | SurfaceId::Thinking => {
-            default_list_hints().single_line().map(Cow::Borrowed)
-        }
-        SurfaceId::AuthSelector => app
-            .auth_selector
-            .interaction_hints()
-            .single_line()
-            .map(Cow::Borrowed),
-        SurfaceId::Mcp => app.mcp.interaction_hints().single_line().map(Cow::Borrowed),
-        SurfaceId::Processes => app
-            .processes
-            .interaction_hints()
-            .single_line()
-            .map(Cow::Borrowed),
-        SurfaceId::Approval => app
-            .approvals
-            .workflow()
-            .map(|workflow| Cow::Owned(workflow.help_text())),
-        SurfaceId::ToolInteraction => app
-            .interactions
-            .front()
-            .map(|interaction| Cow::Owned(interaction.workflow.help_text())),
-        _ => None,
+    match surface.spec().guidance {
+        SurfaceGuidance::DefaultList => default_list_hints().single_line().map(Cow::Borrowed),
+        SurfaceGuidance::Feature => match surface {
+            SurfaceId::AuthSelector => app
+                .auth_selector
+                .interaction_hints()
+                .single_line()
+                .map(Cow::Borrowed),
+            SurfaceId::Mcp => app.mcp.interaction_hints().single_line().map(Cow::Borrowed),
+            SurfaceId::Processes => app
+                .processes
+                .interaction_hints()
+                .single_line()
+                .map(Cow::Borrowed),
+            _ => None,
+        },
+        SurfaceGuidance::Workflow => match surface {
+            SurfaceId::Approval => app
+                .approvals
+                .workflow()
+                .map(|workflow| Cow::Owned(workflow.help_text())),
+            SurfaceId::ToolInteraction => app
+                .interactions
+                .front()
+                .map(|interaction| Cow::Owned(interaction.workflow.help_text())),
+            _ => None,
+        },
+        SurfaceGuidance::None => None,
     }
 }
 

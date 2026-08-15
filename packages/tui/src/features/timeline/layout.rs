@@ -4,7 +4,7 @@ use crate::{app::HitId, layout::DEFAULT_HORIZONTAL_INSET, theme::Theme};
 
 use super::{Timeline, TimelineComponent, render::component_lines};
 
-pub(super) struct TimelineRenderPlan {
+pub(crate) struct TimelineRenderPlan {
     pub lines: Vec<Line<'static>>,
     pub content_area: Rect,
     pub top_offset: usize,
@@ -12,7 +12,7 @@ pub(super) struct TimelineRenderPlan {
 }
 
 impl Timeline {
-    pub(super) fn render_plan(
+    pub(crate) fn render_plan(
         &self,
         area: Rect,
         theme: &Theme,
@@ -95,6 +95,7 @@ impl Timeline {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn pointer_regions(&self, area: Rect, theme: &Theme) -> Vec<(Rect, HitId)> {
         self.render_plan(area, theme, None).tool_regions
     }

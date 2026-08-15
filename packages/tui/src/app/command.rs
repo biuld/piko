@@ -1,4 +1,10 @@
 use piko_protocol::{ApprovalDecision, HostCommandDescriptor, HostCommandInvoke};
+use piko_tui_layout::{ComponentHit, PointerGesture};
+
+use crate::{
+    app::HitId,
+    navigation::{Region, SurfaceId},
+};
 
 /// Root user intent. This is intentionally only a router over smaller intent
 /// domains; feature-specific behavior should live in the nested action types.
@@ -16,11 +22,35 @@ pub enum Action {
     Notifications(NotificationAction),
     Slash(SlashAction),
     AgentPanel(AgentPanelAction),
+    Pointer(PointerAction),
 }
 
 #[derive(Debug)]
 pub enum AppAction {
     Quit,
+    /// Idle-editor Esc with the adapter timestamp used for double-Esc.
+    IdleEscape(std::time::Instant),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PointerTarget {
+    Component {
+        region: Region,
+        hit: ComponentHit<HitId>,
+    },
+    OutsideModal(SurfaceId),
+    None,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PointerAction {
+    LeftDown(PointerTarget),
+    LeftUp(PointerTarget),
+    Move(Option<(Region, Option<HitId>)>),
+    Gesture {
+        target: PointerTarget,
+        gesture: PointerGesture,
+    },
 }
 
 #[derive(Debug)]
@@ -153,6 +183,12 @@ pub enum AgentPanelAction {
 impl From<AgentPanelAction> for Action {
     fn from(action: AgentPanelAction) -> Self {
         Self::AgentPanel(action)
+    }
+}
+
+impl From<PointerAction> for Action {
+    fn from(action: PointerAction) -> Self {
+        Self::Pointer(action)
     }
 }
 

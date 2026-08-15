@@ -110,16 +110,19 @@ fn assistant(text: &str) -> Message {
     }
 }
 
+mod command_more_tests;
 mod command_tests;
 mod completion_tests;
 mod delete_scope_tests;
 mod diff_tests;
 mod foreground_tests;
 mod modal_tests;
+mod pointer_more_tests;
 mod pointer_tests;
 mod prompt_tests;
 mod session_tests;
 mod settings_tests;
+mod snapshot_more_tests;
 mod snapshot_tests;
 mod timeline_tests;
 mod tree_tests;

@@ -4,12 +4,15 @@ use super::*;
 fn delete_current_session_waits_for_authoritative_clear() {
     let mut app = app();
     app.session.id = Some("session-1".into());
-    app.timeline
-        .push_session_fact("keep-entry".into(), "session", "keep until listed".into());
+    app.timeline_mut().push_session_fact(
+        "keep-entry".into(),
+        "session",
+        "keep until listed".into(),
+    );
 
     let effects = app.delete_current_session();
     assert!(app.session.id.as_deref() == Some("session-1"));
-    assert!(!app.timeline.components.is_empty());
+    assert!(!app.timeline().components.is_empty());
     assert!(matches!(
         effects.as_slice(),
         [Effect::Send(piko_protocol::Command::SessionDelete { session_id, .. })]
@@ -19,7 +22,7 @@ fn delete_current_session_waits_for_authoritative_clear() {
         previous_session_id: "session-1".into(),
     }));
     assert!(app.session.id.is_none());
-    assert!(app.timeline.components.is_empty());
+    assert!(app.timeline().components.is_empty());
 }
 
 #[test]
@@ -45,10 +48,10 @@ fn tool_execution_scopes_to_non_active_agent_timeline() {
         .expect("tool stream item"),
     ));
 
-    assert!(app.timeline.tool_calls.is_empty());
+    assert!(app.timeline().tool_calls.is_empty());
     assert_eq!(
-        app.agent_timelines
-            .get("other")
+        app.timelines
+            .inactive("other")
             .map(|t| t.tool_calls.len())
             .unwrap_or(0),
         1

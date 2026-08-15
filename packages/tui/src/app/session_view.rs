@@ -30,9 +30,7 @@ impl AppState {
         self.session.last_context_tokens = None;
         self.last_turn_id = None;
         self.last_turn_diff = None;
-        self.timeline.clear();
-        self.agent_timelines.clear();
-        self.session_timeline_entries.clear();
+        self.timelines.clear();
         self.agent_panel.begin_loading();
         self.approvals.clear();
         self.interactions.clear();
@@ -53,9 +51,7 @@ impl AppState {
         self.session.last_context_tokens = None;
         self.last_turn_id = None;
         self.last_turn_diff = None;
-        self.timeline.clear();
-        self.agent_timelines.clear();
-        self.session_timeline_entries.clear();
+        self.timelines.clear();
         self.agent_panel.begin_loading();
         if self.session.shell_ready {
             self.agent_panel.mark_hydrated();

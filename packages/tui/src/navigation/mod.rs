@@ -12,7 +12,10 @@ pub use compose::{PlaneMetrics, compose_modals, compose_plane};
 pub use focus_target::AppMode;
 pub use region::Region;
 pub use select_band::SelectBandBudget;
-pub use surface::{OutsideClickPolicy, SurfaceId, SurfaceIntent};
+pub use surface::{
+    CenteredSizePolicy, OutsideClickPolicy, SurfaceGuidance, SurfaceId, SurfaceInputProfile,
+    SurfaceIntent, SurfaceSizing,
+};
 
 pub type FocusManager = piko_tui_layout::FocusManager<AppMode>;
 

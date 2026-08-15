@@ -15,7 +15,7 @@ impl AppState {
             effect::Msg::Tick => {
                 self.last_tick = std::time::Instant::now();
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
-                self.timeline.viewport.apply_metrics();
+                self.timeline_mut().viewport.apply_metrics();
                 Vec::new()
             }
         }
@@ -103,7 +103,7 @@ impl AppState {
             }
             Some(pending::PendingCommandKind::ModelList) => {
                 self.status = format!("model list failed: {reason}");
-                if matches!(self.mode, super::AppMode::Surface(SurfaceId::Models)) {
+                if matches!(self.mode(), super::AppMode::Surface(SurfaceId::Models)) {
                     self.pop_focus();
                 }
             }
@@ -124,7 +124,7 @@ impl AppState {
     }
 
     pub fn push(&mut self, entry: TimelineEntry) {
-        self.timeline.push(entry);
+        self.timeline_mut().push(entry);
     }
 
     pub fn push_error(&mut self, message: String) {

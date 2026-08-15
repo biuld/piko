@@ -69,18 +69,30 @@ impl HostdClient {
         Ok(())
     }
 
-    pub fn drain(&mut self) -> Vec<HostLine> {
-        let mut lines = Vec::new();
-        while let Ok(line) = self.rx.try_recv() {
-            lines.push(line);
-        }
-        lines
+    /// Receive at most `limit` currently queued lines. Keeping this bounded
+    /// guarantees that a continuously streaming host cannot starve TUI paint.
+    pub fn drain_up_to(&mut self, limit: usize) -> Vec<HostLine> {
+        drain_receiver_up_to(&self.rx, limit)
     }
 
     pub fn shutdown(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn drain_receiver_up_to(
+    rx: &piko_comms::ThreadBridgeReceiver<piko_comms::contracts::TuiHostBridge, HostLine>,
+    limit: usize,
+) -> Vec<HostLine> {
+    let mut lines = Vec::with_capacity(limit);
+    for _ in 0..limit {
+        let Ok(line) = rx.try_recv() else {
+            break;
+        };
+        lines.push(line);
+    }
+    lines
 }
 
 fn render_command(command: &str, args: &[String]) -> String {
@@ -100,5 +112,22 @@ fn parse_host_line(line: &str) -> HostLine {
     match serde_json::from_value::<ServerMessage>(value) {
         Ok(message) => HostLine::Message(Box::new(message)),
         Err(err) => HostLine::DecodeError(err.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_drain_preserves_backlog_past_the_frame_limit() {
+        let (tx, rx) =
+            piko_comms::thread_bridge::<piko_comms::contracts::TuiHostBridge, HostLine>();
+        tx.send(HostLine::DecodeError("one".into())).unwrap();
+        tx.send(HostLine::DecodeError("two".into())).unwrap();
+        tx.send(HostLine::DecodeError("three".into())).unwrap();
+
+        assert_eq!(drain_receiver_up_to(&rx, 2).len(), 2);
+        assert_eq!(drain_receiver_up_to(&rx, 2).len(), 1);
     }
 }
