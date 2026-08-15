@@ -64,6 +64,9 @@ impl AppState {
             }
             EditorAction::SuggestionSelectNext => self.select_suggestion_next(),
             EditorAction::SuggestionSelectPrev => self.select_suggestion_prev(),
+            EditorAction::FollowUp => effects.extend(self.submit_follow_up()),
+            EditorAction::Steer => effects.extend(self.submit_steer()),
+            EditorAction::DequeueFollowUp => effects.extend(self.dequeue_follow_up()),
         }
         effects
     }

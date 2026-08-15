@@ -9,20 +9,21 @@ impl HostState {
         agent_instance_id: &str,
         message: &str,
     ) -> QueueUpdateEvent {
-        let state = self.session_mut(session_id).unwrap();
-        state
-            .steer_queue
-            .push((agent_instance_id.to_string(), message.to_string()));
+        if let Ok(state) = self.session_mut(session_id) {
+            state
+                .steer_queue
+                .push((agent_instance_id.to_string(), message.to_string()));
+        }
         self.build_queue_update(session_id)
     }
 
-    /// Pop and return the next steer item (agent_instance_id, message), if any.
-    pub fn drain_next_steer(&mut self, session_id: &str) -> Option<(String, String)> {
-        let state = self.session_mut(session_id).ok()?;
-        if state.steer_queue.is_empty() {
-            None
-        } else {
-            Some(state.steer_queue.remove(0))
+    /// Drop in-flight steers for one agent. Called when that agent's active
+    /// turn becomes terminal so `QueueEvent` counts cannot grow forever.
+    pub fn clear_steers_for_agent(&mut self, session_id: &str, agent_instance_id: &str) {
+        if let Ok(state) = self.session_mut(session_id) {
+            state
+                .steer_queue
+                .retain(|(owner, _)| owner != agent_instance_id);
         }
     }
 
@@ -64,5 +65,53 @@ impl From<QueueUpdateEvent> for ServerMessage {
             steer_preview: q.steer_preview,
             follow_up_preview: q.follow_up_preview,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::sessions::HostState;
+
+    fn session() -> (HostState, String) {
+        let mut state = HostState::new();
+        let crate::api::CommandResult::SessionCreated { session_id, .. } =
+            state.create_session("/tmp")
+        else {
+            panic!("session create");
+        };
+        (state, session_id)
+    }
+
+    #[test]
+    fn push_steer_counts_per_session() {
+        let (mut state, session_id) = session();
+        state.push_steer(&session_id, "agent-a", "one");
+        let ev = state.push_steer(&session_id, "agent-a", "two");
+        assert_eq!(ev.steer_count, 2);
+        assert_eq!(ev.steer_preview.as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn ending_active_turn_clears_that_agents_steers() {
+        let (mut state, session_id) = session();
+        let (turn_id, _) = state.start_turn(&session_id, "agent-a", "go").unwrap();
+        state.mark_turn_running(&session_id, &turn_id).unwrap();
+        state.push_steer(&session_id, "agent-a", "left");
+        state.push_steer(&session_id, "agent-b", "stay");
+        state.cancel_turn(&session_id, &turn_id).unwrap();
+        let ev = state.build_queue_update(&session_id);
+        assert_eq!(ev.steer_count, 1);
+        assert_eq!(ev.steer_preview.as_deref(), Some("stay"));
+    }
+
+    #[test]
+    fn clear_steers_for_agent_leaves_other_agents() {
+        let (mut state, session_id) = session();
+        state.push_steer(&session_id, "agent-a", "a");
+        state.push_steer(&session_id, "agent-b", "b");
+        state.clear_steers_for_agent(&session_id, "agent-a");
+        let ev = state.build_queue_update(&session_id);
+        assert_eq!(ev.steer_count, 1);
+        assert_eq!(ev.steer_preview.as_deref(), Some("b"));
     }
 }

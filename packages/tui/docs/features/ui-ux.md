@@ -582,7 +582,7 @@ not new protocol variants.
 | Context / cost | Session/turn usage projection | BottomBar still placeholder when data exists | Project into BottomBar (no new command) |
 | Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel with exact run identity and complete run-prompt, resource, tool-catalog, request, and options sections | Local presentation command; content is scrollable rather than silently truncated |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
-| Queue steer | `QueueSteer` | No first-class user entry | Local slash or Editor mode only if product wants steer; else keep protocol for automation |
+| Queue steer | `QueueSteer` | **Landed:** Enter while running, Ctrl+Enter | Fail closed when idle; Alt+Enter remains FollowUp |
 | `model.set` / `thinking.set` in catalog | Catalog advertised | Combined selector uses another path | Keep the selector; optional slash args later; no second set API |
 
 ### When to add a **new** host wire command
@@ -639,7 +639,6 @@ assistant messages.
 The current command inventory has a visible result path. Future work is a
 product decision rather than a missing-surface repair:
 
-- Queue steer user entry (only if steerable queue is a first-class UX)
 - Per-run usage drill-down if a concrete reporting journey requires it
 - New host wire commands for net-new host capabilities
 

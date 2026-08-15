@@ -35,6 +35,7 @@ mod runtime;
 mod session_ops;
 mod session_view;
 mod slash;
+mod submit;
 mod turn;
 
 #[cfg(test)]
@@ -189,6 +190,15 @@ pub struct ActiveTurnUi {
     pub status: piko_protocol::TurnStatus,
 }
 
+/// A follow-up this TUI submitted and can dequeue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FollowUpUi {
+    pub agent_instance_id: String,
+    pub text: String,
+    pub turn_id: Option<String>,
+    pub cancel_when_queued: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SessionUiState {
     /// Session whose authoritative view has been reconciled and is live.
@@ -204,6 +214,8 @@ pub struct SessionUiState {
     pub continue_requested: bool,
     /// agent_instance_id → active turn (id + status) for F-22 foreground projection.
     pub active_turns: HashMap<String, ActiveTurnUi>,
+    /// Follow-ups this process queued for dequeue (newest last).
+    pub follow_ups: Vec<FollowUpUi>,
     pub pending: pending::PendingCommands,
     /// Session-wide token/cost ledger projected from hostd (F-15 / D-29).
     pub cumulative_usage: Option<piko_protocol::messages::Usage>,

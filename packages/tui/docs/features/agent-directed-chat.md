@@ -20,8 +20,10 @@ Agent in AgentPanel identifies the recipient of the next Editor submission.
 - Messages are committed to that Agent's transcript and remain visible after
   reopening the session.
 - Every accepted submission uses the same Turn lifecycle and Agent run API.
-- One AgentInstance runs at most one Turn at a time. Additional submissions to
-  that Agent are durably queued and remain queued across hostd restarts.
+- One AgentInstance runs at most one Turn at a time. Enter on a running Agent
+  steers the active turn. Alt+Enter durably queues a follow-up
+  that remains queued across hostd restarts. See
+  [message-queue.md](./message-queue.md).
 - Different AgentInstances in the same Session may run Turns concurrently.
 - Cancelling stops the active Turn for the Agent currently shown in Timeline.
 - A target that is not open reports an error without redirecting the message.
@@ -30,8 +32,8 @@ Agent in AgentPanel identifies the recipient of the next Editor submission.
 
 ## Configuration
 
-Agent-Directed Chat has no dedicated setting or key binding. It follows the
-existing Agent selection and Editor submission controls.
+Bindings for start / steer / queue / dequeue live in
+[message-queue.md](./message-queue.md). Agent selection is unchanged.
 
 ## Non-goals
 

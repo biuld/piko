@@ -18,6 +18,8 @@ use crate::{
 };
 
 const COMPOSER_HINTS: &str = "/ commands · @ files · Enter send";
+const RUNNING_HINTS: &str = "Enter steer · Alt+Enter queue · Alt+↑ dequeue";
+const DEQUEUE_HINTS: &str = "Alt+↑ dequeue · / commands · Enter send";
 
 /// One frame's selected Guidance Row projection.
 pub enum GuidanceContent<'a> {
@@ -51,12 +53,51 @@ pub fn resolve(app: &AppState) -> GuidanceContent<'_> {
                 .map(|hint| GuidanceContent::Hint(Cow::Borrowed(hint)))
                 .unwrap_or(GuidanceContent::Empty);
         }
-        return GuidanceContent::Hint(Cow::Borrowed(COMPOSER_HINTS));
+        return GuidanceContent::Hint(composer_hint(app));
     };
 
     surface_hint(app, surface)
         .map(GuidanceContent::Hint)
         .unwrap_or(GuidanceContent::Empty)
+}
+
+fn composer_hint(app: &AppState) -> Cow<'static, str> {
+    let summary = app.queue_summary();
+    let pending = queue_pending_hint(&summary);
+    if app.viewed_agent_is_busy() {
+        return match pending {
+            Some(pending) => Cow::Owned(format!("{RUNNING_HINTS} · {pending}")),
+            None => Cow::Borrowed(RUNNING_HINTS),
+        };
+    }
+    let viewed = app.agent_panel.active_agent_instance_id.as_deref();
+    let has_follow_up = app
+        .session
+        .follow_ups
+        .iter()
+        .any(|item| viewed.is_some_and(|id| item.agent_instance_id == id));
+    if has_follow_up || pending.is_some() {
+        return match pending {
+            Some(pending) => Cow::Owned(format!("{DEQUEUE_HINTS} · {pending}")),
+            None => Cow::Borrowed(DEQUEUE_HINTS),
+        };
+    }
+    Cow::Borrowed(COMPOSER_HINTS)
+}
+
+fn queue_pending_hint(summary: &crate::app::QueueStatus) -> Option<String> {
+    let mut parts = Vec::new();
+    if summary.steer_count > 0 {
+        parts.push(format!("{} steer", summary.steer_count));
+    }
+    if summary.follow_up_count > 0 {
+        parts.push(format!("{} queued", summary.follow_up_count));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
+    }
 }
 
 fn surface_hint<'a>(app: &'a AppState, surface: SurfaceId) -> Option<Cow<'a, str>> {

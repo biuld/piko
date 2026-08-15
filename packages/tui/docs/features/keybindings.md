@@ -79,8 +79,9 @@ Global or editor-level shortcuts that open overlays, manage sessions, or interru
 | `app.thinking.toggle` | `ctrl+t` | Toggle visibility of thinking/reasoning blocks |
 | `app.session.toggleNamedFilter` | `ctrl+n` | Cycle through named session filters in Session list |
 | `app.editor.external` | `ctrl+g` | Open active editor text in an external editor |
-| `app.message.followUp` | `alt+enter` | Queue follow-up message without executing |
-| `app.message.dequeue` | `alt+up` | Restore a previously queued follow-up message |
+| `app.message.followUp` | `alt+enter` | Queue a follow-up (`ChatSubmit` / FollowUp) |
+| `app.message.steer` | `ctrl+enter` | Steer the running turn only; fail if idle |
+| `app.message.dequeue` | `alt+up` | Restore the last follow-up this TUI queued |
 | `app.clipboard.pasteImage` | `ctrl+v` (`alt+v` on Windows) | Paste an image from the clipboard |
 | `app.session.new` | *None* | Start a new chat session |
 | `app.session.tree` | `f2` (or *None*) | Open the session list/tree view |

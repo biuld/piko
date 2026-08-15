@@ -331,17 +331,16 @@ fn status_label(
     (glyph, parts.join(" · "))
 }
 
-fn queue_detail(queue: &QueueStatus, foreground: &[piko_protocol::AgentForeground]) -> String {
-    let any_busy = foreground.iter().any(|fg| fg.is_busy());
-    if any_busy {
-        return String::new();
+fn queue_detail(queue: &QueueStatus, _foreground: &[piko_protocol::AgentForeground]) -> String {
+    let mut parts = Vec::new();
+    if queue.steer_count > 0 {
+        parts.push(format!("{} steer", queue.steer_count));
     }
-    let total = queue.steer_count + queue.follow_up_count + queue.next_turn_count;
-    if total == 0 {
-        String::new()
-    } else {
-        format!("{total} queued")
+    let queued = queue.follow_up_count.saturating_add(queue.next_turn_count);
+    if queued > 0 {
+        parts.push(format!("{queued} queued"));
     }
+    parts.join(" · ")
 }
 
 // ── tree prefix builder ──────────────────────────────────────────────────────

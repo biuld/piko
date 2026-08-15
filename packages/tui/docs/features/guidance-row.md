@@ -35,7 +35,9 @@ For the base plane and ComposerBand surfaces, resolve one value per frame:
 1. The visible applicable notice, if any.
 2. The active Suggest hint while completion is open.
 3. The active Select or Dock surface hint.
-4. The default Composer hint in Chat.
+4. The default Composer hint in Chat. A running viewed agent projects
+   `Enter steer · Alt+Enter queue` and live `N steer` / `N queued` counts.
+   A waiting follow-up mentions dequeue.
 
 Notice content retains severity styling and its `F8 dismiss` / pointer-dismiss
 behavior. Hint content follows the

@@ -33,6 +33,34 @@ fn plain_j_reaches_editor_as_text() {
     ));
 }
 
+fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    }
+}
+
+#[test]
+fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
+    let app = app();
+    let keymap = Keymap::default();
+
+    assert!(matches!(
+        InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::ALT)),
+        Some(Action::Editor(EditorAction::FollowUp))
+    ));
+    assert!(matches!(
+        InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::CONTROL)),
+        Some(Action::Editor(EditorAction::Steer))
+    ));
+    assert!(matches!(
+        InputRouter::route_key(&app, &keymap, key(KeyCode::Up, KeyModifiers::ALT)),
+        Some(Action::Editor(EditorAction::DequeueFollowUp))
+    ));
+}
+
 #[test]
 fn notification_panel_routes_selection_and_copy_keys() {
     let mut app = app();

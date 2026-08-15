@@ -2,7 +2,7 @@ use super::*;
 
 impl AppState {
     pub(super) fn apply_turn_lifecycle(&mut self, event: piko_protocol::TurnEvent) -> Vec<Effect> {
-        let effects = Vec::new();
+        let mut effects = Vec::new();
         match event {
             piko_protocol::TurnEvent::Queued {
                 session_id,
@@ -16,13 +16,32 @@ impl AppState {
                 self.session
                     .pending
                     .clear_kind(crate::app::pending::PendingCommandKind::ChatSubmit);
-                self.session.active_turns.insert(
-                    agent_instance_id.clone(),
-                    crate::app::ActiveTurnUi {
-                        turn_id: turn_id.clone(),
-                        status: piko_protocol::TurnStatus::Queued,
-                    },
-                );
+                if let Some(effect) =
+                    self.bind_follow_up_queued(&session_id, &agent_instance_id, &turn_id)
+                {
+                    effects.push(effect);
+                }
+                let keep_running = self
+                    .session
+                    .active_turns
+                    .get(&agent_instance_id)
+                    .is_some_and(|active| {
+                        matches!(
+                            active.status,
+                            piko_protocol::TurnStatus::Running
+                                | piko_protocol::TurnStatus::WaitingForApproval
+                                | piko_protocol::TurnStatus::Cancelling
+                        )
+                    });
+                if !keep_running {
+                    self.session.active_turns.insert(
+                        agent_instance_id.clone(),
+                        crate::app::ActiveTurnUi {
+                            turn_id: turn_id.clone(),
+                            status: piko_protocol::TurnStatus::Queued,
+                        },
+                    );
+                }
                 self.status = format!("turn {turn_id} queued ({agent_instance_id})");
             }
             piko_protocol::TurnEvent::Started {
@@ -44,6 +63,7 @@ impl AppState {
                         status: piko_protocol::TurnStatus::Running,
                     },
                 );
+                self.drop_follow_up_turn(&turn_id);
                 self.status = format!("turn {turn_id} running ({agent_instance_id})");
             }
             piko_protocol::TurnEvent::Completed {
@@ -64,6 +84,7 @@ impl AppState {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
                 // Usage chrome is host-authoritative via Event::Usage only.
+                self.drop_follow_up_turn(&turn_id);
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} completed");
             }
@@ -85,6 +106,7 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
+                self.drop_follow_up_turn(&turn_id);
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} failed");
                 self.with_agent_timeline(&agent_instance_id, |timeline| {
@@ -109,6 +131,7 @@ impl AppState {
                 {
                     self.session.active_turns.remove(&agent_instance_id);
                 }
+                self.drop_follow_up_turn(&turn_id);
                 self.last_turn_id = Some(turn_id.clone());
                 self.status = format!("turn {turn_id} cancelled");
                 self.with_agent_timeline(&agent_instance_id, |timeline| {

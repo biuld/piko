@@ -57,9 +57,14 @@ line break.
 
 ### Submitting a prompt
 
-**Enter** submits the current content as a prompt to the LLM. The text is
-trimmed of leading/trailing whitespace. If the trimmed text is empty, nothing
-happens.
+**Enter** submits the current content. The text is trimmed of leading/trailing
+whitespace. If the trimmed text is empty, nothing happens.
+
+When the viewed agent is idle, Enter starts a turn (`ChatSubmit`). When that
+agent is running, Enter steers the active turn (`QueueSteer`). **Alt+Enter**
+always queues a follow-up (`ChatSubmit` / FollowUp). **Ctrl+Enter** steers only
+and fails closed if the agent is idle. **Alt+↑** restores the last follow-up
+this TUI queued. Details: [message-queue.md](./message-queue.md).
 
 ### Slash command interception
 
@@ -147,7 +152,10 @@ Editor has focus (no overlay active):
 
 | Key | Action |
 |-----|--------|
-| Enter | Submit prompt |
+| Enter | Submit prompt (start, or steer if running) |
+| Alt+Enter | Queue follow-up |
+| Ctrl+Enter | Steer running turn only |
+| Alt+↑ | Restore last queued follow-up |
 | Ctrl+P | Previous history entry |
 | Ctrl+E | Next history entry |
 | F2 | Open session tree |

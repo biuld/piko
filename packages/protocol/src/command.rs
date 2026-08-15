@@ -215,7 +215,8 @@ pub enum Command {
         command_id: CommandId,
         patch: serde_json::Value,
     },
-    /// Push a steering message into the session's queue.
+    /// Inject a steering message into a running AgentInstance turn.
+    /// Fails closed when the agent has no running turn or orchd rejects.
     QueueSteer {
         command_id: CommandId,
         session_id: SessionId,

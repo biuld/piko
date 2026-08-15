@@ -214,22 +214,36 @@ impl HostServer {
                 message,
                 ..
             } => {
-                let (queue_ev, has_active_turn) = {
-                    let mut state = self.state.lock().await;
-                    let queue_ev = state.push_steer(&session_id, &agent_instance_id, &message);
-                    let has_active_turn = state
+                let can_steer = {
+                    let state = self.state.lock().await;
+                    state
                         .active_turn_for_agent(&session_id, &agent_instance_id)
-                        .is_some();
-                    (queue_ev, has_active_turn)
+                        .is_some_and(|turn| {
+                            matches!(
+                                turn.status,
+                                crate::api::TurnStatus::Running
+                                    | crate::api::TurnStatus::WaitingForApproval
+                            )
+                        })
                 };
-                // Also route to the explicitly addressed AgentInstance when
-                // that target currently owns a running Turn.
-                if has_active_turn {
-                    let runner = self.turn_runner.lock().await.clone();
-                    let _ = runner
-                        .steer_agent(&session_id, &agent_instance_id, &message)
-                        .await;
+                if !can_steer {
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "agent {agent_instance_id} is not running; cannot steer"
+                    )));
                 }
+                let runner = self.turn_runner.lock().await.clone();
+                if !runner
+                    .steer_agent(&session_id, &agent_instance_id, &message)
+                    .await
+                {
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "steer rejected for agent {agent_instance_id}"
+                    )));
+                }
+                let queue_ev = {
+                    let mut state = self.state.lock().await;
+                    state.push_steer(&session_id, &agent_instance_id, &message)
+                };
                 Ok(vec![
                     ServerMessage::CommandResponse {
                         command_id,
@@ -263,6 +277,13 @@ impl HostServer {
                     let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
                     let size = self.client_context_window_size().await;
                     let mut messages = self.state.lock().await.with_usage_projection(event, size);
+                    messages.push(
+                        self.state
+                            .lock()
+                            .await
+                            .build_queue_update(&session_id)
+                            .into(),
+                    );
                     let mut out = vec![ServerMessage::CommandResponse {
                         command_id,
                         result: Ok(crate::api::CommandResult::Empty),

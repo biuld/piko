@@ -389,6 +389,9 @@ impl InputRouter {
             Some(KeyAction::DeleteToLineStart) => Some(EditorAction::DeleteBackward.into()),
             Some(KeyAction::DeleteToLineEnd) => Some(EditorAction::DeleteForward.into()),
             Some(KeyAction::Submit) => Some(EditorAction::Submit.into()),
+            Some(KeyAction::MessageFollowUp) => Some(EditorAction::FollowUp.into()),
+            Some(KeyAction::MessageSteer) => Some(EditorAction::Steer.into()),
+            Some(KeyAction::MessageDequeue) => Some(EditorAction::DequeueFollowUp.into()),
             Some(KeyAction::Complete) => Some(EditorAction::AcceptSuggestion.into()),
             Some(KeyAction::CursorLeft | KeyAction::CursorWordLeft) => {
                 Some(EditorAction::CursorLeft.into())

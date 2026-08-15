@@ -27,9 +27,21 @@ impl HostApp {
     /// Emit a terminal turn event followed by a host usage projection when applicable.
     pub(crate) async fn send_turn_terminal(&self, tx: &ClientEventSender, terminal: ServerMessage) {
         let size = self.client_context_window_size().await;
+        let session_id = match &terminal {
+            ServerMessage::TurnLifecycle(
+                crate::api::TurnEvent::Completed { session_id, .. }
+                | crate::api::TurnEvent::Failed { session_id, .. }
+                | crate::api::TurnEvent::Cancelled { session_id, .. },
+            ) => Some(session_id.clone()),
+            _ => None,
+        };
         let messages = {
             let state = self.state.lock().await;
-            state.with_usage_projection(terminal, size)
+            let mut messages = state.with_usage_projection(terminal, size);
+            if let Some(session_id) = session_id {
+                messages.push(state.build_queue_update(&session_id).into());
+            }
+            messages
         };
         for message in messages {
             send_event(tx, message).await;

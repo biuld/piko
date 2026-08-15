@@ -56,6 +56,7 @@ pub enum KeyAction {
     SessionToggleNamedFilter,
     EditorExternal,
     MessageFollowUp,
+    MessageSteer,
     MessageDequeue,
     ClipboardPasteImage,
     SessionNew,
@@ -203,6 +204,7 @@ impl Default for Keymap {
         keymap.bind("ctrl+n", KeyAction::SessionToggleNamedFilter);
         keymap.bind("ctrl+g", KeyAction::EditorExternal);
         keymap.bind("alt+enter", KeyAction::MessageFollowUp);
+        keymap.bind("ctrl+enter", KeyAction::MessageSteer);
         keymap.bind("alt+up", KeyAction::MessageDequeue);
         keymap.bind("ctrl+v", KeyAction::ClipboardPasteImage);
         keymap.bind("alt+v", KeyAction::ClipboardPasteImage);
@@ -301,6 +303,7 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.session.toggleNamedFilter" => KeyAction::SessionToggleNamedFilter,
         "app.editor.external" => KeyAction::EditorExternal,
         "app.message.followUp" => KeyAction::MessageFollowUp,
+        "app.message.steer" => KeyAction::MessageSteer,
         "app.message.dequeue" => KeyAction::MessageDequeue,
         "app.clipboard.pasteImage" => KeyAction::ClipboardPasteImage,
         "app.session.new" => KeyAction::SessionNew,

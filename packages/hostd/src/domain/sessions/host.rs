@@ -326,6 +326,9 @@ impl HostState {
             == Some(turn_id)
         {
             state.active_turns.remove(&agent_instance_id);
+            state
+                .steer_queue
+                .retain(|(owner, _)| owner != &agent_instance_id);
         }
         if !already_terminal {
             crate::telemetry::handle().record_turn_usage(&usage, "completed");
@@ -368,6 +371,9 @@ impl HostState {
             == Some(turn_id)
         {
             state.active_turns.remove(&agent_instance_id);
+            state
+                .steer_queue
+                .retain(|(owner, _)| owner != &agent_instance_id);
         }
         if !already_terminal {
             crate::telemetry::handle().record_turn_usage(&usage, "failed");
@@ -410,6 +416,9 @@ impl HostState {
             == Some(turn_id)
         {
             state.active_turns.remove(&agent_instance_id);
+            state
+                .steer_queue
+                .retain(|(owner, _)| owner != &agent_instance_id);
         }
         if !already_terminal {
             crate::telemetry::handle().record_turn_usage(&usage, "cancelled");

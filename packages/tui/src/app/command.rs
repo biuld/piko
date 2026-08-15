@@ -73,6 +73,9 @@ pub enum EditorAction {
     AcceptAndSubmitSuggestion,
     SuggestionSelectNext,
     SuggestionSelectPrev,
+    FollowUp,
+    Steer,
+    DequeueFollowUp,
 }
 
 #[derive(Debug)]

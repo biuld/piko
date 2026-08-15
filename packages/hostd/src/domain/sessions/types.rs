@@ -44,7 +44,8 @@ pub struct SessionState {
     pub current_leaf_id: Option<String>,
     /// Last committed transcript message for each runtime agent instance.
     pub task_heads: HashMap<String, String>,
-    /// Queue of pending steering messages: (agent_instance_id, message)
+    /// Steers accepted for the agent's current turn. Cleared when that turn
+    /// becomes terminal. Not a durable follow-up queue.
     pub steer_queue: Vec<(String, String)>,
     /// Last provider+model recorded for a turn in this session. Durable via
     /// `SessionProjection.last_model`; drives the prompt model-switch fragment

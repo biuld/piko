@@ -258,10 +258,11 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 .iter()
                 .map(|agent| app.agent_foreground(&agent.agent_instance_id, &agent.activity))
                 .collect();
+            let queue = app.queue_summary();
             let view = AgentPanelView {
                 state: &app.agent_panel,
                 foreground: &foreground,
-                queue: &app.queue_status,
+                queue: &queue,
                 spinner_frame: app.spinner_frame,
                 theme: &app.theme,
             };
