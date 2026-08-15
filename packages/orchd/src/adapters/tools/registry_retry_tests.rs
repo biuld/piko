@@ -232,3 +232,106 @@ async fn sandbox_denial_skips_prefix_for_complex_shell() {
     );
     assert!(requests[0].tool_args.get("prefix_rule").is_none());
 }
+
+#[tokio::test]
+async fn write_denial_retries_with_write_roots_and_ancestor() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let registry = ToolRegistryImpl::new();
+    registry
+        .register_provider(Box::new(DenyOnceProvider {
+            calls: Arc::clone(&calls),
+            deny_message: "sandbox denied: deny write /tmp/piko-f34-missing/child".into(),
+        }))
+        .await;
+    registry
+        .set_approval_gateway(Some(Box::new(CapturingGateway(Arc::clone(&captured)))))
+        .await;
+    let route = CatalogRoute {
+        provider_id: "fake-exec".into(),
+        provider_tool_name: "exec_command".into(),
+        tool_def: definition(),
+        execution_mode: ToolExecutionMode::Sequential,
+        max_concurrent_calls: None,
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({ "cmd": "mkdir /tmp/piko-f34-missing/child" }),
+        partial_json: None,
+    };
+    let record = registry.execute_tool(&call, &context(), &route, None).await;
+    assert!(record.result.ok, "{:?}", record.result);
+    let retry_args = &captured.lock().await[0].tool_args;
+    let writes = retry_args["additional_permissions"]["write_roots"]
+        .as_array()
+        .unwrap();
+    assert!(writes.iter().any(|v| v == "/tmp/piko-f34-missing/child"));
+    assert!(writes.iter().any(|v| v == "/tmp"));
+}
+
+#[tokio::test]
+async fn no_gateway_appends_escalation_guidance() {
+    let registry = ToolRegistryImpl::new();
+    registry
+        .register_provider(Box::new(DenyOnceProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            deny_message: "sandbox denied: deny write /opt/x".into(),
+        }))
+        .await;
+    let route = CatalogRoute {
+        provider_id: "fake-exec".into(),
+        provider_tool_name: "exec_command".into(),
+        tool_def: definition(),
+        execution_mode: ToolExecutionMode::Sequential,
+        max_concurrent_calls: None,
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({ "cmd": "mkdir /opt/x" }),
+        partial_json: None,
+    };
+    let record = registry.execute_tool(&call, &context(), &route, None).await;
+    let error = record.result.error.unwrap();
+    assert_eq!(error.code, "sandbox_denied");
+    assert!(
+        error
+            .message
+            .contains("approval-backed retry is unavailable")
+    );
+}
+
+#[tokio::test]
+async fn approved_prefix_retry_reports_grant() {
+    let registry = ToolRegistryImpl::new();
+    registry
+        .register_provider(Box::new(DenyOnceProvider {
+            calls: Arc::new(AtomicUsize::new(0)),
+            deny_message: "sandbox denied: deny write".into(),
+        }))
+        .await;
+    registry
+        .set_approval_gateway(Some(Box::new(CapturingGateway(Arc::new(Mutex::new(
+            Vec::new(),
+        ))))))
+        .await;
+    let route = CatalogRoute {
+        provider_id: "fake-exec".into(),
+        provider_tool_name: "exec_command".into(),
+        tool_def: definition(),
+        execution_mode: ToolExecutionMode::Sequential,
+        max_concurrent_calls: None,
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({ "cmd": "brew install jq" }),
+        partial_json: None,
+    };
+    let record = registry.execute_tool(&call, &context(), &route, None).await;
+    assert!(record.result.ok, "{:?}", record.result);
+    let grant = &record.result.value.unwrap()["approved_grant"];
+    assert_eq!(grant["prefix"], serde_json::json!(["brew", "install"]));
+    assert!(grant["note"].as_str().unwrap().contains("reuse"));
+}

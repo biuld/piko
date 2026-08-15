@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-47: Execution denial typing and escalation guidance](D-47-execution-denial-typing-guidance.md)
+  implements F-34: type sandboxed OS denials as `sandbox_denied`, derive
+  retry roots from the denial text (not a second policy walk), and surface
+  escalation guidance. No command-blacklist preflight (implemented).
 - [D-46: OTel GenAI prompt inspection](D-46-otel-genai-prompt-inspection.md)
   implements the first two stages of a vendor-neutral LangSmith-like trace
   view with safe assembly metadata by default and separately opted-in GenAI

@@ -355,7 +355,10 @@ The generic tool registry remains responsible for schema validation, tool-call
 events, cancellation propagation, result commit, and the single retry budget.
 It does not parse shell policy. The workspace provider recognizes only
 backend-owned denial/setup diagnostics; arbitrary command stderr remains
-ordinary process output.
+ordinary process output. F-34 / D-47 amend this: a sandboxed non-zero exit
+whose output contains a recognized OS denial (`Read-only file system`,
+`Operation not permitted`, `Permission denied`) is also typed
+`sandbox_denied`. Elevated runs, zero exits, and other stderr stay ordinary.
 
 ### 8. Unified process manager
 

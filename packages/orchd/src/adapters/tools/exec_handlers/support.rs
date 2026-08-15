@@ -205,7 +205,44 @@ pub(super) fn sandbox_observation_error(
             false,
         ));
     }
+    typed_os_denial(&output)
+}
+
+/// The sandbox already decided. We only recognize the OS denial it produced
+/// and keep any path the error text already named — we do not re-authorize
+/// against policy roots.
+fn typed_os_denial(output: &str) -> Option<ToolExecResult> {
+    for line in output.lines() {
+        let lower = line.to_ascii_lowercase();
+        let erofs = lower.contains("read-only file system");
+        let eacces =
+            lower.contains("operation not permitted") || lower.contains("permission denied");
+        if !erofs && !eacces {
+            continue;
+        }
+        let path = absolute_path_token(line);
+        let access = if erofs || lower.contains("write") {
+            "write"
+        } else if lower.contains("read") {
+            "read"
+        } else {
+            "access"
+        };
+        let message = match path {
+            Some(path) => format!("sandbox denied: deny {access} {path}"),
+            None => format!("sandbox denied: deny {access}"),
+        };
+        return Some(error_result("sandbox_denied", message, true));
+    }
     None
+}
+
+fn absolute_path_token(line: &str) -> Option<&str> {
+    line.split_whitespace()
+        .map(|token| token.trim_matches(|ch| matches!(ch, '"' | '\'' | '(' | ')' | ',' | ':')))
+        .find(|token| {
+            token.starts_with('/') && !token.starts_with("//") && !token.starts_with("/dev/")
+        })
 }
 
 pub(super) fn tokens_to_bytes(tokens: u64) -> usize {
@@ -250,5 +287,53 @@ fn error_result(code: &str, message: String, retryable: bool) -> ToolExecResult 
             message,
             retryable: Some(retryable),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_sandbox::exec::ExitStatus;
+    use piko_sandbox::exec::process::OutputChunk;
+
+    fn chunk(output: &str, code: i32) -> OutputChunk {
+        OutputChunk {
+            bytes: output.as_bytes().to_vec(),
+            truncated: false,
+            exited: true,
+            status: Some(ExitStatus {
+                code: Some(code),
+                signal: None,
+            }),
+            termination: None,
+        }
+    }
+
+    #[test]
+    fn erofs_on_sandboxed_nonzero_is_sandbox_denied() {
+        let error =
+            sandbox_observation_error(true, &chunk("mkdir: /opt/x: Read-only file system\n", 1))
+                .expect("typed");
+        assert_eq!(error.error.as_ref().unwrap().code, "sandbox_denied");
+        assert!(error.error.unwrap().message.contains("deny write /opt/x"));
+    }
+
+    #[test]
+    fn eperm_names_the_path_from_the_os_line() {
+        let error =
+            sandbox_observation_error(true, &chunk("touch: /opt/x: Operation not permitted\n", 1))
+                .expect("typed");
+        assert!(error.error.unwrap().message.contains("deny access /opt/x"));
+    }
+
+    #[test]
+    fn zero_exit_and_unsandboxed_are_not_denials() {
+        assert!(sandbox_observation_error(true, &chunk("Read-only file system", 0)).is_none());
+        assert!(sandbox_observation_error(false, &chunk("Permission denied: /opt/x", 1)).is_none());
+    }
+
+    #[test]
+    fn ordinary_nonzero_stays_ordinary() {
+        assert!(sandbox_observation_error(true, &chunk("command not found\n", 127)).is_none());
     }
 }

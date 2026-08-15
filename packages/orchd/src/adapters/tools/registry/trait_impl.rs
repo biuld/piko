@@ -301,12 +301,14 @@ impl ToolRegistry for ToolRegistryImpl {
                 .as_ref()
                 .map(|error| error.message.as_str())
                 .unwrap_or_default();
-            let retry_args = denial_retry_args(&call_args, denial_message);
+            let retry_args = super::denial::denial_retry_args(&call_args, denial_message);
             let gateway = self.approval_gateway.read().await;
             let Some(gateway) = gateway.as_ref() else {
-                return ToolExecutionRecord {
-                    result: exec_result,
-                };
+                let mut result = exec_result;
+                if let Some(error) = result.error.as_mut() {
+                    error.message.push_str(super::denial::NO_GATEWAY_RETRY_NOTE);
+                }
+                return ToolExecutionRecord { result };
             };
             let request = ToolApprovalRequest {
                 tool_entity_id: tool_entity_id.clone(),
@@ -334,7 +336,7 @@ impl ToolRegistry for ToolRegistryImpl {
                 gateway.request_tool_approval(request).await
             };
             if !piko_orchd_api::is_approval_accepted(&decision) {
-                let (code, message) = approval_failure(&decision);
+                let (code, message) = super::denial::approval_failure(&decision);
                 return ToolExecutionRecord {
                     result: ToolExecResult {
                         ok: false,
@@ -350,11 +352,14 @@ impl ToolRegistry for ToolRegistryImpl {
             let retry_call = ToolCall {
                 id: call_id,
                 name: provider_call.name,
-                arguments: retry_args,
+                arguments: retry_args.clone(),
                 partial_json: None,
             };
             return ToolExecutionRecord {
-                result: provider.execute(retry_call, exec_context).await,
+                result: super::denial::attach_approved_grant(
+                    provider.execute(retry_call, exec_context).await,
+                    &retry_args,
+                ),
             };
         }
 
@@ -362,186 +367,4 @@ impl ToolRegistry for ToolRegistryImpl {
             result: exec_result,
         }
     }
-}
-
-fn approval_failure(decision: &ToolApprovalDecision) -> (&'static str, String) {
-    match decision {
-        ToolApprovalDecision::Expired => (
-            "approval_expired",
-            "Approval request expired before a decision arrived".into(),
-        ),
-        ToolApprovalDecision::GuardianDenied { reason } => (
-            "guardian_denied",
-            format!("Guardian denied approval: {reason}"),
-        ),
-        ToolApprovalDecision::GuardianUnavailable => (
-            "guardian_unavailable",
-            "Guardian review failed; failing closed".into(),
-        ),
-        ToolApprovalDecision::SafetyRejected { reason } => (
-            "safety_rejected",
-            format!("Write rejected by safety assessment: {reason}"),
-        ),
-        ToolApprovalDecision::PermissionDenied { reason } => (
-            "permission_denied",
-            format!("Command denied by permission policy: {reason}"),
-        ),
-        _ => ("declined", "User declined approval".into()),
-    }
-}
-
-/// Derive the retry arguments for a sandbox-denied command (F-23 Rev B).
-///
-/// Absolute denied paths parsed from the platform denial become a
-/// `with_additional_permissions` retry with those paths as read roots;
-/// `require_escalated` is used only when no representable path can be
-/// derived. When the command is a simple narrow program + subcommand and the
-/// call did not already propose one, the retry attaches a reusable
-/// `prefix_rule` so repeat commands reuse the grant instead of prompting
-/// again.
-fn denial_retry_args(call_args: &serde_json::Value, denial_message: &str) -> serde_json::Value {
-    let mut retry = call_args.clone();
-    let denied = denied_absolute_paths(denial_message);
-    if denied.is_empty() {
-        retry["sandbox_permissions"] = serde_json::json!("require_escalated");
-        retry["justification"] = serde_json::json!(
-            "The enforced sandbox denied the initial command attempt; retry once with explicit elevation"
-        );
-    } else {
-        retry["sandbox_permissions"] = serde_json::json!("with_additional_permissions");
-        retry["justification"] = serde_json::json!(
-            "The enforced sandbox denied the initial command attempt; retry once with minimal additional read access"
-        );
-        let mut additional = retry
-            .get("additional_permissions")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let mut reads: Vec<String> = additional
-            .get("read_roots")
-            .and_then(|value| value.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|value| value.as_str().map(str::to_string))
-            .collect();
-        for path in denied {
-            if !reads.iter().any(|existing| existing == &path) {
-                reads.push(path);
-            }
-        }
-        additional["read_roots"] = serde_json::json!(reads);
-        retry["additional_permissions"] = additional;
-    }
-    if retry.get("prefix_rule").is_none()
-        && let Some(prefix) = reusable_retry_prefix(call_args)
-    {
-        retry["prefix_rule"] = serde_json::json!(prefix);
-    }
-    retry
-}
-
-/// Absolute filesystem paths named by a platform denial message, deduplicated
-/// and bounded so the derived additional permissions stay narrow.
-fn denied_absolute_paths(message: &str) -> Vec<String> {
-    const MAX_PATHS: usize = 8;
-    let mut out: Vec<String> = Vec::new();
-    for line in message.lines() {
-        if !line.to_ascii_lowercase().contains("deny") {
-            continue;
-        }
-        for token in line.split_whitespace() {
-            let token = token.trim_matches(|ch| matches!(ch, '"' | '\'' | '(' | ')' | ','));
-            if !token.starts_with('/')
-                || token.starts_with("//")
-                || token.starts_with("/dev/")
-                || out.iter().any(|existing| existing == token)
-            {
-                continue;
-            }
-            out.push(token.to_string());
-            if out.len() >= MAX_PATHS {
-                return out;
-            }
-        }
-    }
-    out
-}
-
-/// Propose a reusable narrow prefix when the command is a simple program +
-/// subcommand pair. Shell constructs, interpreters, shell builtins, and
-/// commands whose second token is a path or flag are ineligible, mirroring
-/// the operator prefix-rule restrictions.
-fn reusable_retry_prefix(call_args: &serde_json::Value) -> Option<Vec<String>> {
-    let command = call_args.get("cmd")?.as_str()?;
-    if command.is_empty() || command.chars().any(|ch| ";|&<>`$\n\r()".contains(ch)) {
-        return None;
-    }
-    let tokens: Vec<&str> = command.split_whitespace().collect();
-    if tokens.len() < 2 {
-        return None;
-    }
-    let program = tokens[0];
-    let subcommand = tokens[1];
-    if !is_reusable_program(program) || !is_subcommand_token(subcommand) {
-        return None;
-    }
-    Some(vec![program.to_string(), subcommand.to_string()])
-}
-
-fn is_reusable_program(program: &str) -> bool {
-    if program.contains('/') {
-        return false;
-    }
-    !matches!(
-        program,
-        "sh" | "bash"
-            | "zsh"
-            | "fish"
-            | "sudo"
-            | "env"
-            | "python"
-            | "python3"
-            | "node"
-            | "ruby"
-            | "perl"
-            | "rm"
-            | "curl"
-            | "wget"
-            | "cd"
-            | "export"
-            | "echo"
-            | "set"
-            | "unset"
-            | "alias"
-            | "source"
-            | "exec"
-            | "eval"
-            | "test"
-            | "printf"
-            | "read"
-            | "true"
-            | "false"
-            | "time"
-            | "local"
-            | "shift"
-            | "return"
-            | "exit"
-            | "type"
-            | "ulimit"
-            | "umask"
-            | "wait"
-            | "."
-    )
-}
-
-fn is_subcommand_token(token: &str) -> bool {
-    let mut chars = token.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() {
-        return false;
-    }
-    token
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }

@@ -39,7 +39,7 @@ pub(super) fn exec_command_tool_def() -> ToolDef {
         name: "exec_command".into(),
         version: "1".into(),
         provenance: piko_protocol::PromptSource::new("built-in-tool", "workspace/exec-command"),
-        description: "Run a complete shell command in a PTY. Non-zero exit codes are normal command results. Commands still running after the initial yield (default 30s) return a running result with a session_id; poll it with write_stdin until the result reports exited. Prefer `rg` over `find` for searches; when using `find`, prune heavy directories (e.g. `-not -path '*/target/*' -not -path '*/.git/*'`).".into(),
+        description: "Run a complete shell command in a PTY. Non-zero exit codes are normal command results. Commands still running after the initial yield (default 30s) return a running result with a session_id; poll it with write_stdin until the result reports exited. Prefer `rg` over `find` for searches; when using `find`, prune heavy directories (e.g. `-not -path '*/target/*' -not -path '*/.git/*'`). A sandbox denial is retried once automatically after approval; commands known to need broader authority should request it on the first call with a justification.".into(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {

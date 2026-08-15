@@ -89,5 +89,6 @@ impl Default for ToolRegistryImpl {
     }
 }
 
+mod denial;
 mod impls;
 mod trait_impl;
