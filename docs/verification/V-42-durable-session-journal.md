@@ -18,6 +18,10 @@
   recoverable-tail/fail-loud-middle distinction. Host integration coverage
   verifies that a corrupt schema-v4 session remains listable with an integrity
   diagnostic.
+- `checksum_verifies_original_float_spelling_without_json_round_trip` verifies
+  that checksum validation uses the persisted JSON bytes, accepts a writer
+  spelling that would shorten after floating-point decoding, and still rejects
+  a real byte change.
 - `rolls_segment_at_one_thousand_commits` verifies that revision 1,000 seals
   the `1-1000` segment, opens `1001-open`, and publishes only the revision-1000
   snapshot.

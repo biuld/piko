@@ -16,6 +16,8 @@ use crate::ui::components::selectable_list::{
     paint_selectable_panel, selectable_row_regions,
 };
 
+const SESSION_STATUS_COLUMN_WIDTH: u16 = 15;
+
 /// Render context for the sessions surface.
 pub struct SessionListCtx<'a> {
     pub active_session_id: Option<&'a str>,
@@ -290,7 +292,10 @@ impl SessionList {
         if show_path_col {
             widths.push(Constraint::Percentage(30));
         }
-        widths.extend([Constraint::Length(12), Constraint::Length(8)]);
+        widths.extend([
+            Constraint::Length(SESSION_STATUS_COLUMN_WIDTH),
+            Constraint::Length(8),
+        ]);
 
         let items: Vec<SelectableItem> = filtered
             .iter()
@@ -467,6 +472,18 @@ mod tests {
         );
         let row = session_row(&summary("s1"), Some("s2"), false, false);
         assert!(!row.is_active);
+    }
+
+    #[test]
+    fn integrity_status_fits_its_column() {
+        let mut broken = summary("broken");
+        broken.integrity_error = Some("checksum mismatch".into());
+
+        let row = session_row(&broken, None, false, false);
+        let status = &row.cells[1].text;
+
+        assert_eq!(status, "integrity error");
+        assert!(status.chars().count() <= usize::from(SESSION_STATUS_COLUMN_WIDTH));
     }
 
     #[test]

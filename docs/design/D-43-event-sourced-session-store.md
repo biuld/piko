@@ -161,10 +161,12 @@ commit line. Events inside a commit are applied in array order and addressed by
 stable `eventId`; a cursor may use `(revision, event_index)` when it needs to
 identify a position inside a batch.
 
-The checksum covers the record without its checksum field using one stable
-canonical JSON encoding owned by the crate. Integrity verification must not
-depend on `HashMap` iteration order. CRC32 detects torn or accidental
-corruption; it is not an authenticity signature.
+The checksum covers the exact UTF-8 record bytes produced with an empty
+checksum value. Readers verify those original bytes rather than parsing and
+re-encoding the record: semantically equal JSON floating-point spellings are
+not guaranteed to serialize identically after a round trip. Integrity
+verification must not depend on `HashMap` iteration order. CRC32 detects torn
+or accidental corruption; it is not an authenticity signature.
 
 Every successfully appended record ends with `\n`. A record without the final
 newline is never acknowledged and is an incomplete-tail candidate. The writer

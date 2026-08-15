@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::io_error;
+use crate::journal_io::checksum_record;
 use crate::{Result, SCHEMA_VERSION, SessionAggregate, SessionStore, StoreError};
 
 const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
@@ -228,7 +229,11 @@ fn load_one(path: PathBuf, session_id: &str, journal_generation: &str) -> Result
             message: "snapshot identity/version mismatch".into(),
         });
     }
-    if checksum(&snapshot)? != snapshot.checksum {
+    let record = data
+        .strip_suffix(b"\n")
+        .and_then(|record| record.strip_suffix(b"\r").or(Some(record)))
+        .unwrap_or(data.as_slice());
+    if checksum_record(record, b"\"\"").as_deref() != Some(snapshot.checksum.as_str()) {
         return Err(StoreError::Corruption {
             path,
             line: 1,

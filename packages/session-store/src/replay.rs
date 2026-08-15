@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::io_error;
 use crate::journal::{DurableCommit, RecoveryReport};
-use crate::journal_io::checksum;
+use crate::journal_io::checksum_record;
 use crate::segments::{descriptor, validate_segment};
 use crate::{Result, SCHEMA_VERSION, StoreError};
 
@@ -100,7 +100,17 @@ fn read_segment(
                 supported: SCHEMA_VERSION,
             });
         }
-        if checksum(&commit)? != commit.checksum.value {
+        let unsigned_checksum = serde_json::to_vec(&crate::journal::Checksum {
+            algorithm: commit.checksum.algorithm.clone(),
+            value: String::new(),
+        })
+        .map_err(|source| StoreError::Json {
+            path: "journal checksum".into(),
+            source,
+        })?;
+        if checksum_record(line.as_bytes(), &unsigned_checksum).as_deref()
+            != Some(commit.checksum.value.as_str())
+        {
             return Err(StoreError::Corruption {
                 path: path.to_path_buf(),
                 line: index + 1,

@@ -51,6 +51,9 @@ fact.
 5. The host finds corruption before the final record. It refuses to invent a
    partial state, keeps the session discoverable, and reports an actionable
    integrity error.
+   Verification uses the exact persisted record representation, so decoding
+   and re-encoding an equivalent floating-point spelling cannot create a false
+   corruption report.
 6. A user opens usage reporting after resume, compaction, navigation, or fork.
    Token and provider-native cost totals match the unique model work actually
    performed and are not double-counted by inherited history.
