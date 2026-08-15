@@ -198,6 +198,9 @@ impl ExecutionActor {
         };
         self.commit_message(message, steering.message_id.clone())
             .await?;
+        // The next model step must answer this message before further tool
+        // work (F-35 / ADR-021).
+        self.state.respond_after_steer = true;
         Ok(())
     }
 }

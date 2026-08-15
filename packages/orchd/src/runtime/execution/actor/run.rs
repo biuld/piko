@@ -34,6 +34,7 @@ impl ExecutionActor {
             transcript,
             model_step_index: 0,
             steering: VecDeque::new(),
+            respond_after_steer: false,
             usage: Usage::default(),
             // PreparedExecution commits the input before activation, so the
             // first live transcript head is always durable.
@@ -124,6 +125,7 @@ impl ExecutionActor {
                 let step = self.run_model_step().await?;
                 self.commit_message(step.assistant_message, step.message_id.clone())
                     .await?;
+                let respond_step_completed = step.respond_after_steer;
 
                 if !step.tool_calls.is_empty() {
                     if !self.request.config.allow_tool_calls {
@@ -146,6 +148,12 @@ impl ExecutionActor {
                 self.drain_controls_at_step_boundary().await?;
                 if let Some(steering) = self.state.steering.pop_front() {
                     self.commit_steering(&steering).await?;
+                    return Ok((true, step.model));
+                }
+
+                if respond_step_completed {
+                    // The steered message was answered; resume the turn's
+                    // normal tool loop (F-35 / ADR-021).
                     return Ok((true, step.model));
                 }
 
@@ -231,6 +239,7 @@ impl ExecutionActor {
     pub(super) async fn run_model_step(&mut self) -> Result<CompletedModelStep, AgentApiError> {
         self.state.model_step_index += 1;
         let step_count = self.state.model_step_index;
+        let respond_after_steer = std::mem::take(&mut self.state.respond_after_steer);
         let message_id = runtime_assistant_message_id(
             &self.identity.execution_id,
             &format!("step_{step_count}"),
@@ -253,6 +262,12 @@ impl ExecutionActor {
         } else {
             (Vec::new(), HashMap::new())
         };
+        let mut run_prompt = self.request.run_prompt.clone();
+        if respond_after_steer {
+            run_prompt
+                .blocks
+                .push(super::super::prompt::steer_respond_prompt_block());
+        }
         let max_tool_output_tokens = model_config
             .as_ref()
             .map(|config| config.max_tool_output_tokens)
@@ -281,7 +296,7 @@ impl ExecutionActor {
         if let Some(config) = model_config.as_ref() {
             span.record("context_window", config.context_window);
             let estimate = super::super::budget::enforce_context_budget(
-                &self.request.run_prompt,
+                &run_prompt,
                 snapshot,
                 &tools,
                 config.context_window,
@@ -294,31 +309,33 @@ impl ExecutionActor {
 
         let request = InferenceRequest {
             model: piko_llmd::gateway::ModelRef::new(&model.provider, &model.id),
-            conversation: piko_llmd::gateway::Conversation::from_messages(
-                self.request.run_prompt.clone(),
-                transcript,
-            ),
+            conversation: piko_llmd::gateway::Conversation::from_messages(run_prompt, transcript),
             tools: tools.into_iter().map(Into::into).collect(),
             options: piko_llmd::gateway::InferenceOptions {
                 reasoning_effort: thinking,
-                tool_choice: model_config
-                    .as_ref()
-                    .and_then(|config| config.settings.tool_choice.as_ref())
-                    .map(|choice| match choice {
-                        piko_protocol::model::ModelToolChoice::Auto => {
-                            piko_llmd::gateway::ToolChoice::Auto
-                        }
-                        piko_protocol::model::ModelToolChoice::None => {
-                            piko_llmd::gateway::ToolChoice::None
-                        }
-                        piko_protocol::model::ModelToolChoice::Required => {
-                            piko_llmd::gateway::ToolChoice::Required
-                        }
-                        piko_protocol::model::ModelToolChoice::Specific { name } => {
-                            piko_llmd::gateway::ToolChoice::Specific(name.clone())
-                        }
-                    })
-                    .unwrap_or_default(),
+                tool_choice: if respond_after_steer {
+                    // Answer the steered message before any further tool work.
+                    piko_llmd::gateway::ToolChoice::None
+                } else {
+                    model_config
+                        .as_ref()
+                        .and_then(|config| config.settings.tool_choice.as_ref())
+                        .map(|choice| match choice {
+                            piko_protocol::model::ModelToolChoice::Auto => {
+                                piko_llmd::gateway::ToolChoice::Auto
+                            }
+                            piko_protocol::model::ModelToolChoice::None => {
+                                piko_llmd::gateway::ToolChoice::None
+                            }
+                            piko_protocol::model::ModelToolChoice::Required => {
+                                piko_llmd::gateway::ToolChoice::Required
+                            }
+                            piko_protocol::model::ModelToolChoice::Specific { name } => {
+                                piko_llmd::gateway::ToolChoice::Specific(name.clone())
+                            }
+                        })
+                        .unwrap_or_default()
+                },
                 parallel_tools: model_config
                     .as_ref()
                     .and_then(|config| config.settings.parallel_tools),
@@ -392,14 +409,22 @@ impl ExecutionActor {
         };
 
         match result {
-            Ok(step) => Ok(CompletedModelStep {
-                assistant_message: step.step.assistant_message,
-                tool_calls: step.step.tool_calls,
-                routes,
-                message_id,
-                model,
-                context_remaining,
-            }),
+            Ok(step) => {
+                if respond_after_steer && !step.step.tool_calls.is_empty() {
+                    // A respond-only step must answer in text; executing
+                    // tools would bury the steer again (F-35 / ADR-021).
+                    return Err(AgentApiError::InputRejected);
+                }
+                Ok(CompletedModelStep {
+                    assistant_message: step.step.assistant_message,
+                    tool_calls: step.step.tool_calls,
+                    routes,
+                    message_id,
+                    model,
+                    context_remaining,
+                    respond_after_steer,
+                })
+            }
             Err((error, step)) => {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
                     return Err(AgentApiError::PersistenceFailed(error));

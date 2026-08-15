@@ -134,6 +134,8 @@ mod follow_up;
 mod lifecycle;
 #[path = "behavior/requests.rs"]
 mod requests;
+#[path = "behavior/steer.rs"]
+mod steer;
 
 async fn wait_until_idle(runtime: &AgentRuntime) {
     for _ in 0..100 {

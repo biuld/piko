@@ -46,6 +46,29 @@ pub(super) fn fallback_run_prompt(
     }
 }
 
+/// Extra instruction appended to the prompt for the model step that must
+/// answer a steered user message (F-35 / ADR-021). The step runs with tools
+/// disabled, so the block only shapes the text reply.
+pub(super) fn steer_respond_prompt_block() -> piko_protocol::PromptBlock {
+    const CONTENT: &str = "\
+A new user message was delivered while this turn was running. Answer that \
+message directly now, in text. Do not call tools in this step; reply to the \
+user's latest message first.";
+    piko_protocol::PromptBlock {
+        id: "steer.respond".into(),
+        kind: piko_protocol::PromptBlockKind::Instruction,
+        authority: piko_protocol::InstructionAuthority::Platform,
+        trust: piko_protocol::ContentTrust::Trusted,
+        source: piko_protocol::PromptSource::new("platform", "steer.respond"),
+        content: CONTENT.into(),
+        content_digest: piko_orchd_api::stable_internal_id(
+            "prompt-block",
+            &["steer.respond", CONTENT],
+        ),
+        cache_scope: piko_protocol::CacheScope::RunDynamic,
+    }
+}
+
 pub(super) fn resolved_tool_catalog(
     mut tools: Vec<piko_protocol::ToolDef>,
 ) -> piko_protocol::ResolvedToolCatalog {

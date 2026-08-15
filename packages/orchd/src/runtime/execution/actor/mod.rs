@@ -60,4 +60,7 @@ struct CompletedModelStep {
     message_id: String,
     model: ModelSpec,
     context_remaining: Option<u64>,
+    /// True when this step was forced to answer a steered user message
+    /// without tools (F-35 / ADR-021).
+    respond_after_steer: bool,
 }

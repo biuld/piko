@@ -90,6 +90,73 @@ fn context_budget_accounts_snapshot_and_reports_context_remaining() {
     assert!(message.contains("compaction required"), "{message}");
 }
 
+#[test]
+fn context_budget_caps_output_reserve_for_large_max_tokens_with_reasoning() {
+    // F-35 / ADR-020: a reasoning model with max_tokens=384K in a 1M window
+    // must not reserve 768K of fixed overhead. The reserve is capped at
+    // OUTPUT_RESERVE_CAP and reasoning shares it.
+    let prompt = piko_protocol::SemanticRunPrompt::default();
+    let transcript = TranscriptSnapshot::new(vec![], vec![]);
+    let estimate =
+        super::budget::enforce_context_budget(&prompt, &transcript, &[], 1_000_000, 384_000, true)
+            .expect("1M window with capped reserve must be accepted");
+    // output=32_768 + reasoning=0 + margin=20_000 plus small prompt/tools
+    // serialization overhead.
+    assert!((32_768 + 20_000..=53_000).contains(&estimate.fixed_tokens));
+    assert!(estimate.context_remaining > 900_000);
+}
+
+#[test]
+fn context_budget_accepts_long_transcript_shape_from_production_turn() {
+    // The failing production turn (session 75455f6c) estimated ~208K
+    // transcript tokens in a 1M window and died because fixed overhead was
+    // ~796K. With the capped reserve it must be accepted.
+    let messages = vec![piko_protocol::Message::User {
+        content: piko_protocol::messages::MessageContent::String("x".repeat(600_000)),
+        timestamp: None,
+    }];
+    let tokens = crate::domain::transcript::tokens::estimate_messages(&messages);
+    let transcript = TranscriptSnapshot::new(messages, tokens);
+    let estimate = super::budget::enforce_context_budget(
+        &piko_protocol::SemanticRunPrompt::default(),
+        &transcript,
+        &[],
+        1_000_000,
+        384_000,
+        true,
+    )
+    .expect("~200K transcript in a 1M window must be accepted");
+    assert!(estimate.transcript_tokens >= 200_000);
+    assert!(estimate.context_remaining > 700_000);
+}
+
+#[test]
+fn context_budget_failure_message_reports_budget_fields_and_reasoning_flag() {
+    let transcript = TranscriptSnapshot::new(vec![], vec![]);
+    let error = super::budget::enforce_context_budget(
+        &piko_protocol::SemanticRunPrompt::default(),
+        &transcript,
+        &[],
+        1_000,
+        384_000,
+        true,
+    )
+    .expect_err("fixed overhead must fail closed");
+    let message = error.to_string();
+    for field in [
+        "fixed estimate",
+        "prompt=",
+        "tools=",
+        "output=",
+        "reasoning=",
+        "reasoning_enabled=true",
+        "margin=",
+        "window=1000",
+    ] {
+        assert!(message.contains(field), "missing {field:?} in {message:?}");
+    }
+}
+
 struct NoopGateway;
 
 #[async_trait]
