@@ -139,8 +139,9 @@ gateway compatibility scans return no matches.
   `additional_tools` and instruction items, disabled parallel tool calls,
   all-turn reasoning context, unconditional automatic summary selection,
   stateless storage, encrypted-reasoning inclusion, and subsequent opaque
-  replay. A no-effort fixture verifies that summary visibility is independent
-  from explicit effort selection.
+  replay. The opaque-replay fixture verifies that retained assistant text uses
+  the Responses `output_text` content grammar. A no-effort fixture verifies
+  that summary visibility is independent from explicit effort selection.
 - A standard Responses fixture verifies that top-level tools and instructions
   remain unchanged when Lite is not selected.
 - `cargo test -p piko-llmd` and `cargo test -p piko-hostd --test models` pass.

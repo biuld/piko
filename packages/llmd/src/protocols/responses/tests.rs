@@ -159,6 +159,14 @@ fn codex_lite_subsequent_call_remains_stateless_and_encrypted() {
     assert_eq!(body.get("previous_response_id"), None);
     assert_eq!(body["store"], false);
     assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
+    let replayed_assistant = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["role"] == "assistant")
+        .expect("opaque replay should include the prior assistant message");
+    assert_eq!(replayed_assistant["content"][0]["type"], "output_text");
+    assert_eq!(replayed_assistant["content"][0]["text"], "calling");
 }
 
 #[test]
@@ -183,6 +191,13 @@ fn standard_responses_keeps_top_level_tools_and_instructions() {
             .get("x-openai-internal-codex-responses-lite")
             .is_none()
     );
+    let replayed_assistant = body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["role"] == "assistant")
+        .expect("full replay should include the prior assistant message");
+    assert_eq!(replayed_assistant["content"][0]["type"], "output_text");
 }
 
 #[test]

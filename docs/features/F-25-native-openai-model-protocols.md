@@ -205,6 +205,8 @@ successful completion.
 - [x] A Responses fixture covering instructions, input items, reasoning,
       parallel function calls, tool outputs, usage, and completion round-trips
       through the semantic contract without losing required identity.
+- [x] Responses transcript replay uses input content parts for user/context
+      messages and output content parts for assistant messages.
 - [x] Streaming and non-streaming Responses calls yield equivalent semantic
       completed results for the same fixture.
 - [x] A Chat Completions fixture covering system/user/assistant/tool messages,

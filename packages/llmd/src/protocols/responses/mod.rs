@@ -278,12 +278,14 @@ fn encode_message(
             json!({
                 "role": "assistant",
                 "content": content.iter().filter_map(|block| match block {
-                    ContentBlock::Text { text } => Some(json!({ "type": "input_text", "text": text })),
-                    ContentBlock::Image { data, mime_type } => Some(json!({
-                        "type": "input_image", "image_url": format!("data:{mime_type};base64,{data}")
-                    })),
                     ContentBlock::Thinking { .. } => None,
-                    other => Some(json!({ "type": "input_text", "text": other.text_projection() })),
+                    ContentBlock::Text { text } => {
+                        Some(json!({ "type": "output_text", "text": text }))
+                    }
+                    other => Some(json!({
+                        "type": "output_text",
+                        "text": other.text_projection()
+                    })),
                 }).collect::<Vec<_>>()
             })
         }
@@ -305,16 +307,16 @@ fn encode_message(
             "output": text_from_content(content)
         }),
         ConversationItemKind::UpstreamActivity(activity) => json!({
-            "role":"assistant","content":[{"type":"input_text","text":format!("[upstream tool activity: {activity:?}]")}]
+            "role":"assistant","content":[{"type":"output_text","text":format!("[upstream tool activity: {activity:?}]")}]
         }),
         ConversationItemKind::Source(source) => json!({
-            "role":"assistant","content":[{"type":"input_text","text":format!("[source: {source:?}]")}]
+            "role":"assistant","content":[{"type":"output_text","text":format!("[source: {source:?}]")}]
         }),
         ConversationItemKind::Citation(citation) => json!({
-            "role":"assistant","content":[{"type":"input_text","text":format!("[citation: {citation:?}]")}]
+            "role":"assistant","content":[{"type":"output_text","text":format!("[citation: {citation:?}]")}]
         }),
         ConversationItemKind::Artifact(artifact) => json!({
-            "role":"assistant","content":[{"type":"input_text","text":format!("[generated artifact: {artifact:?}]")}]
+            "role":"assistant","content":[{"type":"output_text","text":format!("[generated artifact: {artifact:?}]")}]
         }),
     })
 }
