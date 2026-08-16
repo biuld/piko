@@ -197,6 +197,12 @@ impl Editor {
         self.set_from_history(next_index);
     }
 
+    /// Whether the editor is currently browsing submitted history (a history
+    /// browse was entered with `history_prev` and not yet left).
+    pub fn is_browsing_history(&self) -> bool {
+        self.history_index.is_some()
+    }
+
     pub fn history_next(&mut self) {
         let Some(index) = self.history_index else {
             return;

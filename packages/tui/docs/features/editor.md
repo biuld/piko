@@ -85,7 +85,7 @@ The Editor remembers the last **100 submitted prompts**.
 | Key | Action |
 |-----|--------|
 | **Ctrl+P** | Previous entry (go back in history) |
-| **Ctrl+E** | Next entry (go forward in history) |
+| **Ctrl+E** | Next entry (go forward in history) while browsing; otherwise move cursor to the end of the line |
 
 - When not in history mode, pressing Ctrl+P loads the most recent submission.
 - Continuing to press Ctrl+P goes further back (wraps around to the oldest

@@ -368,14 +368,38 @@ impl InputRouter {
         // Standard editor inputs, timeline scroll, and keyboard commands
         match ka {
             Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
-            Some(KeyAction::NewLine) => Some(EditorAction::InsertNewline.into()),
+            Some(KeyAction::NewLine) => {
+                // Terminals and IMEs that emit LF (0x0A) for the Return key are
+                // parsed by crossterm as Ctrl+J. On a prompt that is still a
+                // single line that keypress is the user pressing Enter, so
+                // submit instead of inserting an invisible newline. Shift+Enter
+                // and Ctrl+J inside multiline content keep inserting newlines.
+                let bare_lf = matches!(key.code, KeyCode::Char('j'))
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::SHIFT);
+                if bare_lf && !app.editor.text().contains('\n') {
+                    Some(EditorAction::Submit.into())
+                } else {
+                    Some(EditorAction::InsertNewline.into())
+                }
+            }
             Some(KeyAction::Sessions) => Some(SessionAction::RequestList.into()),
             Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
             Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
             Some(KeyAction::Usage) => Some(SurfaceAction::OpenUsage.into()),
             Some(KeyAction::ClearNotifications) => Some(NotificationAction::DismissVisible.into()),
             Some(KeyAction::HistoryPrev) => Some(EditorAction::HistoryPrev.into()),
-            Some(KeyAction::HistoryNext) => Some(EditorAction::HistoryNext.into()),
+            Some(KeyAction::HistoryNext) => {
+                // Ctrl+E is bound both to history-next and cursor-to-line-end.
+                // In the composer it moves to the end of the line; it only
+                // walks history while a history browse is already active
+                // (Ctrl+P entered it).
+                if app.editor.is_browsing_history() {
+                    Some(EditorAction::HistoryNext.into())
+                } else {
+                    Some(EditorAction::CursorLineEnd.into())
+                }
+            }
             Some(KeyAction::DeleteBackward) => Some(EditorAction::DeleteBackward.into()),
             Some(KeyAction::DeleteForward) => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && app.editor.is_empty() {

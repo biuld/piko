@@ -32,7 +32,7 @@ These keys are active when the Editor is focused and not blocked by active overl
 | `tui.editor.cursorWordLeft` | `alt+left`, `ctrl+left`, `alt+b` | Move cursor left one word |
 | `tui.editor.cursorWordRight` | `alt+right`, `ctrl+right`, `alt+f` | Move cursor right one word |
 | `tui.editor.cursorLineStart` | `home`, `ctrl+a` | Move cursor to the start of the line |
-| `tui.editor.cursorLineEnd` | `end`, `ctrl+e` | Move cursor to the end of the line |
+| `tui.editor.cursorLineEnd` | `end`, `ctrl+e` | Move cursor to the end of the line (Ctrl+E walks history forward while a history browse is active) |
 | `tui.editor.jumpForward` | `ctrl+]` | Jump forward to a specific character |
 | `tui.editor.jumpBackward` | `ctrl+alt+]` | Jump backward to a specific character |
 | `tui.editor.pageUp` | `pageup` | Scroll up one page |

@@ -165,7 +165,7 @@ impl Default for Keymap {
         keymap.bind("home", KeyAction::CursorLineStart);
         keymap.bind("ctrl+a", KeyAction::CursorLineStart); // Overriden in Models / Tree contexts
         keymap.bind("end", KeyAction::CursorLineEnd);
-        keymap.bind("ctrl+e", KeyAction::CursorLineEnd); // Overriden in timeline/history in some contexts
+        keymap.bind("ctrl+e", KeyAction::CursorLineEnd); // History context: routed as HistoryNext while browsing
         keymap.bind("ctrl+]", KeyAction::JumpForward);
         keymap.bind("ctrl+alt+]", KeyAction::JumpBackward);
         keymap.bind("pageup", KeyAction::TimelinePageUp);
@@ -198,7 +198,7 @@ impl Default for Keymap {
         keymap.bind("ctrl+z", KeyAction::Suspend);
         keymap.bind("shift+tab", KeyAction::ThinkingCycle);
         keymap.bind("ctrl+p", KeyAction::HistoryPrev); // Overriden to cycle model or filter tree in specific panels
-        keymap.bind("ctrl+e", KeyAction::HistoryNext);
+        keymap.bind("ctrl+e", KeyAction::HistoryNext); // Editor routes as CursorLineEnd unless browsing history
         keymap.bind("ctrl+l", KeyAction::Models); // Open model selector
         keymap.bind("ctrl+t", KeyAction::ThinkingToggle);
         keymap.bind("ctrl+n", KeyAction::SessionToggleNamedFilter);
