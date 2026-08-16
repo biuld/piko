@@ -126,14 +126,15 @@ export function createTimeline({ onSelectMessage }) {
     );
     const height = t.rulerH + state.tracks.length * t.trackH + t.padBottom;
     // Track labels grow/change with the track set (live refresh can add a
-    // track — e.g. the first tool call — mid-stream).
+    // track — e.g. the first tool call — mid-stream). Insert in order before
+    // the bottom spacer; the ruler spacer stays on top.
     labels.querySelectorAll(".track-label").forEach((row) => row.remove());
-    const rulerSpacer = labels.querySelector(".timeline-ruler-spacer");
+    const bottomSpacer = labels.querySelector(".timeline-bottom-spacer");
     for (const kind of state.tracks) {
       const row = document.createElement("div");
       row.className = "track-label";
       row.textContent = kind === "step" ? "model step" : kind;
-      labels.insertBefore(row, rulerSpacer ? rulerSpacer.nextSibling : null);
+      labels.insertBefore(row, bottomSpacer);
     }
     spacerEl.style.width = `${contentWidth}px`;
     canvas.style.width = `${scrollEl.clientWidth || 800}px`;
