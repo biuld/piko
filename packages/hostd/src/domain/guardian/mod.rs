@@ -198,6 +198,7 @@ pub async fn run_review(
             agent_instance_id: "guardian".into(),
             run_id: "guardian".into(),
             step_id: "review".into(),
+            step_message_id: "guardian-review".into(),
         },
     );
     let execution = model_executor

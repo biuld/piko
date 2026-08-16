@@ -9,7 +9,8 @@
 Slices:
 - Tracing + metrics (D-15 / V-15)
 - Per-turn usage accounting (D-29 / V-29)
-- Prompt assembly debugging (D-30 / V-30)
+- Prompt assembly debugging (D-30 / V-30) — superseded by F-36/D-49 and
+  removed (V-49)
 - OTel GenAI prompt inspection (D-46 / V-46)
 - Durable rollout paging (D-31 / V-31)
 - Exact turn-diff tracking (D-32 / V-32)
@@ -159,9 +160,9 @@ causality makes regressions slow to localize.
   blocks and model-output bodies are not exported in this slice.
 - Content attributes are size-bounded and must not be duplicated into stderr
   or OTel log records.
-- The existing local prompt-debug snapshot remains an immediate diagnostic
-  surface until an OTLP backend provides equivalent inspection. Its fidelity
-  must not depend on OTel sampling or exporter availability.
+- The trajectory viewer (F-36) is the immediate diagnostic surface for prompt
+  assembly; its fidelity does not depend on OTel sampling or exporter
+  availability. The D-30 latest-only snapshot is removed (V-49).
 
 ### Durable rollout paging (D-31)
 
@@ -211,23 +212,12 @@ causality makes regressions slow to localize.
 - [x] Hostd records turn-level OTel token/cost counters from the same turn
       ledger at terminal lifecycle (does not invent a second total).
 
-### Prompt assembly debugging (V-30)
+### Prompt assembly debugging (D-30 / V-30) — superseded
 
-- [x] A completed production assembly can be queried by session and agent
-      and returns the exact semantic prompt and resolved tool catalog used by
-      that run.
-- [x] The snapshot includes world-state and mention resource messages in
-      model-injection order without folding them into prompt blocks.
-- [x] Querying before a successful assembly returns an explicit unavailable
-      error and creates no turn, transcript entry, provider request, or
-      durable session write.
-- [x] A later successful assembly replaces the earlier snapshot for only
-      the addressed session/agent; other agents remain isolated.
-- [x] Debug prompt bodies are absent from tracing/log events.
-- [x] Actual llmd request and options are captured before provider dispatch
-      with the correct session, agent, run, and step identity.
-- [x] A late model input from a replaced run is not attached to the latest
-      prompt-debug snapshot.
+This slice is superseded by F-36/D-49: the latest-only in-memory snapshot was
+retired once the durable trajectory query path landed (verified in V-49).
+Prompt assembly is now served from `trajectory.assembly` journal events by the
+trajectory viewer.
 
 ### OTel prompt inspection (D-46)
 
@@ -266,8 +256,8 @@ causality makes regressions slow to localize.
 | Who owns the product usage ledger? | **hostd** turn + session roll-ups; transcript assistant messages are durable step facts | Matches hostd authority for user-visible state; OTel is a projection |
 | Natural grain for usage? | Model-step (assistant message); turn = sum of steps; session = sum of all steps | Provider usage arrives per completion; multi-step turns must not discard earlier steps |
 | Client surface for turn totals? | `TurnEvent` terminals carry `usage` | Live clients get totals without replaying the whole tree |
-| What is the first prompt-debug surface? | Last successful production assembly, queried through hostd | It is faithful by construction and keeps hostd authoritative for user-visible diagnostics |
-| Persist debug snapshots? | No, in-memory only | Prompt bodies can contain sensitive workspace content; diagnostics should not create a second durable transcript |
+| What is the first prompt-debug surface? | Superseded by F-36: the trajectory viewer serves durable run records (assembly + model steps) from the session journal | Faithful by construction; hostd stays authoritative for user-visible diagnostics |
+| Persist debug snapshots? | Superseded: assembly is durable as `trajectory.assembly` journal events (F-36) | The journal is the sole durable authority; the D-30 in-memory snapshot is removed |
 | Model-input debug boundary | llmd request after mapping/middleware/options, before provider adapter | Faithful to dispatched model input without claiming adapter-private HTTP wire parity |
 | Rollout source | Existing per-AgentInstance append-only JSONL | Avoids a second recorder and preserves hostd's durable authority |
 | Turn-diff source | Exact successful built-in mutation results | Avoids racy filesystem rereads and permits restart reconstruction |
@@ -281,7 +271,7 @@ causality makes regressions slow to localize.
 | Rollout recorder / diff tracking | **kept (adapted)** | Page existing v3 AgentInstance JSONL; built-in mutation results carry exact durable content and hostd owns roll-up |
 | `installation_id.rs` anonymous telemetry | **rejected for this slice** | piko has no product-telemetry decision yet; tracing stays local |
 | Usage accounting / cost metadata | **kept (adapted)** | hostd session+turn ledger from durable assistant step usages; OTel turn counters write-through from the same ledger (not a second store) |
-| `prompt_debug.rs` standalone next-input builder | **kept (adapted)** | piko first exposes the last real hostd-owned assembly rather than constructing an ephemeral codex-shaped session; this preserves the host/orchestrator split and avoids predictive drift |
+| `prompt_debug.rs` standalone next-input builder | **rejected in final state** | The D-30 adaptation was retired once F-36 trajectory assembly records landed (V-49); codex-rs remains only a modeling reference (ADR-002) |
 
 ## Open questions
 

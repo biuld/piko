@@ -1,6 +1,6 @@
 // Session list and run strip renderers (static DOM lists).
 
-import { $, esc, short, fmtTs, fmtDur, terminalBadge, agentShort } from "./format.js";
+import { $, esc, short, fmtTs, fmtDur, fmtCount, terminalBadge, agentShort } from "./format.js";
 
 export function renderSessions(state, actions) {
   $("session-count").textContent = `(${state.sessions.length})`;
@@ -42,4 +42,41 @@ export function renderRunStrip(state, actions) {
     el.onclick = () => actions.selectRun(run.runId);
     strip.appendChild(el);
   }
+}
+
+// One-line run-level usage summary, derived from model-step records. Hidden
+// when the run has no steps. Per-call detail lives on message cards.
+export function renderRunStats(state) {
+  const el = $("run-stats");
+  const steps = (state.run?.records || []).filter((r) => r.type === "model_step");
+  if (!steps.length) {
+    el.classList.add("hidden");
+    return;
+  }
+  const totals = steps.reduce(
+    (acc, step) => {
+      const usage = step.usage;
+      if (!usage) return acc;
+      acc.input += usage.input || 0;
+      acc.cacheRead += usage.cacheRead || 0;
+      acc.cacheWrite += usage.cacheWrite || 0;
+      acc.output += usage.output || 0;
+      const entry = usage.cost?.entries?.[0];
+      if (entry) {
+        acc.cost += Number(entry.total ?? 0);
+        acc.currency ||= entry.currency || "";
+      }
+      return acc;
+    },
+    { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, currency: "" }
+  );
+  const hit = totals.input > 0 ? (totals.cacheRead / totals.input) * 100 : null;
+  el.classList.remove("hidden");
+  el.textContent =
+    `${steps.length} model step${steps.length === 1 ? "" : "s"} · ` +
+    `${fmtCount(totals.input)} input · ` +
+    `${fmtCount(totals.cacheRead)} cached${hit === null ? "" : ` (${hit.toFixed(0)}%)`} · ` +
+    `${fmtCount(totals.cacheWrite)} written · ` +
+    `${fmtCount(totals.output)} output` +
+    (totals.cost > 0 ? ` · ${totals.currency}${totals.cost.toFixed(4)}` : "");
 }

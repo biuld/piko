@@ -484,8 +484,8 @@ Detail ownership: [resume-session.md](./resume-session.md),
 
 **Should show** (when protocol + hostd already expose them)
 
-- Prompt-debug / turn-diff entry points or last-fetched summaries via
-  slash or status subsections (developer-oriented; not Timeline clutter)
+- Turn-diff entry points or last-fetched summaries via slash or status
+  subsections (developer-oriented; not Timeline clutter)
 - Cumulative usage mirrors (context, cost) consistent with BottomBar
 
 **Must not** become a second chat log.
@@ -547,7 +547,6 @@ Each slash entry **must** expose:
 | `/noti` | Centered Notifications modal | In-memory notices; Current/All title-affix scope |
 | `/agents` | Session agents | Switch viewed agent; BottomBar agent chip updates |
 | `/diff` | Shared Diagnostics surface (diff mode) | Last or active turn workspace diff |
-| `/prompt-debug` | Shared Diagnostics surface (prompt mode) | Prompt assembly diagnostics |
 | `/quit` | Exit | Process exits (not Esc) |
 
 ### Current host product commands (content + result)
@@ -580,7 +579,6 @@ not new protocol variants.
 | Capability | Wire today | UX gap | Preferred fix |
 |------------|------------|--------|---------------|
 | Context / cost | Session/turn usage projection | BottomBar still placeholder when data exists | Project into BottomBar (no new command) |
-| Prompt debug | `PromptDebugGet` + result | **Landed:** `/prompt-debug` → diagnostics panel with exact run identity and complete run-prompt, resource, tool-catalog, request, and options sections | Local presentation command; content is scrollable rather than silently truncated |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
 | Queue steer | `QueueSteer` | **Landed:** Enter while running, Ctrl+Enter | Fail closed when idle; Alt+Enter remains FollowUp |
 | `model.set` / `thinking.set` in catalog | Catalog advertised | Combined selector uses another path | Keep the selector; optional slash args later; no second set API |
@@ -600,8 +598,6 @@ Examples that **do not** justify a new wire command:
 
 - “Show usage in the footer” → project existing usage fields.
 - “Open settings / status” → local presentation command.
-- “Pretty-print prompt debug” → consume `PromptDebugGet`.
-
 Examples that **would** justify a new wire command (future, not required by
 this PRD’s P0):
 
@@ -627,7 +623,7 @@ model without going through host config/model APIs).
 | Session lifecycle | View rehydrate + short status/notification on failure |
 | Lists (sessions, models, agents, processes, MCP) | Dedicated overlay or structured panel—not a wall of Timeline chat |
 | Destructive confirm | Confirm step before wire send |
-| Diagnostics (status, prompt debug, diff) | Full or partial overlay; monospace/scroll for long text |
+| Diagnostics (status, diff) | Full or partial overlay; monospace/scroll for long text |
 | Transient ack | Status line or info notification |
 | Errors | Error notification with host message; keep draft/focus safe |
 
@@ -738,9 +734,8 @@ how existing and future settings surface:
    projection arrives, then live values.
 7. Every slash/palette row either opens a surface, runs a host intent, or shows
    a structured result; the palette lists the same merged set the user can run.
-8. Diagnostic host results (prompt debug, turn diff) are never silently
-   discarded once their presentation commands ship; they do not pollute Timeline
-   as fake chat.
+8. Diagnostic host results (turn diff) are never silently discarded once
+   their presentation commands ship; they do not pollute Timeline as fake chat.
 9. Feature PRDs that contradict this document are updated or explicitly
    exception-listed under Non-goals / deltas.
 

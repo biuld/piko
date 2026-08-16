@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-51: Trajectory prompt assembly and cache debugging view](D-51-trajectory-prompt-and-cache-view.md)
+  adds a Prompt tab to the trajectory viewer: the frozen assembly (blocks,
+  tool catalog, cache plan) plus per-step provider cache usage, with an
+  optional `usage` field on the model-step record (draft).
 - [D-50: Trajectory viewer architecture](D-50-trajectory-viewer-architecture.md)
   defines the hostd-served trajectory web viewer: modular static assets
   (no build toolchain), a store with per-slice subscriptions, a canvas

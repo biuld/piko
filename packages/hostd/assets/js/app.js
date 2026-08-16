@@ -3,15 +3,18 @@
 import { $, SESSION_KEY, RUN_KEY, short } from "./format.js";
 import { loadSessions, loadRuns, fetchRun, openRunStream } from "./api.js";
 import { createStore } from "./store.js";
-import { renderSessions, renderRunStrip } from "./panels.js";
+import { renderSessions, renderRunStrip, renderRunStats } from "./panels.js";
 import { createMessages } from "./messages.js";
 import { createTimeline, deriveTimeline } from "./timeline.js";
+import { createPrompt } from "./prompt.js";
 
 const store = createStore({
   sessions: [],
   runs: [],
   selectedSession: localStorage.getItem(SESSION_KEY) || "",
   selectedRun: localStorage.getItem(RUN_KEY) || "",
+  activeTab: "conversation",
+  loading: false,
   run: null,
   messages: [],
   timelineItems: [],
@@ -25,18 +28,40 @@ const messages = createMessages({
 });
 const timeline = createTimeline({
   onSelectMessage: (index) => store.set({ selectedMessage: index }, "message:selected"),
+  onSelectPrompt: () => actions.selectTab("prompt"),
 });
+const prompt = createPrompt();
 
 let streamCleanup = null;
 let refreshing = false;
+
+function applyTab(state) {
+  const conversationView = $("conversation-view");
+  const promptView = $("prompt-view");
+  const tabs = $("run-tabs");
+  tabs.classList.toggle("hidden", !state.run);
+  conversationView.classList.toggle("hidden", state.activeTab !== "conversation");
+  promptView.classList.toggle("hidden", state.activeTab !== "prompt");
+  for (const button of tabs.querySelectorAll(".tab")) {
+    button.classList.toggle("active", button.dataset.tab === state.activeTab);
+  }
+}
+
+function applyLoading(state) {
+  $("loading").classList.toggle("hidden", !state.loading);
+}
 
 const actions = {
   setStatus(text) {
     $("status").textContent = text;
   },
 
+  selectTab(tab) {
+    store.set({ activeTab: tab }, "tab:selected");
+  },
+
   async selectSession(sessionId) {
-    store.set({ selectedSession: sessionId }, "session:selected");
+    store.set({ selectedSession: sessionId, loading: true }, "session:selected");
     localStorage.setItem(SESSION_KEY, sessionId);
     actions.setStatus("loading runs…");
     try {
@@ -56,11 +81,13 @@ const actions = {
       }
     } catch (error) {
       actions.setStatus(`runs: ${error.message}`);
+    } finally {
+      store.set({ loading: false }, "loading:done");
     }
   },
 
   async selectRun(runId, sessionId = store.state.selectedSession) {
-    store.set({ selectedRun: runId }, "run:selecting");
+    store.set({ selectedRun: runId, loading: true }, "run:selecting");
     localStorage.setItem(RUN_KEY, runId);
     try {
       const run = await fetchRun(sessionId, runId);
@@ -79,6 +106,8 @@ const actions = {
       });
     } catch (error) {
       actions.setStatus(`run: ${error.message}`);
+    } finally {
+      store.set({ loading: false }, "loading:done");
     }
   },
 
@@ -99,6 +128,7 @@ const actions = {
 };
 
 store.subscribe((state, action) => {
+  applyLoading(state);
   switch (action) {
     case "sessions:loaded":
     case "session:selected":
@@ -111,10 +141,19 @@ store.subscribe((state, action) => {
     case "run:selected":
       messages.render(state);
       timeline.render(state);
+      prompt.render(state);
+      renderRunStats(state);
+      applyTab(state);
       break;
     case "run:refreshed":
       messages.append(state);
       timeline.update(state);
+      prompt.update(state);
+      renderRunStats(state);
+      break;
+    case "tab:selected":
+      applyTab(state);
+      prompt.render(state);
       break;
     case "message:selected":
       timeline.update(state);
@@ -122,6 +161,10 @@ store.subscribe((state, action) => {
       break;
   }
 });
+
+for (const button of document.querySelectorAll("#run-tabs .tab")) {
+  button.addEventListener("click", () => actions.selectTab(button.dataset.tab));
+}
 
 $("refresh").onclick = () => {
   actions.selectSession(store.state.selectedSession).catch(() => {});

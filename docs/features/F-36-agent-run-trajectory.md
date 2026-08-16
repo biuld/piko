@@ -106,9 +106,9 @@ prompt debugging and OTel span export redundant.
   identity; assembly version and digest.
 - Assembly record: the assembled prompt (per content policy) and tool catalog
   identity.
-- Model step records: request, response including thinking blocks, usage,
-  started/finished timestamps, duration, and retries/fallbacks with per-attempt
-  detail.
+- Model step records: request, response including thinking blocks, usage
+  (input/output, cache-read/cache-write tokens, cost), started/finished
+  timestamps, duration, and retries/fallbacks with per-attempt detail.
 - Tool batch records: each call's arguments, status transitions (running,
   awaiting approval, completed, failed, cancelled), result content or error,
   and duration.
@@ -215,9 +215,11 @@ by readers that do not understand them.
       state or invoke the model gateway; missing runs return explicit errors.
 - [ ] Records are captured in full without truncation; oversized payloads are
       handled by the web viewer at render time, not by altering stored content.
-- [ ] Once the trajectory query path is verified, all D-30 prompt-debug code is
+- [x] Once the trajectory query path is verified, all D-30 prompt-debug code is
       deleted (capture, protocol command and result, TUI surface and tests);
-      the web viewer shows the latest run's structured step graph instead.
+      the web viewer shows the latest run's structured step graph instead
+      (verified in V-49; the D-30 design and V-30 verification records are
+      removed).
 - [ ] The web viewer is served over loopback HTTP only, is read-only, and
       works without an external backend or frontend build toolchain.
 - [ ] The web viewer follows a running turn in real time over SSE (or

@@ -8,6 +8,15 @@ import { $, fmtTs, tokens, TRACK_ORDER, ROLE_LABEL, textOfMessage } from "./form
 export function deriveTimeline(run) {
   const items = [];
   const messages = run.messages || [];
+  if (run.assembly) {
+    items.push({
+      id: "prompt",
+      kind: "prompt",
+      label: "prompt assembled",
+      time: run.assembly.recordedAt || 0,
+      ref: { kind: "prompt" },
+    });
+  }
   let lastTime = 0;
   messages.forEach((m, index) => {
     // Old journals may lack timestamps on ToolResult; fall back to the
@@ -23,7 +32,18 @@ export function deriveTimeline(run) {
     });
   });
   for (const record of run.records || []) {
-    if (record.type === "system_notification") {
+    if (record.type === "model_step") {
+      const messageIndex = record.messageId
+        ? messages.findIndex((m) => m.messageId === record.messageId)
+        : -1;
+      items.push({
+        id: `s${record.stepId}`,
+        kind: "step",
+        label: `${record.provider || ""}/${record.model || "model"}`,
+        time: record.startedAt || 0,
+        ref: { kind: "step", index: messageIndex >= 0 ? messageIndex : null },
+      });
+    } else if (record.type === "system_notification") {
       items.push({
         id: `n${items.length}`,
         kind: "system",
@@ -52,7 +72,7 @@ export function deriveTimeline(run) {
   return { timelineItems: indexed, tracks, trackItems };
 }
 
-export function createTimeline({ onSelectMessage }) {
+export function createTimeline({ onSelectMessage, onSelectPrompt }) {
   const container = $("timeline");
   let scrollEl = null;
   let canvas = null;
@@ -85,7 +105,7 @@ export function createTimeline({ onSelectMessage }) {
     for (const kind of state.tracks) {
       const row = document.createElement("div");
       row.className = "track-label";
-      row.textContent = kind;
+      row.textContent = kind === "step" ? "model step" : kind;
       labels.appendChild(row);
     }
     const bottomSpacer = document.createElement("div");
@@ -118,6 +138,10 @@ export function createTimeline({ onSelectMessage }) {
     cv.addEventListener("click", (e) => {
       const hit = hitTest(e);
       if (hit && hit.ref.kind === "message") onSelectMessage(hit.ref.index);
+      else if (hit && hit.ref.kind === "prompt") onSelectPrompt();
+      else if (hit && hit.ref.kind === "step" && hit.ref.index != null) {
+        onSelectMessage(hit.ref.index);
+      }
     });
     cv.addEventListener("mousemove", (e) => showTooltip(e));
     cv.addEventListener("mouseleave", () => {

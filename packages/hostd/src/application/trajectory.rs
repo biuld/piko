@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use piko_protocol::{
-    Message, TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_CHILD_RUN, TRAJECTORY_EVENT_MODEL_STEP,
+    TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_CHILD_RUN, TRAJECTORY_EVENT_MODEL_STEP,
     TRAJECTORY_EVENT_SYSTEM_NOTIFICATION, TRAJECTORY_EVENT_TOOL_CALL, TrajectoryAssemblyRecord,
-    TrajectoryChildRunRecord, TrajectoryModelStepRecord, TrajectoryRecord, TrajectoryRun,
-    TrajectoryRunListPage, TrajectoryRunSummary, TrajectorySystemNotificationRecord,
+    TrajectoryChildRunRecord, TrajectoryMessage, TrajectoryModelStepRecord, TrajectoryRecord,
+    TrajectoryRun, TrajectoryRunListPage, TrajectoryRunSummary, TrajectorySystemNotificationRecord,
     TrajectoryTerminalKind, TrajectoryToolCallRecord,
 };
 use piko_session_store::EventData;
@@ -173,7 +173,7 @@ struct DecodedRun {
     terminal: Option<TrajectoryTerminalKind>,
     assembly: Option<TrajectoryAssemblyRecord>,
     records: Vec<TrajectoryRecord>,
-    messages: Vec<Message>,
+    messages: Vec<TrajectoryMessage>,
     step_count: u32,
     tool_call_count: u32,
     child_run_count: u32,
@@ -238,7 +238,10 @@ fn decode_events(events: &[RawJournalEventRef]) -> BTreeMap<String, DecodedRun> 
                 runs.entry(run_id)
                     .or_default()
                     .messages
-                    .push(committed.message);
+                    .push(TrajectoryMessage {
+                        message_id: Some(committed.message_id.clone()),
+                        message: committed.message,
+                    });
             }
             TRAJECTORY_EVENT_ASSEMBLY => {
                 let Ok(record) =
@@ -399,6 +402,7 @@ mod tests {
             fallback: None,
             response: None,
             message_id: None,
+            usage: None,
         };
         store
             .append_optional_event(

@@ -349,6 +349,7 @@ impl ExecutionActor {
                 agent_instance_id: self.identity.agent_instance_id.clone(),
                 run_id: self.identity.execution_id.clone(),
                 step_id: format!("step_{step_count}"),
+                step_message_id: message_id.clone(),
             },
         };
         tracing::debug!(

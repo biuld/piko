@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AgentInstanceId, ResolvedToolCatalog, SemanticRunPrompt};
+use crate::{AgentInstanceId, ResolvedToolCatalog, SemanticRunPrompt, Usage};
 
 /// Journal event type for the per-run assembly record.
 pub const TRAJECTORY_EVENT_ASSEMBLY: &str = "trajectory.assembly";
@@ -96,6 +96,10 @@ pub struct TrajectoryModelStepRecord {
     pub response: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<String>,
+    /// Final provider usage of the step (input/output/cache tokens and cost).
+    /// Absent on start records and on steps whose stream was abandoned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Box<Usage>>,
 }
 
 /// Tool-call lifecycle status. A call emits one record per transition;
@@ -222,6 +226,18 @@ pub struct TrajectoryRunListPage {
     pub next_cursor: Option<String>,
 }
 
+/// One committed transcript message of a run, flattened so the wire shape of
+/// `Message` is preserved and a `messageId` is added for joining model-step
+/// records to the assistant message they produced.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(flatten)]
+    pub message: crate::Message,
+}
+
 /// One full run record: assembly (input side) + trajectory records and
 /// committed messages (interaction side), joined by run identity.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -234,7 +250,7 @@ pub struct TrajectoryRun {
     pub records: Vec<TrajectoryRecord>,
     /// Committed messages of this run, in journal order (bounded by paging).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub messages: Vec<crate::Message>,
+    pub messages: Vec<TrajectoryMessage>,
 }
 
 /// Live fan-out event published after a trajectory record is durably
@@ -291,9 +307,30 @@ mod tests {
             }),
             response: None,
             message_id: None,
+            usage: Some(Box::new(Usage {
+                input: 120,
+                output: 30,
+                cache_read: 90,
+                cache_write: 30,
+                total_tokens: 150,
+                units: Default::default(),
+                cost: Default::default(),
+            })),
         });
         let json = serde_json::to_value(&record).unwrap();
-        let back: TrajectoryRecord = serde_json::from_value(json).unwrap();
+        let back: TrajectoryRecord = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(record, back);
+
+        // Backward compatibility: journals written before `usage` existed
+        // decode with usage = None.
+        let mut legacy = json.clone();
+        if let Some(object) = legacy.as_object_mut() {
+            object.remove("usage");
+        }
+        let back: TrajectoryRecord = serde_json::from_value(legacy).unwrap();
+        match back {
+            TrajectoryRecord::ModelStep(step) => assert_eq!(step.usage, None),
+            other => panic!("expected model step record, got {other:?}"),
+        }
     }
 }

@@ -29,8 +29,8 @@ It reuses `SelectableList`, `SelectableItem`, `PaneSpec`, and
   the shared ComposerBand budget solver. `/top` projects `process.list` and
   `process.stop` into one selectable process-management journey; stop
   confirmation is panel state, not another surface.
-- `/diff` and `/prompt-debug` reuse one Diagnostics surface with different
-  content modes.
+- `/diff` uses the Diagnostics surface; prompt-assembly diagnostics live in
+  the trajectory web viewer (F-36).
 
 There is deliberately no Commands `SurfaceId`, panel state, focus route, or
 keybinding action.

@@ -38,6 +38,10 @@ pub struct InvocationContext {
     pub agent_instance_id: String,
     pub run_id: String,
     pub step_id: String,
+    /// Assistant message id assigned by the orchestrator for this step's
+    /// output. Links the trajectory model-step record to the committed
+    /// transcript message without any positional or temporal heuristics.
+    pub step_message_id: String,
 }
 
 #[derive(Debug, Clone)]

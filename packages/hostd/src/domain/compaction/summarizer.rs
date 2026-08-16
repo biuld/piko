@@ -121,6 +121,7 @@ pub async fn summarize_history(
             agent_instance_id: "compaction".into(),
             run_id: "compaction".into(),
             step_id: "summary".into(),
+            step_message_id: "compaction-summary".into(),
         },
     );
     let execution = model_executor

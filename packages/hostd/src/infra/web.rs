@@ -32,6 +32,7 @@ const JS_STORE: &str = include_str!("../../assets/js/store.js");
 const JS_PANELS: &str = include_str!("../../assets/js/panels.js");
 const JS_MESSAGES: &str = include_str!("../../assets/js/messages.js");
 const JS_TIMELINE: &str = include_str!("../../assets/js/timeline.js");
+const JS_PROMPT: &str = include_str!("../../assets/js/prompt.js");
 const JS_APP: &str = include_str!("../../assets/js/app.js");
 
 #[derive(Clone)]
@@ -90,6 +91,7 @@ async fn js_asset(Path(file): Path<String>) -> impl IntoResponse {
         "panels.js" => JS_PANELS,
         "messages.js" => JS_MESSAGES,
         "timeline.js" => JS_TIMELINE,
+        "prompt.js" => JS_PROMPT,
         "app.js" => JS_APP,
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };

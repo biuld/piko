@@ -310,6 +310,7 @@ fn request() -> InferenceRequest {
             agent_instance_id: "agent-1".to_string(),
             run_id: "run-1".to_string(),
             step_id: "step-1".to_string(),
+            step_message_id: "step-message-1".to_string(),
         },
     }
 }

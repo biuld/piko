@@ -4,6 +4,8 @@ export const $ = (id) => document.getElementById(id);
 export const SESSION_KEY = "piko.trajectory.session";
 export const RUN_KEY = "piko.trajectory.run";
 export const ROLE_LABEL = {
+  prompt: "prompt",
+  step: "model step",
   user: "user",
   assistant: "assistant",
   toolCall: "toolCall",
@@ -11,7 +13,7 @@ export const ROLE_LABEL = {
   context: "context",
   system: "system",
 };
-export const TRACK_ORDER = ["context", "user", "assistant", "toolCall", "toolResult", "system"];
+export const TRACK_ORDER = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system"];
 
 let tokenCache = null;
 export function tokens() {
@@ -22,7 +24,7 @@ export function tokens() {
     return Number.isFinite(v) ? v : fallback;
   };
   const alpha = { toolCall: 0.6, system: 0.65 };
-  const names = ["context", "user", "assistant", "toolCall", "toolResult", "system"];
+  const names = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system"];
   const roleColors = {};
   for (const name of names) {
     const hex = cs.getPropertyValue(`--role-${name}`).trim();
@@ -79,6 +81,35 @@ export function fmtDur(start, end) {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return s ? `${m}m${s}s` : `${m}m`;
+}
+
+export function fmtCount(n) {
+  const value = Number(n) || 0;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 10_000) return `${(value / 1000).toFixed(0)}k`;
+  if (value >= 1_000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
+}
+
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard may be unavailable in restricted contexts; the button is a
+    // convenience, not a contract.
+  }
+}
+
+export function fmtCost(usage) {
+  const entries = usage?.cost?.entries || [];
+  if (!entries.length) return "—";
+  const entry = entries[0];
+  return `${entry.currency || ""}${Number(entry.total ?? 0).toFixed(4)}`;
+}
+
+export function cacheRatio(usage) {
+  if (!usage || !usage.input) return null;
+  return (usage.cacheRead || 0) / usage.input;
 }
 
 export function agentShort(id, sessionId) {

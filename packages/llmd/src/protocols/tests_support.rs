@@ -102,6 +102,7 @@ pub(crate) fn semantic_request() -> InferenceRequest {
             agent_instance_id: "root".into(),
             run_id: "run".into(),
             step_id: "step".into(),
+            step_message_id: "step-message".into(),
         },
     }
 }

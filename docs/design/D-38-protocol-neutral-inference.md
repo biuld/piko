@@ -91,6 +91,7 @@ pub struct InvocationContext {
     pub agent_instance_id: String,
     pub run_id: String,
     pub step_id: String,
+    pub step_message_id: String,
 }
 ```
 
