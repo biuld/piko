@@ -14,6 +14,20 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-50: Trajectory viewer architecture](D-50-trajectory-viewer-architecture.md)
+  defines the hostd-served trajectory web viewer: modular static assets
+  (no build toolchain), a store with per-slice subscriptions, a canvas
+  timeline component, native-scroll DOM lists, loop-free SSE, and CSS tokens
+  as the single source of truth (draft).
+- [D-49: Agent run trajectory](D-49-agent-run-trajectory.md)
+  implements F-36: a durable per-run record (prompt assembly + agent
+  trajectory) in the journal as observational event types, served to a
+  real-time loopback web viewer over SSE, retiring D-30 and OTel span export
+  (draft).
+- [D-48: Turn budget headroom and steer responsiveness](D-48-turn-budget-headroom-and-steer-responsiveness.md)
+  implements F-35: a bounded output/reasoning reserve in the per-step context
+  preflight and a respond-first model step after a steered user message
+  (implemented).
 - [D-47: Execution denial typing and escalation guidance](D-47-execution-denial-typing-guidance.md)
   implements F-34: type sandboxed OS denials as `sandbox_denied`, derive
   retry roots from the denial text (not a second policy walk), and surface

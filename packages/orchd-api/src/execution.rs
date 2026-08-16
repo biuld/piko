@@ -50,6 +50,14 @@ pub trait RealtimeDeltaSink: Send + Sync {
     fn try_publish(&self, delta: piko_protocol::agent_runtime::RealtimeDeltaEnvelope);
 }
 
+/// Best-effort durable trajectory capture (F-36). The hostd implementation
+/// must never block, fail, or alter the turn: it enqueues into a bounded
+/// channel and returns immediately.
+#[async_trait]
+pub trait TrajectoryCapturePort: Send + Sync {
+    async fn record(&self, record: piko_protocol::TrajectoryRecord);
+}
+
 /// Immutable session-scoped capabilities for one attached Session.
 pub struct SessionExecutionPorts {
     pub commit: Arc<dyn ExecutionCommitPort>,
@@ -57,6 +65,7 @@ pub struct SessionExecutionPorts {
     pub approval: Option<Arc<dyn ApprovalPort>>,
     pub interaction: Option<Arc<dyn InteractionPort>>,
     pub realtime: Option<Arc<dyn RealtimeDeltaSink>>,
+    pub trajectory: Option<Arc<dyn TrajectoryCapturePort>>,
 }
 
 impl SessionExecutionPorts {
@@ -67,6 +76,7 @@ impl SessionExecutionPorts {
             approval: None,
             interaction: None,
             realtime: None,
+            trajectory: None,
         }
     }
 
@@ -87,6 +97,11 @@ impl SessionExecutionPorts {
 
     pub fn with_realtime(mut self, realtime: Arc<dyn RealtimeDeltaSink>) -> Self {
         self.realtime = Some(realtime);
+        self
+    }
+
+    pub fn with_trajectory(mut self, trajectory: Arc<dyn TrajectoryCapturePort>) -> Self {
+        self.trajectory = Some(trajectory);
         self
     }
 }

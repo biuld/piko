@@ -231,12 +231,6 @@ pub enum Command {
     CommandCatalogGet {
         command_id: CommandId,
     },
-    /// Read the latest successful production prompt assembly for one agent.
-    PromptDebugGet {
-        command_id: CommandId,
-        session_id: SessionId,
-        agent_instance_id: crate::AgentInstanceId,
-    },
     /// Page through one agent's durable append-only rollout transcript.
     RolloutPageGet {
         command_id: CommandId,
@@ -335,7 +329,6 @@ impl Command {
             | Self::QueueSteer { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
-            | Self::PromptDebugGet { command_id, .. }
             | Self::RolloutPageGet { command_id, .. }
             | Self::TurnDiffGet { command_id, .. }
             | Self::SessionCompact { command_id, .. }

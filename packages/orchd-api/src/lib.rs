@@ -29,7 +29,7 @@ pub use approval::{
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use execution::{
     ApprovalPort, ExecutionCommitPort, InteractionPort, PromptAssemblyPort, RealtimeDeltaSink,
-    SessionExecutionPorts,
+    SessionExecutionPorts, TrajectoryCapturePort,
 };
 pub use request::SubscribeRequest;
 pub use response::SessionRuntimeSnapshot;

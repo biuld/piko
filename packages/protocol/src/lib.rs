@@ -16,6 +16,7 @@ pub mod session;
 pub mod stream_item;
 pub mod todo;
 pub mod tools;
+pub mod trajectory;
 pub mod user_mention;
 
 pub use agent_completion::*;
@@ -40,4 +41,5 @@ pub use session::*;
 pub use stream_item::*;
 pub use todo::*;
 pub use tools::*;
+pub use trajectory::*;
 pub use user_mention::*;

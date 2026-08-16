@@ -8,6 +8,8 @@ flowchart LR
         nhostd_prompt_approval_reply["hostd.prompt.approval_reply<br/>Reply / Request<br/>One"]
         nhostd_prompt_interaction_reply["hostd.prompt.interaction_reply<br/>Reply / Request<br/>One"]
         nhostd_client_output["hostd.client.output<br/>ClientOutput / Connection<br/>Bounded(256)"]
+        nhostd_trajectory_writes["hostd.trajectory.writes<br/>Mailbox / Session<br/>Bounded(1024)"]
+        nhostd_trajectory_live["hostd.trajectory.live<br/>Observation / Session<br/>Bounded(256)"]
     end
     subgraph orchd["orchd"]
         norchd_agent_commands["orchd.agent.commands<br/>Mailbox / Agent<br/>Bounded(32)"]
@@ -38,10 +40,15 @@ flowchart LR
     ncomponent_ExecutionTerminalWaiter["ExecutionTerminalWaiter"]
     ncomponent_HostApp["HostApp"]
     ncomponent_HostObservationProjection["HostObservationProjection"]
+    ncomponent_HostPromptAssemblyPort["HostPromptAssemblyPort"]
     ncomponent_HostServerCommandTask["HostServerCommandTask"]
     ncomponent_HostStdoutReaderThread["HostStdoutReaderThread"]
     ncomponent_HostTransport["HostTransport"]
+    ncomponent_LlmdExecutor["LlmdExecutor"]
+    ncomponent_OrchAgentRunRunner["OrchAgentRunRunner"]
     ncomponent_SessionObservationRouter["SessionObservationRouter"]
+    ncomponent_TrajectoryWebViewer["TrajectoryWebViewer"]
+    ncomponent_TrajectoryWriterTask["TrajectoryWriterTask"]
     ncomponent_TuiEventLoop["TuiEventLoop"]
     ncomponent_UserInteractionGateway["UserInteractionGateway"]
     ncomponent_AgentRuntime --> norchd_agent_commands
@@ -78,4 +85,11 @@ flowchart LR
     ncomponent_HostApp --> nhostd_client_output
     ncomponent_HostServerCommandTask --> nhostd_client_output
     nhostd_client_output --> ncomponent_HostTransport
+    ncomponent_OrchAgentRunRunner --> nhostd_trajectory_writes
+    ncomponent_LlmdExecutor --> nhostd_trajectory_writes
+    ncomponent_HostPromptAssemblyPort --> nhostd_trajectory_writes
+    ncomponent_ExecutionActor --> nhostd_trajectory_writes
+    nhostd_trajectory_writes --> ncomponent_TrajectoryWriterTask
+    ncomponent_TrajectoryWriterTask --> nhostd_trajectory_live
+    nhostd_trajectory_live --> ncomponent_TrajectoryWebViewer
 ```

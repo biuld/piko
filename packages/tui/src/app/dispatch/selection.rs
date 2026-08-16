@@ -82,23 +82,6 @@ impl AppState {
         })]
     }
 
-    pub(super) fn request_prompt_debug(&mut self) -> Vec<Effect> {
-        let Some(session_id) = self.session.id.clone() else {
-            self.status = "no active session for /prompt-debug".to_string();
-            return Vec::new();
-        };
-        let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
-            self.status = "no active agent for /prompt-debug".to_string();
-            return Vec::new();
-        };
-        self.status = "fetching prompt debug".to_string();
-        vec![Effect::send(Command::PromptDebugGet {
-            command_id: command_id(),
-            session_id,
-            agent_instance_id,
-        })]
-    }
-
     pub(super) fn close_surface(&mut self) {
         match self.mode() {
             AppMode::Surface(SurfaceId::SummaryPrompt) => {

@@ -307,6 +307,47 @@ pub mod contracts {
             cancellation: CancellationMeaning::DisconnectOnly,
         }
     );
+    contract!(
+        TrajectoryWrites,
+        MailboxContract,
+        TRAJECTORY_WRITES,
+        CommunicationSpec {
+            id: "hostd.trajectory.writes",
+            kind: CommunicationKind::Mailbox,
+            owner: "TrajectoryRecorder",
+            producers: &[
+                "OrchAgentRunRunner",
+                "LlmdExecutor",
+                "HostPromptAssemblyPort",
+                "ExecutionActor",
+            ],
+            consumer: "TrajectoryWriterTask",
+            scope: CommunicationScope::Session,
+            delivery: DeliveryGuarantee::BestEffort,
+            capacity: CapacityPolicy::Bounded(1024),
+            overflow: OverflowPolicy::RejectOverload,
+            closure: ClosureMeaning::RuntimeUnavailable,
+            cancellation: CancellationMeaning::DropInterestOnly,
+        }
+    );
+    contract!(
+        TrajectoryLive,
+        BroadcastContract,
+        TRAJECTORY_LIVE,
+        CommunicationSpec {
+            id: "hostd.trajectory.live",
+            kind: CommunicationKind::Observation,
+            owner: "TrajectoryWriterTask",
+            producers: &["TrajectoryWriterTask"],
+            consumer: "TrajectoryWebViewer",
+            scope: CommunicationScope::Session,
+            delivery: DeliveryGuarantee::BestEffort,
+            capacity: CapacityPolicy::Bounded(256),
+            overflow: OverflowPolicy::DropNewest,
+            closure: ClosureMeaning::NoSubscribers,
+            cancellation: CancellationMeaning::DropInterestOnly,
+        }
+    );
 
     pub const ALL: &[CommunicationSpec] = &[
         AGENT_COMMANDS,
@@ -325,6 +366,8 @@ pub mod contracts {
         INTERACTION_REPLY,
         TUI_HOST_BRIDGE,
         HOST_COMMAND_OUTPUT,
+        TRAJECTORY_WRITES,
+        TRAJECTORY_LIVE,
     ];
 }
 

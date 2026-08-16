@@ -1,5 +1,10 @@
 use std::sync::Arc;
 
+use piko_protocol::{
+    TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
+    TrajectorySystemNotificationRecord,
+};
+
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::ports::{AgentOperationAddress, AgentRunHandle, AgentRunRunner};
@@ -107,6 +112,19 @@ impl HostApp {
         }
         let barrier = completion.observation_barrier.clone();
         let terminal = completion.result;
+        // F-36: record run failures on the durable trajectory.
+        if let Err(failure) = &terminal {
+            self.record_trajectory_run_error(&address, failure.message.clone())
+                .await;
+        } else if let Ok(report) = &terminal
+            && matches!(
+                report.outcome,
+                piko_protocol::ExecutionOutcome::Failed { .. }
+            )
+        {
+            self.record_trajectory_run_error(&address, "agent run failed".into())
+                .await;
+        }
 
         let complete_event = {
             let mut state = self.state.lock().await;
@@ -171,5 +189,39 @@ impl HostApp {
         runner.finish_agent_run(&address, &barrier).await;
 
         Ok(turn_succeeded)
+    }
+
+    async fn record_trajectory_run_error(&self, address: &AgentOperationAddress, message: String) {
+        let runner = self.turn_runner.lock().await.clone();
+        let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {
+            return;
+        };
+        // The trajectory run identity is the orchd execution id, derived as
+        // `stable("exec", [session, agent, request_id])` with the root-turn
+        // request id equal to the hostd operation id.
+        let run_id = piko_orchd_api::stable_internal_id(
+            "exec",
+            &[
+                &address.session_id,
+                &address.agent_instance_id,
+                &address.operation_id,
+            ],
+        );
+        recorder
+            .record(TrajectoryRecord::SystemNotification(
+                TrajectorySystemNotificationRecord {
+                    identity: TrajectoryIdentity {
+                        session_id: address.session_id.clone(),
+                        agent_instance_id: address.agent_instance_id.clone(),
+                        run_id,
+                        execution_id: None,
+                        source_turn_id: Some(address.operation_id.clone()),
+                    },
+                    kind: TrajectoryNotificationKind::RunError,
+                    summary: message,
+                    recorded_at: crate::util::now_ms(),
+                },
+            ))
+            .await;
     }
 }

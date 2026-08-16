@@ -1,34 +1,20 @@
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
 use piko_protocol::{AgentInstanceLifecycle, MessageContent};
 use tracing::Instrument;
 
 use crate::api::{ProtocolError, UserInteractionResponse};
-use crate::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use crate::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner, TrajectoryRegistryPort};
 
 use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
 #[async_trait]
 impl AgentRunRunner for OrchAgentRunRunner {
-    async fn prompt_debug_snapshot(
-        &self,
-        session_id: &str,
-        agent_instance_id: &str,
-    ) -> Option<piko_protocol::PromptDebugSnapshot> {
-        let mut snapshot = self
-            .prompt_debug_snapshots
-            .lock()
-            .unwrap()
-            .get(&(session_id.to_string(), agent_instance_id.to_string()))
-            .cloned()?;
-        snapshot.model_inputs = crate::telemetry::handle().model_inputs(
-            session_id,
-            agent_instance_id,
-            &snapshot.run_id,
-        );
-        Some(snapshot)
+    fn trajectory_registry(&self) -> Arc<dyn TrajectoryRegistryPort> {
+        Arc::new(self.trajectory_recorders.clone())
     }
 
     async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>piko trajectory</title>
+<link rel="stylesheet" href="/assets/viewer.css">
+</head>
+<body>
+<header>
+  <strong>piko trajectory</strong>
+  <button id="refresh">refresh</button>
+  <span id="status" class="muted"></span>
+</header>
+<main>
+  <aside>
+    <h3>sessions <span id="session-count" class="muted"></span></h3>
+    <div id="sessions"></div>
+  </aside>
+  <section>
+    <div id="runs-strip"><span class="muted">select a session to load runs</span></div>
+    <div id="timeline"><p class="muted" style="padding:12px">select a run to see its timeline</p></div>
+    <div id="messages"><p class="muted">messages appear here in chronological order</p></div>
+  </section>
+</main>
+<script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>

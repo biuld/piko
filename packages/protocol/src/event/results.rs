@@ -50,10 +50,6 @@ pub enum CommandResult {
         commands: Vec<HostCommandDescriptor>,
         timestamp: i64,
     },
-    PromptDebugged {
-        snapshot: crate::PromptDebugSnapshot,
-        timestamp: i64,
-    },
     RolloutPaged {
         page: crate::RolloutPage,
         timestamp: i64,

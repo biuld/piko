@@ -172,7 +172,6 @@ pub enum SlashAction {
     ListProcesses,
     ListMcpStatus,
     RequestDiff,
-    RequestPromptDebug,
 }
 
 #[derive(Debug)]
@@ -282,8 +281,6 @@ pub enum LocalCommandId {
     Agents,
     /// Open last/active turn workspace diff.
     Diff,
-    /// Fetch latest prompt-assembly debug snapshot.
-    PromptDebug,
     Quit,
 }
 
@@ -357,12 +354,6 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         "Turn diff",
         "Show workspace diff for the last or active turn",
     ),
-    (
-        "/prompt-debug",
-        LocalCommandId::PromptDebug,
-        "Prompt debug",
-        "Show latest prompt assembly and model-input diagnostics",
-    ),
     ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
 ];
 
@@ -427,7 +418,6 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Usage => SurfaceAction::OpenUsage.into(),
         LocalCommandId::Notifications => SurfaceAction::OpenNotifications.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),
-        LocalCommandId::PromptDebug => SlashAction::RequestPromptDebug.into(),
         LocalCommandId::Quit => AppAction::Quit.into(),
     }
 }

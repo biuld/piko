@@ -119,7 +119,6 @@ mod foreground_tests;
 mod modal_tests;
 mod pointer_more_tests;
 mod pointer_tests;
-mod prompt_tests;
 mod queue_tests;
 mod session_tests;
 mod settings_tests;

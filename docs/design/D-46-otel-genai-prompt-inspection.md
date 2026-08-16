@@ -1,6 +1,7 @@
 # D-46: OTel GenAI prompt inspection
 
-> Status: implemented (stages 1-2)
+> Status: superseded
+> Superseded by: [F-36/D-49](../features/F-36-agent-run-trajectory.md)
 > Implements: [F-15](../features/F-15-observability.md) (OTel prompt-inspection slice)
 > Verification: [V-46](../verification/V-46-otel-genai-prompt-inspection.md)
 
@@ -87,8 +88,9 @@ misconfigured or bypassed.
 
 1. **Implemented:** add a safe `piko.prompt.assemble` metadata span and adopt
    GenAI names for the model client span where applicable.
-2. **Implemented:** add the explicit content-export setting and model-boundary
-   GenAI content attributes with size limits and tests proving default absence.
+2. **Removed with F-36:** the content-export setting and GenAI content
+   attributes were deleted; the durable trajectory is the only content
+   capture. OTel metrics and unified logs remain.
 3. **Follow-up:** provide a reference OTel Collector plus backend configuration and verify
    trace rendering, redaction, and retention.
 4. **Follow-up:** add model-output content if needed, with streaming buffering

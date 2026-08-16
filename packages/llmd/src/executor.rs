@@ -6,6 +6,9 @@ use async_stream::stream;
 use async_trait::async_trait;
 use futures::StreamExt;
 use piko_protocol::config::RetryConfig;
+use piko_protocol::{
+    TrajectoryFallback, TrajectoryIdentity, TrajectoryModelStepRecord, TrajectoryRetryAttempt,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
@@ -177,11 +180,6 @@ impl InferenceGateway for LlmdExecutor {
         let protocol_adapter = adapter(target.protocol.kind());
         let plan = crate::checkpoint::plan(&target, &request.conversation)?;
         let body = protocol_adapter.encode(&request, &target, &plan, true)?;
-        let content_attributes = self
-            .telemetry
-            .capture_content()
-            .then(|| crate::genai_telemetry::content_attributes(&request));
-
         let span = tracing::info_span!(
             "llm.request",
             otel.kind = "client",
@@ -193,39 +191,46 @@ impl InferenceGateway for LlmdExecutor {
             provider = %request.model.provider,
             protocol = ?target.protocol.kind(),
             streaming = true,
-            "gen_ai.operation.name" = "chat",
-            "gen_ai.provider.name" = %request.model.provider,
-            "gen_ai.conversation.id" = %request.context.session_id,
-            "gen_ai.request.model" = %request.model.model,
-            "gen_ai.request.stream" = true,
-            "gen_ai.request.max_tokens" = tracing::field::Empty,
-            "gen_ai.request.reasoning.level" = tracing::field::Empty,
         );
-        if let Some(max_tokens) = request.options.max_output_tokens {
-            span.record("gen_ai.request.max_tokens", max_tokens as u64);
-        }
-        if let Some(reasoning) = request.options.reasoning_effort.as_ref() {
-            span.record("gen_ai.request.reasoning.level", reasoning.as_str());
-        }
-        if let Some(content) = content_attributes {
-            span.in_scope(|| self.telemetry.record_genai_content(&content));
-        }
-        self.telemetry
-            .record_model_input(piko_protocol::ModelInputDebugSnapshot {
-                session_id: request.context.session_id.clone(),
-                agent_instance_id: request.context.agent_instance_id.clone(),
-                run_id: request.context.run_id.clone(),
-                step_id: request.context.step_id.clone(),
-                provider: request.model.provider.clone(),
-                model: request.model.model.clone(),
-                request: crate::redaction::semantic_model_input(&request),
-                options: crate::redaction::semantic_inference_options(&request.options),
-            });
+        let step_started_at = now_ms();
+        let step_identity = TrajectoryIdentity {
+            session_id: request.context.session_id.clone(),
+            agent_instance_id: request.context.agent_instance_id.clone(),
+            run_id: request.context.run_id.clone(),
+            execution_id: None,
+            source_turn_id: None,
+        };
+        let step_capture = ModelStepCapture {
+            telemetry: Arc::clone(&self.telemetry),
+            identity: step_identity,
+            step_id: request.context.step_id.clone(),
+            provider: request.model.provider.clone(),
+            model: request.model.model.clone(),
+            request: crate::redaction::semantic_model_input(&request),
+            options: crate::redaction::semantic_inference_options(&request.options),
+            started_at: step_started_at,
+        };
+        self.telemetry.record_model_step(TrajectoryModelStepRecord {
+            identity: step_capture.identity.clone(),
+            step_id: step_capture.step_id.clone(),
+            provider: step_capture.provider.clone(),
+            model: step_capture.model.clone(),
+            request: step_capture.request.clone(),
+            options: step_capture.options.clone(),
+            started_at: step_capture.started_at,
+            finished_at: None,
+            duration_ms: None,
+            retries: Vec::new(),
+            fallback: None,
+            response: None,
+            message_id: None,
+        });
         let state = Arc::clone(&self.state);
         let middlewares = self.middlewares.clone();
         let telemetry = Arc::clone(&self.telemetry);
         let policy = RetryPolicy::from_config(&self.retry);
         let mut retry_state = RetryState::default();
+        let mut retries: Vec<TrajectoryRetryAttempt> = Vec::new();
         let initial = loop {
             match crate::transport::send(&state.client, &target, &body, true, &cancel)
                 .instrument(span.clone())
@@ -240,6 +245,7 @@ impl InferenceGateway for LlmdExecutor {
                         &cancel,
                         &telemetry,
                         &target,
+                        Some(&mut retries),
                     )
                     .instrument(span.clone())
                     .await
@@ -253,10 +259,19 @@ impl InferenceGateway for LlmdExecutor {
                 }
             }
         };
+        let mut fallback_info: Option<TrajectoryFallback> = None;
         let (initial_response, fallback) = match initial {
             Ok(response) => (Some(response), None),
             Err(error) if policy.enabled && target.streaming_fallback && error.is_retryable() => {
                 telemetry.record_fallback(&target.model, &target.id);
+                fallback_info = Some(TrajectoryFallback {
+                    from_provider: target.id.clone(),
+                    from_model: target.model.clone(),
+                    to_provider: target.id.clone(),
+                    to_model: target.model.clone(),
+                    reason: "streaming fallback".into(),
+                    at: now_ms(),
+                });
                 let result = execute_fallback(&state.client, &request, &target, &cancel)
                     .instrument(span.clone())
                     .await?;
@@ -403,9 +418,63 @@ impl InferenceGateway for LlmdExecutor {
                             }
                         }
         };
+        let output = wrap_model_step_finish(output, step_capture, retries, fallback_info);
         Ok(InferenceExecution {
             events: Box::pin(InstrumentedStream::new(Box::pin(output), span)),
             handle: None,
         })
     }
+}
+
+/// Per-step capture context shared between the live start record and the
+/// finish record.
+struct ModelStepCapture {
+    telemetry: Arc<dyn crate::telemetry::GatewayTelemetry>,
+    identity: TrajectoryIdentity,
+    step_id: String,
+    provider: String,
+    model: String,
+    request: serde_json::Value,
+    options: serde_json::Value,
+    started_at: i64,
+}
+
+/// Forward the step stream and record the finished model-step record once the
+/// stream ends. If the consumer abandons the stream, no finish record is
+/// written and the step stays "started" (interrupted).
+fn wrap_model_step_finish(
+    output: impl futures_core::Stream<Item = InferenceEvent> + Send + 'static,
+    capture: ModelStepCapture,
+    retries: Vec<TrajectoryRetryAttempt>,
+    fallback: Option<TrajectoryFallback>,
+) -> impl futures_core::Stream<Item = InferenceEvent> + Send + 'static {
+    stream! {
+        let mut inner = Box::pin(output);
+        while let Some(event) = inner.next().await {
+            yield event;
+        }
+        let finished_at = now_ms();
+        capture.telemetry.record_model_step(TrajectoryModelStepRecord {
+            identity: capture.identity,
+            step_id: capture.step_id,
+            provider: capture.provider,
+            model: capture.model,
+            request: capture.request,
+            options: capture.options,
+            started_at: capture.started_at,
+            finished_at: Some(finished_at),
+            duration_ms: Some(finished_at.saturating_sub(capture.started_at) as u64),
+            retries,
+            fallback,
+            response: None,
+            message_id: None,
+        });
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }

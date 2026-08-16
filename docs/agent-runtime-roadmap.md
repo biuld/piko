@@ -45,7 +45,7 @@ M4 Ecosystem                 partial
 M5 Multi-agent depth         complete for committed scope
  └─ I followup/interrupt/list/wait · agent roles · fragments
 M6 Observability & ops       complete
- └─ L tracing/usage · rollout · diff-tracking · prompt debugging
+ └─ L tracing/usage · rollout · diff-tracking · trajectory (F-36)
 M7 Extension                 deferred
  └─ K realtime/multimodal
 ```
@@ -170,7 +170,7 @@ Status: **complete for committed scope**.
 | Per-turn and cumulative usage accounting | implemented | D-29/V-29 |
 | Durable rollout recorder/paging | implemented | D-31/V-31; existing v3 JSONL is the recorder |
 | Exact turn-diff tracking | implemented | D-32/V-32 |
-| Prompt and model-input debugging | implemented | D-30/V-30; adapter-private HTTP rendering intentionally excluded |
+| Prompt and model-input debugging | superseded by F-36 trajectory | D-30 removed; the durable trajectory + loopback web viewer is the inspection surface (D-49/V-49) |
 
 There is no JSON/file-log fallback: when OTel export is disabled, hostd logs
 to stderr.

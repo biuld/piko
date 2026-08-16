@@ -136,6 +136,43 @@ impl SessionStore {
             .map_err(|error| self.storage_error(error))
     }
 
+    /// Append one observational trajectory record as an optional (ignorable)
+    /// journal event (F-36). Best-effort: callers treat failure as a dropped
+    /// record; it never affects acknowledged session facts or the turn.
+    pub(crate) fn append_optional_event(
+        &self,
+        commit_id: &str,
+        committed_at: i64,
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<u64, SessionStorageError> {
+        let journal = self.journal()?;
+        let revision = journal.aggregate().revision;
+        let raw = RawEvent::optional(commit_id, event_type, payload);
+        let proposed = ProposedCommit {
+            commit_id: commit_id.to_string(),
+            committed_at,
+            causation_id: None,
+            correlation_id: None,
+            events: vec![raw],
+            extensions: BTreeMap::new(),
+        };
+        journal
+            .append(revision, proposed)
+            .map(|commit| commit.revision)
+            .map_err(|error| self.storage_error(error))
+    }
+
+    /// All raw journal events in commit order, including optional
+    /// (`ignorable`) event types that the acknowledged projection skips.
+    pub fn raw_journal_events(
+        &self,
+    ) -> Result<Vec<piko_session_store::RawJournalEvent>, SessionStorageError> {
+        self.journal()?
+            .raw_events()
+            .map_err(|error| self.storage_error(error))
+    }
+
     fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {
         match error {
             piko_session_store::StoreError::NotFound(path) => {

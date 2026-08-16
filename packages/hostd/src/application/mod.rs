@@ -12,6 +12,8 @@ pub mod host_app;
 mod observability;
 mod observation;
 pub mod sessions;
+mod trajectory;
 pub mod turns;
 
 pub use host_app::HostApp;
+pub use trajectory::TrajectoryQuery;

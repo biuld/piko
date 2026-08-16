@@ -34,8 +34,8 @@ fn expanded_host_actions_emit_minimal_merge_patches() {
         json!({ "prompt": { "cache-policy": "ephemeral" } })
     );
     assert_eq!(
-        patch(SettingsAction::ObservabilityCaptureContent(true)),
-        json!({ "observability": { "capture-content": true } })
+        patch(SettingsAction::Trajectory(true)),
+        json!({ "trajectory": { "enabled": true } })
     );
 }
 

@@ -41,9 +41,9 @@ pub(crate) fn sanitize_sensitive_text(message: &str) -> String {
 }
 
 /// Remove provider continuation resources and credential-shaped values from
-/// local prompt-debug snapshots. These values may have originated inside an
-/// opaque checkpoint and must not become observable again after wire
-/// encoding.
+/// local trajectory model-step records. These values may have originated
+/// inside an opaque checkpoint and must not become observable again after
+/// wire encoding.
 pub(crate) fn redact_model_input(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(object) => {

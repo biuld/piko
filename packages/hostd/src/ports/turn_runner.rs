@@ -1,10 +1,13 @@
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::api::{ProtocolError, ServerMessage};
 use async_trait::async_trait;
 use futures_core::Stream;
 use piko_orchd_api::SessionSubscription;
+
+use super::{NoopTrajectoryRegistry, TrajectoryRegistryPort};
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
@@ -80,13 +83,10 @@ pub struct AgentRunFailure {
 
 #[async_trait]
 pub trait AgentRunRunner: Send + Sync {
-    /// Latest successful production prompt assembly for diagnostics.
-    async fn prompt_debug_snapshot(
-        &self,
-        _session_id: &str,
-        _agent_instance_id: &str,
-    ) -> Option<piko_protocol::PromptDebugSnapshot> {
-        None
+    /// Shared trajectory recorder registry (F-36). Defaults to a no-op for
+    /// runners without trajectory capture.
+    fn trajectory_registry(&self) -> Arc<dyn TrajectoryRegistryPort> {
+        Arc::new(NoopTrajectoryRegistry)
     }
 
     /// Live set of external processes spawned by the `process` tool (F-08);

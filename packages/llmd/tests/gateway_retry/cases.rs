@@ -30,7 +30,7 @@ async fn responses_uses_native_stream_and_non_streaming_contracts() {
 }
 
 #[tokio::test]
-async fn captures_actual_model_input_before_provider_dispatch() {
+async fn captures_actual_model_step_before_provider_dispatch() {
     let stub = Stub::start(Script {
         steps: vec![Step::StreamSuccess],
     })
@@ -43,17 +43,23 @@ async fn captures_actual_model_input_before_provider_dispatch() {
         .unwrap();
     let _ = stream.events.collect::<Vec<_>>().await;
 
-    let inputs = capture.inputs.lock().unwrap();
-    assert_eq!(inputs.len(), 1);
-    assert_eq!(inputs[0].session_id, "session-1");
-    assert_eq!(inputs[0].agent_instance_id, "agent-1");
-    assert_eq!(inputs[0].provider, "openai");
-    assert_eq!(
-        inputs[0].request["items"][0]["kind"]["User"]["content"],
-        "hi"
-    );
-    assert_eq!(inputs[0].options["delivery"], "streaming");
-    assert!(inputs[0].options.get("protocol").is_none());
+    let steps = capture.steps.lock().unwrap();
+    assert_eq!(steps.len(), 2);
+    let started = steps
+        .iter()
+        .find(|step| step.finished_at.is_none())
+        .expect("started record present");
+    assert_eq!(started.identity.session_id, "session-1");
+    assert_eq!(started.identity.agent_instance_id, "agent-1");
+    assert_eq!(started.provider, "openai");
+    assert_eq!(started.request["items"][0]["kind"]["User"]["content"], "hi");
+    assert_eq!(started.options["delivery"], "streaming");
+    assert!(started.options.get("protocol").is_none());
+    let finished = steps
+        .iter()
+        .find(|step| step.finished_at.is_some())
+        .expect("finished record present");
+    assert!(finished.duration_ms.is_some());
 }
 
 #[tokio::test]

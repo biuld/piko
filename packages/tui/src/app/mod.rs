@@ -420,17 +420,17 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
                 }
             })
         }
-        SettingsAction::ObservabilityCaptureContent(value) => {
-            serde_json::json!({
-                "observability": {
-                    "capture-content": value
-                }
-            })
-        }
         SettingsAction::ObservabilityEndpoint(endpoint) => {
             serde_json::json!({
                 "observability": {
                     "otel-endpoint": endpoint
+                }
+            })
+        }
+        SettingsAction::Trajectory(value) => {
+            serde_json::json!({
+                "trajectory": {
+                    "enabled": value
                 }
             })
         }

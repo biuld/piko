@@ -281,5 +281,44 @@
     "overflow": "await_capacity",
     "closure": "client_disconnected",
     "cancellation": "disconnect_only"
+  },
+  {
+    "id": "hostd.trajectory.writes",
+    "kind": "mailbox",
+    "owner": "TrajectoryRecorder",
+    "producers": [
+      "OrchAgentRunRunner",
+      "LlmdExecutor",
+      "HostPromptAssemblyPort",
+      "ExecutionActor"
+    ],
+    "consumer": "TrajectoryWriterTask",
+    "scope": "session",
+    "delivery": "best_effort",
+    "capacity": {
+      "type": "bounded",
+      "value": 1024
+    },
+    "overflow": "reject_overload",
+    "closure": "runtime_unavailable",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "hostd.trajectory.live",
+    "kind": "observation",
+    "owner": "TrajectoryWriterTask",
+    "producers": [
+      "TrajectoryWriterTask"
+    ],
+    "consumer": "TrajectoryWebViewer",
+    "scope": "session",
+    "delivery": "best_effort",
+    "capacity": {
+      "type": "bounded",
+      "value": 256
+    },
+    "overflow": "drop_newest",
+    "closure": "no_subscribers",
+    "cancellation": "drop_interest_only"
   }
 ]

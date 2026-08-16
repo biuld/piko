@@ -194,40 +194,6 @@ pub struct PromptAssemblyRequest {
     pub tool_catalog: ResolvedToolCatalog,
 }
 
-/// Latest successful production prompt assembly captured for diagnostics.
-///
-/// This is process-local observational state, not a durable session record.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct PromptDebugSnapshot {
-    pub session_id: String,
-    pub agent_instance_id: AgentInstanceId,
-    pub run_id: String,
-    pub run_prompt: SemanticRunPrompt,
-    /// Retained prompt-resource messages in injection order: world-state,
-    /// then mentions. Later orchd-owned context is outside this snapshot.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub resource_messages: Vec<Message>,
-    pub tool_catalog: ResolvedToolCatalog,
-    /// Actual llmd model requests produced from this assembly, in step order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub model_inputs: Vec<ModelInputDebugSnapshot>,
-}
-
-/// Provider-neutral request immediately before llmd enters the provider adapter.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInputDebugSnapshot {
-    pub session_id: String,
-    pub agent_instance_id: AgentInstanceId,
-    pub run_id: String,
-    pub step_id: String,
-    pub provider: String,
-    pub model: String,
-    pub request: serde_json::Value,
-    pub options: serde_json::Value,
-}
-
 /// One bounded page from an AgentInstance's append-only rollout transcript.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

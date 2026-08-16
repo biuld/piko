@@ -56,6 +56,7 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         features: merge_features(base.features, overrides.features),
         execution: merge_execution(base.execution, overrides.execution),
         observability: merge_observability(base.observability, overrides.observability),
+        trajectory: overrides.trajectory.or(base.trajectory),
         session_dir: overrides.session_dir.or(base.session_dir),
         active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
         mcp_servers: if overrides.mcp_servers.is_empty() {
@@ -226,7 +227,6 @@ pub(crate) fn merge_observability(
             enabled: overrides.enabled.or(base.enabled),
             otel_endpoint: overrides.otel_endpoint.or(base.otel_endpoint),
             service_name: overrides.service_name.or(base.service_name),
-            capture_content: overrides.capture_content.or(base.capture_content),
         }),
         (base, overrides) => overrides.or(base),
     }

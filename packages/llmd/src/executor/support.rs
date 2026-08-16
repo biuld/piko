@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use piko_protocol::TrajectoryRetryAttempt;
 use tokio_util::sync::CancellationToken;
 
 use crate::gateway::{
@@ -42,6 +43,7 @@ pub(super) async fn retry_or_sleep(
     cancel: &CancellationToken,
     telemetry: &Arc<dyn crate::telemetry::GatewayTelemetry>,
     target: &ModelTarget,
+    trajectory_retries: Option<&mut Vec<TrajectoryRetryAttempt>>,
 ) -> bool {
     if !error.is_retryable() {
         return false;
@@ -63,6 +65,17 @@ pub(super) async fn retry_or_sleep(
         error_class(error.class),
         state.retries_used + 1,
     );
+    if let Some(retries) = trajectory_retries {
+        retries.push(TrajectoryRetryAttempt {
+            attempt: state.retries_used + 1,
+            delay_ms: delay,
+            error: crate::redaction::sanitize_diagnostic(&error.to_string()),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        });
+    }
     tracing::warn!(
         target: "llm.retry",
         attempt = state.retries_used + 1,

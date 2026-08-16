@@ -6,6 +6,7 @@ pub mod prompt_materials;
 pub mod session_repository;
 pub mod session_store;
 pub mod storage_types;
+pub mod trajectory_registry;
 pub mod transcript_estimator;
 pub mod turn_runner;
 
@@ -16,6 +17,7 @@ pub use storage_types::{
     AgentProjection, CommittedMessage, ExecutionProjection, PersistedSession, RecoveredAgent,
     SessionProjection, SessionStorageError,
 };
+pub use trajectory_registry::{NoopTrajectoryRegistry, TrajectoryRegistryPort};
 pub use transcript_estimator::TranscriptEstimator;
 pub use turn_runner::{
     AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,

@@ -105,7 +105,6 @@ impl AppState {
                 self.status = "listing mcp servers".to_string();
             }
             SlashAction::RequestDiff => effects.extend(self.request_turn_diff()),
-            SlashAction::RequestPromptDebug => effects.extend(self.request_prompt_debug()),
         }
         effects
     }

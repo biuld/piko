@@ -2,20 +2,20 @@
 //!
 //! Unified logging model: every `tracing` event is routed through the OTel
 //! pipeline. With `[observability] enabled = true` the subscriber exports
-//! spans to OTLP traces and all log records to OTLP logs — there is no
-//! hand-rolled file logger anymore. When observability is disabled a plain
-//! stderr console layer is installed so development still sees logs.
+//! metrics and all log records to OTLP — there is no hand-rolled file logger
+//! anymore. Spans are never exported (F-36: the durable trajectory is the
+//! causal record); internal `tracing` spans remain for console correlation.
+//! When observability is disabled a plain stderr console layer is installed
+//! so development still sees logs.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use opentelemetry::global;
-use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig};
+use opentelemetry_otlp::{LogExporter, MetricExporter, WithExportConfig};
 use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use thiserror::Error;
 use tracing_subscriber::{
     EnvFilter, Registry, fmt,
@@ -85,18 +85,15 @@ pub struct LogConfig {
     pub ansi: bool,
 }
 
-/// Holds the OTel providers; dropping flushes and shuts down exporters.
+/// Holds the OTel providers (metrics + logs); dropping flushes and shuts down
+/// exporters. Traces are intentionally not exported (F-36).
 pub struct LogGuard {
-    tracer_provider: Option<SdkTracerProvider>,
     meter_provider: Option<SdkMeterProvider>,
     logger_provider: Option<SdkLoggerProvider>,
 }
 
 impl Drop for LogGuard {
     fn drop(&mut self) {
-        if let Some(tracer_provider) = self.tracer_provider.take() {
-            let _ = tracer_provider.shutdown();
-        }
         if let Some(meter_provider) = self.meter_provider.take() {
             let _ = meter_provider.shutdown();
         }
@@ -166,16 +163,12 @@ pub fn resolve_config(cli: &HostdLogCli) -> Result<LogConfig, LogError> {
     Ok(LogConfig { filter, ansi: true })
 }
 
-type OtelLayer =
-    tracing_opentelemetry::OpenTelemetryLayer<Registry, opentelemetry_sdk::trace::Tracer>;
 type OtelLogsBridge = OpenTelemetryTracingBridge<SdkLoggerProvider, SdkLogger>;
 
 /// Providers and layers built when observability is enabled.
 #[derive(Default)]
 struct OtelRuntime {
-    layer: Option<OtelLayer>,
     logs_bridge: Option<OtelLogsBridge>,
-    tracer_provider: Option<SdkTracerProvider>,
     meter_provider: Option<SdkMeterProvider>,
     logger_provider: Option<SdkLoggerProvider>,
 }
@@ -195,50 +188,36 @@ pub fn init(
     let observability_enabled = observability
         .map(|obs| obs.enabled.unwrap_or(false))
         .unwrap_or(false);
-    let capture_content = observability
-        .and_then(|obs| obs.capture_content)
-        .unwrap_or(false);
 
     // Build OTel providers first so the global meter is installed before
     // `telemetry::init` binds instruments (and so batch exporters start).
     let otel = init_otel(observability)?;
-    crate::telemetry::init(observability_enabled, capture_content);
+    crate::telemetry::init(observability_enabled);
 
     let console = fmt::layer().with_writer(io::stderr).with_ansi(config.ansi);
     if observability_enabled {
-        install_layers(otel.layer, otel.logs_bridge, env_filter, console)?;
+        install_layers(otel.logs_bridge, env_filter, console)?;
     } else {
-        install_layers(None, None, env_filter, console)?;
+        install_layers(None, env_filter, console)?;
     }
 
     Ok(LogGuard {
-        tracer_provider: otel.tracer_provider,
         meter_provider: otel.meter_provider,
         logger_provider: otel.logger_provider,
     })
 }
 
-/// Compose the tracing subscriber. The OTel layers attach first (the trace
-/// layer's span lookup target is `Registry`); the generic bridge/filter/console
-/// layers adapt to whatever wraps them.
+/// Compose the tracing subscriber. The OTel logs bridge attaches first; the
+/// generic filter/console layers adapt to whatever wraps them.
 fn install_layers<F>(
-    otel_layer: Option<OtelLayer>,
     logs_bridge: Option<OtelLogsBridge>,
     env_filter: EnvFilter,
     console: F,
 ) -> Result<(), LogError>
 where
-    F: Layer<
-            Layered<
-                EnvFilter,
-                Layered<Option<OtelLogsBridge>, Layered<Option<OtelLayer>, Registry>>,
-            >,
-        > + Send
-        + Sync
-        + 'static,
+    F: Layer<Layered<EnvFilter, Layered<Option<OtelLogsBridge>, Registry>>> + Send + Sync + 'static,
 {
     Registry::default()
-        .with(otel_layer)
         .with(logs_bridge)
         .with(env_filter)
         .with(console)
@@ -270,21 +249,8 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
 
     ensure_otlp_no_proxy();
 
-    let traces_endpoint = otlp_signal_endpoint(&endpoint, "/v1/traces");
     let metrics_endpoint = otlp_signal_endpoint(&endpoint, "/v1/metrics");
     let logs_endpoint = otlp_signal_endpoint(&endpoint, "/v1/logs");
-
-    let span_exporter = SpanExporter::builder()
-        .with_http()
-        .with_endpoint(&traces_endpoint)
-        .build()
-        .map_err(|err| LogError::Otel(err.to_string()))?;
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_batch_exporter(span_exporter)
-        .with_resource(resource.clone())
-        .build();
-    let tracer = tracer_provider.tracer(service_name.clone());
-    let layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
     let metric_exporter = MetricExporter::builder()
         .with_http()
@@ -307,19 +273,16 @@ fn init_otel(observability: Option<&ObservabilitySettings>) -> Result<OtelRuntim
         .build();
     let logs_bridge = OpenTelemetryTracingBridge::new(&logger_provider);
 
-    global::set_tracer_provider(tracer_provider.clone());
     global::set_meter_provider(meter_provider.clone());
 
     // stderr: export errors are mostly silent; surface enablement for ops.
     eprintln!(
         "[piko-hostd] OTLP export enabled service={service_name} base={endpoint} \
-         traces={traces_endpoint} metrics={metrics_endpoint} logs={logs_endpoint}"
+         metrics={metrics_endpoint} logs={logs_endpoint} (traces disabled)"
     );
 
     Ok(OtelRuntime {
-        layer: Some(layer),
         logs_bridge: Some(logs_bridge),
-        tracer_provider: Some(tracer_provider),
         meter_provider: Some(meter_provider),
         logger_provider: Some(logger_provider),
     })

@@ -60,28 +60,6 @@ impl HostServer {
                     timestamp: now_ms(),
                 }),
             }]),
-            Command::PromptDebugGet {
-                session_id,
-                agent_instance_id,
-                ..
-            } => {
-                let runner = self.0.turn_runner.lock().await.clone();
-                let snapshot = runner
-                    .prompt_debug_snapshot(&session_id, &agent_instance_id)
-                    .await
-                    .ok_or_else(|| {
-                        ProtocolError::InvalidCommand(format!(
-                            "prompt debug snapshot unavailable for {session_id}/{agent_instance_id}"
-                        ))
-                    })?;
-                Ok(vec![ServerMessage::CommandResponse {
-                    command_id,
-                    result: Ok(crate::api::CommandResult::PromptDebugged {
-                        snapshot,
-                        timestamp: now_ms(),
-                    }),
-                }])
-            }
             Command::RolloutPageGet {
                 session_id,
                 agent_instance_id,

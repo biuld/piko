@@ -16,6 +16,17 @@ use serde::{Deserialize, Serialize};
 use crate::domain::prompts::WorldStateFacts;
 use crate::domain::sessions::{SessionModelRef, SessionState};
 
+/// One raw journal event surfaced to application-level observational readers
+/// (trajectory query). Optional event types are included; the acknowledged
+/// projection ignores them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawJournalEventRef {
+    pub revision: u64,
+    pub committed_at: i64,
+    pub event_type: String,
+    pub payload: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionProjection {
     pub session_id: String,

@@ -24,6 +24,7 @@ pub use journal::{
     DurableCommit, NewSession, OpenOptions, OpenedSession, ProposedCommit, RecoveryReport,
     SessionDescriptor, SessionStore, VerificationReport,
 };
+pub use journal_queries::RawJournalEvent;
 pub use projection::{
     ModelContinuity, StoredAgent, StoredExecution, StoredMessage, StoredTreeEntry,
 };

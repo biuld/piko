@@ -187,11 +187,11 @@ impl OrchAgentRunRunner {
                 .collect()
         };
 
-        Self {
+        let runner = Self {
             agent_runtime,
             active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             agent_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            prompt_debug_snapshots: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            trajectory_recorders: TrajectoryRecorderRegistry::global(),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             realtime_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),
             pending_approvals: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -222,7 +222,13 @@ impl OrchAgentRunRunner {
             observation_router: Arc::new(observation_router::SessionObservationRouter::default()),
             prompt_gate: Arc::new(tokio::sync::Mutex::new(())),
             context_tools,
-        }
+        };
+        // Wire the process telemetry sink to this runner's trajectory
+        // registry so model-step records captured in llmd land in the same
+        // per-session recorders (F-36). The composition root re-points this
+        // to the shared registry after replacing the runner's registry.
+        crate::telemetry::handle().set_trajectory_registry(runner.trajectory_recorders.clone());
+        runner
     }
 
     /// Wire the `new_context_window` tool callback (F-05). Hostd invokes the

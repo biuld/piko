@@ -13,7 +13,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::storage_types::{
-    AgentProjection, CommittedMessage, RecoveredAgent, SessionProjection, SessionStorageError,
+    AgentProjection, CommittedMessage, RawJournalEventRef, RecoveredAgent, SessionProjection,
+    SessionStorageError,
 };
 
 /// Narrow async read/query surface used by the application. The filesystem
@@ -43,6 +44,10 @@ pub trait SessionStorePort: Send + Sync {
     ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError>;
 
     async fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError>;
+
+    /// All raw journal events in commit order, including optional
+    /// (`ignorable`) event types (F-36 trajectory replay).
+    async fn raw_journal_events(&self) -> Result<Vec<RawJournalEventRef>, SessionStorageError>;
 }
 
 /// Opens or creates a [`SessionStorePort`] for a given session directory.

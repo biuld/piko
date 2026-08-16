@@ -1,4 +1,8 @@
 use super::*;
+use piko_protocol::{
+    TrajectoryChildRunRecord, TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
+    TrajectorySystemNotificationRecord, TrajectoryToolCallRecord, TrajectoryToolCallStatus,
+};
 
 impl ExecutionActor {
     pub(super) async fn execute_and_commit_tools(
@@ -28,7 +32,27 @@ impl ExecutionActor {
         let registry = self.services.tool_registry().clone();
         let model_step_index = self.state.model_step_index;
         let mut fresh_window_requested = false;
+        let mut tool_started_at: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
         for group in tool_batch::group_tool_calls(tool_calls, routes) {
+            for tc in &group.calls {
+                let started_at = now_ms();
+                tool_started_at.insert(tc.id.clone(), started_at);
+                self.record_trajectory_tool(TrajectoryRecord::ToolCall(TrajectoryToolCallRecord {
+                    identity: self.trajectory_identity(),
+                    call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    arguments: Some(tc.arguments.clone()),
+                    status: TrajectoryToolCallStatus::Started,
+                    started_at,
+                    finished_at: None,
+                    duration_ms: None,
+                    result: None,
+                    error: None,
+                    message_id: None,
+                }))
+                .await;
+            }
             let batch_span = tracing::info_span!(
                 "tool.batch",
                 session_id = %self.identity.session_id,
@@ -93,6 +117,15 @@ impl ExecutionActor {
                                 ),
                             )
                             .await?;
+                            if let Some(record) = record {
+                                self.record_finished_tool(
+                                    tc,
+                                    &record,
+                                    tool_started_at.remove(&tc.id).unwrap_or_default(),
+                                    parent_message_id,
+                                )
+                                .await;
+                            }
                         }
                     }
                     ToolExecutionMode::Parallel => {
@@ -120,6 +153,13 @@ impl ExecutionActor {
                                 ),
                             )
                             .await?;
+                            self.record_finished_tool(
+                                tc,
+                                &result,
+                                tool_started_at.remove(&tc.id).unwrap_or_default(),
+                                parent_message_id,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -136,6 +176,72 @@ impl ExecutionActor {
             self.state.transcript.reset_to_recent_user();
         }
         Ok(())
+    }
+
+    fn trajectory_identity(&self) -> TrajectoryIdentity {
+        TrajectoryIdentity {
+            session_id: self.identity.session_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            run_id: self.identity.execution_id.clone(),
+            execution_id: None,
+            source_turn_id: self.identity.source_turn_id.clone(),
+        }
+    }
+
+    async fn record_trajectory_tool(&self, record: TrajectoryRecord) {
+        if let Some(port) = self.ports.ports().trajectory.clone() {
+            port.record(record).await;
+        }
+    }
+
+    async fn record_finished_tool(
+        &self,
+        tc: &ToolCallItem,
+        result: &piko_orchd_api::ToolExecResult,
+        started_at: i64,
+        parent_message_id: &str,
+    ) {
+        let finished_at = now_ms();
+        let status = if self.cancel.is_cancelled() {
+            TrajectoryToolCallStatus::Cancelled
+        } else if result.ok {
+            TrajectoryToolCallStatus::Completed
+        } else {
+            TrajectoryToolCallStatus::Failed
+        };
+        self.record_trajectory_tool(TrajectoryRecord::ToolCall(TrajectoryToolCallRecord {
+            identity: self.trajectory_identity(),
+            call_id: tc.id.clone(),
+            tool_name: tc.name.clone(),
+            arguments: None,
+            status,
+            started_at,
+            finished_at: Some(finished_at),
+            duration_ms: Some(finished_at.saturating_sub(started_at) as u64),
+            result: result.value.clone(),
+            error: result.error.as_ref().map(|error| error.message.clone()),
+            message_id: Some(tool_batch::tool_result_message_id(
+                parent_message_id,
+                tc.tool_call_index,
+            )),
+        }))
+        .await;
+        if matches!(tc.name.as_str(), "spawn_agent" | "spawn_agent_detached")
+            && let Some(child_id) = result
+                .value
+                .as_ref()
+                .and_then(|value| value.get("agent_instance_id"))
+                .and_then(serde_json::Value::as_str)
+        {
+            self.record_trajectory_tool(TrajectoryRecord::ChildRun(TrajectoryChildRunRecord {
+                identity: self.trajectory_identity(),
+                child_agent_instance_id: child_id.into(),
+                child_run_id: None,
+                spawned_at: started_at,
+                completed_at: None,
+            }))
+            .await;
+        }
     }
 
     pub(super) fn resolve_fallback_model(
@@ -198,9 +304,33 @@ impl ExecutionActor {
         };
         self.commit_message(message, steering.message_id.clone())
             .await?;
+        let steer_summary = match &steering.content {
+            piko_protocol::MessageContent::String(text) => text.clone(),
+            piko_protocol::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .map(|block| format!("{block:?}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        self.record_trajectory_tool(TrajectoryRecord::SystemNotification(
+            TrajectorySystemNotificationRecord {
+                identity: self.trajectory_identity(),
+                kind: TrajectoryNotificationKind::SteerDelivered,
+                summary: steer_summary.chars().take(512).collect(),
+                recorded_at: now_ms(),
+            },
+        ))
+        .await;
         // The next model step must answer this message before further tool
         // work (F-35 / ADR-021).
         self.state.respond_after_steer = true;
         Ok(())
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }

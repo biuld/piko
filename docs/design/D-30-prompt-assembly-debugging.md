@@ -1,6 +1,7 @@
 # D-30: Prompt assembly debugging
 
-> Status: accepted
+> Status: superseded
+> Superseded by: [F-36/D-49](../features/F-36-agent-run-trajectory.md)
 > Implements: [F-15](../features/F-15-observability.md) (prompt-debugging slice)
 > Decisions: [ADR-002](../decisions/ADR-002-codex-modeling-reference.md)
 

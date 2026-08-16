@@ -1,11 +1,11 @@
-use std::sync::{Arc, Mutex};
-
 use async_trait::async_trait;
+use piko_orchd_api::TrajectoryCapturePort;
 
-use super::PromptDebugMap;
+use crate::infra::trajectory::TrajectoryRecorder;
+use crate::util::now_ms;
 
 pub(super) struct HostPromptAssemblyPort {
-    pub(super) snapshots: Arc<Mutex<PromptDebugMap>>,
+    pub(super) trajectory: Option<TrajectoryRecorder>,
 }
 
 #[async_trait]
@@ -38,29 +38,27 @@ impl piko_orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
         span.in_scope(|| {
             let run_prompt = crate::domain::prompts::assemble_agent_run_prompt(&request);
             record_assembly_provenance(&span, &request, &run_prompt);
-            crate::telemetry::handle().begin_prompt_run(
-                &request.session_id,
-                &request.agent_instance_id,
-                &request.run_id,
-            );
-            let mut resource_messages = Vec::new();
-            if let Some(world_state) = request.resources.world_state.clone() {
-                resource_messages.push(world_state);
+            if let Some(recorder) = self.trajectory.clone() {
+                let record = piko_protocol::TrajectoryRecord::Assembly(
+                    piko_protocol::TrajectoryAssemblyRecord {
+                        identity: piko_protocol::TrajectoryIdentity {
+                            session_id: request.session_id.clone(),
+                            agent_instance_id: request.agent_instance_id.clone(),
+                            run_id: request.run_id.clone(),
+                            execution_id: None,
+                            source_turn_id: None,
+                        },
+                        assembly_version: run_prompt.assembly_version,
+                        prompt_digest: run_prompt.source_digest.clone(),
+                        prompt: run_prompt.clone(),
+                        tool_catalog: request.tool_catalog.clone(),
+                        recorded_at: now_ms(),
+                    },
+                );
+                tokio::spawn(async move {
+                    recorder.record(record).await;
+                });
             }
-            resource_messages.extend(request.resources.user_mentions.clone());
-            let snapshot = piko_protocol::PromptDebugSnapshot {
-                session_id: request.session_id.clone(),
-                agent_instance_id: request.agent_instance_id.clone(),
-                run_id: request.run_id.clone(),
-                run_prompt: run_prompt.clone(),
-                resource_messages,
-                tool_catalog: request.tool_catalog.clone(),
-                model_inputs: Vec::new(),
-            };
-            self.snapshots
-                .lock()
-                .unwrap()
-                .insert((request.session_id, request.agent_instance_id), snapshot);
             Ok(run_prompt)
         })
     }
@@ -118,13 +116,14 @@ fn record_assembly_provenance(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use piko_orchd_api::PromptAssemblyPort;
     use piko_protocol::{
         AgentSpec, ContentTrust, Message, MessageContent, PromptAssemblyRequest,
-        PromptResourceSnapshot, PromptSource, ResolvedToolCatalog,
+        PromptResourceSnapshot, PromptSource, ResolvedToolCatalog, TRAJECTORY_EVENT_ASSEMBLY,
+        TrajectoryAssemblyRecord,
     };
+
+    use crate::infra::storage::SessionStore;
 
     use super::HostPromptAssemblyPort;
 
@@ -167,9 +166,13 @@ mod tests {
 
     #[tokio::test]
     async fn captures_and_replaces_successful_assembly_per_agent() {
-        let snapshots = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::create_session(temp.path(), "s1".into(), "/project".into(), 0).unwrap();
+        let recorder =
+            crate::infra::trajectory::TrajectoryRecorder::new(store.clone(), "s1".into());
         let port = HostPromptAssemblyPort {
-            snapshots: snapshots.clone(),
+            trajectory: Some(recorder),
         };
 
         let first = port
@@ -184,35 +187,49 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshots = snapshots.lock().unwrap();
-        assert_eq!(snapshots.len(), 2);
-        let captured = snapshots.get(&("s1".into(), "a1".into())).unwrap();
-        assert_eq!(captured.run_prompt, second);
-        assert_eq!(captured.run_id, "run-second");
-        assert_ne!(captured.run_prompt, first);
-        assert_eq!(captured.resource_messages.len(), 2);
-        assert!(matches!(
-            &captured.resource_messages[0],
-            Message::Context {
-                content: MessageContent::String(content),
-                ..
-            } if content == "world"
-        ));
-        assert!(matches!(
-            &captured.resource_messages[1],
-            Message::Context {
-                content: MessageContent::String(content),
-                ..
-            } if content == "mention"
-        ));
-        assert_eq!(captured.tool_catalog.digest, "tools-second");
-        assert_eq!(
-            snapshots
-                .get(&("s1".into(), "a2".into()))
-                .unwrap()
-                .tool_catalog
-                .digest,
-            "tools-other"
+        let assemblies = wait_for_assemblies(&store, 3).await;
+        let a1_second = assemblies
+            .iter()
+            .find(|record| {
+                record.identity.agent_instance_id == "a1" && record.identity.run_id == "run-second"
+            })
+            .expect("second assembly for a1");
+        assert_eq!(a1_second.prompt, second);
+        assert_ne!(a1_second.prompt, first);
+        assert_eq!(a1_second.tool_catalog.digest, "tools-second");
+        assert!(
+            assemblies
+                .iter()
+                .any(|record| record.identity.run_id == "run-first")
         );
+        assert!(assemblies.iter().any(|record| {
+            record.identity.agent_instance_id == "a2" && record.tool_catalog.digest == "tools-other"
+        }));
+    }
+
+    async fn wait_for_assemblies(
+        store: &SessionStore,
+        expected: usize,
+    ) -> Vec<TrajectoryAssemblyRecord> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let events = store.raw_journal_events().unwrap_or_default();
+            let assemblies = events
+                .iter()
+                .filter(|event| event.event.event_type == TRAJECTORY_EVENT_ASSEMBLY)
+                .filter_map(|event| {
+                    serde_json::from_value::<TrajectoryAssemblyRecord>(event.event.payload.clone())
+                        .ok()
+                })
+                .collect::<Vec<_>>();
+            if assemblies.len() >= expected {
+                return assemblies;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "trajectory assembly records not appended"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 }

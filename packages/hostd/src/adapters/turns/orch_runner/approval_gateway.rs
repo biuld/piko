@@ -1,11 +1,17 @@
 use async_trait::async_trait;
+use piko_orchd_api::TrajectoryCapturePort;
 use piko_orchd_api::{ApprovalGateway, ToolApprovalDecision, ToolApprovalRequest};
+use piko_protocol::{
+    TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
+    TrajectorySystemNotificationRecord,
+};
 
 use super::OrchAgentRunRunner;
 use crate::adapters::turns::approval::ApprovalScope;
 use crate::domain::guardian::{GuardianConfig, GuardianReviewRequest, GuardianState};
 use crate::domain::permissions::CommandDecision;
 use crate::domain::safety::WriteSafetyDecision;
+use crate::util::now_ms;
 
 #[async_trait]
 impl ApprovalGateway for OrchAgentRunRunner {
@@ -52,9 +58,15 @@ impl ApprovalGateway for OrchAgentRunRunner {
                     prefix = %prefix,
                     "Permission policy denied command (fail closed)"
                 );
-                return ToolApprovalDecision::PermissionDenied {
-                    reason: format!("command prefix '{prefix}' is denied by permission policy"),
-                };
+                let reason = format!("command prefix '{prefix}' is denied by permission policy");
+                self.record_trajectory_notification(
+                    request.host_context.as_ref().map(|c| c.session_id.as_str()),
+                    &request.agent_instance_id,
+                    TrajectoryNotificationKind::ToolDenied,
+                    format!("{}: {reason}", request.tool_name),
+                )
+                .await;
+                return ToolApprovalDecision::PermissionDenied { reason };
             }
             Some(CommandDecision::Allow) => {
                 tracing::event!(
@@ -144,6 +156,13 @@ impl ApprovalGateway for OrchAgentRunRunner {
                         reason = %reason,
                         "Safety assessment rejected workspace write"
                     );
+                    self.record_trajectory_notification(
+                        request.host_context.as_ref().map(|c| c.session_id.as_str()),
+                        &request.agent_instance_id,
+                        TrajectoryNotificationKind::ToolDenied,
+                        format!("{}: {reason}", request.tool_name),
+                    )
+                    .await;
                     return ToolApprovalDecision::SafetyRejected { reason };
                 }
                 WriteSafetyDecision::AskUser => {}
@@ -278,6 +297,13 @@ impl ApprovalGateway for OrchAgentRunRunner {
                 },
             )
             .await;
+        self.record_trajectory_notification(
+            Some(&session_id),
+            &request.agent_instance_id,
+            TrajectoryNotificationKind::ApprovalRequested,
+            format!("approval requested for {}", request.tool_name),
+        )
+        .await;
 
         let decision = match tokio::time::timeout(self.approval_timeout, rx).await {
             Ok(Ok(d)) => d,
@@ -311,6 +337,13 @@ impl ApprovalGateway for OrchAgentRunRunner {
                     "Tool approval expired: no decision before deadline"
                 );
                 self.reset_guardian_state(&session_id);
+                self.record_trajectory_notification(
+                    Some(&session_id),
+                    &request.agent_instance_id,
+                    TrajectoryNotificationKind::ApprovalResolved,
+                    format!("approval for {} expired", request.tool_name),
+                )
+                .await;
                 return ToolApprovalDecision::Expired;
             }
         };
@@ -329,6 +362,13 @@ impl ApprovalGateway for OrchAgentRunRunner {
             pending.remove(&approval_id);
         }
         self.reset_guardian_state(&session_id);
+        self.record_trajectory_notification(
+            Some(&session_id),
+            &request.agent_instance_id,
+            TrajectoryNotificationKind::ApprovalResolved,
+            format!("approval for {} resolved: {decision:?}", request.tool_name),
+        )
+        .await;
 
         if !cwd.is_empty() {
             let store = self.get_approval_store(&cwd);
@@ -418,5 +458,56 @@ impl OrchAgentRunRunner {
 
     fn reset_guardian_state(&self, session_id: &str) {
         self.guardian_states.lock().unwrap().remove(session_id);
+    }
+
+    /// Emit a best-effort system-notification trajectory record for the
+    /// session's active run (F-36). No-op when the session has no recorder
+    /// or no active run carrying the identity.
+    async fn record_trajectory_notification(
+        &self,
+        session_id: Option<&str>,
+        agent_instance_id: &str,
+        kind: TrajectoryNotificationKind,
+        summary: String,
+    ) {
+        let Some(session_id) = session_id else {
+            return;
+        };
+        let Some(recorder) = self.trajectory_recorders.get(session_id) else {
+            return;
+        };
+        let Some(operation_id) = self
+            .active_agent_runs
+            .lock()
+            .unwrap()
+            .get(&(session_id.to_string(), agent_instance_id.to_string()))
+            .map(|run| run.run_id.clone())
+        else {
+            return;
+        };
+        // The trajectory run identity is the orchd execution id, derived by
+        // orchd as `stable("exec", [session, agent, request_id])` where the
+        // root-turn request id is the hostd operation id. Replicate that
+        // deterministic derivation so notifications join the right run.
+        let run_id = piko_orchd_api::stable_internal_id(
+            "exec",
+            &[session_id, agent_instance_id, &operation_id],
+        );
+        recorder
+            .record(TrajectoryRecord::SystemNotification(
+                TrajectorySystemNotificationRecord {
+                    identity: TrajectoryIdentity {
+                        session_id: session_id.to_string(),
+                        agent_instance_id: agent_instance_id.to_string(),
+                        run_id,
+                        execution_id: None,
+                        source_turn_id: None,
+                    },
+                    kind,
+                    summary,
+                    recorded_at: now_ms(),
+                },
+            ))
+            .await;
     }
 }

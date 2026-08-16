@@ -61,6 +61,10 @@ pub struct HostSettings {
     // ---- Observability ----
     pub observability: Option<ObservabilitySettings>,
 
+    // ---- Trajectory web viewer (F-36) ----
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trajectory: Option<TrajectorySettings>,
+
     // ---- Paths ----
     pub session_dir: Option<String>,
 
@@ -356,16 +360,26 @@ pub struct ExecutionSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct ObservabilitySettings {
-    /// Master switch for OTLP export (traces + metrics). Default: off.
+    /// Master switch for OTLP export (metrics + logs; traces are not
+    /// exported — the trajectory is the causal record, F-36). Default: off.
     pub enabled: Option<bool>,
-    /// OTLP HTTP endpoint (base URL; `/v1/traces` and `/v1/metrics` are
+    /// OTLP HTTP endpoint (base URL; `/v1/metrics` and `/v1/logs` are
     /// appended automatically). Default: `http://127.0.0.1:4318`.
     pub otel_endpoint: Option<String>,
     /// OTel `service.name` resource attribute. Default: `piko-hostd`.
     pub service_name: Option<String>,
-    /// Export prompt, transcript, and tool-definition bodies on GenAI spans.
-    /// Sensitive and independently opt-in; default: false.
-    pub capture_content: Option<bool>,
+}
+
+/// F-36: `[trajectory]` section for the read-only loopback web viewer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct TrajectorySettings {
+    /// Serve the read-only trajectory web viewer. Default: false.
+    pub enabled: Option<bool>,
+    /// Loopback bind address. Default: `127.0.0.1`.
+    pub bind: Option<String>,
+    /// Viewer HTTP port. Default: 3847.
+    pub port: Option<u16>,
 }
 
 mod manager;

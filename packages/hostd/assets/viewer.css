@@ -1,0 +1,73 @@
+/* Design tokens: single source of truth for colors and dimensions.
+   The canvas reads these at runtime via getComputedStyle. */
+:root {
+  color-scheme: light dark;
+  --role-context: #888888;
+  --role-user: #4488ff;
+  --role-assistant: #22aa22;
+  --role-toolCall: #aa6633;
+  --role-toolResult: #6666ff;
+  --role-system: #ffaa33;
+  --label-w: 92px;
+  --track-h: 34px;
+  --ruler-h: 18px;
+  --slot-w: 24px;
+  --brick-w: 22px;
+  --pad-x: 8px;
+  --pad-bottom: 12px;
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; }
+body { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; height: 100vh; display: flex; flex-direction: column; }
+header { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #8884; }
+header strong { margin-right: 8px; }
+.muted { color: #888; }
+main { flex: 1; display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
+
+/* left: sessions */
+aside { border-right: 1px solid #8884; overflow: auto; padding: 8px; min-height: 0; }
+.session, .run-chip { padding: 6px 8px; margin: 3px 0; border: 1px solid #8884; border-radius: 6px; cursor: pointer; word-break: break-all; }
+.session.active, .run-chip.active { outline: 2px solid #66f; background: #66f1; }
+.session .muted, .run-chip .muted { font-size: 11px; }
+.badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 1.4; }
+.badge.completed { background: #2a2; color: #fff; }
+.badge.failed { background: #a33; color: #fff; }
+.badge.cancelled { background: #a63; color: #fff; }
+.badge.running { background: #36a; color: #fff; }
+.dropped { color: #e55; font-weight: 700; }
+
+/* right column */
+section { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#runs-strip { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #8884; overflow-x: auto; flex: none; }
+.run-chip { flex: none; min-width: 120px; margin: 0; }
+
+/* timeline: frozen label column + canvas scroller */
+#timeline { display: flex; flex: none; border: 1px solid #8884; }
+#timeline-labels { flex: none; width: var(--label-w); background: Canvas; border-right: 1px solid #8882; }
+#timeline-scroll { flex: 1; min-width: 0; position: relative; overflow-x: auto; overflow-y: hidden; overflow-anchor: none; scrollbar-gutter: stable; }
+#timeline-canvas { position: sticky; left: 0; top: 0; display: block; flex: none; cursor: pointer; }
+#timeline-spacer { flex: none; height: 1px; }
+#timeline-tooltip { position: absolute; z-index: 5; display: none; max-width: 320px; padding: 4px 8px; font-size: 11px; color: #ddd; background: #222d; border-radius: 4px; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-label { display: flex; align-items: center; height: var(--track-h); padding: 0 8px; font-size: 11px; color: #888; border-bottom: 1px solid #8882; }
+.timeline-ruler-spacer { height: var(--ruler-h); border-bottom: 1px solid #8882; }
+.timeline-bottom-spacer { height: var(--pad-bottom); }
+
+/* messages */
+#messages { flex: 1; overflow: auto; scrollbar-gutter: stable; padding: 8px 12px; min-height: 0; }
+.msg { border-left: 3px solid #888; margin: 6px 0; padding: 6px 10px; border-radius: 0 6px 6px 0; background: #0001; cursor: pointer; }
+.msg.selected { outline: 2px solid #66f; }
+.msg.user { border-color: var(--role-user); }
+.msg.assistant { border-color: var(--role-assistant); }
+.msg.toolCall { border-color: var(--role-toolCall); }
+.msg.toolResult { border-color: var(--role-toolResult); }
+.msg.context { border-color: var(--role-context); }
+.msg.system { border-color: var(--role-system); }
+.msg .role { font-weight: 700; margin-right: 8px; }
+.msg .time { float: right; color: #888; }
+.msg .preview { margin: 4px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; color: inherit; }
+.msg .full { display: none; white-space: pre-wrap; word-break: break-word; margin: 4px 0 0; background: #0002; padding: 6px; border-radius: 6px; }
+.msg.expanded .full { display: block; }
+.msg.expanded .preview { display: none; }
+.msg .hint { color: #888; font-size: 11px; }
+.error { color: #c33; }

@@ -4,7 +4,7 @@ mod context;
 mod presentation;
 mod tools;
 
-use super::mirror::{SettingsSnapshot, observability_summary, on_off};
+use super::mirror::{SettingsSnapshot, observability_summary, on_off, trajectory_summary};
 use crate::ui::components::menu::{MenuRow, MenuRowKind};
 
 /// Action applied when a setting option is confirmed.
@@ -34,8 +34,8 @@ pub enum SettingsAction {
     EnableAllTools,
     DisableTools,
     Observability(bool),
-    ObservabilityCaptureContent(bool),
     ObservabilityEndpoint(&'static str),
+    Trajectory(bool),
     Theme(&'static str),
     EditorMultiline(bool),
     EditorAutoResize(bool),
@@ -158,6 +158,7 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>> {
     rows.extend(tools::trust_rows(snap));
     rows.extend(tools::tool_rows(snap));
     rows.push(observability(snap));
+    rows.push(trajectory(snap));
     rows.extend(presentation::rows(snap));
     rows.push(section_choice(
         "Transport",
@@ -199,22 +200,32 @@ fn observability(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
                     SettingsAction::Observability(false),
                 ),
             ),
-            section_choice(
-                "GenAI Content",
-                on_off(host.observability_capture_content).into(),
-                Some("sensitive · restart hostd"),
-                None,
-                "GenAI Content",
-                binary_options(
-                    host.observability_capture_content,
-                    "Export prompt, transcript, and tool-definition bodies",
-                    "Export metadata only",
-                    SettingsAction::ObservabilityCaptureContent(true),
-                    SettingsAction::ObservabilityCaptureContent(false),
-                ),
-            ),
             presentation::otel_endpoint(snap),
         ],
+    )
+}
+
+fn trajectory(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
+    let host = &snap.host;
+    section_branch(
+        "Trajectory",
+        trajectory_summary(host),
+        Some("restart hostd"),
+        Some(GROUP_DIAGNOSTICS),
+        vec![section_choice(
+            "Trajectory Server",
+            on_off(host.trajectory_enabled).into(),
+            Some("restart hostd · loopback web viewer"),
+            None,
+            "Trajectory Server",
+            binary_options(
+                host.trajectory_enabled,
+                "Serve the trajectory web viewer after hostd restarts",
+                "Keep the trajectory server off after hostd restarts",
+                SettingsAction::Trajectory(true),
+                SettingsAction::Trajectory(false),
+            ),
+        )],
     )
 }
 
@@ -236,8 +247,8 @@ pub fn action_requires_hostd_restart(action: &SettingsAction) -> bool {
     matches!(
         action,
         SettingsAction::Observability(_)
-            | SettingsAction::ObservabilityCaptureContent(_)
             | SettingsAction::ObservabilityEndpoint(_)
+            | SettingsAction::Trajectory(_)
             | SettingsAction::Transport(_)
     )
 }

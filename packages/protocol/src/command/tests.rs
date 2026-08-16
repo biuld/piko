@@ -61,26 +61,6 @@ fn session_compact_without_mode_defaults_to_summarize() {
 }
 
 #[test]
-fn prompt_debug_get_round_trips() {
-    let value = serde_json::json!({
-        "type": "prompt_debug_get",
-        "command_id": "c-debug",
-        "session_id": "s1",
-        "agent_instance_id": "a1"
-    });
-    let command: Command = serde_json::from_value(value.clone()).unwrap();
-    assert!(matches!(
-        &command,
-        Command::PromptDebugGet {
-            command_id,
-            session_id,
-            agent_instance_id,
-        } if command_id == "c-debug" && session_id == "s1" && agent_instance_id == "a1"
-    ));
-    assert_eq!(serde_json::to_value(command).unwrap(), value);
-}
-
-#[test]
 fn rollout_page_get_round_trips() {
     let value = serde_json::json!({
         "type": "rollout_page_get",

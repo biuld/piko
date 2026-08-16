@@ -6,7 +6,6 @@ mod collector;
 mod execution;
 pub mod executor;
 pub mod gateway;
-mod genai_telemetry;
 pub mod middleware;
 pub mod modeling;
 mod protocols;

@@ -122,6 +122,9 @@ impl OrchAgentRunRunner {
                 &recovered_agents,
                 Arc::clone(&self.observation_router),
             ));
+            let trajectory_recorder = self
+                .trajectory_recorders
+                .get_or_create(session_id, store.clone());
             self.agent_runtime
                 .attach_agent_session(SessionAgentConfig {
                     session_id: session_id.to_string(),
@@ -133,9 +136,10 @@ impl OrchAgentRunRunner {
                             commit_router.clone() as Arc<dyn ExecutionCommitPort>
                         )
                         .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort {
-                            snapshots: Arc::clone(&self.prompt_debug_snapshots),
+                            trajectory: Some(trajectory_recorder.clone()),
                         }))
-                        .with_realtime(realtime_router.clone() as Arc<dyn RealtimeDeltaSink>),
+                        .with_realtime(realtime_router.clone() as Arc<dyn RealtimeDeltaSink>)
+                        .with_trajectory(Arc::new(trajectory_recorder)),
                     },
                 })
                 .await

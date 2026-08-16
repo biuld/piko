@@ -4,29 +4,6 @@ use super::*;
 use crate::domain::guardian::GuardianConfig;
 
 #[test]
-fn observability_content_capture_defaults_off_and_merges_independently() {
-    let installed: HostSettings = toml::from_str(&installed_settings_fixture()).unwrap();
-    let defaults = installed.observability.expect("observability defaults");
-    assert_eq!(defaults.enabled, Some(false));
-    assert_eq!(defaults.capture_content, Some(false));
-
-    let merged = merge_observability(
-        Some(ObservabilitySettings {
-            enabled: Some(true),
-            capture_content: Some(false),
-            ..Default::default()
-        }),
-        Some(ObservabilitySettings {
-            capture_content: Some(true),
-            ..Default::default()
-        }),
-    )
-    .unwrap();
-    assert_eq!(merged.enabled, Some(true));
-    assert_eq!(merged.capture_content, Some(true));
-}
-
-#[test]
 fn guardian_defaults_are_documented_in_installed_settings() {
     let settings = installed_settings_fixture();
     assert!(settings.contains("[guardian]"));

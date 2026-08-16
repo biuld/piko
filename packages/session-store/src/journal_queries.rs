@@ -4,6 +4,16 @@ use crate::journal::{DurableCommit, SessionStore, VerificationReport};
 use crate::replay::read_all;
 use crate::{Result, SessionAggregate, StoreError};
 
+/// One raw journal event with its durable commit position. Observational
+/// readers (for example the trajectory query) use this to replay optional
+/// event types without affecting the acknowledged session projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawJournalEvent {
+    pub revision: u64,
+    pub committed_at: i64,
+    pub event: crate::RawEvent,
+}
+
 impl SessionStore {
     pub fn verify(&self) -> Result<VerificationReport> {
         let (commits, _, segments) = read_all(&self.inner.path, false)?;
@@ -39,5 +49,22 @@ impl SessionStore {
             .into_iter()
             .find(|commit| commit.revision == revision)
             .ok_or_else(|| StoreError::InvalidEvent(format!("missing commit revision {revision}")))
+    }
+
+    /// All raw journal events in commit order, including optional
+    /// (`ignorable`) event types that the acknowledged projection skips.
+    pub fn raw_events(&self) -> Result<Vec<RawJournalEvent>> {
+        let (commits, _, _) = read_all(&self.inner.path, false)?;
+        let mut events = Vec::new();
+        for commit in commits {
+            for event in commit.events {
+                events.push(RawJournalEvent {
+                    revision: commit.revision,
+                    committed_at: commit.committed_at,
+                    event,
+                });
+            }
+        }
+        Ok(events)
     }
 }

@@ -16,7 +16,7 @@ pub(crate) fn build_tool_result(tc: &ToolCallItem, result: &ToolExecResult) -> M
             content: vec![ContentBlock::Text { text }],
             details: result.value.clone(),
             is_error: Some(false),
-            timestamp: None,
+            timestamp: Some(chrono::Utc::now().timestamp_millis()),
         }
     } else {
         let msg = result
@@ -33,7 +33,7 @@ pub(crate) fn build_tool_result(tc: &ToolCallItem, result: &ToolExecResult) -> M
                 .as_ref()
                 .map(|e| serde_json::to_value(e).unwrap_or_default()),
             is_error: Some(true),
-            timestamp: None,
+            timestamp: Some(chrono::Utc::now().timestamp_millis()),
         }
     }
 }

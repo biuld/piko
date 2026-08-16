@@ -16,11 +16,6 @@ impl AppState {
                 self.status = error.clone();
                 self.notify(NotificationLevel::Error, error);
             }
-            Ok(piko_protocol::CommandResult::PromptDebugged { snapshot, .. }) => {
-                self.diagnostics.set_prompt_debug(&snapshot);
-                self.push_surface(SurfaceId::Diagnostics);
-                self.status = "prompt debug".to_string();
-            }
             // Rollout is no longer surfaced by the TUI; ignore stale responses.
             Ok(piko_protocol::CommandResult::RolloutPaged { .. }) => {}
             Ok(piko_protocol::CommandResult::TurnDiffGot { diff, .. }) => match diff {

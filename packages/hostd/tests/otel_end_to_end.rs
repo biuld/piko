@@ -1,6 +1,7 @@
-//! End-to-end observability verification: one turn produces a trace tree
-//! turn.run → agent.run → model.step → tool.batch → tool.call with the
-//! expected correlation attributes, and turn metrics are recorded.
+//! End-to-end observability verification: one turn records OTel metrics and
+//! unified OTel logs with correlation attributes. Traces are intentionally
+//! not exported (F-36): the durable trajectory is the causal record, so no
+//! span exporter is installed.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,8 +10,6 @@ use async_trait::async_trait;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::logs::{InMemoryLogExporterBuilder, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
-use opentelemetry_sdk::testing::trace::new_tokio_test_exporter;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
@@ -71,12 +70,8 @@ impl InferenceGateway for ScriptedGateway {
 }
 
 #[tokio::test]
-async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
-    // ---- test OTel backend (in-memory spans + manual metric reader) ----
-    let (span_exporter, mut span_rx, _shutdown_rx) = new_tokio_test_exporter();
-    let tracer_provider = SdkTracerProvider::builder()
-        .with_simple_exporter(span_exporter)
-        .build();
+async fn turn_records_metrics_and_logs_without_span_export() {
+    // ---- test OTel backend (in-memory logs + manual metric reader) ----
     let metric_exporter = InMemoryMetricExporter::default();
     let meter_provider = SdkMeterProvider::builder()
         .with_reader(PeriodicReader::builder(metric_exporter.clone()).build())
@@ -85,19 +80,15 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     let logger_provider = SdkLoggerProvider::builder()
         .with_simple_exporter(log_exporter.clone())
         .build();
-    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     opentelemetry::global::set_meter_provider(meter_provider.clone());
     let _meter_provider_keepalive = meter_provider.clone();
-    let otel_layer = tracing_opentelemetry::layer()
-        .with_tracer(opentelemetry::global::tracer("otel_end_to_end_test"));
     let logs_bridge = OpenTelemetryTracingBridge::new(&logger_provider);
     let subscriber = tracing_subscriber::registry()
-        .with(otel_layer)
         .with(logs_bridge)
         .with(tracing_subscriber::fmt::layer().with_ansi(false));
     use tracing_subscriber::layer::SubscriberExt;
     tracing::subscriber::set_global_default(subscriber).unwrap();
-    piko_hostd::telemetry::init(true, false);
+    piko_hostd::telemetry::init(true);
 
     // ---- run one turn through the real hostd path ----
     let temp = tempfile::tempdir().unwrap();
@@ -181,83 +172,7 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
         }) if agent_instance_id == &root_agent_instance_id
     )));
 
-    // ---- flush and collect spans ----
-    tracer_provider.force_flush().unwrap();
-    let mut spans = Vec::new();
-    while let Ok(span) = span_rx.try_recv() {
-        spans.push(span);
-    }
-
-    let names: std::collections::HashSet<&str> =
-        spans.iter().map(|span| span.name.as_ref()).collect();
-    for expected in [
-        "turn.run",
-        "agent.run",
-        "piko.prompt.assemble",
-        "model.step",
-        "tool.batch",
-        "tool.call",
-    ] {
-        assert!(
-            names.contains(expected),
-            "expected span {expected:?} in exported spans: {spans:?}"
-        );
-    }
-
-    // ---- hierarchy: turn → agent → step → batch → call ----
-    let by_name = |name: &str| {
-        spans
-            .iter()
-            .filter(|span| span.name.as_ref() == name)
-            .collect::<Vec<_>>()
-    };
-    let turn_spans = by_name("turn.run");
-    let turn = turn_spans.first().expect("turn.run span");
-    let agent_spans = by_name("agent.run");
-    let agent = agent_spans.first().expect("agent.run span");
-    let prompt_spans = by_name("piko.prompt.assemble");
-    let prompt = prompt_spans.first().expect("piko.prompt.assemble span");
-    let step_spans = by_name("model.step");
-    let step = step_spans.first().expect("model.step span");
-    let batch_spans = by_name("tool.batch");
-    let batch = batch_spans.first().expect("tool.batch span");
-    let call_spans = by_name("tool.call");
-    let call = call_spans.first().expect("tool.call span");
-    assert_eq!(agent.parent_span_id, turn.span_context.span_id());
-    assert_eq!(prompt.parent_span_id, agent.span_context.span_id());
-    assert_eq!(step.parent_span_id, agent.span_context.span_id());
-    assert_eq!(batch.parent_span_id, step.span_context.span_id());
-    assert_eq!(call.parent_span_id, batch.span_context.span_id());
-
-    // ---- correlation attributes ----
-    let attr = |span: &opentelemetry_sdk::trace::SpanData, key: &str| -> Option<String> {
-        span.attributes
-            .iter()
-            .find(|kv| kv.key.as_str() == key)
-            .map(|kv| kv.value.to_string())
-    };
-    let turn_session = attr(turn, "session_id");
-    assert_eq!(turn_session.as_deref(), Some(session_id.as_str()));
-    let step_model = attr(step, "model");
-    assert_eq!(step_model.as_deref(), Some("test-model"));
-    let step_provider = attr(step, "provider");
-    assert_eq!(step_provider.as_deref(), Some("test"));
-    assert_eq!(attr(prompt, "assembly_version").as_deref(), Some("5"));
-    let blocks = attr(prompt, "piko.prompt.blocks").expect("ordered prompt block metadata");
-    assert!(blocks.contains("platform.policy"));
-    assert!(!blocks.contains("coding agent operating inside piko"));
-    for sensitive in [
-        "gen_ai.system_instructions",
-        "gen_ai.input.messages",
-        "gen_ai.tool.definitions",
-    ] {
-        assert!(
-            attr(prompt, sensitive).is_none(),
-            "prompt assembly metadata span must not contain {sensitive}"
-        );
-    }
-
-    // ---- turn metrics ----
+    // ---- turn metrics (spans are never exported) ----
     meter_provider.force_flush().unwrap();
     let finished = metric_exporter
         .get_finished_metrics()
@@ -283,10 +198,6 @@ async fn turn_produces_end_to_end_trace_tree_and_turn_metrics() {
     assert!(
         !logs.is_empty(),
         "expected at least one OTel LogRecord from the turn"
-    );
-    assert!(
-        logs.iter().any(|log| log.record.trace_context().is_some()),
-        "expected a LogRecord correlated with a span (trace_context set)"
     );
     assert!(
         logs.iter().any(|log| {

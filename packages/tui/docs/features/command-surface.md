@@ -22,15 +22,15 @@ product capabilities and invocation metadata.
 5. Destructive commands require explicit text confirmation; `/delete` alone
    never deletes a session.
 6. Result lists use structured surfaces rather than notification text. MCP and
-   process results use ComposerBand; diff and prompt debug share the reusable
-   Diagnostics Browse surface.
+   process results use ComposerBand; turn diff uses the reusable Diagnostics
+   Browse surface.
 7. Local commands are available before the host catalog bootstrap completes.
 8. Host command failures are visible as errors.
 
 ## Command inventory
 
 - Presentation: sessions, tree, model configuration, settings, status, agents,
-  turn diff, prompt debug, quit.
+  turn diff, quit.
 - Host-owned: new, fork, rename, import, delete, login, logout, compact,
   process management, and MCP status when advertised by hostd.
 - The TUI exposes one session-copy command, `/fork`, and one authentication
