@@ -2,7 +2,7 @@
 // tooltip, ruler, and scroll redraw. No DOM nodes per brick; layout constants
 // come from CSS custom properties via format.tokens().
 
-import { $, fmtTs, tokens, TRACK_ORDER, ROLE_LABEL, terminalLabel, textOfMessage } from "./format.js";
+import { $, fmtTs, tokens, ROLE_LABEL, terminalLabel, textOfMessage } from "./format.js";
 
 // Pure derivation: run detail + display message stream -> global slot axis +
 // per-track groups. `messageItems` is the store's display list (assembly card
@@ -90,11 +90,10 @@ export function deriveTimeline(run, messageItems) {
     item.slot = slot;
     item.nudge = seen * 3; // tiny in-track offset for exact same-ms commits
   });
-  const tracks = [...new Set(indexed.map((i) => i.kind))].sort((a, b) => {
-    const ia = TRACK_ORDER.indexOf(a);
-    const ib = TRACK_ORDER.indexOf(b);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-  });
+  // Tracks follow first-appearance order: `indexed` is time-sorted, so each
+  // new kind lands below the kinds that appeared before it — a track that
+  // first shows up mid-stream naturally appends at the bottom.
+  const tracks = [...new Set(indexed.map((i) => i.kind))];
   const trackItems = tracks.map((kind) => indexed.filter((i) => i.kind === kind));
   return { timelineItems: indexed, tracks, trackItems };
 }

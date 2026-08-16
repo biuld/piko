@@ -14,7 +14,6 @@ export const ROLE_LABEL = {
   system: "system",
   terminal: "terminal",
 };
-export const TRACK_ORDER = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system", "terminal"];
 
 let tokenCache = null;
 export function tokens() {
