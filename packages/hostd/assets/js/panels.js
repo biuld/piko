@@ -33,6 +33,9 @@ export function renderRunStrip(state, actions) {
     ];
     if (run.childRunCount > 0) parts.push(`${run.childRunCount} children`);
     if (run.stepCount > 0) parts.push(`${run.stepCount} steps`);
+    if (run.usage?.cacheHitRatio != null) {
+      parts.push(`${(run.usage.cacheHitRatio * 100).toFixed(0)}% cached`);
+    }
     if (run.droppedRecords > 0) parts.push(`<span class="dropped">${run.droppedRecords} dropped</span>`);
     const agent = agentShort(run.agentInstanceId, state.selectedSession);
     el.innerHTML = `<div>${terminalBadge(run.terminal)} <span class="muted">${esc(short(run.runId))}</span>` +
@@ -44,39 +47,26 @@ export function renderRunStrip(state, actions) {
   }
 }
 
-// One-line run-level usage summary, derived from model-step records. Hidden
-// when the run has no steps. Per-call detail lives on message cards.
+// One-line run-level usage summary. Hostd computes the rollup
+// (`TrajectoryRunSummary.usage`); the viewer only formats it. Hidden when the
+// run has no usage. Per-call detail lives on message cards.
 export function renderRunStats(state) {
   const el = $("run-stats");
-  const steps = (state.run?.records || []).filter((r) => r.type === "model_step");
-  if (!steps.length) {
+  const summary = state.run?.summary;
+  const usage = summary?.usage;
+  if (!usage) {
     el.classList.add("hidden");
     return;
   }
-  const totals = steps.reduce(
-    (acc, step) => {
-      const usage = step.usage;
-      if (!usage) return acc;
-      acc.input += usage.input || 0;
-      acc.cacheRead += usage.cacheRead || 0;
-      acc.cacheWrite += usage.cacheWrite || 0;
-      acc.output += usage.output || 0;
-      const entry = usage.cost?.entries?.[0];
-      if (entry) {
-        acc.cost += Number(entry.total ?? 0);
-        acc.currency ||= entry.currency || "";
-      }
-      return acc;
-    },
-    { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, currency: "" }
-  );
-  const hit = totals.input > 0 ? (totals.cacheRead / totals.input) * 100 : null;
+  const steps = summary.stepCount ?? 0;
+  const hit = usage.cacheHitRatio == null ? null : usage.cacheHitRatio * 100;
+  const cost = usage.cost?.[0];
   el.classList.remove("hidden");
   el.textContent =
-    `${steps.length} model step${steps.length === 1 ? "" : "s"} · ` +
-    `${fmtCount(totals.input)} input · ` +
-    `${fmtCount(totals.cacheRead)} cached${hit === null ? "" : ` (${hit.toFixed(0)}%)`} · ` +
-    `${fmtCount(totals.cacheWrite)} written · ` +
-    `${fmtCount(totals.output)} output` +
-    (totals.cost > 0 ? ` · ${totals.currency}${totals.cost.toFixed(4)}` : "");
+    `${steps} model step${steps === 1 ? "" : "s"} · ` +
+    `${fmtCount(usage.input)} input · ` +
+    `${fmtCount(usage.cacheRead)} cached${hit === null ? "" : ` (${hit.toFixed(0)}%)`} · ` +
+    `${fmtCount(usage.cacheWrite)} written · ` +
+    `${fmtCount(usage.output)} output` +
+    (cost && cost.total > 0 ? ` · ${cost.currency}${cost.total.toFixed(4)}` : "");
 }

@@ -163,8 +163,11 @@ description, and input schema JSON (collapsed by default).
   expanding to `input / cache_read (hit ratio) / cache_write / output / cost`,
   plus retry/fallback markers. Steps without a committed message stay visible
   on the timeline but have no strip.
-- **Run summary bar**: one line above the timeline aggregating step count,
-  total input, total cached with hit ratio, written, output, and cost.
+- **Run summary bar**: one line above the timeline showing step count, total
+  input, total cached with hit ratio, written, output, and cost. Hostd
+  computes the rollup (`TrajectoryRunSummary.usage`) at query time; the viewer
+  only formats it — bookkeeping authority stays in hostd (F-32), the viewer
+  never aggregates records.
 - **Timeline bricks**: each model step renders as a `step` brick at
   `started_at`; clicking one selects the assistant message it produced (via
   `messageId`), and steps without a message are still inspectable through the
@@ -217,9 +220,9 @@ tokenizer and provider cache semantics we do not own.
 
 | Package | Change |
 |---|---|
-| `piko-protocol` | `TrajectoryModelStepRecord.usage: Option<Usage>` (optional, backward-compatible); `TrajectoryMessage` adds `messageId` to `TrajectoryRun.messages` via flatten |
+| `piko-protocol` | `TrajectoryModelStepRecord.usage: Option<Usage>` (optional, backward-compatible); `TrajectoryMessage` adds `messageId` to `TrajectoryRun.messages` via flatten; `TrajectoryRunSummary.usage: Option<TrajectoryRunUsage>` carries the host-computed rollup |
 | `piko-llmd` | `ModelStepCapture` retains final step `Usage`; finish record includes it |
-| `piko-hostd` | Viewer assets only: tabs, prompt panel, cache bar, per-call message strips, run summary bar, step bricks, raw JSON |
+| `piko-hostd` | Query computes the run-level usage rollup; viewer assets: tabs, prompt panel, cache bar, per-call message strips, run summary bar, step bricks, raw JSON |
 | `piko-orchd` | none |
 
 ## Reusable infrastructure

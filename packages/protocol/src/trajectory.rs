@@ -196,7 +196,7 @@ pub enum TrajectoryTerminalKind {
 }
 
 /// One entry in the run list.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryRunSummary {
     pub session_id: String,
@@ -215,10 +215,39 @@ pub struct TrajectoryRunSummary {
     pub child_run_count: u32,
     pub message_count: u32,
     pub dropped_records: u32,
+    /// Host-owned run-level usage rollup (F-32 bookkeeping authority): the
+    /// viewer formats it, it never aggregates records itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TrajectoryRunUsage>,
+}
+
+/// One per-currency cost total for a run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryCostTotal {
+    pub currency: String,
+    pub total: f64,
+}
+
+/// Run-level usage rollup computed by hostd from the model-step records.
+/// Token sums include the shared frozen prefix once per step (each step's
+/// provider-reported input is cumulative), so `input` is a request total, not
+/// a de-duplicated context size.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryRunUsage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    /// Summed per currency across all steps.
+    pub cost: Vec<TrajectoryCostTotal>,
+    /// `cache_read / input`; `None` when no step reported input tokens.
+    pub cache_hit_ratio: Option<f64>,
 }
 
 /// Bounded page of run summaries, newest first.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryRunListPage {
     pub runs: Vec<TrajectoryRunSummary>,

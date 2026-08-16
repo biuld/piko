@@ -12,9 +12,10 @@ use std::sync::Arc;
 use piko_protocol::{
     TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_CHILD_RUN, TRAJECTORY_EVENT_MODEL_STEP,
     TRAJECTORY_EVENT_SYSTEM_NOTIFICATION, TRAJECTORY_EVENT_TOOL_CALL, TrajectoryAssemblyRecord,
-    TrajectoryChildRunRecord, TrajectoryMessage, TrajectoryModelStepRecord, TrajectoryRecord,
-    TrajectoryRun, TrajectoryRunListPage, TrajectoryRunSummary, TrajectorySystemNotificationRecord,
-    TrajectoryTerminalKind, TrajectoryToolCallRecord,
+    TrajectoryChildRunRecord, TrajectoryCostTotal, TrajectoryMessage, TrajectoryModelStepRecord,
+    TrajectoryRecord, TrajectoryRun, TrajectoryRunListPage, TrajectoryRunSummary,
+    TrajectoryRunUsage, TrajectorySystemNotificationRecord, TrajectoryTerminalKind,
+    TrajectoryToolCallRecord,
 };
 use piko_session_store::EventData;
 use tokio::sync::Mutex;
@@ -320,7 +321,50 @@ fn summarize(
         child_run_count: run.child_run_count,
         message_count: run.messages.len() as u32,
         dropped_records: dropped.get(run_id).copied().unwrap_or(0),
+        usage: run_usage(&run.records),
     }
+}
+
+/// Host-owned run-level usage rollup. Token sums add each step's
+/// provider-reported input, which is cumulative over the run's conversation;
+/// cost is summed per currency.
+fn run_usage(records: &[TrajectoryRecord]) -> Option<TrajectoryRunUsage> {
+    let mut input = 0u64;
+    let mut output = 0u64;
+    let mut cache_read = 0u64;
+    let mut cache_write = 0u64;
+    let mut costs: BTreeMap<String, f64> = BTreeMap::new();
+    let mut saw_usage = false;
+    for record in records {
+        let TrajectoryRecord::ModelStep(step) = record else {
+            continue;
+        };
+        let Some(usage) = step.usage.as_deref() else {
+            continue;
+        };
+        saw_usage = true;
+        input += usage.input;
+        output += usage.output;
+        cache_read += usage.cache_read;
+        cache_write += usage.cache_write;
+        for entry in &usage.cost.entries {
+            *costs.entry(entry.currency.clone()).or_default() += entry.total;
+        }
+    }
+    if !saw_usage {
+        return None;
+    }
+    Some(TrajectoryRunUsage {
+        input,
+        output,
+        cache_read,
+        cache_write,
+        cost: costs
+            .into_iter()
+            .map(|(currency, total)| TrajectoryCostTotal { currency, total })
+            .collect(),
+        cache_hit_ratio: (input > 0).then(|| cache_read as f64 / input as f64),
+    })
 }
 
 #[cfg(test)]
@@ -518,5 +562,76 @@ mod tests {
             "persisted session resolved via repository"
         );
         assert_eq!(page.runs[0].run_id, "run-1");
+    }
+
+    #[test]
+    fn run_usage_rolls_up_model_steps_host_side() {
+        let identity = TrajectoryIdentity {
+            session_id: "s".into(),
+            agent_instance_id: "a".into(),
+            run_id: "r".into(),
+            execution_id: None,
+            source_turn_id: None,
+        };
+        let usage = piko_protocol::Usage {
+            input: 1000,
+            output: 100,
+            cache_read: 800,
+            cache_write: 200,
+            total_tokens: 1100,
+            units: Default::default(),
+            cost: piko_protocol::UsageCost {
+                entries: vec![piko_protocol::UsageCostEntry {
+                    currency: "USD".into(),
+                    basis: piko_protocol::UsageCostBasis::ListPrice,
+                    components: Default::default(),
+                    total: 0.01,
+                }],
+            },
+        };
+        let step = TrajectoryModelStepRecord {
+            identity,
+            step_id: "step-1".into(),
+            provider: "test".into(),
+            model: "m".into(),
+            request: serde_json::json!({}),
+            options: serde_json::json!({}),
+            started_at: 1,
+            finished_at: Some(2),
+            duration_ms: Some(1),
+            retries: Vec::new(),
+            fallback: None,
+            response: None,
+            message_id: Some("msg-1".into()),
+            usage: Some(Box::new(usage)),
+        };
+        let records = vec![
+            TrajectoryRecord::ModelStep(step),
+            TrajectoryRecord::SystemNotification(TrajectorySystemNotificationRecord {
+                identity: TrajectoryIdentity {
+                    session_id: "s".into(),
+                    agent_instance_id: "a".into(),
+                    run_id: "r".into(),
+                    execution_id: None,
+                    source_turn_id: None,
+                },
+                kind: piko_protocol::TrajectoryNotificationKind::RunError,
+                summary: "boom".into(),
+                recorded_at: 1,
+            }),
+        ];
+
+        let rolled = run_usage(&records).expect("rollup present");
+        assert_eq!(rolled.input, 1000);
+        assert_eq!(rolled.output, 100);
+        assert_eq!(rolled.cache_read, 800);
+        assert_eq!(rolled.cache_write, 200);
+        assert_eq!(rolled.cache_hit_ratio, Some(0.8));
+        assert_eq!(rolled.cost.len(), 1);
+        assert_eq!(rolled.cost[0].currency, "USD");
+        assert!((rolled.cost[0].total - 0.01).abs() < f64::EPSILON);
+
+        assert!(run_usage(&[]).is_none());
+        assert!(run_usage(&records[1..]).is_none());
     }
 }
