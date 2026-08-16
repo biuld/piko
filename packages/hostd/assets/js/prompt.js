@@ -2,7 +2,7 @@
 // per-model-step provider cache usage, and raw JSON. Pure derivation plus DOM
 // rendering; native vertical scroll, no JS on scroll.
 
-import { $, esc, short, fmtCount, copyText } from "./format.js";
+import { esc, short, fmtCount, copyText } from "./format.js";
 
 export const KIND_LABEL = {
   instruction: "Instruction",
@@ -59,8 +59,21 @@ export function derivePrompt(run) {
   };
 }
 
-export function createPrompt() {
-  const view = $("prompt-view");
+// One-line collapsed-card summary: version, source digest, scale, cache policy.
+export function assemblySummary(d) {
+  if (!d) return "no assembly";
+  const a = d.assembly;
+  return (
+    `v${a.assemblyVersion} · ${short(a.promptDigest || "")} · ` +
+    `${d.blocks.length} blocks · ${d.tools.length} tools · ` +
+    `cache ${a.prompt?.cachePlan?.policy || "providerDefault"}`
+  );
+}
+
+// Container-parameterized prompt renderer. One instance per assembly card,
+// created lazily on first expand so collapsed runs never build prompt bodies.
+export function createPrompt(container) {
+  const view = container;
   const ui = { filter: {}, expanded: new Set(), highlightScope: null };
   let current = null;
 
@@ -194,7 +207,7 @@ export function createPrompt() {
       `<span class="badge kind">${KIND_LABEL[block.kind] || block.kind}</span>` +
       `<span class="badge auth">${AUTHORITY_LABEL[block.authority] || block.authority}</span>` +
       `<span class="badge trust">${TRUST_LABEL[block.trust] || block.trust}</span>` +
-      `<span class="badge scope scope-${kebab(block.cacheScope)}">${SCOPE_LABEL[block.cacheScope] || block.cacheScope}</span>`;
+      `<span class="scope-tag"><i class="dot scope-${kebab(block.cacheScope)}"></i>${SCOPE_LABEL[block.cacheScope] || block.cacheScope}</span>`;
     const body = document.createElement("div");
     body.className = "block-body";
     const content = document.createElement("div");

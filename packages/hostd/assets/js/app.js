@@ -1,19 +1,17 @@
-// Composition root: wires the store, the API client, and the three views.
+// Composition root: wires the store, the API client, and the views.
 
 import { $, SESSION_KEY, RUN_KEY, short } from "./format.js";
 import { loadSessions, loadRuns, fetchRun, openRunStream } from "./api.js";
 import { createStore } from "./store.js";
 import { renderSessions, renderRunStrip, renderRunStats } from "./panels.js";
-import { createMessages } from "./messages.js";
+import { createMessages, deriveMessageItems } from "./messages.js";
 import { createTimeline, deriveTimeline } from "./timeline.js";
-import { createPrompt } from "./prompt.js";
 
 const store = createStore({
   sessions: [],
   runs: [],
   selectedSession: localStorage.getItem(SESSION_KEY) || "",
   selectedRun: localStorage.getItem(RUN_KEY) || "",
-  activeTab: "conversation",
   loading: false,
   run: null,
   messages: [],
@@ -28,24 +26,10 @@ const messages = createMessages({
 });
 const timeline = createTimeline({
   onSelectMessage: (index) => store.set({ selectedMessage: index }, "message:selected"),
-  onSelectPrompt: () => actions.selectTab("prompt"),
 });
-const prompt = createPrompt();
 
 let streamCleanup = null;
 let refreshing = false;
-
-function applyTab(state) {
-  const conversationView = $("conversation-view");
-  const promptView = $("prompt-view");
-  const tabs = $("run-tabs");
-  tabs.classList.toggle("hidden", !state.run);
-  conversationView.classList.toggle("hidden", state.activeTab !== "conversation");
-  promptView.classList.toggle("hidden", state.activeTab !== "prompt");
-  for (const button of tabs.querySelectorAll(".tab")) {
-    button.classList.toggle("active", button.dataset.tab === state.activeTab);
-  }
-}
 
 function applyLoading(state) {
   $("loading").classList.toggle("hidden", !state.loading);
@@ -54,10 +38,6 @@ function applyLoading(state) {
 const actions = {
   setStatus(text) {
     $("status").textContent = text;
-  },
-
-  selectTab(tab) {
-    store.set({ activeTab: tab }, "tab:selected");
   },
 
   async selectSession(sessionId) {
@@ -91,9 +71,10 @@ const actions = {
     localStorage.setItem(RUN_KEY, runId);
     try {
       const run = await fetchRun(sessionId, runId);
-      const derived = deriveTimeline(run);
+      const messageItems = deriveMessageItems(run);
+      const derived = deriveTimeline(run, messageItems);
       store.set(
-        { run, messages: run.messages || [], selectedMessage: -1, ...derived },
+        { run, messages: messageItems, selectedMessage: -1, ...derived },
         "run:selected"
       );
       actions.setStatus(`run ${short(runId)} · ${run.records?.length ?? 0} records`);
@@ -117,8 +98,9 @@ const actions = {
     refreshing = true;
     try {
       const run = await fetchRun(sessionId, runId);
-      const derived = deriveTimeline(run);
-      store.set({ run, messages: run.messages || [], ...derived }, "run:refreshed");
+      const messageItems = deriveMessageItems(run);
+      const derived = deriveTimeline(run, messageItems);
+      store.set({ run, messages: messageItems, ...derived }, "run:refreshed");
     } catch (error) {
       // Transient; the stream keeps trying and will retry on the next record.
     } finally {
@@ -141,19 +123,12 @@ store.subscribe((state, action) => {
     case "run:selected":
       messages.render(state);
       timeline.render(state);
-      prompt.render(state);
       renderRunStats(state);
-      applyTab(state);
       break;
     case "run:refreshed":
       messages.append(state);
       timeline.update(state);
-      prompt.update(state);
       renderRunStats(state);
-      break;
-    case "tab:selected":
-      applyTab(state);
-      prompt.render(state);
       break;
     case "message:selected":
       timeline.update(state);
@@ -161,10 +136,6 @@ store.subscribe((state, action) => {
       break;
   }
 });
-
-for (const button of document.querySelectorAll("#run-tabs .tab")) {
-  button.addEventListener("click", () => actions.selectTab(button.dataset.tab));
-}
 
 $("refresh").onclick = () => {
   actions.selectSession(store.state.selectedSession).catch(() => {});

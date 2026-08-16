@@ -14,6 +14,11 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-52: Trajectory viewer inline assembly](D-52-trajectory-inline-assembly.md)
+  removes the Prompt tab and renders each run's prompt assembly as a
+  time-ordered card in the message stream with the same selection/expansion
+  behavior as ordinary cards; the timeline prompt marker selects that card
+  (implemented; visual QA user-side).
 - [D-51: Trajectory prompt assembly and cache debugging view](D-51-trajectory-prompt-and-cache-view.md)
   adds a Prompt tab to the trajectory viewer: the frozen assembly (blocks,
   tool catalog, cache plan) plus per-step provider cache usage, with an

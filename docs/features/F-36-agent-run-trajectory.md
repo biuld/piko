@@ -185,6 +185,10 @@ by readers that do not understand them.
   view); stored records are never truncated.
 - The page renders the step graph with foldable steps, content, and child-run
   links; plain static assets, no separate frontend toolchain.
+- The per-run view renders the run's prompt assembly as a time-ordered card
+  in the message stream (same card interaction and selection as messages) and
+  as a matching timeline marker brick; there is no separate prompt tab
+  (D-52).
 
 ### Observability integration
 

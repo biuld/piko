@@ -43,6 +43,15 @@
   the same endpoints. `/api/trajectory/sessions` returns sessions
   most-recently-modified first, and unknown runs return an explicit 404.
   Browser-level interaction beyond the endpoints is manual.
+- D-52 (viewer slice): the run detail has no Prompt tab; the run's prompt
+  assembly renders as a time-ordered card at the head of the message stream
+  (collapsed metadata, expandable full prompt content) and as a `prompt`
+  timeline marker that selects the card like a message brick. Verified with
+  `node --check` on all viewer modules, Node fixture assertions on
+  `deriveMessageItems`/`deriveTimeline` index alignment (assembly card at
+  index 0, step bricks resolving through the display list, prompt brick
+  selecting index 0), and a static reference check (no dangling tab/prompt
+  view references). Browser-level interaction remains user-side.
 - Child-run records are emitted by the execution actor when a
   `spawn_agent`/`spawn_agent_detached` call completes; steer notifications are
   emitted on `commit_steering`. Approval/denial/run-error notifications are

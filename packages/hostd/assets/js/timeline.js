@@ -4,21 +4,25 @@
 
 import { $, fmtTs, tokens, TRACK_ORDER, ROLE_LABEL, textOfMessage } from "./format.js";
 
-// Pure derivation: run detail -> global slot axis + per-track groups.
-export function deriveTimeline(run) {
+// Pure derivation: run detail + display message stream -> global slot axis +
+// per-track groups. `messageItems` is the store's display list (assembly card
+// + messages); all message/step refs index into it so selection never drifts.
+export function deriveTimeline(run, messageItems) {
   const items = [];
-  const messages = run.messages || [];
+  const messages = messageItems || run?.messages || [];
   if (run.assembly) {
+    const assemblyIndex = messages.findIndex((m) => m && m.role === "assembly");
     items.push({
       id: "prompt",
       kind: "prompt",
       label: "prompt assembled",
       time: run.assembly.recordedAt || 0,
-      ref: { kind: "prompt" },
+      ref: { kind: "message", index: assemblyIndex >= 0 ? assemblyIndex : 0 },
     });
   }
   let lastTime = 0;
   messages.forEach((m, index) => {
+    if (m.role === "assembly") return;
     // Old journals may lack timestamps on ToolResult; fall back to the
     // previous message's time so they stay in journal order.
     const time = m.timestamp || lastTime;
@@ -82,7 +86,7 @@ export function deriveTimeline(run) {
   return { timelineItems: indexed, tracks, trackItems };
 }
 
-export function createTimeline({ onSelectMessage, onSelectPrompt }) {
+export function createTimeline({ onSelectMessage }) {
   const container = $("timeline");
   let scrollEl = null;
   let canvas = null;
@@ -148,7 +152,6 @@ export function createTimeline({ onSelectMessage, onSelectPrompt }) {
     cv.addEventListener("click", (e) => {
       const hit = hitTest(e);
       if (hit && hit.ref.kind === "message") onSelectMessage(hit.ref.index);
-      else if (hit && hit.ref.kind === "prompt") onSelectPrompt();
       else if (hit && hit.ref.kind === "step" && hit.ref.index != null) {
         onSelectMessage(hit.ref.index);
       }

@@ -2,11 +2,33 @@
 // live refresh so scroll position and expansion survive.
 
 import { $, esc, fmtTs, ROLE_LABEL, textOfMessage, fmtCount, fmtDur, fmtCost, cacheRatio } from "./format.js";
+import { derivePrompt, assemblySummary, createPrompt } from "./prompt.js";
+
+// Pure derivation: the run's display stream = assembly card (if recorded) +
+// committed messages, ordered by timestamp (stable; assembly precedes the
+// run's input commit). Every index downstream refers to this list.
+export function deriveMessageItems(run) {
+  const messages = run?.messages || [];
+  const items = [];
+  if (run?.assembly) {
+    items.push({
+      role: "assembly",
+      timestamp: run.assembly.recordedAt || 0,
+      assembly: run.assembly,
+    });
+  }
+  items.push(...messages);
+  const withSeq = items.map((m, i) => ({ m, i }));
+  withSeq.sort((a, b) => (a.m.timestamp || 0) - (b.m.timestamp || 0) || a.i - b.i);
+  return withSeq.map((x) => x.m);
+}
 
 export function createMessages({ onSelect }) {
   const box = $("messages");
   let rendered = 0;
   const expanded = new Set();
+  const assemblyViews = new Map();
+  let assemblySeen = false;
   let stepsByMessage = {};
 
   function indexSteps(state) {
@@ -49,7 +71,40 @@ export function createMessages({ onSelect }) {
     return details;
   }
 
+  function buildAssemblyCard(m, index) {
+    const derived = derivePrompt({ assembly: m.assembly });
+    const card = document.createElement("div");
+    card.className = `msg assembly${expanded.has(index) ? " expanded" : ""}`;
+    card.dataset.index = index;
+    card.innerHTML =
+      `<span class="role">prompt assembly</span>` +
+      `<span class="time">${fmtTs(m.timestamp)}</span>` +
+      `<div class="preview">${esc(assemblySummary(derived))}</div>` +
+      `<div class="full prompt-body"></div>` +
+      `<div class="hint">click to expand/select</div>`;
+    const full = card.querySelector(".full");
+    // Nested prompt controls (block cards, chips, copy, tool entries) manage
+    // their own clicks; they must not collapse the assembly card.
+    full.addEventListener("click", (event) => event.stopPropagation());
+    card.onclick = () => {
+      const isExpanded = card.classList.toggle("expanded");
+      if (isExpanded) expanded.add(index);
+      else expanded.delete(index);
+      if (isExpanded) {
+        let view = assemblyViews.get(index);
+        if (!view) {
+          view = createPrompt(full);
+          assemblyViews.set(index, view);
+        }
+        view.render({ run: { assembly: m.assembly } });
+      }
+      onSelect(index);
+    };
+    return card;
+  }
+
   function buildCard(m, index) {
+    if (m.role === "assembly") return buildAssemblyCard(m, index);
     const role = ROLE_LABEL[m.role] || "message";
     const text = textOfMessage(m);
     const card = document.createElement("div");
@@ -75,8 +130,10 @@ export function createMessages({ onSelect }) {
   function render(state) {
     box.innerHTML = "";
     expanded.clear();
+    assemblyViews.clear();
     rendered = 0;
     indexSteps(state);
+    assemblySeen = (state.messages?.[0]?.role) === "assembly";
     append(state);
   }
 
@@ -84,6 +141,13 @@ export function createMessages({ onSelect }) {
   function append(state) {
     const messages = state.messages || [];
     indexSteps(state);
+    const hasAssembly = messages[0]?.role === "assembly";
+    if (hasAssembly !== assemblySeen) {
+      // Assembly appearance/disappearance is a head-of-list change, not a
+      // tail append; rebuild the card list once (D-50 invariant 4).
+      render(state);
+      return;
+    }
     if (!messages.length) {
       if (!rendered) box.innerHTML = '<p class="muted">no messages in this run</p>';
       return;
