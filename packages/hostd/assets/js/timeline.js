@@ -2,7 +2,7 @@
 // tooltip, ruler, and scroll redraw. No DOM nodes per brick; layout constants
 // come from CSS custom properties via format.tokens().
 
-import { $, fmtTs, tokens, TRACK_ORDER, ROLE_LABEL, textOfMessage } from "./format.js";
+import { $, fmtTs, tokens, TRACK_ORDER, ROLE_LABEL, terminalLabel, textOfMessage } from "./format.js";
 
 // Pure derivation: run detail + display message stream -> global slot axis +
 // per-track groups. `messageItems` is the store's display list (assembly card
@@ -67,6 +67,19 @@ export function deriveTimeline(run, messageItems) {
       });
     }
   }
+  // Terminal record: the running → completed/failed/cancelled transition is
+  // pushed live via SSE, so the brick appears as soon as the run finishes.
+  for (const record of run.records || []) {
+    if (record.type === "terminal") {
+      items.push({
+        id: `t${items.length}`,
+        kind: "terminal",
+        label: terminalLabel(record.kind) + (record.reason ? `: ${record.reason}` : ""),
+        time: record.finishedAt || 0,
+        ref: { kind: "record", index: run.records.indexOf(record) },
+      });
+    }
+  }
   const indexed = items.map((item, seq) => ({ ...item, seq }));
   indexed.sort((a, b) => (a.time || 0) - (b.time || 0) || a.seq - b.seq);
   const sameInstant = new Map(); // `${kind}:${time}` -> count seen
@@ -91,40 +104,69 @@ export function createTimeline({ onSelectMessage }) {
   let scrollEl = null;
   let canvas = null;
   let tooltip = null;
+  let labels = null;
+  let spacerEl = null;
   let raf = 0;
   let current = null;
+  let layoutKey = "";
 
-  // Build structure once per run; draw() is cheap and rerun on scroll/refresh.
-  function render(state) {
-    current = state;
-    const prevScrollLeft = scrollEl?.scrollLeft || 0;
-    container.innerHTML = "";
-    scrollEl = null;
-    canvas = null;
-    tooltip = null;
-    if (!state.timelineItems.length) {
-      container.innerHTML = '<p class="muted" style="padding:12px">no messages in this run</p>';
-      return;
-    }
+  // Recompute content geometry (spacer width, canvas height, track labels)
+  // and apply follow-scroll. `pin` true forces the right edge onto the
+  // newest activity (used on run selection and when the user is already at
+  // the end); without it the current scroll position is preserved.
+  function layout(state, { pin = null } = {}) {
+    if (!scrollEl || !canvas || !labels || !spacerEl) return;
     const t = tokens();
+    const atEnd = scrollEl.scrollLeft + scrollEl.clientWidth >= scrollEl.scrollWidth - 2;
+    const shouldPin = pin != null ? pin : atEnd;
     const viewWidth = container.clientWidth || 800;
-    const contentWidth = Math.max(viewWidth - t.labelW, t.padX * 2 + state.timelineItems.length * t.slotW);
-
-    // Left frozen column: ruler spacer + one label row per track.
-    const labels = document.createElement("div");
-    labels.id = "timeline-labels";
-    const rulerSpacer = document.createElement("div");
-    rulerSpacer.className = "timeline-ruler-spacer";
-    labels.appendChild(rulerSpacer);
+    const contentWidth = Math.max(
+      viewWidth - t.labelW,
+      t.padX * 2 + state.timelineItems.length * t.slotW
+    );
+    const height = t.rulerH + state.tracks.length * t.trackH + t.padBottom;
+    // Track labels grow/change with the track set (live refresh can add a
+    // track — e.g. the first tool call — mid-stream).
+    labels.querySelectorAll(".track-label").forEach((row) => row.remove());
+    const rulerSpacer = labels.querySelector(".timeline-ruler-spacer");
     for (const kind of state.tracks) {
       const row = document.createElement("div");
       row.className = "track-label";
       row.textContent = kind === "step" ? "model step" : kind;
-      labels.appendChild(row);
+      labels.insertBefore(row, rulerSpacer ? rulerSpacer.nextSibling : null);
     }
+    spacerEl.style.width = `${contentWidth}px`;
+    canvas.style.width = `${scrollEl.clientWidth || 800}px`;
+    canvas.style.height = `${height}px`;
+    if (shouldPin) {
+      scrollEl.scrollLeft = scrollEl.scrollWidth;
+    }
+  }
+
+  // Build structure once per run; draw() is cheap and rerun on scroll/refresh.
+  function render(state) {
+    current = state;
+    container.innerHTML = "";
+    scrollEl = null;
+    canvas = null;
+    tooltip = null;
+    labels = null;
+    spacerEl = null;
+    layoutKey = "";
+    if (!state.timelineItems.length) {
+      container.innerHTML = '<p class="muted" style="padding:12px">no messages in this run</p>';
+      return;
+    }
+
+    // Left frozen column: ruler spacer + one label row per track.
+    const labelsEl = document.createElement("div");
+    labelsEl.id = "timeline-labels";
+    const rulerSpacer = document.createElement("div");
+    rulerSpacer.className = "timeline-ruler-spacer";
+    labelsEl.appendChild(rulerSpacer);
     const bottomSpacer = document.createElement("div");
     bottomSpacer.className = "timeline-bottom-spacer";
-    labels.appendChild(bottomSpacer);
+    labelsEl.appendChild(bottomSpacer);
 
     // Right column: pinned viewport-sized canvas + a spacer that provides the
     // native horizontal scrollbar and wheel range.
@@ -134,20 +176,14 @@ export function createTimeline({ onSelectMessage }) {
     cv.id = "timeline-canvas";
     const spacer = document.createElement("div");
     spacer.id = "timeline-spacer";
-    spacer.style.width = `${contentWidth}px`;
     const tip = document.createElement("div");
     tip.id = "timeline-tooltip";
     scroll.appendChild(cv);
     scroll.appendChild(spacer);
     scroll.appendChild(tip);
-    container.appendChild(labels);
+    container.appendChild(labelsEl);
     container.appendChild(scroll);
 
-    const height = t.rulerH + state.tracks.length * t.trackH + t.padBottom;
-    cv.style.width = `${scroll.clientWidth || 800}px`;
-    cv.style.height = `${height}px`;
-
-    scroll.scrollLeft = prevScrollLeft;
     scroll.addEventListener("scroll", scheduleDraw, { passive: true });
     cv.addEventListener("click", (e) => {
       const hit = hitTest(e);
@@ -163,12 +199,25 @@ export function createTimeline({ onSelectMessage }) {
     scrollEl = scroll;
     canvas = cv;
     tooltip = tip;
+    labels = labelsEl;
+    spacerEl = spacer;
+    // Land on the newest activity; a live run then follows as records stream
+    // in.
+    layout(state, { pin: true });
     draw();
   }
 
-  // Redraw only (live refresh, selection change).
+  // Redraw only (live refresh, selection change); relayout when the content
+  // structure grew (new items or new tracks) so the scroll range and track
+  // labels keep up. The right edge follows the newest activity only when the
+  // user was already pinned there.
   function update(state) {
     current = state;
+    const key = `${state.timelineItems.length}|${state.tracks.join(",")}`;
+    if (key !== layoutKey) {
+      layout(state);
+      layoutKey = key;
+    }
     draw();
   }
 

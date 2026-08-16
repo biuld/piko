@@ -187,6 +187,15 @@ pub struct LatestSender<C, T> {
     marker: PhantomData<fn() -> C>,
 }
 
+impl<C, T> Clone for LatestSender<C, T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            marker: PhantomData,
+        }
+    }
+}
+
 impl<C: LatestContract, T> LatestSender<C, T> {
     pub fn send(&self, value: T) -> Result<(), watch::error::SendError<T>> {
         self.inner.send(value)
@@ -194,6 +203,13 @@ impl<C: LatestContract, T> LatestSender<C, T> {
 
     pub fn send_replace(&self, value: T) -> T {
         self.inner.send_replace(value)
+    }
+
+    pub fn subscribe(&self) -> LatestReceiver<C, T> {
+        LatestReceiver {
+            inner: self.inner.subscribe(),
+            marker: PhantomData,
+        }
     }
 }
 

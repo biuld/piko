@@ -348,6 +348,24 @@ pub mod contracts {
             cancellation: CancellationMeaning::DropInterestOnly,
         }
     );
+    contract!(
+        TrajectoryRecorders,
+        LatestContract,
+        TRAJECTORY_RECORDERS,
+        CommunicationSpec {
+            id: "hostd.trajectory.recorders",
+            kind: CommunicationKind::LatestState,
+            owner: "TrajectoryRecorderRegistry",
+            producers: &["TrajectoryRecorderRegistry"],
+            consumer: "TrajectoryWebViewer",
+            scope: CommunicationScope::Session,
+            delivery: DeliveryGuarantee::LatestOnly,
+            capacity: CapacityPolicy::Latest,
+            overflow: OverflowPolicy::ReplaceLatest,
+            closure: ClosureMeaning::NoSubscribers,
+            cancellation: CancellationMeaning::DropInterestOnly,
+        }
+    );
 
     pub const ALL: &[CommunicationSpec] = &[
         AGENT_COMMANDS,
@@ -368,6 +386,7 @@ pub mod contracts {
         HOST_COMMAND_OUTPUT,
         TRAJECTORY_WRITES,
         TRAJECTORY_LIVE,
+        TRAJECTORY_RECORDERS,
     ];
 }
 

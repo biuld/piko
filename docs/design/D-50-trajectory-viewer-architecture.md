@@ -113,12 +113,34 @@ the DOM never drift.
 
 ### Live updates (SSE)
 
-- Server: the stream stays open with keep-alive pings when no recorder exists
-  for the session; `reload` is only emitted on a genuinely lagged broadcast.
-  This makes reconnects loop-free.
-- Client: a record event triggers `refreshRun` (idempotent) → store update →
-  timeline redraw + message list update. Never a full-tree rebuild, never a
-  reconnect loop.
+- Event kinds: the session broadcast carries `Record` (a durably appended
+  trajectory record, tagged with the journal revision) and `RunsChanged` (the
+  session's run list changed). `RunsChanged` is published when a run starts
+  (assembly record) or finishes (terminal record) and reaches every per-run
+  stream regardless of the watched run, so new runs appear in the strip
+  without polling or a manual refresh.
+- Terminal transition: hostd appends a `trajectory.terminal` record after the
+  `execution_finished` fact, so the stream pushes the running → completed /
+  failed / cancelled flip and the client refetch observes the terminal
+  summary (previously the viewer stayed "running" until a manual refresh).
+- No-recorder sessions: `stream_run` waits on the recorder registry (a
+  latest-state channel bumped when a recorder is created) instead of hanging
+  on keep-alive pings forever, so a viewer opened before this process
+  attached the session — e.g. right after hostd restart — picks up live
+  records as soon as the first run starts.
+- Client: a `Record` event triggers `refreshRun` (idempotent) → store update →
+  timeline redraw + message list update; a `RunsChanged` event triggers a
+  lightweight run-list reload that re-renders the strip only when the list
+  changed. The refreshed run summary is also merged back into the runs strip,
+  and the Refresh button reloads the session list first, so newly created
+  sessions appear without a full page reload. Never a full-tree rebuild,
+  never a reconnect loop.
+- Streaming follow: selecting a run lands on its newest activity (timeline
+  right edge, message list bottom); while records stream in the timeline
+  grows its spacer/canvas/track labels (new tracks appear mid-stream) and
+  keeps the right edge pinned when the user is already there, and the
+  message list appends and sticks to the bottom when the user is at the
+  bottom. Scrolling away stops the follow; the user is never yanked.
 
 ### Design tokens (`viewer.css`)
 

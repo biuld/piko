@@ -20,6 +20,8 @@ pub const TRAJECTORY_EVENT_TOOL_CALL: &str = "trajectory.tool_call";
 pub const TRAJECTORY_EVENT_CHILD_RUN: &str = "trajectory.child_run";
 /// Journal event type for a system notification record.
 pub const TRAJECTORY_EVENT_SYSTEM_NOTIFICATION: &str = "trajectory.system_notification";
+/// Journal event type for the terminal-outcome record.
+pub const TRAJECTORY_EVENT_TERMINAL: &str = "trajectory.terminal";
 
 /// Run-scoped identity shared by every trajectory record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,6 +176,23 @@ pub struct TrajectorySystemNotificationRecord {
     pub recorded_at: i64,
 }
 
+/// Terminal outcome of a run, recorded as the final trajectory record after
+/// the durable `execution_finished` fact (F-36 "terminal record"). Its SSE
+/// fan-out is what lets a live viewer observe the running → terminal
+/// transition: on a clean completion no other trajectory record would follow
+/// `execution_finished`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryTerminalRecord {
+    pub identity: TrajectoryIdentity,
+    pub kind: TrajectoryTerminalKind,
+    /// Human-readable reason carried by the outcome (failure error /
+    /// cancellation reason). Absent for a clean completion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub finished_at: i64,
+}
+
 /// One trajectory record, tagged for query responses and the web viewer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -183,10 +202,14 @@ pub enum TrajectoryRecord {
     ToolCall(TrajectoryToolCallRecord),
     ChildRun(TrajectoryChildRunRecord),
     SystemNotification(TrajectorySystemNotificationRecord),
+    Terminal(TrajectoryTerminalRecord),
 }
 
-/// Terminal outcome of a run, derived from the durable `execution_finished`
-/// fact. Absent means the run is still running or was interrupted.
+/// Terminal outcome of a run. The query derives it from the durable
+/// `execution_finished` fact; `TrajectoryRecord::Terminal` also records it as
+/// the final observational record so live SSE viewers observe the
+/// running → terminal transition. Absent means the run is still running or
+/// was interrupted.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TrajectoryTerminalKind {
@@ -282,11 +305,26 @@ pub struct TrajectoryRun {
     pub messages: Vec<TrajectoryMessage>,
 }
 
-/// Live fan-out event published after a trajectory record is durably
-/// appended. Consumed by the SSE web viewer.
+/// Live fan-out event consumed by the SSE web viewer. Published after a
+/// trajectory record is durably appended (`Record`), or when the session's
+/// run list changes — a run started (assembly record) or finished (terminal
+/// record) — so a viewer following a different run can refresh the strip.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TrajectoryLiveEvent {
+    /// A record for one run was durably appended.
+    Record(Box<TrajectoryLiveRecordEvent>),
+    /// The session's run list changed; the viewer should re-fetch it.
+    RunsChanged {
+        session_id: String,
+        committed_at: i64,
+    },
+}
+
+/// One durably appended trajectory record, tagged for the SSE web viewer.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct TrajectoryLiveEvent {
+pub struct TrajectoryLiveRecordEvent {
     pub session_id: String,
     pub run_id: String,
     pub revision: u64,
@@ -306,6 +344,56 @@ mod tests {
             execution_id: None,
             source_turn_id: None,
         }
+    }
+
+    #[test]
+    fn terminal_record_round_trip() {
+        let record = TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
+            identity: identity(),
+            kind: TrajectoryTerminalKind::Completed,
+            reason: None,
+            finished_at: 2,
+        });
+        let json = serde_json::to_value(&record).unwrap();
+        let back: TrajectoryRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(record, back);
+        match back {
+            TrajectoryRecord::Terminal(terminal) => {
+                assert_eq!(terminal.kind, TrajectoryTerminalKind::Completed);
+                assert_eq!(terminal.reason, None);
+            }
+            other => panic!("expected terminal record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn live_events_round_trip() {
+        let record = TrajectoryLiveEvent::Record(Box::new(TrajectoryLiveRecordEvent {
+            session_id: "s".into(),
+            run_id: "r".into(),
+            revision: 7,
+            committed_at: 1,
+            record: TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
+                identity: identity(),
+                kind: TrajectoryTerminalKind::Completed,
+                reason: None,
+                finished_at: 2,
+            }),
+        }));
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["kind"], "record");
+        assert_eq!(json["runId"], "r");
+        let back: TrajectoryLiveEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(record, back);
+
+        let changed = TrajectoryLiveEvent::RunsChanged {
+            session_id: "s".into(),
+            committed_at: 3,
+        };
+        let json = serde_json::to_value(&changed).unwrap();
+        assert_eq!(json["kind"], "runs_changed");
+        let back: TrajectoryLiveEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(changed, back);
     }
 
     #[test]

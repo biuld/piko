@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use piko_protocol::{
     TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
-    TrajectorySystemNotificationRecord,
+    TrajectorySystemNotificationRecord, TrajectoryTerminalKind, TrajectoryTerminalRecord,
 };
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::ports::{AgentOperationAddress, AgentRunHandle, AgentRunRunner};
+use crate::ports::{AgentOperationAddress, AgentRunFailure, AgentRunHandle, AgentRunRunner};
 use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
@@ -112,6 +112,13 @@ impl HostApp {
         }
         let barrier = completion.observation_barrier.clone();
         let terminal = completion.result;
+        // F-36: record the terminal outcome on the durable trajectory. The
+        // terminal record is appended after the `execution_finished` fact, so
+        // its SSE fan-out makes a live viewer observe the running → terminal
+        // transition (on a clean completion no other trajectory record would
+        // follow the fact). Failures additionally keep the RunError
+        // notification so the human-readable reason is visible in the stream.
+        self.record_trajectory_terminal(&address, &terminal).await;
         // F-36: record run failures on the durable trajectory.
         if let Err(failure) = &terminal {
             self.record_trajectory_run_error(&address, failure.message.clone())
@@ -191,32 +198,72 @@ impl HostApp {
         Ok(turn_succeeded)
     }
 
+    /// Trajectory run identity for terminal/error records: the orchd
+    /// execution id, derived as `stable("exec", [session, agent, request_id])`
+    /// with the root-turn request id equal to the hostd operation id.
+    fn trajectory_identity(&self, address: &AgentOperationAddress) -> TrajectoryIdentity {
+        TrajectoryIdentity {
+            session_id: address.session_id.clone(),
+            agent_instance_id: address.agent_instance_id.clone(),
+            run_id: piko_orchd_api::stable_internal_id(
+                "exec",
+                &[
+                    &address.session_id,
+                    &address.agent_instance_id,
+                    &address.operation_id,
+                ],
+            ),
+            execution_id: None,
+            source_turn_id: Some(address.operation_id.clone()),
+        }
+    }
+
+    /// Record the run's terminal outcome as the final trajectory record.
+    async fn record_trajectory_terminal(
+        &self,
+        address: &AgentOperationAddress,
+        terminal: &Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+    ) {
+        let runner = self.turn_runner.lock().await.clone();
+        let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {
+            return;
+        };
+        let (kind, reason) = match terminal {
+            Ok(report) => match &report.outcome {
+                piko_protocol::ExecutionOutcome::Succeeded { .. } => {
+                    (TrajectoryTerminalKind::Completed, None)
+                }
+                piko_protocol::ExecutionOutcome::Failed { error } => {
+                    (TrajectoryTerminalKind::Failed, Some(error.clone()))
+                }
+                piko_protocol::ExecutionOutcome::Cancelled { reason } => {
+                    (TrajectoryTerminalKind::Cancelled, reason.clone())
+                }
+            },
+            Err(failure) => (
+                TrajectoryTerminalKind::Failed,
+                Some(failure.message.clone()),
+            ),
+        };
+        recorder
+            .record(TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
+                identity: self.trajectory_identity(address),
+                kind,
+                reason,
+                finished_at: crate::util::now_ms(),
+            }))
+            .await;
+    }
+
     async fn record_trajectory_run_error(&self, address: &AgentOperationAddress, message: String) {
         let runner = self.turn_runner.lock().await.clone();
         let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {
             return;
         };
-        // The trajectory run identity is the orchd execution id, derived as
-        // `stable("exec", [session, agent, request_id])` with the root-turn
-        // request id equal to the hostd operation id.
-        let run_id = piko_orchd_api::stable_internal_id(
-            "exec",
-            &[
-                &address.session_id,
-                &address.agent_instance_id,
-                &address.operation_id,
-            ],
-        );
         recorder
             .record(TrajectoryRecord::SystemNotification(
                 TrajectorySystemNotificationRecord {
-                    identity: TrajectoryIdentity {
-                        session_id: address.session_id.clone(),
-                        agent_instance_id: address.agent_instance_id.clone(),
-                        run_id,
-                        execution_id: None,
-                        source_turn_id: Some(address.operation_id.clone()),
-                    },
+                    identity: self.trajectory_identity(address),
                     kind: TrajectoryNotificationKind::RunError,
                     summary: message,
                     recorded_at: crate::util::now_ms(),

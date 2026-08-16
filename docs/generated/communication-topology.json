@@ -320,5 +320,22 @@
     "overflow": "drop_newest",
     "closure": "no_subscribers",
     "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "hostd.trajectory.recorders",
+    "kind": "latest_state",
+    "owner": "TrajectoryRecorderRegistry",
+    "producers": [
+      "TrajectoryRecorderRegistry"
+    ],
+    "consumer": "TrajectoryWebViewer",
+    "scope": "session",
+    "delivery": "latest_only",
+    "capacity": {
+      "type": "latest"
+    },
+    "overflow": "replace_latest",
+    "closure": "no_subscribers",
+    "cancellation": "drop_interest_only"
   }
 ]

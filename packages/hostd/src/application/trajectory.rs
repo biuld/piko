@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 use piko_protocol::{
     TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_CHILD_RUN, TRAJECTORY_EVENT_MODEL_STEP,
-    TRAJECTORY_EVENT_SYSTEM_NOTIFICATION, TRAJECTORY_EVENT_TOOL_CALL, TrajectoryAssemblyRecord,
-    TrajectoryChildRunRecord, TrajectoryCostTotal, TrajectoryMessage, TrajectoryModelStepRecord,
-    TrajectoryRecord, TrajectoryRun, TrajectoryRunListPage, TrajectoryRunSummary,
-    TrajectoryRunUsage, TrajectorySystemNotificationRecord, TrajectoryTerminalKind,
-    TrajectoryToolCallRecord,
+    TRAJECTORY_EVENT_SYSTEM_NOTIFICATION, TRAJECTORY_EVENT_TERMINAL, TRAJECTORY_EVENT_TOOL_CALL,
+    TrajectoryAssemblyRecord, TrajectoryChildRunRecord, TrajectoryCostTotal, TrajectoryMessage,
+    TrajectoryModelStepRecord, TrajectoryRecord, TrajectoryRun, TrajectoryRunListPage,
+    TrajectoryRunSummary, TrajectoryRunUsage, TrajectorySystemNotificationRecord,
+    TrajectoryTerminalKind, TrajectoryTerminalRecord, TrajectoryToolCallRecord,
 };
 use piko_session_store::EventData;
 use tokio::sync::Mutex;
@@ -295,6 +295,20 @@ fn decode_events(events: &[RawJournalEventRef]) -> BTreeMap<String, DecodedRun> 
                 run.records
                     .push(TrajectoryRecord::SystemNotification(record));
             }
+            TRAJECTORY_EVENT_TERMINAL => {
+                let Ok(record) =
+                    serde_json::from_value::<TrajectoryTerminalRecord>(raw.payload.clone())
+                else {
+                    continue;
+                };
+                let run = runs.entry(record.identity.run_id.clone()).or_default();
+                // Mirrors the `execution_finished` fact (same source outcome),
+                // so a run whose terminal record is present decodes to the
+                // same summary even if the fact falls outside the page window.
+                run.finished_at = Some(record.finished_at);
+                run.terminal = Some(record.kind);
+                run.records.push(TrajectoryRecord::Terminal(record));
+            }
             _ => {}
         }
     }
@@ -476,6 +490,22 @@ mod tests {
                 }],
             )
             .unwrap();
+        // The terminal record mirrors the fact: it is decoded into the run
+        // records and keeps the summary terminal consistent.
+        store
+            .append_optional_event(
+                "t-terminal",
+                5,
+                TRAJECTORY_EVENT_TERMINAL,
+                serde_json::to_value(TrajectoryTerminalRecord {
+                    identity: assembly.identity.clone(),
+                    kind: TrajectoryTerminalKind::Completed,
+                    reason: None,
+                    finished_at: 15,
+                })
+                .unwrap(),
+            )
+            .unwrap();
 
         let query = TrajectoryQuery::new(
             Arc::new(Mutex::new(HashMap::from([(
@@ -503,11 +533,19 @@ mod tests {
             .await
             .unwrap();
         assert!(run.assembly.is_some());
-        assert_eq!(run.records.len(), 1);
+        assert_eq!(run.records.len(), 2);
         assert!(matches!(
             &run.records[0],
             piko_protocol::TrajectoryRecord::ModelStep(step) if step.step_id == "step-1"
         ));
+        assert!(matches!(
+            &run.records[1],
+            piko_protocol::TrajectoryRecord::Terminal(piko_protocol::TrajectoryTerminalRecord {
+                kind: TrajectoryTerminalKind::Completed,
+                ..
+            })
+        ));
+        assert_eq!(run.summary.finished_at, Some(15));
         assert!(
             query
                 .fetch_run("s1", "missing", &HashMap::new())

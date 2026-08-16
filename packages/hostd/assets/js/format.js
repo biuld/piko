@@ -12,8 +12,9 @@ export const ROLE_LABEL = {
   toolResult: "toolResult",
   context: "context",
   system: "system",
+  terminal: "terminal",
 };
-export const TRACK_ORDER = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system"];
+export const TRACK_ORDER = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system", "terminal"];
 
 let tokenCache = null;
 export function tokens() {
@@ -24,7 +25,7 @@ export function tokens() {
     return Number.isFinite(v) ? v : fallback;
   };
   const alpha = { toolCall: 0.6, system: 0.65 };
-  const names = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system"];
+  const names = ["prompt", "step", "context", "user", "assistant", "toolCall", "toolResult", "system", "terminal"];
   const roleColors = {};
   for (const name of names) {
     const hex = cs.getPropertyValue(`--role-${name}`).trim();

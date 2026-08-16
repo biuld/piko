@@ -28,6 +28,7 @@
   --role-system: #d08a10;
   --role-prompt: #6b7280;
   --role-step: #4f9bd6;
+  --role-terminal: #a21caf;
 
   /* cache scopes */
   --cache-global-stable: #2f9e63;
@@ -75,6 +76,7 @@
     --role-system: #f2b84b;
     --role-prompt: #a9b1bf;
     --role-step: #62b4e8;
+    --role-terminal: #d946ef;
 
     --cache-global-stable: #3fc183;
     --cache-operator-stable: #6ea2ff;

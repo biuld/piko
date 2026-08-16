@@ -115,6 +115,10 @@ prompt debugging and OTel span export redundant.
 - Child run records: child agent identity, link to the child run's trajectory,
   and completion fragment reference.
 - Terminal record: completed, failed, or cancelled with the reason.
+  (Implemented: `trajectory.terminal` record appended by hostd after the
+  `execution_finished` fact; its SSE fan-out is what lets the live viewer
+  observe the running → terminal transition — on a clean completion no other
+  trajectory record would follow the fact.)
 
 ### Two record categories, one durable journal
 

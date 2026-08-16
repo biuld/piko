@@ -74,7 +74,7 @@ const actions = {
       const messageItems = deriveMessageItems(run);
       const derived = deriveTimeline(run, messageItems);
       store.set(
-        { run, messages: messageItems, selectedMessage: -1, ...derived },
+        { run, messages: messageItems, selectedMessage: -1, stripChanged: false, ...derived },
         "run:selected"
       );
       actions.setStatus(`run ${short(runId)} · ${run.records?.length ?? 0} records`);
@@ -84,6 +84,8 @@ const actions = {
       }
       streamCleanup = openRunStream(sessionId, runId, () => {
         if (store.state.selectedRun === runId) actions.refreshRun(sessionId, runId);
+      }, () => {
+        actions.refreshRuns(sessionId);
       });
     } catch (error) {
       actions.setStatus(`run: ${error.message}`);
@@ -100,11 +102,30 @@ const actions = {
       const run = await fetchRun(sessionId, runId);
       const messageItems = deriveMessageItems(run);
       const derived = deriveTimeline(run, messageItems);
-      store.set({ run, messages: messageItems, ...derived }, "run:refreshed");
+      const previous = store.state.runs.find((r) => r.runId === runId);
+      const runs = store.state.runs.map((r) =>
+        r.runId === runId ? { ...r, ...run.summary } : r
+      );
+      const stripChanged =
+        JSON.stringify(previous) !== JSON.stringify(runs.find((r) => r.runId === runId));
+      store.set({ run, runs, stripChanged, messages: messageItems, ...derived }, "run:refreshed");
     } catch (error) {
       // Transient; the stream keeps trying and will retry on the next record.
     } finally {
       refreshing = false;
+    }
+  },
+
+  // Run list changed server-side (a run started/finished in this session):
+  // reload the strip without disturbing the watched run's stream or detail.
+  async refreshRuns(sessionId = store.state.selectedSession) {
+    if (!sessionId) return;
+    try {
+      const runs = await loadRuns(sessionId);
+      const stripChanged = JSON.stringify(runs) !== JSON.stringify(store.state.runs);
+      store.set({ runs, stripChanged }, "runs:refreshed");
+    } catch (error) {
+      // Transient; the stream keeps trying and will retry on the next event.
     }
   },
 };
@@ -120,12 +141,22 @@ store.subscribe((state, action) => {
     case "run:selecting":
       renderRunStrip(state, actions);
       break;
+    case "runs:refreshed":
+      if (state.stripChanged) {
+        renderRunStrip(state, actions);
+        store.set({ stripChanged: false }, "strip:synced");
+      }
+      break;
     case "run:selected":
       messages.render(state);
       timeline.render(state);
       renderRunStats(state);
       break;
     case "run:refreshed":
+      if (state.stripChanged) {
+        renderRunStrip(state, actions);
+        store.set({ stripChanged: false }, "strip:synced");
+      }
       messages.append(state);
       timeline.update(state);
       renderRunStats(state);
@@ -137,8 +168,36 @@ store.subscribe((state, action) => {
   }
 });
 
-$("refresh").onclick = () => {
-  actions.selectSession(store.state.selectedSession).catch(() => {});
+$("refresh").onclick = async () => {
+  try {
+    // Refresh the session list first (a session may have been added since
+    // boot), then re-select the current session to reload its runs.
+    const sessions = await loadSessions();
+    store.set({ sessions }, "sessions:loaded");
+    const current = store.state.selectedSession;
+    if (sessions.includes(current)) {
+      await actions.selectSession(current);
+    } else if (sessions.length) {
+      await actions.selectSession(sessions[0]);
+    } else {
+      store.set(
+        {
+          runs: [],
+          run: null,
+          messages: [],
+          timelineItems: [],
+          tracks: [],
+          trackItems: [],
+          selectedMessage: -1,
+          stripChanged: false,
+        },
+        "run:selected"
+      );
+      actions.setStatus("no sessions — open/resume one in piko first");
+    }
+  } catch (error) {
+    actions.setStatus(`sessions: ${error.message}`);
+  }
 };
 
 async function boot() {

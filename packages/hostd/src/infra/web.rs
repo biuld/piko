@@ -15,7 +15,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
 use futures_core::Stream;
-use piko_protocol::{TrajectoryRun, TrajectoryRunListPage};
+use piko_protocol::{TrajectoryLiveEvent, TrajectoryRun, TrajectoryRunListPage};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -177,21 +177,32 @@ async fn stream_run(
     Path(run_id): Path<String>,
     Query(params): Query<RunIdQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let receiver = state.registry.subscribe(&params.session_id);
+    // Wait for a recorder instead of subscribing once: a viewer opened before
+    // this process attached the session (or right after hostd restart) would
+    // otherwise never see live records — the no-recorder stream hung on
+    // keep-alive pings forever.
+    let receiver = state.registry.await_subscribe(&params.session_id).await;
     let stream = stream! {
         let Some(mut receiver) = receiver else {
-            // No recorder for this session means no live records can arrive;
-            // keep the connection open with keep-alive pings instead of
-            // emitting a reload event, which would make the client refetch in
-            // an infinite reconnect loop.
+            // No recorder for this session and none can appear; keep the
+            // connection open with keep-alive pings instead of emitting a
+            // reload event, which would make the client refetch in an
+            // infinite reconnect loop.
             std::future::pending::<()>().await;
             return;
         };
         loop {
             match receiver.recv().await {
-                Ok(event) if event.run_id == run_id => {
-                    if let Ok(data) = serde_json::to_string(&event.record) {
+                Ok(ref live @ TrajectoryLiveEvent::Record(ref event)) if event.run_id == run_id => {
+                    if let Ok(data) = serde_json::to_string(live) {
                         yield Ok(Event::default().id(event.revision.to_string()).data(data));
+                    }
+                }
+                // Run-list changes (a run started/finished in this session)
+                // reach every per-run stream regardless of the watched run.
+                Ok(ref live @ TrajectoryLiveEvent::RunsChanged { .. }) => {
+                    if let Ok(data) = serde_json::to_string(live) {
+                        yield Ok(Event::default().data(data));
                     }
                 }
                 Ok(_) => {}

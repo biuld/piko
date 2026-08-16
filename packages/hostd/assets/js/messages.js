@@ -139,6 +139,10 @@ export function createMessages({ onSelect }) {
 
   // Incremental: only append messages beyond what is already rendered.
   function append(state) {
+    // Keep following the newest message while the user is already at the
+    // bottom (a fresh render of a rebuilt list is also "at the bottom", so
+    // selecting a run lands on its latest messages).
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
     const messages = state.messages || [];
     indexSteps(state);
     const hasAssembly = messages[0]?.role === "assembly";
@@ -161,6 +165,7 @@ export function createMessages({ onSelect }) {
       box.appendChild(buildCard(messages[i], i));
       rendered++;
     }
+    if (atBottom) box.scrollTop = box.scrollHeight;
   }
 
   function highlight(index) {

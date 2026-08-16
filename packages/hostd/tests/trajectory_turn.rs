@@ -10,11 +10,15 @@ use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::application::TrajectoryQuery;
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
+use piko_hostd::ports::TrajectoryRegistryPort;
 use piko_hostd::protocol::HostServer;
 use piko_llmd::gateway::{
     InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
 };
-use piko_protocol::{TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_TOOL_CALL};
+use piko_protocol::{
+    TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_TERMINAL, TRAJECTORY_EVENT_TOOL_CALL,
+    TrajectoryRecord,
+};
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
@@ -183,6 +187,40 @@ async fn turn_writes_durable_trajectory_records() {
         .collect::<Vec<_>>();
     assert_eq!(tool_events.len(), 2, "started + completed tool records");
 
+    // The terminal record is appended after `execution_finished`, so a live
+    // SSE viewer observes the running → completed transition (F-36 terminal
+    // record).
+    wait_for_events(&store, 1, TRAJECTORY_EVENT_TERMINAL).await;
+
+    // The live SSE broadcast carries the same events: the terminal record
+    // (which flips a viewer from running → completed) and a run-list-changed
+    // marker (which tells viewers watching other runs to refresh the strip).
+    let mut live = piko_hostd::infra::trajectory::TrajectoryRecorderRegistry::global()
+        .subscribe(&session_id)
+        .expect("recorder exists after attach");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut saw_terminal = false;
+    let mut saw_runs_changed = false;
+    while !(saw_terminal && saw_runs_changed) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "live broadcast missing events (terminal={saw_terminal}, runs_changed={saw_runs_changed})"
+        );
+        match tokio::time::timeout(std::time::Duration::from_millis(100), live.recv()).await {
+            Ok(Ok(piko_protocol::TrajectoryLiveEvent::Record(record_event))) => {
+                if let piko_protocol::TrajectoryRecord::Terminal(_) = record_event.record {
+                    saw_terminal = true;
+                }
+            }
+            Ok(Ok(piko_protocol::TrajectoryLiveEvent::RunsChanged { .. })) => {
+                saw_runs_changed = true;
+            }
+            Ok(Err(_)) => break,
+            Err(_) => {}
+        }
+    }
+    assert!(saw_terminal && saw_runs_changed);
+
     // A fresh query (separate store instance, ≈ restart) replays the run.
     let query = TrajectoryQuery::new(
         Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
@@ -209,6 +247,25 @@ async fn turn_writes_durable_trajectory_records() {
         .await
         .unwrap();
     assert!(run.assembly.is_some());
-    assert_eq!(run.records.len(), 2, "two tool records");
+    let tool_records = run
+        .records
+        .iter()
+        .filter(|record| matches!(record, TrajectoryRecord::ToolCall(_)))
+        .count();
+    assert_eq!(tool_records, 2, "two tool records");
+    let terminal_records = run
+        .records
+        .iter()
+        .filter(|record| matches!(record, TrajectoryRecord::Terminal(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(terminal_records.len(), 1, "one terminal record");
+    assert!(matches!(
+        terminal_records[0],
+        TrajectoryRecord::Terminal(piko_protocol::TrajectoryTerminalRecord {
+            kind: piko_protocol::TrajectoryTerminalKind::Completed,
+            reason: None,
+            ..
+        })
+    ));
     assert!(!run.messages.is_empty(), "committed messages replayed");
 }
