@@ -100,6 +100,128 @@ async fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
 }
 
 #[tokio::test]
+async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf() {
+    use piko_protocol::MessageContent;
+    use piko_protocol::execution::MessageCommit;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: Some("turn-1".into()),
+                execution_id: "exec-1".into(),
+                agent_instance_id: root.agent_instance_id.clone(),
+                message_id: "root-msg".into(),
+                parent_message_id: None,
+                tree_parent_entry_id: None,
+                message: Message::User {
+                    content: MessageContent::String("first".into()),
+                    timestamp: Some(1),
+                },
+                committed_at: 1,
+            },
+            "main",
+        )
+        .unwrap();
+    store
+        .commit_message(
+            MessageCommit {
+                session_id: "session-1".into(),
+                source_turn_id: Some("turn-1".into()),
+                execution_id: "exec-1".into(),
+                agent_instance_id: root.agent_instance_id.clone(),
+                message_id: "followup-msg".into(),
+                parent_message_id: Some("root-msg".into()),
+                tree_parent_entry_id: Some("root-msg".into()),
+                message: Message::Assistant {
+                    content: vec![piko_protocol::ContentBlock::Text {
+                        text: "reply".into(),
+                    }],
+                    checkpoint: None,
+                    provider: "test".into(),
+                    model: "test".into(),
+                    usage: None,
+                    stop_reason: Some("stop".into()),
+                    error_message: None,
+                    timestamp: Some(2),
+                },
+                committed_at: 2,
+            },
+            "main",
+        )
+        .unwrap();
+
+    // Simulate a session open: entries already projected from the journal with
+    // the correct tree parents, leaf pointing at the latest message.
+    let mut state = HostState::default();
+    let mut session =
+        crate::domain::sessions::SessionState::new("session-1".into(), "/project".into());
+    session
+        .entries
+        .push(SessionTreeEntry::Message(piko_protocol::MessageEntry {
+            id: "root-msg".into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            agent_id: "main".into(),
+            agent_instance_id: root.agent_instance_id.clone(),
+            source_turn_id: "turn-1".into(),
+            transcript_seq: 1,
+            message: Message::User {
+                content: MessageContent::String("first".into()),
+                timestamp: Some(1),
+            },
+        }));
+    session
+        .entries
+        .push(SessionTreeEntry::Message(piko_protocol::MessageEntry {
+            id: "followup-msg".into(),
+            parent_id: Some("root-msg".into()),
+            timestamp: "2".into(),
+            agent_id: "main".into(),
+            agent_instance_id: root.agent_instance_id.clone(),
+            source_turn_id: "turn-1".into(),
+            transcript_seq: 2,
+            message: Message::Assistant {
+                content: vec![piko_protocol::ContentBlock::Text {
+                    text: "reply".into(),
+                }],
+                checkpoint: None,
+                provider: "test".into(),
+                model: "test".into(),
+                usage: None,
+                stop_reason: Some("stop".into()),
+                error_message: None,
+                timestamp: Some(2),
+            },
+        }));
+    session.current_leaf_id = Some("followup-msg".into());
+    state.insert_session(session);
+
+    let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
+    reconcile_committed_messages(&mut state, async_store.as_ref(), "session-1")
+        .await
+        .unwrap();
+
+    let entries = &state.session("session-1").unwrap().entries;
+    let root = entries
+        .iter()
+        .find_map(|entry| match entry {
+            SessionTreeEntry::Message(message) if message.id == "root-msg" => Some(message),
+            _ => None,
+        })
+        .expect("root message entry");
+    assert_eq!(
+        root.parent_id, None,
+        "existing root message must not be grafted under the current leaf"
+    );
+}
+
+#[tokio::test]
 async fn record_committed_message_projects_into_host_state() {
     use piko_protocol::MessageContent;
     use piko_protocol::execution::MessageCommit;

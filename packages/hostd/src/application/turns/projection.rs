@@ -101,6 +101,17 @@ pub async fn reconcile_committed_messages(
             Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
         };
         for message in recovered.transcript {
+            // The session state was already seeded from the durable journal
+            // (e.g. session open), so these messages carry the correct tree
+            // parents. Re-projecting them here can graft a root message
+            // (world-state) under the current leaf and create a cycle in the
+            // entry tree — only project messages that are not present yet.
+            let already_projected = state
+                .session(session_id)
+                .is_ok_and(|session| session.entries.iter().any(|entry| entry.id() == message.id));
+            if already_projected {
+                continue;
+            }
             let _ = record_committed_message(
                 state,
                 Some(store),

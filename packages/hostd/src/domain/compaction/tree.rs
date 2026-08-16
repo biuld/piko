@@ -19,7 +19,13 @@ pub fn active_branch_entries(
             .or_else(|| entries.last().map(|entry| entry.id().to_string()))
     });
     let mut indexes = Vec::new();
+    let mut visited = std::collections::HashSet::new();
     while let Some(id) = current {
+        // Corrupt or legacy projections can contain parent cycles (e.g. a root
+        // message grafted under the final head). Never loop forever.
+        if !visited.insert(id.clone()) {
+            break;
+        }
         let Some(index) = by_id.get(id.as_str()).copied() else {
             break;
         };
@@ -214,5 +220,42 @@ fn content_block_text(block: &ContentBlock) -> Option<String> {
         ContentBlock::Text { text } => Some(text.clone()),
         ContentBlock::Thinking { thinking, .. } => Some(thinking.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use piko_protocol::{Message, MessageContent, MessageEntry};
+
+    fn message_entry(id: &str, parent_id: Option<&str>, seq: u64) -> SessionTreeEntry {
+        SessionTreeEntry::Message(MessageEntry {
+            id: id.into(),
+            parent_id: parent_id.map(str::to_string),
+            timestamp: seq.to_string(),
+            agent_id: "main".into(),
+            agent_instance_id: "agent-1".into(),
+            source_turn_id: "turn-1".into(),
+            transcript_seq: seq,
+            message: Message::User {
+                content: MessageContent::String("hi".into()),
+                timestamp: None,
+            },
+        })
+    }
+
+    #[test]
+    fn parent_cycle_does_not_loop_forever() {
+        // A corrupted projection can graft a root message under the final head,
+        // making the leaf walk a cycle (a -> b -> a). The walk must terminate.
+        let entries = vec![
+            message_entry("root-msg", Some("final-msg"), 1),
+            message_entry("final-msg", None, 2),
+        ];
+        let branch = active_branch_entries(&entries, Some("final-msg"));
+        assert!(
+            branch.len() <= entries.len(),
+            "cycle walk must terminate within the entry count"
+        );
     }
 }
