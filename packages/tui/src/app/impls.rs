@@ -350,6 +350,10 @@ impl AppState {
                 self.host_settings.otel_endpoint = (*ep).to_string();
             }
             SettingsAction::Trajectory(v) => self.host_settings.trajectory_enabled = *v,
+            SettingsAction::TrajectoryBind(bind) => {
+                self.host_settings.trajectory_bind = (*bind).to_string();
+            }
+            SettingsAction::TrajectoryPort(port) => self.host_settings.trajectory_port = *port,
             SettingsAction::EditorMultiline(value) => {
                 self.tui_config.editor.multiline = *value;
             }

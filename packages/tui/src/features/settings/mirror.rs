@@ -37,6 +37,8 @@ pub struct HostRuntimeSettings {
     pub observability_enabled: bool,
     pub otel_endpoint: String,
     pub trajectory_enabled: bool,
+    pub trajectory_bind: String,
+    pub trajectory_port: u16,
     /// `true` when active-tool-names is null/absent (all tools).
     pub all_tools: bool,
     pub transport: Option<String>,
@@ -71,6 +73,8 @@ impl Default for HostRuntimeSettings {
             observability_enabled: false,
             otel_endpoint: "http://localhost:4318".to_string(),
             trajectory_enabled: false,
+            trajectory_bind: "127.0.0.1".to_string(),
+            trajectory_port: 3847,
             all_tools: true,
             transport: None,
         }
@@ -211,10 +215,16 @@ impl HostRuntimeSettings {
                 self.otel_endpoint = ep.to_string();
             }
         }
-        if let Some(t) = value.get("trajectory")
-            && let Some(enabled) = t.get("enabled").and_then(|v| v.as_bool())
-        {
-            self.trajectory_enabled = enabled;
+        if let Some(t) = value.get("trajectory") {
+            if let Some(enabled) = t.get("enabled").and_then(|v| v.as_bool()) {
+                self.trajectory_enabled = enabled;
+            }
+            if let Some(bind) = t.get("bind").and_then(|v| v.as_str()) {
+                self.trajectory_bind = bind.to_string();
+            }
+            if let Some(port) = t.get("port").and_then(|v| v.as_u64()) {
+                self.trajectory_port = port as u16;
+            }
         }
         if let Some(mcp) = value.get("mcp")
             && let Some(n) = kebab_u64(mcp, "connect-timeout-ms", "connect_timeout_ms")
@@ -312,7 +322,10 @@ pub fn observability_summary(host: &HostRuntimeSettings) -> String {
 
 pub fn trajectory_summary(host: &HostRuntimeSettings) -> String {
     if host.trajectory_enabled {
-        "on".to_string()
+        format!(
+            "on · http://{}:{}",
+            host.trajectory_bind, host.trajectory_port
+        )
     } else {
         "off".to_string()
     }
@@ -365,12 +378,14 @@ mod tests {
             },
             "mcp": { "connect-timeout-ms": 30000 },
             "prompt": { "cache-policy": "ephemeral" },
-            "trajectory": { "enabled": true }
+            "trajectory": { "enabled": true, "bind": "localhost", "port": 8080 }
         }));
 
         assert_eq!(mirror.transport.as_deref(), Some("stdio"));
         assert_eq!(mirror.transcript_max_tool_output_tokens, 8000);
         assert!(mirror.trajectory_enabled);
+        assert_eq!(mirror.trajectory_bind, "localhost");
+        assert_eq!(mirror.trajectory_port, 8080);
         assert_eq!(mirror.retry_max_retries, 5);
         assert_eq!(mirror.retry_budget_ms, 120000);
         assert_eq!(mirror.approval_timeout_secs, 300);

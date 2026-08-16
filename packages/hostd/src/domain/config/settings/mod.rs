@@ -158,6 +158,7 @@ impl HostSettings {
             "features": self.features,
             "execution": self.execution,
             "observability": self.observability,
+            "trajectory": self.trajectory,
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
             "mcp-servers": self.mcp_servers,
