@@ -31,19 +31,29 @@ export function deriveTimeline(run) {
       ref: { kind: "message", index },
     });
   });
+  // Model steps emit a start and a finish record; keep one brick per step and
+  // prefer the finish record so usage/duration/timing are available.
+  const steps = new Map();
   for (const record of run.records || []) {
-    if (record.type === "model_step") {
-      const messageIndex = record.messageId
-        ? messages.findIndex((m) => m.messageId === record.messageId)
-        : -1;
-      items.push({
-        id: `s${record.stepId}`,
-        kind: "step",
-        label: `${record.provider || ""}/${record.model || "model"}`,
-        time: record.startedAt || 0,
-        ref: { kind: "step", index: messageIndex >= 0 ? messageIndex : null },
-      });
-    } else if (record.type === "system_notification") {
+    if (record.type !== "model_step") continue;
+    const key = record.messageId || record.stepId;
+    const existing = steps.get(key);
+    if (!existing || (record.finishedAt && !existing.finishedAt)) steps.set(key, record);
+  }
+  for (const record of steps.values()) {
+    const messageIndex = record.messageId
+      ? messages.findIndex((m) => m.messageId === record.messageId)
+      : -1;
+    items.push({
+      id: `s${record.stepId}`,
+      kind: "step",
+      label: `${record.provider || ""}/${record.model || "model"}`,
+      time: record.startedAt || 0,
+      ref: { kind: "step", index: messageIndex >= 0 ? messageIndex : null },
+    });
+  }
+  for (const record of run.records || []) {
+    if (record.type === "system_notification") {
       items.push({
         id: `n${items.length}`,
         kind: "system",

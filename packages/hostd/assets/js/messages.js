@@ -12,7 +12,9 @@ export function createMessages({ onSelect }) {
   function indexSteps(state) {
     stepsByMessage = {};
     for (const record of state.run?.records || []) {
-      if (record.type === "model_step" && record.messageId) {
+      if (record.type !== "model_step" || !record.messageId) continue;
+      const existing = stepsByMessage[record.messageId];
+      if (!existing || (record.finishedAt && !existing.finishedAt)) {
         stepsByMessage[record.messageId] = record;
       }
     }

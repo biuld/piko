@@ -443,8 +443,12 @@ struct ModelStepCapture {
     message_id: String,
 }
 
-/// Forward the step stream and record the finished model-step record once the
-/// stream ends. If the consumer abandons the stream, no finish record is
+/// Forward the step stream and record the finished model-step record. The
+/// finish record is flushed as soon as `Completed` is seen — before it is
+/// yielded — because consumers treat `Completed` as terminal and stop polling
+/// (dropping the stream), which would otherwise cancel the post-loop write and
+/// lose the finish record (and with it usage, duration, and terminal state).
+/// If the consumer abandons the stream before `Completed`, no finish record is
 /// written and the step stays "started" (interrupted).
 fn wrap_model_step_finish(
     output: impl futures_core::Stream<Item = InferenceEvent> + Send + 'static,
@@ -454,31 +458,65 @@ fn wrap_model_step_finish(
 ) -> impl futures_core::Stream<Item = InferenceEvent> + Send + 'static {
     stream! {
         let mut usage: Option<Usage> = None;
+        let mut retries = Some(retries);
+        let mut fallback = fallback;
         let mut inner = Box::pin(output);
         while let Some(event) = inner.next().await {
             if let InferenceEvent::Usage(value) = &event {
                 usage = Some(value.clone());
             }
+            let terminal = matches!(event, InferenceEvent::Completed(_));
+            if terminal {
+                write_model_step_finish(
+                    &capture,
+                    retries.take().unwrap_or_default(),
+                    fallback.take(),
+                    usage.take(),
+                    now_ms(),
+                );
+            }
             yield event;
+            if terminal {
+                return;
+            }
         }
-        let finished_at = now_ms();
-        capture.telemetry.record_model_step(TrajectoryModelStepRecord {
-            identity: capture.identity,
-            step_id: capture.step_id,
-            provider: capture.provider,
-            model: capture.model,
-            request: capture.request,
-            options: capture.options,
+        // Natural stream end without a Completed event (unusual): still flush
+        // the finish record so the step is not left open.
+        write_model_step_finish(
+            &capture,
+            retries.take().unwrap_or_default(),
+            fallback.take(),
+            usage,
+            now_ms(),
+        );
+    }
+}
+
+fn write_model_step_finish(
+    capture: &ModelStepCapture,
+    retries: Vec<TrajectoryRetryAttempt>,
+    fallback: Option<TrajectoryFallback>,
+    usage: Option<Usage>,
+    finished_at: i64,
+) {
+    capture
+        .telemetry
+        .record_model_step(TrajectoryModelStepRecord {
+            identity: capture.identity.clone(),
+            step_id: capture.step_id.clone(),
+            provider: capture.provider.clone(),
+            model: capture.model.clone(),
+            request: capture.request.clone(),
+            options: capture.options.clone(),
             started_at: capture.started_at,
             finished_at: Some(finished_at),
             duration_ms: Some(finished_at.saturating_sub(capture.started_at) as u64),
             retries,
             fallback,
             response: None,
-            message_id: Some(capture.message_id),
+            message_id: Some(capture.message_id.clone()),
             usage: usage.map(Box::new),
         });
-    }
 }
 
 fn now_ms() -> i64 {
@@ -591,5 +629,52 @@ mod tests {
         drop(wrapped);
 
         assert!(telemetry.finished.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn completed_event_flushes_finish_before_consumer_stops() {
+        // Regression: real consumers stop polling as soon as they see
+        // `Completed` and drop the stream. The finish record must already be
+        // durable at that point or usage/duration are lost.
+        let telemetry = Arc::new(RecordingTelemetry::default());
+        let usage = Usage {
+            input: 50,
+            output: 10,
+            cache_read: 45,
+            cache_write: 5,
+            total_tokens: 60,
+            units: Default::default(),
+            cost: Default::default(),
+        };
+        let input = stream::iter([
+            InferenceEvent::Usage(usage.clone()),
+            InferenceEvent::Completed(FinishReason::Completed {
+                reason: "end_turn".into(),
+            }),
+        ]);
+        let mut wrapped = Box::pin(wrap_model_step_finish(
+            input,
+            capture(Arc::clone(&telemetry)),
+            Vec::new(),
+            None,
+        ));
+
+        // Consume exactly like dispatch_step_stream: stop on Completed and drop.
+        while let Some(event) = wrapped.next().await {
+            if matches!(event, InferenceEvent::Completed(_)) {
+                break;
+            }
+        }
+        drop(wrapped);
+
+        let record = telemetry
+            .finished
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("finish record flushed before consumer stopped");
+        assert_eq!(record.usage.as_deref(), Some(&usage));
+        assert!(record.finished_at.is_some());
+        assert!(record.duration_ms.is_some());
     }
 }
