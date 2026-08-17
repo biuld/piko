@@ -237,7 +237,7 @@ fn stores_and_recovers_agent_transcript_from_v4_journal() {
             .join("events/00000000000000000001-open.jsonl")
             .exists()
     );
-    assert!(temp.path().join("snapshots").is_dir());
+    assert!(temp.path().join("readmodels").is_dir());
     assert!(!temp.path().join("agents").exists());
 }
 

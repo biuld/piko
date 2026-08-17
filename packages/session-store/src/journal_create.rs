@@ -76,7 +76,7 @@ fn create_staged(
 fn prepare_staging(path: &Path, session: &NewSession) -> Result<()> {
     fs::create_dir(path).map_err(|source| io_error(path, source))?;
     fs::create_dir(path.join("events")).map_err(|source| io_error(path, source))?;
-    fs::create_dir(path.join("snapshots")).map_err(|source| io_error(path, source))?;
+    crate::readmodels::ensure_dir(path)?;
     let identity = SessionIdentityFile {
         schema_version: SCHEMA_VERSION,
         session_id: session.session_id.clone(),

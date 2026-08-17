@@ -119,8 +119,7 @@ mod tests {
     use piko_orchd_api::PromptAssemblyPort;
     use piko_protocol::{
         AgentSpec, ContentTrust, Message, MessageContent, PromptAssemblyRequest,
-        PromptResourceSnapshot, PromptSource, ResolvedToolCatalog, TRAJECTORY_EVENT_ASSEMBLY,
-        TrajectoryAssemblyRecord,
+        PromptResourceSnapshot, PromptSource, ResolvedToolCatalog, TrajectoryAssemblyRecord,
     };
 
     use crate::infra::storage::SessionStore;
@@ -213,14 +212,12 @@ mod tests {
     ) -> Vec<TrajectoryAssemblyRecord> {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            let events = store.raw_journal_events().unwrap_or_default();
-            let assemblies = events
-                .iter()
-                .filter(|event| event.event.event_type == TRAJECTORY_EVENT_ASSEMBLY)
-                .filter_map(|event| {
-                    serde_json::from_value::<TrajectoryAssemblyRecord>(event.event.payload.clone())
-                        .ok()
-                })
+            let assemblies = store
+                .trajectory()
+                .unwrap_or_default()
+                .runs
+                .into_values()
+                .filter_map(|run| run.assembly)
                 .collect::<Vec<_>>();
             if assemblies.len() >= expected {
                 return assemblies;

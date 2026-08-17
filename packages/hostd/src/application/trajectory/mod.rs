@@ -19,29 +19,19 @@ use tokio::sync::Mutex;
 
 use crate::api::ProtocolError;
 use crate::ports::session_repository::SessionRepositoryPort;
-use crate::ports::session_store::{SessionStoreFactory, SessionStorePort};
-use crate::util::LruMap;
+use crate::ports::session_store::SessionStoreFactory;
 
-use self::decode::{DecodedSession, apply_events, summarize};
+use self::decode::{DecodedSession, summarize};
 
 const DEFAULT_RUN_LIMIT: usize = 50;
 const MAX_RUN_LIMIT: usize = 200;
 const CURSOR_PREFIX: &str = "run:";
-/// Upper bound on decoded session caches (each pins a journal handle and its
-/// in-memory replay).
-const TRAJECTORY_CACHE_CAPACITY: usize = 64;
 
 #[derive(Clone)]
 pub struct TrajectoryQuery {
     pub(crate) session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
     pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
     pub(crate) storage: Option<Arc<dyn SessionRepositoryPort>>,
-    cache: Arc<Mutex<LruMap<String, CachedSession>>>,
-}
-
-struct CachedSession {
-    store: Arc<dyn SessionStorePort>,
-    decoded: DecodedSession,
 }
 
 impl TrajectoryQuery {
@@ -54,7 +44,6 @@ impl TrajectoryQuery {
             session_paths,
             store_factory,
             storage,
-            cache: Arc::new(Mutex::new(LruMap::new(TRAJECTORY_CACHE_CAPACITY))),
         }
     }
 
@@ -82,45 +71,15 @@ impl TrajectoryQuery {
     }
 
     async fn decoded_session(&self, session_id: &str) -> Result<DecodedSession, ProtocolError> {
-        let mut cache = self.cache.lock().await;
-        let entry = if cache.get(session_id).is_some() {
-            cache.get_mut(session_id).expect("cache entry just checked")
-        } else {
-            let session_dir = self.session_dir(session_id).await?;
-            let store = self.store_factory.open(&session_dir);
-            cache.insert(
-                session_id.to_string(),
-                CachedSession {
-                    store,
-                    decoded: DecodedSession::default(),
-                },
-            );
-            cache
-                .get_mut(session_id)
-                .expect("cache entry just inserted")
-        };
-        let store = entry.store.clone();
-        let revision = store
-            .journal_revision()
+        let session_dir = self.session_dir(session_id).await?;
+        let store = self.store_factory.open(&session_dir);
+        let projection = store
+            .trajectory()
             .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-        if entry.decoded.revision == revision {
-            return Ok(entry.decoded.clone());
-        }
-        let events = if entry.decoded.revision == 0 {
-            store
-                .raw_journal_events()
-                .await
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
-        } else {
-            store
-                .raw_journal_events_after(entry.decoded.revision)
-                .await
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
-        };
-        apply_events(&mut entry.decoded, &events);
-        entry.decoded.revision = entry.decoded.revision.max(revision);
-        Ok(entry.decoded.clone())
+        Ok(DecodedSession {
+            runs: projection.runs,
+        })
     }
 
     /// List runs, newest first, bounded and cursor-paged.

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::io_error;
 use crate::journal_io::{checksum, proposal_matches, sync_dir};
-use crate::replay::read_all;
+
 use crate::schema::RawEvent;
 use crate::segments::{
     append_line, create_open_segment, normalize_segment_boundary, open_path, segment_start,
@@ -144,10 +144,7 @@ pub(crate) struct SessionStoreInner {
     _lock: File,
     pub(crate) aggregate: Mutex<SessionAggregate>,
     last_checksum: Mutex<Option<String>>,
-    /// Observational event view, including ignorable types. Populated on
-    /// open from the journal and extended on each successful append so
-    /// readers do not re-scan JSONL.
-    pub(crate) raw_events: Mutex<Vec<crate::RawJournalEvent>>,
+    pub(crate) trajectory: Mutex<crate::TrajectoryProjection>,
 }
 
 static OPEN_STORES: OnceLock<Mutex<BTreeMap<PathBuf, Weak<SessionStoreInner>>>> = OnceLock::new();
@@ -178,129 +175,6 @@ impl SessionStore {
             cwd: identity.cwd,
             created_at: identity.created_at,
         })
-    }
-
-    /// Lightweight list-summary load: boundary snapshot plus the open tail
-    /// segment only. Returns `None` when the session has no boundary snapshot
-    /// yet (caller falls back to a full open). Does not take the writer lock,
-    /// repair the tail, or retain a journal handle, so it is cheap enough to
-    /// run for every listed session.
-    pub fn inspect_facts(path: &Path) -> Result<Option<crate::journal_queries::JournalFacts>> {
-        let path = path
-            .canonicalize()
-            .map_err(|source| io_error(path, source))?;
-        let identity_path = path.join("session.json");
-        let data = fs::read(&identity_path).map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                StoreError::NotFound(path.to_path_buf())
-            } else {
-                io_error(&identity_path, source)
-            }
-        })?;
-        let identity: SessionIdentityFile =
-            serde_json::from_slice(&data).map_err(|source| StoreError::Json {
-                path: identity_path,
-                source,
-            })?;
-        if identity.schema_version != SCHEMA_VERSION {
-            return Err(StoreError::UnsupportedSchema {
-                found: identity.schema_version,
-                supported: SCHEMA_VERSION,
-            });
-        }
-        let Some(snapshot) = crate::snapshot::load_for_replay(
-            &path,
-            &identity.session_id,
-            &identity.journal_generation,
-        ) else {
-            return Ok(None);
-        };
-        let boundary = snapshot.aggregate.revision;
-        // Byte-level verification of snapshot-covered closed segments. Full
-        // deserialization of those events is skipped, but checksums and the
-        // revision/previous-checksum chain still catch corruption.
-        if boundary > 0
-            && let Some(last) = crate::replay::verify_closed_segments_checksums(&path)?
-            && last != snapshot.through_commit_checksum
-        {
-            return Err(StoreError::InvalidEvent(
-                "journal closed segments do not match snapshot".into(),
-            ));
-        }
-        let events_dir = path.join("events");
-        let mut tail = Vec::new();
-        let mut recovery = RecoveryReport::default();
-        let mut saw_open = false;
-        for entry in fs::read_dir(&events_dir).map_err(|source| io_error(&events_dir, source))? {
-            let entry = entry.map_err(|source| io_error(&events_dir, source))?;
-            let segment = entry.path();
-            if segment.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-                continue;
-            }
-            if !segment
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with("-open.jsonl"))
-            {
-                continue;
-            }
-            crate::replay::read_segment(
-                &segment,
-                false,
-                &mut tail,
-                &mut recovery,
-                Some((boundary, snapshot.through_commit_checksum.as_str())),
-            )?;
-            saw_open = true;
-        }
-        if saw_open {
-            if let Some(first) = tail.first() {
-                if first.revision != boundary + 1 {
-                    return Err(StoreError::Corruption {
-                        path: path.clone(),
-                        line: 1,
-                        message: format!(
-                            "tail starts at revision {}, expected {}",
-                            first.revision,
-                            boundary + 1
-                        ),
-                    });
-                }
-                if first.previous_checksum.as_deref()
-                    != Some(snapshot.through_commit_checksum.as_str())
-                {
-                    return Err(StoreError::InvalidEvent(
-                        "journal tail does not continue from snapshot".into(),
-                    ));
-                }
-            }
-            let mut expected = snapshot.through_commit_checksum.clone();
-            for (index, commit) in tail.iter().enumerate() {
-                if commit.session_id != identity.session_id
-                    || commit.journal_generation != identity.journal_generation
-                {
-                    return Err(StoreError::InvalidEvent(
-                        "journal identity/generation mismatch in tail".into(),
-                    ));
-                }
-                if commit.previous_checksum.as_deref() != Some(expected.as_str()) {
-                    return Err(StoreError::InvalidEvent(
-                        "journal tail checksum chain mismatch".into(),
-                    ));
-                }
-                expected = commit.checksum.value.clone();
-                if index > 0 && commit.revision != tail[index - 1].revision + 1 {
-                    return Err(StoreError::InvalidEvent("journal tail revision gap".into()));
-                }
-            }
-        }
-        let mut aggregate = snapshot.aggregate;
-        for commit in &tail {
-            aggregate.apply_for_replay(commit)?;
-        }
-        Ok(Some(crate::journal_queries::facts_from_aggregate(
-            &aggregate,
-        )))
     }
 
     pub fn open(path: &Path, options: OpenOptions) -> Result<OpenedSession> {
@@ -358,84 +232,8 @@ impl SessionStore {
             std::fs::TryLockError::WouldBlock => StoreError::WriterLocked(lock_path.clone()),
             std::fs::TryLockError::Error(source) => io_error(&lock_path, source),
         })?;
-        let (commits, mut recovery, _) = read_all(&path, options.repair_incomplete_tail)?;
-        if commits.is_empty() && !allow_empty_genesis {
-            return Err(StoreError::InvalidEvent(
-                "journal is missing the session_created genesis commit".into(),
-            ));
-        }
-        let last_checksum = commits.last().map(|commit| commit.checksum.value.clone());
-        if commits.iter().any(|commit| {
-            commit.session_id != identity.session_id
-                || commit.journal_generation != identity.journal_generation
-        }) {
-            return Err(StoreError::InvalidEvent(
-                "journal identity/generation mismatch".into(),
-            ));
-        }
-        let mut aggregate = crate::snapshot::load_for_replay(
-            &path,
-            &identity.session_id,
-            &identity.journal_generation,
-        )
-        .filter(|snapshot| {
-            commits
-                .get(snapshot.aggregate.revision.saturating_sub(1) as usize)
-                .is_some_and(|commit| {
-                    commit.revision == snapshot.aggregate.revision
-                        && commit.checksum.value == snapshot.through_commit_checksum
-                })
-        })
-        .map(|snapshot| snapshot.aggregate)
-        .unwrap_or_default();
-        let snapshot_revision = aggregate.revision;
-        for commit in commits
-            .iter()
-            .filter(|commit| commit.revision > snapshot_revision)
-        {
-            aggregate.apply_for_replay(commit)?;
-        }
-        if aggregate.revision > 0
-            && (aggregate.session_id.as_deref() != Some(identity.session_id.as_str())
-                || aggregate.cwd.as_deref() != Some(identity.cwd.as_str()))
-        {
-            return Err(StoreError::InvalidEvent(
-                "journal aggregate does not match session identity".into(),
-            ));
-        }
-        if normalize_segment_boundary(&path, aggregate.revision)? {
-            recovery.repaired = true;
-        }
-        let boundary_revision = (aggregate.revision / COMMITS_PER_SEGMENT) * COMMITS_PER_SEGMENT;
-        let boundary_snapshot = if boundary_revision == 0 {
-            None
-        } else {
-            let boundary_checksum = commits[(boundary_revision - 1) as usize]
-                .checksum
-                .value
-                .clone();
-            if crate::snapshot::valid_boundary(
-                &path,
-                &identity.session_id,
-                &identity.journal_generation,
-                boundary_revision,
-                &boundary_checksum,
-            ) {
-                None
-            } else {
-                let boundary_aggregate = if aggregate.revision == boundary_revision {
-                    aggregate.clone()
-                } else {
-                    let mut rebuilt = SessionAggregate::default();
-                    for commit in commits.iter().take(boundary_revision as usize) {
-                        rebuilt.apply_for_replay(commit)?;
-                    }
-                    rebuilt
-                };
-                Some((boundary_aggregate, boundary_checksum))
-            }
-        };
-        let raw_events = crate::journal_queries::events_from_commits(&commits);
+        let (aggregate, trajectory, last_checksum, recovery) =
+            crate::readmodels::load_or_rebuild(&path, &identity, options, allow_empty_genesis)?;
         let inner = Arc::new(SessionStoreInner {
             path: path.clone(),
             session_id: identity.session_id,
@@ -443,18 +241,9 @@ impl SessionStore {
             _lock: lock,
             aggregate: Mutex::new(aggregate.clone()),
             last_checksum: Mutex::new(last_checksum),
-            raw_events: Mutex::new(raw_events),
+            trajectory: Mutex::new(trajectory),
         });
         registry.insert(path, Arc::downgrade(&inner));
-        if let Some((boundary_aggregate, checksum)) = boundary_snapshot {
-            crate::snapshot::schedule(
-                inner.path.clone(),
-                inner.session_id.clone(),
-                inner.journal_generation.clone(),
-                boundary_aggregate,
-                checksum,
-            );
-        }
         Ok(OpenedSession {
             store: Self { inner },
             aggregate,
@@ -478,15 +267,20 @@ impl SessionStore {
             }
             let existing = self.commit_at(revision)?;
             if proposal_matches(&proposed, &existing) {
-                if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
-                    crate::snapshot::schedule(
-                        self.inner.path.clone(),
-                        self.inner.session_id.clone(),
-                        self.inner.journal_generation.clone(),
-                        aggregate.clone(),
-                        existing.checksum.value.clone(),
-                    );
-                }
+                let trajectory = self
+                    .inner
+                    .trajectory
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone();
+                let _ = crate::readmodels::publish(
+                    &self.inner.path,
+                    &self.inner.session_id,
+                    &self.inner.journal_generation,
+                    &aggregate,
+                    &trajectory,
+                    &existing.checksum.value,
+                );
                 return Ok(existing);
             }
             return Err(StoreError::IdempotencyConflict(proposed.commit_id));
@@ -541,20 +335,24 @@ impl SessionStore {
             .last_checksum
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(commit.checksum.value.clone());
-        self.inner
-            .raw_events
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .extend(crate::journal_queries::events_from_commit(&commit));
+        {
+            let mut trajectory = self
+                .inner
+                .trajectory
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            crate::readmodels::apply_trajectory_commit(&mut trajectory, &commit);
+            let _ = crate::readmodels::publish(
+                &self.inner.path,
+                &self.inner.session_id,
+                &self.inner.journal_generation,
+                &aggregate,
+                &trajectory,
+                &commit.checksum.value,
+            );
+        }
         if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
             self.roll_segment(revision)?;
-            crate::snapshot::schedule(
-                self.inner.path.clone(),
-                self.inner.session_id.clone(),
-                self.inner.journal_generation.clone(),
-                aggregate.clone(),
-                commit.checksum.value.clone(),
-            );
         }
         Ok(commit)
     }

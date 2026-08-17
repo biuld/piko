@@ -92,13 +92,16 @@ Schema **v4** under `~/.piko/agent/sessions/<encoded-cwd>/<session-id>/`:
 session.json
 events/<start>-<end>.jsonl
 events/<start>-open.jsonl
-snapshots/<revision>.json
+readmodels/head.json
+readmodels/catalog.json
+readmodels/current.json
+readmodels/trajectory.json
 writer.lock
 ```
 
 The append-only event journal is the sole durable authority. `session.json`
-contains immutable identity only; snapshots are disposable caches aligned to
-the fixed 1,000-commit segment boundary. No migration from older layouts.
+contains immutable identity only. Query paths read write-time projections
+under `readmodels/`. No migration from older layouts.
 
 ## Configuration
 

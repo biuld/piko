@@ -1,18 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
 
 use super::super::session_store::SessionStore;
-use super::super::types::{
-    CachedFacts, CachedJournal, FACTS_CACHE_CAPACITY, JsonlSessionRepository,
-    OPEN_STORE_CACHE_CAPACITY, PersistedSession, SessionStorageError,
-};
+use super::super::types::{JsonlSessionRepository, PersistedSession, SessionStorageError};
 use super::helpers::{encode_cwd, timestamp};
 use super::load::load_session_dir;
 use crate::api::SessionSummary;
-use crate::util::LruMap;
 
 /// Upper bound on parallel session-summary workers. Listing many sessions
 /// should not spawn an unbounded number of threads.
@@ -20,15 +15,11 @@ const MAX_SUMMARY_WORKERS: usize = 8;
 
 impl JsonlSessionRepository {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self {
-            root: root.into(),
-            open_stores: Arc::new(Mutex::new(LruMap::new(OPEN_STORE_CACHE_CAPACITY))),
-            facts_cache: Arc::new(Mutex::new(LruMap::new(FACTS_CACHE_CAPACITY))),
-        }
+        Self { root: root.into() }
     }
 
     pub fn load_by_path(&self, path: &Path) -> Result<PersistedSession, SessionStorageError> {
-        load_session_dir(&self.cached_store(path), path)
+        load_session_dir(&self.store(path), path)
     }
 
     pub fn delete(&self, session_dir: &Path) -> Result<(), SessionStorageError> {
@@ -69,7 +60,7 @@ impl JsonlSessionRepository {
             cwd.to_string(),
             created_at.parse().unwrap_or_default(),
         )?;
-        load_session_dir(&self.cached_store(&dir), &dir)
+        load_session_dir(&self.store(&dir), &dir)
     }
 
     pub fn open(
@@ -105,7 +96,7 @@ impl JsonlSessionRepository {
                 })?;
                 let path = entry.path();
                 if path.is_dir() && path.join("session.json").exists() {
-                    match load_session_dir(&self.cached_store(&path), &path) {
+                    match load_session_dir(&self.store(&path), &path) {
                         Ok(s) => sessions.push(s),
                         Err(_) => continue,
                     }
@@ -202,38 +193,10 @@ impl JsonlSessionRepository {
         Ok(summaries)
     }
 
-    /// Reuse the journal handle for a session directory. Keeps the
-    /// in-memory replay (and raw-events cache) alive across list/load calls.
-    /// Cheaply re-checks segment sizes so external writes or corruption
-    /// invalidate the cached handle instead of being masked by it.
-    pub(crate) fn cached_store(&self, dir: &Path) -> SessionStore {
-        let mut stores = self
-            .open_stores
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if let Some(cached) = stores.get(dir)
-            && segment_sizes_match(dir, &cached.segment_sizes)
-        {
-            return cached.store.clone();
-        }
-        // Stale or missing: drop the old handle (releasing its writer lock)
-        // before reopening so this process can re-acquire the lock.
-        stores.remove(dir);
-        let store = SessionStore::new(dir);
-        stores.insert(
-            dir.to_path_buf(),
-            CachedJournal {
-                store: store.clone(),
-                segment_sizes: segment_sizes(dir),
-            },
-        );
-        store
+    pub(crate) fn store(&self, dir: &Path) -> SessionStore {
+        SessionStore::new(dir)
     }
 
-    /// Lightweight per-session summary: boundary snapshot + open tail via
-    /// `inspect_facts`, falling back to a full journal open for sessions
-    /// without a snapshot yet. Cached facts are invalidated when on-disk
-    /// segment sizes change.
     fn summarize_one(&self, dir: &Path) -> Result<SessionSummary, SessionStorageError> {
         let identity = piko_session_store::SessionStore::inspect(dir).map_err(|error| {
             SessionStorageError::Invalid {
@@ -241,57 +204,25 @@ impl JsonlSessionRepository {
                 message: error.to_string(),
             }
         })?;
-        let cached = {
-            let mut stores = self
-                .facts_cache
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if let Some(cached) = stores.get(dir)
-                && segment_sizes_match(dir, &cached.segment_sizes)
-            {
-                Some(cached.facts.clone())
-            } else {
-                stores.remove(dir);
-                None
-            }
-        };
-        let facts = match cached {
-            Some(ref facts) => facts.clone(),
-            None => {
-                let facts = match piko_session_store::SessionStore::inspect_facts(dir) {
-                    Ok(Some(facts)) => Some(facts),
-                    Ok(None) => {
-                        // No boundary snapshot yet: full open (also seeds the
-                        // journal handle cache for later loads).
-                        self.cached_store(dir).journal_facts().ok()
+        let facts =
+            match piko_session_store::inspect_catalog(dir) {
+                Ok(Some(view)) => view.facts,
+                Ok(None) => self.store(dir).journal_facts().map_err(|error| {
+                    SessionStorageError::Invalid {
+                        path: dir.to_path_buf(),
+                        message: error.to_string(),
                     }
-                    Err(error) => {
-                        return Err(SessionStorageError::Invalid {
-                            path: dir.to_path_buf(),
-                            message: error.to_string(),
-                        });
-                    }
-                };
-                let Some(facts) = facts else {
+                })?,
+                Err(error) => {
                     return Err(SessionStorageError::Invalid {
                         path: dir.to_path_buf(),
-                        message: "failed to summarize session".into(),
+                        message: error.to_string(),
                     });
-                };
-                self.facts_cache
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .insert(
-                        dir.to_path_buf(),
-                        CachedFacts {
-                            facts: facts.clone(),
-                            segment_sizes: segment_sizes(dir),
-                        },
-                    );
-                facts
-            }
-        };
-        let summary = SessionSummary {
+                }
+            };
+        let integrity_error = (!piko_session_store::open_journal_readable(dir))
+            .then(|| "journal open segment is not readable".to_string());
+        Ok(SessionSummary {
             session_id: identity.session_id,
             cwd: identity.cwd,
             seq: facts.extra_tree_count + facts.message_count,
@@ -302,9 +233,8 @@ impl JsonlSessionRepository {
             modified_at: Some(facts.updated_at.to_string()),
             session_path: Some(dir.to_string_lossy().to_string()),
             parent_session_path: None,
-            integrity_error: None,
-        };
-        Ok(summary)
+            integrity_error,
+        })
     }
 
     pub(super) fn session_dir(&self, cwd: &str) -> PathBuf {
@@ -330,23 +260,4 @@ impl JsonlSessionRepository {
         }
         Ok(d)
     }
-}
-
-fn segment_sizes(dir: &Path) -> std::collections::HashMap<PathBuf, u64> {
-    let mut sizes = std::collections::HashMap::new();
-    if let Ok(entries) = fs::read_dir(dir.join("events")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) == Some("jsonl")
-                && let Ok(metadata) = entry.metadata()
-            {
-                sizes.insert(path, metadata.len());
-            }
-        }
-    }
-    sizes
-}
-
-fn segment_sizes_match(dir: &Path, cached: &std::collections::HashMap<PathBuf, u64>) -> bool {
-    segment_sizes(dir) == *cached
 }

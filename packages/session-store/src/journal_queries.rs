@@ -1,18 +1,6 @@
-use std::path::Path;
-
 use crate::journal::{DurableCommit, SessionStore, VerificationReport};
 use crate::replay::read_all;
 use crate::{Result, SessionAggregate, StoreError};
-
-/// One raw journal event with its durable commit position. Observational
-/// readers (for example the trajectory query) use this to replay optional
-/// event types without affecting the acknowledged session projection.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RawJournalEvent {
-    pub revision: u64,
-    pub committed_at: i64,
-    pub event: crate::RawEvent,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JournalFacts {
@@ -22,20 +10,6 @@ pub struct JournalFacts {
     pub message_count: u64,
     pub extra_tree_count: u64,
     pub first_user_message: Option<String>,
-}
-
-pub(crate) fn events_from_commits(commits: &[DurableCommit]) -> Vec<RawJournalEvent> {
-    commits.iter().flat_map(events_from_commit).collect()
-}
-
-pub(crate) fn events_from_commit(
-    commit: &DurableCommit,
-) -> impl Iterator<Item = RawJournalEvent> + '_ {
-    commit.events.iter().cloned().map(|event| RawJournalEvent {
-        revision: commit.revision,
-        committed_at: commit.committed_at,
-        event,
-    })
 }
 
 impl SessionStore {
@@ -75,18 +49,6 @@ impl SessionStore {
             .clone()
     }
 
-    pub(crate) fn path(&self) -> &Path {
-        &self.inner.path
-    }
-
-    pub(crate) fn session_id(&self) -> &str {
-        &self.inner.session_id
-    }
-
-    pub(crate) fn journal_generation(&self) -> &str {
-        &self.inner.journal_generation
-    }
-
     pub(crate) fn commit_at(&self, revision: u64) -> Result<DurableCommit> {
         read_all(&self.inner.path, false)?
             .0
@@ -95,30 +57,12 @@ impl SessionStore {
             .ok_or_else(|| StoreError::InvalidEvent(format!("missing commit revision {revision}")))
     }
 
-    /// All raw journal events in commit order, including optional
-    /// (`ignorable`) event types that the acknowledged projection skips.
-    /// Served from the in-memory cache filled on open and append.
-    pub fn raw_events(&self) -> Result<Vec<RawJournalEvent>> {
-        Ok(self
-            .inner
-            .raw_events
+    pub fn trajectory(&self) -> crate::TrajectoryProjection {
+        self.inner
+            .trajectory
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone())
-    }
-
-    /// Raw events with `revision > after_revision`. Used by observational
-    /// readers to refresh incrementally after the first full decode.
-    pub fn raw_events_after(&self, after_revision: u64) -> Result<Vec<RawJournalEvent>> {
-        Ok(self
-            .inner
-            .raw_events
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .iter()
-            .filter(|event| event.revision > after_revision)
-            .cloned()
-            .collect())
+            .clone()
     }
 }
 

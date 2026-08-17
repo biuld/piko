@@ -9,6 +9,10 @@
 > branching, and recovery behavior in [F-09](F-09-session-persistence.md).
 > F-09 remains only the source for deferred session-list paging and startup
 > prewarm until those behaviors are separately specified.
+>
+> [F-37](F-37-materialized-read-models.md) supersedes boundary snapshots,
+> process-local history caches, and bounded LRUs of recently replayed
+> sessions as the query and open latency contract.
 
 ## Summary
 

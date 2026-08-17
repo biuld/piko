@@ -170,27 +170,10 @@ impl SessionStore {
             .map_err(|error| self.storage_error(error))
     }
 
-    /// All raw journal events in commit order, including optional
-    /// (`ignorable`) event types that the acknowledged projection skips.
-    pub fn raw_journal_events(
+    pub fn trajectory(
         &self,
-    ) -> Result<Vec<piko_session_store::RawJournalEvent>, SessionStorageError> {
-        self.journal()?
-            .raw_events()
-            .map_err(|error| self.storage_error(error))
-    }
-
-    pub fn journal_revision(&self) -> Result<u64, SessionStorageError> {
-        Ok(self.journal()?.revision())
-    }
-
-    pub fn raw_journal_events_after(
-        &self,
-        after_revision: u64,
-    ) -> Result<Vec<piko_session_store::RawJournalEvent>, SessionStorageError> {
-        self.journal()?
-            .raw_events_after(after_revision)
-            .map_err(|error| self.storage_error(error))
+    ) -> Result<piko_session_store::TrajectoryProjection, SessionStorageError> {
+        Ok(self.journal()?.trajectory())
     }
 
     fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {

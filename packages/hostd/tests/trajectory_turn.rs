@@ -15,10 +15,7 @@ use piko_hostd::protocol::HostServer;
 use piko_llmd::gateway::{
     InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
 };
-use piko_protocol::{
-    TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_TERMINAL, TRAJECTORY_EVENT_TOOL_CALL,
-    TrajectoryRecord,
-};
+use piko_protocol::TrajectoryRecord;
 use tokio_stream::iter;
 use tokio_util::sync::CancellationToken;
 
@@ -71,24 +68,22 @@ impl InferenceGateway for ScriptedGateway {
     }
 }
 
-async fn wait_for_events(
+async fn wait_for_trajectory(
     store: &SessionStore,
     expected: usize,
-    event_type: &str,
-) -> Vec<piko_session_store::RawJournalEvent> {
+    matches: impl Fn(&piko_session_store::TrajectoryProjection) -> usize,
+    label: &str,
+) -> piko_session_store::TrajectoryProjection {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
-        let events = store.raw_journal_events().unwrap_or_default();
-        let matched = events
-            .iter()
-            .filter(|event| event.event.event_type == event_type)
-            .count();
+        let projection = store.trajectory().unwrap_or_default();
+        let matched = matches(&projection);
         if matched >= expected {
-            return events;
+            return projection;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "trajectory {event_type} records not appended (got {matched}/{expected})"
+            "trajectory {label} records not published (got {matched}/{expected})"
         );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
@@ -188,17 +183,44 @@ async fn turn_writes_durable_trajectory_records() {
     // Durable optional events landed in the session journal. Model-step
     // records are covered at the llmd layer (`captures_actual_model_step_*`);
     // the scripted gateway here replaces the real model executor.
-    let events = wait_for_events(&store, 1, TRAJECTORY_EVENT_ASSEMBLY).await;
-    let tool_events = events
-        .iter()
-        .filter(|event| event.event.event_type == TRAJECTORY_EVENT_TOOL_CALL)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_events.len(), 2, "started + completed tool records");
+    let projection = wait_for_trajectory(
+        &store,
+        1,
+        |projection| {
+            projection
+                .runs
+                .values()
+                .filter(|run| run.assembly.is_some())
+                .count()
+        },
+        "assembly",
+    )
+    .await;
+    let tool_events = projection
+        .runs
+        .values()
+        .flat_map(|run| run.records.iter())
+        .filter(|record| matches!(record, TrajectoryRecord::ToolCall(_)))
+        .count();
+    assert_eq!(tool_events, 2, "started + completed tool records");
 
     // The terminal record is appended after `execution_finished`, so a live
     // SSE viewer observes the running → completed transition (F-36 terminal
     // record).
-    wait_for_events(&store, 1, TRAJECTORY_EVENT_TERMINAL).await;
+    wait_for_trajectory(
+        &store,
+        1,
+        |projection| {
+            projection
+                .runs
+                .values()
+                .flat_map(|run| run.records.iter())
+                .filter(|record| matches!(record, TrajectoryRecord::Terminal(_)))
+                .count()
+        },
+        "terminal",
+    )
+    .await;
 
     // The live SSE broadcast carries the same events: the terminal record
     // (which flips a viewer from running → completed) and a run-list-changed

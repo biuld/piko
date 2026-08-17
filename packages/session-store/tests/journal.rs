@@ -5,8 +5,8 @@ use std::io::Write;
 use piko_protocol::{AgentInstanceIdentity, Message, MessageContent, Usage};
 use piko_session_store::{
     CompactionRecordedV1, EventData, MessageCommittedV1, NewSession, OpenOptions, ProposedCommit,
-    RawEvent, SessionStore, SnapshotStatus, StoreError, UsageAttribution, UsageCorrectedV1,
-    UsageQuery, UsageRecordedV1,
+    RawEvent, SessionStore, StoreError, UsageAttribution, UsageCorrectedV1, UsageQuery,
+    UsageRecordedV1,
 };
 use tempfile::tempdir;
 
@@ -69,7 +69,7 @@ fn append_reopen_and_idempotent_retry_converge() {
 }
 
 #[test]
-fn raw_events_are_cached_on_open_and_append() {
+fn trajectory_read_model_is_published_and_survives_reopen() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");
     let opened = SessionStore::create(&path, new_session("s1")).unwrap();
@@ -83,18 +83,11 @@ fn raw_events_are_cached_on_open_and_append() {
         serde_json::json!({"runId": "r1"}),
     );
     opened.store.append(2, commit("c3", 3, optional)).unwrap();
-    let first = opened.store.raw_events().unwrap();
-    assert!(
-        first
-            .iter()
-            .any(|event| event.event.event_type == "trajectory.assembly")
-    );
-    assert_eq!(opened.store.raw_events().unwrap(), first);
-    assert_eq!(opened.store.raw_events_after(2).unwrap().len(), 1);
+    assert_eq!(opened.store.trajectory().revision, 3);
     drop(opened);
 
     let reopened = SessionStore::open(&path, OpenOptions::default()).unwrap();
-    assert_eq!(reopened.store.raw_events().unwrap(), first);
+    assert_eq!(reopened.store.trajectory().revision, 3);
 }
 
 #[test]
@@ -390,7 +383,6 @@ fn usage_is_stable_across_retry_navigation_compaction_snapshot_and_replay() {
         )
         .unwrap();
     fill_to_segment_boundary(&opened.store);
-    opened.store.write_snapshot().unwrap();
     assert_eq!(
         opened
             .store
@@ -410,7 +402,7 @@ fn usage_is_stable_across_retry_navigation_compaction_snapshot_and_replay() {
 }
 
 #[test]
-fn generated_branch_history_converges_live_snapshot_tail_and_full_replay() {
+fn generated_branch_history_converges_live_read_model_and_full_replay() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");
     let opened = SessionStore::create(&path, new_session("s1")).unwrap();
@@ -446,7 +438,6 @@ fn generated_branch_history_converges_live_snapshot_tail_and_full_replay() {
             )
             .unwrap();
     }
-    let snapshot = opened.store.write_snapshot().unwrap();
     for revision in 1_001..=1_025 {
         seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
         let parent = messages[(seed as usize) % messages.len()].clone();
@@ -469,16 +460,16 @@ fn generated_branch_history_converges_live_snapshot_tail_and_full_replay() {
     }
     let live = opened.store.aggregate();
     drop(opened);
-    let snapshot_tail = SessionStore::open(&path, OpenOptions::default()).unwrap();
-    assert_eq!(snapshot_tail.aggregate, live);
-    drop(snapshot_tail);
-    std::fs::remove_file(snapshot.path).unwrap();
+    let from_model = SessionStore::open(&path, OpenOptions::default()).unwrap();
+    assert_eq!(from_model.aggregate, live);
+    drop(from_model);
+    std::fs::remove_file(path.join("readmodels/current.json")).unwrap();
     let full = SessionStore::open(&path, OpenOptions::default()).unwrap();
     assert_eq!(full.aggregate, live);
 }
 
 #[test]
-fn snapshot_plus_tail_matches_full_replay_and_corrupt_snapshot_is_disposable() {
+fn corrupt_current_read_model_is_rebuilt_from_the_journal() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");
     let opened = SessionStore::create(&path, new_session("s1")).unwrap();
@@ -487,8 +478,6 @@ fn snapshot_plus_tail_matches_full_replay_and_corrupt_snapshot_is_disposable() {
         .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
         .unwrap();
     fill_to_segment_boundary(&opened.store);
-    let snapshot = opened.store.write_snapshot().unwrap();
-    assert_eq!(snapshot.through_revision, 1_000);
     opened
         .store
         .append(
@@ -508,49 +497,35 @@ fn snapshot_plus_tail_matches_full_replay_and_corrupt_snapshot_is_disposable() {
         replayed.aggregate.active_root_transcript().unwrap().len(),
         2
     );
-    assert!(matches!(
-        replayed.store.latest_snapshot(),
-        SnapshotStatus::Valid(_)
-    ));
     drop(replayed);
 
     FsOpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(snapshot.path)
+        .open(path.join("readmodels/current.json"))
         .unwrap()
         .write_all(b"broken")
         .unwrap();
-    let full_replay = SessionStore::open(&path, OpenOptions::default()).unwrap();
-    assert_eq!(full_replay.aggregate.revision, 1_001);
+    let rebuilt = SessionStore::open(&path, OpenOptions::default()).unwrap();
+    assert_eq!(rebuilt.aggregate.revision, 1_001);
+    assert_eq!(rebuilt.aggregate.active_root_transcript().unwrap().len(), 2);
     assert_eq!(
-        full_replay
-            .aggregate
-            .active_root_transcript()
+        piko_session_store::inspect_catalog(&path)
             .unwrap()
-            .len(),
-        2
+            .unwrap()
+            .facts
+            .revision,
+        1_001
     );
-    for _ in 0..200 {
-        if matches!(
-            full_replay.store.latest_snapshot(),
-            SnapshotStatus::Valid(ref snapshot) if snapshot.through_revision == 1_000
-        ) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    panic!("invalid boundary snapshot was not rebuilt from the journal prefix");
 }
 
 #[test]
-fn snapshot_from_another_journal_generation_is_rejected() {
+fn foreign_generation_current_read_model_is_ignored() {
     let temp = tempdir().unwrap();
     let source_path = temp.path().join("source");
     let target_path = temp.path().join("target");
     let source = SessionStore::create(&source_path, new_session("same-id")).unwrap();
     fill_to_segment_boundary(&source.store);
-    source.store.write_snapshot().unwrap();
     let target = SessionStore::create(&target_path, new_session("same-id")).unwrap();
     fill_to_segment_boundary(&target.store);
     target
@@ -566,21 +541,14 @@ fn snapshot_from_another_journal_generation_is_rejected() {
         .unwrap();
     drop(source);
     drop(target);
-    // Boundary snapshots are asynchronous; let both writers finish before
-    // replacing the target cache with the foreign-generation snapshot.
-    std::thread::sleep(std::time::Duration::from_millis(100));
 
     std::fs::copy(
-        source_path.join("snapshots/00000000000000001000.json"),
-        target_path.join("snapshots/00000000000000001000.json"),
+        source_path.join("readmodels/current.json"),
+        target_path.join("readmodels/current.json"),
     )
     .unwrap();
     let reopened = SessionStore::open(&target_path, OpenOptions::default()).unwrap();
     assert_eq!(reopened.aggregate.revision, 1_001);
-    assert!(matches!(
-        reopened.store.latest_snapshot(),
-        SnapshotStatus::Invalid { .. }
-    ));
 }
 
 #[test]
@@ -656,7 +624,6 @@ fn every_torn_commit_byte_boundary_recovers_the_verified_prefix() {
 fn copy_session(source: &std::path::Path, target: &std::path::Path) {
     std::fs::create_dir(target).unwrap();
     std::fs::create_dir(target.join("events")).unwrap();
-    std::fs::create_dir(target.join("snapshots")).unwrap();
     std::fs::copy(source.join("session.json"), target.join("session.json")).unwrap();
     std::fs::copy(
         source.join("events/00000000000000000001-open.jsonl"),
@@ -833,14 +800,12 @@ fn rolls_segment_at_one_thousand_commits() {
     assert!(closed.exists());
     assert!(path.join("events/00000000000000001001-open.jsonl").exists());
     assert_eq!(opened.store.verify().unwrap().revision, 1_000);
-    for _ in 0..200 {
-        if matches!(
-            opened.store.latest_snapshot(),
-            SnapshotStatus::Valid(ref snapshot) if snapshot.through_revision == 1_000
-        ) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    panic!("revision-1000 snapshot was not published at the segment boundary");
+    assert_eq!(
+        piko_session_store::inspect_catalog(&path)
+            .unwrap()
+            .unwrap()
+            .facts
+            .revision,
+        1_000
+    );
 }

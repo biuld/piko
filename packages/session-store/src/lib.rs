@@ -1,7 +1,7 @@
 //! Schema-v4 session persistence.
 //!
-//! The journal is the sole durable authority. [`SessionAggregate`] is the
-//! deterministic live/replay projection and snapshots are disposable caches.
+//! The journal is the sole durable authority. Query paths read durable
+//! write-time projections under `readmodels/`.
 
 mod accounting;
 mod aggregate;
@@ -12,10 +12,10 @@ mod journal_create;
 mod journal_io;
 mod journal_queries;
 mod projection;
+mod readmodels;
 mod replay;
 mod schema;
 mod segments;
-mod snapshot;
 
 pub use accounting::{AccountingProjection, EffectiveUsageFact, UsageQuery, UsageSummary};
 pub use aggregate::SessionAggregate;
@@ -24,17 +24,22 @@ pub use journal::{
     DurableCommit, NewSession, OpenOptions, OpenedSession, ProposedCommit, RecoveryReport,
     SessionDescriptor, SessionStore, VerificationReport,
 };
-pub use journal_queries::{JournalFacts, RawJournalEvent};
+pub use journal_queries::JournalFacts;
 pub use projection::{
     ModelContinuity, StoredAgent, StoredExecution, StoredMessage, StoredTreeEntry,
 };
+pub use readmodels::{CatalogView, TrajectoryProjection, TrajectoryRunProjection, inspect_catalog};
+
+/// True when the open journal segment parses. Used by listing to attach
+/// `integrity_error` without a full replay.
+pub fn open_journal_readable(path: &std::path::Path) -> bool {
+    crate::replay::last_open_commit(path, false).is_ok()
+}
 pub use schema::{
     CompactionRecordedV1, Compatibility, EventData, ExecutionStartedV1, MessageCommittedV1,
     RawEvent, SessionForkedV1, TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1,
     UsageRecordedV1,
 };
-pub use snapshot::{SnapshotRef, SnapshotStatus};
-
 pub const SCHEMA_VERSION: u32 = 4;
 /// Event-decoder capability within schema-v4. It advances independently from
 /// the on-disk storage generation.

@@ -298,7 +298,7 @@ async fn persistent_turn_recovers_each_agent_private_transcript() {
         Some("task-main")
     );
     assert!(session_dir.join("events").is_dir());
-    assert!(session_dir.join("snapshots").is_dir());
+    assert!(session_dir.join("readmodels").is_dir());
     assert!(!session_dir.join("agents").exists());
 
     let reopened_server = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));

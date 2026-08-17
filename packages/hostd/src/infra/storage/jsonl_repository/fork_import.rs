@@ -48,7 +48,7 @@ impl JsonlSessionRepository {
             forked_id,
             created_at.parse().unwrap_or_default(),
         )?;
-        load_session_dir(&self.cached_store(&forked_dir), &forked_dir)
+        load_session_dir(&self.store(&forked_dir), &forked_dir)
     }
 
     fn fork_at_entry(
@@ -57,7 +57,7 @@ impl JsonlSessionRepository {
         entry_id: &str,
     ) -> Result<PersistedSession, SessionStorageError> {
         // Validate against the same projected entry set clients see after open.
-        let source_projected = load_session_dir(&self.cached_store(source_dir), source_dir)?;
+        let source_projected = load_session_dir(&self.store(source_dir), source_dir)?;
         let has_entry = source_projected
             .state
             .entries
@@ -94,7 +94,7 @@ impl JsonlSessionRepository {
             let _ = fs::remove_dir_all(&forked_dir);
         }
         write_result?;
-        load_session_dir(&self.cached_store(&forked_dir), &forked_dir)
+        load_session_dir(&self.store(&forked_dir), &forked_dir)
     }
 
     pub fn import(&self, input_path: &Path) -> Result<PersistedSession, SessionStorageError> {
@@ -115,7 +115,7 @@ impl JsonlSessionRepository {
             // handle, so the filesystem writer lock remains held throughout
             // the copy as well as the in-process session IO lock.
             source.load_projection()?;
-            let src_session = load_session_dir(&self.cached_store(input_path), input_path)?;
+            let src_session = load_session_dir(&self.store(input_path), input_path)?;
             let dest_dir = self.session_dir(&src_session.state.cwd);
             fs::create_dir_all(&dest_dir).map_err(|source| SessionStorageError::Io {
                 path: dest_dir.clone(),
@@ -152,10 +152,8 @@ impl JsonlSessionRepository {
                     source,
                 })?;
                 // Validate the complete copied journal before publication.
-                // Use a fresh (non-cached) handle: the staging directory is
-                // renamed into place right after, and the cached handle would
-                // keep the writer lock on the moved directory, blocking the
-                // final open of `dest`.
+                // Open staging with a dedicated handle so the writer lock is
+                // released before the directory is renamed to `dest`.
                 {
                     let staging_store = SessionStore::new(&staging);
                     load_session_dir(&staging_store, &staging)?;
@@ -178,7 +176,7 @@ impl JsonlSessionRepository {
                         path: dest_dir.clone(),
                         source,
                     })?;
-                load_session_dir(&self.cached_store(&dest), &dest)
+                load_session_dir(&self.store(&dest), &dest)
             })();
             if result.is_err() {
                 let _ = fs::remove_dir_all(&staging);

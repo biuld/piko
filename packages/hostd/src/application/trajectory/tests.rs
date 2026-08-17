@@ -168,7 +168,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
             .is_err()
     );
 
-    // Incremental: a later record is folded into the cached projection.
+    // Incremental: a later record is folded into the published projection.
     let step2 = TrajectoryModelStepRecord {
         identity: assembly.identity,
         step_id: "step-2".into(),

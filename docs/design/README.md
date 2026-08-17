@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-53: CQRS session read models](D-53-cqrs-session-read-models.md)
+  implements F-37: durable catalog, trajectory, and current-state
+  projections published on append; list/trajectory/open read those files;
+  snapshots and query LRUs are removed (implemented).
 - [D-52: Trajectory viewer inline assembly](D-52-trajectory-inline-assembly.md)
   removes the Prompt tab and renders each run's prompt assembly as a
   time-ordered card in the message stream with the same selection/expansion
