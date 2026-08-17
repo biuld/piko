@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{AgentInboxItem, Message};
 use piko_session_store::{SessionAggregate, StoredMessage};
@@ -160,15 +160,21 @@ impl SessionStore {
             stored.push(message);
         }
         stored.reverse();
+        let seq_by_id = transcript_seqs(&aggregate, agent_instance_id);
+        let last_transcript_seq = seq_by_id.len() as u64;
         let transcript = stored
             .into_iter()
-            .map(|message| committed_message(&aggregate, message, &agent.identity.agent_spec_id))
+            .map(|message| {
+                committed_message(
+                    message,
+                    &agent.identity.agent_spec_id,
+                    seq_by_id
+                        .get(message.data.message_id.as_str())
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
             .collect();
-        let last_transcript_seq = aggregate
-            .messages
-            .values()
-            .filter(|message| message.data.agent_instance_id == agent_instance_id)
-            .count() as u64;
         Ok(RecoveredAgent {
             session_id: session_id.to_string(),
             agent_instance_id: agent_instance_id.to_string(),
@@ -212,7 +218,11 @@ impl SessionStore {
             .ok_or_else(|| self.invalid(format!("unknown agent {agent_instance_id}")))?
             .identity
             .agent_spec_id;
-        Ok(Some(committed_message(&aggregate, message, spec_id)))
+        let seq = transcript_seqs(&aggregate, agent_instance_id)
+            .get(message.data.message_id.as_str())
+            .copied()
+            .unwrap_or(0);
+        Ok(Some(committed_message(message, spec_id, seq)))
     }
 
     pub fn list_agents(&self, session_id: &str) -> Result<Vec<String>, SessionStorageError> {
@@ -224,19 +234,25 @@ impl SessionStore {
     }
 }
 
-fn committed_message(
-    aggregate: &SessionAggregate,
-    stored: &StoredMessage,
-    agent_spec_id: &str,
-) -> CommittedMessage {
-    let transcript_seq = aggregate
+fn transcript_seqs(aggregate: &SessionAggregate, agent_instance_id: &str) -> BTreeMap<String, u64> {
+    let mut messages = aggregate
         .messages
         .values()
-        .filter(|message| {
-            message.data.agent_instance_id == stored.data.agent_instance_id
-                && message.revision <= stored.revision
-        })
-        .count() as u64;
+        .filter(|message| message.data.agent_instance_id == agent_instance_id)
+        .collect::<Vec<_>>();
+    messages.sort_by_key(|message| message.revision);
+    messages
+        .into_iter()
+        .enumerate()
+        .map(|(index, message)| (message.data.message_id.clone(), (index + 1) as u64))
+        .collect()
+}
+
+fn committed_message(
+    stored: &StoredMessage,
+    agent_spec_id: &str,
+    transcript_seq: u64,
+) -> CommittedMessage {
     CommittedMessage {
         id: stored.data.message_id.clone(),
         parent_id: stored.data.agent_parent_message_id.clone(),

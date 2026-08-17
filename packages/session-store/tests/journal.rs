@@ -69,6 +69,35 @@ fn append_reopen_and_idempotent_retry_converge() {
 }
 
 #[test]
+fn raw_events_are_cached_on_open_and_append() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("session");
+    let opened = SessionStore::create(&path, new_session("s1")).unwrap();
+    opened
+        .store
+        .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
+        .unwrap();
+    let optional = RawEvent::optional(
+        "opt-1",
+        "trajectory.assembly",
+        serde_json::json!({"runId": "r1"}),
+    );
+    opened.store.append(2, commit("c3", 3, optional)).unwrap();
+    let first = opened.store.raw_events().unwrap();
+    assert!(
+        first
+            .iter()
+            .any(|event| event.event.event_type == "trajectory.assembly")
+    );
+    assert_eq!(opened.store.raw_events().unwrap(), first);
+    assert_eq!(opened.store.raw_events_after(2).unwrap().len(), 1);
+    drop(opened);
+
+    let reopened = SessionStore::open(&path, OpenOptions::default()).unwrap();
+    assert_eq!(reopened.store.raw_events().unwrap(), first);
+}
+
+#[test]
 fn same_process_open_reuses_the_single_writer_core() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");

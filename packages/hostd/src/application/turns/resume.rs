@@ -25,28 +25,19 @@ impl HostApp {
                     session.current_leaf_id.as_deref(),
                 );
                 if !session_transcript.is_empty() {
-                    let transcript_seq = self
-                        .session_store_factory
-                        .open(session_dir)
-                        .load_agent(session_id, root_agent_instance_id)
-                        .await
-                        .ok()
-                        .map(|recovered| recovered.last_transcript_seq)
-                        .unwrap_or_else(|| {
-                            session
-                                .entries
-                                .iter()
-                                .filter_map(|entry| match entry {
-                                    piko_protocol::SessionTreeEntry::Message(message)
-                                        if message.agent_instance_id == root_agent_instance_id =>
-                                    {
-                                        Some(message.transcript_seq)
-                                    }
-                                    _ => None,
-                                })
-                                .max()
-                                .unwrap_or(0)
-                        });
+                    let transcript_seq = session
+                        .entries
+                        .iter()
+                        .filter_map(|entry| match entry {
+                            piko_protocol::SessionTreeEntry::Message(message)
+                                if message.agent_instance_id == root_agent_instance_id =>
+                            {
+                                Some(message.transcript_seq)
+                            }
+                            _ => None,
+                        })
+                        .max()
+                        .unwrap_or(0);
                     let head_message_id = session
                         .task_heads
                         .get(root_agent_instance_id)

@@ -48,6 +48,15 @@ pub trait SessionStorePort: Send + Sync {
     /// All raw journal events in commit order, including optional
     /// (`ignorable`) event types (F-36 trajectory replay).
     async fn raw_journal_events(&self) -> Result<Vec<RawJournalEventRef>, SessionStorageError>;
+
+    /// Current journal revision. Does not clone the aggregate.
+    async fn journal_revision(&self) -> Result<u64, SessionStorageError>;
+
+    /// Raw events with `revision > after_revision`.
+    async fn raw_journal_events_after(
+        &self,
+        after_revision: u64,
+    ) -> Result<Vec<RawJournalEventRef>, SessionStorageError>;
 }
 
 /// Opens or creates a [`SessionStorePort`] for a given session directory.

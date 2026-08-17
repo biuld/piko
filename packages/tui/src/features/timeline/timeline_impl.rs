@@ -17,9 +17,11 @@ impl Timeline {
 
     pub fn begin_projection_batch(&mut self) {
         self.defer_projection_sync = true;
+        self.projection.begin_batch();
     }
 
     pub fn end_projection_batch(&mut self) {
+        self.projection.end_batch();
         self.defer_projection_sync = false;
         self.flush_projection();
     }

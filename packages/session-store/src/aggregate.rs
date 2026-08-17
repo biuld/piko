@@ -46,6 +46,22 @@ pub struct SessionAggregate {
 
 impl SessionAggregate {
     pub fn apply(&mut self, commit: &DurableCommit) -> Result<()> {
+        // Transactional apply: clone first so a failed commit leaves `self`
+        // untouched. Used by live append preflight.
+        let mut next = self.clone();
+        next.apply_in_place(commit)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Replay-only apply: mutates `self` directly, without the transactional
+    /// clone. Safe for journal replay where a failed commit aborts the whole
+    /// open and the partially-applied aggregate is discarded.
+    pub(crate) fn apply_for_replay(&mut self, commit: &DurableCommit) -> Result<()> {
+        self.apply_in_place(commit)
+    }
+
+    fn apply_in_place(&mut self, commit: &DurableCommit) -> Result<()> {
         crate::schema::validate_extensions("commit", &commit.extensions)?;
         if commit.revision != self.revision + 1 {
             return Err(StoreError::InvalidEvent(format!(
@@ -57,15 +73,13 @@ impl SessionAggregate {
         if self.commit_ids.contains_key(&commit.commit_id) {
             return Err(StoreError::IdempotencyConflict(commit.commit_id.clone()));
         }
-        let mut next = self.clone();
         for event in &commit.events {
-            next.apply_event(commit.revision, event)?;
+            self.apply_event(commit.revision, event)?;
         }
-        next.revision = commit.revision;
-        next.updated_at = next.updated_at.max(commit.committed_at);
-        next.commit_ids
+        self.revision = commit.revision;
+        self.updated_at = self.updated_at.max(commit.committed_at);
+        self.commit_ids
             .insert(commit.commit_id.clone(), commit.revision);
-        *self = next;
         Ok(())
     }
 

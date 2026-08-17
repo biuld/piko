@@ -9,7 +9,10 @@ use super::super::recovery::agent_transcript_entries;
 use super::super::session_store::{SessionProjection, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
 
-pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionStorageError> {
+pub(crate) fn load_session_dir(
+    store: &SessionStore,
+    dir: &Path,
+) -> Result<PersistedSession, SessionStorageError> {
     let identity_path = dir.join("session.json");
     if !identity_path.exists() {
         return Err(SessionStorageError::Invalid {
@@ -17,7 +20,6 @@ pub(crate) fn load_session_dir(dir: &Path) -> Result<PersistedSession, SessionSt
             message: "missing session.json".into(),
         });
     }
-    let store = SessionStore::new(dir);
     let projection = store.load_projection()?;
     let mut state = SessionState::new(projection.session_id.clone(), projection.cwd.clone());
     state.name = projection.name.clone();

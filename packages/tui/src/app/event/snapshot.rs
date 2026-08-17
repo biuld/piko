@@ -61,6 +61,7 @@ impl AppState {
             }
         }
 
+        self.timelines.begin_projection_batch();
         for (order, entry) in active_entries.into_iter().enumerate() {
             match entry {
                 SessionTreeEntry::Message(message_entry) => {
@@ -113,6 +114,7 @@ impl AppState {
                 }
             }
         }
+        self.timelines.end_projection_batch();
 
         self.session.active_turns = snapshot
             .active_turns

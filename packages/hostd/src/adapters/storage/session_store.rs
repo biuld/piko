@@ -89,21 +89,40 @@ impl SessionStorePort for BlockingSessionStore {
     async fn raw_journal_events(&self) -> Result<Vec<RawJournalEventRef>, SessionStorageError> {
         let store = self.inner.clone();
         self.pool
+            .run(move || store.raw_journal_events().map(to_event_refs))
+            .await
+    }
+
+    async fn journal_revision(&self) -> Result<u64, SessionStorageError> {
+        let store = self.inner.clone();
+        self.pool.run(move || store.journal_revision()).await
+    }
+
+    async fn raw_journal_events_after(
+        &self,
+        after_revision: u64,
+    ) -> Result<Vec<RawJournalEventRef>, SessionStorageError> {
+        let store = self.inner.clone();
+        self.pool
             .run(move || {
-                store.raw_journal_events().map(|events| {
-                    events
-                        .into_iter()
-                        .map(|event| RawJournalEventRef {
-                            revision: event.revision,
-                            committed_at: event.committed_at,
-                            event_type: event.event.event_type.clone(),
-                            payload: event.event.payload,
-                        })
-                        .collect()
-                })
+                store
+                    .raw_journal_events_after(after_revision)
+                    .map(to_event_refs)
             })
             .await
     }
+}
+
+fn to_event_refs(events: Vec<piko_session_store::RawJournalEvent>) -> Vec<RawJournalEventRef> {
+    events
+        .into_iter()
+        .map(|event| RawJournalEventRef {
+            revision: event.revision,
+            committed_at: event.committed_at,
+            event_type: event.event.event_type.clone(),
+            payload: event.event.payload,
+        })
+        .collect()
 }
 
 /// Default factory backed by the real filesystem and the shared blocking pool.

@@ -31,33 +31,54 @@ pub(crate) fn checksum_record(record: &[u8], unsigned_checksum: &[u8]) -> Option
     Some(format!("{:08x}", hasher.finalize()))
 }
 
-fn top_level_field_value(record: &[u8], target: &[u8]) -> Option<std::ops::Range<usize>> {
+pub(crate) fn top_level_field_value(
+    record: &[u8],
+    target: &[u8],
+) -> Option<std::ops::Range<usize>> {
+    top_level_field_ranges(record, &[target])
+        .into_iter()
+        .next()
+        .flatten()
+}
+
+/// Extract the value ranges of several top-level fields in a single pass.
+/// Missing fields yield `None` entries in the returned vector.
+pub(crate) fn top_level_field_ranges(
+    record: &[u8],
+    targets: &[&[u8]],
+) -> Vec<Option<std::ops::Range<usize>>> {
+    let mut result = vec![None; targets.len()];
     let mut cursor = skip_whitespace(record, 0);
     if record.get(cursor) != Some(&b'{') {
-        return None;
+        return result;
     }
     cursor += 1;
     loop {
         cursor = skip_whitespace(record, cursor);
         if record.get(cursor) == Some(&b'}') {
-            return None;
+            return result;
         }
-        let (key_start, key_end, next) = json_string(record, cursor)?;
+        let Some((key_start, key_end, next)) = json_string(record, cursor) else {
+            return result;
+        };
         cursor = skip_whitespace(record, next);
         if record.get(cursor) != Some(&b':') {
-            return None;
+            return result;
         }
         cursor = skip_whitespace(record, cursor + 1);
         let value_start = cursor;
-        let value_end = json_value_end(record, cursor)?;
-        if &record[key_start..key_end] == target {
-            return Some(value_start..value_end);
+        let Some(value_end) = json_value_end(record, cursor) else {
+            return result;
+        };
+        for (index, target) in targets.iter().enumerate() {
+            if &record[key_start..key_end] == *target {
+                result[index] = Some(value_start..value_end);
+            }
         }
         cursor = skip_whitespace(record, value_end);
         match record.get(cursor) {
             Some(b',') => cursor += 1,
-            Some(b'}') => return None,
-            _ => return None,
+            _ => return result,
         }
     }
 }

@@ -48,13 +48,13 @@ impl AgentTimeline {
                     tool.status = ToolStatus::Running;
                 }
             }
-            self.reorder_authored_items();
+            self.maintenance();
             return;
         }
 
         let live_order = self.allocate_live_order();
         self.items.push(TimelineItem::Tool(Box::new(ToolItem {
-            tool_call_id,
+            tool_call_id: tool_call_id.clone(),
             tool_name,
             args,
             partial_json: None,
@@ -68,8 +68,9 @@ impl AgentTimeline {
             transcript_seq,
             live_order,
         })));
-        self.rebuild_indexes();
-        self.reorder_authored_items();
+        self.tool_ids
+            .insert(tool_call_id.clone(), self.items.len() - 1);
+        self.maintenance();
     }
 
     pub fn apply_tool_ended(
@@ -130,13 +131,13 @@ impl AgentTimeline {
                 tool.argument_segments.clear();
                 tool.status = status;
             }
-            self.reorder_authored_items();
+            self.maintenance();
             return;
         }
 
         let live_order = self.allocate_live_order();
         self.items.push(TimelineItem::Tool(Box::new(ToolItem {
-            tool_call_id,
+            tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.unwrap_or_else(|| "tool".to_string()),
             args: serde_json::Value::Null,
             partial_json: None,
@@ -150,8 +151,9 @@ impl AgentTimeline {
             transcript_seq,
             live_order,
         })));
-        self.rebuild_indexes();
-        self.reorder_authored_items();
+        self.tool_ids
+            .insert(tool_call_id.clone(), self.items.len() - 1);
+        self.maintenance();
     }
 
     pub fn apply_tool_arg_chunk(
@@ -196,7 +198,9 @@ impl AgentTimeline {
                 transcript_seq: None,
                 live_order,
             })));
-            self.rebuild_indexes();
+            self.tool_ids
+                .insert(tool_call_id.clone(), self.items.len() - 1);
+            self.maintenance_indexes_only();
         }
         let idx = self.tool_ids[&tool_call_id];
         let TimelineItem::Tool(tool) = &mut self.items[idx] else {

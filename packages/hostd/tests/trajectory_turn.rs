@@ -158,6 +158,14 @@ async fn turn_writes_durable_trajectory_records() {
             after_seq: None,
         })
         .await;
+    // Subscribe before the turn so live records are observed as they are
+    // appended. The recorder broadcast does not replay already-sent events.
+    let session_id_live = session_id.clone();
+    let live_wait = tokio::spawn(async move {
+        piko_hostd::infra::trajectory::TrajectoryRecorderRegistry::global()
+            .await_subscribe(&session_id_live)
+            .await
+    });
     let events = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         server.handle_command(Command::ChatSubmit {
@@ -195,8 +203,9 @@ async fn turn_writes_durable_trajectory_records() {
     // The live SSE broadcast carries the same events: the terminal record
     // (which flips a viewer from running → completed) and a run-list-changed
     // marker (which tells viewers watching other runs to refresh the strip).
-    let mut live = piko_hostd::infra::trajectory::TrajectoryRecorderRegistry::global()
-        .subscribe(&session_id)
+    let mut live = live_wait
+        .await
+        .expect("subscribe task")
         .expect("recorder exists after attach");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut saw_terminal = false;

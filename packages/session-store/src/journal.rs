@@ -144,6 +144,10 @@ pub(crate) struct SessionStoreInner {
     _lock: File,
     pub(crate) aggregate: Mutex<SessionAggregate>,
     last_checksum: Mutex<Option<String>>,
+    /// Observational event view, including ignorable types. Populated on
+    /// open from the journal and extended on each successful append so
+    /// readers do not re-scan JSONL.
+    pub(crate) raw_events: Mutex<Vec<crate::RawJournalEvent>>,
 }
 
 static OPEN_STORES: OnceLock<Mutex<BTreeMap<PathBuf, Weak<SessionStoreInner>>>> = OnceLock::new();
@@ -174,6 +178,129 @@ impl SessionStore {
             cwd: identity.cwd,
             created_at: identity.created_at,
         })
+    }
+
+    /// Lightweight list-summary load: boundary snapshot plus the open tail
+    /// segment only. Returns `None` when the session has no boundary snapshot
+    /// yet (caller falls back to a full open). Does not take the writer lock,
+    /// repair the tail, or retain a journal handle, so it is cheap enough to
+    /// run for every listed session.
+    pub fn inspect_facts(path: &Path) -> Result<Option<crate::journal_queries::JournalFacts>> {
+        let path = path
+            .canonicalize()
+            .map_err(|source| io_error(path, source))?;
+        let identity_path = path.join("session.json");
+        let data = fs::read(&identity_path).map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                StoreError::NotFound(path.to_path_buf())
+            } else {
+                io_error(&identity_path, source)
+            }
+        })?;
+        let identity: SessionIdentityFile =
+            serde_json::from_slice(&data).map_err(|source| StoreError::Json {
+                path: identity_path,
+                source,
+            })?;
+        if identity.schema_version != SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedSchema {
+                found: identity.schema_version,
+                supported: SCHEMA_VERSION,
+            });
+        }
+        let Some(snapshot) = crate::snapshot::load_for_replay(
+            &path,
+            &identity.session_id,
+            &identity.journal_generation,
+        ) else {
+            return Ok(None);
+        };
+        let boundary = snapshot.aggregate.revision;
+        // Byte-level verification of snapshot-covered closed segments. Full
+        // deserialization of those events is skipped, but checksums and the
+        // revision/previous-checksum chain still catch corruption.
+        if boundary > 0
+            && let Some(last) = crate::replay::verify_closed_segments_checksums(&path)?
+            && last != snapshot.through_commit_checksum
+        {
+            return Err(StoreError::InvalidEvent(
+                "journal closed segments do not match snapshot".into(),
+            ));
+        }
+        let events_dir = path.join("events");
+        let mut tail = Vec::new();
+        let mut recovery = RecoveryReport::default();
+        let mut saw_open = false;
+        for entry in fs::read_dir(&events_dir).map_err(|source| io_error(&events_dir, source))? {
+            let entry = entry.map_err(|source| io_error(&events_dir, source))?;
+            let segment = entry.path();
+            if segment.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if !segment
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with("-open.jsonl"))
+            {
+                continue;
+            }
+            crate::replay::read_segment(
+                &segment,
+                false,
+                &mut tail,
+                &mut recovery,
+                Some((boundary, snapshot.through_commit_checksum.as_str())),
+            )?;
+            saw_open = true;
+        }
+        if saw_open {
+            if let Some(first) = tail.first() {
+                if first.revision != boundary + 1 {
+                    return Err(StoreError::Corruption {
+                        path: path.clone(),
+                        line: 1,
+                        message: format!(
+                            "tail starts at revision {}, expected {}",
+                            first.revision,
+                            boundary + 1
+                        ),
+                    });
+                }
+                if first.previous_checksum.as_deref()
+                    != Some(snapshot.through_commit_checksum.as_str())
+                {
+                    return Err(StoreError::InvalidEvent(
+                        "journal tail does not continue from snapshot".into(),
+                    ));
+                }
+            }
+            let mut expected = snapshot.through_commit_checksum.clone();
+            for (index, commit) in tail.iter().enumerate() {
+                if commit.session_id != identity.session_id
+                    || commit.journal_generation != identity.journal_generation
+                {
+                    return Err(StoreError::InvalidEvent(
+                        "journal identity/generation mismatch in tail".into(),
+                    ));
+                }
+                if commit.previous_checksum.as_deref() != Some(expected.as_str()) {
+                    return Err(StoreError::InvalidEvent(
+                        "journal tail checksum chain mismatch".into(),
+                    ));
+                }
+                expected = commit.checksum.value.clone();
+                if index > 0 && commit.revision != tail[index - 1].revision + 1 {
+                    return Err(StoreError::InvalidEvent("journal tail revision gap".into()));
+                }
+            }
+        }
+        let mut aggregate = snapshot.aggregate;
+        for commit in &tail {
+            aggregate.apply_for_replay(commit)?;
+        }
+        Ok(Some(crate::journal_queries::facts_from_aggregate(
+            &aggregate,
+        )))
     }
 
     pub fn open(path: &Path, options: OpenOptions) -> Result<OpenedSession> {
@@ -266,7 +393,7 @@ impl SessionStore {
             .iter()
             .filter(|commit| commit.revision > snapshot_revision)
         {
-            aggregate.apply(commit)?;
+            aggregate.apply_for_replay(commit)?;
         }
         if aggregate.revision > 0
             && (aggregate.session_id.as_deref() != Some(identity.session_id.as_str())
@@ -301,13 +428,14 @@ impl SessionStore {
                 } else {
                     let mut rebuilt = SessionAggregate::default();
                     for commit in commits.iter().take(boundary_revision as usize) {
-                        rebuilt.apply(commit)?;
+                        rebuilt.apply_for_replay(commit)?;
                     }
                     rebuilt
                 };
                 Some((boundary_aggregate, boundary_checksum))
             }
         };
+        let raw_events = crate::journal_queries::events_from_commits(&commits);
         let inner = Arc::new(SessionStoreInner {
             path: path.clone(),
             session_id: identity.session_id,
@@ -315,6 +443,7 @@ impl SessionStore {
             _lock: lock,
             aggregate: Mutex::new(aggregate.clone()),
             last_checksum: Mutex::new(last_checksum),
+            raw_events: Mutex::new(raw_events),
         });
         registry.insert(path, Arc::downgrade(&inner));
         if let Some((boundary_aggregate, checksum)) = boundary_snapshot {
@@ -412,6 +541,11 @@ impl SessionStore {
             .last_checksum
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(commit.checksum.value.clone());
+        self.inner
+            .raw_events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .extend(crate::journal_queries::events_from_commit(&commit));
         if revision.is_multiple_of(COMMITS_PER_SEGMENT) {
             self.roll_segment(revision)?;
             crate::snapshot::schedule(

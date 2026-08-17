@@ -142,6 +142,14 @@ pub struct AgentTimeline {
     tool_ids: HashMap<String, usize>,
     session_entry_ids: HashMap<String, usize>,
     next_live_order: u64,
+    /// While > 0, mutations skip the per-item index rebuild / authored
+    /// reorder; `end_batch` performs both once. Index maps used for lookups
+    /// are still maintained incrementally inside the batch.
+    ///
+    /// Batch input must be ordered like a hydrated snapshot: a ToolCall (or
+    /// tool-start) entry must precede its ToolResult so incremental
+    /// `tool_ids` lookup pairs them. Realtime streams never enter batches.
+    batch_depth: u32,
 }
 
 mod content;

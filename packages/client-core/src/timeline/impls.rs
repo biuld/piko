@@ -97,8 +97,7 @@ impl AgentTimeline {
             ),
         }
         self.committed_records.insert(message_id, record);
-        self.rebuild_indexes();
-        self.reorder_authored_items();
+        self.maintenance();
         ApplyOutcome::Applied
     }
 
@@ -126,7 +125,8 @@ impl AgentTimeline {
                 entry,
                 branch_order,
             })));
-        self.rebuild_indexes();
+        self.session_entry_ids.insert(id, self.items.len() - 1);
+        self.maintenance_indexes_only();
         ApplyOutcome::Applied
     }
 
@@ -361,7 +361,9 @@ impl AgentTimeline {
                             transcript_seq: None,
                             live_order,
                         })));
-                        self.rebuild_indexes();
+                        self.tool_ids
+                            .insert(patch.item_id.clone(), self.items.len() - 1);
+                        self.maintenance_indexes_only();
                     }
                 }
                 _ => return ApplyOutcome::Ignored,
@@ -393,7 +395,9 @@ impl AgentTimeline {
                 content_segments: Vec::new(),
                 live_order,
             }));
-            self.rebuild_indexes();
+            self.draft_ids
+                .insert(message_id.to_string(), self.items.len() - 1);
+            self.maintenance_indexes_only();
             return ApplyOutcome::Applied;
         }
         let idx = self.draft_ids[message_id];
@@ -432,6 +436,43 @@ impl AgentTimeline {
             self.items[idx] = item;
         }
         self.rebuild_indexes();
+    }
+
+    /// Enter a batch of mutations. Per-item index rebuilds and authored
+    /// reorders are deferred to `end_batch`; lookup maps are still updated
+    /// incrementally so ToolCall/ToolResult pairing stays correct.
+    ///
+    /// Contract: batch input must arrive in hydrated order (tool starts
+    /// before their results, no duplicate message ids). Out-of-order or
+    /// duplicate input inside a batch is not validated per item.
+    pub fn begin_batch(&mut self) {
+        self.batch_depth = self.batch_depth.saturating_add(1);
+    }
+
+    /// Leave a batch. When the outermost batch ends, indexes are rebuilt and
+    /// authored items are reordered once.
+    pub fn end_batch(&mut self) {
+        if self.batch_depth == 0 {
+            return;
+        }
+        self.batch_depth -= 1;
+        if self.batch_depth == 0 {
+            self.rebuild_indexes();
+            self.reorder_authored_items();
+        }
+    }
+
+    pub(super) fn maintenance(&mut self) {
+        if self.batch_depth == 0 {
+            self.rebuild_indexes();
+            self.reorder_authored_items();
+        }
+    }
+
+    pub(super) fn maintenance_indexes_only(&mut self) {
+        if self.batch_depth == 0 {
+            self.rebuild_indexes();
+        }
     }
 
     pub(super) fn rebuild_indexes(&mut self) {
