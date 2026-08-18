@@ -68,11 +68,10 @@ impl JsonlSessionRepository {
         cwd: &str,
         specifier: &str,
     ) -> Result<PersistedSession, SessionStorageError> {
-        let sessions = self.list(Some(cwd))?;
-        sessions
-            .into_iter()
-            .find(|s| s.state.session_id == specifier || s.state.session_id.starts_with(specifier))
-            .ok_or_else(|| SessionStorageError::NotFound(specifier.to_string()))
+        let path = self
+            .resolve_session_dir(Some(cwd), specifier)?
+            .ok_or_else(|| SessionStorageError::NotFound(specifier.to_string()))?;
+        self.load_by_path(&path)
     }
 
     pub fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError> {
@@ -204,24 +203,13 @@ impl JsonlSessionRepository {
                 message: error.to_string(),
             }
         })?;
-        let facts =
-            match piko_session_store::inspect_catalog(dir) {
-                Ok(Some(view)) => view.facts,
-                Ok(None) => self.store(dir).journal_facts().map_err(|error| {
-                    SessionStorageError::Invalid {
-                        path: dir.to_path_buf(),
-                        message: error.to_string(),
-                    }
-                })?,
-                Err(error) => {
-                    return Err(SessionStorageError::Invalid {
-                        path: dir.to_path_buf(),
-                        message: error.to_string(),
-                    });
-                }
-            };
-        let integrity_error = (!piko_session_store::open_journal_readable(dir))
-            .then(|| "journal open segment is not readable".to_string());
+        let view = piko_session_store::query_catalog(dir).map_err(|error| {
+            SessionStorageError::Invalid {
+                path: dir.to_path_buf(),
+                message: error.to_string(),
+            }
+        })?;
+        let facts = view.facts;
         Ok(SessionSummary {
             session_id: identity.session_id,
             cwd: identity.cwd,
@@ -233,8 +221,63 @@ impl JsonlSessionRepository {
             modified_at: Some(facts.updated_at.to_string()),
             session_path: Some(dir.to_string_lossy().to_string()),
             parent_session_path: None,
-            integrity_error,
+            integrity_error: None,
         })
+    }
+
+    pub fn resolve_session_dir(
+        &self,
+        cwd: Option<&str>,
+        specifier: &str,
+    ) -> Result<Option<PathBuf>, SessionStorageError> {
+        let mut matches = Vec::new();
+        for path in self.session_identity_dirs(cwd)? {
+            let Ok(identity) = piko_session_store::SessionStore::inspect(&path) else {
+                continue;
+            };
+            if identity.session_id == specifier {
+                return Ok(Some(path));
+            }
+            if identity.session_id.starts_with(specifier) {
+                matches.push(path);
+            }
+        }
+        Ok(match matches.len() {
+            1 => matches.pop(),
+            _ => None,
+        })
+    }
+
+    fn session_identity_dirs(
+        &self,
+        cwd: Option<&str>,
+    ) -> Result<Vec<PathBuf>, SessionStorageError> {
+        let dirs = if let Some(cwd) = cwd {
+            vec![self.session_dir(cwd)]
+        } else {
+            self.list_session_dirs()?
+        };
+        let mut paths = Vec::new();
+        for dir in dirs {
+            if !dir.exists() {
+                continue;
+            }
+            for entry in fs::read_dir(&dir).map_err(|source| SessionStorageError::Io {
+                path: dir.clone(),
+                source,
+            })? {
+                let path = entry
+                    .map_err(|source| SessionStorageError::Io {
+                        path: dir.clone(),
+                        source,
+                    })?
+                    .path();
+                if path.is_dir() && path.join("session.json").exists() {
+                    paths.push(path);
+                }
+            }
+        }
+        Ok(paths)
     }
 
     pub(super) fn session_dir(&self, cwd: &str) -> PathBuf {

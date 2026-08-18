@@ -13,6 +13,8 @@
 > [F-37](F-37-materialized-read-models.md) supersedes boundary snapshots,
 > process-local history caches, and bounded LRUs of recently replayed
 > sessions as the query and open latency contract.
+> [F-38](F-38-branch-cursor-without-leaf.md) removes pi-style Leaf tree
+> nodes; the durable cursor is the existing branch-selection fact.
 
 ## Summary
 

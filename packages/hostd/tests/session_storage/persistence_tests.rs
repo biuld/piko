@@ -129,7 +129,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
 }
 
 #[tokio::test]
-async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
+async fn persistent_session_navigate_to_root_user_clears_cursor_without_leaf_node() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
@@ -182,10 +182,6 @@ async fn persistent_session_navigate_to_root_user_writes_leaf_target_none() {
         panic!("expected session reconciled");
     };
     assert_eq!(reconciled.snapshot.current_leaf_id, None);
-    assert!(matches!(
-        reconciled.snapshot.entries.last(),
-        Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
-    ));
 }
 
 #[tokio::test]

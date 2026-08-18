@@ -363,9 +363,9 @@ The root user-message case naturally sets new leaf to `None`, which resets the
 conversation to before the first entry and returns the original prompt in
 `editor_text`.
 
-hostd persists navigation by appending a `LeafEntry` whose `target_id` is the
-new leaf id. It should not set the leaf directly in memory without a durable
-entry.
+hostd persists navigation as a `BranchSelected` journal fact whose
+`selected_tree_entry_id` is the new cursor (F-38). It does not append a
+`Leaf` tree node. The in-memory path updates the same cursor field.
 
 Branch summary is part of the navigation operation. hostd finds the common
 ancestor between old and new positions, collects the abandoned branch entries,

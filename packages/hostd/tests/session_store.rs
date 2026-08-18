@@ -294,13 +294,35 @@ fn root_transcript_advances_persisted_leaf_across_reopen() {
         Some("message-2")
     );
     JsonlSessionRepository::new(temp.path())
-        .navigate(temp.path(), Some("message-2"), Some("message-1"), None)
+        .navigate(temp.path(), Some("message-1"))
         .unwrap();
     let explicitly_navigated = JsonlSessionRepository::new(temp.path())
         .load_by_path(temp.path())
         .unwrap();
     assert_eq!(
         explicitly_navigated.state.current_leaf_id.as_deref(),
+        Some("message-1")
+    );
+
+    JsonlSessionRepository::new(temp.path())
+        .append_entry(
+            temp.path(),
+            &piko_protocol::SessionTreeEntry::Label(piko_protocol::LabelEntry {
+                id: "label-1".into(),
+                parent_id: Some("message-1".into()),
+                timestamp: "3".into(),
+                target_id: "message-1".into(),
+                label: Some("keep".into()),
+            }),
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        SessionStore::new(temp.path())
+            .load_projection()
+            .unwrap()
+            .current_leaf_id
+            .as_deref(),
         Some("message-1")
     );
 

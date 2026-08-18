@@ -21,6 +21,12 @@ pub trait SessionRepositoryPort: Send + Sync {
 
     async fn load_by_path(&self, path: &Path) -> Result<PersistedSession, SessionStorageError>;
 
+    async fn resolve_session_dir(
+        &self,
+        cwd: Option<&str>,
+        specifier: &str,
+    ) -> Result<Option<std::path::PathBuf>, SessionStorageError>;
+
     async fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError>;
 
     async fn summaries(
@@ -95,10 +101,8 @@ pub trait SessionRepositoryPort: Send + Sync {
     async fn navigate(
         &self,
         session_dir: &Path,
-        parent_id: Option<&str>,
         target_id: Option<&str>,
-        agent_id: Option<&str>,
-    ) -> Result<SessionTreeEntry, SessionStorageError>;
+    ) -> Result<(), SessionStorageError>;
 
     async fn set_selected_agent(
         &self,

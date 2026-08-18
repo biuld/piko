@@ -24,6 +24,19 @@ impl SessionRepositoryPort for JsonlSessionRepository {
         pool().run(move || repository.load_by_path(&path)).await
     }
 
+    async fn resolve_session_dir(
+        &self,
+        cwd: Option<&str>,
+        specifier: &str,
+    ) -> Result<Option<std::path::PathBuf>, SessionStorageError> {
+        let repository = self.clone();
+        let cwd = cwd.map(str::to_string);
+        let specifier = specifier.to_string();
+        pool()
+            .run(move || repository.resolve_session_dir(cwd.as_deref(), &specifier))
+            .await
+    }
+
     async fn list(&self, cwd: Option<&str>) -> Result<Vec<PersistedSession>, SessionStorageError> {
         let repository = self.clone();
         let cwd = cwd.map(str::to_string);
@@ -199,24 +212,13 @@ impl SessionRepositoryPort for JsonlSessionRepository {
     async fn navigate(
         &self,
         session_dir: &Path,
-        parent_id: Option<&str>,
         target_id: Option<&str>,
-        agent_id: Option<&str>,
-    ) -> Result<SessionTreeEntry, SessionStorageError> {
+    ) -> Result<(), SessionStorageError> {
         let repository = self.clone();
         let session_dir = session_dir.to_path_buf();
-        let parent_id = owned(parent_id);
         let target_id = owned(target_id);
-        let agent_id = owned(agent_id);
         pool()
-            .run(move || {
-                repository.navigate(
-                    &session_dir,
-                    parent_id.as_deref(),
-                    target_id.as_deref(),
-                    agent_id.as_deref(),
-                )
-            })
+            .run(move || repository.navigate(&session_dir, target_id.as_deref()))
             .await
     }
 

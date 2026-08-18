@@ -14,6 +14,9 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-54: Branch cursor without Leaf nodes](D-54-branch-cursor-without-leaf.md)
+  implements F-38: navigate writes only `BranchSelected`; no Leaf wire
+  type; current-state cursor is the active branch tip (accepted).
 - [D-53: CQRS session read models](D-53-cqrs-session-read-models.md)
   implements F-37: durable catalog, trajectory, and current-state
   projections published on append; list/trajectory/open read those files;

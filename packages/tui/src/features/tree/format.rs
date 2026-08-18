@@ -26,9 +26,6 @@ pub fn session_entry_label(entry: &SessionTreeEntry) -> String {
             "[session info: {}]",
             entry.name.as_deref().unwrap_or("unnamed")
         ),
-        SessionTreeEntry::Leaf(entry) => {
-            format!("[leaf -> {}]", entry.target_id.as_deref().unwrap_or("none"))
-        }
     }
 }
 
@@ -52,7 +49,6 @@ pub fn session_entry_preview_text(entry: &SessionTreeEntry) -> String {
         },
         SessionTreeEntry::Label(e) => e.label.as_deref().unwrap_or("").to_string(),
         SessionTreeEntry::SessionInfo(e) => e.name.as_deref().unwrap_or("").to_string(),
-        SessionTreeEntry::Leaf(e) => e.target_id.as_deref().unwrap_or("none").to_string(),
     };
     compact_single_line(&text, 160)
 }

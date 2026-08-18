@@ -54,7 +54,9 @@ impl HostState {
         entry: SessionTreeEntry,
     ) -> Result<(), ProtocolError> {
         let state = self.session_mut(session_id)?;
-        state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+        if entry.advances_selected_branch() {
+            state.current_leaf_id = Some(entry.id().to_string());
+        }
         if let SessionTreeEntry::SessionInfo(session_info) = &entry
             && let Some(name) = &session_info.name
         {
@@ -62,6 +64,23 @@ impl HostState {
         }
         state.entries.push(entry);
         state.seq += 1;
+        Ok(())
+    }
+
+    pub fn select_branch(
+        &mut self,
+        session_id: &str,
+        target_id: Option<String>,
+    ) -> Result<(), ProtocolError> {
+        let state = self.session_mut(session_id)?;
+        if let Some(id) = target_id.as_deref()
+            && !state.entries.iter().any(|entry| entry.id() == id)
+        {
+            return Err(ProtocolError::InvalidCommand(format!(
+                "unknown tree entry: {id}"
+            )));
+        }
+        state.current_leaf_id = target_id;
         Ok(())
     }
 
@@ -86,8 +105,10 @@ impl HostState {
         state
             .task_heads
             .insert(agent_instance_id.to_string(), entry.id().to_string());
-        if state.active_agent_instance_id.as_deref() == Some(agent_instance_id) {
-            state.current_leaf_id = entry.leaf_target_id().map(str::to_string);
+        if state.active_agent_instance_id.as_deref() == Some(agent_instance_id)
+            && entry.advances_selected_branch()
+        {
+            state.current_leaf_id = Some(entry.id().to_string());
         }
         state.entries.push(entry);
         state.seq += 1;

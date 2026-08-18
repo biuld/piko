@@ -8,9 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use mock_turn_runner::MockAgentRunRunner;
-use piko_hostd::api::{
-    ApprovalDecision, Command, Message, ServerMessage as Event, SessionTreeEntry,
-};
+use piko_hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_hostd::protocol::{HostServer, run_jsonl_server};

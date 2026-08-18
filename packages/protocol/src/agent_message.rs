@@ -169,8 +169,7 @@ pub fn entries_to_agent_messages(entries: &[SessionTreeEntry]) -> Vec<AgentMessa
             | SessionTreeEntry::ActiveToolsChange(_)
             | SessionTreeEntry::Custom(_)
             | SessionTreeEntry::Label(_)
-            | SessionTreeEntry::SessionInfo(_)
-            | SessionTreeEntry::Leaf(_) => None,
+            | SessionTreeEntry::SessionInfo(_) => None,
         })
         .collect()
 }

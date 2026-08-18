@@ -32,36 +32,40 @@ pub(crate) fn last_open_commit(
     let Some(open) = open else {
         return Ok((None, RecoveryReport::default()));
     };
-    let mut commits: Vec<DurableCommit> = Vec::new();
     let mut recovery = RecoveryReport::default();
     repair_incomplete_tail(&open, repair, &mut recovery)?;
     let bytes = std::fs::read(&open).map_err(|source| io_error(&open, source))?;
-    for (index, line) in bytes.split(|byte| *byte == b'\n').enumerate() {
-        if line.is_empty() {
-            continue;
-        }
-        let commit: DurableCommit =
-            serde_json::from_slice(line).map_err(|source| StoreError::Corruption {
-                path: open.clone(),
-                line: index + 1,
-                message: source.to_string(),
-            })?;
-        if let Some(prior) = commits.last()
-            && commit.revision != prior.revision + 1
-        {
-            return Err(StoreError::Corruption {
-                path: open.clone(),
-                line: index + 1,
-                message: format!(
-                    "expected revision {}, got {}",
-                    prior.revision + 1,
-                    commit.revision
-                ),
-            });
-        }
-        commits.push(commit);
+    let Some((line_no, line)) = last_complete_line(&bytes) else {
+        return Ok((None, recovery));
+    };
+    let commit: DurableCommit =
+        serde_json::from_slice(line).map_err(|source| StoreError::Corruption {
+            path: open,
+            line: line_no,
+            message: source.to_string(),
+        })?;
+    Ok((Some(commit), recovery))
+}
+
+fn last_complete_line(bytes: &[u8]) -> Option<(usize, &[u8])> {
+    let complete = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    if complete.is_empty() {
+        return None;
     }
-    Ok((commits.pop(), recovery))
+    let start = complete
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let line = &complete[start..];
+    if line.is_empty() {
+        return None;
+    }
+    let line_no = complete[..start]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        + 1;
+    Some((line_no, line))
 }
 
 fn repair_incomplete_tail(path: &Path, repair: bool, recovery: &mut RecoveryReport) -> Result<()> {

@@ -45,8 +45,9 @@ or post-branch work.
    rewrite the source. Sibling branches and descendants past the entry are
    absent from the forked session.
 4. The user navigates within the same session (tree navigate / `SessionNavigate`).
-   History is retained in one file (Leaf / optional branch summary); this path
-   remains separate from fork-into-new-file.
+   History is retained in one session (cursor fact / optional branch
+   summary); this path remains separate from fork-into-new-file.
+   Leaf pointer nodes are removed by F-38.
 5. The user lists sessions for a cwd and opens one from the list.
 
 ## In scope
@@ -91,7 +92,7 @@ or post-branch work.
   paging).
 - Session startup prewarm of model connections.
 - Cross-cwd automatic fork when resuming another project’s session.
-- In-session navigate redesign; Leaf graph remains the in-file branching model.
+- In-session navigate cursor representation (superseded by F-38).
 - Export/import format beyond directory import.
 - Merging two forked sessions back together.
 - Soft-links / shared storage between source and fork (fork is a deep copy of
@@ -177,7 +178,7 @@ Both clear world-state baseline. Both assign a new session id.
 |---|---|---|
 | Thread store with metadata + rollouts | **kept (adapted)** | hostd schema-v3 session dir + JSONL; hostd authoritative |
 | Fork / branch thread | **kept (adapted)** | full clone already landed; branch-point fork is this slice |
-| Thread graph sections | **rejected (adapted)** | piko `SessionTreeEntry` parent graph + Leaf navigation |
+| Thread graph sections | **rejected (adapted)** | piko `SessionTreeEntry` parent graph + F-38 cursor fact |
 | Rollout cursor paging | **deferred** | no piko list-paging consumer at scale |
 | Interrupted-turn markers | **kept (adapted)** | F-01 abort markers + host open finalization + incomplete execution sweep |
 | Session startup prewarm | **deferred** | no critical path consumer |

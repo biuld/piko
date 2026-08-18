@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use crate::api::{AgentInfo, AgentStatus, Message, ServerMessage, SessionTreeEntry};
+use crate::api::{AgentInfo, AgentStatus, Message, MessageEntry, ServerMessage, SessionTreeEntry};
 use crate::domain::sessions::AgentViewState;
 use crate::domain::sessions::SessionState;
 
-use super::super::recovery::agent_transcript_entries;
 use super::super::session_store::{SessionProjection, SessionStore};
 use super::super::types::{PersistedSession, SessionStorageError};
 
@@ -20,45 +19,43 @@ pub(crate) fn load_session_dir(
             message: "missing session.json".into(),
         });
     }
-    let projection = store.load_projection()?;
+    let aggregate =
+        piko_session_store::query_current(dir).map_err(|error| SessionStorageError::Invalid {
+            path: dir.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    let projection = store.project_session(&aggregate)?;
     let mut state = SessionState::new(projection.session_id.clone(), projection.cwd.clone());
     state.name = projection.name.clone();
     state.current_leaf_id = projection.current_leaf_id.clone();
     state.entries = projection.entries.clone();
     state.last_model = projection.last_model.clone();
     state.world_state_baseline = projection.world_state_baseline.clone();
-    let mut recovered_root_leaf = None;
-    for agent_instance_id in store.list_agents(&projection.session_id)? {
-        let recovered = store.load_agent(&projection.session_id, &agent_instance_id)?;
-        if projection.root_agent_instance_id.as_deref() == Some(agent_instance_id.as_str()) {
-            recovered_root_leaf = Some(resolve_recovered_root_leaf(&projection, &recovered));
+    for (agent_instance_id, entry) in message_entries(&aggregate) {
+        if let SessionTreeEntry::Message(message) = &entry {
+            state
+                .task_heads
+                .insert(agent_instance_id, message.id.clone());
         }
-        for entry in agent_transcript_entries(&recovered) {
-            if let SessionTreeEntry::Message(message) = &entry {
-                state
-                    .task_heads
-                    .insert(agent_instance_id.clone(), message.id.clone());
-            }
-            state.entries.push(entry);
-        }
-    }
-    if let Some(root_leaf) = recovered_root_leaf {
-        state.current_leaf_id = root_leaf;
+        state.entries.push(entry);
     }
     state.entries.sort_by_key(|e| e.timestamp().to_string());
     state.seq = state.entries.len() as u64;
-    state.cumulative_usage = store
-        .usage_summary(&piko_session_store::UsageQuery {
+    state.cumulative_usage = aggregate
+        .accounting
+        .summarize(&piko_session_store::UsageQuery {
             incurred_only: true,
             ..piko_session_store::UsageQuery::default()
-        })?
+        })
         .usage;
     for agent_instance_id in projection.agents.keys() {
-        let accounting = store.usage_summary(&piko_session_store::UsageQuery {
-            agent_instance_id: Some(agent_instance_id.clone()),
-            incurred_only: true,
-            ..piko_session_store::UsageQuery::default()
-        })?;
+        let accounting = aggregate
+            .accounting
+            .summarize(&piko_session_store::UsageQuery {
+                agent_instance_id: Some(agent_instance_id.clone()),
+                incurred_only: true,
+                ..piko_session_store::UsageQuery::default()
+            });
         if accounting.fact_count > 0 {
             state
                 .agent_usage
@@ -82,39 +79,41 @@ pub(crate) fn load_session_dir(
     })
 }
 
-fn resolve_recovered_root_leaf(
-    projection: &super::super::session_store::SessionProjection,
-    recovered: &super::super::session_store::RecoveredAgent,
-) -> Option<String> {
-    let Some(head_id) = recovered.head_message_id.as_ref() else {
-        return projection.current_leaf_id.clone();
-    };
-    if projection.current_leaf_id.as_ref() == Some(head_id) {
-        return Some(head_id.clone());
-    }
-
-    let head_timestamp = recovered
-        .transcript
-        .iter()
-        .find(|message| &message.id == head_id)
-        .map(|message| message.timestamp)
-        .unwrap_or(i64::MIN);
-    let selection_timestamp = projection
-        .entries
-        .iter()
-        .filter(|entry| match entry {
-            SessionTreeEntry::Leaf(leaf) => leaf.target_id == projection.current_leaf_id,
-            _ => projection.current_leaf_id.as_deref() == Some(entry.id()),
+fn message_entries(
+    aggregate: &piko_session_store::SessionAggregate,
+) -> Vec<(String, SessionTreeEntry)> {
+    let mut messages = aggregate.messages.values().collect::<Vec<_>>();
+    messages.sort_by_key(|message| message.revision);
+    messages
+        .into_iter()
+        .map(|stored| {
+            let agent_instance_id = stored.data.agent_instance_id.clone();
+            let spec_id = aggregate
+                .agents
+                .get(&agent_instance_id)
+                .map(|agent| agent.identity.agent_spec_id.clone())
+                .unwrap_or_default();
+            let seq = aggregate
+                .messages
+                .values()
+                .filter(|message| message.data.agent_instance_id == agent_instance_id)
+                .filter(|message| message.revision <= stored.revision)
+                .count() as u64;
+            (
+                agent_instance_id.clone(),
+                SessionTreeEntry::Message(MessageEntry {
+                    id: stored.data.message_id.clone(),
+                    parent_id: stored.data.tree_parent_entry_id.clone(),
+                    timestamp: stored.data.committed_at.to_string(),
+                    agent_id: spec_id,
+                    agent_instance_id,
+                    source_turn_id: stored.data.source_turn_id.clone().unwrap_or_default(),
+                    transcript_seq: seq,
+                    message: stored.data.message.clone(),
+                }),
+            )
         })
-        .filter_map(|entry| entry.timestamp().parse::<i64>().ok())
-        .max()
-        .unwrap_or(i64::MIN);
-
-    if head_timestamp > selection_timestamp {
-        Some(head_id.clone())
-    } else {
-        projection.current_leaf_id.clone()
-    }
+        .collect()
 }
 
 fn restore_agent_runtime_state(state: &mut SessionState, projection: &SessionProjection) {

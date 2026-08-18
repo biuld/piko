@@ -29,8 +29,6 @@ pub enum SessionTreeEntry {
     Label(LabelEntry),
     #[serde(rename = "session_info")]
     SessionInfo(SessionInfoEntry),
-    #[serde(rename = "leaf")]
-    Leaf(LeafEntry),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -177,15 +175,6 @@ pub struct SessionInfoEntry {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct LeafEntry {
-    pub id: EntryId,
-    pub parent_id: Option<EntryId>,
-    pub timestamp: String,
-    pub target_id: Option<EntryId>,
-}
-
 impl SessionTreeEntry {
     pub fn id(&self) -> &str {
         match self {
@@ -200,7 +189,6 @@ impl SessionTreeEntry {
             Self::CustomMessage(entry) => &entry.id,
             Self::Label(entry) => &entry.id,
             Self::SessionInfo(entry) => &entry.id,
-            Self::Leaf(entry) => &entry.id,
         }
     }
 
@@ -217,16 +205,35 @@ impl SessionTreeEntry {
             Self::CustomMessage(entry) => entry.parent_id.as_deref(),
             Self::Label(entry) => entry.parent_id.as_deref(),
             Self::SessionInfo(entry) => entry.parent_id.as_deref(),
-            Self::Leaf(entry) => entry.parent_id.as_deref(),
         }
     }
 
-    pub fn leaf_target_id(&self) -> Option<&str> {
-        match self {
-            Self::Leaf(entry) => entry.target_id.as_deref(),
-            Self::ToolCall(entry) => Some(&entry.id),
-            _ => Some(self.id()),
-        }
+    pub fn recognizes_recorded_type(entry_type: &str) -> bool {
+        matches!(
+            entry_type,
+            "message"
+                | "tool_call"
+                | "thinking_level_change"
+                | "model_change"
+                | "active_tools_change"
+                | "compaction"
+                | "branch_summary"
+                | "custom"
+                | "custom_message"
+                | "label"
+                | "session_info"
+        )
+    }
+
+    pub fn advances_selected_branch(&self) -> bool {
+        matches!(
+            self,
+            Self::Message(_)
+                | Self::ToolCall(_)
+                | Self::Compaction(_)
+                | Self::BranchSummary(_)
+                | Self::CustomMessage(_)
+        )
     }
 
     pub fn timestamp(&self) -> &str {
@@ -242,7 +249,6 @@ impl SessionTreeEntry {
             Self::CustomMessage(e) => &e.timestamp,
             Self::Label(e) => &e.timestamp,
             Self::SessionInfo(e) => &e.timestamp,
-            Self::Leaf(e) => &e.timestamp,
         }
     }
 }

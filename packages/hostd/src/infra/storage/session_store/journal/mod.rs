@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex};
 
 use piko_session_store::{
     EventData, NewSession, OpenOptions, ProposedCommit, RawEvent, SessionAggregate,
@@ -23,34 +23,14 @@ pub struct SessionStore {
     journal: Arc<Mutex<Option<Journal>>>,
 }
 
-type JournalHandle = Mutex<Option<Journal>>;
-type JournalHandleCache = Mutex<BTreeMap<PathBuf, Weak<JournalHandle>>>;
-
-fn journal_handles() -> &'static JournalHandleCache {
-    static HANDLES: OnceLock<JournalHandleCache> = OnceLock::new();
-    HANDLES.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
 impl SessionStore {
     pub fn new(session_dir: impl Into<PathBuf>) -> Self {
         let session_dir = session_dir.into();
         let io = super::serial::io_lock_for(&session_dir);
-        let journal = {
-            let mut handles = journal_handles()
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if let Some(existing) = handles.get(&session_dir).and_then(Weak::upgrade) {
-                existing
-            } else {
-                let journal = Arc::new(Mutex::new(None));
-                handles.insert(session_dir.clone(), Arc::downgrade(&journal));
-                journal
-            }
-        };
         Self {
             session_dir,
             io,
-            journal,
+            journal: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -100,13 +80,6 @@ impl SessionStore {
 
     pub(crate) fn aggregate(&self) -> Result<SessionAggregate, SessionStorageError> {
         Ok(self.journal()?.aggregate())
-    }
-
-    /// Lightweight aggregate facts without cloning the full aggregate.
-    pub(crate) fn journal_facts(
-        &self,
-    ) -> Result<piko_session_store::JournalFacts, SessionStorageError> {
-        Ok(self.journal()?.journal_facts())
     }
 
     pub(crate) fn commit_events(
@@ -173,7 +146,8 @@ impl SessionStore {
     pub fn trajectory(
         &self,
     ) -> Result<piko_session_store::TrajectoryProjection, SessionStorageError> {
-        Ok(self.journal()?.trajectory())
+        piko_session_store::query_trajectory(&self.session_dir)
+            .map_err(|error| self.storage_error(error))
     }
 
     fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {

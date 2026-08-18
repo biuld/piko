@@ -209,5 +209,7 @@ are transient panel state and do not persist after the panel closes.
 - Session Tree does not run a model turn by itself after navigation.
 - Session Tree does not replace the Timeline; it chooses the active branch that
   Timeline displays.
+- Session Tree does not persist a Leaf pointer node. Confirming a row asks
+  hostd to publish a branch-selection cursor (F-38).
 - Session Tree does not expose extension-specific custom renderers in the first
   version.

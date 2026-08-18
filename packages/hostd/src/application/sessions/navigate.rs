@@ -168,15 +168,8 @@ impl HostApp {
                 state.insert_session(persisted.state);
             }
 
-            let leaf_target = target_id.clone();
-            let current_leaf_id = state.session(&session_id)?.current_leaf_id.clone();
             storage
-                .navigate(
-                    path,
-                    current_leaf_id.as_deref(),
-                    leaf_target.as_deref(),
-                    None,
-                )
+                .navigate(path, target_id.as_deref())
                 .await
                 .map_err(storage_error)?;
 
@@ -186,18 +179,11 @@ impl HostApp {
         }
 
         if !persisted_via_storage {
-            let leaf_parent_id = state.session(&session_id)?.current_leaf_id.clone();
             if let Some(b) = &branch_summary {
                 state.append_entry(&session_id, b.clone())?;
                 target_id = Some(b.id().to_string());
             }
-            let leaf_entry = crate::api::SessionTreeEntry::Leaf(crate::api::LeafEntry {
-                id: uuid::Uuid::new_v4().to_string()[..8].to_string(),
-                parent_id: leaf_parent_id,
-                timestamp: now_ms().to_string(),
-                target_id: target_id.clone(),
-            });
-            state.append_entry(&session_id, leaf_entry)?;
+            state.select_branch(&session_id, target_id.clone())?;
         }
 
         drop(state);

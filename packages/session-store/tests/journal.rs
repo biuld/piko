@@ -469,6 +469,24 @@ fn generated_branch_history_converges_live_read_model_and_full_replay() {
 }
 
 #[test]
+fn query_catalog_and_current_use_published_models() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("session");
+    let opened = SessionStore::create(&path, new_session("s1")).unwrap();
+    opened
+        .store
+        .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
+        .unwrap();
+    drop(opened);
+
+    let catalog = piko_session_store::query_catalog(&path).unwrap();
+    assert_eq!(catalog.facts.message_count, 1);
+    let current = piko_session_store::query_current(&path).unwrap();
+    assert_eq!(current.revision, 2);
+    assert!(current.messages.contains_key("m1"));
+}
+
+#[test]
 fn corrupt_current_read_model_is_rebuilt_from_the_journal() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");

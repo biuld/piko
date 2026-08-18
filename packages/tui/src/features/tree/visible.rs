@@ -17,8 +17,7 @@ mod tests {
     use std::collections::HashSet;
 
     use piko_protocol::{
-        CompactionEntry, LeafEntry, Message, MessageContent, MessageEntry, SessionTreeEntry,
-        ToolCallEntry,
+        CompactionEntry, Message, MessageContent, MessageEntry, SessionTreeEntry, ToolCallEntry,
     };
 
     use super::{ConnectorKind, TreeDocument, TreeFilterMode, VisibleTree};
@@ -45,15 +44,6 @@ mod tests {
                 content: MessageContent::String(text.to_string()),
                 timestamp: None,
             },
-        })
-    }
-
-    fn leaf_entry(id: &str, parent_id: Option<&str>, target_id: Option<&str>) -> SessionTreeEntry {
-        SessionTreeEntry::Leaf(LeafEntry {
-            id: id.to_string(),
-            parent_id: parent_id.map(str::to_string),
-            timestamp: "2026-07-02T00:00:00Z".to_string(),
-            target_id: target_id.map(str::to_string),
         })
     }
 
@@ -125,33 +115,6 @@ mod tests {
         assert_eq!(visible.rows[1].connector, ConnectorKind::Branch);
         assert_eq!(visible.rows[2].depth, 1);
         assert_eq!(visible.rows[2].connector, ConnectorKind::Corner);
-    }
-
-    #[test]
-    fn default_filter_hides_leaf_entries_so_navigation_cursors_do_not_create_branches() {
-        let entries = vec![
-            user_entry("root", None, "root"),
-            user_entry("child", Some("root"), "child"),
-            leaf_entry("leaf-a", Some("child"), Some("root")),
-            leaf_entry("leaf-b", Some("leaf-a"), Some("child")),
-        ];
-        let doc = TreeDocument::build(&entries, Some("child"));
-        let visible = VisibleTree::build(&doc, TreeFilterMode::Default, "", &HashSet::new(), None);
-
-        assert_eq!(
-            visible
-                .rows
-                .iter()
-                .map(|row| row.entry_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["root", "child"]
-        );
-        assert!(
-            visible
-                .rows
-                .iter()
-                .all(|row| row.connector == ConnectorKind::None)
-        );
     }
 
     #[test]

@@ -101,7 +101,7 @@ the important variants are:
 - `BranchSummary(BranchSummaryEntry)`
 - `CustomMessage(CustomMessageEntry)`
 - `ThinkingLevelChange`, `ModelChange`, `ActiveToolsChange`, `SessionInfo`,
-  `Label`, and `Leaf` as compact notices or tree-only metadata depending on
+  and `Label` as compact notices or tree-only metadata depending on
   the feature doc
 
 `Message::Assistant` already contains structured `AssistantContentBlock` values:
@@ -308,7 +308,7 @@ Examples:
 - active tool set changed when the product elects to show it
 
 Session-open feedback, auth lifecycle, command failures, and transient progress
-remain in Notice Row, AgentPanel, or BottomBar. Label, SessionInfo, and Leaf
+remain in Notice Row, AgentPanel, or BottomBar. Label and SessionInfo
 entries remain tree/navigation metadata.
 
 Adjacent status-like facts may coalesce when no non-fact component was

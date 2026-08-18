@@ -12,10 +12,12 @@ use super::SessionStore;
 
 impl SessionStore {
     pub fn load_projection(&self) -> Result<SessionProjection, SessionStorageError> {
-        self.project_session(&self.aggregate()?)
+        let aggregate =
+            piko_session_store::query_current(&self.session_dir).or_else(|_| self.aggregate())?;
+        self.project_session(&aggregate)
     }
 
-    pub(super) fn project_session(
+    pub(crate) fn project_session(
         &self,
         aggregate: &SessionAggregate,
     ) -> Result<SessionProjection, SessionStorageError> {
@@ -27,10 +29,13 @@ impl SessionStore {
             .cwd
             .clone()
             .ok_or_else(|| self.invalid("missing cwd"))?;
-        let mut entries = aggregate
+        let mut entries: Vec<SessionTreeEntry> = aggregate
             .tree_entries
             .values()
-            .filter(|stored| !aggregate.messages.contains_key(&stored.data.entry_id))
+            .filter(|stored| {
+                !aggregate.messages.contains_key(&stored.data.entry_id)
+                    && SessionTreeEntry::recognizes_recorded_type(&stored.data.entry_type)
+            })
             .map(|stored| {
                 serde_json::from_value::<SessionTreeEntry>(stored.data.payload.clone()).map_err(
                     |error| {

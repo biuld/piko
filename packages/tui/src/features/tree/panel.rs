@@ -303,7 +303,9 @@ impl TreePanel {
 #[cfg(test)]
 mod tests {
     use super::TreePanel;
-    use piko_protocol::{LeafEntry, Message, MessageContent, MessageEntry, SessionTreeEntry};
+    use piko_protocol::{
+        Message, MessageContent, MessageEntry, ModelChangeEntry, SessionTreeEntry,
+    };
 
     #[test]
     fn load_selects_nearest_visible_ancestor_when_current_leaf_is_hidden() {
@@ -321,16 +323,17 @@ mod tests {
                     timestamp: None,
                 },
             }),
-            SessionTreeEntry::Leaf(LeafEntry {
-                id: "hidden-leaf".into(),
+            SessionTreeEntry::ModelChange(ModelChangeEntry {
+                id: "hidden-model".into(),
                 parent_id: Some("root".into()),
                 timestamp: "2026-07-02T00:00:01Z".into(),
-                target_id: Some("root".into()),
+                provider: "openai".into(),
+                model_id: "gpt".into(),
             }),
         ];
         let mut panel = TreePanel::new();
 
-        panel.load(&entries, Some("hidden-leaf"));
+        panel.load(&entries, Some("hidden-model"));
 
         assert_eq!(panel.selection.as_deref(), Some("root"));
     }

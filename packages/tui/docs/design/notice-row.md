@@ -93,7 +93,7 @@ projection maps them directly to typed Timeline components:
 | ActiveToolsChange | session fact when non-empty |
 | Compaction / BranchSummary | summary component |
 | CustomMessage with `display = true` | custom-message component |
-| Custom, Label, SessionInfo, Leaf | no Timeline component |
+| Custom, Label, SessionInfo | no Timeline component |
 
 Timeline components derived from session entries use the durable entry id.
 Snapshot rebuild and live replay must converge. A generic persisted Notice

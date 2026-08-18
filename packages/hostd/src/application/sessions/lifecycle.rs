@@ -276,51 +276,26 @@ impl HostApp {
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
 
-        // 3. Search all known sessions.
+        // 3. Resolve the session directory from identity files, then load
+        //    that one current-state read model.
         if let Some(storage) = &self.storage {
-            let all_sessions = storage.list(None).await.map_err(storage_error)?;
-            let exact_match = all_sessions
-                .iter()
-                .find(|s| s.state.session_id == session_id);
-            if let Some(persisted) = exact_match {
+            let resolved = storage
+                .resolve_session_dir(None, &session_id)
+                .await
+                .map_err(storage_error)?;
+            if let Some(path) = resolved {
+                let persisted = storage.load_by_path(&path).await.map_err(|err| match err {
+                    SessionStorageError::NotFound(_) => {
+                        ProtocolError::SessionNotFound(session_id.clone())
+                    }
+                    _ => ProtocolError::InvalidCommand(format!("invalid session: {}", err)),
+                })?;
                 let opened_id = persisted.state.session_id.clone();
                 self.session_paths
                     .lock()
                     .await
                     .insert(opened_id.clone(), persisted.path.clone());
-                state.insert_session(persisted.state.clone());
-                let path = persisted.path.clone();
-                let messages = Self::session_open_response(
-                    &mut state,
-                    command_id,
-                    opened_id.clone(),
-                    Some(&path),
-                    self.session_store_factory.as_ref(),
-                    false,
-                )
-                .await?;
-                drop(state);
-                return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
-            }
-
-            // Fallback for prefix matching
-            let prefix_matches: Vec<_> = all_sessions
-                .iter()
-                .filter(|s| s.state.session_id.starts_with(&session_id))
-                .collect();
-            if prefix_matches.len() > 1 {
-                return Err(ProtocolError::InvalidCommand(format!(
-                    "ambiguous session ID prefix: {}",
-                    session_id
-                )));
-            } else if prefix_matches.len() == 1 {
-                let persisted = prefix_matches[0];
-                let opened_id = persisted.state.session_id.clone();
-                self.session_paths
-                    .lock()
-                    .await
-                    .insert(opened_id.clone(), persisted.path.clone());
-                state.insert_session(persisted.state.clone());
+                state.insert_session(persisted.state);
                 let path = persisted.path.clone();
                 let messages = Self::session_open_response(
                     &mut state,

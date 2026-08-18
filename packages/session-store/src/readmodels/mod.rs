@@ -4,6 +4,7 @@ mod catalog;
 mod current;
 mod files;
 mod open;
+mod query;
 mod trajectory;
 
 use std::path::Path;
@@ -15,6 +16,7 @@ use crate::{Result, SessionAggregate};
 pub use catalog::{CatalogView, inspect_catalog};
 pub use files::READ_MODEL_SCHEMA;
 pub(crate) use open::load_or_rebuild;
+pub use query::{query_catalog, query_current, query_trajectory};
 pub use trajectory::{
     TrajectoryProjection, TrajectoryRunProjection, apply_commit as apply_trajectory_commit,
 };

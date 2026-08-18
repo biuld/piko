@@ -27,7 +27,9 @@ caches, and F-31 boundary snapshots are removed.
 
 `piko-session-store` owns read-model files and the publish/rebuild
 contract. hostd does not project journal events for list, trajectory, or
-open. It reads store APIs.
+open. It reads `query_catalog` / `query_current` / `query_trajectory`.
+Resolving a session id walks `session.json` identity files only. The
+writer `Journal::open` path is not a query implementation.
 
 Publication order after a successful journal append (F-31 Committed):
 
@@ -37,12 +39,11 @@ Publication order after a successful journal append (F-31 Committed):
    `readmodels/current.json`, and `readmodels/trajectory.json`.
 3. Atomically replace `readmodels/head.json` last.
 
-`head.json` is the Published watermark. A query that sees
-`model.throughRevision == head.revision` (same session id and journal
-generation) serves the model. A crash between step 1 of the journal write
-and step 3 leaves `head` at the previous Published revision; list still
-shows the last published catalog. The next writer open compares the
-journal open-tail tip to `head` and rebuilds.
+`head.json` is the Published watermark. A query also peeks the last
+complete open-segment record (one object). If that tip matches `head`,
+the model is served. A crash between the journal write and `head.json`
+leaves tip ahead of `head`; the next query rebuilds. It does not parse
+the rest of the open segment or any closed segment.
 
 A failed read-model write does not retract the journal commit. The next
 query or open rebuilds.

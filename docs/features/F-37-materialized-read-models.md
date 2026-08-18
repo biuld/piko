@@ -183,12 +183,19 @@ wholesale when a commit changes them. Append-only belongs to the journal.
 ### Ordinary query
 
 1. Read the revision watermark (no history scan).
-2. Read the read model. If it is present, readable, compatible, and at the
+2. Confirm the watermark against the last complete open-segment record
+   only (one JSON object, not the journal history).
+3. Read the read model. If it is present, readable, compatible, and at the
    watermark, serve it.
-3. Otherwise discard it, rebuild from the journal, publish the rebuilt
+4. Otherwise discard it, rebuild from the journal, publish the rebuilt
    model, and serve that.
 
-A query that hits step 3 is a **rebuild path**, not the ordinary path. It
+List, open/resume, and trajectory list/fetch are this query path. They
+must not open the writer, parse the open segment, or load every other
+session in order to answer one query. Session identity files are enough
+to resolve a path by id.
+
+A query that hits step 4 is a **rebuild path**, not the ordinary path. It
 replays the journal from the beginning. That cost is accepted because it is
 recovery; it must be rare after a clean write. Rebuild does not consult
 snapshots or process-local history caches.

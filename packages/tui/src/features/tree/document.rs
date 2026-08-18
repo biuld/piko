@@ -25,7 +25,7 @@ impl TreeDocument {
             ..Default::default()
         };
 
-        for (idx, entry) in entries.iter().enumerate() {
+        for (idx, entry) in doc.nodes.iter().enumerate() {
             let id = entry.id().to_string();
             doc.by_id.insert(id.clone(), idx);
             let parent_id = entry.parent_id().map(str::to_string);
@@ -53,7 +53,7 @@ impl TreeDocument {
             }
             doc.active_path.insert(id.clone());
             if let Some(&idx) = doc.by_id.get(&id) {
-                curr = entries[idx].parent_id().map(str::to_string);
+                curr = doc.nodes[idx].parent_id().map(str::to_string);
             } else {
                 break;
             }

@@ -11,13 +11,9 @@ pub fn active_branch_entries(
         by_id.insert(entry.id(), index);
     }
 
-    let mut current = leaf_id.map(str::to_string).or_else(|| {
-        entries
-            .last()
-            .and_then(|entry| entry.leaf_target_id().map(str::to_string))
-            // When no Leaf cursor is set, the tip is the last projected entry.
-            .or_else(|| entries.last().map(|entry| entry.id().to_string()))
-    });
+    let mut current = leaf_id
+        .map(str::to_string)
+        .or_else(|| entries.last().map(|entry| entry.id().to_string()));
     let mut indexes = Vec::new();
     let mut visited = std::collections::HashSet::new();
     while let Some(id) = current {

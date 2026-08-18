@@ -1,12 +1,8 @@
 //! Read-only trajectory query (F-36).
 //!
-//! Replays the session journal's raw events — acknowledged facts plus
-//! optional `trajectory.*` records — and joins them by run identity into
-//! run summaries and full run records for the web viewer. Queries never
-//! mutate session state or invoke the model gateway.
-//!
-//! The first read for a session decodes the journal; later list/fetch calls
-//! reuse that projection and apply only newer revisions.
+//! Read the published trajectory read model. Queries never mutate session
+//! state, invoke the model gateway, or replay the journal on the ordinary
+//! path.
 
 mod decode;
 
@@ -54,16 +50,13 @@ impl TrajectoryQuery {
         // Resume-friendly fallback: resolve persisted sessions through the
         // repository even when this hostd process has not opened them.
         // Summaries avoid reconstructing full HostState for every session.
-        if let Some(storage) = &self.storage {
-            let all = storage
-                .summaries(None)
+        if let Some(storage) = &self.storage
+            && let Some(path) = storage
+                .resolve_session_dir(None, session_id)
                 .await
-                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-            if let Some(path) = all.into_iter().find_map(|summary| {
-                (summary.session_id == session_id).then_some(summary.session_path)?
-            }) {
-                return Ok(PathBuf::from(path));
-            }
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
+        {
+            return Ok(path);
         }
         Err(ProtocolError::InvalidCommand(format!(
             "trajectory unavailable for session {session_id}"

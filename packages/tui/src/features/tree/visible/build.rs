@@ -32,7 +32,6 @@ impl VisibleTree {
                         entry,
                         SessionTreeEntry::ActiveToolsChange(_)
                             | SessionTreeEntry::Custom(_)
-                            | SessionTreeEntry::Leaf(_)
                             | SessionTreeEntry::Label(_)
                             | SessionTreeEntry::ModelChange(_)
                             | SessionTreeEntry::ThinkingLevelChange(_)
@@ -46,7 +45,6 @@ impl VisibleTree {
                         entry,
                         SessionTreeEntry::ActiveToolsChange(_)
                             | SessionTreeEntry::Custom(_)
-                            | SessionTreeEntry::Leaf(_)
                             | SessionTreeEntry::Label(_)
                             | SessionTreeEntry::ModelChange(_)
                             | SessionTreeEntry::ThinkingLevelChange(_)

@@ -70,7 +70,7 @@ async fn root_chat_reuses_session_sink_across_turns() {
 }
 
 #[tokio::test]
-async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current_leaf() {
+async fn in_memory_session_navigate_to_root_user_resets_current_leaf_without_leaf_node() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
@@ -135,10 +135,6 @@ async fn in_memory_session_navigate_to_root_user_appends_leaf_and_resets_current
         panic!("expected session reconciled");
     };
     assert_eq!(reconciled.snapshot.current_leaf_id, None);
-    assert!(matches!(
-        reconciled.snapshot.entries.last(),
-        Some(SessionTreeEntry::Leaf(leaf)) if leaf.target_id.is_none()
-    ));
 }
 
 #[tokio::test]

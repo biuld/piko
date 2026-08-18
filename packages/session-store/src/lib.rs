@@ -28,13 +28,10 @@ pub use journal_queries::JournalFacts;
 pub use projection::{
     ModelContinuity, StoredAgent, StoredExecution, StoredMessage, StoredTreeEntry,
 };
-pub use readmodels::{CatalogView, TrajectoryProjection, TrajectoryRunProjection, inspect_catalog};
-
-/// True when the open journal segment parses. Used by listing to attach
-/// `integrity_error` without a full replay.
-pub fn open_journal_readable(path: &std::path::Path) -> bool {
-    crate::replay::last_open_commit(path, false).is_ok()
-}
+pub use readmodels::{
+    CatalogView, TrajectoryProjection, TrajectoryRunProjection, inspect_catalog, query_catalog,
+    query_current, query_trajectory,
+};
 pub use schema::{
     CompactionRecordedV1, Compatibility, EventData, ExecutionStartedV1, MessageCommittedV1,
     RawEvent, SessionForkedV1, TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1,

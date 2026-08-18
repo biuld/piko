@@ -17,7 +17,7 @@ impl SessionStore {
         created_at: i64,
     ) -> Result<Self, SessionStorageError> {
         let target = target.into();
-        self.fork_projected(&target, session_id, created_at, None)?;
+        self.fork_projected(&target, session_id, created_at, None, None)?;
         Ok(Self::new(target))
     }
 
@@ -26,14 +26,14 @@ impl SessionStore {
         target: &Path,
         session_id: String,
         created_at: i64,
-        _entry_id: &str,
+        entry_id: &str,
         retained: &[SessionTreeEntry],
     ) -> Result<(), SessionStorageError> {
         let ids = retained
             .iter()
             .map(|entry| entry.id().to_string())
             .collect::<BTreeSet<_>>();
-        self.fork_projected(target, session_id, created_at, Some(&ids))
+        self.fork_projected(target, session_id, created_at, Some(&ids), Some(entry_id))
     }
 
     fn fork_projected(
@@ -42,6 +42,7 @@ impl SessionStore {
         session_id: String,
         created_at: i64,
         retained: Option<&BTreeSet<String>>,
+        cursor_entry_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
         let parent = target
             .parent()
@@ -60,7 +61,9 @@ impl SessionStore {
             source,
         })?;
         let staging = staging_root.join(format!("{name}-{}", uuid::Uuid::new_v4()));
-        if let Err(error) = self.fork_projected_into(&staging, session_id, created_at, retained) {
+        if let Err(error) =
+            self.fork_projected_into(&staging, session_id, created_at, retained, cursor_entry_id)
+        {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
@@ -92,6 +95,7 @@ impl SessionStore {
         session_id: String,
         created_at: i64,
         retained: Option<&BTreeSet<String>>,
+        cursor_entry_id: Option<&str>,
     ) -> Result<(), SessionStorageError> {
         let source = self.aggregate()?;
         let source_session_id = source
@@ -200,12 +204,20 @@ impl SessionStore {
                 selected_at: created_at,
             });
         }
-        let selected = source
-            .selected_tree_entry_id
-            .filter(|id| retained.is_none_or(|ids| ids.contains(id)));
-        let root_base = source
-            .root_base_message_id
-            .filter(|id| retained.is_none_or(|ids| ids.contains(id)));
+        let selected = cursor_entry_id.map(str::to_string).or_else(|| {
+            source
+                .selected_tree_entry_id
+                .filter(|id| retained.is_none_or(|ids| ids.contains(id)))
+        });
+        let root_base = selected
+            .as_ref()
+            .filter(|id| source.messages.contains_key(*id))
+            .cloned()
+            .or_else(|| {
+                source
+                    .root_base_message_id
+                    .filter(|id| retained.is_none_or(|ids| ids.contains(id)))
+            });
         if selected.is_some() || root_base.is_some() {
             final_events.push(EventData::BranchSelected {
                 selected_tree_entry_id: selected,

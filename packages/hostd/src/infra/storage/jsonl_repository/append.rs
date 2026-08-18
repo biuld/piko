@@ -294,18 +294,10 @@ impl JsonlSessionRepository {
     pub fn navigate(
         &self,
         session_dir: &Path,
-        parent_id: Option<&str>,
         target_id: Option<&str>,
-        agent_id: Option<&str>,
-    ) -> Result<SessionTreeEntry, SessionStorageError> {
-        let entry = SessionTreeEntry::Leaf(crate::api::LeafEntry {
-            id: Uuid::new_v4().to_string()[..8].to_string(),
-            parent_id: parent_id.map(str::to_string),
-            timestamp: timestamp(),
-            target_id: target_id.map(str::to_string),
-        });
-        self.append_entry(session_dir, &entry, agent_id)?;
-        Ok(entry)
+    ) -> Result<(), SessionStorageError> {
+        let store = SessionStore::new(session_dir);
+        store.with_io(|| select_branch(&store, session_dir, target_id))
     }
 }
 
@@ -326,27 +318,70 @@ fn append_tree_entry(
         }));
         events.push(EventData::WorldStateAdvanced { facts: None });
     }
-    let projection = store.load_projection()?;
-    let root_base_message_id = match entry {
-        SessionTreeEntry::Leaf(leaf) => leaf.target_id.as_ref().and_then(|target| {
-            let root = projection.root_agent_instance_id.as_ref()?;
-            store
-                .find_committed_message(&projection.session_id, root, target)
-                .ok()??;
-            Some(target.clone())
-        }),
-        _ => projection.root_agent_instance_id.as_ref().and_then(|root| {
+    if entry.advances_selected_branch() {
+        let projection = store.load_projection()?;
+        let root_base_message_id = projection.root_agent_instance_id.as_ref().and_then(|root| {
             store
                 .load_agent(&projection.session_id, root)
                 .ok()?
                 .head_message_id
-        }),
-    };
-    events.push(EventData::BranchSelected {
-        selected_tree_entry_id: entry.leaf_target_id().map(str::to_string),
-        root_base_message_id,
-    });
+        });
+        events.push(EventData::BranchSelected {
+            selected_tree_entry_id: Some(entry.id().to_string()),
+            root_base_message_id,
+        });
+    }
     commit_events(store, "tree-entry", entry.id(), committed_at, events)
+}
+
+fn select_branch(
+    store: &SessionStore,
+    session_dir: &Path,
+    target_id: Option<&str>,
+) -> Result<(), SessionStorageError> {
+    let aggregate = store
+        .aggregate()
+        .map_err(|error| SessionStorageError::Invalid {
+            path: session_dir.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    if aggregate.selected_tree_entry_id.as_deref() == target_id {
+        return Ok(());
+    }
+    if let Some(id) = target_id
+        && !aggregate.messages.contains_key(id)
+        && !aggregate.tree_entries.contains_key(id)
+    {
+        return Err(SessionStorageError::Invalid {
+            path: session_dir.to_path_buf(),
+            message: format!("unknown tree entry: {id}"),
+        });
+    }
+    let session_id = aggregate
+        .session_id
+        .clone()
+        .ok_or_else(|| SessionStorageError::Invalid {
+            path: session_dir.to_path_buf(),
+            message: "missing session".into(),
+        })?;
+    let root_base_message_id = target_id.and_then(|target| {
+        let root = aggregate.root.as_ref()?;
+        store
+            .find_committed_message(&session_id, &root.agent_instance_id, target)
+            .ok()??;
+        Some(target.to_string())
+    });
+    let seed = format!("{}:{}", aggregate.revision, target_id.unwrap_or("root"));
+    commit_events(
+        store,
+        "branch-selected",
+        &seed,
+        now_millis(),
+        vec![EventData::BranchSelected {
+            selected_tree_entry_id: target_id.map(str::to_string),
+            root_base_message_id,
+        }],
+    )
 }
 
 fn commit_events(
