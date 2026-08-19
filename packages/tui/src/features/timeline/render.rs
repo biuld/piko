@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::{
@@ -61,13 +61,14 @@ impl Timeline {
         }
 
         let block = if self.viewport.pending_new_items() > 0 {
+            // Floating bottom hint: the Dock Stack boundary already paints the
+            // single separator under the stream, so the banner must not add its
+            // own bottom rule (avoid a duplicate line pair).
             Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(theme.border))
-                .title(format!(" {} new items ", self.viewport.pending_new_items()))
+                .title_bottom(format!(" {} new items ", self.viewport.pending_new_items()))
                 .title_style(Style::default().fg(theme.warning))
         } else {
-            Block::default().borders(Borders::empty())
+            Block::default()
         };
         frame.render_widget(
             Paragraph::new(std::mem::take(&mut plan.lines))

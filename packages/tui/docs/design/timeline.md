@@ -543,6 +543,10 @@ State transition tests:
 - bottom-pinned scroll stays pinned when content arrives
 - scrolled-up viewport preserves visual position and records new items
 
+The pending-new hint renders as a floating text line (warning-colored, no
+rule) at the bottom of the stream; the Dock Stack boundary owns the single
+separator under the stream, so the timeline never paints a second rule.
+
 Render tests:
 
 - user message background
