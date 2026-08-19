@@ -62,7 +62,9 @@ pub enum HitId {
     /// One completion suggestion row (click → accept it).
     Suggest(usize),
     /// One visible Timeline tool component (click → toggle this block only).
-    TimelineTool(usize),
+    /// Payload is the Timeline-interned stable tool identity, not a component
+    /// slot: it survives rebuilds and never retargets a click.
+    TimelineTool(u64),
     /// One source row owned by a selectable surface.
     Row(usize),
     /// An editable field owned by a surface.
@@ -123,6 +125,9 @@ pub struct AppState {
     /// Last pointer hover target (region + element), resolved from the hit
     /// map on `Moved` and consumed by product rendering as soft feedback.
     pub hovered: Option<(Region, Option<HitId>)>,
+    /// Last known pointer position (screen coordinates), updated on every
+    /// mouse event. Hover is re-derived from this after viewport changes.
+    pub pointer_position: Option<(u16, u16)>,
     /// Whether a left-button press is waiting for its paired release. Some
     /// terminal transports report only release events; paired releases are
     /// suppressed because the press already activated the target.

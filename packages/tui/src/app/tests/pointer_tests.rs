@@ -312,20 +312,24 @@ fn timeline_tool_block_hit_wins_over_stream_and_toggles_that_block() {
         None,
     )));
     let terminal = Rect::new(0, 0, 80, 24);
-    let map = build_surface_hitmap(&app, terminal);
-    let tool = map
-        .hits
-        .iter()
-        .find(|hit| hit.element == Some(crate::app::HitId::TimelineTool(0)))
+    let stream = compose_frame(&app, terminal).plan.rects[&Region::Stream];
+    let (hit_id, tool) = app
+        .timeline()
+        .tool_hits(stream, &app.theme)
+        .first()
+        .copied()
         .expect("timeline tool hit");
-    let x = tool.rect.x;
-    let y = tool.rect.y;
+    let x = tool.x;
+    let y = tool.y;
 
     let hover = route_pointer(&mut app, terminal, mouse(MouseEventKind::Moved, x, y));
     assert!(hover.is_empty());
     assert_eq!(
         app.hovered,
-        Some((Region::Stream, Some(crate::app::HitId::TimelineTool(0))))
+        Some((
+            Region::Stream,
+            Some(crate::app::HitId::TimelineTool(hit_id))
+        ))
     );
 
     let actions = route_pointer(
@@ -335,7 +339,7 @@ fn timeline_tool_block_hit_wins_over_stream_and_toggles_that_block() {
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(0))]
+        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == hit_id
     ));
 }
 

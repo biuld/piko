@@ -42,6 +42,40 @@ pub struct PreparedFrame {
     pub(crate) timeline: Option<TimelineRenderPlan>,
 }
 
+impl PreparedFrame {
+    /// Rebuild the retained timeline plan when content changed since it was
+    /// painted (layout epoch mismatch). Pure scroll never bumps the epoch, so
+    /// the common path stays a no-op and hit-testing reads the live offset.
+    pub(crate) fn refresh_timeline(&mut self, app: &AppState) {
+        let Some(plan) = self.timeline.as_ref() else {
+            return;
+        };
+        if plan.epoch == app.timeline().layout_epoch() {
+            return;
+        }
+        let Some(area) = self.product.plan.rects.get(&Region::Stream).copied() else {
+            self.timeline = None;
+            return;
+        };
+        if self
+            .product
+            .modal_surface
+            .is_some_and(SurfaceId::covers_body)
+        {
+            self.timeline = None;
+            return;
+        }
+        let hovered_tool = app
+            .hovered
+            .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten())
+            .and_then(|element| match element {
+                HitId::TimelineTool(hit_id) => Some(hit_id),
+                _ => None,
+            });
+        self.timeline = Some(app.timeline().render_plan(area, &app.theme, hovered_tool));
+    }
+}
+
 pub fn resolve_modal_surface(app: &AppState) -> Option<SurfaceId> {
     app.modal_surface()
 }
@@ -220,7 +254,7 @@ pub fn prepare_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Prepare
         .flatten()
         .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten())
         .and_then(|element| match element {
-            HitId::TimelineTool(index) => Some(index),
+            HitId::TimelineTool(hit_id) => Some(hit_id),
             _ => None,
         });
     let timeline = product
@@ -230,7 +264,7 @@ pub fn prepare_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Prepare
         .copied()
         .filter(|_| !product.modal_surface.is_some_and(SurfaceId::covers_body))
         .map(|area| app.timeline().render_plan(area, &app.theme, hovered_tool));
-    let hit_map = build_surface_hitmap_for_frame(app, &product, timeline.as_ref());
+    let hit_map = build_surface_hitmap_for_frame(app, &product);
     PreparedFrame {
         product,
         hit_map,
@@ -252,7 +286,6 @@ pub fn build_surface_hitmap(
 fn build_surface_hitmap_for_frame(
     app: &AppState,
     composed: &ProductFrame,
-    timeline: Option<&TimelineRenderPlan>,
 ) -> HitMap<Region, HitId> {
     let stamp = |hrs: Vec<HitRegion<SurfaceId, HitId>>| -> Vec<HitRegion<Region, HitId>> {
         hrs.into_iter()
@@ -265,22 +298,14 @@ fn build_surface_hitmap_for_frame(
     };
     build_hitmap(&composed.plan, |region, rect| match region {
         Region::Stream => {
-            let mut hits = vec![HitRegion {
+            // Tool hits are resolved live in content space at event time
+            // (scroll must never invalidate them); the map only carries the
+            // Stream default action over the whole region.
+            vec![HitRegion {
                 region: Region::Stream,
                 rect,
                 element: Some(HitId::Stream),
-            }];
-            hits.extend(
-                timeline
-                    .into_iter()
-                    .flat_map(|plan| plan.tool_regions.iter().cloned())
-                    .map(|(rect, element)| HitRegion {
-                        region: Region::Stream,
-                        rect,
-                        element: Some(element),
-                    }),
-            );
-            hits
+            }]
         }
         Region::DockBoundary => Vec::new(),
         // Only the summary header toggles disclosure; rows remain read-only.

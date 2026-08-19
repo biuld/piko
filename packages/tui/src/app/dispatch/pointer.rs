@@ -4,6 +4,7 @@ use crate::{
         command::{Action, PointerAction, PointerTarget, SurfaceAction},
         effect::Effect,
     },
+    layout::PreparedFrame,
     navigation::{OutsideClickPolicy, Region},
     ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
 };
@@ -41,6 +42,33 @@ impl AppState {
                 self.reduce_pointer_target(target, gesture)
             }
         }
+    }
+
+    /// Re-derive hover from the last known pointer position after a viewport
+    /// change. Hover is a paint concern, so this runs at the end of the input
+    /// batch (before paint) and covers every viewport-change source from one
+    /// path: wheel, keyboard scroll, `jump_latest`.
+    pub(crate) fn reconcile_hover_after_viewport_change(&mut self, prepared: &PreparedFrame) {
+        if self.modal_surface().is_some() {
+            return;
+        }
+        let Some((x, y)) = self.pointer_position else {
+            return;
+        };
+        let Some(plan) = prepared.timeline.as_ref() else {
+            return;
+        };
+        if !plan
+            .stream_rect
+            .contains(ratatui::layout::Position::new(x, y))
+        {
+            return;
+        }
+        let hovered = match plan.resolve(x, y, self.timeline().viewport.top_offset()) {
+            Some((element, _)) => (Region::Stream, Some(element)),
+            None => (Region::Stream, Some(HitId::Stream)),
+        };
+        self.hovered = Some(hovered);
     }
 
     fn reduce_pointer_target(

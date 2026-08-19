@@ -7,6 +7,9 @@ impl Timeline {
             viewport: ScrollViewport::default(),
             thinking_visible: true,
             tool_calls: Vec::new(),
+            hit_ids: HashMap::new(),
+            next_hit_id: 1,
+            layout_epoch: 0,
             projection: piko_client_core::AgentTimeline::new(),
             next_local_id: 1,
             line_cache: std::cell::RefCell::new(super::line_cache::LineCache::default()),
@@ -144,46 +147,38 @@ impl Timeline {
         self.viewport.jump_latest();
     }
 
-    pub fn toggle_tool(&mut self, source_index: usize) {
-        let Some(TimelineComponent::Tool(tool)) = self.components.get_mut(source_index) else {
-            return;
-        };
-        tool.expanded = !tool.expanded;
-        let id = tool.id.clone();
-        let expanded = tool.expanded;
-        if let Some(registry) = self.tool_calls.iter_mut().find(|tool| tool.id == id) {
-            registry.expanded = expanded;
-        }
-    }
-
     pub fn clear(&mut self) {
         self.components.clear();
         self.tool_calls.clear();
+        self.hit_ids.clear();
+        // `next_hit_id` stays monotonic so ids are never reused after a clear.
         self.viewport.jump_latest();
         self.projection.clear();
         self.line_cache.borrow_mut().clear();
         self.projection_dirty = false;
         self.defer_projection_sync = false;
+        self.bump_layout_epoch();
     }
 
     /// Update or insert a presentation-only tool. Host-authored tools enter
     /// through the canonical client-core projection above.
     pub fn upsert_tool(&mut self, mut tool: ToolEntry) -> bool {
         tool.component_id = ComponentId::ToolCallId(tool.id.clone());
+        self.intern_tool_id(&tool.id);
         if let Some(existing) = self.tool_calls.iter_mut().find(|t| t.id == tool.id) {
             tool.expanded = existing.expanded;
             *existing = tool.clone();
         } else {
             self.tool_calls.push(tool.clone());
         }
-        for component in self.components.iter_mut().rev() {
-            if let TimelineComponent::Tool(existing) = component
-                && existing.id == tool.id
-            {
-                *existing = tool;
-                return true;
-            }
+        if let Some(index) = self.components.iter().rposition(|component| {
+            matches!(component, TimelineComponent::Tool(existing) if existing.id == tool.id)
+        }) {
+            self.components[index] = TimelineComponent::Tool(tool);
+            self.bump_layout_epoch();
+            return true;
         }
+        self.bump_layout_epoch();
         false
     }
 
@@ -204,6 +199,21 @@ impl Timeline {
         let was_at_latest = self.viewport.is_at_latest();
         self.components.clear();
         self.tool_calls.clear();
+
+        // Intern hit ids for every projected tool before rebuilding components
+        // (the projection borrow must end before mutating self).
+        let tool_call_ids: Vec<String> = self
+            .projection
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                CoreItem::Tool(tool) => Some(tool.tool_call_id.clone()),
+                _ => None,
+            })
+            .collect();
+        for tool_call_id in &tool_call_ids {
+            self.intern_tool_id(tool_call_id);
+        }
 
         let mut last_component_by_turn = HashMap::new();
         for item in self.projection.items() {
@@ -297,11 +307,14 @@ impl Timeline {
         while self.components.len() > MAX_COMPONENTS {
             self.components.pop_front();
         }
+        self.hit_ids
+            .retain(|tool_call_id, _| self.tool_calls.iter().any(|tool| &tool.id == tool_call_id));
         if was_at_latest {
             self.viewport.jump_latest();
         } else {
             self.viewport.mark_appended();
         }
+        self.bump_layout_epoch();
     }
 
     #[cfg(test)]
@@ -319,6 +332,16 @@ impl Timeline {
             .iter()
             .filter(|component| matches!(component, TimelineComponent::Tool(_)))
             .count()
+    }
+
+    #[cfg(test)]
+    pub fn tool_expanded(&self, tool_call_id: &str) -> Option<bool> {
+        self.components
+            .iter()
+            .find_map(|component| match component {
+                TimelineComponent::Tool(tool) if tool.id == tool_call_id => Some(tool.expanded),
+                _ => None,
+            })
     }
 
     #[cfg(test)]

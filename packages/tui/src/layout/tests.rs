@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::{AppState, InitialOptions};
+use crate::app::{AppState, HitId, InitialOptions};
 use ratatui::layout::Rect;
 use std::path::PathBuf;
 
@@ -152,7 +152,7 @@ fn usage_surface_uses_content_sized_centered_modal() {
 }
 
 #[test]
-fn prepared_frame_reuses_timeline_plan_for_tool_hits() {
+fn prepared_frame_resolves_tool_hits_from_live_plan() {
     use crate::app::ToolStatus;
     use crate::features::timeline::{TimelineEntry, ToolEntry};
 
@@ -166,22 +166,31 @@ fn prepared_frame_reuses_timeline_plan_for_tool_hits() {
         None,
     )));
 
-    let prepared = prepare_frame(&app, Rect::new(0, 0, 80, 24));
-    let plan_hit = prepared
+    let terminal = Rect::new(0, 0, 80, 24);
+    let prepared = prepare_frame(&app, terminal);
+    let stream = prepared.product.plan.rects[&Region::Stream];
+    let (hit_id, rect) = app
+        .timeline()
+        .tool_hits(stream, &app.theme)
+        .first()
+        .copied()
+        .expect("timeline tool hit");
+    assert_eq!(rect.height, 1);
+
+    // Tool geometry is resolved live from the plan; the per-frame map only
+    // carries the Stream default and never bakes scroll-dependent rects.
+    assert!(
+        !prepared
+            .hit_map
+            .hits
+            .iter()
+            .any(|hit| hit.element == Some(HitId::TimelineTool(hit_id)))
+    );
+    let resolved = prepared
         .timeline
         .as_ref()
-        .and_then(|plan| plan.tool_regions.first())
-        .copied()
-        .expect("prepared timeline tool hit");
-    let map_hit = prepared
-        .hit_map
-        .hits
-        .iter()
-        .find(|hit| hit.element == Some(plan_hit.1))
-        .expect("frame hit map tool hit");
-
-    assert_eq!(map_hit.rect, plan_hit.0);
-    assert_eq!(map_hit.region, Region::Stream);
+        .and_then(|plan| plan.resolve(rect.x, rect.y, app.timeline().viewport.top_offset()));
+    assert_eq!(resolved, Some((HitId::TimelineTool(hit_id), rect)));
 }
 
 #[test]

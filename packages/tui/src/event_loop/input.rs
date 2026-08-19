@@ -19,7 +19,7 @@ pub(super) fn drain_input(
     app: &mut AppState,
     host: &mut HostdClient,
     keymap: &Keymap,
-    prepared: &PreparedFrame,
+    prepared: &mut PreparedFrame,
     budget: CycleBudget,
 ) -> Result<bool> {
     if !event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
@@ -46,8 +46,13 @@ pub(super) fn drain_input(
                 end_batch = true;
             }
             CrosstermEvent::Mouse(event) => {
-                for action in
-                    crate::input::pointer::route_pointer_with_hitmap(app, &prepared.hit_map, event)
+                // Content may have changed since the last paint (streaming,
+                // expansion toggle). Refresh the plan once per event if its
+                // layout epoch is stale; pure scroll is a no-op here because
+                // hit-testing reads the viewport offset live.
+                prepared.refresh_timeline(app);
+                app.pointer_position = Some((event.column, event.row));
+                for action in crate::input::pointer::route_pointer_with_hitmap(app, prepared, event)
                 {
                     match action {
                         Action::Timeline(
@@ -89,6 +94,10 @@ pub(super) fn drain_input(
         apply_action(app, host, action.into());
         state_changed = true;
     }
+    // Hover is re-derived from the last pointer position after any viewport
+    // change in this batch (wheel, keyboard scroll, jump_latest).
+    prepared.refresh_timeline(app);
+    app.reconcile_hover_after_viewport_change(prepared);
     Ok(state_changed)
 }
 

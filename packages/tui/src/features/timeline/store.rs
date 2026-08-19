@@ -71,9 +71,9 @@ impl TimelineStore {
     }
 
     pub fn set_thinking_visible(&mut self, visible: bool) {
-        self.active.thinking_visible = visible;
+        self.active.set_thinking_visible(visible);
         for timeline in self.inactive.values_mut() {
-            timeline.thinking_visible = visible;
+            timeline.set_thinking_visible(visible);
         }
     }
 

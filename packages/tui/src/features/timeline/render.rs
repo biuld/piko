@@ -39,7 +39,7 @@ impl Timeline {
         welcome: WelcomeView<'_>,
     ) {
         let hovered_tool = match interaction.hovered {
-            Some(HitId::TimelineTool(index)) => Some(index),
+            Some(HitId::TimelineTool(hit_id)) => Some(hit_id),
             _ => None,
         };
         let plan = self.render_plan(area, theme, hovered_tool);

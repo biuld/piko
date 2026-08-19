@@ -58,7 +58,7 @@ pub fn run(
             return Ok(());
         }
 
-        let work = step(app, host, keymap, &prepared, budget)?;
+        let work = step(app, host, keymap, &mut prepared, budget)?;
         let now = Instant::now();
         let host_due = now.duration_since(last_host_paint) >= budget.host_paint_interval;
         if should_paint(work, host_due) {
@@ -79,7 +79,7 @@ fn step(
     app: &mut AppState,
     host: &mut HostdClient,
     keymap: &Keymap,
-    prepared: &PreparedFrame,
+    prepared: &mut PreparedFrame,
     budget: Budget,
 ) -> Result<CycleWork> {
     let input = drain_input(app, host, keymap, prepared, budget)?;

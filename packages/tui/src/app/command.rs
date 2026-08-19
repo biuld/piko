@@ -83,7 +83,8 @@ pub enum TimelineAction {
     ScrollUp(usize),
     ScrollDown(usize),
     JumpLatest,
-    ToggleTool(usize),
+    /// Toggle one tool block by its stable interned hit id.
+    ToggleTool(u64),
 }
 
 #[derive(Debug)]

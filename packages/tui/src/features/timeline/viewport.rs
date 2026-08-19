@@ -79,7 +79,7 @@ impl ScrollViewport {
             .saturating_sub(self.viewport_height.get())
     }
 
-    pub(super) fn top_offset(&self) -> usize {
+    pub(crate) fn top_offset(&self) -> usize {
         self.max_scroll()
             .saturating_sub(self.effective_offset_from_bottom())
     }

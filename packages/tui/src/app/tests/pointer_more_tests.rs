@@ -173,24 +173,21 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
     });
 
     let terminal = Rect::new(0, 0, 80, 24);
-    let map = build_surface_hitmap(&app, terminal);
-    let tool = map
-        .hits
-        .iter()
-        .find(|hit| hit.element == Some(HitId::TimelineTool(0)))
+    let stream = compose_frame(&app, terminal).plan.rects[&Region::Stream];
+    let (hit_id, tool) = app
+        .timeline()
+        .tool_hits(stream, &app.theme)
+        .first()
+        .copied()
         .expect("timeline tool hitzone");
     let actions = route_pointer(
         &mut app,
         terminal,
-        mouse(
-            MouseEventKind::Up(MouseButton::Left),
-            tool.rect.x,
-            tool.rect.y,
-        ),
+        mouse(MouseEventKind::Up(MouseButton::Left), tool.x, tool.y),
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(0))]
+        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == hit_id
     ));
 
     let todo = build_surface_hitmap(&app, terminal)

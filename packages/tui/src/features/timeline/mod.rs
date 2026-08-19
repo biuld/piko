@@ -42,6 +42,13 @@ pub struct Timeline {
     pub thinking_visible: bool,
     /// Running and completed tool calls, kept for status lookup.
     pub tool_calls: Vec<ToolEntry>,
+    /// Stable hit identity for tool calls: tool call id → local hit id. Kept
+    /// across projection rebuilds so pointer hits never target the wrong tool.
+    hit_ids: HashMap<String, u64>,
+    next_hit_id: u64,
+    /// Bumped by every mutation that can change render-plan geometry
+    /// (`lines` / `row_owners`). Scroll does not bump it.
+    layout_epoch: u64,
     projection: piko_client_core::AgentTimeline,
     next_local_id: u64,
     line_cache: RefCell<line_cache::LineCache>,
@@ -65,8 +72,8 @@ impl PointerComponent<HitId> for Timeline {
             (PointerGesture::ScrollDown, _) => {
                 vec![TimelineAction::ScrollDown(WHEEL_STEP).into()]
             }
-            (PointerGesture::Activate, Some(HitId::TimelineTool(index))) => {
-                vec![TimelineAction::ToggleTool(index).into()]
+            (PointerGesture::Activate, Some(HitId::TimelineTool(hit_id))) => {
+                vec![TimelineAction::ToggleTool(hit_id).into()]
             }
             (PointerGesture::Activate, _) => Vec::new(),
         }
