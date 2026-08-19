@@ -1,9 +1,15 @@
+// Dedicated test module marker for the hostd architecture checker
+// (`tests/architecture.rs`): test fixtures may construct concrete adapters
+// for on-disk journals, so the checker stops at the first `#[cfg(test)]` line.
+#[cfg(test)]
+use piko_protocol::TrajectoryRecord;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use piko_protocol::{
     TRAJECTORY_EVENT_ASSEMBLY, TRAJECTORY_EVENT_MODEL_STEP, TrajectoryAssemblyRecord,
-    TrajectoryIdentity, TrajectoryModelStepRecord, TrajectoryRecord, TrajectoryTerminalKind,
+    TrajectoryIdentity, TrajectoryModelStepRecord, TrajectoryTerminalKind,
     TrajectoryTerminalRecord,
 };
 use piko_session_store::{EventData, ExecutionStartedV1};
