@@ -66,6 +66,7 @@ fn custom_adapter_and_policy_dispatch_without_engine_changes() {
         provider: "custom",
         model: "metered",
         api_surface: "platform",
+        occurred_at: chrono::Utc::now(),
     };
     let cost = registry.estimate(&context, &plan, &Usage::empty()).unwrap();
     assert_eq!(cost.entries[0].components["request"], 0.5);
@@ -119,6 +120,7 @@ fn context() -> BillingContext<'static> {
         provider: "test",
         model: "model",
         api_surface: "platform",
+        occurred_at: chrono::Utc::now(),
     }
 }
 

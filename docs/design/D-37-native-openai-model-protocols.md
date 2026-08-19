@@ -61,7 +61,7 @@ target compatible with the same auth method. Model-specific target maps
 replace, rather than merge with, provider defaults so selection is explicit.
 OpenAI declares separate Platform/API-key and Subscription/OAuth surfaces.
 DeepSeek declares one API-key surface; its default target is Chat Completions
-and `deepseek-v4-flash` replaces that target with stateless Responses.
+and the V4 models replace that target with stateless Responses.
 > Decisions: none; create an ADR before implementation if the semantic/wire
 > split becomes a cross-feature public extension point
 
@@ -204,7 +204,8 @@ Bundled target defaults are:
 - newly created OpenAI Platform targets: Responses;
 - API-key targets: use the protocol declared by their catalog target;
 - provider catalogs may override protocol and continuation policy per model;
-- DeepSeek `deepseek-v4-flash`: Responses with stateless full-history replay;
+- DeepSeek `deepseek-v4-flash` and `deepseek-v4-pro`: Responses with stateless
+  full-history replay (official support confirmed 2026-08-20);
 - other shipped DeepSeek models: Chat Completions until their Responses
   support is documented;
 - custom targets: require an explicit supported protocol.

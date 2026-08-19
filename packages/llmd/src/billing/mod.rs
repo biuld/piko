@@ -1,4 +1,5 @@
 mod standard;
+mod time_of_day;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use piko_protocol::messages::{Usage, UsageCost};
 use crate::modeling::BillingPlan;
 
 pub use standard::{StandardTokenPricing, StandardTokenTier};
+pub use time_of_day::{TimeOfDayPricing, TimeWindowPricing};
 
 pub type BillableUsage = BTreeMap<String, f64>;
 
@@ -16,6 +18,7 @@ pub struct BillingContext<'a> {
     pub provider: &'a str,
     pub model: &'a str,
     pub api_surface: &'a str,
+    pub occurred_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub trait UsageAdapter: Send + Sync {
@@ -49,6 +52,9 @@ impl BillingRegistry {
         registry
             .register_pricing_policy(Arc::new(standard::TokenTieredPolicy))
             .expect("standard policy ID is unique");
+        registry
+            .register_pricing_policy(Arc::new(time_of_day::TimeOfDayPolicy))
+            .expect("time-of-day policy ID is unique");
         registry
     }
 
@@ -124,3 +130,30 @@ fn validate_values(label: &str, values: &BTreeMap<String, f64>) -> Result<(), St
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use piko_protocol::messages::Usage;
+
+    use super::standard::StandardTokenPricing;
+
+    pub(crate) fn schedule(rates: [f64; 3]) -> StandardTokenPricing {
+        StandardTokenPricing {
+            input_per_million: rates[0],
+            cached_input_per_million: rates[1],
+            output_per_million: rates[2],
+            cache_write_per_million: None,
+            tiers: Vec::new(),
+        }
+    }
+
+    pub(crate) fn usage(input: u64, output: u64, read: u64, write: u64) -> Usage {
+        Usage {
+            input,
+            output,
+            cache_read: read,
+            cache_write: write,
+            total_tokens: input + output,
+            ..Default::default()
+        }
+    }
+}

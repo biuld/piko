@@ -19,6 +19,10 @@ input = ["text"]
 context_window = 1000000
 max_tokens = 384000
 
+[models."deepseek-v4-pro".targets.platform]
+protocol = "responses"
+continuation = "stateless_replay"
+
 [models."deepseek-v4-pro".thinking_level_map]
 high = "high"
 xhigh = "max"
@@ -26,13 +30,39 @@ minimal = ""
 low = ""
 medium = ""
 
+# Official peak/off-peak schedule (2026-08-16). Peak hours are Beijing time
+# 09:00-12:00 and 14:00-18:00; the default schedule is off-peak.
 [[models."deepseek-v4-pro".pricing]]
 surface = "platform"
 basis = "list_price"
 currency = "CNY"
-input_per_million = 3.0
-cached_input_per_million = 0.025
-output_per_million = 6.0
+policy = "time_of_day"
+
+[models."deepseek-v4-pro".pricing.configuration]
+utc_offset = "+08:00"
+
+[models."deepseek-v4-pro".pricing.configuration.default]
+input_per_million = 4.5
+cached_input_per_million = 0.15
+output_per_million = 13.5
+
+[[models."deepseek-v4-pro".pricing.configuration.windows]]
+start = "09:00"
+end = "12:00"
+
+[models."deepseek-v4-pro".pricing.configuration.windows.rates]
+input_per_million = 9.0
+cached_input_per_million = 0.30
+output_per_million = 27.0
+
+[[models."deepseek-v4-pro".pricing.configuration.windows]]
+start = "14:00"
+end = "18:00"
+
+[models."deepseek-v4-pro".pricing.configuration.windows.rates]
+input_per_million = 9.0
+cached_input_per_million = 0.30
+output_per_million = 27.0
 
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
@@ -52,13 +82,39 @@ minimal = ""
 low = ""
 medium = ""
 
+# Official peak/off-peak schedule (2026-08-16). Peak hours are Beijing time
+# 09:00-12:00 and 14:00-18:00; the default schedule is off-peak.
 [[models."deepseek-v4-flash".pricing]]
 surface = "platform"
 basis = "list_price"
 currency = "CNY"
-input_per_million = 1.0
-cached_input_per_million = 0.02
-output_per_million = 2.0
+policy = "time_of_day"
+
+[models."deepseek-v4-flash".pricing.configuration]
+utc_offset = "+08:00"
+
+[models."deepseek-v4-flash".pricing.configuration.default]
+input_per_million = 1.5
+cached_input_per_million = 0.05
+output_per_million = 4.5
+
+[[models."deepseek-v4-flash".pricing.configuration.windows]]
+start = "09:00"
+end = "12:00"
+
+[models."deepseek-v4-flash".pricing.configuration.windows.rates]
+input_per_million = 3.0
+cached_input_per_million = 0.10
+output_per_million = 9.0
+
+[[models."deepseek-v4-flash".pricing.configuration.windows]]
+start = "14:00"
+end = "18:00"
+
+[models."deepseek-v4-flash".pricing.configuration.windows.rates]
+input_per_million = 3.0
+cached_input_per_million = 0.10
+output_per_million = 9.0
 
 # ---- V3 (non-reasoning) ----
 

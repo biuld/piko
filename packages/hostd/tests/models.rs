@@ -112,7 +112,10 @@ fn deepseek_resolves_model_specific_responses_target() {
         .unwrap();
     assert_eq!(
         pro.target.as_ref().unwrap().protocol,
-        piko_llmd::modeling::ProtocolProfile::ChatCompletions
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::StatelessReplay,
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
+        }
     );
 }
 

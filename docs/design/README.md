@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-55: Time-of-day pricing policy](D-55-time-of-day-pricing-policy.md)
+  implements F-39: a registered `time_of_day` policy selects token rates by
+  request wall-clock time, with fixed-offset timezone expression, half-open
+  windows, and the official DeepSeek V4 peak/off-peak CNY catalog (accepted).
 - [D-54: Branch cursor without Leaf nodes](D-54-branch-cursor-without-leaf.md)
   implements F-38: navigate writes only `BranchSelected`; no Leaf wire
   type; current-state cursor is the active branch tip (accepted).

@@ -102,29 +102,49 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
             .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-pro")
             .unwrap()
             .protocol,
-        ProtocolProfile::ChatCompletions
+        ProtocolProfile::Responses {
+            continuation: ResponsesContinuationPolicy::StatelessReplay,
+            variant: ResponsesVariant::Standard,
+        }
     );
     let flash_pricing = flash.billing.unwrap();
     assert_eq!(flash_pricing.currency, "CNY");
     assert_eq!(flash_pricing.basis, UsageCostBasis::ListPrice);
     assert_eq!(flash_pricing.usage_adapter, "semantic_tokens");
-    assert_eq!(flash_pricing.pricing_policy, "token_tiered");
-    let flash_schedule: crate::billing::StandardTokenPricing =
+    assert_eq!(flash_pricing.pricing_policy, "time_of_day");
+    let flash_schedule: crate::billing::TimeOfDayPricing =
         serde_json::from_value(flash_pricing.configuration).unwrap();
-    assert_eq!(flash_schedule.input_per_million, 1.0);
-    assert_eq!(flash_schedule.cached_input_per_million, 0.02);
-    assert_eq!(flash_schedule.output_per_million, 2.0);
+    assert_eq!(flash_schedule.utc_offset, "+08:00");
+    assert_eq!(flash_schedule.default.input_per_million, 1.5);
+    assert_eq!(flash_schedule.default.cached_input_per_million, 0.05);
+    assert_eq!(flash_schedule.default.output_per_million, 4.5);
+    assert_eq!(flash_schedule.windows.len(), 2);
+    let flash_peak = &flash_schedule.windows[0].rates;
+    assert_eq!(flash_schedule.windows[0].start, "09:00");
+    assert_eq!(flash_schedule.windows[0].end, "12:00");
+    assert_eq!(flash_peak.input_per_million, 3.0);
+    assert_eq!(flash_peak.cached_input_per_million, 0.10);
+    assert_eq!(flash_peak.output_per_million, 9.0);
     let pro_pricing = provider
         .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-pro")
         .unwrap()
         .billing
         .unwrap();
     assert_eq!(pro_pricing.currency, "CNY");
-    let pro_schedule: crate::billing::StandardTokenPricing =
+    assert_eq!(pro_pricing.pricing_policy, "time_of_day");
+    let pro_schedule: crate::billing::TimeOfDayPricing =
         serde_json::from_value(pro_pricing.configuration).unwrap();
-    assert_eq!(pro_schedule.input_per_million, 3.0);
-    assert_eq!(pro_schedule.cached_input_per_million, 0.025);
-    assert_eq!(pro_schedule.output_per_million, 6.0);
+    assert_eq!(pro_schedule.utc_offset, "+08:00");
+    assert_eq!(pro_schedule.default.input_per_million, 4.5);
+    assert_eq!(pro_schedule.default.cached_input_per_million, 0.15);
+    assert_eq!(pro_schedule.default.output_per_million, 13.5);
+    assert_eq!(pro_schedule.windows.len(), 2);
+    let pro_peak = &pro_schedule.windows[1].rates;
+    assert_eq!(pro_schedule.windows[1].start, "14:00");
+    assert_eq!(pro_schedule.windows[1].end, "18:00");
+    assert_eq!(pro_peak.input_per_million, 9.0);
+    assert_eq!(pro_peak.cached_input_per_million, 0.30);
+    assert_eq!(pro_peak.output_per_million, 27.0);
 }
 
 #[test]

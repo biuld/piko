@@ -45,6 +45,7 @@ impl LlmdMiddleware for CostTrackerMiddleware {
             provider: &ctx.provider,
             model: &ctx.model_id,
             api_surface: &ctx.api_surface,
+            occurred_at: chrono::Utc::now(),
         };
         usage.cost = match self.registry.estimate(&billing_context, plan, usage) {
             Ok(cost) => cost,
