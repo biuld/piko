@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-58: Exact model-visible tool names](D-58-exact-model-tool-names.md)
+  extends F-03 platform policy so models describe and invoke only exact names
+  from the structured run surface, without invented aliases or absent tools
+  (accepted; V-58).
 - [D-57: Unified agent home layout](D-57-unified-agent-home.md)
   implements F-41: installed agent specs move to `agents/spec`, sessions move
   to `agents/sessions`, and installer upgrades migrate legacy paths without

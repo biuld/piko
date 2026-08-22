@@ -17,6 +17,25 @@ fn run_facts_options() -> PromptSnapshotOptions {
 }
 
 #[test]
+fn platform_policy_requires_exact_supplied_tool_names() {
+    for todo_feature_on in [false, true] {
+        let snapshot = snapshot_prompt_resources(PromptSnapshotOptions {
+            todo_feature_on,
+            ..Default::default()
+        });
+        let policy = snapshot
+            .blocks
+            .iter()
+            .find(|block| block.id == "platform.policy")
+            .expect("platform policy block");
+
+        assert!(policy.content.contains("use their exact names"));
+        assert!(policy.content.contains("do not invent aliases"));
+        assert!(policy.content.contains("tools that are not supplied"));
+    }
+}
+
+#[test]
 fn snapshots_emit_environment_host_and_model_switch_blocks_without_world_state() {
     let snapshot = snapshot_prompt_resources(run_facts_options());
     let by_id = snapshot
