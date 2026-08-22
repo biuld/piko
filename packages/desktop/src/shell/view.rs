@@ -85,11 +85,9 @@ impl Render for Shell {
                     &self.sidebar_scroll,
                     on_activate.clone(),
                 ),
-                WorkspaceChrome::new(ChromeZones::leading(
-                    text(TextRole::PlaceholderTitle).child("Sessions"),
-                ))
-                .surface_role(SurfaceRole::Sidebar)
-                .material(self.material),
+                WorkspaceChrome::new(ChromeZones::leading(self.sidebar_toggle_icon(cx, false)))
+                    .surface_role(SurfaceRole::Sidebar)
+                    .material(self.material),
                 px(sidebar::SIDEBAR_WIDTH),
             );
         }
@@ -127,6 +125,37 @@ impl Render for Shell {
 }
 
 impl Shell {
+    fn toggle_sidebar(&mut self, narrow: bool, cx: &mut Context<Self>) {
+        if narrow {
+            self.narrow_overlay_open = !self.narrow_overlay_open;
+        } else {
+            self.prefs.sidebar_collapsed = !self.prefs.sidebar_collapsed;
+            self.narrow_overlay_open = false;
+            let _ = self.prefs.save(&self.prefs_path);
+        }
+        cx.notify();
+    }
+
+    fn sidebar_toggle_icon(&self, cx: &mut Context<Self>, show: bool) -> AnyElement {
+        use island::components::chrome::GhostIconButton;
+        let icon = if show {
+            IslandIcon::PanelLeft
+        } else {
+            IslandIcon::PanelLeftFilled
+        };
+        let tooltip = if show { "Show Sidebar" } else { "Hide Sidebar" };
+        let t = tokens();
+        GhostIconButton::new("piko-sessions-toggle", icon, t.fg_rgba())
+            .tooltip(tooltip)
+            .material(self.material)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let narrow = f32::from(window.bounds().size.width)
+                    < sidebar::SIDEBAR_WIDTH + sidebar::MIN_TIMELINE_WIDTH;
+                this.toggle_sidebar(narrow, cx);
+            }))
+            .into_any_element()
+    }
+
     fn render_chrome(
         &self,
         cx: &mut Context<Self>,
@@ -138,63 +167,36 @@ impl Shell {
         let t = tokens();
         let m = metrics();
         let live_chrome = self.state.connection == DesktopConnection::Live;
-        let sidebar_visible = !narrow && !self.prefs.sidebar_collapsed;
-        let navigation_label = if sidebar_visible || self.narrow_overlay_open {
-            "Hide Sidebar"
-        } else {
-            "Show Sidebar"
-        };
         let status = self.state.status.clone();
         let material = self.material;
         let connection_color = t.role_accent(self.connection_color());
         let connection_label = self.state.connection.label();
 
-        let trailing = div()
-            .flex()
-            .items_center()
-            .gap(m.space_sm)
-            .child(
-                div()
-                    .id("piko-connection")
-                    .flex()
-                    .items_center()
-                    .gap(m.space_xs)
-                    .tooltip(move |_, cx| {
-                        island::components::tooltip::label_on(status.clone(), material, cx)
-                    })
-                    .child(div().size(px(8.)).rounded_full().bg(connection_color))
-                    .when(!live_chrome, |mark| {
-                        mark.child(
-                            text(TextRole::Meta)
-                                .text_color(connection_color)
-                                .child(connection_label),
-                        )
-                    }),
-            )
-            .child(
-                island::components::chrome::GhostTextButton::new(
-                    "piko-sessions-toggle",
-                    navigation_label,
-                )
-                .emphasis(island::components::chrome::ChromeTextEmphasis::Foreground)
-                .material(self.material)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if narrow {
-                        this.narrow_overlay_open = !this.narrow_overlay_open;
-                    } else {
-                        this.prefs.sidebar_collapsed = !this.prefs.sidebar_collapsed;
-                        this.narrow_overlay_open = false;
-                        let _ = this.prefs.save(&this.prefs_path);
-                    }
-                    cx.notify();
-                })),
-            );
+        let trailing = div().flex().items_center().gap(m.space_sm).child(
+            div()
+                .id("piko-connection")
+                .flex()
+                .items_center()
+                .gap(m.space_xs)
+                .tooltip(move |_, cx| {
+                    island::components::tooltip::label_on(status.clone(), material, cx)
+                })
+                .child(div().size(px(8.)).rounded_full().bg(connection_color))
+                .when(!live_chrome, |mark| {
+                    mark.child(
+                        text(TextRole::Meta)
+                            .text_color(connection_color)
+                            .child(connection_label),
+                    )
+                }),
+        );
 
-        WorkspaceChrome::new(
-            ChromeZones::new(None, Some(trailing.into_any_element()), None)
-                .principal(text(TextRole::PlaceholderTitle).child("piko")),
-        )
-        .material(self.material)
+        let mut zones = ChromeZones::new(None, Some(trailing.into_any_element()), None);
+        if narrow || self.prefs.sidebar_collapsed {
+            zones = zones.prepend_leading(self.sidebar_toggle_icon(cx, true));
+        }
+
+        WorkspaceChrome::new(zones).material(self.material)
     }
 
     fn render_timeline_region(

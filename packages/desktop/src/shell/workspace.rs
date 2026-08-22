@@ -5,7 +5,7 @@ use super::tabs::{
 };
 use super::*;
 use gpui::prelude::*;
-use gpui::{AnyElement, App, ClickEvent, Window, div};
+use gpui::{AnyElement, App, ClickEvent, Window, div, px};
 use island::components::chrome::{ChromeTextEmphasis, ChromeZones, GhostTextButton};
 use island::components::panel::IslandHeader;
 use island::components::tabs::TabGroup;
@@ -33,7 +33,9 @@ impl Shell {
                 }
             });
         Some(IslandHeader::chrome(
-            ChromeZones::new(None, Some(self.workspace_toolbar(cx)), None).principal(group),
+            ChromeZones::new(None, Some(self.workspace_toolbar(cx)), None)
+                .principal(group)
+                .principal_min_width(px(160.)),
         ))
     }
 
