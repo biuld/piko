@@ -19,7 +19,10 @@ pub fn tab_items(core: &ClientState, pending_agent: Option<&str>) -> Vec<TabItem
         return Vec::new();
     };
     if session.agents.is_empty() {
-        return Vec::new();
+        let Some(id) = view_key(pending_agent, session.selected_agent.as_deref()) else {
+            return Vec::new();
+        };
+        return vec![TabItem::new(id.to_string(), "Main").tooltip(id.to_string())];
     }
     let view = view_key(pending_agent, session.selected_agent.as_deref());
     let labels = display_labels(session);
@@ -177,6 +180,20 @@ mod tests {
             role: "agent".into(),
             status: AgentStatus::Idle,
         }
+    }
+
+    #[test]
+    fn empty_agent_list_still_shows_selected_tab() {
+        let mut core = ClientState::default();
+        core.session_phase = SessionPhase::Live;
+        core.live_session = Some(piko_client_core::LiveSession {
+            session_id: "s1".into(),
+            selected_agent: Some("root".into()),
+            ..piko_client_core::LiveSession::default()
+        });
+        let items = tab_items(&core, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "root");
     }
 
     #[test]
