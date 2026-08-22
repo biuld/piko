@@ -135,7 +135,7 @@ admission modeling and adds a piko-native reply guarantee.
 ## Reference evidence
 
 - Session `75455f6c` journal:
-  `~/.piko/agent/sessions/cwd_Users-biu-Projects-piko/1786825587015_75455f6c-8f2e-4484-ac6e-2434c9df8562/events/00000000000000000001-open.jsonl`
+  `~/.piko/agents/sessions/cwd_Users-biu-Projects-piko/1786825587015_75455f6c-8f2e-4484-ac6e-2434c9df8562/events/00000000000000000001-open.jsonl`
   (execution_finished reports `model context budget exceeded`; user steers at
   04:31:53 and 04:33:47 were acknowledged but not answered).
 - `packages/orchd/src/runtime/execution/budget.rs` (current double reserve).

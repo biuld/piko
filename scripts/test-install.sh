@@ -31,7 +31,8 @@ test -x "$INSTALL_ROOT/bin/piko"
 test -x "$INSTALL_ROOT/bin/piko-hostd"
 test -f "$INSTALL_ROOT/settings.toml"
 test -f "$INSTALL_ROOT/keybindings.json"
-test -f "$INSTALL_ROOT/agents/main.toml"
+test -f "$INSTALL_ROOT/agents/spec/main.toml"
+test -d "$INSTALL_ROOT/agents/sessions"
 test -f "$INSTALL_ROOT/models/openai.toml"
 test -f "$INSTALL_ROOT/themes/dark.toml"
 test -d "$INSTALL_ROOT/prompts"
@@ -75,5 +76,32 @@ HOME="$OPT_OUT_HOME" SHELL="/bin/zsh" PIKO_HOME="$OPT_OUT_HOME/.piko" \
 PIKO_TUI_BINARY="$tui_binary" PIKO_HOSTD_BINARY="$hostd_binary" \
   "$ROOT/scripts/install.sh" --no-build --no-modify-path >/dev/null
 test ! -e "$OPT_OUT_HOME/.zshrc"
+
+MIGRATION_HOME="$TEST_ROOT/migration-home"
+MIGRATION_ROOT="$MIGRATION_HOME/.piko"
+mkdir -p "$MIGRATION_ROOT/agents" "$MIGRATION_ROOT/agent/sessions/cwd_project"
+printf 'custom agent\n' >"$MIGRATION_ROOT/agents/custom.toml"
+printf 'durable session\n' >"$MIGRATION_ROOT/agent/sessions/cwd_project/marker"
+HOME="$MIGRATION_HOME" SHELL="/bin/zsh" PIKO_HOME="$MIGRATION_ROOT" \
+PIKO_TUI_BINARY="$tui_binary" PIKO_HOSTD_BINARY="$hostd_binary" \
+  "$ROOT/scripts/install.sh" --no-build --no-modify-path >/dev/null
+test "$(cat "$MIGRATION_ROOT/agents/spec/custom.toml")" = "custom agent"
+test "$(cat "$MIGRATION_ROOT/agents/sessions/cwd_project/marker")" = "durable session"
+test ! -e "$MIGRATION_ROOT/agents/custom.toml"
+test ! -e "$MIGRATION_ROOT/agent"
+
+CONFLICT_HOME="$TEST_ROOT/conflict-home"
+CONFLICT_ROOT="$CONFLICT_HOME/.piko"
+mkdir -p "$CONFLICT_ROOT/agents/spec"
+printf 'legacy version\n' >"$CONFLICT_ROOT/agents/main.toml"
+printf 'new version\n' >"$CONFLICT_ROOT/agents/spec/main.toml"
+if HOME="$CONFLICT_HOME" SHELL="/bin/zsh" PIKO_HOME="$CONFLICT_ROOT" \
+  PIKO_TUI_BINARY="$tui_binary" PIKO_HOSTD_BINARY="$hostd_binary" \
+  "$ROOT/scripts/install.sh" --no-build --no-modify-path >/dev/null 2>&1; then
+  echo "expected conflicting agent spec migration to fail" >&2
+  exit 1
+fi
+test "$(cat "$CONFLICT_ROOT/agents/main.toml")" = "legacy version"
+test "$(cat "$CONFLICT_ROOT/agents/spec/main.toml")" = "new version"
 
 echo "installer test passed"

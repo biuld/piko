@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-57: Unified agent home layout](D-57-unified-agent-home.md)
+  implements F-41: installed agent specs move to `agents/spec`, sessions move
+  to `agents/sessions`, and installer upgrades migrate legacy paths without
+  overwriting conflicts (accepted).
 - [D-55: Time-of-day pricing policy](D-55-time-of-day-pricing-policy.md)
   implements F-39: a registered `time_of_day` policy selects token rates by
   request wall-clock time, with fixed-offset timezone expression, half-open

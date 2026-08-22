@@ -113,9 +113,10 @@ cd piko
 piko
 ```
 
-The installer places executables in `~/.piko/bin` and initializes editable
-settings, agents, model catalogs, themes, keybindings, prompts, and skills
-under `~/.piko`. Reinstalling refreshes binaries but preserves every existing
+The installer places executables in `~/.piko/bin`, editable agent specs in
+`~/.piko/agents/spec`, durable sessions in `~/.piko/agents/sessions`, and the
+remaining settings, catalogs, themes, keybindings, prompts, and skills under
+`~/.piko`. Reinstalling refreshes binaries but preserves every existing
 configuration file. Set `PIKO_HOME` to use a different installation root.
 The installer configures zsh, bash, or fish automatically; pass
 `--no-modify-path` to leave shell startup files untouched.

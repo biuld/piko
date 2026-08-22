@@ -34,7 +34,7 @@ detected shell configuration. zsh uses `.zshrc`; bash covers `.bashrc` and
 receive printed manual instructions without guessed profile mutation.
 
 Runtime path resolution uses the same `PIKO_HOME` contract. hostd loads global
-agents from `$PIKO_HOME/agents`, provider/model catalogs from
+agents from `$PIKO_HOME/agents/spec`, provider/model catalogs from
 `$PIKO_HOME/models`, and settings from `$PIKO_HOME/settings.toml`. The TUI
 loads named themes from the project catalog first and the user catalog second.
 Project-local overrides retain their existing precedence.

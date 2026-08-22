@@ -30,16 +30,11 @@ impl JsonlSessionRepository {
     }
 
     pub fn default_root() -> PathBuf {
-        if let Some(root) = std::env::var_os("PIKO_HOME") {
-            return PathBuf::from(root).join("agent").join("sessions");
-        }
+        let piko_home = std::env::var_os("PIKO_HOME").map(PathBuf::from);
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home)
-            .join(".piko")
-            .join("agent")
-            .join("sessions")
+        default_root_from(piko_home, PathBuf::from(home))
     }
     pub fn create(&self, cwd: &str) -> Result<PersistedSession, SessionStorageError> {
         let session_id = Uuid::new_v4().to_string();
@@ -302,5 +297,30 @@ impl JsonlSessionRepository {
             }
         }
         Ok(d)
+    }
+}
+
+fn default_root_from(piko_home: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    piko_home
+        .unwrap_or_else(|| home.join(".piko"))
+        .join("agents")
+        .join("sessions")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_root_from;
+    use std::path::PathBuf;
+
+    #[test]
+    fn default_root_uses_unified_agent_home() {
+        assert_eq!(
+            default_root_from(None, PathBuf::from("home")),
+            PathBuf::from("home/.piko/agents/sessions")
+        );
+        assert_eq!(
+            default_root_from(Some(PathBuf::from("install")), PathBuf::from("ignored")),
+            PathBuf::from("install/agents/sessions")
+        );
     }
 }

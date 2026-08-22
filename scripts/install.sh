@@ -62,9 +62,52 @@ for binary in "$tui_binary" "$hostd_binary"; do
   fi
 done
 
+migrate_agent_home() {
+  local agents_root="$PIKO_INSTALL_ROOT/agents"
+  local spec_root="$agents_root/spec"
+  local legacy_agent_root="$PIKO_INSTALL_ROOT/agent"
+  local source destination name
+
+  mkdir -p "$spec_root"
+  shopt -s nullglob
+
+  for source in "$agents_root"/*.toml; do
+    destination="$spec_root/$(basename "$source")"
+    if [[ ! -e "$destination" ]]; then
+      mv "$source" "$destination"
+    elif cmp -s "$source" "$destination"; then
+      rm "$source"
+    else
+      echo "error: agent spec migration conflict: $source -> $destination" >&2
+      return 1
+    fi
+  done
+
+  if [[ -d "$legacy_agent_root" ]]; then
+    for source in \
+      "$legacy_agent_root"/* \
+      "$legacy_agent_root"/.[!.]* \
+      "$legacy_agent_root"/..?*; do
+      name="$(basename "$source")"
+      destination="$agents_root/$name"
+      if [[ -e "$destination" ]]; then
+        echo "error: agent state migration conflict: $source -> $destination" >&2
+        return 1
+      fi
+      mv "$source" "$destination"
+    done
+    rmdir "$legacy_agent_root"
+  fi
+
+  shopt -u nullglob
+}
+
+migrate_agent_home
+
 mkdir -p \
   "$PIKO_INSTALL_ROOT/bin" \
-  "$PIKO_INSTALL_ROOT/agents" \
+  "$PIKO_INSTALL_ROOT/agents/spec" \
+  "$PIKO_INSTALL_ROOT/agents/sessions" \
   "$PIKO_INSTALL_ROOT/models" \
   "$PIKO_INSTALL_ROOT/themes" \
   "$PIKO_INSTALL_ROOT/prompts" \
@@ -88,7 +131,7 @@ install_config "$ROOT/packages/tui/resources/keybindings.json" \
   "$PIKO_INSTALL_ROOT/keybindings.json"
 
 for source in "$ROOT"/packages/hostd/resources/agents/*.toml; do
-  install_config "$source" "$PIKO_INSTALL_ROOT/agents/$(basename "$source")"
+  install_config "$source" "$PIKO_INSTALL_ROOT/agents/spec/$(basename "$source")"
 done
 for source in "$ROOT"/packages/llmd/resources/models/*.toml; do
   install_config "$source" "$PIKO_INSTALL_ROOT/models/$(basename "$source")"

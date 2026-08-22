@@ -86,7 +86,7 @@ header; a landed PRD supersedes earlier conflicting documents.
 
 ## Session storage
 
-Schema **v4** under `~/.piko/agent/sessions/<encoded-cwd>/<session-id>/`:
+Schema **v4** under `~/.piko/agents/sessions/<encoded-cwd>/<session-id>/`:
 
 ```text
 session.json

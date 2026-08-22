@@ -141,7 +141,7 @@ fn global_agent_source_from(
             root.join("packages/hostd/resources/agents"),
             "development-agent",
         ),
-        None => (piko_root.join("agents"), "installed-agent"),
+        None => (piko_root.join("agents").join("spec"), "installed-agent"),
     }
 }
 
@@ -215,7 +215,7 @@ mod tests {
     fn installed_agent_source_uses_piko_home() {
         let (dir, provenance) = global_agent_source_from(None, PathBuf::from("installation"));
 
-        assert_eq!(dir, PathBuf::from("installation/agents"));
+        assert_eq!(dir, PathBuf::from("installation/agents/spec"));
         assert_eq!(provenance, "installed-agent");
     }
 

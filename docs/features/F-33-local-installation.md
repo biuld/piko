@@ -35,6 +35,8 @@ configuration they require.
 - User-installation layout rooted at `~/.piko` by default.
 - Initialization of settings, credentials, agents, model catalogs, themes,
   keybinding overrides, and empty prompt/skill directories.
+- Agent specifications live under `agents/spec`; durable sessions live under
+  `agents/sessions` as specified by F-41.
 - Idempotent PATH integration for supported user shells, with an explicit
   opt-out that leaves shell startup files untouched.
 - Runtime loading of shipped configuration from the installed files.

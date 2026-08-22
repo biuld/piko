@@ -4,7 +4,7 @@ pub(super) fn root_agent_spec(cwd: impl AsRef<std::path::Path>) -> AgentSpec {
     let mut spec = crate::adapters::prompts::agent_loader::load_agents(cwd)
         .remove("main")
         .expect(
-            "main agent is missing; run scripts/install.sh or restore $PIKO_HOME/agents/main.toml",
+            "main agent is missing; run scripts/install.sh or restore $PIKO_HOME/agents/spec/main.toml",
         );
     ensure_root_tool_sets(&mut spec);
     spec
