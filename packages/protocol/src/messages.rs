@@ -10,19 +10,6 @@ pub use cost::{UsageCost, UsageCostBasis, UsageCostEntry};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum UpstreamToolKind {
-    Search,
-    Retrieval,
-    RemoteMcp,
-    Shell,
-    Computer,
-    ImageGeneration,
-    DeferredDiscovery,
-    ProgrammaticExecution,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum UpstreamActivityStatus {
     Started,
     InProgress,
@@ -61,7 +48,8 @@ pub enum ContentBlock {
     UpstreamToolActivity {
         activity_id: String,
         tool_name: String,
-        kind: UpstreamToolKind,
+        /// Open provider-neutral catalog identifier such as `search`.
+        kind: String,
         status: UpstreamActivityStatus,
     },
     UpstreamToolApproval {

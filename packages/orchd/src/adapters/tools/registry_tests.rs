@@ -15,6 +15,9 @@ use piko_orchd_api::{ToolExecResult, is_approval_accepted};
 use piko_protocol::messages::ToolCall;
 use piko_protocol::tools::{ToolProviderSource, ToolSet, ToolSetToolRef};
 
+mod model_surface;
+mod policy_denials;
+
 const TOOL_NAME: &str = "needs_approval";
 
 fn approved_tool() -> ToolDef {
@@ -208,6 +211,19 @@ async fn catalog_registry(features: Option<HashMap<String, bool>>) -> ToolRegist
             id: "workspace".into(),
             name: "Workspace".into(),
             description: None,
+            feature: Some(piko_protocol::tools::ToolSetFeature::ByTool {
+                tool_features: HashMap::from([
+                    ("read".into(), "workspace".into()),
+                    ("exec_command".into(), "exec".into()),
+                    ("write_stdin".into(), "exec".into()),
+                    ("environment".into(), "environment".into()),
+                    ("get_context_remaining".into(), "context".into()),
+                    ("todo_write".into(), "todo".into()),
+                    ("spawn_agent".into(), "multi-agent".into()),
+                    ("ask_user".into(), "user-interaction".into()),
+                    ("server_defined_tool".into(), "mcp".into()),
+                ]),
+            }),
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {
@@ -220,6 +236,60 @@ async fn catalog_registry(features: Option<HashMap<String, bool>>) -> ToolRegist
         .await;
     registry.set_features(features).await;
     registry
+}
+
+fn contribution_set(id: &str, provider_id: &str) -> ToolSet {
+    ToolSet {
+        id: id.into(),
+        name: id.into(),
+        description: None,
+        feature: None,
+        metadata: None,
+        policy: None,
+        tools: vec![ToolSetToolRef::ProviderNamespace {
+            provider_id: provider_id.into(),
+            namespace: String::new(),
+            alias: None,
+            policy: None,
+        }],
+    }
+}
+
+#[tokio::test]
+async fn contribution_registration_is_atomic_and_never_replaces_ids() {
+    let registry = ToolRegistryImpl::new();
+    registry
+        .install_contribution(super::registry::ToolContribution {
+            provider: Box::new(CatalogProvider),
+            tool_sets: vec![contribution_set("catalog-set", "catalog")],
+        })
+        .await
+        .unwrap();
+    let error = registry
+        .install_contribution(super::registry::ToolContribution {
+            provider: Box::new(CatalogProvider),
+            tool_sets: vec![contribution_set("replacement-set", "catalog")],
+        })
+        .await
+        .unwrap_err();
+    assert!(error.contains("already registered"));
+    let sets = registry.list_tool_sets().await;
+    assert!(sets.contains_key("catalog-set"));
+    assert!(!sets.contains_key("replacement-set"));
+}
+
+#[tokio::test]
+async fn invalid_contribution_publishes_nothing() {
+    let registry = ToolRegistryImpl::new();
+    let error = registry
+        .install_contribution(super::registry::ToolContribution {
+            provider: Box::new(CatalogProvider),
+            tool_sets: vec![contribution_set("broken", "different-provider")],
+        })
+        .await
+        .unwrap_err();
+    assert!(error.contains("references provider"));
+    assert!(registry.list_tool_sets().await.is_empty());
 }
 
 fn feature_map(entries: &[(&str, bool)]) -> HashMap<String, bool> {
@@ -400,58 +470,4 @@ async fn guardian_unavailable_decision_fails_closed() {
     assert!(!record.result.ok);
     assert_eq!(error.code, "guardian_unavailable");
     assert_eq!(error.retryable, Some(false));
-}
-
-#[tokio::test]
-async fn safety_rejected_decision_fails_closed_with_reason() {
-    let registry = registry_with_gateway(Some(ToolApprovalDecision::SafetyRejected {
-        reason: "write target `/Users/me/.ssh/config` is outside the sandbox writable roots".into(),
-    }))
-    .await;
-    let record = registry
-        .execute_tool(&call(), &context(), &route(), None)
-        .await;
-
-    let error = record.result.error.expect("safety rejection must fail");
-    assert!(!record.result.ok);
-    assert_eq!(error.code, "safety_rejected");
-    assert_eq!(error.retryable, Some(false));
-    assert!(error.message.contains("outside the sandbox writable roots"));
-}
-
-#[tokio::test]
-async fn permission_denied_decision_fails_closed_with_reason() {
-    let registry = registry_with_gateway(Some(ToolApprovalDecision::PermissionDenied {
-        reason: "command prefix 'rm -rf' is denied by permission policy".into(),
-    }))
-    .await;
-    let record = registry
-        .execute_tool(&call(), &context(), &route(), None)
-        .await;
-
-    let error = record.result.error.expect("permission denial must fail");
-    assert!(!record.result.ok);
-    assert_eq!(error.code, "permission_denied");
-    assert_eq!(error.retryable, Some(false));
-    assert!(error.message.contains("rm -rf"));
-}
-
-#[test]
-fn expired_is_never_accepted() {
-    assert!(!is_approval_accepted(&ToolApprovalDecision::Expired));
-    assert!(!is_approval_accepted(&ToolApprovalDecision::Decline));
-    assert!(!is_approval_accepted(
-        &ToolApprovalDecision::GuardianDenied { reason: "x".into() }
-    ));
-    assert!(!is_approval_accepted(
-        &ToolApprovalDecision::GuardianUnavailable
-    ));
-    assert!(!is_approval_accepted(
-        &ToolApprovalDecision::SafetyRejected { reason: "x".into() }
-    ));
-    assert!(!is_approval_accepted(
-        &ToolApprovalDecision::PermissionDenied { reason: "x".into() }
-    ));
-    assert!(is_approval_accepted(&ToolApprovalDecision::Accept));
-    assert!(is_approval_accepted(&ToolApprovalDecision::AcceptSession));
 }

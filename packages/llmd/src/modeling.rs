@@ -113,6 +113,9 @@ pub struct ApiSurface {
     pub id: String,
     pub base_url: String,
     pub auth_methods: Vec<ProviderAuthMethod>,
+    /// Optional allow-list narrowing the provider upstream-tool catalog for
+    /// this API surface. `None` inherits the provider catalog.
+    pub upstream_tools: Option<std::collections::BTreeSet<crate::capabilities::UpstreamToolKind>>,
 }
 
 /// Catalog binding from a model to one named API surface.
@@ -146,4 +149,21 @@ pub struct ResolvedModelTarget {
     /// Private wire mapping for closed semantic reasoning efforts.
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
+    /// Effective provider/surface/model upstream tools for this target.
+    pub upstream_tools:
+        std::collections::BTreeMap<crate::capabilities::UpstreamToolKind, UpstreamToolSupport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamToolSupport {
+    pub kind: crate::capabilities::UpstreamToolKind,
+    pub name: String,
+    pub approval: crate::tools::UpstreamApprovalPolicy,
+    /// Provider-private request object emitted by the selected protocol
+    /// adapter. It never crosses llmd's public inference boundary.
+    pub wire_definition: serde_json::Value,
+    /// Provider-private selector used for a specific upstream tool choice.
+    pub wire_choice: serde_json::Value,
+    /// Responses output-item types produced by this tool.
+    pub activity_types: Vec<String>,
 }

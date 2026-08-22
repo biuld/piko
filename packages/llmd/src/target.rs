@@ -8,6 +8,8 @@ use crate::modeling::{
     BillingPlan, ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant,
 };
 
+mod resolution;
+
 const CODEX_RESPONSES_LITE_HEADER: &str = "x-openai-internal-codex-responses-lite";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +51,10 @@ pub struct ModelTargetConfig {
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
     pub billing: Option<BillingPlan>,
+    pub upstream_tool_catalog: std::collections::BTreeMap<
+        crate::capabilities::UpstreamToolKind,
+        crate::modeling::UpstreamToolSupport,
+    >,
 }
 
 impl ModelTargetConfig {
@@ -70,6 +76,7 @@ impl ModelTargetConfig {
             streaming_fallback: true,
             reasoning_effort_map: Default::default(),
             billing: None,
+            upstream_tool_catalog: Default::default(),
         }
     }
 }
@@ -121,124 +128,13 @@ pub struct ModelTarget {
     pub reasoning_effort_map:
         std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>,
     pub billing: Option<BillingPlan>,
+    pub upstream_tool_catalog: std::collections::BTreeMap<
+        crate::capabilities::UpstreamToolKind,
+        crate::modeling::UpstreamToolSupport,
+    >,
 }
 
 impl ModelTarget {
-    pub fn resolve(
-        id: &str,
-        model: &str,
-        config: &ModelTargetConfig,
-        auth_headers: Option<&HashMap<String, String>>,
-    ) -> Result<Self, InferenceError> {
-        let protocol = config.protocol;
-        let endpoint = if let Some(endpoint) = config.endpoint.as_deref() {
-            reqwest::Url::parse(endpoint).map_err(|error| {
-                InferenceError::new(
-                    ErrorClass::Target,
-                    id,
-                    "resolve_target",
-                    format!("invalid endpoint: {error}"),
-                )
-            })?
-        } else {
-            let base = config.base_url.as_deref().ok_or_else(|| {
-                InferenceError::new(
-                    ErrorClass::Target,
-                    id,
-                    "resolve_target",
-                    "target has neither an endpoint nor an API-surface base URL",
-                )
-            })?;
-            let mut base_url = reqwest::Url::parse(base).map_err(|error| {
-                InferenceError::new(
-                    ErrorClass::Target,
-                    id,
-                    "resolve_target",
-                    format!("invalid base URL: {error}"),
-                )
-            })?;
-            if !base_url.path().ends_with('/') {
-                let path = format!("{}/", base_url.path());
-                base_url.set_path(&path);
-            }
-            let operation = protocol.operation();
-            base_url.join(operation).map_err(|error| {
-                InferenceError::new(
-                    ErrorClass::Target,
-                    id,
-                    "resolve_target",
-                    format!("invalid endpoint: {error}"),
-                )
-            })?
-        };
-
-        let mut headers = HeaderMap::new();
-        if let Some(custom) = &config.headers {
-            for (name, value) in custom {
-                let lower = name.to_ascii_lowercase();
-                if matches!(
-                    lower.as_str(),
-                    "authorization" | "content-length" | "accept" | "content-type"
-                ) {
-                    return Err(InferenceError::new(
-                        ErrorClass::Target,
-                        id,
-                        "resolve_target",
-                        format!("custom header {name} is protected"),
-                    ));
-                }
-                insert_header(&mut headers, name, value, id)?;
-            }
-        }
-        if let Some(auth) = auth_headers {
-            for (name, value) in auth {
-                // Authentication material is trusted and supersedes the API
-                // key, but it still cannot own protocol or endpoint.
-                insert_header(&mut headers, name, value, id)?;
-            }
-        }
-        if protocol.responses_variant() == Some(ResponsesVariant::CodexLite) {
-            insert_header(&mut headers, CODEX_RESPONSES_LITE_HEADER, "true", id)?;
-        }
-
-        Ok(Self {
-            id: config.target_id.clone(),
-            api_surface: config.api_surface.clone(),
-            auth_method: config.auth_method,
-            protocol,
-            endpoint,
-            model: model.into(),
-            headers,
-            capabilities: config
-                .capabilities
-                .as_ref()
-                .map(|capabilities| ModelCapabilities {
-                    text: capabilities.text,
-                    images: capabilities.images,
-                    tools: capabilities.tools,
-                    reasoning: capabilities.reasoning,
-                    reasoning_efforts: capabilities.reasoning_efforts.clone(),
-                    refusals: capabilities.refusals,
-                    upstream_tools: capabilities.upstream_tools.clone(),
-                    hybrid_tools: capabilities.hybrid_tools,
-                    upstream_dispatch: capabilities.upstream_dispatch,
-                    parallel_tools: capabilities.parallel_tools,
-                    required_tool_choice: capabilities.required_tool_choice,
-                    specific_tool_choice: capabilities.specific_tool_choice,
-                    structured_json_schema: capabilities.structured_json_schema,
-                    strict_structured_output: capabilities.strict_structured_output,
-                    streaming_delivery: capabilities.streaming_delivery,
-                    assembled_delivery: capabilities.assembled_delivery,
-                    max_output_tokens: capabilities.max_output_tokens,
-                    replay_safe: capabilities.replay_safe,
-                })
-                .unwrap_or_default(),
-            streaming_fallback: config.streaming_fallback,
-            reasoning_effort_map: config.reasoning_effort_map.clone(),
-            billing: config.billing.clone(),
-        })
-    }
-
     pub fn validate(&self, request: &InferenceRequest) -> Result<(), InferenceError> {
         if !self.capabilities.text {
             return Err(InferenceError::new(
@@ -287,7 +183,7 @@ impl ModelTarget {
                 ));
             }
             if let Some(kind) = tool.upstream_kind()
-                && !self.capabilities.upstream_tools.contains(&kind)
+                && !self.capabilities.upstream_tools.contains(kind)
             {
                 return Err(InferenceError::new(
                     ErrorClass::UnsupportedCapability,
@@ -300,23 +196,14 @@ impl ModelTarget {
                 tool,
                 crate::tools::InferenceTool::Upstream(_)
                     | crate::tools::InferenceTool::Hybrid { .. }
-            ) {
-                let authorized = match tool {
-                    crate::tools::InferenceTool::Upstream(definition)
-                    | crate::tools::InferenceTool::Hybrid {
-                        upstream: definition,
-                        ..
-                    } => definition.authorization.is_some(),
-                    crate::tools::InferenceTool::Caller(_) => true,
-                };
-                if !authorized {
-                    return Err(InferenceError::new(
-                        ErrorClass::UnsupportedCapability,
-                        &self.id,
-                        "validate",
-                        "upstream execution requires host authorization",
-                    ));
-                }
+            ) && !request.options.allow_upstream_tools
+            {
+                return Err(InferenceError::new(
+                    ErrorClass::UnsupportedCapability,
+                    &self.id,
+                    "validate",
+                    "upstream execution requires tool-call permission",
+                ));
             }
         }
         match &request.options.tool_choice {

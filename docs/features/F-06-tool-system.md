@@ -38,6 +38,12 @@ what the transcript must look like afterwards.
 
 ## In scope
 
+- One runtime authority for caller-executed tool providers, tool sets, routes,
+  and effective policy.
+- Atomic registration of a provider together with the tool sets it contributes;
+  an invalid or conflicting contribution becomes wholly unavailable.
+- Tool-family feature metadata carried by the contribution/catalog rather than
+  inferred from a second hard-coded tool-name table.
 - Batch dispatch for one model step's tool calls.
 - Execution modes (`parallel`, `sequential`) and their mutual-exclusion
   guarantees within a batch.
@@ -49,6 +55,9 @@ what the transcript must look like afterwards.
 
 ## Out of scope
 
+- Executing provider-side upstream tools locally. Provider capability and wire
+  definitions belong to F-26, while orchd's registry owns unified discovery
+  and assembly of the caller/upstream model-visible surface.
 - Provider-level output truncation details; providers are responsible for
   returning bounded results (the built-in workspace tools already truncate).
 - Tool approval flows (already specified and implemented separately).
@@ -57,6 +66,21 @@ what the transcript must look like afterwards.
 - Retry/backoff policy for failed tool calls.
 
 ## Behavior and states
+
+### Registration and catalog authority
+
+- `orchd` owns the sole model-facing tool registry. Caller contributions carry
+  execution routes; llmd-discovered upstream descriptors carry no local route.
+- A tool contribution contains one provider plus one or more tool sets and
+  declares its source, lifecycle, and optional managed-feature key.
+- Installing a contribution validates provider and set identifiers, provider
+  references, public-name collisions, and feature metadata before publishing
+  any of it. Registration never silently replaces an existing contribution.
+- Provider implementations remain with their owning subsystem. Host-owned
+  providers such as user interaction and MCP contribute bundles to orchd; they
+  do not create a second execution registry in hostd.
+- Catalog discovery retains enough provenance to explain the provider, tool
+  set, feature gate, route, and effective policy for every caller tool.
 
 ### Mode resolution
 
@@ -110,6 +134,13 @@ for differential replay against codex-rs.
 
 ## Acceptance criteria
 
+- [x] Installing a valid contribution publishes its provider and all tool sets
+      atomically.
+- [ ] Duplicate provider IDs, duplicate set IDs, missing provider references,
+      and public-name collisions reject the contribution without partial
+      publication or replacement.
+- [x] Managed-feature gating is derived from contribution/catalog metadata;
+      adding or renaming a tool does not require editing a tool-name mapping.
 - [x] A batch with two parallel-capable tools shows observable overlap in
       execution and commits both results in call order.
 - [x] A sequential tool in a batch never overlaps any other call.
@@ -133,6 +164,8 @@ for differential replay against codex-rs.
 | Result commit order | By `toolCallIndex`, not completion order | Preserves append-only transcript determinism |
 | What does cancellation commit? | Bounded error result per in-flight call | Keeps the transcript complete and replayable |
 | Concurrency cap | `maxConcurrentCalls` from the owning tool set | Bounded resource use; unbounded when unset |
+| Caller tool authority | One orchd registry populated by atomic contributions | Keeps routing and execution with the agent runtime while allowing host-owned lifecycles |
+| Feature ownership | Contribution/tool-set metadata | Removes the duplicate tool-name-to-feature fact table |
 
 ## Open questions
 

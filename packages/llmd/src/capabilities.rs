@@ -17,30 +17,39 @@ pub enum OutputModality {
     Image,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
-pub enum UpstreamToolKind {
-    Search,
-    Retrieval,
-    RemoteMcp,
-    Shell,
-    Computer,
-    ImageGeneration,
-    DeferredDiscovery,
-    ProgrammaticExecution,
-}
+/// Open semantic identifier for a provider-hosted tool capability.
+///
+/// The value is catalog data rather than a closed Rust enum so adding a new
+/// provider tool does not require changing llmd, orchd, or protocol code.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct UpstreamToolKind(String);
 
 impl UpstreamToolKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Search => "search",
-            Self::Retrieval => "retrieval",
-            Self::RemoteMcp => "remote_mcp",
-            Self::Shell => "shell",
-            Self::Computer => "computer",
-            Self::ImageGeneration => "image_generation",
-            Self::DeferredDiscovery => "deferred_discovery",
-            Self::ProgrammaticExecution => "programmatic_execution",
+    pub fn new(value: impl Into<String>) -> Result<Self, String> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+            || value.as_bytes()[0].is_ascii_digit()
+        {
+            return Err(format!(
+                "upstream tool kind must be 1-64 lowercase ASCII letters, digits, or underscores and must not start with a digit: {value}"
+            ));
         }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for UpstreamToolKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
     }
 }
 
@@ -122,6 +131,18 @@ pub struct ModelDescriptor {
     pub display_name: String,
     pub capabilities: ModelCapabilities,
     pub limits: ModelLimits,
+    /// Resolved model-facing upstream tools for this concrete target.
+    pub upstream_tools: Vec<UpstreamToolDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UpstreamToolDescriptor {
+    pub name: String,
+    pub kind: UpstreamToolKind,
+    pub approval: crate::tools::UpstreamApprovalPolicy,
+    /// Opaque fingerprint of the provider-private request definition. Orchd
+    /// uses it for prompt-prefix identity without learning the wire schema.
+    pub wire_definition_digest: String,
 }
 
 impl crate::target::ModelTarget {
@@ -182,6 +203,24 @@ impl crate::target::ModelTarget {
                 checkpoint_bytes: Some(96 * 1024),
                 ..Default::default()
             },
+            upstream_tools: self
+                .upstream_tool_catalog
+                .values()
+                .map(|tool| UpstreamToolDescriptor {
+                    name: tool.name.clone(),
+                    kind: tool.kind.clone(),
+                    approval: tool.approval,
+                    wire_definition_digest: wire_definition_digest(&tool.wire_definition),
+                })
+                .collect(),
         }
     }
+}
+
+fn wire_definition_digest(definition: &serde_json::Value) -> String {
+    use sha2::{Digest as _, Sha256};
+
+    let encoded = serde_json::to_vec(definition)
+        .expect("serializing an in-memory JSON tool definition cannot fail");
+    format!("sha256:{:x}", Sha256::digest(encoded))
 }

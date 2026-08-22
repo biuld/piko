@@ -1,6 +1,7 @@
 # D-38: Protocol-neutral inference boundary
 
-> Status: implemented
+> Status: partial (core boundary and hosted-search resolution slice
+> implemented; remaining upstream families and unified surface digest pending)
 > Implements: [F-26](../features/F-26-protocol-neutral-inference.md)
 > Decisions: [ADR-009](../decisions/ADR-009-first-class-model-targets.md)
 
@@ -293,12 +294,73 @@ The public tool algebra includes an execution locus: caller, upstream, or
 hybrid. Typed variants cover search/retrieval, remote MCP, shell, computer use,
 image generation, deferred tool discovery, and programmatic tool execution.
 Their configuration uses semantic resource references and approval policy;
-raw Responses tool objects remain private.
+provider wire definitions remain private inside llmd's catalog.
 
 Upstream and hybrid activity uses neutral tool progress/result, approval,
-citation/source, and artifact events. Catalog support, hostd authorization,
-and adapter support are separate gates. Remote MCP or upstream shell therefore
-cannot bypass piko policy merely because a model advertises the capability.
+citation/source, and artifact events. Resolved catalog support, the run's
+tool-call policy, and adapter support are separate gates. Remote MCP or
+upstream shell therefore cannot bypass piko policy merely because a model
+advertises the capability.
+
+### Upstream tool catalog and resolution
+
+llmd owns the provider-private source catalog and wire definitions. The
+provider manifest supplies provider defaults, API-surface constraints, and
+model overrides. Target resolution computes one immutable effective catalog
+for `(provider, model, api_surface, protocol_profile)` and model discovery
+projects neutral descriptors into orchd's sole model-facing tool registry.
+
+```rust
+pub struct UpstreamToolSupport {
+    pub kind: UpstreamToolKind,
+    pub name: String,
+    pub approval: UpstreamApprovalPolicy,
+    wire_definition: serde_json::Value,
+    wire_choice: serde_json::Value,
+    activity_types: Vec<String>,
+}
+
+pub enum InferenceTool {
+    Caller(ToolDef),
+    Upstream(UpstreamToolDefinition),
+    Hybrid { caller: ToolDef, upstream: UpstreamToolDefinition },
+}
+```
+
+`UpstreamToolKind` is a validated, lowercase open identifier backed by catalog
+data, not a closed Rust enum. Protocol projections preserve it as a string.
+The loader requires every wire definition to be an object with a non-empty
+`type`, resolves surface/model allow lists against known definitions, and
+rejects output activity types claimed by more than one effective tool.
+
+Provider manifests define reusable upstream tools and API-surface constraints;
+model entries narrow that set and may replace a provider definition for the
+model. llmd exposes the resolved neutral descriptors through `describe`.
+Orchd registers them alongside caller discovery metadata and assembles the
+complete step surface. There is deliberately no global `[upstream-tools]`
+setting and no search-only authorization DTO. Only the protocol adapter sees
+final Responses tool JSON. Each neutral descriptor includes an opaque digest
+of that private wire definition, so a provider mapping change invalidates the
+model tool-surface prefix without leaking provider JSON into orchd.
+
+`InferenceRequest` carries caller definitions and upstream intents as distinct
+variants in one per-step vector. Only caller entries receive orchd routes. The
+registry's immutable combined snapshot supplies the request, context budget,
+trajectory tool count, and prompt-cache surface digest.
+
+When tool calls are enabled for a step, orchd obtains caller entries and the
+registered resolved upstream descriptors in one registry operation. It rejects
+cross-locus name collisions and sorts the combined surface deterministically.
+A respond-only steer step keeps the same tool surface and uses
+`tool_choice = none`, preserving the prompt prefix. When tool calls are
+disabled, neither caller nor upstream tools are exposed.
+
+Standard Responses emits the catalog-owned wire definition and specific-choice
+object without switching on semantic search. Output activities are mapped back
+through catalog-owned activity item types. This path therefore supports any
+configured upstream kind; adding a tool does not require a search-specific
+hostd, orchd, or Responses branch. Chat Completions and Codex Responses Lite
+resolve an empty upstream catalog.
 
 Responses Conversations, response chaining, and encrypted replay are private
 `ConversationPlan` backends. Server-side and standalone Responses compaction
@@ -425,8 +487,9 @@ restart needs no in-memory reconstruction beyond the supplied conversation.
   token; do not trust storage origin.
 - Durable attach: deduplicate events through the opaque cursor and reject a
   handle whose target or auth route no longer matches.
-- Upstream tools: require advertised support and host authorization; denial
-  cannot be reinterpreted as permission to execute a local tool.
+- Upstream tools: require resolved target support and the run's general
+  tool-call permission; denial cannot be reinterpreted as permission to
+  execute a local tool.
 
 ## Verification
 

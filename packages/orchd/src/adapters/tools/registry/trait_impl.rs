@@ -1,4 +1,5 @@
 use super::*;
+use crate::adapters::tools::features::feature_enabled;
 
 #[async_trait]
 impl ToolRegistry for ToolRegistryImpl {
@@ -18,7 +19,7 @@ impl ToolRegistry for ToolRegistryImpl {
             catalog
                 .iter()
                 .filter(|e| {
-                    feature_enabled(features.as_ref(), &e.tool_def)
+                    feature_enabled(features.as_ref(), e.feature.as_deref())
                         && active.contains(&e.public_name)
                 })
                 .map(|e| e.tool_def.clone())
@@ -26,7 +27,7 @@ impl ToolRegistry for ToolRegistryImpl {
         } else {
             catalog
                 .iter()
-                .filter(|e| feature_enabled(features.as_ref(), &e.tool_def))
+                .filter(|e| feature_enabled(features.as_ref(), e.feature.as_deref()))
                 .map(|e| e.tool_def.clone())
                 .collect()
         };
@@ -40,7 +41,7 @@ impl ToolRegistry for ToolRegistryImpl {
             {
                 continue;
             }
-            if !feature_enabled(features.as_ref(), &entry.tool_def) {
+            if !feature_enabled(features.as_ref(), entry.feature.as_deref()) {
                 continue;
             }
             routes.insert(

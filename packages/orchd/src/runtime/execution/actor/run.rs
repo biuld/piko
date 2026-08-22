@@ -257,7 +257,7 @@ impl ExecutionActor {
                 .as_ref()
                 .and_then(|config| config.settings.thinking_level.clone())
         });
-        let (tools, routes) = if self.request.config.allow_tool_calls {
+        let (caller_tools, routes) = if self.request.config.allow_tool_calls {
             (self.tools.clone(), self.routes.clone())
         } else {
             (Vec::new(), HashMap::new())
@@ -268,6 +268,18 @@ impl ExecutionActor {
                 .blocks
                 .push(super::super::prompt::steer_respond_prompt_block());
         }
+        let tool_surface = self
+            .services
+            .tool_registry()
+            .resolve_model_surface(
+                &model.provider,
+                &model.id,
+                caller_tools,
+                self.request.config.allow_tool_calls,
+            )
+            .await
+            .map_err(AgentApiError::ToolCatalogFailed)?;
+        super::super::prompt::bind_model_tool_surface(&mut run_prompt, &tool_surface.digest);
         let max_tool_output_tokens = model_config
             .as_ref()
             .map(|config| config.max_tool_output_tokens)
@@ -289,7 +301,7 @@ impl ExecutionActor {
                 .map(|value| value.as_str())
                 .unwrap_or("none"),
         );
-        span.record("tools", tools.len());
+        span.record("tools", tool_surface.tools.len());
         span.record("transcript_messages", transcript.len());
         span.record("transcript_tokens", snapshot.total_tokens());
         span.record("truncated_outputs", model_view.truncated_outputs);
@@ -298,7 +310,7 @@ impl ExecutionActor {
             let estimate = super::super::budget::enforce_context_budget(
                 &run_prompt,
                 snapshot,
-                &tools,
+                &tool_surface.tools,
                 config.context_window,
                 config.max_output_tokens,
                 thinking.is_some(),
@@ -310,7 +322,7 @@ impl ExecutionActor {
         let request = InferenceRequest {
             model: piko_llmd::gateway::ModelRef::new(&model.provider, &model.id),
             conversation: piko_llmd::gateway::Conversation::from_messages(run_prompt, transcript),
-            tools: tools.into_iter().map(Into::into).collect(),
+            tools: tool_surface.tools,
             options: piko_llmd::gateway::InferenceOptions {
                 reasoning_effort: thinking,
                 tool_choice: if respond_after_steer {
@@ -342,6 +354,7 @@ impl ExecutionActor {
                 max_output_tokens: model_config
                     .as_ref()
                     .and_then(|config| config.settings.max_tokens),
+                allow_upstream_tools: self.request.config.allow_tool_calls,
                 ..Default::default()
             },
             context: piko_llmd::gateway::InvocationContext {

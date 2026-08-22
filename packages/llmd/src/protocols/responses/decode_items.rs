@@ -17,6 +17,7 @@ pub(super) enum StreamItemKind {
     Message,
     Reasoning,
     FunctionCall,
+    Upstream,
 }
 
 pub(super) fn decode_message_item(

@@ -35,6 +35,9 @@ pub async fn initialize_mcp_tools(
                     id: format!("mcp_{name}"),
                     name: format!("mcp/{name}"),
                     description: Some(format!("MCP tools from {name} server")),
+                    feature: Some(piko_protocol::tools::ToolSetFeature::Family {
+                        key: "mcp".into(),
+                    }),
                     tools: vec![ToolSetToolRef::ProviderNamespace {
                         provider_id: name.clone(),
                         namespace: String::new(),
@@ -48,10 +51,24 @@ pub async fn initialize_mcp_tools(
                     }),
                 };
 
-                runtime
-                    .register_tool_provider(Box::new(provider.clone()))
-                    .await;
-                runtime.register_tool_set(tool_set).await;
+                if let Err(error) = runtime
+                    .install_tool_contribution(piko_orchd::tools::ToolContribution {
+                        provider: Box::new(provider.clone()),
+                        tool_sets: vec![tool_set],
+                    })
+                    .await
+                {
+                    tracing::warn!("Failed to register MCP server {name}: {error}");
+                    statuses.push(piko_protocol::command::McpServerInfo {
+                        name,
+                        connected: false,
+                        tool_count: 0,
+                        resource_count: 0,
+                        template_count: 0,
+                        error: Some(error),
+                    });
+                    continue;
+                }
 
                 providers.insert(name.clone(), std::sync::Arc::new(provider));
                 statuses.push(piko_protocol::command::McpServerInfo {
@@ -83,6 +100,7 @@ pub async fn initialize_mcp_tools(
             id: "mcp-resources".into(),
             name: "mcp/resources".into(),
             description: Some("MCP resource access across connected servers".into()),
+            feature: Some(piko_protocol::tools::ToolSetFeature::Family { key: "mcp".into() }),
             tools: vec![ToolSetToolRef::ProviderTool {
                 provider_id: MCP_RESOURCE_PROVIDER_ID.into(),
                 tool_name: MCP_RESOURCE_TOOL_NAME.into(),
@@ -95,10 +113,15 @@ pub async fn initialize_mcp_tools(
                 tags: None,
             }),
         };
-        runtime
-            .register_tool_provider(Box::new(McpResourceProvider::new(providers)))
-            .await;
-        runtime.register_tool_set(resource_tool_set).await;
+        if let Err(error) = runtime
+            .install_tool_contribution(piko_orchd::tools::ToolContribution {
+                provider: Box::new(McpResourceProvider::new(providers)),
+                tool_sets: vec![resource_tool_set],
+            })
+            .await
+        {
+            tracing::warn!("Failed to register MCP resource tools: {error}");
+        }
     }
 
     statuses

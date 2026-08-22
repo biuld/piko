@@ -6,10 +6,13 @@ use crate::gateway::{ConversationItem, ConversationItemKind};
 use crate::gateway::{ErrorClass, InferenceError, InferenceRequest, InferenceResult};
 use crate::modeling::ResponsesVariant;
 mod decode;
+mod decode_complete;
 mod decode_items;
+mod decode_upstream;
 mod support;
 
-use decode::{ResponsesStream, decode_complete};
+use decode::ResponsesStream;
+use decode_complete::decode_complete;
 
 #[cfg(test)]
 mod tests;
@@ -75,7 +78,7 @@ impl ProtocolAdapter for ResponsesAdapter {
                 false,
             ),
         };
-        let tools = caller_tools(request);
+        let tools = response_tools(request, target)?;
         let lite = target.responses_variant() == Some(ResponsesVariant::CodexLite);
         let request_instructions = instructions(request);
         if lite {
@@ -130,7 +133,20 @@ impl ProtocolAdapter for ResponsesAdapter {
             crate::gateway::ToolChoice::None => body["tool_choice"] = json!("none"),
             crate::gateway::ToolChoice::Required => body["tool_choice"] = json!("required"),
             crate::gateway::ToolChoice::Specific(name) => {
-                body["tool_choice"] = json!({"type":"function","name":name});
+                body["tool_choice"] = request
+                    .tools
+                    .iter()
+                    .find_map(|tool| match tool {
+                        crate::tools::InferenceTool::Upstream(definition)
+                            if definition.name == *name =>
+                        {
+                            target
+                                .upstream_tool_support(&definition.kind)
+                                .map(|support| support.wire_choice.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| json!({"type":"function","name":name}));
             }
         }
         if lite {
@@ -181,19 +197,41 @@ impl ProtocolAdapter for ResponsesAdapter {
     }
 }
 
-fn caller_tools(request: &InferenceRequest) -> Vec<Value> {
+fn response_tools(
+    request: &InferenceRequest,
+    target: &ModelTarget,
+) -> Result<Vec<Value>, InferenceError> {
     request
         .tools
         .iter()
-        .filter_map(crate::tools::InferenceTool::caller)
-        .map(|tool| {
-            json!({
-                "type": "function",
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.input_schema,
-                "strict": false
-            })
+        .map(|tool| match tool {
+            crate::tools::InferenceTool::Caller(tool) => Ok(json!({
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                    "strict": false
+            })),
+            crate::tools::InferenceTool::Upstream(definition) => target
+                .upstream_tool_support(&definition.kind)
+                .map(|support| support.wire_definition.clone())
+                .ok_or_else(|| {
+                    InferenceError::new(
+                        ErrorClass::UnsupportedCapability,
+                        &target.id,
+                        "encode_tools",
+                        format!(
+                            "upstream tool {:?} has no target definition",
+                            definition.kind
+                        ),
+                    )
+                }),
+            crate::tools::InferenceTool::Hybrid { .. } => Err(InferenceError::new(
+                ErrorClass::UnsupportedCapability,
+                &target.id,
+                "encode_tools",
+                "Responses hybrid tool encoding is not implemented",
+            )),
         })
         .collect()
 }

@@ -2,7 +2,9 @@ use piko_protocol::model::{ModelSummary, ProviderAuthMethod};
 use std::collections::HashMap;
 
 use super::provider::Provider;
-use crate::modeling::{ApiSurface, ModelKey, ModelTargetProfile, ResolvedModelTarget};
+use crate::modeling::{
+    ApiSurface, ModelKey, ModelTargetProfile, ResolvedModelTarget, UpstreamToolSupport,
+};
 
 pub(crate) mod loader;
 mod pricing;
@@ -21,6 +23,14 @@ pub struct TomlProvider {
     reasoning_effort_maps:
         HashMap<String, std::collections::BTreeMap<piko_protocol::model::ThinkingLevel, String>>,
     billing: HashMap<String, HashMap<String, crate::modeling::BillingPlan>>,
+    upstream_tools:
+        std::collections::BTreeMap<crate::capabilities::UpstreamToolKind, UpstreamToolSupport>,
+    model_upstream_tools:
+        HashMap<String, Option<std::collections::BTreeSet<crate::capabilities::UpstreamToolKind>>>,
+    model_upstream_tool_overrides: HashMap<
+        String,
+        std::collections::BTreeMap<crate::capabilities::UpstreamToolKind, UpstreamToolSupport>,
+    >,
 }
 
 impl TomlProvider {
@@ -33,6 +43,9 @@ impl TomlProvider {
             models: Vec::new(),
             reasoning_effort_maps: HashMap::new(),
             billing: HashMap::new(),
+            upstream_tools: Default::default(),
+            model_upstream_tools: HashMap::new(),
+            model_upstream_tool_overrides: HashMap::new(),
         }
     }
 
@@ -78,6 +91,39 @@ impl TomlProvider {
         self
     }
 
+    pub fn with_upstream_tools(
+        mut self,
+        tools: std::collections::BTreeMap<
+            crate::capabilities::UpstreamToolKind,
+            UpstreamToolSupport,
+        >,
+    ) -> Self {
+        self.upstream_tools = tools;
+        self
+    }
+
+    pub fn with_model_upstream_tools(
+        mut self,
+        tools: HashMap<
+            String,
+            Option<std::collections::BTreeSet<crate::capabilities::UpstreamToolKind>>,
+        >,
+    ) -> Self {
+        self.model_upstream_tools = tools;
+        self
+    }
+
+    pub fn with_model_upstream_tool_overrides(
+        mut self,
+        tools: HashMap<
+            String,
+            std::collections::BTreeMap<crate::capabilities::UpstreamToolKind, UpstreamToolSupport>,
+        >,
+    ) -> Self {
+        self.model_upstream_tool_overrides = tools;
+        self
+    }
+
     /// Load from a TOML file path.
     pub fn from_toml(path: &std::path::Path) -> Result<Self, String> {
         loader::load_provider_from_path(path)
@@ -117,6 +163,35 @@ impl Provider for TomlProvider {
         })?;
         let surface = self.api_surfaces.get(&profile.api_surface)?;
         let model = ModelKey::new(&self.id, model_id);
+        let upstream_tools = if matches!(
+            profile.protocol,
+            crate::modeling::ProtocolProfile::Responses {
+                variant: crate::modeling::ResponsesVariant::Standard,
+                ..
+            }
+        ) {
+            let mut catalog = self.upstream_tools.clone();
+            if let Some(overrides) = self.model_upstream_tool_overrides.get(model_id) {
+                catalog.extend(overrides.clone());
+            }
+            catalog
+                .iter()
+                .filter(|(kind, _)| {
+                    surface
+                        .upstream_tools
+                        .as_ref()
+                        .is_none_or(|allowed| allowed.contains(kind))
+                        && self
+                            .model_upstream_tools
+                            .get(model_id)
+                            .and_then(Option::as_ref)
+                            .is_none_or(|allowed| allowed.contains(kind))
+                })
+                .map(|(kind, support)| (kind.clone(), support.clone()))
+                .collect()
+        } else {
+            Default::default()
+        };
         Some(ResolvedModelTarget {
             id: format!("{model}@{}", surface.id),
             model,
@@ -134,6 +209,7 @@ impl Provider for TomlProvider {
                 .get(model_id)
                 .cloned()
                 .unwrap_or_default(),
+            upstream_tools,
         })
     }
 

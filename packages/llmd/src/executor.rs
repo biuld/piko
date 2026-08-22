@@ -21,7 +21,9 @@ use crate::middleware::{GatewayContext, LlmdMiddleware};
 use crate::retry::{RetryPolicy, RetryState};
 use crate::target::{ModelTarget, ModelTargetConfig};
 
+mod finish;
 mod support;
+use finish::{now_ms, write_model_step_finish};
 use support::*;
 
 struct ExecState {
@@ -168,6 +170,7 @@ impl InferenceGateway for LlmdExecutor {
             return Err(InferenceError::cancelled(&request.model.provider));
         }
         let target = self.target(&request).await?;
+        target.resolve_upstream_tools(&mut request)?;
         target.validate(&request)?;
         let mut context = self.context(&request, &target);
         for middleware in &self.middlewares {
@@ -429,8 +432,7 @@ impl InferenceGateway for LlmdExecutor {
     }
 }
 
-/// Per-step capture context shared between the live start record and the
-/// finish record.
+/// Per-step context shared by live start and finish records.
 struct ModelStepCapture {
     telemetry: Arc<dyn crate::telemetry::GatewayTelemetry>,
     identity: TrajectoryIdentity,
@@ -447,9 +449,8 @@ struct ModelStepCapture {
 /// finish record is flushed as soon as `Completed` is seen — before it is
 /// yielded — because consumers treat `Completed` as terminal and stop polling
 /// (dropping the stream), which would otherwise cancel the post-loop write and
-/// lose the finish record (and with it usage, duration, and terminal state).
-/// If the consumer abandons the stream before `Completed`, no finish record is
-/// written and the step stays "started" (interrupted).
+/// lose usage, duration, and terminal state. An abandoned stream leaves the
+/// step "started" (interrupted).
 fn wrap_model_step_finish(
     output: impl futures_core::Stream<Item = InferenceEvent> + Send + 'static,
     capture: ModelStepCapture,
@@ -492,189 +493,5 @@ fn wrap_model_step_finish(
     }
 }
 
-fn write_model_step_finish(
-    capture: &ModelStepCapture,
-    retries: Vec<TrajectoryRetryAttempt>,
-    fallback: Option<TrajectoryFallback>,
-    usage: Option<Usage>,
-    finished_at: i64,
-) {
-    capture
-        .telemetry
-        .record_model_step(TrajectoryModelStepRecord {
-            identity: capture.identity.clone(),
-            step_id: capture.step_id.clone(),
-            provider: capture.provider.clone(),
-            model: capture.model.clone(),
-            request: capture.request.clone(),
-            options: capture.options.clone(),
-            started_at: capture.started_at,
-            finished_at: Some(finished_at),
-            duration_ms: Some(finished_at.saturating_sub(capture.started_at) as u64),
-            retries,
-            fallback,
-            response: None,
-            message_id: Some(capture.message_id.clone()),
-            usage: usage.map(Box::new),
-        });
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
 #[cfg(test)]
-mod tests {
-    use std::sync::Mutex;
-
-    use futures::stream;
-    use piko_protocol::Usage;
-
-    use super::*;
-
-    #[derive(Default)]
-    struct RecordingTelemetry {
-        finished: Mutex<Option<TrajectoryModelStepRecord>>,
-    }
-
-    impl crate::telemetry::GatewayTelemetry for RecordingTelemetry {
-        fn record_model_step(&self, record: piko_protocol::TrajectoryModelStepRecord) {
-            *self.finished.lock().unwrap() = Some(record);
-        }
-
-        fn record_ttft(&self, _model: &str, _provider: &str, _ttft_ms: u64) {}
-
-        fn record_usage(&self, _model: &str, _provider: &str, _usage: &Usage) {}
-
-        fn record_retry(&self, _model: &str, _provider: &str, _error_class: &str, _attempt: u32) {}
-
-        fn record_fallback(&self, _model: &str, _provider: &str) {}
-    }
-
-    fn capture(telemetry: Arc<RecordingTelemetry>) -> ModelStepCapture {
-        ModelStepCapture {
-            telemetry: telemetry as Arc<dyn crate::telemetry::GatewayTelemetry>,
-            identity: TrajectoryIdentity {
-                session_id: "s".into(),
-                agent_instance_id: "a".into(),
-                run_id: "r".into(),
-                execution_id: None,
-                source_turn_id: None,
-            },
-            step_id: "step-1".into(),
-            provider: "test".into(),
-            model: "test-model".into(),
-            request: serde_json::json!({}),
-            options: serde_json::json!({}),
-            started_at: 1,
-            message_id: "message-1".into(),
-        }
-    }
-
-    #[tokio::test]
-    async fn finish_record_carries_final_step_usage() {
-        let telemetry = Arc::new(RecordingTelemetry::default());
-        let usage = Usage {
-            input: 100,
-            output: 20,
-            cache_read: 80,
-            cache_write: 20,
-            total_tokens: 120,
-            units: Default::default(),
-            cost: Default::default(),
-        };
-        let input = stream::iter([
-            InferenceEvent::Usage(usage.clone()),
-            InferenceEvent::Completed(FinishReason::Completed {
-                reason: "end_turn".into(),
-            }),
-        ]);
-        let mut wrapped = Box::pin(wrap_model_step_finish(
-            input,
-            capture(Arc::clone(&telemetry)),
-            Vec::new(),
-            None,
-        ));
-        while wrapped.next().await.is_some() {}
-
-        let record = telemetry
-            .finished
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("finish record written");
-        assert_eq!(record.usage.as_deref(), Some(&usage));
-        assert_eq!(record.message_id.as_deref(), Some("message-1"));
-        assert!(record.finished_at.is_some());
-        assert_eq!(record.step_id, "step-1");
-    }
-
-    #[tokio::test]
-    async fn abandoned_stream_writes_no_finish_record() {
-        let telemetry = Arc::new(RecordingTelemetry::default());
-        let input = stream::iter([InferenceEvent::Usage(Usage {
-            input: 10,
-            output: 0,
-            cache_read: 0,
-            cache_write: 10,
-            total_tokens: 10,
-            units: Default::default(),
-            cost: Default::default(),
-        })]);
-        let wrapped =
-            wrap_model_step_finish(input, capture(Arc::clone(&telemetry)), Vec::new(), None);
-        drop(wrapped);
-
-        assert!(telemetry.finished.lock().unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn completed_event_flushes_finish_before_consumer_stops() {
-        // Regression: real consumers stop polling as soon as they see
-        // `Completed` and drop the stream. The finish record must already be
-        // durable at that point or usage/duration are lost.
-        let telemetry = Arc::new(RecordingTelemetry::default());
-        let usage = Usage {
-            input: 50,
-            output: 10,
-            cache_read: 45,
-            cache_write: 5,
-            total_tokens: 60,
-            units: Default::default(),
-            cost: Default::default(),
-        };
-        let input = stream::iter([
-            InferenceEvent::Usage(usage.clone()),
-            InferenceEvent::Completed(FinishReason::Completed {
-                reason: "end_turn".into(),
-            }),
-        ]);
-        let mut wrapped = Box::pin(wrap_model_step_finish(
-            input,
-            capture(Arc::clone(&telemetry)),
-            Vec::new(),
-            None,
-        ));
-
-        // Consume exactly like dispatch_step_stream: stop on Completed and drop.
-        while let Some(event) = wrapped.next().await {
-            if matches!(event, InferenceEvent::Completed(_)) {
-                break;
-            }
-        }
-        drop(wrapped);
-
-        let record = telemetry
-            .finished
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("finish record flushed before consumer stopped");
-        assert_eq!(record.usage.as_deref(), Some(&usage));
-        assert!(record.finished_at.is_some());
-        assert!(record.duration_ms.is_some());
-    }
-}
+mod tests;

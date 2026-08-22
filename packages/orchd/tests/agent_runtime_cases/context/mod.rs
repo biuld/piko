@@ -98,6 +98,7 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
             id: "bloat".into(),
             name: "Bloat".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {

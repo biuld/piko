@@ -41,6 +41,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
             id: "user_interaction".into(),
             name: "User Interaction".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: None,
             tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {

@@ -1,6 +1,7 @@
 # F-26: Protocol-neutral inference
 
-> Status: implemented
+> Status: partial (neutral boundary and hosted-search vertical slice
+> implemented; broader upstream capability families remain incremental)
 > Priority: P0
 > Source evidence: piko product direction; F-02 model gateway; F-25 native
 > OpenAI-family model protocols
@@ -98,6 +99,13 @@ common denominator.
   checkpoints.
 - Typed capability semantics for caller-executed, upstream, and hybrid
   tools, deferred tool discovery, citations, and generated artifacts.
+- Provider-, API-surface-, and model-scoped upstream tool definitions resolved
+  by llmd for the concrete target selected for a model step.
+- Upstream tool kinds are validated open catalog identifiers rather than a
+  closed built-in enum; adding a provider definition does not require an
+  llmd, orchd, or protocol code branch.
+- A per-step model-visible tool surface that combines orchd caller tools with
+  llmd-resolved upstream tools without merging their execution authorities.
 - A protocol-neutral optional durable-execution lifecycle: start, attach,
   resume after an opaque cursor, observe terminal state, and cancel.
 - Internal mappings for provider conversation resources, response chaining,
@@ -191,6 +199,19 @@ Upstream execution is opt-in and policy-gated because it does not pass through
 orchd's local tool executor. Catalog support alone never authorizes network,
 code, computer, file, or remote MCP activity.
 
+Upstream-tool resolution has five independent inputs:
+
+1. provider support is the upper bound;
+2. API-surface/protocol support narrows that bound for the selected target;
+3. model metadata narrows support and selects semantic variants;
+4. the run's general tool-call policy decides whether remote execution is allowed;
+5. per-turn intent decides which allowed tools are actually exposed.
+
+The effective key is the resolved target, not a bare model name. Two auth
+routes for the same provider/model may select different API surfaces and
+therefore expose different upstream tools. Protocol adapters alone translate
+resolved semantic definitions into provider wire objects.
+
 Upstream calls, results, sources, citations, and artifacts that affect later
 turns remain part of the logical conversation in semantic form. Wire-only
 execution records needed for replay remain inside the checkpoint.
@@ -269,7 +290,19 @@ Restored checkpoints pass the same validation as newly produced checkpoints.
 - [x] Opaque checkpoint parsing is bounded, rejects malformed data, and never
       logs checkpoint payloads or credential material.
 - [x] Capability discovery distinguishes caller-executed, upstream, and
-      hybrid tools without exposing provider tool JSON.
+      hybrid tools without exposing provider tool JSON, including effective
+      provider/API-surface/model resolution.
+- [x] Standard Responses encodes provider/model-catalog upstream definitions,
+      including non-search definitions, without a search-specific host path;
+      Chat Completions and Codex Responses Lite expose none.
+- [x] A fixture-only future tool kind resolves and encodes without a Rust enum
+      variant; malformed definitions, undefined allow-list references, and
+      ambiguous activity ownership fail during catalog loading.
+- [x] Disabling tool calls for a run adds no upstream tool to a model request;
+      no process-wide or host settings namespace defines upstream tools.
+- [x] Orchd's tool registry assembles caller and llmd-discovered upstream tools
+      into one per-step model-visible surface and digest while retaining
+      separate execution routes.
 - [x] Upstream tool activity, approvals, citations, sources, and artifacts have
       semantic event forms; hostd policy is required in addition to model
       capability support.

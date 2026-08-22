@@ -64,49 +64,56 @@ impl AgentRuntime {
             Arc::clone(&execution),
             Arc::new(context_tools_provider.clone()),
         ));
+        let multi_agent_provider = crate::adapters::tools::MultiAgentToolProvider::new(
+            runtime.clone() as Arc<dyn AgentRuntimeApi>,
+        );
         execution
-            .register_tool_provider(Box::new(
-                crate::adapters::tools::MultiAgentToolProvider::new(
-                    runtime.clone() as Arc<dyn AgentRuntimeApi>
-                ),
-            ))
-            .await;
-        execution
-            .register_tool_set(piko_protocol::tools::ToolSet {
-                id: "multi_agent".into(),
-                name: "Multi-Agent Tools".into(),
-                description: Some(
-                    "Multi-agent: list_agent_specs, spawn, message_agent (queue/steer), list_agents, wait"
-                        .into(),
-                ),
-                metadata: None,
-                policy: None,
-                tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
-                    provider_id: "multi_agent".into(),
-                    namespace: "".into(),
-                    alias: None,
+            .install_tool_contribution(crate::adapters::tools::ToolContribution {
+                provider: Box::new(multi_agent_provider),
+                tool_sets: vec![piko_protocol::tools::ToolSet {
+                    id: "multi_agent".into(),
+                    name: "Multi-Agent Tools".into(),
+                    description: Some(
+                        "Multi-agent: list_agent_specs, spawn, message_agent (queue/steer), list_agents, wait"
+                            .into(),
+                    ),
+                    feature: Some(piko_protocol::tools::ToolSetFeature::Family {
+                        key: "multi-agent".into(),
+                    }),
+                    metadata: None,
                     policy: None,
+                    tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
+                        provider_id: "multi_agent".into(),
+                        namespace: "".into(),
+                        alias: None,
+                        policy: None,
+                    }],
                 }],
             })
-            .await;
+            .await
+            .expect("built-in multi-agent tool contribution is valid");
         execution
-            .register_tool_provider(Box::new(context_tools_provider))
-            .await;
-        execution
-            .register_tool_set(piko_protocol::tools::ToolSet {
-                id: "context".into(),
-                name: "Context Budget Tools".into(),
-                description: Some("Model-visible context budget and fresh-window tools".into()),
-                metadata: None,
-                policy: None,
-                tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
-                    provider_id: "context".into(),
-                    namespace: "".into(),
-                    alias: None,
+            .install_tool_contribution(crate::adapters::tools::ToolContribution {
+                provider: Box::new(context_tools_provider),
+                tool_sets: vec![piko_protocol::tools::ToolSet {
+                    id: "context".into(),
+                    name: "Context Budget Tools".into(),
+                    description: Some("Model-visible context budget and fresh-window tools".into()),
+                    feature: Some(piko_protocol::tools::ToolSetFeature::Family {
+                        key: "context".into(),
+                    }),
+                    metadata: None,
                     policy: None,
+                    tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
+                        provider_id: "context".into(),
+                        namespace: "".into(),
+                        alias: None,
+                        policy: None,
+                    }],
                 }],
             })
-            .await;
+            .await
+            .expect("built-in context tool contribution is valid");
         runtime
     }
 
@@ -116,6 +123,13 @@ impl AgentRuntime {
 
     pub async fn register_tool_provider(&self, provider: Box<dyn piko_orchd_api::ToolProvider>) {
         self.execution.register_tool_provider(provider).await;
+    }
+
+    pub async fn install_tool_contribution(
+        &self,
+        contribution: crate::adapters::tools::ToolContribution,
+    ) -> Result<(), String> {
+        self.execution.install_tool_contribution(contribution).await
     }
 
     /// Seed runtime todo lists from host durable projection (session hydrate).

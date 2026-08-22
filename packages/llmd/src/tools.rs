@@ -1,7 +1,7 @@
 use crate::capabilities::{ToolExecutionLocus, UpstreamToolKind};
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum UpstreamApprovalPolicy {
     Never,
     Always,
@@ -14,23 +14,15 @@ pub struct SemanticResourceRef {
     pub resource: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UpstreamToolDefinition {
     pub name: String,
     pub kind: UpstreamToolKind,
     pub resources: Vec<SemanticResourceRef>,
     pub approval: UpstreamApprovalPolicy,
-    /// Host-owned authorization for upstream (model-API-side) execution.
-    /// Catalog support alone is never sufficient to dispatch an upstream tool.
-    pub authorization: Option<UpstreamExecutionAuthorization>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpstreamExecutionAuthorization {
-    pub approval_id: String,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum InferenceTool {
     Caller(piko_protocol::ToolDef),
     Upstream(UpstreamToolDefinition),
@@ -67,14 +59,14 @@ impl InferenceTool {
         }
     }
 
-    pub(crate) fn upstream_kind(&self) -> Option<UpstreamToolKind> {
+    pub(crate) fn upstream_kind(&self) -> Option<&UpstreamToolKind> {
         match self {
             Self::Caller(_) => None,
             Self::Upstream(definition)
             | Self::Hybrid {
                 upstream: definition,
                 ..
-            } => Some(definition.kind),
+            } => Some(&definition.kind),
         }
     }
 }

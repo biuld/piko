@@ -26,6 +26,7 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
             id: "bloat".into(),
             name: "Bloat".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {

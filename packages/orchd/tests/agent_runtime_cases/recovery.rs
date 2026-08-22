@@ -366,6 +366,7 @@ async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
             id: "multi_agent".into(),
             name: "Multi-Agent Tools".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: None,
             tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {

@@ -43,6 +43,19 @@ provider prompt-projection suites:
 - Registry resolution: explicit per-tool mode wins; set-level `allowParallel`
   upgrades an unset mode; unset defaults fail-closed to sequential.
 
+## 2026-08-22 centralized registration revision
+
+Production bootstrap now installs built-in, host interaction, and dynamic MCP
+providers through atomic `ToolContribution` bundles. Registry tests establish
+that a valid bundle becomes visible as one provider-plus-set snapshot, invalid
+provider references publish nothing, and existing provider/set identifiers are
+never replaced. Managed-feature keys now come from `ToolSet` metadata projected
+onto catalog entries; the parallel hard-coded tool-name classifier was removed.
+
+```bash
+cargo test -p piko-orchd adapters::tools::registry_tests
+```
+
 ## Invariants
 
 - Batch results commit in `tool_call_index` order, never completion order.

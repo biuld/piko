@@ -28,6 +28,13 @@ impl AgentExecutionRuntime {
         self.services.register_tool_provider(provider).await;
     }
 
+    pub async fn install_tool_contribution(
+        &self,
+        contribution: crate::adapters::tools::ToolContribution,
+    ) -> Result<(), String> {
+        self.services.install_tool_contribution(contribution).await
+    }
+
     /// Snapshot of the live `process` tool set (hostd `/ps` surface).
     pub(crate) fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
         self.processes

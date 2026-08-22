@@ -58,6 +58,7 @@ impl InferenceGateway for DurableFixture {
             display_name: "durable fixture".into(),
             capabilities,
             limits: ModelLimits::default(),
+            upstream_tools: Vec::new(),
         })
     }
 

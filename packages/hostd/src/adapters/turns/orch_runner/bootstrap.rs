@@ -229,6 +229,9 @@ impl OrchAgentRunRunner {
         // to the shared registry after replacing the runner's registry.
         crate::telemetry::handle().set_trajectory_registry(runner.trajectory_recorders.clone());
         runner
+            .register_user_interaction_tools_on_execution(&runner)
+            .await;
+        runner
     }
 
     /// Wire the `new_context_window` tool callback (F-05). Hostd invokes the

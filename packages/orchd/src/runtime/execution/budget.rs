@@ -1,5 +1,5 @@
 use piko_orchd_api::AgentApiError;
-use piko_protocol::{SemanticRunPrompt, ToolDef};
+use piko_protocol::SemanticRunPrompt;
 
 use crate::domain::transcript::{TranscriptSnapshot, serialized_tokens};
 
@@ -14,10 +14,10 @@ const OUTPUT_RESERVE_CAP: u64 = 32_768;
 /// Fail-closed provider preflight (F-04 / D-04). `transcript` must be the
 /// exact normalized model view that will be dispatched, so the estimate and
 /// the request can never diverge.
-pub(super) fn enforce_context_budget(
+pub(super) fn enforce_context_budget<T: serde::Serialize>(
     prompt: &SemanticRunPrompt,
     transcript: &TranscriptSnapshot,
-    tools: &[ToolDef],
+    tools: &[T],
     context_window: u64,
     output_reserve: u64,
     reasoning_enabled: bool,

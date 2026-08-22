@@ -91,6 +91,7 @@ async fn steered_message_is_answered_before_further_tool_work() {
             id: "block".into(),
             name: "Block".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {
@@ -237,6 +238,21 @@ async fn steered_message_is_answered_before_further_tool_work() {
         requests[1].options.tool_choice,
         piko_llmd::gateway::ToolChoice::None
     );
+    let surfaces = requests
+        .iter()
+        .map(|request| {
+            request
+                .tools
+                .iter()
+                .map(|tool| tool.name())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(surfaces[0], surfaces[1]);
+    assert_eq!(surfaces[1], surfaces[2]);
+    assert!(requests
+        .iter()
+        .all(|request| request.options.allow_upstream_tools));
     assert!(
         gateway_prompt_text(&requests[1]).contains("Answer that message directly now"),
         "respond step must carry the steer-reply instruction"

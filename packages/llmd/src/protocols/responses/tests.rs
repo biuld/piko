@@ -7,6 +7,8 @@ use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy, ResponsesVar
 use crate::protocols::{ProtocolAdapter, ProtocolStream};
 use crate::target::{ModelTarget, ModelTargetConfig};
 
+mod upstream;
+
 fn target_with_policy(policy: ResponsesContinuationPolicy) -> ModelTarget {
     let mut config = ModelTargetConfig::new(
         "fixture/gpt@responses",
@@ -37,6 +39,35 @@ fn lite_target() -> ModelTarget {
 
 fn target() -> ModelTarget {
     target_with_policy(ResponsesContinuationPolicy::PreviousResponseId)
+}
+
+fn target_with_upstream_search() -> ModelTarget {
+    let mut config = ModelTargetConfig::new(
+        "fixture/gpt@responses",
+        "responses",
+        piko_protocol::model::ProviderAuthMethod::ApiKey,
+        ProtocolProfile::Responses {
+            continuation: ResponsesContinuationPolicy::PreviousResponseId,
+            variant: ResponsesVariant::Standard,
+        },
+    );
+    config.base_url = Some("https://example.test/v1".into());
+    config.upstream_tool_catalog.insert(
+        crate::capabilities::UpstreamToolKind::new("search").unwrap(),
+        crate::modeling::UpstreamToolSupport {
+            kind: crate::capabilities::UpstreamToolKind::new("search").unwrap(),
+            name: "web_search".into(),
+            approval: crate::tools::UpstreamApprovalPolicy::Never,
+            wire_definition: serde_json::json!({"type":"web_search"}),
+            wire_choice: serde_json::json!({"type":"web_search"}),
+            activity_types: vec!["web_search_call".into()],
+        },
+    );
+    config.capabilities = Some(crate::target::ModelCapabilities {
+        upstream_dispatch: true,
+        ..Default::default()
+    });
+    ModelTarget::resolve("fixture/gpt", "gpt", &config, None).unwrap()
 }
 
 fn request_with_checkpoint(target: &ModelTarget) -> crate::gateway::InferenceRequest {
@@ -97,6 +128,31 @@ fn responses_encodes_the_same_typed_controls() {
     assert_eq!(body["tool_choice"], "required");
     assert_eq!(body["max_output_tokens"], 321);
     assert_eq!(body["text"]["format"]["type"], "json_schema");
+}
+
+#[test]
+fn standard_responses_encodes_authorized_upstream_search() {
+    let target = target_with_upstream_search();
+    let mut request = crate::protocols::tests_support::semantic_request();
+    request.tools.push(crate::tools::InferenceTool::Upstream(
+        crate::tools::UpstreamToolDefinition {
+            name: "caller-name-is-not-authoritative".into(),
+            kind: crate::capabilities::UpstreamToolKind::new("search").unwrap(),
+            resources: Vec::new(),
+            approval: crate::tools::UpstreamApprovalPolicy::Always,
+        },
+    ));
+    request.options.allow_upstream_tools = true;
+    target.resolve_upstream_tools(&mut request).unwrap();
+    target.validate(&request).unwrap();
+    let plan = plan(&target, &request.conversation).unwrap();
+    let body = ResponsesAdapter
+        .encode(&request, &target, &plan, true)
+        .unwrap();
+    let tools = body["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[1], json!({"type":"web_search"}));
+    assert_eq!(request.tools[1].name(), "web_search");
 }
 
 #[test]
@@ -263,6 +319,65 @@ fn complete_response_emits_opaque_checkpoint_and_semantic_ids() {
     assert!(
         matches!(&result.items[2], InferenceItem::Text { id, .. } if id.0.starts_with("out_") && !id.0.contains("msg_1"))
     );
+}
+
+#[test]
+fn complete_response_decodes_web_search_as_upstream_activity() {
+    let request = crate::protocols::tests_support::semantic_request();
+    let result = ResponsesAdapter
+        .decode_response(
+            json!({
+                "id":"resp_search","status":"completed","output":[{
+                    "type":"web_search_call","id":"ws_1","status":"completed",
+                    "action":{"type":"search","query":"piko"}
+                }]
+            }),
+            &target_with_upstream_search(),
+            &request,
+        )
+        .unwrap();
+    assert!(matches!(
+        &result.auxiliary[0],
+        crate::tools::InferenceAuxiliary::UpstreamActivity(activity)
+            if activity.activity_id == "ws_1"
+                && activity.kind
+                    == crate::capabilities::UpstreamToolKind::new("search").unwrap()
+                && activity.status == crate::tools::UpstreamActivityStatus::Completed
+    ));
+}
+
+#[test]
+fn stream_decodes_web_search_lifecycle() {
+    let mut stream = ResponsesStream::new(
+        target_with_upstream_search(),
+        crate::protocols::tests_support::semantic_request(),
+    );
+    stream
+        .push(json!({"type":"response.created","response":{"id":"resp_search"}}))
+        .unwrap();
+    let added = stream
+        .push(json!({
+            "type":"response.output_item.added","output_index":0,
+            "item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}
+        }))
+        .unwrap();
+    assert!(matches!(
+        &added[0],
+        InferenceEvent::UpstreamActivity(activity)
+            if activity.status == crate::tools::UpstreamActivityStatus::InProgress
+    ));
+    let done = stream
+        .push(json!({
+            "type":"response.output_item.done","output_index":0,
+            "item":{"type":"web_search_call","id":"ws_1","status":"completed",
+                "action":{"type":"search","query":"piko"}}
+        }))
+        .unwrap();
+    assert!(matches!(
+        &done[0],
+        InferenceEvent::UpstreamActivity(activity)
+            if activity.status == crate::tools::UpstreamActivityStatus::Completed
+    ));
 }
 
 #[test]

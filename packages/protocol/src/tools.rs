@@ -138,6 +138,29 @@ pub struct ToolDef {
 // ---- ToolSets ----
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolSetFeature {
+    Family {
+        key: String,
+    },
+    ByTool {
+        #[serde(rename = "toolFeatures")]
+        tool_features: std::collections::HashMap<String, String>,
+    },
+}
+
+impl ToolSetFeature {
+    pub fn for_tool(&self, provider_tool_name: &str) -> Option<&str> {
+        match self {
+            Self::Family { key } => Some(key),
+            Self::ByTool { tool_features } => {
+                tool_features.get(provider_tool_name).map(String::as_str)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSetMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,6 +236,10 @@ pub struct ToolSet {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Managed feature metadata projected onto catalog entries instead of
+    /// classifying public tool names in a second global table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature: Option<ToolSetFeature>,
     pub tools: Vec<ToolSetToolRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<ToolSetPolicy>,

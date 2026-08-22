@@ -16,6 +16,7 @@ pub use context_tools_provider::{
     ContextToolsCallbacks, ContextToolsProvider, NewContextWindowCallback,
 };
 pub use multi_agent_provider::MultiAgentToolProvider;
+pub use registry::ToolContribution;
 pub(crate) use workspace_handlers::FILE_CHANGE_DETAILS_KEY;
 
 #[cfg(test)]

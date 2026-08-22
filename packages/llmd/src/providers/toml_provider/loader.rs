@@ -18,11 +18,19 @@ use crate::modeling::{
     ApiSurface, ModelTargetProfile, ProtocolProfile, ResponsesContinuationPolicy, ResponsesVariant,
 };
 
+mod upstream;
+use upstream::{
+    build_upstream_tools, parse_upstream_kind_set, validate_effective_catalog,
+    validate_kind_references,
+};
+
 // ---- TOML structures ----
 
 #[derive(Debug, Deserialize)]
 struct ProviderToml {
     provider: ProviderHeader,
+    #[serde(default)]
+    upstream_tools: HashMap<String, UpstreamToolToml>,
     api_surfaces: HashMap<String, ApiSurfaceToml>,
     default_targets: HashMap<String, TargetToml>,
     #[serde(default)]
@@ -38,6 +46,8 @@ struct ProviderHeader {
 struct ApiSurfaceToml {
     base_url: String,
     auth_methods: Vec<String>,
+    #[serde(default)]
+    upstream_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +72,23 @@ struct ModelToml {
     thinking_level_map: Option<HashMap<String, String>>,
     #[serde(default)]
     pricing: Vec<super::pricing::PricingToml>,
+    #[serde(default)]
+    upstream_tools: Option<Vec<String>>,
+    #[serde(default)]
+    upstream_tool_overrides: HashMap<String, UpstreamToolToml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpstreamToolToml {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    approval: Option<String>,
+    definition: serde_json::Value,
+    #[serde(default)]
+    choice: Option<serde_json::Value>,
+    #[serde(default)]
+    activity_types: Vec<String>,
 }
 
 // ---- Adapter kind mapping ----
@@ -100,7 +127,10 @@ fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
 
 // ---- Parsing ----
 
-fn parse_models(models_toml: HashMap<String, ModelToml>) -> Vec<ModelSummary> {
+fn parse_models(
+    models_toml: HashMap<String, ModelToml>,
+    provider_upstream_tools: &std::collections::BTreeSet<crate::capabilities::UpstreamToolKind>,
+) -> Vec<ModelSummary> {
     models_toml
         .into_iter()
         .map(|(id, m)| {
@@ -116,6 +146,17 @@ fn parse_models(models_toml: HashMap<String, ModelToml>) -> Vec<ModelSummary> {
 
             let reasoning_efforts = semantic_reasoning_efforts(&m);
 
+            let supports_upstream = m
+                .upstream_tools
+                .as_ref()
+                .map(|tools| !tools.is_empty())
+                .unwrap_or(
+                    !provider_upstream_tools.is_empty() || !m.upstream_tool_overrides.is_empty(),
+                );
+            let mut tool_execution_loci = vec![ToolExecutionLocus::Caller];
+            if supports_upstream {
+                tool_execution_loci.push(ToolExecutionLocus::Upstream);
+            }
             ModelSummary {
                 id,
                 name: m.name,
@@ -125,7 +166,7 @@ fn parse_models(models_toml: HashMap<String, ModelToml>) -> Vec<ModelSummary> {
                 max_tokens: m.max_tokens,
                 reasoning_efforts,
                 output: vec![OutputModality::Text],
-                tool_execution_loci: vec![ToolExecutionLocus::Caller],
+                tool_execution_loci,
                 parallel_tool_calls: true,
                 structured_output: false,
                 delivery_modes: vec![
@@ -244,6 +285,8 @@ fn build_provider(
     parsed: ProviderToml,
     billing: &crate::billing::BillingRegistry,
 ) -> Result<TomlProvider, String> {
+    let upstream_tools = build_upstream_tools(&parsed.upstream_tools)?;
+    let provider_upstream_kinds = upstream_tools.keys().cloned().collect();
     let surfaces = parsed
         .api_surfaces
         .into_iter()
@@ -266,6 +309,10 @@ fn build_provider(
                     id,
                     base_url: surface.base_url,
                     auth_methods,
+                    upstream_tools: parse_upstream_kind_set(
+                        surface.upstream_tools.as_ref(),
+                        "API surface",
+                    )?,
                 },
             ))
         })
@@ -302,7 +349,59 @@ fn build_provider(
         &surfaces,
         billing,
     )?;
-    let models = parse_models(parsed.models);
+    let model_upstream_tools = parsed
+        .models
+        .iter()
+        .map(|(id, model)| {
+            Ok((
+                id.clone(),
+                parse_upstream_kind_set(model.upstream_tools.as_ref(), id)?,
+            ))
+        })
+        .collect::<Result<HashMap<_, _>, String>>()?;
+    let model_upstream_tool_overrides = parsed
+        .models
+        .iter()
+        .map(|(id, model)| {
+            Ok((
+                id.clone(),
+                build_upstream_tools(&model.upstream_tool_overrides)?,
+            ))
+        })
+        .collect::<Result<HashMap<_, _>, String>>()?;
+    let all_defined_kinds = upstream_tools
+        .keys()
+        .chain(
+            model_upstream_tool_overrides
+                .values()
+                .flat_map(|tools| tools.keys()),
+        )
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for (surface_id, surface) in &surfaces {
+        if let Some(references) = &surface.upstream_tools {
+            validate_kind_references(
+                &format!("API surface {surface_id}"),
+                references,
+                &all_defined_kinds,
+            )?;
+        }
+    }
+    for model_id in parsed.models.keys() {
+        let mut effective = upstream_tools.clone();
+        if let Some(overrides) = model_upstream_tool_overrides.get(model_id) {
+            effective.extend(overrides.clone());
+        }
+        if let Some(Some(references)) = model_upstream_tools.get(model_id) {
+            validate_kind_references(
+                &format!("model {model_id}"),
+                references,
+                &effective.keys().cloned().collect(),
+            )?;
+        }
+        validate_effective_catalog(&format!("model {model_id}"), &effective)?;
+    }
+    let models = parse_models(parsed.models, &provider_upstream_kinds);
 
     Ok(TomlProvider::new(&parsed.provider.id)
         .with_api_surfaces(surfaces)
@@ -310,6 +409,9 @@ fn build_provider(
         .with_models(models)
         .with_reasoning_effort_maps(reasoning_effort_maps)
         .with_billing(billing)
+        .with_upstream_tools(upstream_tools)
+        .with_model_upstream_tools(model_upstream_tools)
+        .with_model_upstream_tool_overrides(model_upstream_tool_overrides)
         .with_model_targets(model_targets))
 }
 
@@ -338,121 +440,4 @@ pub fn load_provider_from_toml_with_billing(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::providers::Provider;
-    use piko_protocol::model::ModelSummary;
-    use piko_protocol::model::ProviderAuthMethod;
-
-    mod pricing_tests;
-
-    fn load_fixture_provider(provider_id: &str) -> Result<TomlProvider, String> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/models")
-            .join(format!("{provider_id}.toml"));
-        load_provider_from_path(&path)
-    }
-
-    #[test]
-    fn openai_catalog_owns_platform_and_subscription_targets() {
-        let provider = load_fixture_provider("openai").unwrap();
-        let platform = provider
-            .target_for_model(ProviderAuthMethod::ApiKey, "gpt-5.5")
-            .unwrap();
-        assert_eq!(platform.api_surface, "platform");
-        assert_eq!(platform.base_url, "https://api.openai.com/v1");
-        let subscription = provider
-            .target_for_model(ProviderAuthMethod::OAuth, "gpt-5.5")
-            .unwrap();
-        assert_eq!(subscription.api_surface, "subscription");
-        assert_eq!(
-            subscription.base_url,
-            "https://chatgpt.com/backend-api/codex/"
-        );
-        assert_eq!(
-            subscription.protocol,
-            ProtocolProfile::Responses {
-                continuation: ResponsesContinuationPolicy::EncryptedReasoning,
-                variant: ResponsesVariant::Standard,
-            }
-        );
-
-        for model in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
-            let platform = provider
-                .target_for_model(ProviderAuthMethod::ApiKey, model)
-                .unwrap();
-            assert_eq!(
-                platform.protocol,
-                ProtocolProfile::Responses {
-                    continuation: ResponsesContinuationPolicy::PreviousResponseId,
-                    variant: ResponsesVariant::Standard,
-                }
-            );
-            let subscription = provider
-                .target_for_model(ProviderAuthMethod::OAuth, model)
-                .unwrap();
-            assert_eq!(
-                subscription.protocol,
-                ProtocolProfile::Responses {
-                    continuation: ResponsesContinuationPolicy::EncryptedReasoning,
-                    variant: ResponsesVariant::CodexLite,
-                }
-            );
-        }
-    }
-
-    fn load_models(provider: &str) -> Vec<ModelSummary> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/models")
-            .join(format!("{provider}.toml"));
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|toml| parse_provider_toml(&toml).ok())
-            .map(|parsed| parse_models(parsed.models))
-            .unwrap_or_default()
-    }
-
-    #[test]
-    fn unsupported_native_provider_is_not_bundled() {
-        assert!(load_fixture_provider("anthropic").is_err());
-    }
-
-    #[test]
-    fn ambiguous_auth_routes_are_rejected() {
-        let manifest = r#"
-[provider]
-id = "ambiguous"
-[api_surfaces.one]
-base_url = "https://one.example"
-auth_methods = ["api_key"]
-[api_surfaces.two]
-base_url = "https://two.example"
-auth_methods = ["api_key"]
-[default_targets.one]
-protocol = "responses"
-[default_targets.two]
-protocol = "chat_completions"
-"#;
-        let error = load_provider_from_toml(manifest).err().unwrap();
-        assert!(error.contains("ambiguous for ApiKey"));
-    }
-
-    #[test]
-    fn test_load_openai_models() {
-        let models = load_models("openai");
-        assert!(!models.is_empty(), "OpenAI catalog should not be empty");
-
-        let gpt5 = models.iter().find(|m| m.id == "gpt-5").unwrap();
-        assert!(gpt5.reasoning);
-        assert_eq!(gpt5.context_window, 400000);
-    }
-
-    #[test]
-    fn test_load_builtin_provider() {
-        use crate::providers::Provider;
-        let provider = load_fixture_provider("openai").unwrap();
-        assert_eq!(provider.id(), "openai");
-        let models = provider.list_models();
-        assert!(models.len() > 10);
-    }
-}
+mod tests;

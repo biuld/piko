@@ -4,13 +4,22 @@
 [provider]
 id = "openai"
 
+[upstream_tools.search]
+name = "web_search"
+approval = "never"
+definition = { type = "web_search" }
+choice = { type = "web_search" }
+activity_types = ["web_search_call"]
+
 [api_surfaces.platform]
 base_url = "https://api.openai.com/v1"
 auth_methods = ["api_key"]
+upstream_tools = ["search"]
 
 [api_surfaces.subscription]
 base_url = "https://chatgpt.com/backend-api/codex/"
 auth_methods = ["oauth"]
+upstream_tools = []
 
 [default_targets.platform]
 protocol = "responses"

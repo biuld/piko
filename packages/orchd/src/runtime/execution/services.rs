@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
+use crate::adapters::tools::ToolContribution;
 use crate::adapters::tools::registry::ToolRegistryImpl;
 use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::domain::model::step::ModelConfig;
@@ -84,6 +85,13 @@ impl ExecutionServices {
 
     pub async fn register_tool_set(&self, tool_set: ToolSet) {
         self.tool_registry.register_tool_set(tool_set).await;
+    }
+
+    pub async fn install_tool_contribution(
+        &self,
+        contribution: ToolContribution,
+    ) -> Result<(), String> {
+        self.tool_registry.install_contribution(contribution).await
     }
 
     /// Keep a clone of the todo provider so host can seed durable lists.

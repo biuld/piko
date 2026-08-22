@@ -44,10 +44,30 @@ fn tool_result_text(message: &Message) -> String {
 async fn no_route_error_distinguishes_feature_disabled_tools() {
     let registry = ToolRegistryImpl::new();
     registry
+        .install_contribution(crate::adapters::tools::registry::ToolContribution {
+            provider: Box::new(TimingToolProvider::new()),
+            tool_sets: vec![piko_protocol::tools::ToolSet {
+                id: "timing-disabled".into(),
+                name: "Timing Disabled".into(),
+                description: None,
+                feature: Some(piko_protocol::tools::ToolSetFeature::Family { key: "exec".into() }),
+                metadata: None,
+                policy: None,
+                tools: vec![piko_protocol::tools::ToolSetToolRef::ProviderNamespace {
+                    provider_id: "timing".into(),
+                    namespace: "".into(),
+                    alias: None,
+                    policy: None,
+                }],
+            }],
+        })
+        .await
+        .unwrap();
+    registry
         .set_features(Some(HashMap::from([("exec".to_string(), false)])))
         .await;
 
-    let disabled = super::no_route_error(&registry, "exec_command").await;
+    let disabled = super::no_route_error(&registry, "par_a").await;
     let disabled_error = disabled.error.expect("disabled tool must fail");
     assert_eq!(disabled_error.code, "feature_disabled");
     assert_eq!(disabled_error.retryable, Some(false));

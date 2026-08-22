@@ -135,7 +135,7 @@ fn requested_semantics_are_rejected_instead_of_silently_dropped() {
 }
 
 #[test]
-fn upstream_catalog_support_is_not_execution_authorization() {
+fn upstream_catalog_support_still_requires_step_permission() {
     use crate::capabilities::UpstreamToolKind;
     use crate::tools::{InferenceTool, UpstreamApprovalPolicy, UpstreamToolDefinition};
 
@@ -144,21 +144,36 @@ fn upstream_catalog_support_is_not_execution_authorization() {
         variant: ResponsesVariant::Standard,
     });
     config.capabilities = Some(ModelCapabilities {
-        upstream_tools: [UpstreamToolKind::Search].into_iter().collect(),
+        upstream_dispatch: true,
         ..Default::default()
     });
+    config.upstream_tool_catalog.insert(
+        UpstreamToolKind::new("search").unwrap(),
+        crate::modeling::UpstreamToolSupport {
+            kind: UpstreamToolKind::new("search").unwrap(),
+            name: "web_search".into(),
+            approval: UpstreamApprovalPolicy::OnRequest,
+            wire_definition: serde_json::json!({"type":"web_search"}),
+            wire_choice: serde_json::json!({"type":"web_search"}),
+            activity_types: vec!["web_search_call".into()],
+        },
+    );
     let target = ModelTarget::resolve("custom", "gpt", &config, None).unwrap();
     let mut request = crate::protocols::tests_support::semantic_request();
     request.tools = vec![InferenceTool::Upstream(UpstreamToolDefinition {
         name: "search".into(),
-        kind: UpstreamToolKind::Search,
+        kind: UpstreamToolKind::new("search").unwrap(),
         resources: Vec::new(),
         approval: UpstreamApprovalPolicy::OnRequest,
-        authorization: None,
     })];
+    target.resolve_upstream_tools(&mut request).unwrap();
     let error = target.validate(&request).unwrap_err();
     assert_eq!(error.class, ErrorClass::UnsupportedCapability);
-    assert!(error.message.contains("not enabled"));
+    assert!(error.message.contains("requires tool-call permission"));
+
+    request.options.allow_upstream_tools = true;
+    target.validate(&request).unwrap();
+    assert_eq!(request.tools[0].name(), "web_search");
 }
 
 #[test]

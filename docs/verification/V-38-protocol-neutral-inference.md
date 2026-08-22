@@ -70,13 +70,16 @@ Responses continuation fields remain confined to llmd.
   Upstream activity, approval requirements, sources, citations, and artifacts
   are semantic events and durable protocol blocks, without raw provider tool
   JSON.
+- The provider loader resolves a fixture-only `future_media` identifier through
+  provider, surface, and model override layers without a code variant. Negative
+  fixtures reject undefined references, malformed wire objects, and duplicate
+  activity ownership before target construction.
 - orchd's upstream-event test establishes the critical ownership boundary: it
-  projects upstream observations into assistant output but neither authorizes
-  nor executes them. Catalog capability is insufficient for dispatch; upstream
-  execution additionally requires explicit authorization and an adapter gate.
-  Production target construction leaves that gate disabled, so no upstream
-  external action is enabled by this slice. A future enabling path must obtain
-  hostd-owned policy approval first.
+  projects upstream observations into assistant output but never executes them
+  locally. Production target construction derives upstream definitions from
+  the resolved provider/API-surface/model catalog. Orchd supplies only the
+  run's general tool-call permission; no global host setting defines upstream
+  tools.
 - Provider-side compaction is represented only as target state capability and
   opaque planning state. It cannot mutate the logical conversation supplied
   by hostd/orchd; removing its anchored prefix merely makes a checkpoint
@@ -99,3 +102,25 @@ Responses continuation fields remain confined to llmd.
   event and rejects duplicate, post-terminal, or incomplete checkpoint state.
   orchd clears pending checkpoint state on error, cancellation, or incomplete
   completion, preserving hostd's durable transcript authority.
+
+## 2026-08-22 provider/model upstream-tool catalog
+
+Provider manifests declare reusable upstream definitions and narrow them by
+API surface. Models can supply allowlists and definition overrides. Target
+resolution intersects these dimensions and exposes the effective immutable
+catalog only for standard Responses; Codex Responses Lite and Chat Completions
+resolve no upstream support.
+
+llmd discovery projects the resolved target's neutral upstream descriptors into
+orchd's tool registry. When a run permits tool calls, that registry assembles
+one sorted caller/upstream surface and digest used by budgeting, prompt cache
+identity, tracing, and dispatch. llmd never appends tools after this boundary.
+Responses emits catalog-owned wire definitions without a search-specific
+encoder branch. Tests cover web search, a model-overridden image-generation
+definition, collision rejection, and tool-disabled exclusion.
+
+```bash
+cargo test -p piko-llmd protocols::responses
+cargo test -p piko-llmd providers::toml_provider::loader::tests::upstream_tools_resolve_by_provider_surface_and_model
+cargo test -p piko-orchd steer::steered_message_is_answered_before_further_tool_work
+```

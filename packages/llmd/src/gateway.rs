@@ -6,15 +6,17 @@ use piko_protocol::messages::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use crate::capabilities::{ModelCapabilities, ModelDescriptor, ModelLimits};
+pub use crate::capabilities::{
+    ModelCapabilities, ModelDescriptor, ModelLimits, UpstreamToolDescriptor,
+};
 pub use crate::collector::collect_execution;
 pub use crate::execution::{
     InferenceExecution, InferenceGateway, InferenceStatus, OpaqueEventCursor, OpaqueExecutionHandle,
 };
 pub use crate::tools::{
     GeneratedArtifact, InferenceAuxiliary, InferenceCitation, InferenceSource, InferenceTool,
-    SemanticResourceRef, UpstreamApprovalPolicy, UpstreamApprovalRequest,
-    UpstreamExecutionAuthorization, UpstreamToolActivity, UpstreamToolDefinition,
+    SemanticResourceRef, UpstreamApprovalPolicy, UpstreamApprovalRequest, UpstreamToolActivity,
+    UpstreamToolDefinition,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -215,6 +217,9 @@ pub struct InferenceOptions {
     pub parallel_tools: Option<bool>,
     pub max_output_tokens: Option<u32>,
     pub structured_output: Option<StructuredOutputIntent>,
+    /// Permit and include upstream tools configured for the resolved target.
+    /// The target catalog, not a process-wide host setting, owns the set.
+    pub allow_upstream_tools: bool,
 }
 
 impl Default for InferenceOptions {
@@ -226,6 +231,7 @@ impl Default for InferenceOptions {
             parallel_tools: None,
             max_output_tokens: None,
             structured_output: None,
+            allow_upstream_tools: false,
         }
     }
 }

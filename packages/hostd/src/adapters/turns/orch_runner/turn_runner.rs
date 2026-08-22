@@ -52,8 +52,6 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .set_approval_gateway(Box::new(self.clone()))
             .await;
 
-        self.register_user_interaction_tools_on_execution(self)
-            .await;
         self.agent_runtime
             .register_agent(root_agent_spec(&input.cwd))
             .await;

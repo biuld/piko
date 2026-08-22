@@ -79,7 +79,8 @@ pub(crate) async fn build_orch_turn_runner(
                 reasoning: resolved.model.reasoning,
                 reasoning_efforts: resolved.model.reasoning_efforts.iter().cloned().collect(),
                 refusals: true,
-                upstream_tools: Default::default(),
+                upstream_tools: target.upstream_tools.keys().cloned().collect(),
+                upstream_dispatch: !target.upstream_tools.is_empty(),
                 hybrid_tools: resolved
                     .model
                     .tool_execution_loci
@@ -103,6 +104,7 @@ pub(crate) async fn build_orch_turn_runner(
             streaming_fallback: true,
             reasoning_effort_map: target.reasoning_effort_map.clone(),
             billing: target.billing.clone(),
+            upstream_tool_catalog: target.upstream_tools.clone(),
         },
     );
     let retry_config = piko_protocol::config::RetryConfig {

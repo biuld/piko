@@ -9,6 +9,7 @@ use piko_protocol::messages::Model;
 use piko_protocol::runtime::OrchModelConfig;
 use piko_protocol::tools::{ToolSet, ToolSetToolRef};
 
+use crate::adapters::tools::ToolContribution;
 use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::adapters::tools::workspace_provider::WorkspaceToolProvider;
 use crate::domain::model::step::ModelConfig;
@@ -57,6 +58,21 @@ impl AgentExecutionRuntime {
         };
 
         if let Some(c) = model_config {
+            let model_ref = piko_llmd::gateway::ModelRef::new(&c.model.provider, &c.model.id);
+            match self.services.model_executor().describe(&model_ref).await {
+                Ok(descriptor) => {
+                    self.services
+                        .tool_registry()
+                        .register_upstream_catalog(&descriptor)
+                        .await;
+                }
+                Err(error) => tracing::debug!(
+                    provider = %c.model.provider,
+                    model = %c.model.id,
+                    %error,
+                    "model gateway does not expose an upstream tool catalog"
+                ),
+            }
             self.services
                 .set_model_config(ModelConfig {
                     model: crate::domain::model::step::ModelSpec {
@@ -89,7 +105,26 @@ impl AgentExecutionRuntime {
         // One shared TodoProvider: registry clone + seed handle share Arc state.
         let todo = TodoProvider::new();
         self.services.set_todo_provider(todo.clone()).await;
-        self.register_tool_provider(Box::new(todo)).await;
+        let todo_set = ToolSet {
+            id: "todo".into(),
+            name: "Todo Tools".into(),
+            description: Some("Task-list planning tools".into()),
+            feature: Some(piko_protocol::tools::ToolSetFeature::Family { key: "todo".into() }),
+            metadata: None,
+            policy: None,
+            tools: vec![ToolSetToolRef::ProviderNamespace {
+                provider_id: "todo".into(),
+                namespace: "".into(),
+                alias: None,
+                policy: None,
+            }],
+        };
+        self.install_tool_contribution(ToolContribution {
+            provider: Box::new(todo),
+            tool_sets: vec![todo_set],
+        })
+        .await
+        .expect("built-in todo tool contribution is valid");
 
         let policy = load_sandbox_policy(sandbox);
         // F-19: attach per-role sandbox policies so workspace tools select
@@ -103,30 +138,20 @@ impl AgentExecutionRuntime {
             WorkspaceToolProvider::new(policy, Arc::clone(&self.processes))
                 .with_role_policies(role_policies)
         };
-        self.register_tool_provider(Box::new(workspace_provider))
-            .await;
-
-        // Single-agent packs: todo + workspace. multi_agent is registered by
-        // AgentRuntime::bootstrap; user_interaction is registered by hostd.
-        self.register_tool_set(ToolSet {
-            id: "todo".into(),
-            name: "Todo Tools".into(),
-            description: Some("Task-list planning tools".into()),
-            metadata: None,
-            policy: None,
-            tools: vec![ToolSetToolRef::ProviderNamespace {
-                provider_id: "todo".into(),
-                namespace: "".into(),
-                alias: None,
-                policy: None,
-            }],
-        })
-        .await;
-
-        self.register_tool_set(ToolSet {
+        let workspace_set = ToolSet {
             id: "workspace".into(),
             name: "Workspace Tools".into(),
             description: Some("Local workspace tools".into()),
+            feature: Some(piko_protocol::tools::ToolSetFeature::ByTool {
+                tool_features: std::collections::HashMap::from([
+                    ("read".into(), "workspace".into()),
+                    ("edit".into(), "workspace".into()),
+                    ("write".into(), "workspace".into()),
+                    ("exec_command".into(), "exec".into()),
+                    ("write_stdin".into(), "exec".into()),
+                    ("environment".into(), "environment".into()),
+                ]),
+            }),
             metadata: None,
             policy: None,
             tools: vec![ToolSetToolRef::ProviderNamespace {
@@ -135,7 +160,12 @@ impl AgentExecutionRuntime {
                 alias: None,
                 policy: None,
             }],
+        };
+        self.install_tool_contribution(ToolContribution {
+            provider: Box::new(workspace_provider),
+            tool_sets: vec![workspace_set],
         })
-        .await;
+        .await
+        .expect("built-in workspace tool contribution is valid");
     }
 }

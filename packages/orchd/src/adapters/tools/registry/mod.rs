@@ -26,7 +26,13 @@ use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, To
 use crate::runtime::utils::runtime_tool_entity_id;
 
 use super::catalog::{CatalogEntry, add_entry, merge_policy, tool_ref_policy};
-use super::features::{disabled_feature_for_tool_name, feature_enabled};
+
+/// One atomic caller-tool contribution. Implementations stay with their
+/// owning subsystem; the registry publishes the provider and sets together.
+pub struct ToolContribution {
+    pub provider: Box<dyn ToolProvider>,
+    pub tool_sets: Vec<ToolSet>,
+}
 
 // ---- CatalogRoute ----
 
@@ -81,6 +87,9 @@ pub struct ToolRegistryImpl {
     approval_gateway: RwLock<Option<Box<dyn ApprovalGateway>>>,
     /// Resolved managed-feature set (F-18). `None` = all features enabled.
     features: RwLock<Option<HashMap<String, bool>>>,
+    /// Model-facing upstream catalogs discovered from llmd, keyed by
+    /// `provider/model`. These definitions have no local execution route.
+    upstream_tools: RwLock<HashMap<String, Vec<piko_llmd::gateway::UpstreamToolDescriptor>>>,
 }
 
 impl Default for ToolRegistryImpl {
@@ -91,4 +100,5 @@ impl Default for ToolRegistryImpl {
 
 mod denial;
 mod impls;
+mod surface;
 mod trait_impl;

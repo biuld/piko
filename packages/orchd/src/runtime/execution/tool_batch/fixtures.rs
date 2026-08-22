@@ -276,6 +276,7 @@ pub(super) async fn tool_batch_harness(
             id: "timing".into(),
             name: "Timing Tools".into(),
             description: None,
+            feature: None,
             metadata: None,
             policy: set_policy,
             tools: vec![ToolSetToolRef::ProviderNamespace {

@@ -138,22 +138,26 @@ impl OrchAgentRunRunner {
             })
             .await;
         self.agent_runtime
-            .register_tool_provider(Box::new(user_provider))
-            .await;
-        self.agent_runtime
-            .register_tool_set(ToolSet {
-                id: "user_interaction".into(),
-                name: "User Interaction Tools".into(),
-                description: Some("Tools that ask the user for input through hostd/TUI".into()),
-                metadata: None,
-                policy: None,
-                tools: vec![ToolSetToolRef::ProviderNamespace {
-                    provider_id: "user_interaction".into(),
-                    namespace: "".into(),
-                    alias: None,
+            .install_tool_contribution(piko_orchd::tools::ToolContribution {
+                provider: Box::new(user_provider),
+                tool_sets: vec![ToolSet {
+                    id: "user_interaction".into(),
+                    name: "User Interaction Tools".into(),
+                    description: Some("Tools that ask the user for input through hostd/TUI".into()),
+                    feature: Some(piko_protocol::tools::ToolSetFeature::Family {
+                        key: "user-interaction".into(),
+                    }),
+                    metadata: None,
                     policy: None,
+                    tools: vec![ToolSetToolRef::ProviderNamespace {
+                        provider_id: "user_interaction".into(),
+                        namespace: "".into(),
+                        alias: None,
+                        policy: None,
+                    }],
                 }],
             })
-            .await;
+            .await
+            .expect("host user-interaction tool contribution is valid");
     }
 }

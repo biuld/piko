@@ -78,3 +78,15 @@ pub(super) fn resolved_tool_catalog(
     let digest = piko_orchd_api::stable_internal_id("tool-catalog", &[&serialized]);
     piko_protocol::ResolvedToolCatalog::new(tools, digest)
 }
+
+/// Bind the exact combined caller/upstream model surface into the provider
+/// cache prefix after model-target discovery.
+pub(super) fn bind_model_tool_surface(
+    prompt: &mut piko_protocol::SemanticRunPrompt,
+    tool_surface_digest: &str,
+) {
+    prompt.cache_plan.semantic_prefix_digest = piko_orchd_api::stable_internal_id(
+        "prompt-prefix",
+        &[&prompt.source_digest, tool_surface_digest],
+    );
+}

@@ -75,32 +75,7 @@ impl AssistantMessageState {
                     .push(ContentBlock::UpstreamToolActivity {
                         activity_id: activity.activity_id.clone(),
                         tool_name: activity.tool_name.clone(),
-                        kind: match activity.kind {
-                            piko_llmd::capabilities::UpstreamToolKind::Search => {
-                                piko_protocol::messages::UpstreamToolKind::Search
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::Retrieval => {
-                                piko_protocol::messages::UpstreamToolKind::Retrieval
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::RemoteMcp => {
-                                piko_protocol::messages::UpstreamToolKind::RemoteMcp
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::Shell => {
-                                piko_protocol::messages::UpstreamToolKind::Shell
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::Computer => {
-                                piko_protocol::messages::UpstreamToolKind::Computer
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::ImageGeneration => {
-                                piko_protocol::messages::UpstreamToolKind::ImageGeneration
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::DeferredDiscovery => {
-                                piko_protocol::messages::UpstreamToolKind::DeferredDiscovery
-                            }
-                            piko_llmd::capabilities::UpstreamToolKind::ProgrammaticExecution => {
-                                piko_protocol::messages::UpstreamToolKind::ProgrammaticExecution
-                            }
-                        },
+                        kind: activity.kind.as_str().to_owned(),
                         status: match activity.status {
                             piko_llmd::tools::UpstreamActivityStatus::Started => {
                                 piko_protocol::messages::UpstreamActivityStatus::Started
@@ -266,7 +241,6 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
 
 #[cfg(test)]
 mod tests {
-    use piko_llmd::capabilities::UpstreamToolKind;
     use piko_llmd::gateway::{
         GeneratedArtifact, InferenceCitation, InferenceEvent, InferenceSource, OutputItemId,
         SemanticResourceRef, UpstreamApprovalRequest, UpstreamToolActivity,
@@ -346,7 +320,7 @@ mod tests {
             InferenceEvent::UpstreamActivity(UpstreamToolActivity {
                 activity_id: "activity-1".into(),
                 tool_name: "search".into(),
-                kind: UpstreamToolKind::Search,
+                kind: piko_llmd::capabilities::UpstreamToolKind::new("search").unwrap(),
                 status: UpstreamActivityStatus::InProgress,
             }),
             InferenceEvent::ApprovalRequired(UpstreamApprovalRequest {

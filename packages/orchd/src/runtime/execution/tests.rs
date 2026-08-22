@@ -24,8 +24,15 @@ fn context_budget_rejects_fixed_prompt_overhead_before_dispatch() {
         ..Default::default()
     };
     let transcript = TranscriptSnapshot::new(vec![], vec![]);
-    let error = super::budget::enforce_context_budget(&prompt, &transcript, &[], 100, 50, false)
-        .expect_err("fixed overhead must fail closed");
+    let error = super::budget::enforce_context_budget(
+        &prompt,
+        &transcript,
+        &[] as &[piko_llmd::tools::InferenceTool],
+        100,
+        50,
+        false,
+    )
+    .expect_err("fixed overhead must fail closed");
     assert!(matches!(error, AgentApiError::ContextBudgetExceeded(_)));
 }
 
@@ -35,7 +42,7 @@ fn context_budget_accepts_request_below_window() {
     let result = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
         &transcript,
-        &[],
+        &[] as &[piko_llmd::tools::InferenceTool],
         10_000,
         100,
         false,
@@ -67,7 +74,7 @@ fn context_budget_accounts_snapshot_and_reports_context_remaining() {
     let estimate = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
         &transcript,
-        &[],
+        &[] as &[piko_llmd::tools::InferenceTool],
         20_000,
         100,
         false,
@@ -79,7 +86,7 @@ fn context_budget_accounts_snapshot_and_reports_context_remaining() {
     let error = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
         &transcript,
-        &[],
+        &[] as &[piko_llmd::tools::InferenceTool],
         5_000,
         100,
         false,
@@ -97,9 +104,15 @@ fn context_budget_caps_output_reserve_for_large_max_tokens_with_reasoning() {
     // OUTPUT_RESERVE_CAP and reasoning shares it.
     let prompt = piko_protocol::SemanticRunPrompt::default();
     let transcript = TranscriptSnapshot::new(vec![], vec![]);
-    let estimate =
-        super::budget::enforce_context_budget(&prompt, &transcript, &[], 1_000_000, 384_000, true)
-            .expect("1M window with capped reserve must be accepted");
+    let estimate = super::budget::enforce_context_budget(
+        &prompt,
+        &transcript,
+        &[] as &[piko_llmd::tools::InferenceTool],
+        1_000_000,
+        384_000,
+        true,
+    )
+    .expect("1M window with capped reserve must be accepted");
     // output=32_768 + reasoning=0 + margin=20_000 plus small prompt/tools
     // serialization overhead.
     assert!((32_768 + 20_000..=53_000).contains(&estimate.fixed_tokens));
@@ -120,7 +133,7 @@ fn context_budget_accepts_long_transcript_shape_from_production_turn() {
     let estimate = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
         &transcript,
-        &[],
+        &[] as &[piko_llmd::tools::InferenceTool],
         1_000_000,
         384_000,
         true,
@@ -136,7 +149,7 @@ fn context_budget_failure_message_reports_budget_fields_and_reasoning_flag() {
     let error = super::budget::enforce_context_budget(
         &piko_protocol::SemanticRunPrompt::default(),
         &transcript,
-        &[],
+        &[] as &[piko_llmd::tools::InferenceTool],
         1_000,
         384_000,
         true,

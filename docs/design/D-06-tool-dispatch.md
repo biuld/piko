@@ -9,6 +9,52 @@ Deliver the F-06 vertical slice: model-step tool calls execute as a batch
 where parallel-capable calls overlap, sequential calls are exclusive,
 cancellation aborts in-flight calls, and the transcript stays deterministic.
 
+Revision B also consolidates caller-tool installation around atomic
+contributions. It changes registration and catalog provenance, not handler
+ownership or the host/orchestrator execution boundary.
+
+## Revision B: caller-tool contributions
+
+`ToolRegistryImpl` remains orchd's sole caller-tool runtime authority. Replace
+the separately awaited provider/set mutations used by production bootstrap
+with an atomic contribution API:
+
+```rust
+pub struct ToolContribution {
+    pub provider: Box<dyn ToolProvider>,
+    pub tool_sets: Vec<ToolSet>,
+}
+```
+
+Installation validates one prospective registry snapshot before publication.
+Provider and set identifiers cannot replace existing entries. Every tool-set
+reference must resolve to the contributed provider (or orchd's reserved
+control namespace). Catalog construction continues to reject final public-name
+collisions. Contribution source and lifecycle remain owned by the bootstrap
+site rather than becoming execution-registry policy.
+
+The managed-feature key is attached to catalog entries through contribution
+or tool-set metadata. Direct-call denial consults the retained full catalog,
+including disabled entries, rather than classifying names through a parallel
+match table.
+
+Built-in providers expose small bundle constructors near their implementations.
+Orchd bootstrap installs workspace, todo, context, and multi-agent bundles;
+hostd installs user-interaction and dynamic MCP bundles because it owns their
+callbacks and process lifecycle. Implementation code stays distributed by
+subsystem.
+
+## Revision C: unified model-facing discovery
+
+`ToolRegistryImpl` also registers the resolved upstream descriptors returned
+by llmd model discovery, keyed by provider/model. They are definition-only
+entries and never receive caller execution routes. For every model step the
+registry performs one `resolve_model_surface` operation that combines caller
+definitions and the registered upstream descriptors, rejects name collisions,
+sorts the complete surface, and computes its digest. Context budgeting, prompt
+cache identity, tracing, and the inference request all consume that same
+snapshot. llmd validates and wire-encodes it but never appends hidden tools.
+
 ## Constraints and non-goals
 
 - Transcripts are append-only and must be deterministic per run; result commit
