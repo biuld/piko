@@ -148,7 +148,12 @@ impl AgentRunRunner for OrchAgentRunRunner {
         ))
     }
 
-    async fn steer_agent(&self, session_id: &str, agent_instance_id: &str, message: &str) -> bool {
+    async fn steer_agent(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        content: MessageContent,
+    ) -> bool {
         if !self
             .active_agent_runs
             .lock()
@@ -167,7 +172,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
                 agent_instance_id: agent_instance_id.to_string(),
                 caller_agent_instance_id: None,
                 message_id: format!("msg_steer_{}", uuid::Uuid::new_v4()),
-                content: MessageContent::String(message.to_string()),
+                content,
             })
             .await
             .is_ok()

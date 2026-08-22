@@ -362,6 +362,12 @@ configured upstream kind; adding a tool does not require a search-specific
 hostd, orchd, or Responses branch. Chat Completions and Codex Responses Lite
 resolve an empty upstream catalog.
 
+DeepSeek's platform catalog defines only the server-executed `web_search`
+capability documented for its Responses API. V4 Responses models inherit that
+definition. Models routed through Chat Completions explicitly resolve no
+upstream tools. DeepSeek's `function` and `custom/apply_patch` forms remain
+caller-executed tools and are not registered as upstream capabilities.
+
 Responses Conversations, response chaining, and encrypted replay are private
 `ConversationPlan` backends. Server-side and standalone Responses compaction
 produce adapter checkpoint payloads; they do not mutate the semantic

@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn text_and_multimodal_chat_commands_are_wire_compatible() {
+    let legacy: Command = serde_json::from_value(serde_json::json!({
+        "type": "chat_submit",
+        "command_id": "legacy",
+        "session_id": "s1",
+        "target_agent_instance_id": "a1",
+        "text": "hello"
+    }))
+    .unwrap();
+    assert!(matches!(legacy, Command::ChatSubmit { text, .. } if text == "hello"));
+
+    let structured = Command::ChatSubmitMessage {
+        command_id: "image".into(),
+        session_id: "s1".into(),
+        target_agent_instance_id: "a1".into(),
+        content: crate::MessageContent::Blocks(vec![
+            crate::ContentBlock::Text {
+                text: "inspect".into(),
+            },
+            crate::ContentBlock::Image {
+                data: "AA==".into(),
+                mime_type: "image/png".into(),
+            },
+        ]),
+    };
+    let value = serde_json::to_value(&structured).unwrap();
+    assert_eq!(value["type"], "chat_submit_message");
+    assert_eq!(value["content"][1]["type"], "image");
+    assert_eq!(
+        serde_json::from_value::<Command>(value).unwrap(),
+        structured
+    );
+}
+
+#[test]
 fn oauth_login_defaults_to_browser_and_cancel_round_trips() {
     let parsed: Command = serde_json::from_value(serde_json::json!({
         "type": "auth_login_o_auth",

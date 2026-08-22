@@ -19,7 +19,29 @@ impl HostServer {
                 ..
             } => {
                 self.0
-                    .apply_chat_submit(command_id, session_id, target_agent_instance_id, text, tx)
+                    .apply_chat_submit(
+                        command_id,
+                        session_id,
+                        target_agent_instance_id,
+                        piko_protocol::MessageContent::String(text),
+                        tx,
+                    )
+                    .await
+            }
+            Command::ChatSubmitMessage {
+                session_id,
+                target_agent_instance_id,
+                content,
+                ..
+            } => {
+                self.0
+                    .apply_chat_submit(
+                        command_id,
+                        session_id,
+                        target_agent_instance_id,
+                        content,
+                        tx,
+                    )
                     .await
             }
             Command::SessionCompact {

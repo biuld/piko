@@ -416,6 +416,7 @@ impl InputRouter {
             Some(KeyAction::MessageFollowUp) => Some(EditorAction::FollowUp.into()),
             Some(KeyAction::MessageSteer) => Some(EditorAction::Steer.into()),
             Some(KeyAction::MessageDequeue) => Some(EditorAction::DequeueFollowUp.into()),
+            Some(KeyAction::ClipboardPasteImage) => Some(EditorAction::PasteImage.into()),
             Some(KeyAction::Complete) => Some(EditorAction::AcceptSuggestion.into()),
             Some(KeyAction::CursorLeft | KeyAction::CursorWordLeft) => {
                 Some(EditorAction::CursorLeft.into())

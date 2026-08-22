@@ -80,6 +80,26 @@ price = 0.25
 #[test]
 fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
     let provider = load_fixture_provider("deepseek").unwrap();
+    let summaries = provider.list_models();
+    let flash_summary = summaries
+        .iter()
+        .find(|model| model.id == "deepseek-v4-flash")
+        .unwrap();
+    assert!(
+        flash_summary
+            .tool_execution_loci
+            .contains(&piko_protocol::model::ToolExecutionLocus::Upstream)
+    );
+    for model in ["deepseek-chat", "deepseek-reasoner"] {
+        let summary = summaries
+            .iter()
+            .find(|summary| summary.id == model)
+            .unwrap();
+        assert_eq!(
+            summary.tool_execution_loci,
+            [piko_protocol::model::ToolExecutionLocus::Caller]
+        );
+    }
     let flash = provider
         .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-flash")
         .unwrap();
@@ -90,6 +110,15 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
             variant: ResponsesVariant::Standard,
         }
     );
+    let search_kind = crate::capabilities::UpstreamToolKind::new("search").unwrap();
+    let search = &flash.upstream_tools[&search_kind];
+    assert_eq!(search.name, "web_search");
+    assert_eq!(
+        search.wire_definition,
+        serde_json::json!({"type":"web_search"})
+    );
+    assert_eq!(search.wire_choice, serde_json::json!({"type":"web_search"}));
+    assert_eq!(search.activity_types, ["web_search_call"]);
     assert_eq!(
         flash
             .reasoning_effort_map
@@ -145,6 +174,71 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
     assert_eq!(pro_peak.input_per_million, 9.0);
     assert_eq!(pro_peak.cached_input_per_million, 0.30);
     assert_eq!(pro_peak.output_per_million, 27.0);
+
+    let vision_summary = summaries
+        .iter()
+        .find(|model| model.id == "deepseek-v4-flash-vision-exp")
+        .unwrap();
+    assert_eq!(vision_summary.context_window, 1_000_000);
+    assert_eq!(vision_summary.max_tokens, 384_000);
+    assert!(
+        vision_summary
+            .input
+            .contains(&piko_protocol::model::InputModality::Image)
+    );
+    assert!(
+        vision_summary
+            .tool_execution_loci
+            .contains(&piko_protocol::model::ToolExecutionLocus::Upstream)
+    );
+    let vision = provider
+        .target_for_model(ProviderAuthMethod::ApiKey, "deepseek-v4-flash-vision-exp")
+        .unwrap();
+    assert_eq!(
+        vision.protocol,
+        ProtocolProfile::Responses {
+            continuation: ResponsesContinuationPolicy::StatelessReplay,
+            variant: ResponsesVariant::Standard,
+        }
+    );
+    assert!(vision.upstream_tools.contains_key(&search_kind));
+    let vision_billing = vision.billing.as_ref().unwrap();
+    let vision_schedule: crate::billing::TimeOfDayPricing =
+        serde_json::from_value(vision_billing.configuration.clone()).unwrap();
+    assert_eq!(vision_schedule.default.input_per_million, 1.5);
+    assert_eq!(vision_schedule.default.cached_input_per_million, 0.05);
+    assert_eq!(vision_schedule.default.output_per_million, 4.5);
+    let image_usage = piko_protocol::messages::Usage {
+        input: 1_000_000,
+        total_tokens: 1_000_000,
+        ..Default::default()
+    };
+    let occurred_at = chrono::DateTime::parse_from_rfc3339("2026-08-20T05:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let image_cost = BillingRegistry::standard()
+        .estimate(
+            &BillingContext {
+                provider: "deepseek",
+                model: "deepseek-v4-flash-vision-exp",
+                api_surface: "platform",
+                occurred_at,
+            },
+            vision_billing,
+            &image_usage,
+        )
+        .unwrap();
+    assert_eq!(image_cost.entries[0].total, 1.5);
+
+    for model in ["deepseek-chat", "deepseek-reasoner"] {
+        assert!(
+            provider
+                .target_for_model(ProviderAuthMethod::ApiKey, model)
+                .unwrap()
+                .upstream_tools
+                .is_empty()
+        );
+    }
 }
 
 #[test]

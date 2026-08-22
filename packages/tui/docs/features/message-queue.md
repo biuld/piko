@@ -3,7 +3,8 @@
 > Status: implemented
 > Package: `piko-tui`
 > Host/runtime: [F-01](../../../../docs/features/F-01-turn-runtime.md) admission,
-> `ChatSubmit` (FollowUp), `QueueSteer` (SteerActive)
+> `ChatSubmit` / `ChatSubmitMessage` (FollowUp), `QueueSteer` /
+> `QueueSteerMessage` (SteerActive)
 
 ## Overview
 
@@ -31,8 +32,8 @@ has a local follow-up waiting, Guidance mentions `Alt+↑ dequeue`.
 
 | Viewed agent | Command | Outcome |
 |---|---|---|
-| Idle | `ChatSubmit` | Start a turn |
-| Running | `QueueSteer` | Inject into the active turn at the next model-step boundary |
+| Idle | `ChatSubmit[Message]` | Start a turn |
+| Running | `QueueSteer[Message]` | Inject into the active turn at the next model-step boundary |
 
 Slash commands are still intercepted before either path.
 
@@ -41,7 +42,7 @@ Slash commands are still intercepted before either path.
 Always `ChatSubmit` (host FollowUp): idle starts a turn; running enqueues a
 durable follow-up for the viewed agent.
 
-The TUI records each follow-up locally (text, then `turn_id` from
+The TUI records each follow-up locally (structured content and display text, then `turn_id` from
 `TurnLifecycle::Queued`) so dequeue can restore it. A `Queued` event must not
 replace that agent's running turn in `active_turns`.
 
@@ -56,7 +57,7 @@ steer display queue.
 
 Pops the last follow-up sent from this TUI for the viewed agent.
 
-- Composer empty: restore the text.
+- Composer empty: restore the text and image references.
 - Composer not empty: leave the follow-up queued and report that the composer
   is occupied.
 - If the host has assigned a `turn_id`, send `TurnCancel` for that queued

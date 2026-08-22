@@ -126,14 +126,13 @@ impl Editor {
         self.cursor = target;
     }
 
+    #[cfg(test)]
     pub fn take_trimmed(&mut self) -> Option<String> {
-        let text = self.expanded_text().trim().to_string();
-        if text.is_empty() {
-            return None;
+        let submission = self.take_submission()?;
+        match submission.content {
+            piko_protocol::MessageContent::String(text) => Some(text),
+            piko_protocol::MessageContent::Blocks(_) => Some(submission.display_text),
         }
-        self.push_history(text.clone());
-        self.clear();
-        Some(text)
     }
 
     pub fn restore_text(&mut self, text: &str) {
@@ -152,7 +151,7 @@ impl Editor {
             let placeholder = self.next_paste_placeholder(text, line_count);
             self.references.push(ReferenceBlock {
                 placeholder: placeholder.clone(),
-                content: text.to_string(),
+                payload: ReferencePayload::Text(text.to_string()),
             });
             self.insert_str(&placeholder);
         } else {
@@ -164,7 +163,7 @@ impl Editor {
         self.exit_history_browse();
         self.references.push(ReferenceBlock {
             placeholder: placeholder.clone(),
-            content,
+            payload: ReferencePayload::Text(content),
         });
         self.insert_str(&placeholder);
     }
@@ -316,14 +315,6 @@ impl Editor {
         self.draft_before_history = None;
         self.references.clear();
         self.next_reference_id = 1;
-    }
-
-    pub(super) fn expanded_text(&self) -> String {
-        let mut text = self.text.clone();
-        for reference in &self.references {
-            text = text.replace(&reference.placeholder, &reference.content);
-        }
-        text
     }
 
     pub(super) fn exit_history_browse(&mut self) {

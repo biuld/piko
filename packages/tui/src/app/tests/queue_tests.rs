@@ -35,6 +35,7 @@ fn queued_guidance_and_summary_show_follow_up_count() {
     app.session.follow_ups.push(crate::app::FollowUpUi {
         agent_instance_id: "task-1".into(),
         text: "later".into(),
+        content: piko_protocol::MessageContent::String("later".into()),
         turn_id: None,
         cancel_when_queued: false,
     });
@@ -62,6 +63,23 @@ fn enter_while_running_sends_queue_steer() {
     ));
     assert!(app.editor.is_empty());
     assert!(app.session.follow_ups.is_empty());
+}
+
+#[test]
+fn image_while_running_sends_structured_steer() {
+    let mut app = running_app();
+    app.editor
+        .insert_image("clipboard.png", "AA==".into(), "image/png".into());
+
+    let effects = app.dispatch(EditorAction::Submit.into());
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::QueueSteerMessage {
+            content: piko_protocol::MessageContent::Blocks(blocks),
+            ..
+        })] if matches!(blocks.as_slice(), [piko_protocol::ContentBlock::Image { data, .. }] if data == "AA==")
+    ));
 }
 
 #[test]
@@ -103,6 +121,7 @@ fn queued_event_does_not_replace_running_turn() {
     app.session.follow_ups.push(crate::app::FollowUpUi {
         agent_instance_id: "task-1".into(),
         text: "later".into(),
+        content: piko_protocol::MessageContent::String("later".into()),
         turn_id: None,
         cancel_when_queued: false,
     });
@@ -131,6 +150,7 @@ fn dequeue_restores_text_and_cancels_queued_turn() {
     app.session.follow_ups.push(crate::app::FollowUpUi {
         agent_instance_id: "task-1".into(),
         text: "bring back".into(),
+        content: piko_protocol::MessageContent::String("bring back".into()),
         turn_id: Some("turn-queued".into()),
         cancel_when_queued: false,
     });
@@ -152,6 +172,7 @@ fn dequeue_waits_for_queued_event_then_cancels() {
     app.session.follow_ups.push(crate::app::FollowUpUi {
         agent_instance_id: "task-1".into(),
         text: "pending id".into(),
+        content: piko_protocol::MessageContent::String("pending id".into()),
         turn_id: None,
         cancel_when_queued: false,
     });

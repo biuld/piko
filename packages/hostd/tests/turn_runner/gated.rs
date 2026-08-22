@@ -48,7 +48,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
             piko_protocol::InputDisposition::Queued
         };
         if disposition == piko_protocol::InputDisposition::Accepted {
-            self.prompts.lock().unwrap().push(input.prompt.clone());
+            self.prompts.lock().unwrap().push(input.text_projection());
         }
         let (started_tx, started) = support::test_oneshot();
         let epoch = subscription.cursor.epoch.clone();
@@ -63,7 +63,7 @@ impl AgentRunRunner for GatedAgentRunRunner {
         let session_id = input.session_id.clone();
         let operation_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         let address = piko_hostd::ports::AgentOperationAddress {
             session_id: session_id.clone(),
             operation_id: operation_id.clone(),

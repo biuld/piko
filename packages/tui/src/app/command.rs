@@ -60,6 +60,12 @@ pub enum EditorAction {
     CancelSuggestions,
     InsertChar(char),
     InsertPaste(String),
+    PasteImage,
+    InsertImage {
+        filename: String,
+        data: String,
+        mime_type: String,
+    },
     InsertNewline,
     DeleteBackward,
     DeleteForward,

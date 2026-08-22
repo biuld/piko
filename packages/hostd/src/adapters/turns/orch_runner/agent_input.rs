@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_orchd_api::AgentRuntimeApi;
-use piko_protocol::{AgentInputDelivery, MessageContent, SendAgentInputRequest};
+use piko_protocol::{AgentInputDelivery, SendAgentInputRequest};
 
 use crate::api::ProtocolError;
 use crate::ports::{
@@ -151,7 +151,7 @@ impl OrchAgentRunRunner {
             caller_agent_instance_id: None,
             source_turn_id: input.source_turn_id,
             message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
-            content: MessageContent::String(input.prompt),
+            content: input.content,
             delivery: AgentInputDelivery::FollowUp,
             prompt_resources: input.prompt_resources,
             active_tool_names: input.active_tool_names,

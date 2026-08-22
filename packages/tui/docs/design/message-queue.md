@@ -5,8 +5,9 @@
 
 ## Goal
 
-Give the Composer first-class start / steer / queue / dequeue without new
-host wire types. Hostd already owns `ChatSubmit` (FollowUp) and `QueueSteer`.
+Give the Composer first-class start / steer / queue / dequeue. Text uses the
+legacy commands; multimodal input uses `ChatSubmitMessage` and
+`QueueSteerMessage` with the same host-owned admission semantics.
 
 ## Mapping
 
@@ -27,7 +28,7 @@ Alt+↑                → pop local follow-up + TurnCancel if turn_id known
 `SessionUiState::follow_ups: Vec<FollowUpUi>`
 
 ```text
-FollowUpUi { agent_instance_id, text, turn_id: Option<String>, cancel_when_queued }
+FollowUpUi { agent_instance_id, text, content, turn_id: Option<String>, cancel_when_queued }
 ```
 
 1. Follow-up `ChatSubmit` pushes `{ text, turn_id: None }`.

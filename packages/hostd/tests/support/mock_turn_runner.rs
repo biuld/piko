@@ -21,7 +21,7 @@ impl AgentRunRunner for MockAgentRunRunner {
         let session_id = input.session_id.clone();
         let source_turn_id = input.operation_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         let mut committed_user: Option<String> = None;
 
         // Sessions backed by a real schema-v4 journal get a durable

@@ -3,9 +3,17 @@
 [provider]
 id = "deepseek"
 
+[upstream_tools.search]
+name = "web_search"
+approval = "never"
+definition = { type = "web_search" }
+choice = { type = "web_search" }
+activity_types = ["web_search_call"]
+
 [api_surfaces.platform]
 base_url = "https://api.deepseek.com"
 auth_methods = ["api_key"]
+upstream_tools = ["search"]
 
 [default_targets.platform]
 protocol = "chat_completions"
@@ -116,6 +124,60 @@ input_per_million = 3.0
 cached_input_per_million = 0.10
 output_per_million = 9.0
 
+# ---- V4 Vision ----
+
+[models."deepseek-v4-flash-vision-exp"]
+name = "DeepSeek V4 Flash Vision Experimental"
+reasoning = true
+input = ["text", "image"]
+context_window = 1000000
+max_tokens = 384000
+
+[models."deepseek-v4-flash-vision-exp".targets.platform]
+protocol = "responses"
+continuation = "stateless_replay"
+
+[models."deepseek-v4-flash-vision-exp".thinking_level_map]
+high = "high"
+xhigh = "max"
+minimal = ""
+low = ""
+medium = ""
+
+# Official peak/off-peak schedule (2026-08-16). Vision input is converted to
+# tokens and uses the same rates as DeepSeek V4 Flash.
+[[models."deepseek-v4-flash-vision-exp".pricing]]
+surface = "platform"
+basis = "list_price"
+currency = "CNY"
+policy = "time_of_day"
+
+[models."deepseek-v4-flash-vision-exp".pricing.configuration]
+utc_offset = "+08:00"
+
+[models."deepseek-v4-flash-vision-exp".pricing.configuration.default]
+input_per_million = 1.5
+cached_input_per_million = 0.05
+output_per_million = 4.5
+
+[[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows]]
+start = "09:00"
+end = "12:00"
+
+[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows.rates]
+input_per_million = 3.0
+cached_input_per_million = 0.10
+output_per_million = 9.0
+
+[[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows]]
+start = "14:00"
+end = "18:00"
+
+[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows.rates]
+input_per_million = 3.0
+cached_input_per_million = 0.10
+output_per_million = 9.0
+
 # ---- V3 (non-reasoning) ----
 
 [models."deepseek-chat"]
@@ -124,6 +186,7 @@ reasoning = false
 input = ["text"]
 context_window = 128000
 max_tokens = 8192
+upstream_tools = []
 
 # ---- R1 (reasoning) ----
 
@@ -133,3 +196,4 @@ reasoning = true
 input = ["text"]
 context_window = 128000
 max_tokens = 8192
+upstream_tools = []

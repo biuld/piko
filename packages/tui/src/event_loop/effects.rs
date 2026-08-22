@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use base64::Engine as _;
+
 use crate::{
     app::{AppState, effect::Effect},
     host::HostdClient,
@@ -31,8 +33,52 @@ pub(crate) fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: V
                 }
                 Err(err) => app.push_error(format!("could not copy notification: {err}")),
             },
+            Effect::ReadClipboardImage => match read_clipboard_image() {
+                Ok((filename, data, mime_type)) => {
+                    let follow_up = app.dispatch(
+                        crate::app::command::EditorAction::InsertImage {
+                            filename,
+                            data,
+                            mime_type,
+                        }
+                        .into(),
+                    );
+                    run_effects(app, host, follow_up);
+                }
+                Err(error) => app.push_error(format!("could not paste image: {error}")),
+            },
         }
     }
+}
+
+fn read_clipboard_image() -> Result<(String, String, String), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    let image = clipboard.get_image().map_err(|error| error.to_string())?;
+    let width = u32::try_from(image.width).map_err(|_| "clipboard image width is too large")?;
+    let height = u32::try_from(image.height).map_err(|_| "clipboard image height is too large")?;
+    let expected = image
+        .width
+        .checked_mul(image.height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or("clipboard image dimensions overflow")?;
+    if image.bytes.len() != expected {
+        return Err("clipboard image is not RGBA8".into());
+    }
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
+        writer
+            .write_image_data(&image.bytes)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok((
+        "clipboard.png".into(),
+        base64::engine::general_purpose::STANDARD.encode(png_bytes),
+        "image/png".into(),
+    ))
 }
 
 fn copy_to_clipboard(text: &str) -> std::io::Result<()> {

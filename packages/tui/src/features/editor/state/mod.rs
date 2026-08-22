@@ -20,10 +20,29 @@ pub struct Editor {
     pub auto_complete: AutoComplete,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ReferenceBlock {
     placeholder: String,
-    content: String,
+    payload: ReferencePayload,
+}
+
+#[derive(Clone, Debug)]
+enum ReferencePayload {
+    Text(String),
+    Image { data: String, mime_type: String },
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorDraft {
+    text: String,
+    cursor: usize,
+    references: Vec<ReferenceBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorSubmission {
+    pub content: piko_protocol::MessageContent,
+    pub display_text: String,
 }
 
 impl Default for Editor {
@@ -43,6 +62,7 @@ impl Default for Editor {
 }
 
 mod impls;
+mod submission;
 #[cfg(test)]
 mod tests;
 

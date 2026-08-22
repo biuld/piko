@@ -110,6 +110,9 @@ gateway compatibility scans return no matches.
   models resolve to Chat Completions. Fixtures verify that DeepSeek's profile
   emits no `previous_response_id`, `store`, or `include`, and accepts
   `reasoning_text` in both complete and streaming responses.
+- The DeepSeek catalog fixture resolves `deepseek-v4-flash-vision-exp` as a
+  text/image Responses target with a 1M context window, 384K output limit,
+  V4 Flash pricing, and the provider's resolved upstream search capability.
 - Protocol implementation files are organized under
   `protocols/responses/` and `protocols/chat_completions/`; cohesive Rust files
   remain below the project's 500-line ceiling.

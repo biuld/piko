@@ -196,10 +196,11 @@ pub struct ActiveTurnUi {
 }
 
 /// A follow-up this TUI submitted and can dequeue.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FollowUpUi {
     pub agent_instance_id: String,
     pub text: String,
+    pub content: piko_protocol::MessageContent,
     pub turn_id: Option<String>,
     pub cancel_when_queued: bool,
 }
@@ -214,7 +215,7 @@ pub struct SessionUiState {
     pub previous_live_id: Option<String>,
     pub initializing: bool,
     pub shell_ready: bool,
-    pub pending_turn_text: Option<String>,
+    pub pending_turn_content: Option<piko_protocol::MessageContent>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     /// agent_instance_id → active turn (id + status) for F-22 foreground projection.

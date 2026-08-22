@@ -19,6 +19,16 @@ impl AppState {
                     self.refresh_suggestions();
                 }
             }
+            EditorAction::PasteImage => effects.push(Effect::read_clipboard_image()),
+            EditorAction::InsertImage {
+                filename,
+                data,
+                mime_type,
+            } => {
+                self.editor.insert_image(&filename, data, mime_type);
+                self.refresh_suggestions();
+                self.status = "image attached".to_string();
+            }
             EditorAction::InsertNewline => {
                 self.editor.insert_newline();
                 self.refresh_suggestions();

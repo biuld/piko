@@ -206,6 +206,8 @@ Bundled target defaults are:
 - provider catalogs may override protocol and continuation policy per model;
 - DeepSeek `deepseek-v4-flash` and `deepseek-v4-pro`: Responses with stateless
   full-history replay (official support confirmed 2026-08-20);
+- DeepSeek `deepseek-v4-flash-vision-exp`: Responses with stateless
+  full-history replay and text/image input;
 - other shipped DeepSeek models: Chat Completions until their Responses
   support is documented;
 - custom targets: require an explicit supported protocol.

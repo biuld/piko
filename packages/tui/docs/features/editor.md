@@ -57,8 +57,9 @@ line break.
 
 ### Submitting a prompt
 
-**Enter** submits the current content. The text is trimmed of leading/trailing
-whitespace. If the trimmed text is empty, nothing happens.
+**Enter** submits the current text and image content. Boundary whitespace is
+trimmed from text. An image-only message is valid; empty text without an image
+does nothing.
 
 When the viewed agent is idle, Enter starts a turn (`ChatSubmit`). When that
 agent is running, Enter steers the active turn (`QueueSteer`). **Alt+Enter**
@@ -212,6 +213,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 | `tui.input.tab` | Tab |
 | `tui.history.prev` | Ctrl+P |
 | `tui.history.next` | Ctrl+E |
+| `app.clipboard.pasteImage` | Ctrl+V / Alt+V |
 
 ## Behavior when overlays are active
 
@@ -235,7 +237,7 @@ that represents the pasted content as a single atomic unit.
 | Paste type | Threshold | Placeholder format |
 |------------|-----------|--------------------|
 | Large text | > 10 lines or > 1000 characters | `[paste #N +123 lines]` or `[paste #N 1234 chars]` |
-| Image | Any image paste | `[Image: filename.png]` |
+| Image | Any image paste | `[Image #N: filename.png]` |
 
 When a paste qualifies as large, the full content is stored internally and a
 compact placeholder replaces inline text. Normal small pastes are inserted as
@@ -248,16 +250,17 @@ regular text.
   Backspace deletes the entire marker, not individual characters within it.
 - **Readable**: the marker text is human-readable and compact, so the Editor
   doesn't become cluttered with large raw content.
-- **Preserved on submit**: when the prompt is submitted, all markers are
-  expanded to their original full content before being sent to the LLM.
+- **Preserved on submit**: text markers expand to text and image markers become
+  ordered `ContentBlock::Image` values before the message is sent to hostd.
 - **Cleared**: after submission, all stored pastes are cleared along with the
   editor state.
 
 ### Image references
 
-When an image is pasted from the clipboard, a similar reference block is
-inserted showing the filename. The actual image is stored alongside the prompt
-and attached to the message sent to the LLM (if the model supports vision).
+Ctrl+V or Alt+V reads an image from the system clipboard, encodes the RGBA
+pixels as PNG, and inserts a reference block. The actual base64 image is stored
+in the editor draft and attached to the structured message. Text-only targets
+reject the image before provider dispatch.
 
 ## Non-goals
 

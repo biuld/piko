@@ -14,6 +14,7 @@ pub enum Effect {
     Send(Command),
     OpenUrl(String),
     CopyToClipboard { notification_id: u64, text: String },
+    ReadClipboardImage,
 }
 
 impl Effect {
@@ -30,5 +31,9 @@ impl Effect {
             notification_id,
             text: text.into(),
         }
+    }
+
+    pub fn read_clipboard_image() -> Self {
+        Self::ReadClipboardImage
     }
 }

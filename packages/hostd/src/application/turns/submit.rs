@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    PromptSnapshotOptions, RunKind, WorldStateFacts, expand_prompt_template, parse_mentions,
-    resolve_mention_messages, snapshot_prompt_resources, world_state_context_message,
-    world_state_diff_content, world_state_full_content,
+    PromptSnapshotOptions, RunKind, WorldStateFacts, parse_mentions, resolve_mention_messages,
+    snapshot_prompt_resources, world_state_context_message, world_state_diff_content,
+    world_state_full_content,
 };
 use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
@@ -60,15 +60,23 @@ impl HostApp {
         command_id: String,
         session_id: String,
         agent_instance_id: String,
-        text: String,
+        content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
+        let display = super::content::text_projection(&content);
         let (turn_id, _) = {
             let mut state = self.state.lock().await;
-            state.start_turn(&session_id, &agent_instance_id, &text)?
+            state.start_turn(&session_id, &agent_instance_id, &display)?
         };
-        self.run_registered_turn(command_id, session_id, turn_id, agent_instance_id, text, tx)
-            .await
+        self.run_registered_turn(
+            command_id,
+            session_id,
+            turn_id,
+            agent_instance_id,
+            content,
+            tx,
+        )
+        .await
     }
 
     async fn run_registered_turn(
@@ -77,7 +85,7 @@ impl HostApp {
         session_id: String,
         turn_id: String,
         agent_instance_id: String,
-        text: String,
+        content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         let cwd = {
@@ -99,7 +107,7 @@ impl HostApp {
                 .await;
         }
         let templates = self.prompt_materials.load_prompt_templates(&cwd);
-        let expanded_text = expand_prompt_template(&text, &templates);
+        let expanded_content = super::content::expand_templates(content, &templates);
         let context_files = self.prompt_materials.load_context_files(&cwd);
         let loaded_skills = self.prompt_materials.load_skills(&cwd);
         for diagnostic in &loaded_skills.diagnostics {
@@ -190,7 +198,7 @@ impl HostApp {
         prompt_resources.world_state = world_state_message;
         // F-03/D-27: expand @path and $skill mentions into retained Context
         // prelude messages; user text stays unchanged for the durable User row.
-        let mention_tokens = parse_mentions(&expanded_text);
+        let mention_tokens = parse_mentions(&super::content::plain_text(&expanded_content));
         if !mention_tokens.is_empty() {
             prompt_resources.user_mentions =
                 resolve_mention_messages(&mention_tokens, PathBuf::from(&cwd).as_path(), &skills);
@@ -287,7 +295,7 @@ impl HostApp {
                 session_id: session_id.clone(),
                 operation_id: turn_id.clone(),
                 agent_instance_id: agent_instance_id.clone(),
-                prompt: expanded_text,
+                content: expanded_content,
                 source_turn_id: Some(turn_id.clone()),
                 prompt_resources: Some(prompt_resources),
                 cwd: cwd.clone(),

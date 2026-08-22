@@ -53,7 +53,7 @@ impl AgentRunRunner for AgentPersistRunner {
         let store = SessionStore::new(session_dir);
         let session_id = input.session_id.clone();
         let turn_id = input.operation_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         let publisher_task = Arc::clone(&publisher);
 
         tokio::spawn(async move {

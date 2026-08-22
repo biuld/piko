@@ -47,7 +47,10 @@ fn submit_without_session_returns_session_create_effect() {
     let effects = app.dispatch(EditorAction::Submit.into());
 
     assert!(app.session.initializing);
-    assert_eq!(app.session.pending_turn_text.as_deref(), Some("hello"));
+    assert_eq!(
+        app.session.pending_turn_content,
+        Some(piko_protocol::MessageContent::String("hello".into()))
+    );
     assert_eq!(effects.len(), 1);
     assert!(matches!(
         &effects[0],

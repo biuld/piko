@@ -270,17 +270,17 @@ Submission produces:
 
 ```rust
 pub struct SubmitRequest {
-    pub text: String,
-    pub references: Vec<ResolvedReference>,
+    pub content: MessageContent,
+    pub display_text: String,
 }
 ```
 
 Flow:
 
-1. Expand reference atoms into their original content.
-2. Trim leading/trailing whitespace from the expanded text.
-3. If empty, return `None`.
-4. Push expanded text into history.
+1. Resolve text references inline and image references into ordered blocks.
+2. Trim leading/trailing whitespace from boundary text blocks.
+3. If there is neither non-empty text nor an image, return `None`.
+4. Push the readable display projection into history.
 5. Clear buffer, references, completions, and history browse state.
 6. Return `SubmitRequest`.
 
@@ -337,9 +337,9 @@ Rules:
 - References expand only during submission.
 - References are cleared after successful submission.
 
-Image references should remain editor-local until protocol support exists for
-vision attachments. Once hostd/protocol supports attachments, `SubmitRequest`
-can carry resolved image references alongside text.
+Image references remain editor-local while drafting. Submission emits
+`MessageContent::Blocks`; hostd and orchd persist those blocks in the existing
+durable transcript rather than storing temporary paths.
 
 ## Layout And Rendering
 
@@ -478,19 +478,19 @@ Command::ChatSubmit {
 }
 ```
 
-For image references, protocol should later grow a structured message command:
+For image references, the app sends the structured message command:
 
 ```rust
 Command::ChatSubmitMessage {
     session_id,
     target_agent_instance_id,
-    content: Vec<ContentBlock>,
+    content: MessageContent,
     ...
 }
 ```
 
-Until then, image paste can be represented in the editor UI but should not be
-silently submitted as a real vision attachment.
+The equivalent `QueueSteerMessage` command carries structured content into a
+running turn. Existing text-only commands remain wire compatible.
 
 ## Test Plan
 

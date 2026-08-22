@@ -30,7 +30,7 @@ fn session_created_waits_for_reconcile_without_local_refresh_effects() {
 fn pending_first_turn_is_submitted_only_after_reconcile() {
     let mut app = app();
     app.begin_session_hydration(None);
-    app.session.pending_turn_text = Some("hello".into());
+    app.session.pending_turn_content = Some(piko_protocol::MessageContent::String("hello".into()));
     app.session.pending.track(
         "create".into(),
         crate::app::pending::PendingCommandKind::SessionCreate,
@@ -45,7 +45,10 @@ fn pending_first_turn_is_submitted_only_after_reconcile() {
         }),
     });
     assert!(created_effects.is_empty());
-    assert_eq!(app.session.pending_turn_text.as_deref(), Some("hello"));
+    assert_eq!(
+        app.session.pending_turn_content,
+        Some(piko_protocol::MessageContent::String("hello".into()))
+    );
 
     let reconcile_effects = app.apply_event(empty_reconcile("session-1"));
     assert!(matches!(
@@ -79,7 +82,8 @@ fn failed_initial_open_clears_loading_and_restores_pending_text() {
     let mut app = app();
     app.session.shell_ready = true;
     app.begin_session_hydration(Some("missing".into()));
-    app.session.pending_turn_text = Some("keep me".into());
+    app.session.pending_turn_content =
+        Some(piko_protocol::MessageContent::String("keep me".into()));
     app.session.pending.track(
         "open".into(),
         crate::app::pending::PendingCommandKind::SessionOpen,

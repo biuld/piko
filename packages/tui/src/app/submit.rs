@@ -50,9 +50,9 @@ impl AppState {
             return Vec::new();
         }
 
-        let text = self.session.follow_ups[index].text.clone();
+        let content = self.session.follow_ups[index].content.clone();
         let turn_id = self.session.follow_ups[index].turn_id.clone();
-        self.editor.restore_text(&text);
+        self.editor.restore_content(&content);
         self.refresh_suggestions();
         if let (Some(session_id), Some(turn_id)) = (self.session.id.clone(), turn_id) {
             self.session.follow_ups.remove(index);
@@ -91,22 +91,33 @@ impl AppState {
     }
 
     fn submit_delivery(&mut self, delivery: Delivery) -> Vec<Effect> {
-        let submitted_draft = self.editor.text();
-        let Some(text) = self.editor.take_trimmed() else {
+        let submitted_draft = self.editor.snapshot_draft();
+        let Some(submission) = self.editor.take_submission() else {
             return Vec::new();
         };
         self.refresh_suggestions();
-        if text.starts_with('/') {
-            return self.intercept_slash(text, submitted_draft);
+        if let piko_protocol::MessageContent::String(text) = &submission.content
+            && text.starts_with('/')
+        {
+            return self.intercept_slash(text.clone(), submitted_draft);
         }
-        self.dispatch_text_or_restore(text, submitted_draft, delivery)
+        self.dispatch_content_or_restore(
+            submission.content,
+            submission.display_text,
+            submitted_draft,
+            delivery,
+        )
     }
 
-    fn intercept_slash(&mut self, text: String, submitted_draft: String) -> Vec<Effect> {
+    fn intercept_slash(
+        &mut self,
+        text: String,
+        submitted_draft: crate::features::editor::state::EditorDraft,
+    ) -> Vec<Effect> {
         if let Some(slash_effects) = self.try_slash_command(&text) {
             return slash_effects;
         }
-        self.editor.restore_text(&submitted_draft);
+        self.editor.restore_draft(submitted_draft);
         self.status = format!("Unknown slash command: {text}");
         self.notify(
             NotificationLevel::Error,
@@ -115,47 +126,53 @@ impl AppState {
         Vec::new()
     }
 
-    fn dispatch_text_or_restore(
+    fn dispatch_content_or_restore(
         &mut self,
-        text: String,
-        submitted_draft: String,
+        content: piko_protocol::MessageContent,
+        display_text: String,
+        submitted_draft: crate::features::editor::state::EditorDraft,
         delivery: Delivery,
     ) -> Vec<Effect> {
         if self.session.id.is_none() && matches!(delivery, Delivery::Steer) {
-            self.editor.restore_text(&submitted_draft);
+            self.editor.restore_draft(submitted_draft);
             return self.reject_steer_idle();
         }
         if self.session.id.is_none() {
-            return self.queue_until_session(text);
+            return self.queue_until_session(content);
         }
         if self.agent_panel.active_agent_instance_id.is_none() {
-            self.editor.restore_text(&submitted_draft);
+            self.editor.restore_draft(submitted_draft);
             self.status = "no agent selected".to_string();
             self.notify(NotificationLevel::Error, "no agent selected");
             return Vec::new();
         }
-        self.dispatch_text(text, delivery)
+        self.dispatch_content(content, display_text, delivery)
     }
 
-    fn dispatch_text(&mut self, text: String, delivery: Delivery) -> Vec<Effect> {
+    fn dispatch_content(
+        &mut self,
+        content: piko_protocol::MessageContent,
+        display_text: String,
+        delivery: Delivery,
+    ) -> Vec<Effect> {
         let Some(session_id) = self.session.id.clone() else {
-            return self.queue_until_session(text);
+            return self.queue_until_session(content);
         };
         let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
-            self.editor.restore_text(&text);
+            self.editor.restore_content(&content);
             self.status = "no agent selected".to_string();
             self.notify(NotificationLevel::Error, "no agent selected");
             return Vec::new();
         };
         match delivery {
             Delivery::Steer if !self.viewed_agent_is_busy() => {
-                self.editor.restore_text(&text);
+                self.editor.restore_content(&content);
                 self.reject_steer_idle()
             }
-            Delivery::Steer => self.send_steer(session_id, agent_instance_id, text),
+            Delivery::Steer => self.send_steer(session_id, agent_instance_id, content),
             Delivery::FollowUp => {
                 let record = self.viewed_agent_is_busy();
-                self.send_chat(session_id, agent_instance_id, text, record)
+                self.send_chat(session_id, agent_instance_id, content, display_text, record)
             }
         }
     }
@@ -164,14 +181,16 @@ impl AppState {
         &mut self,
         session_id: String,
         agent_instance_id: String,
-        text: String,
+        content: piko_protocol::MessageContent,
+        display_text: String,
         record_follow_up: bool,
     ) -> Vec<Effect> {
         let target_name = self.agent_label(&agent_instance_id);
         if record_follow_up {
             self.session.follow_ups.push(FollowUpUi {
                 agent_instance_id: agent_instance_id.clone(),
-                text: text.clone(),
+                text: display_text,
+                content: content.clone(),
                 turn_id: None,
                 cancel_when_queued: false,
             });
@@ -187,32 +206,50 @@ impl AppState {
             format!("submitted to {target_name}")
         };
         self.status = status;
-        vec![Effect::send(Command::ChatSubmit {
-            command_id: submit_command_id,
-            session_id,
-            target_agent_instance_id: agent_instance_id,
-            text,
-        })]
+        let command = match content {
+            piko_protocol::MessageContent::String(text) => Command::ChatSubmit {
+                command_id: submit_command_id,
+                session_id,
+                target_agent_instance_id: agent_instance_id,
+                text,
+            },
+            content => Command::ChatSubmitMessage {
+                command_id: submit_command_id,
+                session_id,
+                target_agent_instance_id: agent_instance_id,
+                content,
+            },
+        };
+        vec![Effect::send(command)]
     }
 
     fn send_steer(
         &mut self,
         session_id: String,
         agent_instance_id: String,
-        text: String,
+        content: piko_protocol::MessageContent,
     ) -> Vec<Effect> {
         let target_name = self.agent_label(&agent_instance_id);
         self.status = format!("steered {target_name}");
-        vec![Effect::send(Command::QueueSteer {
-            command_id: command_id(),
-            session_id,
-            agent_instance_id,
-            message: text,
-        })]
+        let command = match content {
+            piko_protocol::MessageContent::String(message) => Command::QueueSteer {
+                command_id: command_id(),
+                session_id,
+                agent_instance_id,
+                message,
+            },
+            content => Command::QueueSteerMessage {
+                command_id: command_id(),
+                session_id,
+                agent_instance_id,
+                content,
+            },
+        };
+        vec![Effect::send(command)]
     }
 
-    fn queue_until_session(&mut self, text: String) -> Vec<Effect> {
-        self.session.pending_turn_text = Some(text);
+    fn queue_until_session(&mut self, content: piko_protocol::MessageContent) -> Vec<Effect> {
+        self.session.pending_turn_content = Some(content);
         if !self.session.initializing {
             self.begin_session_hydration(None);
             let create_id = command_id();

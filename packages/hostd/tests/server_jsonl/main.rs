@@ -84,7 +84,7 @@ impl AgentRunRunner for AssistantRunner {
         let session_id = input.session_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
         let turn_id = input.operation_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         let agent_spec_id = store
             .load_projection()
             .unwrap()
@@ -226,7 +226,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
             recovered
         };
         let turn_id = input.operation_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         let agent_spec_id = store
             .load_projection()
             .unwrap()

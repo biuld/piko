@@ -7,6 +7,7 @@ use crate::modeling::{ProtocolProfile, ResponsesContinuationPolicy, ResponsesVar
 use crate::protocols::{ProtocolAdapter, ProtocolStream};
 use crate::target::{ModelTarget, ModelTargetConfig};
 
+mod images;
 mod upstream;
 
 fn target_with_policy(policy: ResponsesContinuationPolicy) -> ModelTarget {

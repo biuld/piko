@@ -188,6 +188,14 @@ pub enum Command {
         target_agent_instance_id: crate::AgentInstanceId,
         text: String,
     },
+    /// Submit one structured text/image message. This is the multimodal
+    /// counterpart to `ChatSubmit`; both use the same host-owned Turn path.
+    ChatSubmitMessage {
+        command_id: CommandId,
+        session_id: SessionId,
+        target_agent_instance_id: crate::AgentInstanceId,
+        content: crate::MessageContent,
+    },
     TurnCancel {
         command_id: CommandId,
         session_id: SessionId,
@@ -222,6 +230,13 @@ pub enum Command {
         session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,
         message: String,
+    },
+    /// Inject structured text/image content into a running AgentInstance Turn.
+    QueueSteerMessage {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
+        content: crate::MessageContent,
     },
     /// Request the list of available models from hostd's catalog.
     ModelList {
@@ -321,12 +336,14 @@ impl Command {
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
             | Self::ChatSubmit { command_id, .. }
+            | Self::ChatSubmitMessage { command_id, .. }
             | Self::TurnCancel { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::ConfigUpdate { command_id, .. }
             | Self::QueueSteer { command_id, .. }
+            | Self::QueueSteerMessage { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::RolloutPageGet { command_id, .. }

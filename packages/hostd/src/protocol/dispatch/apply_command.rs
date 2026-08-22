@@ -15,7 +15,7 @@ impl HostServer {
             Command::AuthCancelOAuth { provider, .. } => {
                 self.apply_auth_cancel_oauth(&command_id, provider).await
             }
-            Command::ChatSubmit { .. } => {
+            Command::ChatSubmit { .. } | Command::ChatSubmitMessage { .. } => {
                 unreachable!("streaming chat commands handled in stream")
             }
             Command::AuthSetApiKey {
@@ -192,43 +192,22 @@ impl HostServer {
                 message,
                 ..
             } => {
-                let can_steer = {
-                    let state = self.state.lock().await;
-                    state
-                        .active_turn_for_agent(&session_id, &agent_instance_id)
-                        .is_some_and(|turn| {
-                            matches!(
-                                turn.status,
-                                crate::api::TurnStatus::Running
-                                    | crate::api::TurnStatus::WaitingForApproval
-                            )
-                        })
-                };
-                if !can_steer {
-                    return Err(ProtocolError::InvalidCommand(format!(
-                        "agent {agent_instance_id} is not running; cannot steer"
-                    )));
-                }
-                let runner = self.turn_runner.lock().await.clone();
-                if !runner
-                    .steer_agent(&session_id, &agent_instance_id, &message)
+                self.apply_steer_message(
+                    command_id,
+                    session_id,
+                    agent_instance_id,
+                    piko_protocol::MessageContent::String(message),
+                )
+                .await
+            }
+            Command::QueueSteerMessage {
+                session_id,
+                agent_instance_id,
+                content,
+                ..
+            } => {
+                self.apply_steer_message(command_id, session_id, agent_instance_id, content)
                     .await
-                {
-                    return Err(ProtocolError::InvalidCommand(format!(
-                        "steer rejected for agent {agent_instance_id}"
-                    )));
-                }
-                let queue_ev = {
-                    let mut state = self.state.lock().await;
-                    state.push_steer(&session_id, &agent_instance_id, &message)
-                };
-                Ok(vec![
-                    ServerMessage::CommandResponse {
-                        command_id,
-                        result: Ok(crate::api::CommandResult::Empty),
-                    },
-                    queue_ev.into(),
-                ])
             }
             Command::TurnCancel {
                 command_id,

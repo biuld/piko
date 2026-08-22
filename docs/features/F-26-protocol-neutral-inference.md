@@ -4,7 +4,8 @@
 > implemented; broader upstream capability families remain incremental)
 > Priority: P0
 > Source evidence: piko product direction; F-02 model gateway; F-25 native
-> OpenAI-family model protocols
+> OpenAI-family model protocols;
+> [DeepSeek Responses tool compatibility](https://api-docs.deepseek.com/zh-cn/guides/responses_api/#tools)
 
 ## Summary
 
@@ -298,6 +299,8 @@ Restored checkpoints pass the same validation as newly produced checkpoints.
 - [x] A fixture-only future tool kind resolves and encodes without a Rust enum
       variant; malformed definitions, undefined allow-list references, and
       ambiguous activity ownership fail during catalog loading.
+- [x] Bundled DeepSeek V4 Responses targets expose catalog-owned
+      `web_search`; DeepSeek Chat Completions targets expose no upstream tool.
 - [x] Disabling tool calls for a run adds no upstream tool to a model request;
       no process-wide or host settings namespace defines upstream tools.
 - [x] Orchd's tool registry assembles caller and llmd-discovered upstream tools

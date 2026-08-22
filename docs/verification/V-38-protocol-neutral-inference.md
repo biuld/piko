@@ -74,6 +74,9 @@ Responses continuation fields remain confined to llmd.
   provider, surface, and model override layers without a code variant. Negative
   fixtures reject undefined references, malformed wire objects, and duplicate
   activity ownership before target construction.
+- The bundled DeepSeek fixture resolves `web_search` with its Responses wire
+  definition, choice object, and `web_search_call` activity mapping for both V4
+  targets, while its Chat Completions models resolve an empty upstream catalog.
 - orchd's upstream-event test establishes the critical ownership boundary: it
   projects upstream observations into assistant output but never executes them
   locally. Production target construction derives upstream definitions from

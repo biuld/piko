@@ -4,7 +4,8 @@
 > Priority: P0
 > Source evidence: piko product direction; OpenAI Responses and Chat
 > Completions API contracts;
-> [DeepSeek Responses API contract](https://api-docs.deepseek.com/api/create-response)
+> [DeepSeek Responses API contract](https://api-docs.deepseek.com/zh-cn/guides/responses_api/);
+> [DeepSeek image-understanding contract](https://api-docs.deepseek.com/zh-cn/guides/vision/)
 
 > Public inference semantics, identity, and continuation exposure are refined
 > by [F-26](F-26-protocol-neutral-inference.md). This feature remains
@@ -241,6 +242,9 @@ successful completion.
 - [x] A provider catalog may select different explicit protocols per model.
       DeepSeek `deepseek-v4-flash` uses stateless Responses replay, while its
       models not documented for Responses remain Chat Completions targets.
+- [x] DeepSeek `deepseek-v4-flash-vision-exp` is a text/image model with a
+      stateless Responses target, a 1M context window, 384K maximum output,
+      and the same token-price schedule as V4 Flash.
 - [x] A Responses target may explicitly select the Codex Responses Lite
       variant; bundled GPT-5.6 subscription targets select it while their
       Platform targets remain ordinary Responses.

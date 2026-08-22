@@ -11,7 +11,9 @@ use support::{MockSessionPublisher, test_agent_run_process};
 #[derive(Clone, Default)]
 struct SteerAgentRunRunner {
     active: Arc<std::sync::Mutex<Option<ActiveRun>>>,
+    inputs: Arc<std::sync::Mutex<Vec<piko_protocol::MessageContent>>>,
     steers: Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    raw_steers: Arc<std::sync::Mutex<Vec<piko_protocol::MessageContent>>>,
     accept_steer: bool,
 }
 
@@ -28,6 +30,7 @@ impl AgentRunRunner for SteerAgentRunRunner {
         &self,
         input: AgentRunInput,
     ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
+        self.inputs.lock().unwrap().push(input.content.clone());
         let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
         publisher.publish(
             "root",
@@ -63,17 +66,30 @@ impl AgentRunRunner for SteerAgentRunRunner {
         })
     }
 
-    async fn steer_agent(&self, session_id: &str, agent_instance_id: &str, message: &str) -> bool {
+    async fn steer_agent(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        content: piko_protocol::MessageContent,
+    ) -> bool {
         let running = self.active.lock().unwrap().as_ref().is_some_and(|run| {
             run.session_id == session_id && run.agent_instance_id == agent_instance_id
         });
         if !running || !self.accept_steer {
             return false;
         }
-        self.steers
-            .lock()
-            .unwrap()
-            .push((agent_instance_id.to_string(), message.to_string()));
+        self.raw_steers.lock().unwrap().push(content.clone());
+        self.steers.lock().unwrap().push((
+            agent_instance_id.to_string(),
+            match content {
+                piko_protocol::MessageContent::String(text) => text,
+                piko_protocol::MessageContent::Blocks(blocks) => blocks
+                    .iter()
+                    .map(piko_protocol::ContentBlock::text_projection)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            },
+        ));
         true
     }
 
@@ -82,6 +98,70 @@ impl AgentRunRunner for SteerAgentRunRunner {
             run.session_id == operation.session_id && run.turn_id == operation.operation_id
         })
     }
+}
+
+#[tokio::test]
+async fn structured_image_content_reaches_start_and_steer_runner_ports() {
+    let runner = Arc::new(SteerAgentRunRunner {
+        accept_steer: true,
+        ..SteerAgentRunRunner::default()
+    });
+    let server = HostServer::with_turn_runner(runner.clone());
+    let created = server
+        .handle_command(piko_hostd::api::Command::SessionCreate {
+            command_id: "create-image".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+    let agent = format!("agent_{session_id}_root");
+    let image_content =
+        piko_protocol::MessageContent::Blocks(vec![piko_protocol::ContentBlock::Image {
+            data: "AA==".into(),
+            mime_type: "image/png".into(),
+        }]);
+    let turn_server = server.clone();
+    let turn_session = session_id.clone();
+    let turn_agent = agent.clone();
+    let turn_content = image_content.clone();
+    let turn = tokio::spawn(async move {
+        turn_server
+            .handle_command(piko_hostd::api::Command::ChatSubmitMessage {
+                command_id: "submit-image".into(),
+                session_id: turn_session,
+                target_agent_instance_id: turn_agent,
+                content: turn_content,
+            })
+            .await
+    });
+    while runner.inputs.lock().unwrap().is_empty() {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        runner.inputs.lock().unwrap().as_slice(),
+        std::slice::from_ref(&image_content)
+    );
+
+    let steered = server
+        .handle_command(piko_hostd::api::Command::QueueSteerMessage {
+            command_id: "steer-image".into(),
+            session_id,
+            agent_instance_id: agent,
+            content: image_content.clone(),
+        })
+        .await;
+    assert!(steered.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::Empty),
+            ..
+        }
+    )));
+    assert_eq!(
+        runner.raw_steers.lock().unwrap().as_slice(),
+        &[image_content]
+    );
+    turn.abort();
 }
 
 async fn start_running_turn(

@@ -39,6 +39,58 @@ fn large_paste_expands_on_submit() {
 }
 
 #[test]
+fn mixed_image_submission_preserves_block_order() {
+    let mut editor = Editor::default();
+    editor.restore_text("  before ");
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    editor.insert_char(' ');
+    editor.insert_paste("after  ", &EditorConfig::default());
+
+    let submission = editor.take_submission().unwrap();
+    assert_eq!(
+        submission.content,
+        piko_protocol::MessageContent::Blocks(vec![
+            piko_protocol::ContentBlock::Text {
+                text: "before ".into(),
+            },
+            piko_protocol::ContentBlock::Image {
+                data: "AA==".into(),
+                mime_type: "image/png".into(),
+            },
+            piko_protocol::ContentBlock::Text {
+                text: " after".into(),
+            },
+        ])
+    );
+    assert!(editor.is_empty());
+}
+
+#[test]
+fn image_only_submission_and_restore_are_supported() {
+    let mut editor = Editor::default();
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    let content = editor.take_submission().unwrap().content;
+    assert!(matches!(
+        &content,
+        piko_protocol::MessageContent::Blocks(blocks)
+            if matches!(blocks.as_slice(), [piko_protocol::ContentBlock::Image { data, .. }] if data == "AA==")
+    ));
+
+    editor.restore_content(&content);
+    assert!(editor.text().contains("restored.png"));
+    assert_eq!(editor.take_submission().unwrap().content, content);
+}
+
+#[test]
+fn deleting_image_placeholder_removes_attachment() {
+    let mut editor = Editor::default();
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    editor.backspace();
+    assert!(editor.is_empty());
+    assert!(editor.take_submission().is_none());
+}
+
+#[test]
 fn cursor_offset_handles_multibyte_text() {
     let mut editor = Editor::default();
     editor.restore_text("你好");

@@ -11,7 +11,7 @@ impl HostApp {
         command_id: String,
         session_id: String,
         target_agent_instance_id: String,
-        text: String,
+        content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
         let cwd = self.state.lock().await.session_cwd(&session_id)?;
@@ -36,7 +36,14 @@ impl HostApp {
                 "agent instance is not open: {target_agent_instance_id}"
             )));
         }
-        self.submit_chat(command_id, session_id, target_agent_instance_id, text, tx)
-            .await
+        super::turns::content::validate_user_content(&content)?;
+        self.submit_chat(
+            command_id,
+            session_id,
+            target_agent_instance_id,
+            content,
+            tx,
+        )
+        .await
     }
 }

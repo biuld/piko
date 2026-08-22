@@ -117,6 +117,29 @@ fn deepseek_resolves_model_specific_responses_target() {
             variant: piko_llmd::modeling::ResponsesVariant::Standard,
         }
     );
+
+    let vision = registry
+        .resolve(Some("deepseek-v4-flash-vision-exp"), Some("deepseek"))
+        .unwrap();
+    assert!(
+        vision
+            .model
+            .input
+            .contains(&piko_protocol::model::InputModality::Image)
+    );
+    let vision_target = vision.target.as_ref().unwrap();
+    assert_eq!(
+        vision_target.protocol,
+        piko_llmd::modeling::ProtocolProfile::Responses {
+            continuation: piko_llmd::modeling::ResponsesContinuationPolicy::StatelessReplay,
+            variant: piko_llmd::modeling::ResponsesVariant::Standard,
+        }
+    );
+    assert!(
+        vision_target
+            .upstream_tools
+            .contains_key(&piko_llmd::capabilities::UpstreamToolKind::new("search").unwrap())
+    );
 }
 
 #[test]

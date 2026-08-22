@@ -86,10 +86,10 @@ impl AppState {
                     }));
                 } else {
                     self.clear_session_view();
-                    if let Some(text) = self.session.pending_turn_text.take()
+                    if let Some(content) = self.session.pending_turn_content.take()
                         && self.editor.is_empty()
                     {
-                        self.editor.insert_paste(&text, &self.tui_config.editor);
+                        self.editor.restore_content(&content);
                     }
                 }
             }

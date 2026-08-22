@@ -104,7 +104,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
         let session_id = input.session_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
         let turn_id = input.operation_id.clone();
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
 
         store
             .commit_message(
@@ -216,7 +216,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
         let turn_id = input.operation_id.clone();
         let user_id = format!("user-{turn_id}");
         let assistant_id = format!("assistant-{turn_id}");
-        let prompt = input.prompt.clone();
+        let prompt = input.text_projection();
         // Chain onto the private transcript head so repeated turns stay linear.
         let user_parent = store
             .load_agent(&session_id, &agent_instance_id)

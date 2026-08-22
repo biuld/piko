@@ -124,7 +124,7 @@ impl AppState {
                     name,
                 }));
             }
-            if let Some(text) = self.session.pending_turn_text.take() {
+            if let Some(content) = self.session.pending_turn_content.take() {
                 if let Some(target_agent_instance_id) =
                     self.agent_panel.active_agent_instance_id.clone()
                 {
@@ -133,15 +133,24 @@ impl AppState {
                         submit_command_id.clone(),
                         crate::app::pending::PendingCommandKind::ChatSubmit,
                     );
-                    effects.push(Effect::send(Command::ChatSubmit {
-                        command_id: submit_command_id,
-                        session_id: reconciled.session_id,
-                        target_agent_instance_id,
-                        text,
-                    }));
+                    let command = match content {
+                        piko_protocol::MessageContent::String(text) => Command::ChatSubmit {
+                            command_id: submit_command_id,
+                            session_id: reconciled.session_id,
+                            target_agent_instance_id,
+                            text,
+                        },
+                        content => Command::ChatSubmitMessage {
+                            command_id: submit_command_id,
+                            session_id: reconciled.session_id,
+                            target_agent_instance_id,
+                            content,
+                        },
+                    };
+                    effects.push(Effect::send(command));
                     self.status = "submitted first message".to_string();
                 } else {
-                    self.session.pending_turn_text = Some(text);
+                    self.session.pending_turn_content = Some(content);
                     self.status = "waiting for root agent".to_string();
                 }
             }

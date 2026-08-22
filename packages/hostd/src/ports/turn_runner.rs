@@ -29,7 +29,7 @@ pub struct AgentRunInput {
     pub session_id: String,
     pub operation_id: String,
     pub agent_instance_id: String,
-    pub prompt: String,
+    pub content: piko_protocol::MessageContent,
     pub source_turn_id: Option<String>,
     pub prompt_resources: Option<piko_protocol::PromptResourceSnapshot>,
     pub cwd: String,
@@ -39,6 +39,19 @@ pub struct AgentRunInput {
     pub session_dir: PathBuf,
     /// Reattach a resumed root agent with committed transcript history.
     pub resume_agent: Option<ResumeAgent>,
+}
+
+impl AgentRunInput {
+    pub fn text_projection(&self) -> String {
+        match &self.content {
+            piko_protocol::MessageContent::String(text) => text.clone(),
+            piko_protocol::MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .map(piko_protocol::ContentBlock::text_projection)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
 }
 
 pub struct AgentRunHandle {
@@ -118,6 +131,15 @@ pub trait AgentRunRunner: Send + Sync {
         ))
     }
 
+    async fn steer_agent(
+        &self,
+        _session_id: &str,
+        _agent_instance_id: &str,
+        _content: piko_protocol::MessageContent,
+    ) -> bool {
+        false
+    }
+
     async fn finish_agent_run(
         &self,
         _: &AgentOperationAddress,
@@ -158,10 +180,6 @@ pub trait AgentRunRunner: Send + Sync {
         _: crate::api::UserInteractionResponse,
     ) -> Result<bool, ProtocolError> {
         Ok(false)
-    }
-
-    async fn steer_agent(&self, _: &str, _: &str, _: &str) -> bool {
-        false
     }
 
     async fn cancel_agent_run(&self, _: &AgentOperationAddress) -> bool {
