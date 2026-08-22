@@ -17,6 +17,7 @@ pub fn paint_strip(
     area: Rect,
     list: &TodoList,
     collapsed: bool,
+    scroll: usize,
     theme: &Theme,
     header_hovered: bool,
 ) {
@@ -24,7 +25,7 @@ pub fn paint_strip(
         return;
     }
     let max_items = max_item_rows_for_grant(area.height, list.items.len());
-    let view = project_strip(list, area.width, max_items, collapsed);
+    let view = project_strip(list, area.width, max_items, collapsed, scroll);
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let header_style = Style::default()
@@ -52,11 +53,11 @@ pub fn paint_strip(
         lines.push(Line::from(spans));
     }
 
-    if let Some(overflow) = view.overflow
+    if let Some(hint) = view.scroll_hint
         && (lines.len() as u16) < area.height
     {
         lines.push(Line::from(Span::styled(
-            overflow,
+            hint,
             Style::default().fg(theme.dim),
         )));
     }

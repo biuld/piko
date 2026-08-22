@@ -270,7 +270,10 @@ CHROME     BottomBar (unchanged duties)
 - **What:** scannable todo summary (counts + items or compact active focus);
   exact row layout is presentation, not this PRD’s glyph catalog.
 - **Not:** BottomBar item; not a modal by default.
-- **Interaction (v1):** read-only; optional later expand for long lists.
+- **Interaction (v1):** read-only; the strip is **collapsed to a one-line
+  summary by default** and expands on a header click. When items overflow the
+  granted strip height, the wheel scrolls the item window (clamped both ends)
+  instead of hard-capping the tail.
 
 **TUI presentation contract** (placement, strip vs Timeline, height budget,
 status language family, acceptance): package docs
@@ -352,8 +355,8 @@ dock placement.
 
 1. **Persistence file layout:** field on agent instance record vs map on
    `session.json` (D-39 chooses a default; may refine).
-2. **Strip density:** always full list vs one-line summary + expand when N
-   items exceed budget?
+2. **Strip density:** one-line summary by default + expand on header click;
+   long lists scroll within the budgeted strip (TUI feature/design docs).
 3. **Parent visibility:** should a parent’s strip optionally summarize children
    lists? Deferred; default is viewed agent only.
 4. **Human edit commands:** `/todo` or dock click-complete — later PRD if

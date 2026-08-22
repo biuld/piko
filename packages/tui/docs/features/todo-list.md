@@ -99,7 +99,11 @@ Collapsed:
   ────────────────────────────────────────
 ```
 
-### Overflow (height cap)
+Collapse is the **default** when a list first appears; clicking the header
+expands it. Collapse is transient TUI presentation state and never mutates or
+persists the host-authoritative todo list.
+
+### Overflow (height cap → scrollable window)
 
 When `items` exceed the budget (header + ≤ N item rows):
 
@@ -109,12 +113,16 @@ When `items` exceed the budget (header + ≤ N item rows):
   ▸  Currently doing this
   ·  Next pending A
   ·  Next pending B
-  ·  Next pending C
-  +3 more                                          ← overflow (not a real item)
+  ↓3                                                ← scroll hint (not a real item)
 ```
 
 - Visible items stay in **list order** (full-replace semantics).
-- Overflow is one dim summary row; not a focusable fake todo.
+- The strip keeps its budgeted height and the item window **scrolls**; the
+  wheel over the strip moves the window by a fixed step.
+- The dim hint row shows how many items remain above (`↑n`) and below (`↓n`)
+  the current window; scrolled to the top only `↓n` shows, at the bottom only
+  `↑n`. The hint is not a focusable fake todo.
+- While collapsed, or when everything fits, the wheel is a no-op.
 
 ### Timeline vs dock (same session)
 
@@ -195,7 +203,7 @@ normative **structure**; paint details stay in code.
 **Height**
 
 - Budgeted in plane compose. Never steals the whole stream.
-- Cap = header + ≤ N items + optional overflow row + one shared bottom
+- Cap = header + ≤ N items + optional scroll hint row + one shared bottom
   separator (N is an implementation constant; design doc names it).
 - The Stream/Dock separator belongs to Dock Stack infrastructure, not to the
   Todos provider or its height grant.
@@ -205,10 +213,11 @@ normative **structure**; paint details stay in code.
 | Gesture | Behavior |
 |---------|----------|
 | Click header | Toggle between the expanded checklist and a one-line summary |
+| Wheel over strip | Scroll the item window when items overflow the granted height; no-op while collapsed or when everything fits |
 | Hover header | Paint the header text with the shared accent color |
 | Click item | **Read-only** — no complete/reorder/edit |
-| Focus | Strip is **not** a focus owner in v1 (no Tab stop) |
-| Collapsed form | One summary header row; the Dock Stack separator remains below it |
+| Focus | Strip is **not** a focus owner in v1 (no Tab stop; wheel scrolling only) |
+| Collapsed form | One summary header row; the Dock Stack separator remains below it. **Default when a list first appears** |
 
 The header shows a disclosure mark so its hit action is discoverable. Collapse
 is transient TUI presentation state and never mutates or persists the
@@ -294,6 +303,10 @@ catalog. The strip and timeline presenters should feel like **one family**.
 - [ ] Strip never shows another agent’s items for the current view.
 - [ ] Clicking the Todos header collapses the strip to one summary row and
       clicking it again restores the checklist.
+- [ ] A newly appeared list starts **collapsed** (one summary row) and only
+      expands after a header click.
+- [ ] Wheel over the expanded strip scrolls long lists; collapsed or
+      fully-fitting lists ignore the wheel.
 - [ ] Item clicks and all strip keys leave the host-projected list unchanged.
 
 ## Related

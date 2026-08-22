@@ -1,17 +1,20 @@
-//! Pure strip projection: TodoList → header / rows / overflow (no ratatui).
+//! Pure strip projection: TodoList → header / rows / scroll hint (no ratatui).
 
 use piko_protocol::{TodoList, TodoStatus};
 use unicode_width::UnicodeWidthStr;
 
 use crate::features::dock_stack::TODOS_MAX_ITEM_ROWS;
-use crate::ui::components::feedback::{DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, SUCCESS_GLYPH};
+use crate::ui::components::feedback::{
+    DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, SCROLL_DOWN_GLYPH, SCROLL_UP_GLYPH, SUCCESS_GLYPH,
+};
 
 /// Projected strip content for one paint frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TodoStripView {
     pub header: String,
     pub rows: Vec<TodoStripRow>,
-    pub overflow: Option<String>,
+    /// Direction-aware hint when items overflow the visible window.
+    pub scroll_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,7 +24,8 @@ pub struct TodoStripRow {
     pub status: TodoStatus,
 }
 
-/// Preferred dock height: content rows plus one Dock Stack separator row.
+/// Preferred dock height: header + item rows + optional scroll hint row plus
+/// one Dock Stack separator row.
 pub fn strip_height_offer(list: &TodoList, collapsed: bool) -> u16 {
     let n = list.items.len() as u16;
     if n == 0 {
@@ -32,8 +36,8 @@ pub fn strip_height_offer(list: &TodoList, collapsed: bool) -> u16 {
     }
     let max_items = TODOS_MAX_ITEM_ROWS;
     let shown = n.min(max_items);
-    let overflow = u16::from(n > max_items);
-    1 + shown + overflow + 1
+    let hint_row = u16::from(n > max_items);
+    1 + shown + hint_row + 1
 }
 
 /// Project list into strip rows, truncating content to `width` and capping items.
@@ -42,6 +46,7 @@ pub fn project_strip(
     width: u16,
     max_item_rows: usize,
     collapsed: bool,
+    scroll: usize,
 ) -> TodoStripView {
     let total = list.items.len();
     let mut done = 0usize;
@@ -69,9 +74,15 @@ pub fn project_strip(
         .min(TODOS_MAX_ITEM_ROWS as usize)
         .max(if total > 0 && !collapsed { 1 } else { 0 }.min(total));
     let shown = total.min(max_item_rows);
+    let scroll = if collapsed {
+        0
+    } else {
+        scroll.min(total.saturating_sub(shown))
+    };
     let rows: Vec<TodoStripRow> = list
         .items
         .iter()
+        .skip(scroll)
         .take(shown)
         .map(|item| {
             let mark = status_mark(item.status);
@@ -85,25 +96,34 @@ pub fn project_strip(
         })
         .collect();
 
-    let overflow = if !collapsed && total > shown {
-        Some(format!("+{} more", total - shown))
-    } else {
+    let scroll_hint = if collapsed || shown == 0 || total <= shown {
         None
+    } else {
+        let above = scroll;
+        let below = total.saturating_sub(scroll + shown);
+        match (above > 0, below > 0) {
+            (true, true) => Some(format!(
+                "{SCROLL_UP_GLYPH}{above} · {SCROLL_DOWN_GLYPH}{below}"
+            )),
+            (true, false) => Some(format!("{SCROLL_UP_GLYPH}{above}")),
+            (false, true) => Some(format!("{SCROLL_DOWN_GLYPH}{below}")),
+            (false, false) => None,
+        }
     };
 
     TodoStripView {
         header,
         rows,
-        overflow,
+        scroll_hint,
     }
 }
 
-/// Max item rows that fit inside a granted height (header + optional overflow).
+/// Max item rows that fit inside a granted height (header + optional hint row).
 pub fn max_item_rows_for_grant(grant_height: u16, item_count: usize) -> usize {
     if grant_height == 0 || item_count == 0 {
         return 0;
     }
-    // Reserve 1 for header; if items exceed remaining, reserve 1 for overflow.
+    // Reserve 1 for header; if items exceed remaining, reserve 1 for the hint.
     let after_header = grant_height.saturating_sub(1);
     if after_header == 0 {
         return 0;
@@ -112,7 +132,7 @@ pub fn max_item_rows_for_grant(grant_height: u16, item_count: usize) -> usize {
     if item_count as u16 <= after_header {
         return (item_count).min(cap);
     }
-    // Need overflow row when not showing all.
+    // Need the hint row when not showing all.
     let for_items = after_header.saturating_sub(1).max(1);
     (for_items as usize).min(cap).min(item_count)
 }

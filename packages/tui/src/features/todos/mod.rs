@@ -7,9 +7,12 @@ mod project;
 mod render;
 mod state;
 
+/// Wheel rows per gesture over the Todos strip (same step as Timeline).
+pub(crate) const WHEEL_STEP: usize = 3;
+
 pub use project::strip_height_offer;
 #[allow(unused_imports)] // public API + tests
-pub use project::{TodoStripView, project_strip};
+pub use project::{TodoStripView, max_item_rows_for_grant, project_strip};
 pub use state::TodoListsState;
 
 use crate::app::AppState;
@@ -46,11 +49,23 @@ pub fn render_todos_strip(
     ) else {
         return;
     };
+    let collapsed = app.todo_lists.is_collapsed();
+    // Record the painted viewport so wheel events clamp to what is visible.
+    // A collapsed strip is never scrollable.
+    let max_scroll = if collapsed {
+        0
+    } else {
+        list.items
+            .len()
+            .saturating_sub(max_item_rows_for_grant(area.height, list.items.len()))
+    };
+    app.todo_lists.set_max_scroll(max_scroll);
     render::paint_strip(
         frame,
         area,
         list,
-        app.todo_lists.is_collapsed(),
+        collapsed,
+        app.todo_lists.scroll_offset(),
         theme,
         interaction.hovered == Some(crate::app::HitId::TodosToggle),
     );
@@ -102,9 +117,9 @@ mod tests {
     }
 
     #[test]
-    fn over_cap_adds_overflow_row() {
+    fn over_cap_reserves_scroll_hint_row() {
         let list = sample_list(10);
-        // header + 6 items + overflow + Dock Stack separator
+        // header + 6 items + scroll hint row + Dock Stack separator
         assert_eq!(strip_height_offer(&list, false), 9);
     }
 
@@ -117,29 +132,51 @@ mod tests {
     #[test]
     fn project_strip_counts_and_marks() {
         let list = sample_list(3);
-        let view = project_strip(&list, 80, 6, false);
+        let view = project_strip(&list, 80, 6, false, 0);
         assert!(view.header.starts_with("▾ Todos"));
         assert!(view.header.contains("Todos"));
         assert!(view.header.contains("1/3 done"));
         assert_eq!(view.rows.len(), 3);
-        assert!(view.overflow.is_none());
+        assert!(view.scroll_hint.is_none());
     }
 
     #[test]
-    fn project_strip_overflow() {
+    fn project_strip_scroll_hint_points_down_at_top() {
         let list = sample_list(8);
-        let view = project_strip(&list, 80, 3, false);
+        let view = project_strip(&list, 80, 3, false, 0);
         assert_eq!(view.rows.len(), 3);
-        assert_eq!(view.overflow.as_deref(), Some("+5 more"));
+        assert_eq!(view.scroll_hint.as_deref(), Some("↓5"));
     }
 
     #[test]
     fn collapsed_projection_keeps_only_summary() {
         let list = sample_list(8);
-        let view = project_strip(&list, 80, 6, true);
+        let view = project_strip(&list, 80, 6, true, 2);
         assert!(view.header.starts_with("▸ Todos"));
         assert!(view.rows.is_empty());
-        assert!(view.overflow.is_none());
+        assert!(view.scroll_hint.is_none());
+    }
+
+    #[test]
+    fn scroll_window_moves_and_hint_tracks_both_directions() {
+        let list = sample_list(10);
+        // Window of 4 rows starting at item 3: items 3..=6 visible.
+        let view = project_strip(&list, 80, 4, false, 3);
+        assert_eq!(view.rows.len(), 4);
+        assert_eq!(view.rows[0].content, "item 3");
+        assert_eq!(view.rows[3].content, "item 6");
+        assert_eq!(view.scroll_hint.as_deref(), Some("↑3 · ↓3"));
+
+        // Bottom: only items above remain.
+        let bottom = project_strip(&list, 80, 4, false, 6);
+        assert_eq!(bottom.rows[0].content, "item 6");
+        assert_eq!(bottom.rows[3].content, "item 9");
+        assert_eq!(bottom.scroll_hint.as_deref(), Some("↑6"));
+
+        // Over-scroll clamps to the last full window.
+        let clamped = project_strip(&list, 80, 4, false, 999);
+        assert_eq!(clamped.rows[0].content, "item 6");
+        assert_eq!(clamped.scroll_hint.as_deref(), Some("↑6"));
     }
 
     #[test]
@@ -162,15 +199,62 @@ mod tests {
         state.upsert(sample_list(1));
         state.toggle_collapsed();
         state.clear();
-        assert!(!state.is_collapsed());
+        assert!(
+            state.is_collapsed(),
+            "clear() restores the collapsed default"
+        );
         assert!(state.get("agent-a").is_none());
+    }
+
+    #[test]
+    fn default_is_collapsed() {
+        let state = TodoListsState::default();
+        assert!(state.is_collapsed());
+        assert_eq!(state.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn scroll_state_clamps_to_painted_viewport() {
+        let mut state = TodoListsState::default();
+        state.upsert(sample_list(10));
+        state.toggle_collapsed();
+        state.set_max_scroll(4);
+        state.scroll_down(3);
+        assert_eq!(state.scroll_offset(), 3);
+        state.scroll_down(10);
+        assert_eq!(state.scroll_offset(), 4, "clamped at the viewport max");
+        state.scroll_up(2);
+        assert_eq!(state.scroll_offset(), 2);
+        state.scroll_up(10);
+        assert_eq!(state.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn expanding_resets_scroll_and_collapsing_disables_it() {
+        let mut state = TodoListsState::default();
+        state.upsert(sample_list(10));
+        state.toggle_collapsed(); // expand
+        state.set_max_scroll(4);
+        state.scroll_down(3);
+        assert_eq!(state.scroll_offset(), 3);
+        state.toggle_collapsed(); // collapse
+        state.scroll_down(3);
+        assert_eq!(state.scroll_offset(), 0, "collapsed strip never scrolls");
+        state.toggle_collapsed(); // expand again → back to top
+        assert_eq!(state.scroll_offset(), 0);
     }
 
     #[test]
     fn paint_respects_grant_height() {
         let list = sample_list(10);
-        let grant_h = 3u16; // header + 1 item + maybe overflow forced by grant
-        let view = project_strip(&list, 40, grant_h.saturating_sub(1).max(1) as usize, false);
+        let grant_h = 3u16; // header + 1 item + maybe scroll hint forced by grant
+        let view = project_strip(
+            &list,
+            40,
+            grant_h.saturating_sub(1).max(1) as usize,
+            false,
+            0,
+        );
         // projector never emits more content rows than max_item_rows
         assert!(view.rows.len() <= grant_h.saturating_sub(1) as usize);
     }

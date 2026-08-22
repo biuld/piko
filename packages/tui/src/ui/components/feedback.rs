@@ -34,6 +34,10 @@ pub const FAIL_GLYPH: &str = "✗";
 pub const CANCELLED_GLYPH: &str = "⊘";
 /// Running / in-progress mark on compact chrome (not an animated spinner).
 pub const RUNNING_GLYPH: &str = "○";
+/// Scroll hint: more content above the visible window.
+pub const SCROLL_UP_GLYPH: &str = "↑";
+/// Scroll hint: more content below the visible window.
+pub const SCROLL_DOWN_GLYPH: &str = "↓";
 /// Compact chip separator (status · duration · tokens). Surrounding spaces are
 /// part of the constant so call sites can use it as a single span.
 pub const CHIP_SEP: &str = " · ";
@@ -233,6 +237,8 @@ mod tests {
         assert_eq!(SUCCESS_GLYPH, "✓");
         assert_eq!(FAIL_GLYPH, "✗");
         assert_eq!(CANCELLED_GLYPH, "⊘");
+        assert_eq!(SCROLL_UP_GLYPH, "↑");
+        assert_eq!(SCROLL_DOWN_GLYPH, "↓");
         assert_eq!(CHIP_SEP, " · ");
     }
 }

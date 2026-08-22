@@ -126,6 +126,7 @@ fn todos_paints_muted_separator_before_guidance() {
 fn todos_header_hitzone_paints_accent_text_without_background() {
     let mut app = app();
     add_todo(&mut app);
+    app.todo_lists.toggle_collapsed(); // expand so item rows are painted
     app.hovered = Some((Region::Todos, Some(HitId::TodosToggle)));
 
     let area = Rect::new(0, 0, 80, 24);

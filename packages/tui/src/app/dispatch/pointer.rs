@@ -163,6 +163,23 @@ impl AppState {
                 self.todo_lists.toggle_collapsed();
                 Vec::new()
             }
+            Region::Todos
+                if matches!(
+                    gesture,
+                    PointerGesture::ScrollUp | PointerGesture::ScrollDown
+                ) =>
+            {
+                match gesture {
+                    PointerGesture::ScrollUp => self
+                        .todo_lists
+                        .scroll_up(crate::features::todos::WHEEL_STEP),
+                    PointerGesture::ScrollDown => self
+                        .todo_lists
+                        .scroll_down(crate::features::todos::WHEEL_STEP),
+                    PointerGesture::Activate => {}
+                }
+                Vec::new()
+            }
             Region::DockBoundary | Region::Todos => Vec::new(),
             Region::Suggest => self
                 .editor

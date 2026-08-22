@@ -58,7 +58,7 @@ Stack order is owned by the Dock Stack registry ([dock-coexistence](../features/
 │ STREAM  (grow)                              │
 ├─────────────────────────────────────────────┤
 │ Boundary  1 | Dock Stack-owned, border_muted │
-│ Todos?    0 | header + items + overflow? + rule │
+│ Todos?    0 | header + items + scroll hint? + rule │
 │ Suggest?  0 | budget                        │
 │ Guidance  1                                 │
 │ Composer  editor budget                     │
@@ -82,7 +82,7 @@ Suggested height policy (constants, tune in code):
 | Condition | Height |
 |-----------|--------|
 | Feature off / no viewed agent / empty items | `0` |
-| Non-empty | `1 (header) + min(items, MAX_ITEM_ROWS) + (1 if overflow)` |
+| Non-empty | `1 (header) + min(items, MAX_ITEM_ROWS) + (1 if scroll hint)` |
 | Cap | e.g. `MAX_ITEM_ROWS = 6` so Stream keeps the frame majority |
 
 Exact numbers are implementation constants; feature PRD requires
@@ -97,6 +97,9 @@ Compose inputs: current `TodoList` for **viewed** `agent_instance_id` only.
 
 struct TodoListsState {
   by_agent: HashMap<AgentInstanceId, TodoList>,
+  collapsed: bool,        // default true — one-line summary until expanded
+  scroll: usize,          // item window offset (paint clamps to viewport)
+  max_scroll: usize,      // last painted max scroll (scroll_down clamp)
 }
 
 // On snapshot: replace/merge by_agent from todoLists[]
@@ -112,8 +115,8 @@ structs). Unknown agents simply absent → empty strip.
 Prefer a small pure projector + paint:
 
 ```text
-TodoList + width + max_rows
-    → TodoStripView { header, rows, overflow }
+TodoList + width + max_rows + scroll
+    → TodoStripView { header, rows, scroll_hint }
     → ratatui Lines in dock rect
 ```
 
@@ -126,7 +129,7 @@ Feature doc ASCII is the target silhouette. Mapping:
   ✓  Ship protocol serde                       →  item Line (TodoDone)
   ▸  Persist list with session                 →  item Line (TodoActive)
   ·  Dock strip + height budget                →  item Line (TodoPending)
-  +2 more                                      →  overflow Line (dim)
+  ↓2                                            →  scroll hint Line (dim)
 ```
 
 ### Header (one row when strip visible)
@@ -161,9 +164,23 @@ Feature doc ASCII is the target silhouette. Mapping:
   +{n} more
 ```
 
-When `items.len() > MAX_ITEM_ROWS`: paint first `MAX_ITEM_ROWS` in **list
-order**, then one overflow row. Overflow is not a todo item and is not
-interactive.
+When `items.len() > MAX_ITEM_ROWS` (or more generally the visible rows granted
+by the strip), the item window **scrolls** instead of hard-capping the tail.
+
+```text
+  ↑2 · ↓3
+  ↓3
+  ↑2
+```
+
+- Projection takes a `scroll` offset and shows `items[scroll .. scroll+rows]`
+  in **list order**.
+- The reserved hint row is direction-aware: `↑n` = n items above the window,
+  `↓n` = n items below it (both shown when the window is in the middle).
+- The hint is dim, is not a todo item, and is not interactive.
+- `max_scroll = items.len() - visible_rows`; wheel `scroll_down` clamps there,
+  `scroll_up` saturates at 0, and paint re-clamps after every list/grant
+  change.
 
 ### Status → style (family, not a glyph catalog)
 
@@ -194,12 +211,18 @@ The whole Todos header row exposes `HitId::TodosToggle`. A primary click
 toggles transient `TodoListsState` presentation state directly and recomposes
 the Dock Stack on the next frame:
 
-- expanded offer: projected header + items + overflow + separator;
+- expanded offer: projected header + items + scroll hint + separator;
 - collapsed offer: header + separator (`TODOS_MIN_HEIGHT`);
 - `TodosToggle` hover paints the header text with the shared `accent` token in
   both states; it does not add a row background;
 - item and separator rows have no element hit action;
-- the strip remains non-focusable and does not steal keys or pointer scrolling.
+- the strip remains non-focusable (no Tab stop) but **owns wheel scrolling**:
+  `ScrollUp` / `ScrollDown` gestures anywhere over the Todos region move the
+  item window by the shared wheel step, clamped to the last painted
+  `max_scroll`. Collapsed strips always report `max_scroll = 0` so the wheel
+  is a no-op until expanded.
+- A newly appeared list defaults to **collapsed**; expanding always resets the
+  window to the top.
 
 The collapse flag resets with session-local todo state. It is not included in
 host protocol, session snapshots, or settings, and does not mutate todo data.
@@ -213,6 +236,9 @@ host protocol, session snapshots, or settings, and does not mutate todo data.
 | Viewed agent change | Rebind strip; height may go 0 |
 | Feature flag off (if client-visible) | Force height 0 |
 | Session switch | Drop previous session’s maps; load new snapshot |
+| Wheel up over strip | `TodoListsState::scroll_up(step)` — saturates at top |
+| Wheel down over strip | `TodoListsState::scroll_down(step)` — clamps to last painted max |
+| Paint | Record `max_scroll` from grant + item count; re-clamp offset |
 
 No local “optimistic” todo writes from the strip.
 
@@ -224,7 +250,7 @@ Prefer a cohesive unit under ~300–400 lines (split if larger):
 packages/tui/src/features/todos/
   mod.rs          // public strip API + tests
   state.rs        // optional: projection helpers
-  render.rs       // header + rows + overflow (separator remains stack chrome)
+  render.rs       // header + rows + scroll hint (separator remains stack chrome)
 ```
 
 Wire:
@@ -237,8 +263,11 @@ Do **not** put multi-line checklist logic in BottomBar render.
 
 ## Verification
 
-- Empty / non-empty / cap / overflow height math (unit).
+- Empty / non-empty / cap / scroll hint height math (unit).
 - Collapsed offer is exactly header + separator; header hit toggles both ways.
+- Default state is collapsed; expand resets scroll to top (unit).
+- Wheel scroll clamps at both ends and hint row reports remaining above/below
+  (unit + pointer integration).
 - Viewed-agent switch changes projection (unit).
 - Snapshot + live update replace list without Timeline dependency (unit).
 - Timeline force-body removed or gated once strip enabled (unit/regression).
