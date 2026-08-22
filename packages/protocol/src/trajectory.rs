@@ -198,7 +198,9 @@ pub struct TrajectoryTerminalRecord {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TrajectoryRecord {
     Assembly(TrajectoryAssemblyRecord),
-    ModelStep(TrajectoryModelStepRecord),
+    /// Boxed: the model-step record dwarfs the other variants (clippy
+    /// large_enum_variant) and records are passed by reference downstream.
+    ModelStep(Box<TrajectoryModelStepRecord>),
     ToolCall(TrajectoryToolCallRecord),
     ChildRun(TrajectoryChildRunRecord),
     SystemNotification(TrajectorySystemNotificationRecord),
@@ -398,7 +400,7 @@ mod tests {
 
     #[test]
     fn trajectory_records_round_trip() {
-        let record = TrajectoryRecord::ModelStep(TrajectoryModelStepRecord {
+        let record = TrajectoryRecord::ModelStep(Box::new(TrajectoryModelStepRecord {
             identity: identity(),
             step_id: "step-1".into(),
             provider: "test".into(),
@@ -433,7 +435,7 @@ mod tests {
                 units: Default::default(),
                 cost: Default::default(),
             })),
-        });
+        }));
         let json = serde_json::to_value(&record).unwrap();
         let back: TrajectoryRecord = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(record, back);

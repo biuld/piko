@@ -171,7 +171,8 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
                 .entry(record.identity.run_id.clone())
                 .or_default();
             run.step_count += 1;
-            run.records.push(TrajectoryRecord::ModelStep(record));
+            run.records
+                .push(TrajectoryRecord::ModelStep(Box::new(record)));
         }
         TRAJECTORY_EVENT_TOOL_CALL => {
             let Ok(record) = serde_json::from_value::<TrajectoryToolCallRecord>(payload.clone())

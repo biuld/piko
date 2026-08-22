@@ -27,7 +27,15 @@ pub(crate) fn load_or_rebuild(
             "journal identity/generation mismatch".into(),
         ));
     }
-    if let Some((aggregate, trajectory)) = load_current_if_current(path, identity, tip.as_ref())? {
+    // Projections may serve queries only when anchored to a durable journal
+    // commit. An empty journal (no tip) must reach replay, which enforces
+    // the genesis contract; read models have no independent authority.
+    let fast = if tip.is_some() {
+        load_current_if_current(path, identity, tip.as_ref())?
+    } else {
+        None
+    };
+    if let Some((aggregate, trajectory)) = fast {
         if normalize_segment_boundary(path, aggregate.revision)? {
             recovery.repaired = true;
         }

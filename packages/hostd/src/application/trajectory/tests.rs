@@ -296,7 +296,7 @@ fn run_usage_rolls_up_model_steps_host_side() {
         usage: Some(Box::new(usage)),
     };
     let records = vec![
-        TrajectoryRecord::ModelStep(step),
+        TrajectoryRecord::ModelStep(Box::new(step)),
         TrajectoryRecord::SystemNotification(piko_protocol::TrajectorySystemNotificationRecord {
             identity: TrajectoryIdentity {
                 session_id: "s".into(),

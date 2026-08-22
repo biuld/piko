@@ -56,6 +56,17 @@ fn checksum_verifies_original_float_spelling_without_json_round_trip() {
 
     let changed = journal.replacen("0.000045600000000000004", "0.0000456", 1);
     std::fs::write(&segment, changed).unwrap();
+
+    // F-37: query-path opens read the materialized projections and do not
+    // scan the journal, so mid-journal tampering does not surface here.
+    let opened = SessionStore::open(&path, OpenOptions::default()).unwrap();
+    assert_eq!(opened.aggregate.revision, 2);
+    drop(opened);
+
+    // Checksums are verified when the store rebuilds from persisted bytes
+    // (recovery / verification path). Dropping the read models forces that
+    // replay; the altered float spelling must fail verification.
+    std::fs::remove_dir_all(path.join("readmodels")).unwrap();
     let error = SessionStore::open(&path, OpenOptions::default()).unwrap_err();
     assert!(
         matches!(error, StoreError::Corruption { message, .. } if message == "checksum mismatch")

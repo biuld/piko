@@ -183,7 +183,7 @@ impl GatewayTelemetry for Telemetry {
         };
         tokio::spawn(async move {
             recorder
-                .record(piko_protocol::TrajectoryRecord::ModelStep(record))
+                .record(piko_protocol::TrajectoryRecord::ModelStep(Box::new(record)))
                 .await;
         });
     }
