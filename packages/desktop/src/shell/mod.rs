@@ -7,16 +7,18 @@ mod layers;
 mod lifecycle;
 mod rows;
 mod sidebar;
+mod tabs;
 mod timeline;
 mod view;
+mod workspace;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AsyncApp, Context, IntoElement, KeyDownEvent, Render, ScrollHandle, Styled,
-    Subscription, Window, div, px,
+    AnyElement, App, AsyncApp, Context, FocusHandle, IntoElement, KeyDownEvent, Render,
+    ScrollHandle, Styled, Subscription, Window, div, px,
 };
 use gpui_base::input::{InputEvent, TextareaState};
 use island::components::list::ListKeyboard;
@@ -71,6 +73,7 @@ pub struct Shell {
     clear_accepted_draft: Option<String>,
     composer_error: Option<String>,
     focus_owner: FocusOwner,
+    agent_tabs_focus: FocusHandle,
     layers: TemporaryLayers,
     prefs_path: PathBuf,
     prefs: DesktopPrefs,
@@ -97,7 +100,7 @@ impl Shell {
                 if composer::is_submit_event(event) {
                     shell.submit_composer(window, cx);
                 } else if matches!(event, InputEvent::Change) {
-                    shell.focus_owner = FocusOwner::Composer;
+                    shell.set_focus_owner(FocusOwner::Composer, window, cx);
                     shell
                         .drafts
                         .insert(shell.draft_key.clone(), input.read(cx).value().to_string());
@@ -128,6 +131,7 @@ impl Shell {
             clear_accepted_draft: None,
             composer_error: None,
             focus_owner: FocusOwner::Timeline,
+            agent_tabs_focus: cx.focus_handle(),
             layers: TemporaryLayers::default(),
             prefs_path,
             last_saved_window: prefs.window,
@@ -199,7 +203,7 @@ impl Shell {
                 self.send_commands(commands);
             }
             self.reconcile_submission();
-            self.reconcile_agent_selection();
+            self.reconcile_agent_selection(cx);
         }
         if reconnect {
             // New authoritative traffic after a decode error recovers the
@@ -247,6 +251,7 @@ impl Shell {
     fn submit_composer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self.state.connection != DesktopConnection::Live
             || self.state.core.session_phase != SessionPhase::Live
+            || self.pending_agent.is_some()
             || self.pending_submission.is_some()
         {
             return;
@@ -306,16 +311,33 @@ impl Shell {
         self.pending_submission = None;
     }
 
-    fn reconcile_agent_selection(&mut self) {
-        let Some(target) = self.pending_agent.as_ref() else {
+    fn reconcile_agent_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(target) = self.pending_agent.as_deref() {
+            let listed = self
+                .state
+                .core
+                .live_session
+                .as_ref()
+                .is_some_and(|session| {
+                    session
+                        .agents
+                        .iter()
+                        .any(|agent| agent.agent_instance_id == target)
+                });
+            if !listed {
+                self.pending_agent = None;
+                return;
+            }
+        }
+        let Some(target) = self.pending_agent.clone() else {
             return;
         };
-        let still_pending = self.state.core.pending_commands.values().any(|operation| {
-            matches!(
-                operation,
-                PendingOp::SelectAgent { agent_instance_id } if agent_instance_id == target
-            )
-        });
+        let still_pending = self
+            .state
+            .core
+            .pending_commands
+            .values()
+            .any(|operation| matches!(operation, PendingOp::SelectAgent { .. }));
         if still_pending {
             return;
         }
@@ -326,20 +348,32 @@ impl Shell {
             .iter()
             .rev()
             .find_map(|failure| match &failure.operation {
-                PendingOp::SelectAgent { agent_instance_id } if agent_instance_id == target => {
+                PendingOp::SelectAgent { agent_instance_id } if agent_instance_id == &target => {
                     Some(failure.message.clone())
                 }
                 _ => None,
             });
+        let host_selected = self
+            .state
+            .core
+            .live_session
+            .as_ref()
+            .and_then(|session| session.selected_agent.clone());
         if self.selection_error.is_some() {
-            self.subscribed_agent = self
-                .state
-                .core
-                .live_session
-                .as_ref()
-                .and_then(|session| session.selected_agent.clone());
+            self.subscribed_agent = host_selected;
+            self.pending_agent = None;
+            return;
         }
-        self.pending_agent = None;
+        if host_selected.as_deref() == Some(target.as_str()) {
+            self.pending_agent = None;
+            return;
+        }
+        self.dispatch_intents(
+            cx,
+            vec![ClientIntent::SelectAgent {
+                agent_instance_id: target,
+            }],
+        );
     }
 
     fn cancel_turn(&mut self, cx: &mut Context<Self>) {
@@ -352,26 +386,31 @@ impl Shell {
     }
 
     fn close_layer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.layers.close() == Some(FocusOwner::Composer) {
-            self.composer_input
-                .update(cx, |input, cx| input.focus(window, cx));
+        match self.layers.close() {
+            Some(FocusOwner::Composer) => {
+                self.set_focus_owner(FocusOwner::Composer, window, cx);
+            }
+            Some(FocusOwner::AgentTabs) => {
+                self.set_focus_owner(FocusOwner::AgentTabs, window, cx);
+            }
+            Some(owner) => {
+                self.set_focus_owner(owner, window, cx);
+            }
+            None => {}
         }
         cx.notify();
     }
 
     fn current_draft_key(&self) -> String {
-        self.state
-            .core
-            .live_session
-            .as_ref()
-            .map(|session| {
-                format!(
-                    "{}:{}",
-                    session.session_id,
-                    session.selected_agent.as_deref().unwrap_or("session")
-                )
-            })
-            .unwrap_or_else(|| "no-session".to_string())
+        let Some(session) = self.state.core.live_session.as_ref() else {
+            return "no-session".to_string();
+        };
+        let agent = self
+            .pending_agent
+            .as_deref()
+            .or(session.selected_agent.as_deref())
+            .unwrap_or("session");
+        format!("{}:{}", session.session_id, agent)
     }
 
     fn reconcile_draft_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {

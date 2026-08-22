@@ -5,6 +5,7 @@ use island::components::overlay::OverlayHost;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusOwner {
     Sidebar,
+    AgentTabs,
     Timeline,
     Composer,
 }
@@ -14,7 +15,8 @@ impl FocusOwner {
         match self {
             Self::Timeline => Self::Composer,
             Self::Composer => Self::Sidebar,
-            Self::Sidebar => Self::Timeline,
+            Self::Sidebar => Self::AgentTabs,
+            Self::AgentTabs => Self::Timeline,
         }
     }
 }
@@ -84,6 +86,7 @@ mod tests {
     fn traversal_reaches_every_primary_surface() {
         assert_eq!(FocusOwner::Timeline.next(), FocusOwner::Composer);
         assert_eq!(FocusOwner::Composer.next(), FocusOwner::Sidebar);
-        assert_eq!(FocusOwner::Sidebar.next(), FocusOwner::Timeline);
+        assert_eq!(FocusOwner::Sidebar.next(), FocusOwner::AgentTabs);
+        assert_eq!(FocusOwner::AgentTabs.next(), FocusOwner::Timeline);
     }
 }

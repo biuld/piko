@@ -91,8 +91,8 @@ host-owned state.
 
 ### Floating sidebar
 
-- The sidebar provides session discovery and selection, the selected session's
-  agent hierarchy, current selection, and a settings entry point.
+- The sidebar provides session discovery and selection and a settings entry
+  point. Agent switching is owned by the content-island tab strip (F-43).
 - Selecting an item changes the corresponding host-backed projection; visual
   selection alone never fabricates an active session or agent.
 - The sidebar supports keyboard and pointer navigation with one clear focus
@@ -174,8 +174,8 @@ host-owned state.
 - [ ] At a comfortable width, the primary window visibly contains one floating
       sidebar, one Timeline, and one bottom-floating Composer, with no permanent
       third column.
-- [ ] The sidebar can select sessions and agents using both keyboard and
-      pointer input, and the Timeline reflects the resulting host projection.
+- [ ] The sidebar can select sessions using both keyboard and pointer input.
+      Agent selection is the content-island tab strip (F-43).
 - [ ] Narrowing the window collapses the persistent sidebar before the Timeline
       becomes unusable; the same navigation remains available in a temporary
       layer.

@@ -27,7 +27,6 @@ pub fn uses_persistent_sidebar(window_width: f32, preference_collapsed: bool) ->
 pub enum NavId {
     NewSession,
     Session(usize),
-    Agent(usize),
     Settings,
 }
 
@@ -68,35 +67,9 @@ pub fn nav_model(core: &ClientState, keyboard_focused: Option<NavId>) -> NavMode
         ));
     }
 
-    let mut agent_rows = Vec::new();
-    let selected_agent = core
-        .live_session
-        .as_ref()
-        .and_then(|session| session.selected_agent.clone());
-    if let Some(live) = core.live_session.as_ref() {
-        for (index, agent) in live.agents.iter().enumerate() {
-            let label = if agent.name.is_empty() {
-                agent.agent_id.clone()
-            } else {
-                agent.name.clone()
-            };
-            if selected_agent.as_deref() == Some(agent.agent_instance_id.as_str()) {
-                selected = Some(NavId::Agent(index));
-            }
-            agent_rows.push(SourceRow::new(
-                NavId::Agent(index),
-                format!("agent-{index}"),
-                label,
-            ));
-        }
-    }
-
     let mut sections = Vec::new();
     if !session_rows.is_empty() {
         sections.push(SourceSection::unlabeled(session_rows));
-    }
-    if !agent_rows.is_empty() {
-        sections.push(SourceSection::new("Agents", agent_rows));
     }
     sections.push(SourceSection::new(
         "Application",

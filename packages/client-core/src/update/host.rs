@@ -199,7 +199,13 @@ fn handle_command_response(
                 if let Some(session) = &mut state.live_session {
                     let expected_session_id = session.session_id.clone();
                     let session_entries = session.session_timeline_entries.clone();
-                    session.selected_agent = Some(agent_instance_id.clone());
+                    let superseded = state
+                        .pending_commands
+                        .values()
+                        .any(|operation| matches!(operation, PendingOp::SelectAgent { .. }));
+                    if !superseded {
+                        session.selected_agent = Some(agent_instance_id.clone());
+                    }
                     let timeline = session.timeline_mut(&agent_instance_id);
                     timeline.clear();
                     for (entry, order) in session_entries {

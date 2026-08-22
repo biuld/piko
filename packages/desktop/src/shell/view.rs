@@ -51,9 +51,9 @@ impl Render for Shell {
         let on_activate = {
             let entity = cx.entity().downgrade();
             std::rc::Rc::new(
-                move |id: sidebar::NavId, _window: &mut Window, app: &mut App| {
+                move |id: sidebar::NavId, window: &mut Window, app: &mut App| {
                     if let Some(shell) = entity.upgrade() {
-                        shell.update(app, |shell, cx| shell.activate_nav(id, cx));
+                        shell.update(app, |shell, cx| shell.activate_nav(id, window, cx));
                     }
                 },
             )
@@ -267,9 +267,15 @@ impl Shell {
                     .size_full()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .on_scroll_wheel(cx.listener(move |this, _, _, _| {
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.set_focus_owner(FocusOwner::Timeline, window, cx);
+                        }),
+                    )
+                    .on_scroll_wheel(cx.listener(move |this, _, window, cx| {
                         this.wheel_seen = true;
-                        this.focus_owner = FocusOwner::Timeline;
+                        this.set_focus_owner(FocusOwner::Timeline, window, cx);
                     }))
                     .child(
                         div()
@@ -287,11 +293,14 @@ impl Shell {
         .material(self.material)
         .surface_role(PanelSurfaceRole::Content)
         .presentation(PanelPresentation::Detached);
+        let panel = if let Some(header) = self.timeline_header(cx) {
+            panel.header(header)
+        } else {
+            panel
+        };
 
-        let show_return = matches!(
-            &state,
-            timeline::TimelineState::Ready(_) | timeline::TimelineState::Empty
-        ) && !self.following;
+        let show_return = matches!(&state, timeline::TimelineState::Ready(rows) if !rows.is_empty())
+            && !self.following;
 
         // Fill the WindowChromeFrame content slot. `flex_1` here collapses
         // because that slot is not a flex column; a zero-height parent then
@@ -408,7 +417,7 @@ impl Shell {
         composer::ComposerView {
             input: self.composer_input.clone(),
             material: self.material,
-            enabled: live && selected_agent.is_some(),
+            enabled: live && selected_agent.is_some() && self.pending_agent.is_none(),
             running,
             pending: self.pending_submission.is_some(),
             model,

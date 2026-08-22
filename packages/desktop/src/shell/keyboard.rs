@@ -5,7 +5,62 @@ use island::components::list::ListKeyIntent;
 use island::components::source_list::{SourceListEffect, apply_source_list_intent};
 
 impl Shell {
-    pub(super) fn activate_nav(&mut self, id: sidebar::NavId, cx: &mut Context<Self>) {
+    pub(super) fn view_key(&self) -> Option<&str> {
+        tabs::view_key(
+            self.pending_agent.as_deref(),
+            self.state
+                .core
+                .live_session
+                .as_ref()
+                .and_then(|session| session.selected_agent.as_deref()),
+        )
+    }
+
+    pub(super) fn set_focus_owner(
+        &mut self,
+        next: FocusOwner,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_owner = next;
+        match next {
+            FocusOwner::AgentTabs => {
+                window.focus(&self.agent_tabs_focus, cx);
+            }
+            FocusOwner::Composer => {
+                if self.agent_tabs_focus.is_focused(window) {
+                    window.blur();
+                }
+                self.composer_input
+                    .update(cx, |input, cx| input.focus(window, cx));
+            }
+            FocusOwner::Timeline | FocusOwner::Sidebar => {
+                if self.agent_tabs_focus.is_focused(window) {
+                    window.blur();
+                }
+            }
+        }
+    }
+
+    pub(super) fn select_agent(&mut self, agent_instance_id: String, cx: &mut Context<Self>) {
+        if self.state.connection != DesktopConnection::Live {
+            return;
+        }
+        if Some(agent_instance_id.as_str()) == self.view_key() {
+            return;
+        }
+        self.pending_agent = Some(agent_instance_id.clone());
+        self.subscribed_agent = Some(agent_instance_id.clone());
+        self.selection_error = None;
+        self.dispatch_intents(cx, vec![ClientIntent::SelectAgent { agent_instance_id }]);
+    }
+
+    pub(super) fn activate_nav(
+        &mut self,
+        id: sidebar::NavId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let intents = match id {
             sidebar::NavId::NewSession => vec![ClientIntent::CreateSession {
                 cwd: self.workspace_cwd.clone(),
@@ -31,37 +86,13 @@ impl Shell {
                     }
                 })
                 .unwrap_or_default(),
-            sidebar::NavId::Agent(index) => self
-                .state
-                .core
-                .live_session
-                .as_ref()
-                .and_then(|live| live.agents.get(index))
-                .map(|agent| agent.agent_instance_id.clone())
-                .map(|agent_instance_id| {
-                    let already_selected = self
-                        .state
-                        .core
-                        .live_session
-                        .as_ref()
-                        .and_then(|session| session.selected_agent.as_deref())
-                        == Some(agent_instance_id.as_str());
-                    if already_selected {
-                        return Vec::new();
-                    }
-                    self.pending_agent = Some(agent_instance_id.clone());
-                    self.subscribed_agent = Some(agent_instance_id.clone());
-                    self.selection_error = None;
-                    vec![ClientIntent::SelectAgent { agent_instance_id }]
-                })
-                .unwrap_or_default(),
             sidebar::NavId::Settings => {
                 self.open_layer(LayerKind::Settings, FocusOwner::Sidebar, cx);
                 Vec::new()
             }
         };
         self.narrow_overlay_open = false;
-        self.focus_owner = FocusOwner::Sidebar;
+        self.set_focus_owner(FocusOwner::Sidebar, window, cx);
         self.dispatch_intents(cx, intents);
     }
 
@@ -82,11 +113,8 @@ impl Shell {
             return;
         }
         if event.keystroke.key == "tab" {
-            self.focus_owner = self.focus_owner.next();
-            if self.focus_owner == FocusOwner::Composer {
-                self.composer_input
-                    .update(cx, |input, cx| input.focus(window, cx));
-            } else if self.focus_owner == FocusOwner::Sidebar && narrow {
+            self.set_focus_owner(self.focus_owner.next(), window, cx);
+            if self.focus_owner == FocusOwner::Sidebar && narrow {
                 self.narrow_overlay_open = true;
             }
             cx.notify();
@@ -112,7 +140,7 @@ impl Shell {
                 self.sidebar_keyboard_focused = Some(id);
                 sidebar::reveal_keyboard_focus(&self.sidebar_scroll, &model, id);
             }
-            SourceListEffect::Activate { id } => self.activate_nav(id, cx),
+            SourceListEffect::Activate { id } => self.activate_nav(id, window, cx),
             SourceListEffect::None => {}
         }
         cx.notify();

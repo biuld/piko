@@ -1,6 +1,6 @@
 # F-43: Desktop agent workspace
 
-> Status: draft
+> Status: partial (PR 2: tab strip + sidebar demotion; toolbar/composer/follow maps remaining)
 > Priority: P0
 > Source evidence: piko product direction after F-42 visual review (screenshot 2026-08-22 21:22)
 > Design: [D-60](../design/D-60-desktop-agent-workspace.md)
