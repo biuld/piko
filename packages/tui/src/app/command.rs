@@ -66,6 +66,12 @@ pub enum EditorAction {
         data: String,
         mime_type: String,
     },
+    ReplaceDraftWithImage {
+        expected_text: String,
+        filename: String,
+        data: String,
+        mime_type: String,
+    },
     InsertNewline,
     DeleteBackward,
     DeleteForward,

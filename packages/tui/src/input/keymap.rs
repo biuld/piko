@@ -183,7 +183,6 @@ impl Default for Keymap {
         keymap.bind("alt+y", KeyAction::YankPop);
         keymap.bind("ctrl+-", KeyAction::Undo);
         keymap.bind("shift+enter", KeyAction::NewLine);
-        keymap.bind("ctrl+j", KeyAction::NewLine);
         keymap.bind("enter", KeyAction::Submit);
         keymap.bind("tab", KeyAction::Complete);
         keymap.bind("ctrl+c", KeyAction::Clear); // Clears editor in pi-mono, also mapped to Selection Cancel

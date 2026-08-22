@@ -37,6 +37,9 @@ The Editor does not own:
 Raw terminal input
         |
         v
+keyboard-enhancement negotiation (when supported)
+        |
+        v
 InputRouter
         |
         v
@@ -332,6 +335,12 @@ Rules:
 - Small text paste inserts normal text.
 - Large text paste inserts one reference atom.
 - Image paste inserts one reference atom and stores image bytes.
+- A whole absolute local-image path paste is read by an application effect and
+  inserts the same reference atom; the reducer never stores the path as draft
+  text while the read is pending.
+- A file-manager drag delivered as individual key events is recognized when
+  the whole draft becomes a supported absolute image path. Successful IO
+  dispatches a compare-and-replace action carrying the expected draft text.
 - Reference placeholders are readable display labels.
 - Reference atoms are atomic for cursor movement and deletion.
 - References expand only during submission.
@@ -452,18 +461,15 @@ Binding IDs:
 | `tui.editor.cursorLineEnd` | End |
 | `tui.editor.deleteCharBackward` | Backspace |
 | `tui.editor.deleteCharForward` | Delete |
-| `tui.input.newLine` | Ctrl+N |
+| `tui.input.newLine` | Shift+Enter |
 | `tui.input.submit` | Enter |
 | `tui.input.tab` | Tab |
 | `tui.history.prev` | Ctrl+P |
 | `tui.history.next` | Ctrl+E |
 
-`multiline` controls the semantic action assigned to Enter when no custom
-binding overrides it:
-
-- `multiline = true`: Enter inserts newline; submit must use the configured
-  submit binding.
-- `multiline = false`: Enter submits.
+`multiline` controls whether the newline action is available. Enter remains the
+submit action in both modes; with `multiline = true`, Shift+Enter inserts a
+newline.
 
 ## Protocol Boundary
 

@@ -147,7 +147,7 @@ Editor has focus (no overlay active):
 |-----|--------|
 | Backspace | Delete character backward |
 | Delete | Delete character forward |
-| Ctrl+N | Insert newline |
+| Shift+Enter | Insert newline |
 
 ### Submission and navigation
 
@@ -184,8 +184,9 @@ The Esc key has a priority chain when the Editor has focus:
 
 ### Multiline mode
 
-When enabled (default), Enter inserts a newline. When disabled, Enter always
-submits. This is controlled by the `tui.editor.multiline` setting on hostd.
+When enabled (default), Shift+Enter inserts a newline. Enter always submits.
+When disabled, newline insertion is unavailable. This is controlled by the
+`tui.editor.multiline` setting on hostd.
 
 ### Planned
 
@@ -208,7 +209,7 @@ the `tui.editor.*` and `tui.input.*` namespaces:
 | `tui.editor.cursorLineEnd` | End |
 | `tui.editor.deleteCharBackward` | Backspace |
 | `tui.editor.deleteCharForward` | Delete |
-| `tui.input.newLine` | Ctrl+N |
+| `tui.input.newLine` | Shift+Enter |
 | `tui.input.submit` | Enter |
 | `tui.input.tab` | Tab |
 | `tui.history.prev` | Ctrl+P |
@@ -238,6 +239,7 @@ that represents the pasted content as a single atomic unit.
 |------------|-----------|--------------------|
 | Large text | > 10 lines or > 1000 characters | `[paste #N +123 lines]` or `[paste #N 1234 chars]` |
 | Image | Any image paste | `[Image #N: filename.png]` |
+| Local image path | Whole bracketed paste is an absolute path to `png`, `jpg`/`jpeg`, `gif`, or `webp` | `[Image #N: filename.ext]` |
 
 When a paste qualifies as large, the full content is stored internally and a
 compact placeholder replaces inline text. Normal small pastes are inserted as
@@ -261,6 +263,18 @@ Ctrl+V or Alt+V reads an image from the system clipboard, encodes the RGBA
 pixels as PNG, and inserts a reference block. The actual base64 image is stored
 in the editor draft and attached to the structured message. Text-only targets
 reject the image before provider dispatch.
+
+Dragging a local image into a terminal commonly produces one bracketed paste
+containing its absolute path. The Editor recognizes supported image
+extensions, reads the file through an application effect, and inserts the same
+reference block instead of literal path text. A failed read leaves the draft
+unchanged and shows an error. Relative paths, unsupported extensions, and
+multi-line pastes keep normal text-paste behavior.
+
+If the terminal reports a file-manager drag as individual key events instead,
+the Editor recognizes the completed whole-draft absolute image path and
+replaces it only after the file read succeeds. This covers Finder-to-Ghostty
+dragging without treating a partial path as an attachment.
 
 ## Non-goals
 

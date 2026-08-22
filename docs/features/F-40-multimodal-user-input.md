@@ -21,15 +21,19 @@ without a complete input path makes the capability unusable and misleading.
 1. The user selects an image-capable model, pastes an image into the composer,
    adds optional text, and submits it. The timeline shows an image placeholder
    and the provider receives one structured multimodal message.
-2. The user queues a multimodal follow-up while an agent is busy. The exact
+2. The user drags a local image file into the terminal. The terminal's pasted
+   absolute path becomes the same atomic image attachment placeholder instead
+   of editor text or a slash-command query.
+3. The user queues a multimodal follow-up while an agent is busy. The exact
    content starts later in FIFO order and remains durable across recovery.
-3. The user submits an image to a text-only target. The model gateway rejects
+4. The user submits an image to a text-only target. The model gateway rejects
    the request as an unsupported capability before provider dispatch.
 
 ## In scope
 
 - Structured text/image submit and steer commands.
-- Clipboard image ingestion in the TUI with a visible atomic placeholder.
+- Clipboard image ingestion and pasted absolute local-image paths in the TUI,
+  with a visible atomic placeholder.
 - Base64 image blocks with an explicit MIME type.
 - Preservation through host turn registration, orchd admission, durable
   follow-up queues, transcript commits, and Responses encoding.
@@ -52,6 +56,14 @@ without a complete input path makes the capability unusable and misleading.
   surrounding an image stays in the same relative order.
 - An image-only message is valid. Empty text without an image remains a no-op.
 - Clipboard failures leave the draft unchanged and produce a visible error.
+- A bracketed paste containing only an absolute path with a supported image
+  extension (`png`, `jpg`/`jpeg`, `gif`, or `webp`) reads that file as an image
+  attachment. Read failures leave the draft unchanged and produce a visible
+  error; other pasted paths remain ordinary text.
+- Some terminals deliver a Finder/file-manager drag as ordinary key events
+  rather than bracketed paste. When the complete composer draft resolves to a
+  supported absolute image path, a successful read atomically replaces that
+  path with the image placeholder. The path remains unchanged on failure.
 - Text-only slash commands remain text-only and cannot contain attachments.
 - Dequeuing a local multimodal follow-up restores both text and images.
 - hostd validates that user content is non-empty and contains only text/image
@@ -63,6 +75,8 @@ without a complete input path makes the capability unusable and misleading.
 
 - [x] A TUI clipboard image becomes a structured user image block rather than
       placeholder text in the model request.
+- [x] A pasted absolute local-image path becomes an atomic image attachment
+      and does not activate slash-command suggestions.
 - [x] Text and image block order is preserved through hostd and orchd.
 - [x] Immediate, follow-up, and steer delivery accept structured content.
 - [x] Existing `ChatSubmit` and `QueueSteer` text commands remain valid.

@@ -368,21 +368,10 @@ impl InputRouter {
         // Standard editor inputs, timeline scroll, and keyboard commands
         match ka {
             Some(KeyAction::Exit) => Some(AppAction::Quit.into()),
-            Some(KeyAction::NewLine) => {
-                // Terminals and IMEs that emit LF (0x0A) for the Return key are
-                // parsed by crossterm as Ctrl+J. On a prompt that is still a
-                // single line that keypress is the user pressing Enter, so
-                // submit instead of inserting an invisible newline. Shift+Enter
-                // and Ctrl+J inside multiline content keep inserting newlines.
-                let bare_lf = matches!(key.code, KeyCode::Char('j'))
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::SHIFT);
-                if bare_lf && !app.editor.text().contains('\n') {
-                    Some(EditorAction::Submit.into())
-                } else {
-                    Some(EditorAction::InsertNewline.into())
-                }
+            Some(KeyAction::NewLine) if app.tui_config.editor.multiline => {
+                Some(EditorAction::InsertNewline.into())
             }
+            Some(KeyAction::NewLine) => None,
             Some(KeyAction::Sessions) => Some(SessionAction::RequestList.into()),
             Some(KeyAction::SessionTree) => Some(SurfaceAction::OpenTree.into()),
             Some(KeyAction::Settings) => Some(SurfaceAction::OpenSettings.into()),
@@ -439,6 +428,11 @@ impl InputRouter {
             }
             Some(KeyAction::TimelineLatest) => Some(TimelineAction::JumpLatest.into()),
             Some(KeyAction::Models) => Some(ModelAction::RequestList.into()),
+            None if matches!(key.code, KeyCode::Char('j'))
+                && key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                None
+            }
             None => {
                 if let KeyCode::Char(ch) = key.code {
                     Some(EditorAction::InsertChar(ch).into())

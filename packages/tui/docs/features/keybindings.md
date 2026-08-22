@@ -6,6 +6,14 @@ The Keybindings System is the central hub for keyboard shortcut definition, cust
 
 ## Input Routing & Context Scoping
 
+At terminal startup, piko negotiates crossterm keyboard enhancement when the
+terminal supports it. This preserves the Shift modifier on Enter so
+`Shift+Enter` remains distinct from the submit key. Unsupported terminals may
+not be able to distinguish those physical keypresses. The negotiation requests
+enhanced encoding for all keys in addition to disambiguating modified keys;
+this is required for reliable modified functional keys in terminals such as
+Ghostty.
+
 Keyboard events flow through a three-priority sequence to handle both global shortcuts and context-sensitive local keys:
 
 1. **Priority 1: Global Shortcuts (Esc/Enter)**
@@ -46,7 +54,7 @@ These keys are active when the Editor is focused and not blocked by active overl
 | `tui.editor.yank` | `ctrl+y` | Paste deleted text from the kill ring (Yank) |
 | `tui.editor.yankPop` | `alt+y` | Cycle through previously deleted text |
 | `tui.editor.undo` | `ctrl+-` | Undo the last editor action |
-| `tui.input.newLine` | `shift+enter`, `ctrl+j` | Insert a newline into the prompt |
+| `tui.input.newLine` | `shift+enter` | Insert a newline into the prompt (requires a terminal that can report modified Enter) |
 | `tui.input.submit` | `enter` | Submit the prompt to the LLM |
 | `tui.input.tab` | `tab` | Complete the selected suggestion |
 | `tui.input.copy` | `ctrl+c` | Copy the selected text to the system clipboard |
@@ -152,7 +160,7 @@ Users define customization by specifying bindings mapped to `KeyId` strings (e.g
   "bindings": {
     "app.exit": "ctrl+q",
     "app.clear": "ctrl+c",
-    "tui.input.newLine": ["shift+enter", "ctrl+j"],
+    "tui.input.newLine": "shift+enter",
     "tui.editor.cursorLineStart": ["home", "ctrl+a"]
   }
 }

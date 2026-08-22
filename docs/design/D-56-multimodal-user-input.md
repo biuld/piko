@@ -30,13 +30,24 @@ change is required. Steering changes only at the host runner port from `&str`
 to owned structured content.
 
 The TUI editor upgrades reference payloads from text-only strings to an enum.
-Clipboard IO is an application effect. The effect reads RGBA pixels, encodes
-PNG, and dispatches an image-insert action. Submission walks the visible draft
-and reference spans in order to produce `MessageContent::Blocks`; text-only
-drafts continue using `MessageContent::String`.
+Image IO is an application effect. The clipboard effect reads RGBA pixels and
+encodes PNG. A bracketed paste that consists only of an absolute path with a
+supported image extension produces a file-read effect instead of mutating the
+draft; that effect reads and base64-encodes the original file bytes. Both paths
+dispatch the same image-insert action. Submission walks the visible draft and
+reference spans in order to produce `MessageContent::Blocks`; text-only drafts
+continue using `MessageContent::String`.
+
+Terminals such as Ghostty may deliver a Finder drag as a sequence of ordinary
+key events. After each character insertion, the reducer checks only the whole
+draft's lexical shape (absolute path plus supported extension). A matching
+candidate produces the same file-read effect with an expected-draft token. On
+success, a reducer action replaces the draft only if it still byte-matches that
+token, preventing stale IO completion from overwriting later input.
 
 ```text
 clipboard RGBA -> TUI PNG/base64 image reference
+local image path -> TUI original MIME/base64 image reference
                -> ChatSubmitMessage(MessageContent)
                -> hostd Turn + AgentRunInput(MessageContent)
                -> orchd durable input/transcript
@@ -61,6 +72,8 @@ No `island-rs` change required.
 ## Failure and cancellation
 
 - Clipboard read/encoding failures do not mutate the editor.
+- Local image file read failures do not mutate the editor. Non-image and
+  non-absolute pasted paths retain the existing text-paste behavior.
 - Malformed or unsupported user blocks fail at host admission.
 - Model modality mismatch fails in llmd before network dispatch.
 - Queued image bytes use the same durable input record and cancellation path as

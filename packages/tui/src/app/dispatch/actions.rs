@@ -10,10 +10,17 @@ impl AppState {
             EditorAction::InsertChar(ch) => {
                 self.editor.insert_char(ch);
                 self.refresh_suggestions();
+                let text = self.editor.text();
+                if let Some(path) = local_image_path_from_paste(&text) {
+                    effects.push(Effect::read_image_file_replacing(path, text));
+                }
             }
             EditorAction::InsertPaste(text) => {
                 if let Some(tb) = self.active_text_box() {
                     tb.insert_str(&text);
+                } else if let Some(path) = local_image_path_from_paste(&text) {
+                    self.editor.auto_complete.clear();
+                    effects.push(Effect::read_image_file(path));
                 } else {
                     self.editor.insert_paste(&text, &self.tui_config.editor);
                     self.refresh_suggestions();
@@ -28,6 +35,19 @@ impl AppState {
                 self.editor.insert_image(&filename, data, mime_type);
                 self.refresh_suggestions();
                 self.status = "image attached".to_string();
+            }
+            EditorAction::ReplaceDraftWithImage {
+                expected_text,
+                filename,
+                data,
+                mime_type,
+            } => {
+                if self.editor.text() == expected_text {
+                    self.editor.restore_text("");
+                    self.editor.insert_image(&filename, data, mime_type);
+                    self.refresh_suggestions();
+                    self.status = "image attached".to_string();
+                }
             }
             EditorAction::InsertNewline => {
                 self.editor.insert_newline();
@@ -327,4 +347,26 @@ impl AppState {
         }
         Vec::new()
     }
+}
+
+fn local_image_path_from_paste(text: &str) -> Option<std::path::PathBuf> {
+    let value = text.trim();
+    if value.is_empty() || value.contains(['\n', '\r']) {
+        return None;
+    }
+    let value = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value);
+    let path = std::path::PathBuf::from(value);
+    if !path.is_absolute() {
+        return None;
+    }
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp").then_some(path)
 }

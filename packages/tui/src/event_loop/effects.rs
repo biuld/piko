@@ -47,8 +47,63 @@ pub(crate) fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: V
                 }
                 Err(error) => app.push_error(format!("could not paste image: {error}")),
             },
+            Effect::ReadImageFile {
+                path,
+                expected_draft,
+            } => match read_image_file(&path) {
+                Ok((filename, data, mime_type)) => {
+                    let action = match expected_draft {
+                        Some(expected_text) => {
+                            crate::app::command::EditorAction::ReplaceDraftWithImage {
+                                expected_text,
+                                filename,
+                                data,
+                                mime_type,
+                            }
+                        }
+                        None => crate::app::command::EditorAction::InsertImage {
+                            filename,
+                            data,
+                            mime_type,
+                        },
+                    };
+                    let follow_up = app.dispatch(action.into());
+                    run_effects(app, host, follow_up);
+                }
+                Err(error) => app.push_error(format!("could not attach image: {error}")),
+            },
         }
     }
+}
+
+fn read_image_file(path: &std::path::Path) -> Result<(String, String, String), String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or("image path has no supported extension")?;
+    let mime_type = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return Err(format!("unsupported image extension: {extension}")),
+    };
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or("image path has no valid filename")?
+        .to_string();
+    let bytes = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    if bytes.is_empty() {
+        return Err(format!("{} is empty", path.display()));
+    }
+    Ok((
+        filename,
+        base64::engine::general_purpose::STANDARD.encode(bytes),
+        mime_type.into(),
+    ))
 }
 
 fn read_clipboard_image() -> Result<(String, String, String), String> {
@@ -168,4 +223,24 @@ fn open_url(url: &str) -> std::io::Result<()> {
         command
     };
     command.spawn().map(|_| ())
+}
+
+#[cfg(test)]
+mod image_file_tests {
+    use super::*;
+
+    #[test]
+    fn reads_original_image_bytes_with_extension_mime_type() {
+        let path =
+            std::env::temp_dir().join(format!("piko-tui-image-{}.JPEG", uuid::Uuid::new_v4()));
+        std::fs::write(&path, [0xff, 0xd8, 0xff]).unwrap();
+
+        let result = read_image_file(&path);
+        std::fs::remove_file(&path).unwrap();
+        let (filename, data, mime_type) = result.unwrap();
+
+        assert!(filename.ends_with(".JPEG"));
+        assert_eq!(data, "/9j/");
+        assert_eq!(mime_type, "image/jpeg");
+    }
 }

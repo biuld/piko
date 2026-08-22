@@ -10,6 +10,11 @@
   `MessageContent` commands.
 - TUI editor tests preserve mixed text/image ordering, allow image-only
   submission, and restore multimodal queued drafts.
+- TUI dispatch/effect tests recognize a pasted absolute image path without
+  activating slash suggestions and preserve its MIME type and bytes in the
+  inserted image action.
+- A Finder-style image path delivered as individual key events is covered by
+  a compare-and-replace regression test, including stale-read protection.
 - Host turn-runner tests observe image blocks in start and steer requests.
 - llmd Responses tests assert `input_image` data URL encoding and capability
   rejection for text-only targets.

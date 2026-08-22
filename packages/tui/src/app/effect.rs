@@ -1,4 +1,5 @@
 use piko_protocol::Command;
+use std::path::PathBuf;
 
 use crate::{app::command::Action, host::HostLine};
 
@@ -13,8 +14,15 @@ pub enum Msg {
 pub enum Effect {
     Send(Command),
     OpenUrl(String),
-    CopyToClipboard { notification_id: u64, text: String },
+    CopyToClipboard {
+        notification_id: u64,
+        text: String,
+    },
     ReadClipboardImage,
+    ReadImageFile {
+        path: PathBuf,
+        expected_draft: Option<String>,
+    },
 }
 
 impl Effect {
@@ -35,5 +43,19 @@ impl Effect {
 
     pub fn read_clipboard_image() -> Self {
         Self::ReadClipboardImage
+    }
+
+    pub fn read_image_file(path: PathBuf) -> Self {
+        Self::ReadImageFile {
+            path,
+            expected_draft: None,
+        }
+    }
+
+    pub fn read_image_file_replacing(path: PathBuf, expected_draft: String) -> Self {
+        Self::ReadImageFile {
+            path,
+            expected_draft: Some(expected_draft),
+        }
     }
 }

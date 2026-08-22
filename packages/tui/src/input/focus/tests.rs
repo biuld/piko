@@ -62,39 +62,42 @@ fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
 }
 
 #[test]
-fn bare_ctrl_j_submits_a_single_line_prompt() {
-    // Some terminals / IMEs send LF (0x0A) for Return, which crossterm parses
-    // as Ctrl+J. On a single-line prompt that is the user pressing Enter, so it
-    // must submit instead of inserting a newline.
-    let mut app = app();
-    app.editor.restore_text("hello");
+fn shift_enter_inserts_a_newline() {
+    let app = app();
     let keymap = Keymap::default();
 
-    let action = InputRouter::route_key(
-        &app,
-        &keymap,
-        key(KeyCode::Char('j'), KeyModifiers::CONTROL),
-    );
-
-    assert!(matches!(action, Some(Action::Editor(EditorAction::Submit))));
-}
-
-#[test]
-fn ctrl_j_inside_multiline_content_still_inserts_a_newline() {
-    let mut app = app();
-    app.editor.restore_text("line one\nline two");
-    let keymap = Keymap::default();
-
-    let action = InputRouter::route_key(
-        &app,
-        &keymap,
-        key(KeyCode::Char('j'), KeyModifiers::CONTROL),
-    );
+    let action = InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::SHIFT));
 
     assert!(matches!(
         action,
         Some(Action::Editor(EditorAction::InsertNewline))
     ));
+}
+
+#[test]
+fn shift_enter_is_disabled_when_multiline_is_off() {
+    let mut app = app();
+    app.tui_config.editor.multiline = false;
+    let keymap = Keymap::default();
+
+    assert!(
+        InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::SHIFT),).is_none()
+    );
+}
+
+#[test]
+fn ctrl_j_has_no_default_binding() {
+    let app = app();
+    let keymap = Keymap::default();
+
+    assert!(
+        InputRouter::route_key(
+            &app,
+            &keymap,
+            key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        )
+        .is_none()
+    );
 }
 
 #[test]
