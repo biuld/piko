@@ -4,6 +4,9 @@
 
 ```mermaid
 flowchart LR
+    subgraph desktop["desktop"]
+        ndesktop_host_process_bridge["desktop.host.process_bridge<br/>ThreadBridge / Process<br/>Unbounded — blocking host stdout reader crosses into the GPUI main loop"]
+    end
     subgraph hostd["hostd"]
         nhostd_prompt_approval_reply["hostd.prompt.approval_reply<br/>Reply / Request<br/>One"]
         nhostd_prompt_interaction_reply["hostd.prompt.interaction_reply<br/>Reply / Request<br/>One"]
@@ -36,6 +39,7 @@ flowchart LR
     ncomponent_AgentRuntime__wait_agent_mailbox["AgentRuntime::wait_agent_mailbox"]
     ncomponent_AgentRuntimeCaller["AgentRuntimeCaller"]
     ncomponent_ApprovalGateway["ApprovalGateway"]
+    ncomponent_DesktopEventLoop["DesktopEventLoop"]
     ncomponent_ExecutionActor["ExecutionActor"]
     ncomponent_ExecutionSupervisor["ExecutionSupervisor"]
     ncomponent_ExecutionTerminalWaiter["ExecutionTerminalWaiter"]
@@ -84,6 +88,8 @@ flowchart LR
     nhostd_prompt_interaction_reply --> ncomponent_UserInteractionGateway
     ncomponent_HostStdoutReaderThread --> ntui_host_process_bridge
     ntui_host_process_bridge --> ncomponent_TuiEventLoop
+    ncomponent_HostStdoutReaderThread --> ndesktop_host_process_bridge
+    ndesktop_host_process_bridge --> ncomponent_DesktopEventLoop
     ncomponent_HostApp --> nhostd_client_output
     ncomponent_HostServerCommandTask --> nhostd_client_output
     nhostd_client_output --> ncomponent_HostTransport

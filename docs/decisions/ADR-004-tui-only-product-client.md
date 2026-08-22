@@ -1,7 +1,8 @@
 # ADR-004: TUI-only first-party client
 
-> Status: Accepted
+> Status: superseded
 > Date: 2026-08-09
+> Superseded by: [ADR-022](ADR-022-desktop-client-reintroduction.md)
 
 ## Context
 

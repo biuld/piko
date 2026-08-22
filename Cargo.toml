@@ -5,6 +5,7 @@ members = [
   "packages/sandbox", "packages/tui", "packages/tui-layout",
   "packages/client-core",
   "packages/session-store",
+  "packages/desktop",
 ]
 resolver = "2"
 

@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     let mut host = HostdClient::spawn(
         args.hostd_command.clone(),
         args.hostd_args.clone(),
-        &host_log,
+        host_log.log_level.as_deref(),
     )?;
 
     let mut terminal = TerminalGuard::enter()?;

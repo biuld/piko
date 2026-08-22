@@ -14,6 +14,16 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-60: Desktop agent workspace](D-60-desktop-agent-workspace.md)
+  implements F-43: the content island becomes a host-backed agent TabGroup,
+  with a workspace toolbar, quiet window chrome, and a redesigned Composer
+  (draft; island TabGroup first, then piko composition).
+- [D-59: Desktop GUI shell](D-59-desktop-gui-shell.md)
+  implements F-42: a two-column desktop shell (floating sidebar, Timeline,
+  bottom-floating Composer) in a new `piko-desktop` crate over island-rs
+  chrome and the client-core projection, with a shared hostd transport
+  extracted into `piko-comms` (Slices 1–6 landed; visual acceptance pending;
+  ADR-022/V-59). Agent switching in the sidebar is superseded by D-60.
 - [D-58: Exact model-visible tool names](D-58-exact-model-tool-names.md)
   extends F-03 platform policy so models describe and invoke only exact names
   from the structured run surface, without invented aliases or absent tools

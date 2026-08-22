@@ -12,7 +12,7 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-001](ADR-001-codex-evidence-prd-first.md) | codex-rs is behavior evidence; PRD-first documentation workflow | accepted |
 | [ADR-002](ADR-002-codex-modeling-reference.md) | codex-rs is a modeling reference, not a parity target; conflicts resolve by discussion + industry best practice | accepted |
 | [ADR-003](ADR-003-protocol-modeling-acp-reference.md) | piko host–client protocol is product-owned; ACP is a modeling reference (not a wire replacement) | accepted |
-| [ADR-004](ADR-004-tui-only-product-client.md) | TUI is piko's only first-party interactive client | accepted |
+| [ADR-004](ADR-004-tui-only-product-client.md) | TUI is piko's only first-party interactive client | superseded by [ADR-022](ADR-022-desktop-client-reintroduction.md) |
 | [ADR-005](ADR-005-execution-authority-containment.md) | Separate execution authorization, enforced containment, and process runtime | accepted |
 | [ADR-006](ADR-006-shared-tui-single-line-dock.md) | Share the TUI single-line dock primitive | accepted |
 | [ADR-007](ADR-007-typed-provider-authentication.md) | Preserve typed provider authentication | accepted; partially superseded |
@@ -28,3 +28,6 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-017](ADR-017-bounded-blocking-session-storage.md) | Use a bounded blocking boundary for session storage | accepted |
 | [ADR-018](ADR-018-tui-prepared-frame-runtime.md) | Make painted TUI frames the pointer geometry authority | accepted |
 | [ADR-019](ADR-019-tui-runtime-authorities.md) | Give TUI runtime state explicit authorities | accepted |
+| [ADR-020](ADR-020-bounded-output-reserve.md) | Context preflight reserves a bounded output allowance | accepted |
+| [ADR-021](ADR-021-respond-first-steer-steps.md) | Steered user messages are answered before further tool work | accepted |
+| [ADR-022](ADR-022-desktop-client-reintroduction.md) | Reintroduce a first-party desktop client on island-rs with shared projections and transport | accepted |

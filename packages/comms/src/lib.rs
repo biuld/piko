@@ -8,6 +8,7 @@
 
 mod catalog;
 mod contract;
+mod host_client;
 mod topology;
 mod wrappers;
 
@@ -16,6 +17,7 @@ pub use contract::{
     CancellationMeaning, CapacityPolicy, ClosureMeaning, CommunicationKind, CommunicationScope,
     CommunicationSpec, DeliveryGuarantee, OverflowPolicy, ValidationError, validate_catalog,
 };
+pub use host_client::{HostLine, HostdClient, decode_host_line};
 pub use topology::{render_json, render_mermaid};
 pub use wrappers::{
     BroadcastReceiver, BroadcastSender, LatestReceiver, LatestSender, MailboxReceiver,

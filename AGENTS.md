@@ -32,6 +32,7 @@ sandbox (leaf)
 | `piko-protocol` | lib | Shared DTOs only. See `packages/protocol/AGENTS.md`. |
 | `piko-tui` | binary | Ratatui product UI over hostd. See `packages/tui/AGENTS.md`. |
 | `piko-tui-layout` | lib | Product-agnostic flex layout + focus generics. See `packages/tui-layout/AGENTS.md`. |
+| `piko-desktop` | binary | macOS GPUI desktop shell over hostd (F-42/D-59); island-rs for reusable chrome, client-core for projections. |
 
 ## Coding conventions
 
@@ -83,6 +84,12 @@ header; a landed PRD supersedes earlier conflicting documents.
 6. Wire types shared across packages → `packages/protocol`
 7. Terminal UI, panels, keybindings, themes, CLI, product compose of layout → `tui` (see `packages/tui/AGENTS.md`)
 8. Terminal flex layout, shell split, modal z-stack, generic focus stack → `tui-layout` (`piko-tui-layout`); product surfaces/recipes remain in `tui`
+9. Product-independent GPUI runtime, layout, focus, chrome, theme, controls,
+   and reusable desktop components → `island-rs`; the piko GUI owns only piko
+   domain IDs and intents, host projections and transport, localization, and
+   product composition. If a second GPUI application could use a component
+   without piko's domain model, implement it in Island rather than privately in
+   piko.
 
 ## Session storage
 

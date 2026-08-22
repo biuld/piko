@@ -264,6 +264,26 @@
     "cancellation": "disconnect_only"
   },
   {
+    "id": "desktop.host.process_bridge",
+    "kind": "thread_bridge",
+    "owner": "HostdClient",
+    "producers": [
+      "HostStdoutReaderThread"
+    ],
+    "consumer": "DesktopEventLoop",
+    "scope": "process",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "unbounded",
+      "value": {
+        "justification": "blocking host stdout reader crosses into the GPUI main loop"
+      }
+    },
+    "overflow": "not_applicable",
+    "closure": "process_exited",
+    "cancellation": "disconnect_only"
+  },
+  {
     "id": "hostd.client.output",
     "kind": "client_output",
     "owner": "HostClientConnection",

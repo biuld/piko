@@ -1,0 +1,2 @@
+{"kind":"command_response","command_id":"desktop-1","result":{"Ok":{"type":"session_listed","sessions":[],"timestamp":1}}}
+{"kind":"command_response","command_id":"desktop-2","result":{"Ok":{"type":"model_listed","providers":[],"timestamp":1}}}
