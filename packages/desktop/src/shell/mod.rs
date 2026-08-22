@@ -2,15 +2,19 @@
 //! Timeline surface (D-59 Slices 1–3).
 
 mod agent_view;
+mod canvas;
 mod composer;
 mod keyboard;
 mod layers;
 mod lifecycle;
+mod pickers;
+mod quote;
 mod rows;
 mod sidebar;
 mod submit;
 mod tabs;
 mod timeline;
+mod tool_body;
 mod view;
 mod workspace;
 
@@ -19,15 +23,15 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AsyncApp, Context, FocusHandle, IntoElement, KeyDownEvent, Render,
-    ScrollHandle, Styled, Subscription, Window, div, px,
+    AnyElement, App, AsyncApp, Context, FocusHandle, FollowMode, IntoElement, KeyDownEvent,
+    ListAlignment, ListState, Render, ScrollHandle, Styled, Subscription, Window, div, px,
 };
 use gpui_base::input::{InputEvent, TextareaState};
 use island::components::list::ListKeyboard;
+use island::components::markdown::MarkdownDocument;
+use island::components::selection::{SelectionGroup, SelectionState};
 use island::platform::material::{MaterialPreference, WindowMaterialHost};
-use island::theme::{
-    RoleAccent, SurfaceRole, TextRole, fill, hairline, highlight, metrics, text, tokens,
-};
+use island::theme::{SurfaceRole, TextRole, fill, hairline, highlight, metrics, text, tokens};
 
 use piko_client_core::{
     ClientIntent, ClientMsg, TransportObservation,
@@ -57,10 +61,18 @@ pub struct Shell {
     selection_error: Option<String>,
     /// Timeline scroll viewport (shell-local; never product-authoritative).
     scroll: ScrollHandle,
+    /// Virtualized timeline rows. Overlay scroll thumbs notify the host view
+    /// every frame; this list only paints visible items.
+    timeline_list: ListState,
+    /// Per-frame resolved row offsets shared with list item callbacks so a
+    /// paint maps payloads for the viewport only (scroll performance).
+    frame_timeline: timeline::FrameTimeline,
+    /// Snapshot behind the open chip-detail layer, if any (F-46).
+    chip_detail: Option<crate::focus::ChipDetail>,
     /// Sidebar viewport, used to keep keyboard navigation visible.
     sidebar_scroll: ScrollHandle,
-    /// A wheel event arrived since the last frame (candidate Reading flip).
-    wheel_seen: bool,
+    /// Avoid rewriting the composer placeholder every paint.
+    composer_placeholder: String,
     /// Narrow-window temporary navigation layer is open.
     narrow_overlay_open: bool,
     sidebar_keyboard: ListKeyboard,
@@ -79,6 +91,9 @@ pub struct Shell {
     last_saved_window: Option<WindowRect>,
     warm_reopen_attempted: bool,
     workspace_cwd: String,
+    selection_group: SelectionGroup,
+    selections: HashMap<String, gpui::Entity<SelectionState>>,
+    markdown_cache: HashMap<String, (String, MarkdownDocument)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,8 +132,28 @@ impl Shell {
             pending_agent: None,
             selection_error: None,
             scroll: ScrollHandle::new(),
+            timeline_list: {
+                let list = ListState::new(0, ListAlignment::Top, px(160.));
+                list.set_follow_mode(FollowMode::Tail);
+                let entity = cx.entity().downgrade();
+                list.set_scroll_handler(move |ev, _, cx| {
+                    let Some(shell) = entity.upgrade() else {
+                        return;
+                    };
+                    let follow = ev.is_following_tail || !ev.is_scrolled;
+                    shell.update(cx, |shell, cx| {
+                        if shell.following() != follow {
+                            shell.view_local().following = follow;
+                            cx.notify();
+                        }
+                    });
+                });
+                list
+            },
+            frame_timeline: timeline::FrameTimeline::empty(0.0),
+            chip_detail: None,
             sidebar_scroll: ScrollHandle::new(),
-            wheel_seen: false,
+            composer_placeholder: String::new(),
             narrow_overlay_open: false,
             sidebar_keyboard: ListKeyboard::new(),
             sidebar_keyboard_focused: None,
@@ -138,6 +173,9 @@ impl Shell {
                 .to_string_lossy()
                 .into_owned(),
             prefs,
+            selection_group: SelectionGroup::new(),
+            selections: HashMap::new(),
+            markdown_cache: HashMap::new(),
             _subscriptions: vec![composer_events],
         };
         match DesktopHostClient::spawn(
@@ -358,9 +396,12 @@ impl Shell {
             .view_key()
             .map(|id| format!("Message {}…", tabs::agent_label(&self.state.core, id)))
             .unwrap_or_else(|| "Message the selected agent…".to_string());
-        self.composer_input.update(cx, |input, cx| {
-            input.set_placeholder(placeholder, window, cx);
-        });
+        if placeholder != self.composer_placeholder {
+            self.composer_placeholder = placeholder.clone();
+            self.composer_input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx);
+            });
+        }
         if let Some(submitted) = self.clear_accepted_draft.take() {
             let current = self.composer_input.read(cx).value().to_string();
             if composer::should_clear_accepted_draft(&current, &submitted) {

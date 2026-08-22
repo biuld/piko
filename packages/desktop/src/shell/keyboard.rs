@@ -103,6 +103,11 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Island context menus own Escape/arrows. Do not stop_propagation so the
+        // menu KEY_CONTEXT can dismiss; TabGroup stays live.
+        if island::components::menu::context_menu_is_open(window, cx) {
+            return;
+        }
         if event.keystroke.key == "escape" {
             if self.layers.active().is_some() {
                 self.close_layer(window, cx);

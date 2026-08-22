@@ -54,6 +54,54 @@ fn tool_ended_clears_partial_json() {
     };
     assert!(tool.partial_json.is_none());
     assert_eq!(tool.status, ToolStatus::Completed);
+    assert_eq!(tool.args, serde_json::Value::String("{".into()));
+}
+
+#[test]
+fn tool_ended_promotes_streamed_json_args() {
+    let mut tl = AgentTimeline::new();
+    tl.apply_tool_arg_chunk("call-1".into(), "{\"cmd\":\"ls\"}", Some("msg".into()));
+    tl.apply_tool_ended(
+        "call-1".into(),
+        "exec_command".into(),
+        serde_json::json!({"ok": true}),
+        false,
+    );
+    let TimelineItem::Tool(tool) = &tl.items()[0] else {
+        panic!("expected tool");
+    };
+    assert_eq!(tool.args, serde_json::json!({"cmd": "ls"}));
+    assert!(tool.partial_json.is_none());
+}
+
+#[test]
+fn committed_tool_call_keeps_exec_cmd_after_result() {
+    let mut tl = AgentTimeline::new();
+    let call = Message::ToolCall {
+        id: "call-1".into(),
+        name: "exec_command".into(),
+        arguments: serde_json::json!({"cmd": "git status"}),
+        model: None,
+        provider: None,
+        timestamp: None,
+    };
+    assert!(tl.apply_committed("msg-call".into(), 1, call, "turn".into()));
+    let result = Message::ToolResult {
+        tool_call_id: "call-1".into(),
+        tool_name: Some("exec_command".into()),
+        content: vec![piko_protocol::ContentBlock::Text {
+            text: r#"{"exit_code":0,"output":"ok"}"#.into(),
+        }],
+        details: None,
+        is_error: Some(false),
+        timestamp: None,
+    };
+    assert!(tl.apply_committed("msg-result".into(), 2, result, "turn".into()));
+    let TimelineItem::Tool(tool) = &tl.items()[0] else {
+        panic!("expected tool");
+    };
+    assert_eq!(tool.tool_name, "exec_command");
+    assert_eq!(tool.args, serde_json::json!({"cmd": "git status"}));
 }
 
 #[test]

@@ -25,41 +25,6 @@ impl Shell {
             })
             .children(
                 match layer {
-                    LayerKind::Model => self
-                        .state
-                        .core
-                        .model
-                        .providers
-                        .iter()
-                        .flat_map(|provider| {
-                            provider.models.iter().map(move |model| {
-                                (
-                                    format!("{} · {}", provider.provider, model.name),
-                                    ClientIntent::SetModel {
-                                        provider: provider.provider.clone(),
-                                        model_id: model.id.clone(),
-                                    },
-                                )
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                    LayerKind::Thinking => [
-                        piko_protocol::ThinkingLevel::Off,
-                        piko_protocol::ThinkingLevel::Minimal,
-                        piko_protocol::ThinkingLevel::Low,
-                        piko_protocol::ThinkingLevel::Medium,
-                        piko_protocol::ThinkingLevel::High,
-                        piko_protocol::ThinkingLevel::XHigh,
-                        piko_protocol::ThinkingLevel::Max,
-                    ]
-                    .into_iter()
-                    .map(|level| {
-                        (
-                            level.as_str().to_string(),
-                            ClientIntent::SetThinkingLevel { level },
-                        )
-                    })
-                    .collect(),
                     LayerKind::Attention => self
                         .state
                         .core
@@ -104,7 +69,7 @@ impl Shell {
                             actions
                         })
                         .unwrap_or_default(),
-                    LayerKind::Settings => Vec::new(),
+                    LayerKind::Settings | LayerKind::ChipDetail => Vec::new(),
                 }
                 .into_iter()
                 .enumerate()
@@ -129,11 +94,15 @@ impl Shell {
                         .child(text(TextRole::Label).child(label))
                 }),
             );
+        let body = if layer == LayerKind::ChipDetail {
+            self.render_chip_detail_body().into_any_element()
+        } else {
+            body.into_any_element()
+        };
         let title = match layer {
-            LayerKind::Model => "Choose model",
-            LayerKind::Thinking => "Choose thinking level",
-            LayerKind::Attention => "Needs attention",
-            LayerKind::Settings => "Settings",
+            LayerKind::Attention => "Needs attention".to_string(),
+            LayerKind::Settings => "Settings".to_string(),
+            LayerKind::ChipDetail => self.chip_detail_title(),
         };
         let entity = cx.entity().downgrade();
         render_overlay_layer_on(
@@ -152,5 +121,106 @@ impl Shell {
                 }
             },
         )
+    }
+
+    /// Chip-detail overlay content (F-46): thinking text snapshot or the
+    /// structured tool body re-resolved from the live projection.
+    fn render_chip_detail_body(&self) -> AnyElement {
+        let m = metrics();
+        match self.chip_detail.as_ref() {
+            Some(crate::focus::ChipDetail::Thinking {
+                text: thinking_text,
+                ..
+            }) => div()
+                .id("piko-chip-thinking")
+                .max_h(px(420.))
+                .overflow_y_scroll()
+                .child(
+                    text(TextRole::BodyMono)
+                        .text_color(tokens().muted_fg_rgba())
+                        .child(thinking_text.clone()),
+                )
+                .into_any_element(),
+            Some(crate::focus::ChipDetail::Tool { call_id, .. }) => {
+                let Some(sections) = self.overlay_tool_sections(call_id) else {
+                    return text(TextRole::Meta)
+                        .text_color(tokens().muted_fg_rgba())
+                        .child("This activity is no longer available.")
+                        .into_any_element();
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(m.space_xs)
+                    .children(sections.iter().map(|(heading, kind)| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(m.space_xs)
+                            .child(
+                                text(TextRole::Label)
+                                    .text_color(tokens().muted_fg_rgba())
+                                    .child(heading.clone()),
+                            )
+                            .child(self.tool_body_section_value(kind))
+                    }))
+                    .into_any_element()
+            }
+            None => text(TextRole::Meta)
+                .text_color(tokens().muted_fg_rgba())
+                .child("Nothing to show.")
+                .into_any_element(),
+        }
+    }
+
+    fn chip_detail_title(&self) -> String {
+        match self.chip_detail.as_ref() {
+            Some(crate::focus::ChipDetail::Thinking { .. }) => "Thinking".to_string(),
+            Some(crate::focus::ChipDetail::Tool { name, status, .. }) => {
+                format!("{name} · {status:?}")
+            }
+            None => "Activity".to_string(),
+        }
+    }
+}
+
+impl Shell {
+    fn tool_body_section_value(&self, kind: &tool_body::ToolBodyKind) -> AnyElement {
+        let m = metrics();
+        let value: AnyElement = match kind {
+            tool_body::ToolBodyKind::PrettyJson(json) => text(TextRole::BodyMono)
+                .text_color(tokens().fg_rgba())
+                .child(json.clone())
+                .into_any_element(),
+            tool_body::ToolBodyKind::Plain(body) => text(TextRole::BodyMono)
+                .text_color(tokens().fg_rgba())
+                .child(body.clone())
+                .into_any_element(),
+            tool_body::ToolBodyKind::KeyRows(rows) => {
+                let mut col = div().flex().flex_col().gap(px(2.));
+                for (key, value) in rows {
+                    col = col.child(
+                        div()
+                            .flex()
+                            .gap(m.space_xs)
+                            .child(
+                                text(TextRole::Label)
+                                    .text_color(tokens().muted_fg_rgba())
+                                    .child(format!("{key}:")),
+                            )
+                            .child(text(TextRole::Body).child(value.clone())),
+                    );
+                }
+                col.into_any_element()
+            }
+        };
+        div()
+            .w_full()
+            .px(m.space_sm)
+            .py(m.space_xs)
+            .rounded(m.radius_xs)
+            .bg(fill(SurfaceRole::Content, self.material))
+            .child(value)
+            .into_any_element()
     }
 }

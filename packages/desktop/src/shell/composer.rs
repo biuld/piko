@@ -2,7 +2,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Entity, InteractiveElement, IntoElement, MouseButton, Window, div, px,
+    AnyElement, App, CursorStyle, Entity, InteractiveElement, IntoElement, MouseButton, Window,
+    div, px,
 };
 use gpui_base::input::{InputEvent, TextareaState};
 use gpui_base::{InputBase, Textarea};
@@ -11,13 +12,16 @@ use island::components::chrome::{
 };
 use island::platform::material::WindowMaterialHost;
 use island::theme::{
-    RoleAccent, SurfaceRole, TextRole, fill, hairline, highlight, metrics, text, tokens,
+    RoleAccent, SurfaceRole, TextRole, concentric_radius, elevation_sm, fill, hairline, highlight,
+    metrics, text, tokens,
 };
 
 pub const MIN_ROWS: usize = 2;
 pub const MAX_ROWS: usize = 8;
 const LINE_HEIGHT: f32 = 21.0;
-const VERTICAL_CHROME: f32 = 64.0;
+/// Outer py 16 + input py 16 + gap 4 + compact_bar 28 + hairline 2.
+const VERTICAL_CHROME: f32 = 66.0;
+/// Wrapper pb (12) + air above the card (12). Vertical only.
 const OUTER_GAP: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,11 +39,19 @@ pub enum ComposerContext {
 /// Conservative footprint used as Timeline trailing padding. The last laid
 /// out input height captures soft wrapping; explicit lines provide a safe
 /// fallback before the first layout.
-pub fn footprint_for_text(text: &str, measured_input_height: f32, return_to_latest: bool) -> f32 {
+pub fn footprint_for_text(
+    text: &str,
+    measured_input_height: f32,
+    measured_card_height: f32,
+) -> f32 {
     let logical_rows = text.lines().count().clamp(MIN_ROWS, MAX_ROWS);
     let input_height = measured_input_height.max(logical_rows as f32 * LINE_HEIGHT);
-    let latest = if return_to_latest { 28.0 } else { 0.0 };
-    input_height + VERTICAL_CHROME + OUTER_GAP + latest
+    let chrome = if measured_card_height > 0.0 {
+        (measured_card_height - measured_input_height).max(0.0)
+    } else {
+        VERTICAL_CHROME
+    };
+    input_height + chrome + OUTER_GAP
 }
 
 pub fn new_input(window: &mut Window, cx: &mut App) -> Entity<TextareaState> {
@@ -98,23 +110,27 @@ impl ComposerView {
             .right_0()
             .flex()
             .justify_center()
-            .px(px(18.))
-            .pb(px(12.))
+            .px(m.space_lg)
+            .pb(m.space_md)
+            .cursor(CursorStyle::IBeam)
             .child(
                 div()
                     .id("piko-composer")
                     .w_full()
-                    .max_w(px(820.))
+                    .max_w(m.reading_width)
                     .flex()
                     .flex_col()
                     .gap(m.space_xs)
                     .px(m.space_sm)
                     .py(m.space_sm)
-                    .rounded_md()
+                    .rounded(m.island_radius)
+                    .overflow_hidden()
+                    .shadow(elevation_sm().box_shadow())
                     .border_1()
                     .border_color(hairline(SurfaceRole::Elevated))
                     .bg(fill(SurfaceRole::Elevated, self.material))
                     .text_color(t.fg_rgba())
+                    .cursor(CursorStyle::IBeam)
                     .when_some(error, |composer, error| {
                         composer.child(
                             text(TextRole::Meta)
@@ -128,13 +144,11 @@ impl ComposerView {
                             .min_h(px(MIN_ROWS as f32 * LINE_HEIGHT))
                             .max_h(px(MAX_ROWS as f32 * LINE_HEIGHT + 12.0))
                             .px(m.space_sm)
-                            .py(px(6.))
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(hairline(SurfaceRole::Content))
+                            .py(px(8.))
+                            .rounded(concentric_radius(m.island_radius, m.space_sm))
                             .bg(fill(SurfaceRole::Content, self.material))
                             .text_color(t.fg_rgba())
-                            .overflow_hidden()
+                            .cursor(CursorStyle::IBeam)
                             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                 input_for_focus.update(cx, |state, cx| state.focus(window, cx));
                             })
@@ -207,7 +221,7 @@ fn action_button(label: &'static str, enabled: bool, action: ComposerAction) -> 
         .id(label)
         .px(m.space_sm)
         .py(px(3.))
-        .rounded_sm()
+        .rounded(concentric_radius(m.island_radius, m.space_sm))
         .border_1()
         .border_color(hairline(SurfaceRole::Chrome))
         .text_color(if enabled {
@@ -229,21 +243,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn footprint_grows_then_clamps_and_reserves_latest_action() {
-        let short = footprint_for_text("one", 0.0, false);
-        let four = footprint_for_text("1\n2\n3\n4", 0.0, false);
-        let many = footprint_for_text(&["x"; 20].join("\n"), 0.0, false);
-        let eight = footprint_for_text(&["x"; MAX_ROWS].join("\n"), 0.0, false);
+    fn two_row_identity_is_one_hundred_thirty_two() {
+        assert_eq!(footprint_for_text("one", 0.0, 0.0), 132.0);
+    }
+
+    #[test]
+    fn footprint_grows_then_clamps() {
+        let short = footprint_for_text("one", 0.0, 0.0);
+        let four = footprint_for_text("1\n2\n3\n4", 0.0, 0.0);
+        let many = footprint_for_text(&["x"; 20].join("\n"), 0.0, 0.0);
+        let eight = footprint_for_text(&["x"; MAX_ROWS].join("\n"), 0.0, 0.0);
         assert!(four > short);
         assert_eq!(many, eight);
-        assert_eq!(footprint_for_text("one", 0.0, true), short + 28.0);
     }
 
     #[test]
     fn measured_soft_wrap_height_expands_timeline_clearance() {
-        let logical_only = footprint_for_text("one very long logical line", 0.0, false);
-        let wrapped = footprint_for_text("one very long logical line", 150.0, false);
+        let logical_only = footprint_for_text("one very long logical line", 0.0, 0.0);
+        let wrapped = footprint_for_text("one very long logical line", 150.0, 0.0);
         assert!(wrapped > logical_only);
+    }
+
+    #[test]
+    fn measured_card_overrides_fallback_chrome() {
+        let fallback = footprint_for_text("one", 42.0, 0.0);
+        let measured = footprint_for_text("one", 42.0, 120.0);
+        assert_eq!(fallback, 42.0 + 66.0 + 24.0);
+        assert_eq!(measured, 42.0 + (120.0 - 42.0) + 24.0);
     }
 
     #[test]

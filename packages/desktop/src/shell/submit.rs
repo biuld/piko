@@ -5,7 +5,10 @@ use std::collections::HashSet;
 use super::*;
 
 impl Shell {
-    pub(super) fn submit_composer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn submit_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if island::components::menu::context_menu_is_open(window, cx) {
+            return;
+        }
         if self.state.connection != DesktopConnection::Live
             || self.state.core.session_phase != SessionPhase::Live
             || self.pending_agent.is_some()

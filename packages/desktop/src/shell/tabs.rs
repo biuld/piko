@@ -22,7 +22,7 @@ pub fn tab_items(core: &ClientState, pending_agent: Option<&str>) -> Vec<TabItem
         let Some(id) = view_key(pending_agent, session.selected_agent.as_deref()) else {
             return Vec::new();
         };
-        return vec![TabItem::new(id.to_string(), "Main").tooltip(id.to_string())];
+        return vec![TabItem::new(id.to_string(), "Main")];
     }
     let view = view_key(pending_agent, session.selected_agent.as_deref());
     let labels = display_labels(session);
@@ -32,7 +32,6 @@ pub fn tab_items(core: &ClientState, pending_agent: Option<&str>) -> Vec<TabItem
         .enumerate()
         .map(|(index, agent)| {
             let label = labels[index].clone();
-            let tooltip = format!("{label} · {}", agent.agent_instance_id);
             let muted = matches!(
                 agent.lifecycle,
                 AgentInstanceLifecycle::Closed
@@ -43,7 +42,6 @@ pub fn tab_items(core: &ClientState, pending_agent: Option<&str>) -> Vec<TabItem
             TabItem::new(agent.agent_instance_id.clone(), label)
                 .badge(tab_badge(core, &agent.agent_instance_id, selected))
                 .muted(muted)
-                .tooltip(tooltip)
         })
         .collect()
 }
@@ -90,6 +88,30 @@ pub fn truncate_chrome_label(label: &str, max_chars: usize) -> String {
         let mut cut: String = label.chars().take(max_chars).collect();
         cut.push('…');
         cut
+    }
+}
+
+/// Last path segment of a model id, truncated for a chrome picker capsule.
+pub fn model_chrome_label(model_id: &str) -> String {
+    let base = model_id
+        .rsplit(['/', ':'])
+        .next()
+        .filter(|part| !part.is_empty())
+        .unwrap_or(model_id);
+    truncate_chrome_label(base, 16)
+}
+
+/// Title-case thinking level for a chrome picker capsule.
+pub fn thinking_chrome_label(level: &str) -> String {
+    match level {
+        "off" => "Off".into(),
+        "minimal" => "Minimal".into(),
+        "low" => "Low".into(),
+        "medium" => "Medium".into(),
+        "high" => "High".into(),
+        "xhigh" => "Extra high".into(),
+        "max" => "Max".into(),
+        other => truncate_chrome_label(other, 12),
     }
 }
 
@@ -194,6 +216,24 @@ mod tests {
         let items = tab_items(&core, None);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "root");
+        assert_eq!(items[0].label.as_ref(), "Main");
+        assert!(items[0].tooltip.is_none());
+    }
+
+    #[test]
+    fn unique_agent_names_do_not_put_instance_ids_in_tooltips() {
+        let mut core = ClientState::default();
+        core.session_phase = SessionPhase::Live;
+        let mut session = piko_client_core::LiveSession {
+            session_id: "s1".into(),
+            selected_agent: Some("agent_aaaaaaaa_root".into()),
+            ..piko_client_core::LiveSession::default()
+        };
+        session.agents = vec![agent("agent_aaaaaaaa_root", "Main")];
+        core.live_session = Some(session);
+        let items = tab_items(&core, None);
+        assert_eq!(items[0].label.as_ref(), "Main");
+        assert!(items[0].tooltip.is_none());
     }
 
     #[test]
@@ -225,5 +265,21 @@ mod tests {
         let long = truncate_chrome_label("deepseek-v4-flash-vision-exp", 22);
         assert_eq!(long.chars().count(), 23);
         assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn model_chrome_label_uses_last_segment() {
+        assert_eq!(
+            model_chrome_label("deepseek/deepseek-v4-flash-vision-exp"),
+            "deepseek-v4-flas…"
+        );
+        assert_eq!(model_chrome_label("gpt-4.1"), "gpt-4.1");
+    }
+
+    #[test]
+    fn thinking_chrome_label_is_title_case() {
+        assert_eq!(thinking_chrome_label("high"), "High");
+        assert_eq!(thinking_chrome_label("xhigh"), "Extra high");
+        assert_eq!(thinking_chrome_label("off"), "Off");
     }
 }

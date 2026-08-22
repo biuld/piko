@@ -189,6 +189,7 @@ fn agent_view_message_from_entry(
             match &message.message {
                 crate::api::Message::User { .. }
                 | crate::api::Message::Assistant { .. }
+                | crate::api::Message::ToolCall { .. }
                 | crate::api::Message::ToolResult { .. } => Some((
                     message.agent_id.clone(),
                     ServerMessage::TranscriptCommitted(piko_protocol::TranscriptCommittedEvent {

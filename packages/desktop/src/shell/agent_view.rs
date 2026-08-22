@@ -1,8 +1,9 @@
 //! Per-tab presentation state: follow, scroll, composer error (F-43 PR 5).
 
-use gpui::point;
-
+use super::canvas::BlockExpandPref;
 use super::*;
+use gpui::FollowMode;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct AgentViewLocal {
@@ -10,6 +11,7 @@ pub struct AgentViewLocal {
     pub last_scroll_y: f32,
     pub composer_error: Option<String>,
     pub pending_submission: Option<composer::PendingSubmission>,
+    pub block_expand: HashMap<String, BlockExpandPref>,
 }
 
 impl Default for AgentViewLocal {
@@ -19,6 +21,7 @@ impl Default for AgentViewLocal {
             last_scroll_y: 0.0,
             composer_error: None,
             pending_submission: None,
+            block_expand: HashMap::new(),
         }
     }
 }
@@ -60,13 +63,7 @@ impl Shell {
         }
         let incoming = self.views.entry(next_key.to_string()).or_default().clone();
         if incoming.following {
-            self.scroll.scroll_to_bottom();
-        } else {
-            let max = f32::from(self.scroll.max_offset().y);
-            if max > 0.0 {
-                self.scroll
-                    .set_offset(point(px(0.), px(incoming.last_scroll_y)));
-            }
+            self.timeline_list.set_follow_mode(FollowMode::Tail);
         }
     }
 }

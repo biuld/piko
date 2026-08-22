@@ -1,6 +1,19 @@
 //! Product focus ownership and temporary-layer policy.
 
 use island::components::overlay::OverlayHost;
+use piko_client_core::timeline::ToolStatus;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ChipDetail {
+    /// Full thinking text captured when the chip was clicked.
+    Thinking { segment_id: String, text: String },
+    /// Tool identity; payloads re-resolve from the projection on paint.
+    Tool {
+        call_id: String,
+        name: String,
+        status: ToolStatus,
+    },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusOwner {
@@ -23,10 +36,9 @@ impl FocusOwner {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerKind {
-    Model,
-    Thinking,
     Attention,
     Settings,
+    ChipDetail,
 }
 
 #[derive(Debug, Default)]
@@ -62,8 +74,8 @@ mod tests {
     #[test]
     fn close_restores_the_initiating_surface() {
         let mut layers = TemporaryLayers::default();
-        layers.open(LayerKind::Model, FocusOwner::Composer);
-        assert_eq!(layers.active(), Some(LayerKind::Model));
+        layers.open(LayerKind::Settings, FocusOwner::Composer);
+        assert_eq!(layers.active(), Some(LayerKind::Settings));
         assert_eq!(layers.close(), Some(FocusOwner::Composer));
         assert_eq!(layers.active(), None);
     }
@@ -76,9 +88,9 @@ mod tests {
     #[test]
     fn replacing_a_layer_keeps_the_original_restore_owner() {
         let mut layers = TemporaryLayers::default();
-        layers.open(LayerKind::Model, FocusOwner::Timeline);
-        layers.open(LayerKind::Thinking, FocusOwner::Composer);
-        assert_eq!(layers.active(), Some(LayerKind::Thinking));
+        layers.open(LayerKind::Settings, FocusOwner::Timeline);
+        layers.open(LayerKind::Attention, FocusOwner::Composer);
+        assert_eq!(layers.active(), Some(LayerKind::Attention));
         assert_eq!(layers.close(), Some(FocusOwner::Timeline));
     }
 

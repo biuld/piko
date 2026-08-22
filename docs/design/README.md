@@ -14,6 +14,15 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-63: Assistant turn chips](D-63-assistant-turn-chips.md)
+  implements F-46: grouped turn rows with ActivityChip flows and a
+  chip-detail overlay (amends D-62 presentation)
+- [D-62: Timeline conversation blocks](D-62-timeline-conversation-blocks.md)
+  implements F-45: island `ConversationBlock` plus piko mapping (hug user
+  chips, collapsible thinking/tool, Copy/Quote).
+- [D-61: Conversation canvas presentation](D-61-conversation-canvas-presentation.md)
+  implements F-44: Tahoe Timeline/Composer/picker presentation (soft
+  scroll-edge fade, content-layer rows, anchored model/thinking menus).
 - [D-60: Desktop agent workspace](D-60-desktop-agent-workspace.md)
   implements F-43: the content island becomes a host-backed agent TabGroup,
   with a workspace toolbar, quiet window chrome, and a redesigned Composer

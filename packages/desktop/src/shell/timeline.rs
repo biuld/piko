@@ -1,10 +1,18 @@
 //! Timeline surface: target-keyed states derived from the client-core
-//! projection (D-59 Slice 2).
+//! projection (D-59 Slice 2). One assistant turn maps to a single bubble row
+//! whose segments preserve chronological order (F-46 / D-63).
+
+#[cfg(test)]
+mod tests;
+
+pub mod frame;
+
+pub use self::frame::{FrameTimeline, frame_timeline, rows_around};
 
 use piko_client_core::{
     ClientState,
-    state::{PendingOp, SessionPhase},
-    timeline::{RealtimeContentKind, TimelineItem, ToolStatus},
+    state::SessionPhase,
+    timeline::{AgentTimeline, RealtimeContentKind, TimelineItem, ToolItem, ToolStatus},
 };
 use piko_protocol::{ContentBlock, Message, MessageContent, session::SessionTreeEntry};
 
@@ -16,11 +24,21 @@ pub enum TimelineState {
     Loading,
     Error(String),
     Empty,
-    Ready(Vec<TimelineRow>),
+    /// Rows exist; payloads read on demand via [`rows_around`].
+    Ready,
 }
 
-/// One presentation row mapped from a normalized client-core item.
-#[derive(Debug, PartialEq)]
+/// Coarse visual taxonomy used for inter-row rhythm (`row_gap_before`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowKind {
+    User,
+    Assistant,
+    System,
+}
+
+/// One presentation row. An assistant turn (thinking/tool/text interleaved)
+/// collapses into a single bubble row whose segments stay in time order.
+#[derive(Debug, Clone, PartialEq)]
 pub enum TimelineRow {
     User {
         id: String,
@@ -28,18 +46,7 @@ pub enum TimelineRow {
     },
     Assistant {
         id: String,
-        text: String,
-    },
-    Thinking {
-        id: String,
-        text: String,
-    },
-    Tool {
-        id: String,
-        name: String,
-        detail: String,
-        running: bool,
-        failed: bool,
+        segments: Vec<TurnSegment>,
     },
     System {
         id: String,
@@ -47,176 +54,313 @@ pub enum TimelineRow {
     },
 }
 
+/// Chronological piece of an assistant turn (F-46).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TurnSegment {
+    /// Activity chip; `active` drives the spinner on the live draft tail.
+    Thinking {
+        id: String,
+        text: String,
+        active: bool,
+    },
+    /// Activity chip; body resolves into the detail overlay on demand.
+    Tool {
+        id: String,
+        name: String,
+        status: ToolStatus,
+    },
+    /// Markdown response text; `caret` marks the streaming tail.
+    Text {
+        id: String,
+        text: String,
+        caret: bool,
+    },
+}
+
 impl TimelineRow {
     pub fn id(&self) -> &str {
         match self {
-            Self::User { id, .. }
-            | Self::Assistant { id, .. }
-            | Self::Thinking { id, .. }
-            | Self::Tool { id, .. }
-            | Self::System { id, .. } => id,
+            Self::User { id, .. } | Self::Assistant { id, .. } | Self::System { id, .. } => id,
         }
     }
 }
 
-/// Derive the presentation state for the selected agent from the sole host
-/// projection.
-pub fn timeline_state(core: &ClientState) -> TimelineState {
-    match core.session_phase {
-        SessionPhase::IdleNoSession => {
-            return session_load_error(core).unwrap_or(TimelineState::NoSession);
-        }
-        SessionPhase::OpeningOrCreating { .. } | SessionPhase::Hydrating { .. } => {
-            return TimelineState::Loading;
-        }
-        SessionPhase::Live => {}
+pub fn row_kind(row: &TimelineRow) -> RowKind {
+    match row {
+        TimelineRow::User { .. } => RowKind::User,
+        TimelineRow::Assistant { .. } => RowKind::Assistant,
+        TimelineRow::System { .. } => RowKind::System,
     }
-    let Some(session) = core.live_session.as_ref() else {
-        return TimelineState::Loading;
-    };
-    let Some(selected) = session.selected_agent.as_ref() else {
-        return TimelineState::Empty;
-    };
-    let Some(timeline) = session.timelines.get(selected) else {
-        return TimelineState::Empty;
-    };
-    let mut rows = Vec::new();
-    for item in timeline.items() {
-        rows.extend(map_item(item));
+}
+
+/// The selected agent's live timeline, when one is projected.
+pub(super) fn selected_timeline(core: &ClientState) -> Option<&AgentTimeline> {
+    if core.session_phase != SessionPhase::Live {
+        return None;
     }
-    if rows.is_empty() {
-        TimelineState::Empty
-    } else {
-        TimelineState::Ready(rows)
-    }
+    let session = core.live_session.as_ref()?;
+    let selected = session.selected_agent.as_ref()?;
+    session.timelines.get(selected)
+}
+
+/// Resolve a tool item by call id for chip labels and detail overlays.
+pub fn find_tool<'a>(core: &'a ClientState, call_id: &str) -> Option<&'a ToolItem> {
+    let timeline = selected_timeline(core)?;
+    timeline.items().iter().find_map(|item| match item {
+        TimelineItem::Tool(tool) if tool.tool_call_id == call_id => Some(tool.as_ref()),
+        _ => None,
+    })
+}
+
+/// Joined plain text of a tool's streamed/committed result blocks.
+pub fn tool_result_text(tool: &ToolItem) -> String {
+    tool.result_content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn session_load_error(core: &ClientState) -> Option<TimelineState> {
     core.command_failures.iter().rev().find_map(|failure| {
         matches!(
             failure.operation,
-            PendingOp::Open { .. } | PendingOp::Create
+            piko_client_core::state::PendingOp::Open { .. }
+                | piko_client_core::state::PendingOp::Create
         )
         .then(|| TimelineState::Error(failure.message.clone()))
     })
 }
 
-fn map_item(item: &TimelineItem) -> Vec<TimelineRow> {
-    match item {
-        TimelineItem::Committed(committed) => {
-            message_rows(&committed.message, &committed.message_id)
+pub(super) fn load_error_state(core: &ClientState) -> TimelineState {
+    session_load_error(core).unwrap_or(TimelineState::NoSession)
+}
+
+/// Assistant-side items group into one bubble; anything else stands alone.
+pub(super) fn groups_items(items: &[TimelineItem]) -> Vec<(usize, usize)> {
+    fn assistant_side(item: &TimelineItem) -> bool {
+        match item {
+            TimelineItem::RealtimeDraft(_) | TimelineItem::Tool(_) => true,
+            TimelineItem::Committed(committed) => {
+                matches!(committed.message, Message::Assistant { .. })
+            }
+            _ => false,
         }
-        TimelineItem::RealtimeDraft(draft) => draft_rows(draft),
-        TimelineItem::Tool(tool) => vec![tool_row(
-            tool.tool_call_id.clone(),
-            &tool.tool_name,
-            tool_args_preview(Some(&tool.args), tool.partial_json.as_deref()),
-            tool.status == ToolStatus::Running,
-            matches!(tool.status, ToolStatus::Failed | ToolStatus::Cancelled),
-        )],
-        TimelineItem::SessionEntry(entry) => entry_rows(
-            &entry.entry,
-            format!("session-entry-{}", entry.branch_order),
-        ),
+    }
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let extend = match groups.last_mut() {
+            // Extend only when BOTH neighbours are assistant-side; otherwise
+            // a user/system item would be absorbed into the next turn.
+            Some((_, end))
+                if assistant_side(item)
+                    && *end == index
+                    && index > 0
+                    && assistant_side(&items[index - 1]) =>
+            {
+                *end = index + 1;
+                true
+            }
+            _ => false,
+        };
+        if !extend {
+            groups.push((index, index + 1));
+        }
+    }
+    groups
+}
+
+/// Map one contiguous item run into its presentation row.
+pub(super) fn map_group(items: &[TimelineItem], range: (usize, usize)) -> Option<TimelineRow> {
+    let slice = items.get(range.0..range.1)?;
+    match slice.first()? {
+        TimelineItem::Committed(committed) => match &committed.message {
+            Message::User { content, .. } => Some(TimelineRow::User {
+                id: format!("{}-user", committed.message_id),
+                text: content_text(content),
+            }),
+            Message::Context { .. } => Some(TimelineRow::System {
+                id: format!("{}-context", committed.message_id),
+                label: "context".to_string(),
+            }),
+            _ => Some(assistant_row(slice, &committed.message_id)),
+        },
+        TimelineItem::RealtimeDraft(draft) => Some(assistant_row(slice, &draft.message_id)),
+        TimelineItem::Tool(_) | TimelineItem::SessionEntry(_) => first_single(slice),
     }
 }
 
-fn message_rows(message: &Message, id: &str) -> Vec<TimelineRow> {
-    match message {
-        Message::User { content, .. } => vec![TimelineRow::User {
-            id: format!("{id}-user"),
-            text: content_text(content),
-        }],
-        Message::Assistant { content, .. } => assistant_rows(content, id),
-        Message::Context { .. } => vec![TimelineRow::System {
-            id: format!("{id}-context"),
-            label: "context".to_string(),
-        }],
-        Message::ToolCall {
-            name, arguments, ..
-        } => vec![tool_row(
-            format!("{id}-tool"),
-            name,
-            tool_args_preview(Some(arguments), None),
-            false,
-            false,
-        )],
-        _ => Vec::new(),
+fn first_single(slice: &[TimelineItem]) -> Option<TimelineRow> {
+    match slice.first()? {
+        TimelineItem::Tool(tool) => Some(TimelineRow::Assistant {
+            id: tool.tool_call_id.clone(),
+            segments: vec![TurnSegment::Tool {
+                id: tool.tool_call_id.clone(),
+                name: tool.tool_name.clone(),
+                status: tool.status,
+            }],
+        }),
+        TimelineItem::SessionEntry(entry) => {
+            entry_label(&entry.entry).map(|label| TimelineRow::System {
+                id: format!("session-entry-{}", entry.branch_order),
+                label,
+            })
+        }
+        _ => None,
     }
 }
 
-fn assistant_rows(blocks: &[ContentBlock], id: &str) -> Vec<TimelineRow> {
-    let mut thinking = String::new();
-    let mut text = String::new();
-    for block in blocks {
-        match block {
-            ContentBlock::Thinking { thinking: t, .. } => {
-                if !thinking.is_empty() {
-                    thinking.push('\n');
+/// Merge an assistant-side run into chronological segments. Adjacent
+/// same-kind pieces merge only within one source message. Streaming flags
+/// land on the live draft's tail when it ends the run.
+fn assistant_row(slice: &[TimelineItem], fallback_id: &str) -> TimelineRow {
+    let mut segments: Vec<TurnSegment> = Vec::new();
+    for item in slice {
+        match item {
+            TimelineItem::Committed(committed) => {
+                if let Message::Assistant { content, .. } = &committed.message {
+                    push_message_segments(&mut segments, &committed.message_id, content);
                 }
-                thinking.push_str(t);
             }
-            ContentBlock::Text { text: t } => {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(t);
+            TimelineItem::RealtimeDraft(draft) => {
+                push_draft_segments(&mut segments, draft);
             }
+            TimelineItem::Tool(tool) => segments.push(TurnSegment::Tool {
+                id: tool.tool_call_id.clone(),
+                name: tool.tool_name.clone(),
+                status: tool.status,
+            }),
             _ => {}
         }
     }
-    let mut rows = Vec::new();
-    if !thinking.is_empty() {
-        rows.push(TimelineRow::Thinking {
-            id: format!("{id}-thinking"),
-            text: thinking,
-        });
+    // Live draft tail drives spinner / caret. Only when the draft ends the
+    // run: later tools own their own spinners meanwhile.
+    if let Some(TimelineItem::RealtimeDraft(draft)) = slice.last() {
+        mark_draft_tail(&mut segments, draft);
     }
-    if !text.is_empty() {
-        rows.push(TimelineRow::Assistant {
-            id: format!("{id}-text"),
-            text,
-        });
+    TimelineRow::Assistant {
+        id: format!("{fallback_id}-turn"),
+        segments,
     }
-    rows
 }
 
-fn draft_rows(draft: &piko_client_core::RealtimeDraft) -> Vec<TimelineRow> {
-    let mut thinking = String::new();
-    let mut text = String::new();
-    for segment in &draft.content_segments {
-        let target = match segment.kind {
-            RealtimeContentKind::Text => &mut text,
-            RealtimeContentKind::Thinking => &mut thinking,
-        };
-        if !target.is_empty() {
-            target.push('\n');
+fn push_message_segments(segments: &mut Vec<TurnSegment>, base: &str, blocks: &[ContentBlock]) {
+    for block in blocks {
+        match block {
+            ContentBlock::Thinking { thinking, .. } => push_kind(
+                segments,
+                base,
+                TurnSegment::Thinking {
+                    id: seg_id(base, segments.len()),
+                    text: thinking.clone(),
+                    active: false,
+                },
+            ),
+            ContentBlock::Text { text } => push_kind(
+                segments,
+                base,
+                TurnSegment::Text {
+                    id: seg_id(base, segments.len()),
+                    text: text.clone(),
+                    caret: false,
+                },
+            ),
+            _ => {}
         }
-        target.push_str(&segment.text);
     }
-    let mut rows = Vec::new();
-    if !thinking.is_empty() {
-        rows.push(TimelineRow::Thinking {
-            id: format!("{}-thinking", draft.message_id),
-            text: thinking,
-        });
-    }
-    if !text.is_empty() {
-        rows.push(TimelineRow::Assistant {
-            id: format!("{}-text", draft.message_id),
-            text,
-        });
-    }
-    rows
 }
 
-fn tool_row(id: String, name: &str, detail: String, running: bool, failed: bool) -> TimelineRow {
-    TimelineRow::Tool {
-        id,
-        name: name.to_string(),
-        detail,
-        running,
-        failed,
+fn push_draft_segments(segments: &mut Vec<TurnSegment>, draft: &piko_client_core::RealtimeDraft) {
+    let base = draft.message_id.clone();
+    for segment in &draft.content_segments {
+        let kind = segment.kind;
+        let text = segment.text.clone();
+        let next = match kind {
+            RealtimeContentKind::Thinking => TurnSegment::Thinking {
+                id: seg_id(&base, segments.len()),
+                text,
+                active: false,
+            },
+            RealtimeContentKind::Text => TurnSegment::Text {
+                id: seg_id(&base, segments.len()),
+                text,
+                caret: false,
+            },
+        };
+        push_kind(segments, &base, next);
+    }
+}
+
+/// Merge into the previous segment only when it is the same kind from the
+/// same source message; ids stay anchored to the first merged piece.
+fn push_kind(segments: &mut Vec<TurnSegment>, base: &str, next: TurnSegment) {
+    let merge = segments.last().is_some_and(|previous| {
+        same_source(previous.id(), base)
+            && matches!(
+                (previous, &next),
+                (TurnSegment::Thinking { .. }, TurnSegment::Thinking { .. })
+                    | (TurnSegment::Text { .. }, TurnSegment::Text { .. })
+            )
+    });
+    if merge {
+        match (segments.last_mut().unwrap(), next) {
+            (TurnSegment::Thinking { text, .. }, TurnSegment::Thinking { text: more, .. }) => {
+                text.push('\n');
+                text.push_str(&more);
+            }
+            (TurnSegment::Text { text, .. }, TurnSegment::Text { text: more, .. }) => {
+                text.push('\n');
+                text.push_str(&more);
+            }
+            _ => unreachable!(),
+        }
+    } else {
+        segments.push(next);
+    }
+}
+
+/// Segment ids are `{message-id}-s{n}`; a shared prefix binds them to one
+/// source message.
+fn same_source(id: &str, base: &str) -> bool {
+    id.strip_prefix(base)
+        .is_some_and(|rest| rest.starts_with('-'))
+}
+
+/// Point the streaming flags at the live draft's final segment.
+fn mark_draft_tail(segments: &mut [TurnSegment], draft: &piko_client_core::RealtimeDraft) {
+    let base = draft.message_id.as_str();
+    let last = segments
+        .iter()
+        .rposition(|segment| segment.id().starts_with(&format!("{base}-")));
+    let Some(index) = last else {
+        return;
+    };
+    match &mut segments[index] {
+        TurnSegment::Thinking { active, .. } => *active = true,
+        TurnSegment::Text { caret, .. } => *caret = true,
+        TurnSegment::Tool { .. } => {}
+    }
+}
+
+fn seg_id(base: &str, index: usize) -> String {
+    format!("{base}-s{index}")
+}
+
+impl TurnSegment {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Thinking { id, .. } | Self::Tool { id, .. } | Self::Text { id, .. } => id,
+        }
+    }
+
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Thinking { text, .. } | Self::Text { text, .. } => Some(text),
+            Self::Tool { .. } => None,
+        }
     }
 }
 
@@ -231,12 +375,6 @@ fn entry_label(entry: &SessionTreeEntry) -> Option<String> {
     }
 }
 
-fn entry_rows(entry: &SessionTreeEntry, id: String) -> Vec<TimelineRow> {
-    entry_label(entry)
-        .map(|label| vec![TimelineRow::System { id, label }])
-        .unwrap_or_default()
-}
-
 fn content_text(content: &MessageContent) -> String {
     match content {
         MessageContent::String(text) => text.clone(),
@@ -248,178 +386,5 @@ fn content_text(content: &MessageContent) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n"),
-    }
-}
-
-const ARGS_PREVIEW_LIMIT: usize = 160;
-
-fn tool_args_preview(args: Option<&serde_json::Value>, partial_json: Option<&str>) -> String {
-    let raw = args
-        .map(|args| args.to_string())
-        .or_else(|| partial_json.map(str::to_string))
-        .unwrap_or_default();
-    truncate_summary(&raw, ARGS_PREVIEW_LIMIT)
-}
-
-fn truncate_summary(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        text.to_string()
-    } else {
-        let mut cut: String = text.chars().take(limit).collect();
-        cut.push('…');
-        cut
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use piko_client_core::timeline::AgentTimeline;
-
-    fn state_with(timeline: AgentTimeline) -> ClientState {
-        let mut core = ClientState::default();
-        core.session_phase = piko_client_core::state::SessionPhase::Live;
-        let mut session = piko_client_core::LiveSession {
-            selected_agent: Some("agent-1".to_string()),
-            ..piko_client_core::LiveSession::default()
-        };
-        session.timelines.insert("agent-1".to_string(), timeline);
-        core.live_session = Some(session);
-        core
-    }
-
-    #[test]
-    fn no_session_when_idle() {
-        assert_eq!(
-            timeline_state(&ClientState::default()),
-            TimelineState::NoSession
-        );
-    }
-
-    #[test]
-    fn open_failure_is_an_error_not_an_empty_session() {
-        let mut core = ClientState::default();
-        core.command_failures
-            .push(piko_client_core::state::CommandFailure {
-                command_id: "desktop-1".to_string(),
-                operation: PendingOp::Open {
-                    session_id: "s1".to_string(),
-                },
-                message: "session journal unreadable".to_string(),
-            });
-        assert_eq!(
-            timeline_state(&core),
-            TimelineState::Error("session journal unreadable".to_string())
-        );
-    }
-
-    #[test]
-    fn loading_during_hydration() {
-        let mut core = ClientState::default();
-        core.session_phase = SessionPhase::Hydrating {
-            target_id: "s1".to_string(),
-        };
-        assert_eq!(timeline_state(&core), TimelineState::Loading);
-    }
-
-    #[test]
-    fn empty_when_live_without_items() {
-        assert_eq!(
-            timeline_state(&state_with(AgentTimeline::new())),
-            TimelineState::Empty
-        );
-    }
-
-    #[test]
-    fn ready_maps_committed_user_and_assistant() {
-        let mut timeline = AgentTimeline::new();
-        timeline.apply_committed(
-            "m1".to_string(),
-            1,
-            Message::User {
-                content: MessageContent::String("hello".to_string()),
-                timestamp: None,
-            },
-            "turn-1".to_string(),
-        );
-        timeline.apply_committed(
-            "m2".to_string(),
-            2,
-            Message::Assistant {
-                content: vec![
-                    ContentBlock::Thinking {
-                        thinking: "hmm".to_string(),
-                        thinking_signature: None,
-                    },
-                    ContentBlock::Text {
-                        text: "hi there".to_string(),
-                    },
-                ],
-                checkpoint: None,
-                provider: "deepseek".to_string(),
-                model: "v4".to_string(),
-                usage: None,
-                stop_reason: None,
-                error_message: None,
-                timestamp: None,
-            },
-            "turn-1".to_string(),
-        );
-        match timeline_state(&state_with(timeline)) {
-            TimelineState::Ready(rows) => {
-                assert!(matches!(&rows[..], [
-                    TimelineRow::User { text: user, .. },
-                    TimelineRow::Thinking { text: th, .. },
-                    TimelineRow::Assistant { text: assistant, .. }
-                ] if user == "hello" && th == "hmm" && assistant == "hi there"));
-            }
-            other => panic!("expected ready state, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn system_entries_render_labels_and_unknown_messages_are_skipped() {
-        let rows = message_rows(
-            &Message::Context {
-                content: MessageContent::String("data".to_string()),
-                trust: piko_protocol::ContentTrust::Trusted,
-                source: piko_protocol::PromptSource::new("test", "timeline"),
-                timestamp: None,
-            },
-            "m1",
-        );
-        match &rows[..] {
-            [TimelineRow::System { label, .. }] => assert_eq!(label, "context"),
-            other => panic!("unexpected rows {other:?}"),
-        }
-    }
-
-    #[test]
-    fn long_tool_arguments_are_truncated_with_ellipsis() {
-        let preview = truncate_summary(&"x".repeat(200), ARGS_PREVIEW_LIMIT);
-        assert_eq!(preview.chars().count(), ARGS_PREVIEW_LIMIT + 1);
-        assert!(preview.ends_with('…'));
-    }
-
-    #[test]
-    fn realtime_and_committed_assistant_rows_keep_message_identity() {
-        let draft = piko_client_core::RealtimeDraft {
-            message_id: "m1".to_string(),
-            last_delta_seq: 1,
-            content_segments: vec![piko_client_core::RealtimeContentSegment {
-                kind: RealtimeContentKind::Text,
-                content_index: 0,
-                text: "streaming".to_string(),
-            }],
-            live_order: 1,
-        };
-        let realtime = draft_rows(&draft);
-        let committed = assistant_rows(
-            &[ContentBlock::Text {
-                text: "complete".to_string(),
-            }],
-            "m1",
-        );
-        assert_eq!(realtime[0].id(), committed[0].id());
     }
 }

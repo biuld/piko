@@ -110,6 +110,7 @@ impl AgentTimeline {
             ToolStatus::Completed
         };
         if let Some(&idx) = self.tool_ids.get(&tool_call_id) {
+            let recovered = self.committed_tool_args(&tool_call_id);
             if let TimelineItem::Tool(tool) = &mut self.items[idx] {
                 if let Some(name) = tool_name.filter(|name| !name.is_empty()) {
                     tool.tool_name = name;
@@ -127,8 +128,12 @@ impl AgentTimeline {
                     tool.source_turn_id = source_turn_id;
                 }
                 tool.transcript_seq = min_seq(tool.transcript_seq, transcript_seq);
-                tool.partial_json = None;
-                tool.argument_segments.clear();
+                if tool.args.is_null()
+                    && let Some(args) = recovered
+                {
+                    tool.args = args;
+                }
+                seal_streamed_args(tool);
                 tool.status = status;
             }
             self.maintenance();
@@ -136,10 +141,13 @@ impl AgentTimeline {
         }
 
         let live_order = self.allocate_live_order();
+        let args = self
+            .committed_tool_args(&tool_call_id)
+            .unwrap_or(serde_json::Value::Null);
         self.items.push(TimelineItem::Tool(Box::new(ToolItem {
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.unwrap_or_else(|| "tool".to_string()),
-            args: serde_json::Value::Null,
+            args,
             partial_json: None,
             argument_segments: Vec::new(),
             result,
@@ -248,11 +256,40 @@ impl AgentTimeline {
                 && tool.source_turn_id.as_deref() == Some(turn_id)
             {
                 tool.status = terminal;
-                tool.partial_json = None;
-                tool.argument_segments.clear();
+                seal_streamed_args(tool);
             }
         }
     }
+
+    fn committed_tool_args(&self, tool_call_id: &str) -> Option<serde_json::Value> {
+        self.committed_records
+            .values()
+            .find_map(|record| match &record.message {
+                Message::ToolCall { id, arguments, .. }
+                    if id == tool_call_id && !arguments.is_null() =>
+                {
+                    Some(arguments.clone())
+                }
+                _ => None,
+            })
+    }
+}
+
+fn seal_streamed_args(tool: &mut ToolItem) {
+    if tool.args.is_null() {
+        let joined = tool.argument_segments.concat();
+        let raw = if joined.is_empty() {
+            tool.partial_json.as_deref().unwrap_or("")
+        } else {
+            joined.as_str()
+        };
+        if !raw.is_empty() {
+            tool.args = serde_json::from_str(raw)
+                .unwrap_or_else(|_| serde_json::Value::String(raw.to_string()));
+        }
+    }
+    tool.partial_json = None;
+    tool.argument_segments.clear();
 }
 
 fn min_seq(current: Option<u64>, next: Option<u64>) -> Option<u64> {

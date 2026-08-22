@@ -1,34 +1,12 @@
-use super::rows::render_row;
+use super::canvas::row_gap_before;
+use super::timeline::row_kind;
 use super::*;
+use gpui::{FollowMode, list};
 use island::components::panel::{
     IslandPanel, IslandPlaceholder, PanelPresentation, PanelSurfaceRole,
 };
+use island::components::scroll_edge::ScrollEdgeFade;
 use island::theme::IslandIcon;
-
-/// Device-dependent wheel rounding still considered the Timeline tail.
-const FOLLOW_EPSILON: f32 = 4.0;
-
-fn is_at_tail(offset_y: f32, max_offset_y: f32) -> bool {
-    max_offset_y <= FOLLOW_EPSILON || (max_offset_y + offset_y).abs() <= FOLLOW_EPSILON
-}
-
-impl Shell {
-    fn sync_follow(&mut self) {
-        let max = self.scroll.max_offset().y;
-        let y = self.scroll.offset().y;
-        let at_bottom = is_at_tail(f32::from(y), f32::from(max));
-        if self.wheel_seen && !at_bottom {
-            self.view_local().following = false;
-        } else if at_bottom {
-            self.view_local().following = true;
-        }
-        self.wheel_seen = false;
-        let following = self.following();
-        if following && self.state.connection == DesktopConnection::Live {
-            self.scroll.scroll_to_bottom();
-        }
-    }
-}
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -51,21 +29,12 @@ impl Render for Shell {
             )
         };
 
-        self.sync_follow();
-        let timeline_state = if self.pending_agent.is_some() {
-            timeline::TimelineState::Loading
-        } else if let Some(error) = self.selection_error.clone() {
-            timeline::TimelineState::Error(error)
-        } else {
-            timeline::timeline_state(&self.state.core)
-        };
-
         use island::components::chrome::ChromeZones;
         use island::components::workspace::{
             WindowChromeFrame, WorkspaceChrome, WorkspacePresentation,
         };
 
-        let content = self.render_timeline_region(timeline_state, cx);
+        let content = self.render_timeline_region(window, cx);
         let mut frame = WindowChromeFrame::new(content, self.render_chrome(cx, narrow))
             .presentation(WorkspacePresentation::Detached)
             .material(self.material);
@@ -76,9 +45,11 @@ impl Render for Shell {
                     &self.sidebar_scroll,
                     on_activate.clone(),
                 ),
-                WorkspaceChrome::new(ChromeZones::leading(self.sidebar_toggle_icon(cx, false)))
-                    .surface_role(SurfaceRole::Sidebar)
-                    .material(self.material),
+                WorkspaceChrome::new(
+                    ChromeZones::empty().pinned(self.sidebar_toggle_icon(cx, false)),
+                )
+                .surface_role(SurfaceRole::Sidebar)
+                .material(self.material),
                 px(sidebar::SIDEBAR_WIDTH),
             );
         }
@@ -155,13 +126,17 @@ impl Shell {
         use island::components::chrome::ChromeZones;
         use island::components::workspace::WorkspaceChrome;
 
-        let toolbar = self.workspace_toolbar(cx);
-        let mut zones = if let Some(tabs) = self.agent_tab_group(cx) {
-            ChromeZones::new(Some(tabs), Some(toolbar), None)
-                .principal(div().id("piko-chrome-spacer").w_full().min_w(px(0.)))
-        } else {
-            ChromeZones::new(None, Some(toolbar), None)
-        };
+        let mut zones = ChromeZones::empty();
+        if let Some(tabs) = self.agent_tab_group(cx) {
+            // Principal is unwrapped so TabGroup can paint a single hugging capsule.
+            zones = zones.principal(tabs);
+        }
+        zones = zones
+            .append_trailing(self.model_picker(cx))
+            .append_trailing(self.thinking_picker(cx));
+        if let Some(attention) = self.attention_control(cx) {
+            zones = zones.append_trailing(attention);
+        }
         if narrow || self.prefs.sidebar_collapsed {
             zones = zones.prepend_leading(self.sidebar_toggle_icon(cx, true));
         }
@@ -171,16 +146,32 @@ impl Shell {
 
     fn render_timeline_region(
         &mut self,
-        state: timeline::TimelineState,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let m = metrics();
         let input = self.composer_input.read(cx);
         let draft = input.value().to_string();
         let measured_input_height = f32::from(input.input_bounds().size.height);
+        let composer_padding = composer::footprint_for_text(&draft, measured_input_height, 0.0);
+        let (state, frame) = if self.pending_agent.is_some() {
+            (
+                timeline::TimelineState::Loading,
+                timeline::FrameTimeline::empty(composer_padding),
+            )
+        } else if let Some(error) = self.selection_error.clone() {
+            (
+                timeline::TimelineState::Error(error),
+                timeline::FrameTimeline::empty(composer_padding),
+            )
+        } else {
+            timeline::frame_timeline(&self.state.core, composer_padding)
+        };
+        // Shared with list item callbacks for this frame; they must not
+        // rebuild the projection per visible row (scroll performance).
+        self.frame_timeline = frame.clone();
         let following = self.following();
-        let composer_padding =
-            composer::footprint_for_text(&draft, measured_input_height, !following);
+        let ready = matches!(&state, timeline::TimelineState::Ready);
 
         let panel = match &state {
             timeline::TimelineState::NoSession => IslandPanel::empty(
@@ -207,42 +198,49 @@ impl Shell {
                     .chrome_icon(IslandIcon::MessageSquare)
                     .subtitle("Start the conversation from the composer."),
             ),
-            timeline::TimelineState::Ready(rows) => IslandPanel::new(
-                "piko-timeline",
-                div()
-                    .id("piko-timeline-scroll")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            this.set_focus_owner(FocusOwner::Timeline, window, cx);
-                        }),
-                    )
-                    .on_scroll_wheel(cx.listener(move |this, _, window, cx| {
-                        this.wheel_seen = true;
-                        this.set_focus_owner(FocusOwner::Timeline, window, cx);
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(m.space_md)
-                            .px(m.space_lg)
-                            .py(m.space_lg)
-                            .pb(px(composer_padding))
-                            .children(rows.iter().map(|row| render_row(row, &self.material))),
-                    ),
-            )
-            .scroll(false),
+            timeline::TimelineState::Ready => {
+                let n = frame.total();
+                self.sync_timeline_list_len(n);
+                if frame.streaming {
+                    self.timeline_list.remeasure_items(n.saturating_sub(2)..n);
+                }
+                let entity = cx.entity().downgrade();
+                IslandPanel::new(
+                    "piko-timeline",
+                    div()
+                        .id("piko-timeline-scroll")
+                        .size_full()
+                        .min_h(px(0.))
+                        .min_w(px(0.))
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                this.set_focus_owner(FocusOwner::Timeline, window, cx);
+                            }),
+                        )
+                        .child(
+                            list(self.timeline_list.clone(), move |ix, window, cx| {
+                                entity
+                                    .upgrade()
+                                    .map(|shell| {
+                                        shell.update(cx, |shell, cx| {
+                                            shell.render_timeline_index(ix, window, cx)
+                                        })
+                                    })
+                                    .unwrap_or_else(|| div().into_any_element())
+                            })
+                            .w_full()
+                            .h_full(),
+                        ),
+                )
+                .scroll(false)
+            }
         }
         .material(self.material)
         .surface_role(PanelSurfaceRole::Content)
         .presentation(PanelPresentation::Detached);
 
-        let show_return = matches!(&state, timeline::TimelineState::Ready(rows) if !rows.is_empty())
-            && !following;
+        let show_return = ready && frame.total() > 0 && !following;
 
         div()
             .id("piko-timeline-region")
@@ -250,32 +248,99 @@ impl Shell {
             .min_w(px(0.))
             .min_h(px(0.))
             .relative()
-            .child(panel)
+            .overflow_hidden()
+            .rounded(m.island_radius)
+            .child(
+                div()
+                    .size_full()
+                    .overflow_hidden()
+                    .rounded(m.island_radius)
+                    .when(!ready, |body| body.pb(px(composer_padding)))
+                    .child(panel),
+            )
+            .when(ready, |region| {
+                region.child(
+                    ScrollEdgeFade::bottom(px(composer_padding))
+                        .material(self.material)
+                        .on_surface(SurfaceRole::Content),
+                )
+            })
             .when(show_return, |region| {
                 region.child(
                     div()
-                        .id("piko-return-to-latest")
+                        .id("piko-return-to-latest-slot")
                         .absolute()
-                        .bottom(px(composer_padding - 18.0))
-                        .left(px(12.))
-                        .right(px(12.))
-                        .px(m.space_sm)
-                        .py(px(2.))
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(hairline(SurfaceRole::Chrome))
-                        .bg(fill(SurfaceRole::Elevated, self.material))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(highlight()))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.view_local().following = true;
-                            this.scroll.scroll_to_bottom();
-                            cx.notify();
-                        }))
-                        .child(text(TextRole::Meta).child("↓ Latest")),
+                        .bottom(px(composer_padding - 10.0))
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id("piko-return-to-latest")
+                                .px(m.space_sm)
+                                .py(px(4.))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(hairline(SurfaceRole::Chrome))
+                                .bg(fill(SurfaceRole::Elevated, self.material))
+                                .cursor_pointer()
+                                .hover(|style| style.bg(highlight()))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.view_local().following = true;
+                                    this.timeline_list.set_follow_mode(FollowMode::Tail);
+                                    cx.notify();
+                                }))
+                                .child(text(TextRole::Meta).child("↓ Latest")),
+                        ),
                 )
             })
             .child(self.render_composer(cx))
+            .into_any_element()
+    }
+
+    fn sync_timeline_list_len(&self, n: usize) {
+        let old = self.timeline_list.item_count();
+        if n == old {
+            return;
+        }
+        if n > old {
+            self.timeline_list.splice(old..old, n - old);
+        } else {
+            self.timeline_list.reset(n);
+        }
+    }
+
+    fn render_timeline_index(
+        &mut self,
+        ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Payloads map on demand for this row (and its predecessor for the
+        // gap); the projection is never rebuilt per visible item.
+        let frame = self.frame_timeline.clone();
+        let Some((prev, row)) = timeline::rows_around(&self.state.core, &frame, ix) else {
+            return div().into_any_element();
+        };
+        let m = metrics();
+        let gap = row_gap_before(prev.as_ref().map(row_kind), row_kind(&row));
+        let total = frame.total();
+        let padding = frame.composer_padding;
+        let row_el = self.render_timeline_row(&row, gap, _window, cx);
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(m.reading_width)
+                    .px(m.space_lg)
+                    .when(ix == 0, |el| el.pt(m.space_lg))
+                    .when(ix + 1 == total, |el| el.pb(px(padding)))
+                    .child(row_el),
+            )
             .into_any_element()
     }
 
@@ -328,18 +393,5 @@ impl Shell {
             on_cancel: cancel,
         }
         .render()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_at_tail;
-
-    #[test]
-    fn gpui_negative_scroll_offsets_detect_the_tail() {
-        assert!(is_at_tail(-100.0, 100.0));
-        assert!(is_at_tail(-97.0, 100.0));
-        assert!(!is_at_tail(-70.0, 100.0));
-        assert!(is_at_tail(0.0, 0.0));
     }
 }

@@ -181,9 +181,9 @@ Session-level “Needs attention · N” in the window title bar is **removed**.
 
 Associated with the active tab, in the island header trailing / actions zone:
 
-- Model — labeled chrome action (`t.fg`, not muted-ghost). Tooltip: **“Session model (next turn)”** plus the model id. Opens the existing model overlay; commits `SetModel`.
-- Thinking — same treatment. Tooltip: **“Session thinking level (next turn)”**. Opens the existing thinking overlay; commits `SetThinkingLevel`.
-- If the **view-target** agent `RequiresAction`, a Needs attention control opens the existing attention overlay (approvals/interactions). Other agents’ attention is tab-only.
+- Model — labeled chrome action (`t.fg`, not muted-ghost). Tooltip: **“Session model (next turn)”** plus the model id. Opens an **anchored menu** (F-44 / D-61); commits `SetModel`.
+- Thinking — same treatment. Tooltip: **“Session thinking level (next turn)”**. Opens an **anchored menu**; commits `SetThinkingLevel`.
+- If the **view-target** agent `RequiresAction`, a Needs attention control opens the existing attention **dialog** (approvals/interactions). Other agents’ attention is tab-only.
 
 These controls use **foreground** chrome type, not `GhostTextButton`’s current muted default (that token is the same as today’s composer chips). They remain session-scoped intents. The toolbar sits on the agent workspace because that is where the next turn is composed, **not** because model is per-agent. Do not label them “Main’s model.”
 

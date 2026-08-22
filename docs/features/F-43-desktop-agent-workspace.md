@@ -1,6 +1,6 @@
 # F-43: Desktop agent workspace
 
-> Status: partial (PRs 2–5 landed: tabs, quiet chrome, composer meter, per-tab follow; visual acceptance pending)
+> Status: partial (PRs 2–5 landed: tabs, quiet chrome, composer meter, per-tab follow; canvas/picker visuals closed by F-44)
 > Priority: P0
 > Source evidence: piko product direction after F-42 visual review (screenshot 2026-08-22 21:22)
 > Design: [D-60](../design/D-60-desktop-agent-workspace.md)
@@ -116,9 +116,9 @@ Idle + no unread = no badge. Session-level “Needs attention · N” in the win
 
 Associated with the active tab:
 
-- Model — labeled chrome action, not a muted chip. Tooltip: **“Session model (next turn)”** plus the model id.
-- Thinking — same treatment. Tooltip: **“Session thinking level (next turn)”**.
-- If the **view-target** agent requires action, a Needs attention control opens the existing attention overlay. Other agents’ attention is tab-only.
+- Model — labeled chrome action, not a muted chip. Tooltip: **“Session model (next turn)”** plus the model id. Opens an **anchored menu** (F-44); not a dialog overlay.
+- Thinking — same treatment. Tooltip: **“Session thinking level (next turn)”**. Opens an **anchored menu** (F-44).
+- If the **view-target** agent requires action, a Needs attention control opens the existing attention **dialog**. Other agents’ attention is tab-only.
 
 These controls remain session-scoped. Do not label them “Main’s model.” When there is no live session, the island header is omitted or inert.
 
@@ -134,14 +134,14 @@ These controls remain session-scoped. Do not label them “Main’s model.” Wh
 Anatomy (structure, not pixels):
 
 ```text
-┌ Composer card (elevated, Timeline column, bounded width) ─────────────┐
+┌ Composer card (one outer radius; Timeline column, bounded width) ─────┐
 │ Send failed: …                                          (error only)  │
-│ ┌ Input well ───────────────────────────────────────────────────────┐ │
-│ │ Message {view-target label}…                                      │ │
-│ └───────────────────────────────────────────────────────────────────┘ │
+│ Message {view-target label}…                                          │
 │ [meter] 12k/128k                          [Cancel if running] [Send]  │
 └───────────────────────────────────────────────────────────────────────┘
 ```
+
+F-44 **supersedes** the nested input-well diagram. The Composer is a single elevated island; the textarea is flush (no inner well).
 
 - Still floats in the active tab’s Timeline column with bottom/side separation (F-42).
 - Placeholder names the view-target agent. Drafts swap when the view target changes and are kept per agent in memory only.

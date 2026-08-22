@@ -198,7 +198,10 @@ fn project_agent_view_from_entry(
             let agent_instance_id = &message.agent_instance_id;
             let agent_id = &message.agent_id;
             match &message.message {
-                Message::User { .. } | Message::Assistant { .. } | Message::ToolResult { .. } => {
+                Message::User { .. }
+                | Message::Assistant { .. }
+                | Message::ToolCall { .. }
+                | Message::ToolResult { .. } => {
                     vec![(
                         agent_instance_id.clone(),
                         agent_id.clone(),
