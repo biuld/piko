@@ -116,6 +116,20 @@ impl ResponsesStream {
             },
         )
     }
+
+    fn is_upstream_lifecycle_notification(&self, event_type: &str) -> bool {
+        let Some(event_type) = event_type.strip_prefix("response.") else {
+            return false;
+        };
+        let Some((activity_type, phase)) = event_type.rsplit_once('.') else {
+            return false;
+        };
+        matches!(phase, "in_progress" | "searching" | "completed")
+            && self
+                .target
+                .upstream_tool_for_activity(activity_type)
+                .is_some()
+    }
 }
 
 impl ProtocolStream for ResponsesStream {
@@ -352,6 +366,7 @@ impl ProtocolStream for ResponsesStream {
             | "response.reasoning_summary_part.done"
             | "response.reasoning_summary_text.done"
             | "response.reasoning_text.done" => {}
+            other if self.is_upstream_lifecycle_notification(other) => {}
             other => {
                 return Err(self.error(format!("unsupported required stream event type {other}")));
             }

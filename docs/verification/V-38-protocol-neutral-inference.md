@@ -77,6 +77,10 @@ Responses continuation fields remain confined to llmd.
 - The bundled DeepSeek fixture resolves `web_search` with its Responses wire
   definition, choice object, and `web_search_call` activity mapping for both V4
   targets, while its Chat Completions models resolve an empty upstream catalog.
+- The Responses stream fixture accepts `in_progress`, `searching`, and
+  `completed` notifications for the catalog-owned `web_search_call` activity
+  family without duplicating output-item activity, and still rejects an
+  unknown activity family.
 - orchd's upstream-event test establishes the critical ownership boundary: it
   projects upstream observations into assistant output but never executes them
   locally. Production target construction derives upstream definitions from

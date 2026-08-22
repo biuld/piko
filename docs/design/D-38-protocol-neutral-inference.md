@@ -362,6 +362,14 @@ configured upstream kind; adding a tool does not require a search-specific
 hostd, orchd, or Responses branch. Chat Completions and Codex Responses Lite
 resolve an empty upstream catalog.
 
+Responses may also emit additive lifecycle notifications named
+`response.<activity_type>.<phase>`. The stream decoder recognizes them only
+when `<activity_type>` belongs to the resolved upstream catalog and `<phase>`
+is `in_progress`, `searching`, or `completed`. It consumes these notifications
+without emitting duplicate semantic events because output-item added/done
+events remain the authoritative transition source. All other event names keep
+the fail-closed protocol error behavior.
+
 DeepSeek's platform catalog defines only the server-executed `web_search`
 capability documented for its Responses API. V4 Responses models inherit that
 definition. Models routed through Chat Completions explicitly resolve no

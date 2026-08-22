@@ -53,3 +53,36 @@ fn standard_responses_encodes_catalog_defined_non_search_tool() {
             .contains(&serde_json::json!({"type":"future_media", "quality":"medium"}))
     );
 }
+
+#[test]
+fn stream_accepts_only_catalog_owned_upstream_lifecycle_notifications() {
+    let mut stream = ResponsesStream::new(
+        target_with_upstream_search(),
+        crate::protocols::tests_support::semantic_request(),
+    );
+    stream
+        .push(json!({"type":"response.created","response":{"id":"resp_search"}}))
+        .unwrap();
+
+    for event_type in [
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+    ] {
+        assert!(
+            stream
+                .push(json!({"type":event_type,"output_index":0,"item_id":"ws_1"}))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    let error = stream
+        .push(json!({"type":"response.unknown_call.in_progress"}))
+        .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("unsupported required stream event type")
+    );
+}

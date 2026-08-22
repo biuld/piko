@@ -217,6 +217,13 @@ Upstream calls, results, sources, citations, and artifacts that affect later
 turns remain part of the logical conversation in semantic form. Wire-only
 execution records needed for replay remain inside the checkpoint.
 
+Responses stream lifecycle notifications for a catalog-owned upstream
+activity type are additive observations. Adapters accept the known
+`in_progress`, `searching`, and `completed` notification suffixes without
+creating duplicate semantic activity; authoritative activity transitions
+continue to come from output-item added/done events. Unknown activity types or
+unknown lifecycle suffixes remain protocol errors.
+
 Provider conversation objects, response chaining, and server-side or
 standalone compaction are internal state backends. llmd may encode their state
 inside checkpoints, but hostd's logical transcript remains authoritative.
@@ -309,6 +316,10 @@ Restored checkpoints pass the same validation as newly produced checkpoints.
 - [x] Upstream tool activity, approvals, citations, sources, and artifacts have
       semantic event forms; hostd policy is required in addition to model
       capability support.
+- [x] Responses accepts additive lifecycle notifications for catalog-owned
+      upstream activity types, including DeepSeek
+      `response.web_search_call.in_progress`, while rejecting unknown event
+      families.
 - [x] Conversation IDs, response IDs, compaction items, background IDs, and
       stream sequence numbers remain inside opaque llmd handles or checkpoints.
 - [x] A durable execution can be detached, restored, resumed without duplicate
