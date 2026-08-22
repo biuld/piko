@@ -22,6 +22,7 @@ impl Shell {
             TabGroup::new("piko-agent-tabs", items)
                 .selected(selected)
                 .disabled(disabled)
+                .clustered(true)
                 .focus_handle(self.agent_tabs_focus.clone())
                 .material(self.material)
                 .on_select(move |id: String, window: &mut Window, app: &mut App| {

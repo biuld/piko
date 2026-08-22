@@ -155,7 +155,13 @@ impl Shell {
         use island::components::chrome::ChromeZones;
         use island::components::workspace::WorkspaceChrome;
 
-        let mut zones = ChromeZones::new(None, Some(self.workspace_toolbar(cx)), None);
+        let toolbar = self.workspace_toolbar(cx);
+        let mut zones = if let Some(tabs) = self.agent_tab_group(cx) {
+            ChromeZones::new(Some(tabs), Some(toolbar), None)
+                .principal(div().id("piko-chrome-spacer").w_full().min_w(px(0.)))
+        } else {
+            ChromeZones::new(None, Some(toolbar), None)
+        };
         if narrow || self.prefs.sidebar_collapsed {
             zones = zones.prepend_leading(self.sidebar_toggle_icon(cx, true));
         }
@@ -233,44 +239,18 @@ impl Shell {
         }
         .material(self.material)
         .surface_role(PanelSurfaceRole::Content)
-        .presentation(PanelPresentation::Hosted)
-        .rounded(false);
+        .presentation(PanelPresentation::Detached);
 
         let show_return = matches!(&state, timeline::TimelineState::Ready(rows) if !rows.is_empty())
             && !following;
-        let tabs = self.agent_tab_group(cx);
 
-        // One content plate: tab strip is the top-left notch of the Timeline
-        // rectangle, not a zero-height chrome principal.
         div()
             .id("piko-timeline-region")
             .size_full()
             .min_w(px(0.))
             .min_h(px(0.))
             .relative()
-            .flex()
-            .flex_col()
-            .rounded(metrics().island_radius)
-            .border_1()
-            .border_color(hairline(SurfaceRole::Content))
-            .bg(fill(SurfaceRole::Content, self.material))
-            .overflow_hidden()
-            .when_some(tabs, |plate, tabs| {
-                plate.child(
-                    div()
-                        .id("piko-agent-tab-strip")
-                        .w_full()
-                        .h(px(32.))
-                        .flex_shrink_0()
-                        .px(m.space_xs)
-                        .flex()
-                        .items_end()
-                        .border_b_1()
-                        .border_color(hairline(SurfaceRole::Content))
-                        .child(div().h(px(32.)).min_w(px(0.)).flex_1().child(tabs)),
-                )
-            })
-            .child(div().flex_1().min_h(px(0.)).min_w(px(0.)).child(panel))
+            .child(panel)
             .when(show_return, |region| {
                 region.child(
                     div()
