@@ -1,17 +1,16 @@
-//! Content-island header: agent TabGroup plus workspace toolbar (F-43).
+//! Window-toolbar TabGroup and model/thinking tools (F-43).
 
 use super::tabs::{
     agent_label, tab_items, tabs_disabled, truncate_chrome_label, view_target_requires_action,
 };
 use super::*;
 use gpui::prelude::*;
-use gpui::{AnyElement, App, ClickEvent, Window, div, px};
-use island::components::chrome::{ChromeTextEmphasis, ChromeZones, GhostTextButton};
-use island::components::panel::IslandHeader;
+use gpui::{AnyElement, App, ClickEvent, Window, div};
+use island::components::chrome::{ChromeTextEmphasis, GhostTextButton};
 use island::components::tabs::TabGroup;
 
 impl Shell {
-    pub(super) fn timeline_header(&self, cx: &mut Context<Self>) -> Option<IslandHeader> {
+    pub(super) fn agent_tab_group(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let items = tab_items(&self.state.core, self.pending_agent.as_deref());
         if items.is_empty() {
             return None;
@@ -19,27 +18,25 @@ impl Shell {
         let selected = self.view_key().map(str::to_string);
         let disabled = tabs_disabled(self.state.connection, self.layers.active().is_some());
         let entity = cx.entity().downgrade();
-        let group = TabGroup::new("piko-agent-tabs", items)
-            .selected(selected)
-            .disabled(disabled)
-            .focus_handle(self.agent_tabs_focus.clone())
-            .material(self.material)
-            .on_select(move |id: String, window: &mut Window, app: &mut App| {
-                if let Some(shell) = entity.upgrade() {
-                    shell.update(app, |shell, cx| {
-                        shell.set_focus_owner(FocusOwner::AgentTabs, window, cx);
-                        shell.select_agent(id, cx);
-                    });
-                }
-            });
-        Some(IslandHeader::chrome(
-            ChromeZones::new(None, Some(self.workspace_toolbar(cx)), None)
-                .principal(group)
-                .principal_min_width(px(160.)),
-        ))
+        Some(
+            TabGroup::new("piko-agent-tabs", items)
+                .selected(selected)
+                .disabled(disabled)
+                .focus_handle(self.agent_tabs_focus.clone())
+                .material(self.material)
+                .on_select(move |id: String, window: &mut Window, app: &mut App| {
+                    if let Some(shell) = entity.upgrade() {
+                        shell.update(app, |shell, cx| {
+                            shell.set_focus_owner(FocusOwner::AgentTabs, window, cx);
+                            shell.select_agent(id, cx);
+                        });
+                    }
+                })
+                .into_any_element(),
+        )
     }
 
-    fn workspace_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn workspace_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let model = self
             .state
             .core

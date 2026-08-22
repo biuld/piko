@@ -21,6 +21,7 @@ pub enum DesktopConnection {
 }
 
 impl DesktopConnection {
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Self::Connecting => "Connecting",

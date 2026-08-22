@@ -28,15 +28,6 @@ impl Shell {
             self.scroll.scroll_to_bottom();
         }
     }
-
-    fn connection_color(&self) -> RoleAccent {
-        match self.state.connection {
-            DesktopConnection::Connecting | DesktopConnection::Hydrating => RoleAccent::Info,
-            DesktopConnection::Live => RoleAccent::Success,
-            DesktopConnection::Disconnected => RoleAccent::Danger,
-            DesktopConnection::DecodeError => RoleAccent::Warning,
-        }
-    }
 }
 
 impl Render for Shell {
@@ -164,34 +155,10 @@ impl Shell {
         use island::components::chrome::ChromeZones;
         use island::components::workspace::WorkspaceChrome;
 
-        let t = tokens();
-        let m = metrics();
-        let live_chrome = self.state.connection == DesktopConnection::Live;
-        let status = self.state.status.clone();
-        let material = self.material;
-        let connection_color = t.role_accent(self.connection_color());
-        let connection_label = self.state.connection.label();
-
-        let trailing = div().flex().items_center().gap(m.space_sm).child(
-            div()
-                .id("piko-connection")
-                .flex()
-                .items_center()
-                .gap(m.space_xs)
-                .tooltip(move |_, cx| {
-                    island::components::tooltip::label_on(status.clone(), material, cx)
-                })
-                .child(div().size(px(8.)).rounded_full().bg(connection_color))
-                .when(!live_chrome, |mark| {
-                    mark.child(
-                        text(TextRole::Meta)
-                            .text_color(connection_color)
-                            .child(connection_label),
-                    )
-                }),
-        );
-
-        let mut zones = ChromeZones::new(None, Some(trailing.into_any_element()), None);
+        let mut zones = ChromeZones::new(None, Some(self.workspace_toolbar(cx)), None);
+        if let Some(tabs) = self.agent_tab_group(cx) {
+            zones = zones.principal(tabs).principal_min_width(px(180.));
+        }
         if narrow || self.prefs.sidebar_collapsed {
             zones = zones.prepend_leading(self.sidebar_toggle_icon(cx, true));
         }
@@ -270,11 +237,6 @@ impl Shell {
         .material(self.material)
         .surface_role(PanelSurfaceRole::Content)
         .presentation(PanelPresentation::Detached);
-        let panel = if let Some(header) = self.timeline_header(cx) {
-            panel.header(header)
-        } else {
-            panel
-        };
 
         let show_return = matches!(&state, timeline::TimelineState::Ready(rows) if !rows.is_empty())
             && !following;
@@ -288,6 +250,8 @@ impl Shell {
             .min_w(px(0.))
             .min_h(px(0.))
             .relative()
+            // Meet the toolbar tab notch at the chrome baseline.
+            .mt(-metrics().island_gutter)
             .child(panel)
             .when(show_return, |region| {
                 region.child(
