@@ -1,18 +1,20 @@
 //! Desktop shell root: two-column composition, host pumping, and the
 //! Timeline surface (D-59 Slices 1–3).
 
+mod agent_view;
 mod composer;
 mod keyboard;
 mod layers;
 mod lifecycle;
 mod rows;
 mod sidebar;
+mod submit;
 mod tabs;
 mod timeline;
 mod view;
 mod workspace;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui::prelude::*;
@@ -59,8 +61,6 @@ pub struct Shell {
     sidebar_scroll: ScrollHandle,
     /// A wheel event arrived since the last frame (candidate Reading flip).
     wheel_seen: bool,
-    /// Tail-following versus reading (F-42 Timeline).
-    following: bool,
     /// Narrow-window temporary navigation layer is open.
     narrow_overlay_open: bool,
     sidebar_keyboard: ListKeyboard,
@@ -68,10 +68,9 @@ pub struct Shell {
     /// Recoverable draft editor; its selection and undo state survive paints.
     composer_input: gpui::Entity<TextareaState>,
     drafts: HashMap<String, String>,
+    views: HashMap<String, agent_view::AgentViewLocal>,
     draft_key: String,
-    pending_submission: Option<composer::PendingSubmission>,
     clear_accepted_draft: Option<String>,
-    composer_error: Option<String>,
     focus_owner: FocusOwner,
     agent_tabs_focus: FocusHandle,
     layers: TemporaryLayers,
@@ -104,7 +103,7 @@ impl Shell {
                     shell
                         .drafts
                         .insert(shell.draft_key.clone(), input.read(cx).value().to_string());
-                    shell.composer_error = None;
+                    shell.view_local().composer_error = None;
                     cx.notify();
                 }
             },
@@ -120,16 +119,14 @@ impl Shell {
             scroll: ScrollHandle::new(),
             sidebar_scroll: ScrollHandle::new(),
             wheel_seen: false,
-            following: true,
             narrow_overlay_open: false,
             sidebar_keyboard: ListKeyboard::new(),
             sidebar_keyboard_focused: None,
             composer_input,
             drafts: HashMap::new(),
+            views: HashMap::new(),
             draft_key: "no-session".to_string(),
-            pending_submission: None,
             clear_accepted_draft: None,
-            composer_error: None,
             focus_owner: FocusOwner::Timeline,
             agent_tabs_focus: cx.focus_handle(),
             layers: TemporaryLayers::default(),
@@ -248,69 +245,6 @@ impl Shell {
         cx.notify();
     }
 
-    fn submit_composer(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.connection != DesktopConnection::Live
-            || self.state.core.session_phase != SessionPhase::Live
-            || self.pending_agent.is_some()
-            || self.pending_submission.is_some()
-        {
-            return;
-        }
-        let value = self.composer_input.read(cx).value().to_string();
-        let text = value.trim().to_string();
-        if text.is_empty() {
-            return;
-        }
-        let before: HashSet<_> = self.state.core.pending_commands.keys().cloned().collect();
-        let commands = reduce(
-            &mut self.state,
-            &mut self.command_ids,
-            ClientMsg::Intent(ClientIntent::SubmitTurn { text: text.clone() }),
-        );
-        let command_id = self
-            .state
-            .core
-            .pending_commands
-            .iter()
-            .find_map(|(id, operation)| {
-                (!before.contains(id) && matches!(operation, PendingOp::Submit)).then(|| id.clone())
-            });
-        let Some(command_id) = command_id else {
-            return;
-        };
-        self.pending_submission = Some(composer::PendingSubmission { command_id, text });
-        self.composer_error = None;
-        self.send_commands(commands);
-        cx.notify();
-    }
-
-    fn reconcile_submission(&mut self) {
-        let Some(pending) = self.pending_submission.as_ref() else {
-            return;
-        };
-        if self
-            .state
-            .core
-            .pending_commands
-            .contains_key(&pending.command_id)
-        {
-            return;
-        }
-        if let Some(failure) = self
-            .state
-            .core
-            .command_failures
-            .iter()
-            .rev()
-            .find(|failure| failure.command_id == pending.command_id)
-        {
-            self.composer_error = Some(format!("Send failed: {}", failure.message));
-        } else {
-            self.clear_accepted_draft = Some(pending.text.clone());
-        }
-        self.pending_submission = None;
-    }
-
     fn reconcile_agent_selection(&mut self, cx: &mut Context<Self>) {
         if let Some(target) = self.pending_agent.as_deref() {
             let listed = self
@@ -376,10 +310,6 @@ impl Shell {
         );
     }
 
-    fn cancel_turn(&mut self, cx: &mut Context<Self>) {
-        self.dispatch_intents(cx, vec![ClientIntent::CancelTurn]);
-    }
-
     fn open_layer(&mut self, layer: LayerKind, initiating: FocusOwner, cx: &mut Context<Self>) {
         self.layers.open(layer, initiating);
         cx.notify();
@@ -418,12 +348,19 @@ impl Shell {
         if next_key != self.draft_key {
             let current = self.composer_input.read(cx).value().to_string();
             self.drafts.insert(self.draft_key.clone(), current);
+            self.switch_view_local(&next_key);
             let next = self.drafts.get(&next_key).cloned().unwrap_or_default();
             self.composer_input
                 .update(cx, |input, cx| input.set_value(next, window, cx));
             self.draft_key = next_key;
-            self.composer_error = None;
         }
+        let placeholder = self
+            .view_key()
+            .map(|id| format!("Message {}…", tabs::agent_label(&self.state.core, id)))
+            .unwrap_or_else(|| "Message the selected agent…".to_string());
+        self.composer_input.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx);
+        });
         if let Some(submitted) = self.clear_accepted_draft.take() {
             let current = self.composer_input.read(cx).value().to_string();
             if composer::should_clear_accepted_draft(&current, &submitted) {

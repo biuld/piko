@@ -1,4 +1,4 @@
-//! Floating Timeline Composer (D-59 Slice 4).
+//! Floating Timeline Composer (D-59 Slice 4, F-43 visual).
 
 use gpui::prelude::*;
 use gpui::{
@@ -6,6 +6,9 @@ use gpui::{
 };
 use gpui_base::input::{InputEvent, TextareaState};
 use gpui_base::{InputBase, Textarea};
+use island::components::chrome::{
+    LINEAR_PROGRESS_HEIGHT_COMPACT, LinearProgress, LinearProgressSize,
+};
 use island::platform::material::WindowMaterialHost;
 use island::theme::{
     RoleAccent, SurfaceRole, TextRole, fill, hairline, highlight, metrics, text, tokens,
@@ -14,13 +17,19 @@ use island::theme::{
 pub const MIN_ROWS: usize = 2;
 pub const MAX_ROWS: usize = 8;
 const LINE_HEIGHT: f32 = 21.0;
-const VERTICAL_CHROME: f32 = 58.0;
+const VERTICAL_CHROME: f32 = 64.0;
 const OUTER_GAP: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingSubmission {
     pub command_id: String,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposerContext {
+    Unknown,
+    Fill { used: u64, window: u64 },
 }
 
 /// Conservative footprint used as Timeline trailing padding. The last laid
@@ -50,6 +59,14 @@ pub fn should_clear_accepted_draft(current: &str, submitted: &str) -> bool {
     current.trim() == submitted
 }
 
+pub fn format_token_count(tokens: u64) -> String {
+    if tokens >= 1000 {
+        format!("{}k", tokens / 1000)
+    } else {
+        tokens.to_string()
+    }
+}
+
 pub type ComposerAction = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 
 pub struct ComposerView {
@@ -58,12 +75,8 @@ pub struct ComposerView {
     pub enabled: bool,
     pub running: bool,
     pub pending: bool,
-    pub model: String,
-    pub thinking: String,
-    pub context: String,
+    pub context: ComposerContext,
     pub error: Option<String>,
-    pub on_model: ComposerAction,
-    pub on_thinking: ComposerAction,
     pub on_submit: ComposerAction,
     pub on_cancel: ComposerAction,
 }
@@ -75,6 +88,7 @@ impl ComposerView {
         let input_for_focus = self.input.clone();
         let submit = self.on_submit.clone();
         let cancel = self.on_cancel.clone();
+        let error = self.error.clone();
 
         div()
             .id("piko-composer-float")
@@ -101,7 +115,7 @@ impl ComposerView {
                     .border_color(hairline(SurfaceRole::Elevated))
                     .bg(fill(SurfaceRole::Elevated, self.material))
                     .text_color(t.fg_rgba())
-                    .when_some(self.error, |composer, error| {
+                    .when_some(error, |composer, error| {
                         composer.child(
                             text(TextRole::Meta)
                                 .text_color(t.role_accent(RoleAccent::Danger))
@@ -119,71 +133,71 @@ impl ComposerView {
                             .border_1()
                             .border_color(hairline(SurfaceRole::Content))
                             .bg(fill(SurfaceRole::Content, self.material))
+                            .text_color(t.fg_rgba())
                             .overflow_hidden()
                             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                 input_for_focus.update(cx, |state, cx| state.focus(window, cx));
                             })
                             .child(Textarea::new(&self.input)),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(m.space_sm)
-                            .child(action_chip("composer-model", self.model, self.on_model))
-                            .child(action_chip(
-                                "composer-thinking",
-                                self.thinking,
-                                self.on_thinking,
-                            ))
-                            .child(meta_chip(self.context))
-                            .child(div().flex_1())
-                            .when(self.running, |bar| {
-                                bar.child(action_button("Cancel", true, cancel))
-                            })
-                            .child(action_button(
-                                if self.pending { "Sending…" } else { "Send" },
-                                self.enabled && !self.pending,
-                                submit,
-                            )),
-                    ),
+                    .child(self.render_action_row(submit, cancel)),
             )
             .into_any_element()
     }
-}
 
-fn meta_chip(label: String) -> impl IntoElement {
-    let t = tokens();
-    let m = metrics();
-    div()
-        .px(m.space_xs)
-        .py(px(2.))
-        .rounded_sm()
-        .bg(highlight())
-        .child(
-            text(TextRole::Meta)
-                .text_color(t.muted_fg_rgba())
-                .child(label),
-        )
-}
-
-fn action_chip(id: &'static str, label: String, action: ComposerAction) -> impl IntoElement {
-    let t = tokens();
-    let m = metrics();
-    div()
-        .id(id)
-        .px(m.space_xs)
-        .py(px(2.))
-        .rounded_sm()
-        .bg(highlight())
-        .cursor_pointer()
-        .hover(|style| style.bg(fill(SurfaceRole::Content, WindowMaterialHost::opaque())))
-        .on_click(move |_, window, cx| action(window, cx))
-        .child(
-            text(TextRole::Meta)
-                .text_color(t.muted_fg_rgba())
-                .child(label),
-        )
+    fn render_action_row(self, submit: ComposerAction, cancel: ComposerAction) -> impl IntoElement {
+        let t = tokens();
+        let m = metrics();
+        div()
+            .flex()
+            .items_center()
+            .gap(m.space_sm)
+            .when_some(
+                match self.context {
+                    ComposerContext::Unknown => None,
+                    ComposerContext::Fill { used, window } => Some((used, window)),
+                },
+                |row, (used, window)| {
+                    let fraction = if window == 0 {
+                        0.0
+                    } else {
+                        (used as f32 / window as f32).clamp(0.0, 1.0)
+                    };
+                    row.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(m.space_xs)
+                            .child(
+                                div()
+                                    .w(px(72.))
+                                    .h(px(LINEAR_PROGRESS_HEIGHT_COMPACT))
+                                    .child(
+                                        LinearProgress::new("piko-context-meter")
+                                            .size(LinearProgressSize::Compact)
+                                            .value(Some(fraction)),
+                                    ),
+                            )
+                            .child(text(TextRole::Meta).text_color(t.muted_fg_rgba()).child(
+                                format!(
+                                    "{}/{}",
+                                    format_token_count(used),
+                                    format_token_count(window)
+                                ),
+                            )),
+                    )
+                },
+            )
+            .child(div().flex_1())
+            .when(self.running, |bar| {
+                bar.child(action_button("Cancel", true, cancel))
+            })
+            .child(action_button(
+                if self.pending { "Sending…" } else { "Send" },
+                self.enabled && !self.pending,
+                submit,
+            ))
+    }
 }
 
 fn action_button(label: &'static str, enabled: bool, action: ComposerAction) -> impl IntoElement {
@@ -251,5 +265,12 @@ mod tests {
             "sent text plus a new edit",
             "sent text"
         ));
+    }
+
+    #[test]
+    fn token_counts_compact_thousands() {
+        assert_eq!(format_token_count(12_000), "12k");
+        assert_eq!(format_token_count(128_000), "128k");
+        assert_eq!(format_token_count(400), "400");
     }
 }

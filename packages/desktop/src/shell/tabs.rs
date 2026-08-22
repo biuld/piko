@@ -49,6 +49,47 @@ pub fn tabs_disabled(connection: DesktopConnection, overlay_open: bool) -> bool 
     connection != DesktopConnection::Live || overlay_open
 }
 
+pub fn agent_label(core: &ClientState, agent_instance_id: &str) -> String {
+    let Some(session) = core.live_session.as_ref() else {
+        return agent_instance_id.to_string();
+    };
+    session
+        .agents
+        .iter()
+        .find(|agent| agent.agent_instance_id == agent_instance_id)
+        .map(|agent| {
+            if agent.name.is_empty() {
+                agent.agent_id.clone()
+            } else {
+                agent.name.clone()
+            }
+        })
+        .unwrap_or_else(|| agent_instance_id.to_string())
+}
+
+pub fn view_target_requires_action(core: &ClientState, view_key: Option<&str>) -> bool {
+    let (Some(session), Some(id)) = (core.live_session.as_ref(), view_key) else {
+        return false;
+    };
+    agent_foreground(
+        id,
+        &session.agents,
+        &session.active_turns,
+        &session.pending_approvals,
+        &session.pending_interactions,
+    ) == AgentForeground::RequiresAction
+}
+
+pub fn truncate_chrome_label(label: &str, max_chars: usize) -> String {
+    if label.chars().count() <= max_chars {
+        label.to_string()
+    } else {
+        let mut cut: String = label.chars().take(max_chars).collect();
+        cut.push('…');
+        cut
+    }
+}
+
 fn display_labels(session: &piko_client_core::LiveSession) -> Vec<String> {
     let bases: Vec<String> = session
         .agents
@@ -159,5 +200,13 @@ mod tests {
         let items = tab_items(&core, None);
         assert!(items[0].label.contains("aaaaaaaa") || items[0].label.contains("Worker ·"));
         assert_ne!(items[0].label, items[1].label);
+    }
+
+    #[test]
+    fn chrome_labels_truncate_with_ellipsis() {
+        assert_eq!(truncate_chrome_label("short", 22), "short");
+        let long = truncate_chrome_label("deepseek-v4-flash-vision-exp", 22);
+        assert_eq!(long.chars().count(), 23);
+        assert!(long.ends_with('…'));
     }
 }

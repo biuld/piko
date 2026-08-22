@@ -18,12 +18,13 @@ impl Shell {
         let y = self.scroll.offset().y;
         let at_bottom = is_at_tail(f32::from(y), f32::from(max));
         if self.wheel_seen && !at_bottom {
-            self.following = false;
+            self.view_local().following = false;
         } else if at_bottom {
-            self.following = true;
+            self.view_local().following = true;
         }
         self.wheel_seen = false;
-        if self.following && self.state.connection == DesktopConnection::Live {
+        let following = self.following();
+        if following && self.state.connection == DesktopConnection::Live {
             self.scroll.scroll_to_bottom();
         }
     }
@@ -137,83 +138,56 @@ impl Shell {
         let t = tokens();
         let m = metrics();
         let live_chrome = self.state.connection == DesktopConnection::Live;
-        let session_count = self.state.session_count();
         let sidebar_visible = !narrow && !self.prefs.sidebar_collapsed;
-        let attention_count = self
-            .state
-            .core
-            .live_session
-            .as_ref()
-            .map(|session| session.pending_approvals.len() + session.pending_interactions.len())
-            .unwrap_or(0);
         let navigation_label = if sidebar_visible || self.narrow_overlay_open {
             "Hide Sidebar"
         } else {
             "Show Sidebar"
         };
+        let status = self.state.status.clone();
+        let material = self.material;
+        let connection_color = t.role_accent(self.connection_color());
+        let connection_label = self.state.connection.label();
 
         let trailing = div()
             .flex()
             .items_center()
             .gap(m.space_sm)
             .child(
-                text(TextRole::Meta)
-                    .text_color(t.muted_fg_rgba())
-                    .child(self.state.status.clone()),
-            )
-            .when(live_chrome, |bar| {
-                bar.child(
-                    text(TextRole::Meta)
-                        .text_color(t.muted_fg_rgba())
-                        .child(format!("{session_count} sessions")),
-                )
-            })
-            .child(
-                text(TextRole::Meta)
-                    .text_color(t.role_accent(self.connection_color()))
-                    .child(self.state.connection.label()),
-            )
-            .when(attention_count > 0, |bar| {
-                bar.child(
-                    div()
-                        .id("piko-attention")
-                        .px(m.space_sm)
-                        .py(px(2.))
-                        .rounded_sm()
-                        .border_1()
-                        .border_color(t.role_accent(RoleAccent::Warning))
-                        .cursor_pointer()
-                        .hover(|style| style.bg(highlight()))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_layer(LayerKind::Attention, this.focus_owner, cx);
-                        }))
-                        .child(
-                            text(TextRole::Label)
-                                .child(format!("Needs attention · {attention_count}")),
-                        ),
-                )
-            })
-            .child(
                 div()
-                    .id("piko-sessions-toggle")
-                    .px(m.space_sm)
-                    .py(px(2.))
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(hairline(SurfaceRole::Chrome))
-                    .cursor_pointer()
-                    .hover(|style| style.bg(highlight()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if narrow {
-                            this.narrow_overlay_open = !this.narrow_overlay_open;
-                        } else {
-                            this.prefs.sidebar_collapsed = !this.prefs.sidebar_collapsed;
-                            this.narrow_overlay_open = false;
-                            let _ = this.prefs.save(&this.prefs_path);
-                        }
-                        cx.notify();
-                    }))
-                    .child(text(TextRole::Label).child(navigation_label)),
+                    .id("piko-connection")
+                    .flex()
+                    .items_center()
+                    .gap(m.space_xs)
+                    .tooltip(move |_, cx| {
+                        island::components::tooltip::label_on(status.clone(), material, cx)
+                    })
+                    .child(div().size(px(8.)).rounded_full().bg(connection_color))
+                    .when(!live_chrome, |mark| {
+                        mark.child(
+                            text(TextRole::Meta)
+                                .text_color(connection_color)
+                                .child(connection_label),
+                        )
+                    }),
+            )
+            .child(
+                island::components::chrome::GhostTextButton::new(
+                    "piko-sessions-toggle",
+                    navigation_label,
+                )
+                .emphasis(island::components::chrome::ChromeTextEmphasis::Foreground)
+                .material(self.material)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if narrow {
+                        this.narrow_overlay_open = !this.narrow_overlay_open;
+                    } else {
+                        this.prefs.sidebar_collapsed = !this.prefs.sidebar_collapsed;
+                        this.narrow_overlay_open = false;
+                        let _ = this.prefs.save(&this.prefs_path);
+                    }
+                    cx.notify();
+                })),
             );
 
         WorkspaceChrome::new(
@@ -232,8 +206,9 @@ impl Shell {
         let input = self.composer_input.read(cx);
         let draft = input.value().to_string();
         let measured_input_height = f32::from(input.input_bounds().size.height);
+        let following = self.following();
         let composer_padding =
-            composer::footprint_for_text(&draft, measured_input_height, !self.following);
+            composer::footprint_for_text(&draft, measured_input_height, !following);
 
         let panel = match &state {
             timeline::TimelineState::NoSession => IslandPanel::empty(
@@ -300,7 +275,7 @@ impl Shell {
         };
 
         let show_return = matches!(&state, timeline::TimelineState::Ready(rows) if !rows.is_empty())
-            && !self.following;
+            && !following;
 
         // Fill the WindowChromeFrame content slot. `flex_1` here collapses
         // because that slot is not a flex column; a zero-height parent then
@@ -329,7 +304,7 @@ impl Shell {
                         .cursor_pointer()
                         .hover(|style| style.bg(highlight()))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.following = true;
+                            this.view_local().following = true;
                             this.scroll.scroll_to_bottom();
                             cx.notify();
                         }))
@@ -343,12 +318,7 @@ impl Shell {
     fn render_composer(&self, cx: &mut Context<Self>) -> AnyElement {
         let live = self.state.connection == DesktopConnection::Live
             && self.state.core.session_phase == SessionPhase::Live;
-        let selected_agent = self
-            .state
-            .core
-            .live_session
-            .as_ref()
-            .and_then(|session| session.selected_agent.as_deref());
+        let view_key = self.view_key();
         let running = self
             .state
             .core
@@ -358,22 +328,8 @@ impl Shell {
                 session
                     .active_turns
                     .iter()
-                    .any(|turn| Some(turn.agent_instance_id.as_str()) == selected_agent)
+                    .any(|turn| Some(turn.agent_instance_id.as_str()) == view_key)
             });
-        let model = self
-            .state
-            .core
-            .model
-            .model_id
-            .clone()
-            .unwrap_or_else(|| "Default model".to_string());
-        let thinking = self
-            .state
-            .core
-            .model
-            .thinking_level
-            .clone()
-            .unwrap_or_else(|| "Default thinking".to_string());
         let context = self
             .state
             .core
@@ -381,26 +337,8 @@ impl Shell {
             .as_ref()
             .and_then(|session| session.last_context_tokens)
             .zip(self.state.core.model.active_context_window())
-            .map(|(used, window)| format!("Context {}%", used.saturating_mul(100) / window.max(1)))
-            .unwrap_or_else(|| "Context —".to_string());
-        let entity = cx.entity().downgrade();
-        let model_layer = std::rc::Rc::new(move |_window: &mut Window, app: &mut App| {
-            if let Some(shell) = entity.upgrade() {
-                shell.update(app, |shell, cx| {
-                    shell.focus_owner = FocusOwner::Composer;
-                    shell.open_layer(LayerKind::Model, FocusOwner::Composer, cx);
-                });
-            }
-        });
-        let entity = cx.entity().downgrade();
-        let thinking_layer = std::rc::Rc::new(move |_window: &mut Window, app: &mut App| {
-            if let Some(shell) = entity.upgrade() {
-                shell.update(app, |shell, cx| {
-                    shell.focus_owner = FocusOwner::Composer;
-                    shell.open_layer(LayerKind::Thinking, FocusOwner::Composer, cx);
-                });
-            }
-        });
+            .map(|(used, window)| composer::ComposerContext::Fill { used, window })
+            .unwrap_or(composer::ComposerContext::Unknown);
         let entity = cx.entity().downgrade();
         let submit = std::rc::Rc::new(move |window: &mut Window, app: &mut App| {
             if let Some(shell) = entity.upgrade() {
@@ -417,15 +355,11 @@ impl Shell {
         composer::ComposerView {
             input: self.composer_input.clone(),
             material: self.material,
-            enabled: live && selected_agent.is_some() && self.pending_agent.is_none(),
+            enabled: live && view_key.is_some() && self.pending_agent.is_none(),
             running,
-            pending: self.pending_submission.is_some(),
-            model,
-            thinking,
+            pending: self.pending_submission().is_some(),
             context,
-            error: self.composer_error.clone(),
-            on_model: model_layer,
-            on_thinking: thinking_layer,
+            error: self.composer_error(),
             on_submit: submit,
             on_cancel: cancel,
         }

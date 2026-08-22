@@ -59,7 +59,8 @@ impl DesktopState {
         self.status = "live".to_string();
     }
 
-    /// Session count for the shell surface when the list has loaded.
+    /// Session inventory size; kept for tests and future chrome that needs it.
+    #[allow(dead_code)]
     pub fn session_count(&self) -> usize {
         self.core.session_list.sessions.len()
     }
