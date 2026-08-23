@@ -26,12 +26,12 @@ use gpui::{
     AnyElement, App, AsyncApp, Context, FocusHandle, FollowMode, IntoElement, KeyDownEvent,
     ListAlignment, ListState, Render, ScrollHandle, Styled, Subscription, Window, div, px,
 };
-use gpui_base::input::{InputEvent, TextareaState};
+use island::components::form::{InputEvent, TextAreaState};
 use island::components::list::ListKeyboard;
 use island::components::markdown::MarkdownDocument;
 use island::components::selection::{SelectionGroup, SelectionState};
 use island::platform::material::{MaterialPreference, WindowMaterialHost};
-use island::theme::{SurfaceRole, TextRole, fill, hairline, highlight, metrics, text, tokens};
+use island::theme::{SurfaceRole, TextRole, fill, highlight, metrics, text, tokens};
 
 use piko_client_core::{
     ClientIntent, ClientMsg, TransportObservation,
@@ -78,7 +78,7 @@ pub struct Shell {
     sidebar_keyboard: ListKeyboard,
     sidebar_keyboard_focused: Option<sidebar::NavId>,
     /// Recoverable draft editor; its selection and undo state survive paints.
-    composer_input: gpui::Entity<TextareaState>,
+    composer_input: gpui::Entity<TextAreaState>,
     drafts: HashMap<String, String>,
     views: HashMap<String, agent_view::AgentViewLocal>,
     draft_key: String,

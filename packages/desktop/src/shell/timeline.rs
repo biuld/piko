@@ -36,8 +36,10 @@ pub enum RowKind {
     System,
 }
 
-/// One presentation row. An assistant turn (thinking/tool/text interleaved)
-/// collapses into a single bubble row whose segments stay in time order.
+/// One presentation row. An assistant turn splits into consecutive pieces
+/// (each at most one text block plus its preceding chip run) so virtualized
+/// scrolling never materializes an unbounded turn; pieces of one turn share
+/// `turn_id` and pack visually into a single bubble (F-46).
 #[derive(Debug, Clone, PartialEq)]
 pub enum TimelineRow {
     User {
@@ -46,6 +48,10 @@ pub enum TimelineRow {
     },
     Assistant {
         id: String,
+        turn_id: String,
+        leads_turn: bool,
+        /// True for the trailing piece of the turn (bottom corners round).
+        ends_turn: bool,
         segments: Vec<TurnSegment>,
     },
     System {
@@ -81,6 +87,14 @@ impl TimelineRow {
     pub fn id(&self) -> &str {
         match self {
             Self::User { id, .. } | Self::Assistant { id, .. } | Self::System { id, .. } => id,
+        }
+    }
+
+    /// Turn identity for same-bubble packing (`Assistant` rows only).
+    pub fn turn_id(&self) -> Option<&str> {
+        match self {
+            Self::Assistant { turn_id, .. } => Some(turn_id),
+            _ => None,
         }
     }
 }
@@ -173,30 +187,36 @@ pub(super) fn groups_items(items: &[TimelineItem]) -> Vec<(usize, usize)> {
     groups
 }
 
-/// Map one contiguous item run into its presentation row.
-pub(super) fn map_group(items: &[TimelineItem], range: (usize, usize)) -> Option<TimelineRow> {
-    let slice = items.get(range.0..range.1)?;
-    match slice.first()? {
-        TimelineItem::Committed(committed) => match &committed.message {
-            Message::User { content, .. } => Some(TimelineRow::User {
+/// Map one contiguous item run into its presentation rows: the turn splits
+/// at text boundaries so every row stays bounded (virtualization).
+pub(super) fn map_group_pieces(items: &[TimelineItem], range: (usize, usize)) -> Vec<TimelineRow> {
+    let Some(slice) = items.get(range.0..range.1) else {
+        return Vec::new();
+    };
+    match slice.first() {
+        Some(TimelineItem::Committed(committed)) => match &committed.message {
+            Message::User { content, .. } => vec![TimelineRow::User {
                 id: format!("{}-user", committed.message_id),
                 text: content_text(content),
-            }),
-            Message::Context { .. } => Some(TimelineRow::System {
+            }],
+            Message::Context { .. } => vec![TimelineRow::System {
                 id: format!("{}-context", committed.message_id),
                 label: "context".to_string(),
-            }),
-            _ => Some(assistant_row(slice, &committed.message_id)),
+            }],
+            _ => split_turn(slice, &committed.message_id),
         },
-        TimelineItem::RealtimeDraft(draft) => Some(assistant_row(slice, &draft.message_id)),
-        TimelineItem::Tool(_) | TimelineItem::SessionEntry(_) => first_single(slice),
+        Some(TimelineItem::RealtimeDraft(draft)) => split_turn(slice, &draft.message_id),
+        _ => first_single(slice).into_iter().collect(),
     }
 }
 
 fn first_single(slice: &[TimelineItem]) -> Option<TimelineRow> {
     match slice.first()? {
         TimelineItem::Tool(tool) => Some(TimelineRow::Assistant {
-            id: tool.tool_call_id.clone(),
+            id: format!("{}#0", tool.tool_call_id),
+            turn_id: tool.tool_call_id.clone(),
+            leads_turn: true,
+            ends_turn: true,
             segments: vec![TurnSegment::Tool {
                 id: tool.tool_call_id.clone(),
                 name: tool.tool_name.clone(),
@@ -213,10 +233,59 @@ fn first_single(slice: &[TimelineItem]) -> Option<TimelineRow> {
     }
 }
 
+/// Merge an assistant-side run into chronological segments, then split into
+/// pieces at text boundaries: piece k = pending chips + (text k-1). The
+/// final text owns nothing extra; trailing chips flush as their own piece.
+fn split_turn(slice: &[TimelineItem], fallback_id: &str) -> Vec<TimelineRow> {
+    let (turn_id, segments) = assistant_segments(slice, fallback_id);
+    let mut pieces: Vec<TimelineRow> = Vec::new();
+    let mut chips: Vec<TurnSegment> = Vec::new();
+    for segment in segments {
+        match segment {
+            TurnSegment::Text { .. } => {
+                let mut owned = std::mem::take(&mut chips);
+                owned.push(segment);
+                pieces.push(TimelineRow::Assistant {
+                    id: format!("{turn_id}#{}", pieces.len()),
+                    turn_id: turn_id.clone(),
+                    leads_turn: pieces.is_empty(),
+                    ends_turn: false,
+                    segments: owned,
+                });
+            }
+            other => chips.push(other),
+        }
+    }
+    if !chips.is_empty() {
+        pieces.push(TimelineRow::Assistant {
+            id: format!("{turn_id}#{}", pieces.len()),
+            turn_id,
+            leads_turn: false,
+            ends_turn: true,
+            segments: chips,
+        });
+    }
+    if let Some(TimelineRow::Assistant { ends_turn, .. }) = pieces.last_mut() {
+        *ends_turn = true;
+    }
+    if pieces.is_empty() {
+        // Degenerate run (no mappable content): keep the group non-empty so
+        // offsets stay aligned.
+        pieces.push(TimelineRow::Assistant {
+            id: format!("{fallback_id}-turn#0"),
+            turn_id: format!("{fallback_id}-turn"),
+            leads_turn: true,
+            ends_turn: true,
+            segments: Vec::new(),
+        });
+    }
+    pieces
+}
+
 /// Merge an assistant-side run into chronological segments. Adjacent
 /// same-kind pieces merge only within one source message. Streaming flags
 /// land on the live draft's tail when it ends the run.
-fn assistant_row(slice: &[TimelineItem], fallback_id: &str) -> TimelineRow {
+fn assistant_segments(slice: &[TimelineItem], fallback_id: &str) -> (String, Vec<TurnSegment>) {
     let mut segments: Vec<TurnSegment> = Vec::new();
     for item in slice {
         match item {
@@ -241,10 +310,7 @@ fn assistant_row(slice: &[TimelineItem], fallback_id: &str) -> TimelineRow {
     if let Some(TimelineItem::RealtimeDraft(draft)) = slice.last() {
         mark_draft_tail(&mut segments, draft);
     }
-    TimelineRow::Assistant {
-        id: format!("{fallback_id}-turn"),
-        segments,
-    }
+    (format!("{fallback_id}-turn"), segments)
 }
 
 fn push_message_segments(segments: &mut Vec<TurnSegment>, base: &str, blocks: &[ContentBlock]) {

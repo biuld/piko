@@ -47,12 +47,37 @@ pub fn format_tool_body(
 }
 
 /// One-line preview for a tool header (exec: `$ cmd`). None if unknown.
+/// Newlines collapse (multi-line commit messages must not blow up the chip)
+/// and the result clamps to a fixed budget with an ellipsis.
 pub fn tool_primary_line(name: &str, args: &Value, partial_json: Option<&str>) -> Option<String> {
+    const MAX_PREVIEW_CHARS: usize = 64;
     let args = resolved_args(args, partial_json);
     if name == "exec_command" {
-        return command_from_args(&args).map(|cmd| format!("$ {cmd}"));
+        return command_from_args(&args).map(|cmd| {
+            format!(
+                "$ {}",
+                clamp_label(&collapse_whitespace(&cmd), MAX_PREVIEW_CHARS)
+            )
+        });
     }
     None
+}
+
+/// Collapse every whitespace run (including literal newlines) to one space.
+pub fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Hard character clamp with an ellipsis; pairs with CSS-level truncation.
+pub fn clamp_label(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut cut = max_chars.saturating_sub(1);
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", &text[..cut])
 }
 
 fn format_exec(
@@ -189,8 +214,6 @@ fn pretty(value: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-
-
 
     #[test]
     fn running_without_partial_is_empty() {

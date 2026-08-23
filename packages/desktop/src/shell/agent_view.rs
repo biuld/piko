@@ -12,6 +12,8 @@ pub struct AgentViewLocal {
     pub composer_error: Option<String>,
     pub pending_submission: Option<composer::PendingSubmission>,
     pub block_expand: HashMap<String, BlockExpandPref>,
+    /// Per-tab attachment chips (F-47); cleared on accepted submit.
+    pub attachments: Vec<composer::Attachment>,
 }
 
 impl Default for AgentViewLocal {
@@ -22,6 +24,7 @@ impl Default for AgentViewLocal {
             composer_error: None,
             pending_submission: None,
             block_expand: HashMap::new(),
+            attachments: Vec::new(),
         }
     }
 }
@@ -42,6 +45,13 @@ impl Shell {
         self.views
             .get(&self.draft_key)
             .and_then(|view| view.composer_error.clone())
+    }
+
+    pub(super) fn view_attachments(&self) -> Vec<composer::Attachment> {
+        self.views
+            .get(&self.draft_key)
+            .map(|view| view.attachments.clone())
+            .unwrap_or_default()
     }
 
     pub(super) fn pending_submission(&self) -> Option<&composer::PendingSubmission> {

@@ -1,11 +1,10 @@
 use super::canvas::row_gap_before;
-use super::timeline::row_kind;
 use super::*;
 use gpui::{FollowMode, list};
+use island::components::chrome::{ChromeTextEmphasis, GhostTextButton};
 use island::components::panel::{
     IslandPanel, IslandPlaceholder, PanelPresentation, PanelSurfaceRole,
 };
-use island::components::scroll_edge::ScrollEdgeFade;
 use island::theme::IslandIcon;
 
 impl Render for Shell {
@@ -34,7 +33,7 @@ impl Render for Shell {
             WindowChromeFrame, WorkspaceChrome, WorkspacePresentation,
         };
 
-        let content = self.render_timeline_region(window, cx);
+        let content = self.render_timeline_region(cx);
         let mut frame = WindowChromeFrame::new(content, self.render_chrome(cx, narrow))
             .presentation(WorkspacePresentation::Detached)
             .material(self.material);
@@ -131,9 +130,7 @@ impl Shell {
             // Principal is unwrapped so TabGroup can paint a single hugging capsule.
             zones = zones.principal(tabs);
         }
-        zones = zones
-            .append_trailing(self.model_picker(cx))
-            .append_trailing(self.thinking_picker(cx));
+        // Model/thinking pickers moved into the composer header (F-47).
         if let Some(attention) = self.attention_control(cx) {
             zones = zones.append_trailing(attention);
         }
@@ -144,16 +141,37 @@ impl Shell {
         WorkspaceChrome::new(zones).material(self.material)
     }
 
-    fn render_timeline_region(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let m = metrics();
+    /// Header control to jump back to the newest message. Replaces the floating
+    /// "↓ Latest" pill; shown only after the reader has scrolled off the tail.
+    fn latest_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.following() || self.timeline_list.item_count() == 0 {
+            return None;
+        }
+        let entity = cx.entity().downgrade();
+        Some(
+            GhostTextButton::new("piko-latest", "Latest")
+                .emphasis(ChromeTextEmphasis::Foreground)
+                .leading_icon(IslandIcon::ArrowDown)
+                .capsule(true)
+                .tooltip("Jump to the latest message")
+                .material(self.material)
+                .on_click(move |_, _, app| {
+                    if let Some(shell) = entity.upgrade() {
+                        shell.update(app, |shell, cx| {
+                            shell.view_local().following = true;
+                            shell.timeline_list.set_follow_mode(FollowMode::Tail);
+                            cx.notify();
+                        });
+                    }
+                })
+                .into_any_element(),
+        )
+    }
+
+    fn render_timeline_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let input = self.composer_input.read(cx);
         let draft = input.value().to_string();
-        let measured_input_height = f32::from(input.input_bounds().size.height);
-        let composer_padding = composer::footprint_for_text(&draft, measured_input_height, 0.0);
+        let composer_padding = composer::footprint_for_text(&draft);
         let (state, frame) = if self.pending_agent.is_some() {
             (
                 timeline::TimelineState::Loading,
@@ -170,7 +188,6 @@ impl Shell {
         // Shared with list item callbacks for this frame; they must not
         // rebuild the projection per visible row (scroll performance).
         self.frame_timeline = frame.clone();
-        let following = self.following();
         let ready = matches!(&state, timeline::TimelineState::Ready);
 
         let panel = match &state {
@@ -238,9 +255,7 @@ impl Shell {
         }
         .material(self.material)
         .surface_role(PanelSurfaceRole::Content)
-        .presentation(PanelPresentation::Detached);
-
-        let show_return = ready && frame.total() > 0 && !following;
+        .presentation(PanelPresentation::Hosted);
 
         div()
             .id("piko-timeline-region")
@@ -249,52 +264,13 @@ impl Shell {
             .min_h(px(0.))
             .relative()
             .overflow_hidden()
-            .rounded(m.island_radius)
             .child(
                 div()
                     .size_full()
                     .overflow_hidden()
-                    .rounded(m.island_radius)
                     .when(!ready, |body| body.pb(px(composer_padding)))
                     .child(panel),
             )
-            .when(ready, |region| {
-                region.child(
-                    ScrollEdgeFade::bottom(px(composer_padding))
-                        .material(self.material)
-                        .on_surface(SurfaceRole::Content),
-                )
-            })
-            .when(show_return, |region| {
-                region.child(
-                    div()
-                        .id("piko-return-to-latest-slot")
-                        .absolute()
-                        .bottom(px(composer_padding - 10.0))
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .id("piko-return-to-latest")
-                                .px(m.space_sm)
-                                .py(px(4.))
-                                .rounded_full()
-                                .border_1()
-                                .border_color(hairline(SurfaceRole::Chrome))
-                                .bg(fill(SurfaceRole::Elevated, self.material))
-                                .cursor_pointer()
-                                .hover(|style| style.bg(highlight()))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.view_local().following = true;
-                                    this.timeline_list.set_follow_mode(FollowMode::Tail);
-                                    cx.notify();
-                                }))
-                                .child(text(TextRole::Meta).child("↓ Latest")),
-                        ),
-                )
-            })
             .child(self.render_composer(cx))
             .into_any_element()
     }
@@ -324,7 +300,7 @@ impl Shell {
             return div().into_any_element();
         };
         let m = metrics();
-        let gap = row_gap_before(prev.as_ref().map(row_kind), row_kind(&row));
+        let gap = row_gap_before(prev.as_ref(), &row);
         let total = frame.total();
         let padding = frame.composer_padding;
         let row_el = self.render_timeline_row(&row, gap, _window, cx);
@@ -381,16 +357,60 @@ impl Shell {
             }
         });
 
+        let entity = cx.entity().downgrade();
+        let on_attach: composer::ComposerAction = std::rc::Rc::new(move |_, app| {
+            let Some(shell) = entity.upgrade() else {
+                return;
+            };
+            let rx = app.prompt_for_paths(gpui::PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: true,
+                prompt: None,
+            });
+            app.spawn(async move |cx: &mut gpui::AsyncApp| {
+                let picked = match rx.await {
+                    Ok(Ok(Some(paths))) => Some(paths),
+                    _ => None,
+                };
+                if let Some(paths) = picked
+                    && !paths.is_empty()
+                {
+                    shell.update(cx, |shell, cx| shell.add_attachments(paths, cx));
+                }
+            })
+            .detach();
+        });
+        let entity = cx.entity().downgrade();
+        let on_remove_attachment: composer::RemoveAttachmentAction =
+            std::rc::Rc::new(move |id, _, app| {
+                if let Some(shell) = entity.upgrade() {
+                    shell.update(app, |shell, cx| shell.remove_attachment(id, cx));
+                }
+            });
+        let model_button = self.model_picker(cx);
+        let thinking_button = self.thinking_picker(cx);
+
         composer::ComposerView {
             input: self.composer_input.clone(),
+            input_height: {
+                let draft = self.composer_input.read(cx).value().to_string();
+                composer::input_box_height(&draft)
+            },
+            latest_button: self.latest_button(cx),
             material: self.material,
             enabled: live && view_key.is_some() && self.pending_agent.is_none(),
             running,
             pending: self.pending_submission().is_some(),
             context,
             error: self.composer_error(),
+            attachments: self.view_attachments(),
+            model_button,
+            thinking_button,
             on_submit: submit,
             on_cancel: cancel,
+            on_attach,
+            on_remove_attachment,
         }
         .render()
     }

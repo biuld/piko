@@ -1,8 +1,8 @@
 //! Frontend-neutral product operations.
 
 use piko_protocol::{
-    AgentInstanceId, ApprovalDecision, ApprovalId, InteractionId, SessionId, SessionListScope,
-    ThinkingLevel, UserInteractionResponse,
+    AgentInstanceId, ApprovalDecision, ApprovalId, InteractionId, MessageContent, SessionId,
+    SessionListScope, ThinkingLevel, UserInteractionResponse,
 };
 
 /// Product intents emitted by a frontend adapter.
@@ -25,6 +25,10 @@ pub enum ClientIntent {
     },
     SubmitTurn {
         text: String,
+    },
+    /// Multimodal submit (F-47): text plus referenced-file/image blocks.
+    SubmitTurnMessage {
+        content: MessageContent,
     },
     CancelTurn,
     RespondApproval {

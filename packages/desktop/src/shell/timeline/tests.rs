@@ -114,17 +114,43 @@ fn assistant_side_run_collapses_into_one_row() {
 
     let core = state_with(timeline);
     let (_, frame) = frame_timeline(&core, 12.);
-    // [user] then one collapsed turn row: a1 + tool + a2.
-    assert_eq!(frame.total(), 2);
-    let (_, turn) = rows_around(&core, &frame, 1).unwrap();
-    let TimelineRow::Assistant { segments, .. } = &turn else {
+    // [user] then the turn splits at text boundaries: [Think, Text] and
+    // [Tool, Text] pack into one bubble via shared turn_id.
+    assert_eq!(frame.total(), 3);
+    let (prev, piece0) = rows_around(&core, &frame, 1).unwrap();
+    assert_eq!(
+        prev.as_ref().map(|row| row.id().to_string()).as_deref(),
+        Some("u1-user")
+    );
+    let TimelineRow::Assistant {
+        turn_id,
+        leads_turn,
+        segments,
+        ..
+    } = &piece0
+    else {
         panic!("expected assistant flow");
     };
-    assert_eq!(segments.len(), 4);
+    assert_eq!(turn_id, "a1-turn");
+    assert!(*leads_turn);
+    assert_eq!(segments.len(), 2);
     assert!(matches!(&segments[0], TurnSegment::Thinking { text, .. } if text == "hmm"));
     assert!(matches!(&segments[1], TurnSegment::Text { text, .. } if text == "part one"));
-    assert!(matches!(&segments[2], TurnSegment::Tool { name, .. } if name == "exec_command"));
-    assert!(matches!(&segments[3], TurnSegment::Text { text, .. } if text == "continuing"));
+
+    let (prev, piece1) = rows_around(&core, &frame, 2).unwrap();
+    assert_eq!(prev.unwrap().id(), piece0.id());
+    let TimelineRow::Assistant {
+        leads_turn,
+        segments,
+        ..
+    } = &piece1
+    else {
+        panic!("expected assistant flow");
+    };
+    assert!(!*leads_turn);
+    assert_eq!(segments.len(), 2);
+    assert!(matches!(&segments[0], TurnSegment::Tool { name, .. } if name == "exec_command"));
+    assert!(matches!(&segments[1], TurnSegment::Text { text, .. } if text == "continuing"));
 }
 
 #[test]
@@ -180,13 +206,37 @@ fn adjacent_same_kind_merges_within_a_message_only() {
     );
     let core = state_with(timeline);
     let (_, frame) = frame_timeline(&core, 0.);
-    assert_eq!(frame.total(), 1);
-    let TimelineRow::Assistant { segments, .. } = rows_around(&core, &frame, 0).unwrap().1 else {
-        panic!("expected assistant flow");
-    };
-    assert_eq!(segments.len(), 2);
-    assert!(matches!(&segments[0], TurnSegment::Text { text, .. } if text == "one\ntwo"));
-    assert!(matches!(&segments[1], TurnSegment::Text { text, .. } if text == "three"));
+    // One turn, two pieces: each merged text block owns a row; both carry
+    // the same turn_id so they pack with zero gap.
+    assert_eq!(frame.total(), 2);
+    let first = rows_around(&core, &frame, 0).unwrap().1;
+    let second = rows_around(&core, &frame, 1).unwrap().1;
+    for (index, row) in [&first, &second].into_iter().enumerate() {
+        assert!(
+            matches!(row, TimelineRow::Assistant { .. }),
+            "piece {index}"
+        );
+    }
+    match (&first, &second) {
+        (
+            TimelineRow::Assistant {
+                segments: a,
+                turn_id: ta,
+                ..
+            },
+            TimelineRow::Assistant {
+                segments: b,
+                turn_id: tb,
+                ..
+            },
+        ) => {
+            assert_eq!(ta, tb);
+            assert_eq!(a.len(), 1);
+            assert!(matches!(&a[0], TurnSegment::Text { text, .. } if text == "one\ntwo"));
+            assert!(matches!(&b[0], TurnSegment::Text { text, .. } if text == "three"));
+        }
+        _ => unreachable!(),
+    }
 }
 
 #[test]
@@ -313,18 +363,19 @@ fn running_tool_after_draft_ends_suppresses_tail_spinner() {
         "t".into(),
     );
     let core = state_with(timeline);
-    let TimelineRow::Assistant { segments, .. } =
-        rows_around(&core, &(frame_timeline(&core, 0.).1), 0)
-            .unwrap()
-            .1
-    else {
+    let frame = frame_timeline(&core, 0.).1;
+    // Piece 0 keeps the draft segments; the tool owns its own piece.
+    let TimelineRow::Assistant { segments, .. } = rows_around(&core, &frame, 0).unwrap().1 else {
         panic!("expected assistant flow");
     };
     assert!(matches!(
         &segments[0],
         TurnSegment::Thinking { active: false, .. }
     ));
-    assert!(matches!(&segments[2], TurnSegment::Tool { id, .. } if id == "call-9"));
+    let TimelineRow::Assistant { segments, .. } = rows_around(&core, &frame, 1).unwrap().1 else {
+        panic!("expected tool piece");
+    };
+    assert!(matches!(&segments[0], TurnSegment::Tool { id, .. } if id == "call-9"));
 }
 
 #[test]

@@ -18,14 +18,19 @@ impl Shell {
         }
         let value = self.composer_input.read(cx).value().to_string();
         let text = value.trim().to_string();
-        if text.is_empty() {
+        let attachments = self.view_local().attachments.clone();
+        if text.is_empty() && attachments.is_empty() {
             return;
         }
+        let intent = match composer::build_submission(&text, &attachments) {
+            Some(content) => ClientIntent::SubmitTurnMessage { content },
+            None => ClientIntent::SubmitTurn { text: text.clone() },
+        };
         let before: HashSet<_> = self.state.core.pending_commands.keys().cloned().collect();
         let commands = reduce(
             &mut self.state,
             &mut self.command_ids,
-            ClientMsg::Intent(ClientIntent::SubmitTurn { text: text.clone() }),
+            ClientMsg::Intent(intent),
         );
         let command_id = self
             .state
@@ -79,6 +84,7 @@ impl Shell {
             } else {
                 if let Some(view) = self.views.get_mut(&key) {
                     view.pending_submission = None;
+                    view.attachments.clear();
                 }
                 self.drafts.insert(key.clone(), String::new());
                 if key == self.draft_key {
@@ -86,6 +92,28 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// Classify picked paths into attachment chips for the current tab.
+    pub(super) fn add_attachments(
+        &mut self,
+        paths: Vec<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        let (added, errors) = composer::classify_paths(&paths);
+        let view = self.view_local();
+        if !errors.is_empty() {
+            view.composer_error = Some(format!("Attachment failed:\n{}", errors.join("\n")));
+        }
+        view.attachments.extend(added);
+        cx.notify();
+    }
+
+    pub(super) fn remove_attachment(&mut self, id: String, cx: &mut Context<Self>) {
+        if let Some(view) = self.views.get_mut(&self.draft_key) {
+            view.attachments.retain(|attachment| attachment.id != id);
+        }
+        cx.notify();
     }
 
     pub(super) fn cancel_turn(&mut self, cx: &mut Context<Self>) {

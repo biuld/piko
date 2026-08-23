@@ -14,6 +14,8 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-64: Two-tone composer with attachments](D-64-composer-two-tone.md)
+  implements F-47: layered composer card, header pickers, attach chips
 - [D-63: Assistant turn chips](D-63-assistant-turn-chips.md)
   implements F-46: grouped turn rows with ActivityChip flows and a
   chip-detail overlay (amends D-62 presentation)

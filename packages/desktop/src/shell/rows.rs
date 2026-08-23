@@ -7,7 +7,8 @@ use crate::focus::{ChipDetail, LayerKind};
 use gpui::{Entity, Window, relative};
 use island::components::activity_chip::{ActivityChip, ActivityStatus};
 use island::components::conversation::{
-    BlockAlign, BlockSurface, CollapsePolicy, ConversationBlock, user_body_max_height,
+    BlockAlign, BlockSurface, CollapsePolicy, ConversationBlock, PieceJunction,
+    user_body_max_height,
 };
 use island::components::markdown::{MarkdownRenderOptions, parse_markdown, render_markdown_with};
 use island::components::selection::SelectionState;
@@ -86,7 +87,13 @@ impl Shell {
                     ))
                     .into_any_element()
             }
-            timeline::TimelineRow::Assistant { segments, .. } => {
+            timeline::TimelineRow::Assistant {
+                turn_id: _,
+                leads_turn,
+                ends_turn,
+                segments,
+                ..
+            } => {
                 let mut caret_tail = false;
                 let mut flow: Vec<AnyElement> = Vec::new();
                 let mut chips: Vec<AnyElement> = Vec::new();
@@ -162,9 +169,29 @@ impl Shell {
                     .filter_map(|segment| segment.text())
                     .collect::<Vec<_>>()
                     .join("\n");
+                // Reserve the icon column on continuation pieces so text
+                // stays flush with the first piece of the bubble.
+                let icon_color = if *leads_turn {
+                    tokens().fg_rgba()
+                } else {
+                    gpui::Rgba {
+                        r: 0.,
+                        g: 0.,
+                        b: 0.,
+                        a: 0.,
+                    }
+                };
+                let junction = match (*leads_turn, *ends_turn) {
+                    (true, true) => PieceJunction::Solo,
+                    (true, false) => PieceJunction::Head,
+                    (false, true) => PieceJunction::Tail,
+                    (false, false) => PieceJunction::Middle,
+                };
                 ConversationBlock::new(id.clone())
                     .align(BlockAlign::Leading)
-                    .leading_icon(IslandIcon::Bot, tokens().fg_rgba())
+                    .fill()
+                    .junction(junction)
+                    .leading_icon(IslandIcon::Bot, icon_color)
                     .surface(BlockSurface::ElevatedChip)
                     .material(material)
                     .collapse(CollapsePolicy::Never)

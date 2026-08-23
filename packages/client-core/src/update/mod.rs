@@ -143,6 +143,22 @@ fn handle_intent(
                 }));
             }
         }
+        ClientIntent::SubmitTurnMessage { content } => {
+            if let (SessionPhase::Live, Some(session)) = (&state.session_phase, &state.live_session)
+                && let Some(agent_id) = &session.selected_agent
+            {
+                let sid = session.session_id.clone();
+                let aid = agent_id.clone();
+                let id = ctx.command_ids.next_command_id();
+                state.pending_commands.insert(id.clone(), PendingOp::Submit);
+                effects.push(ClientEffect::Send(Command::ChatSubmitMessage {
+                    command_id: id,
+                    session_id: sid,
+                    target_agent_instance_id: aid,
+                    content,
+                }));
+            }
+        }
         ClientIntent::CancelTurn => {
             if let Some(session) = &state.live_session
                 && let Some(agent_id) = &session.selected_agent

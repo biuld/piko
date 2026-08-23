@@ -4997,8 +4997,8 @@ name = "piko-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "gpui",
- "gpui-base",
  "island",
  "piko-client-core",
  "piko-comms",

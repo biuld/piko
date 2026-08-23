@@ -91,6 +91,12 @@ header; a landed PRD supersedes earlier conflicting documents.
    without piko's domain model, implement it in Island rather than privately in
    piko.
 
+   Desktop UI must not import `gpui`/`gpui-base` directly. Reusable desktop
+   runtime, layout, theme, chrome, controls, and form inputs live in `island-rs`
+   and are consumed from there; piko only composes them (product IDs, intents,
+   projections, localization). Lower-level GPUI primitives a product needs are
+   re-exported through Island's facade rather than depended on directly.
+
 ## Session storage
 
 Schema **v4** under `~/.piko/agents/sessions/<encoded-cwd>/<session-id>/`:

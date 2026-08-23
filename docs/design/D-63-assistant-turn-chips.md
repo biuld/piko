@@ -51,12 +51,19 @@ by `tool_call_id` when opened, keeping list paints clone-light.
 
 ## Virtualization (amends D-62 offsets)
 
-`frame_timeline` now walks items once to build contiguous item-run **groups**;
-each group renders exactly one list row, so `total()` is the group count and
-row lookup is direct — no offset arithmetic at all.
-Streaming flag unchanged (draft present or any tool running). `rows_around`
-maps every item of the addressed group and merges segments — cost is
-proportional to the visible turn, not the session. Parity tests pin grouping.
+`frame_timeline` walks items once to build contiguous turn **groups** and
+counts each turn's presentation **pieces** without cloning payloads
+(`count_pieces` mirrors the merge/split rules; parity is pinned in tests).
+A turn splits at text boundaries — piece k = pending chip run + text k, and
+trailing chips flush as their own piece — so no single list row is ever
+unbounded, no matter how many tool calls interleave. `offsets[g]` accumulates
+piece counts; `rows_around` maps only the addressed turn (and the previous
+one at piece boundaries). Streaming remeasure touches at most the tail
+pieces instead of a whole giant row.
+
+Chip labels are single-line by construction: `tool_primary_line` collapses
+every whitespace run (literal newlines from multi-line commands included)
+and clamps with an ellipsis before layout sees the string.
 
 ## Presentation
 

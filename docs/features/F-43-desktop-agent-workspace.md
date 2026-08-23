@@ -4,6 +4,7 @@
 > Priority: P0
 > Source evidence: piko product direction after F-42 visual review (screenshot 2026-08-22 21:22)
 > Design: [D-60](../design/D-60-desktop-agent-workspace.md)
+> Superseded in part by: F-47 composer-attachments (model/thinking pickers move into the composer header; composer becomes two-tone with attach chips)
 > Supersedes: F-42 bullets that make the sidebar the agent switcher and the Composer the model/thinking chrome (table below). Unlisted F-42 rules stand.
 
 ## Summary

@@ -98,8 +98,12 @@ pub fn model_chrome_label(model_id: &str) -> String {
         .next()
         .filter(|part| !part.is_empty())
         .unwrap_or(model_id);
-    truncate_chrome_label(base, 16)
+    truncate_chrome_label(base, MODEL_LABEL_MAX)
 }
+
+/// The longest model capsule should read before ellipsizing: matches the width
+/// of the vision variant in the deepseek family.
+const MODEL_LABEL_MAX: usize = 28;
 
 /// Title-case thinking level for a chrome picker capsule.
 pub fn thinking_chrome_label(level: &str) -> String {

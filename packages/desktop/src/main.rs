@@ -33,6 +33,9 @@ fn main() -> Result<()> {
             let mut options = island::platform::window::window_options();
             options.window_bounds = Some(WindowBounds::Windowed(bounds));
             cx.open_window(options, |window, cx| {
+                // gpui-base inputs render at `rem(1.0)`; align the default rem to
+                // island's body size so input typography matches the theme.
+                window.set_rem_size(island::theme::metrics().body_size);
                 cx.new(|cx| {
                     shell::Shell::new(window, cx, args.clone(), prefs_path.clone(), prefs.clone())
                 })
