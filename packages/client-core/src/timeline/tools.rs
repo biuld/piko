@@ -67,6 +67,8 @@ impl AgentTimeline {
             source_turn_id,
             transcript_seq,
             live_order,
+            upstream: None,
+            upstream_split: None,
         })));
         self.tool_ids
             .insert(tool_call_id.clone(), self.items.len() - 1);
@@ -158,6 +160,8 @@ impl AgentTimeline {
             source_turn_id,
             transcript_seq,
             live_order,
+            upstream: None,
+            upstream_split: None,
         })));
         self.tool_ids
             .insert(tool_call_id.clone(), self.items.len() - 1);
@@ -205,6 +209,8 @@ impl AgentTimeline {
                 source_turn_id: source_turn_id.clone(),
                 transcript_seq: None,
                 live_order,
+                upstream: None,
+                upstream_split: None,
             })));
             self.tool_ids
                 .insert(tool_call_id.clone(), self.items.len() - 1);
@@ -272,6 +278,160 @@ impl AgentTimeline {
                 }
                 _ => None,
             })
+    }
+
+    /// Tag a tool timeline item as provider-side ("upstream") and update its
+    /// arguments when a later lifecycle block carries them. The tool item is
+    /// keyed by `activity_id`, so repeated blocks update the same card.
+    pub(super) fn mark_upstream(
+        &mut self,
+        tool_call_id: &str,
+        upstream: ToolUpstream,
+        args: Option<serde_json::Value>,
+    ) {
+        let Some(&idx) = self.tool_ids.get(tool_call_id) else {
+            return;
+        };
+        if let TimelineItem::Tool(tool) = &mut self.items[idx] {
+            tool.upstream = Some(upstream);
+            if let Some(args) = args {
+                tool.args = args;
+                tool.partial_json = None;
+                tool.argument_segments.clear();
+            }
+        }
+    }
+
+    /// Snapshot the parent draft's text/thinking so the projection can split
+    /// the single streaming message into  before → card → after.
+    pub(super) fn capture_upstream_split(&mut self, tool_call_id: &str) {
+        let Some(&idx) = self.tool_ids.get(tool_call_id) else {
+            return;
+        };
+        if let TimelineItem::Tool(tool) = &self.items[idx]
+            && tool.upstream_split.is_some()
+        {
+            return;
+        }
+        let parent = match &self.items[idx] {
+            TimelineItem::Tool(tool) => tool.parent_message_id.clone(),
+            _ => return,
+        };
+        let Some(parent) = parent else {
+            return;
+        };
+        let split = {
+            let Some(&draft_idx) = self.draft_ids.get(&parent) else {
+                return;
+            };
+            match &self.items[draft_idx] {
+                TimelineItem::RealtimeDraft(draft) => UpstreamSplit {
+                    before_text: draft.text(),
+                    before_thinking: draft.thinking(),
+                },
+                _ => return,
+            }
+        };
+        if let TimelineItem::Tool(tool) = &mut self.items[idx] {
+            tool.upstream_split = Some(split);
+        }
+    }
+
+    /// Lift upstream tool activity/approval content blocks out of a committed
+    /// assistant message into timeline tool cards. Cards are keyed by
+    /// `activity_id` / `approval_id`, so repeated lifecycle blocks update one
+    /// card in place and a live streamed card is folded into the durable one.
+    pub(super) fn upsert_committed_upstream(
+        &mut self,
+        content: &[ContentBlock],
+        transcript_seq: u64,
+        source_turn_id: &str,
+    ) {
+        use piko_protocol::messages::UpstreamActivityStatus;
+
+        for block in content {
+            match block {
+                ContentBlock::UpstreamToolActivity {
+                    activity_id,
+                    tool_name,
+                    kind,
+                    status,
+                    arguments,
+                    action,
+                } => {
+                    let args = arguments.clone();
+                    match status {
+                        UpstreamActivityStatus::Completed => {
+                            self.apply_tool_ended_with_turn(
+                                activity_id.clone(),
+                                Some(tool_name.clone()),
+                                None,
+                                Vec::new(),
+                                None,
+                                false,
+                                Some(source_turn_id.to_string()),
+                                Some(transcript_seq),
+                            );
+                        }
+                        UpstreamActivityStatus::Failed => {
+                            self.apply_tool_ended_with_turn(
+                                activity_id.clone(),
+                                Some(tool_name.clone()),
+                                None,
+                                Vec::new(),
+                                None,
+                                true,
+                                Some(source_turn_id.to_string()),
+                                Some(transcript_seq),
+                            );
+                        }
+                        UpstreamActivityStatus::Started | UpstreamActivityStatus::InProgress => {
+                            self.apply_tool_started_with_turn(
+                                activity_id.clone(),
+                                tool_name.clone(),
+                                args.clone().unwrap_or(serde_json::Value::Null),
+                                None,
+                                Some(source_turn_id.to_string()),
+                                Some(transcript_seq),
+                            );
+                        }
+                    }
+                    self.mark_upstream(
+                        activity_id,
+                        ToolUpstream {
+                            kind: kind.clone(),
+                            summary: None,
+                            action: action.clone(),
+                        },
+                        args,
+                    );
+                }
+                ContentBlock::UpstreamToolApproval {
+                    approval_id,
+                    tool_name,
+                    summary,
+                } => {
+                    self.apply_tool_started_with_turn(
+                        approval_id.clone(),
+                        tool_name.clone(),
+                        serde_json::Value::Null,
+                        None,
+                        Some(source_turn_id.to_string()),
+                        Some(transcript_seq),
+                    );
+                    self.mark_upstream(
+                        approval_id,
+                        ToolUpstream {
+                            kind: String::new(),
+                            summary: Some(summary.clone()),
+                            action: None,
+                        },
+                        None,
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 }
 

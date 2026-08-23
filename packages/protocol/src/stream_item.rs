@@ -30,6 +30,8 @@ pub enum StreamItemKind {
     AgentMessage,
     AgentThought,
     ToolCall,
+    /// Provider-side ("upstream") tool lifecycle live on the stream.
+    Upstream,
     /// Deferred: no host→client emitter yet (plan UX not productized).
     Plan,
     /// Reserved; live usage uses [`crate::UsageEvent`] / `ServerMessage::Usage`.
@@ -149,6 +151,55 @@ impl StreamItemPatch {
                     content_index: Some(*content_index),
                     delta_seq,
                     fields: Some(serde_json::json!({
+                        "parentMessageId": message_id,
+                    })),
+                }]
+            }
+            RealtimeDelta::UpstreamActivity {
+                activity_id,
+                tool_name,
+                kind,
+                status,
+                arguments,
+                action,
+            } => {
+                vec![Self {
+                    session_id,
+                    agent_instance_id,
+                    item_id: activity_id.clone(),
+                    item_kind: StreamItemKind::Upstream,
+                    op: StreamItemOp::Upsert,
+                    text: None,
+                    content_index: None,
+                    delta_seq,
+                    fields: Some(serde_json::json!({
+                        "status": upstream_status_str(*status),
+                        "toolName": tool_name,
+                        "kind": kind,
+                        "args": arguments,
+                        "action": action,
+                        "parentMessageId": message_id,
+                    })),
+                }]
+            }
+            RealtimeDelta::UpstreamApproval {
+                approval_id,
+                tool_name,
+                summary,
+            } => {
+                vec![Self {
+                    session_id,
+                    agent_instance_id,
+                    item_id: approval_id.clone(),
+                    item_kind: StreamItemKind::Upstream,
+                    op: StreamItemOp::Upsert,
+                    text: None,
+                    content_index: None,
+                    delta_seq,
+                    fields: Some(serde_json::json!({
+                        "status": "approval",
+                        "toolName": tool_name,
+                        "summary": summary,
                         "parentMessageId": message_id,
                     })),
                 }]
@@ -302,6 +353,15 @@ impl StreamItemPatch {
             _ => return None,
         };
         Some((parent, seq, delta))
+    }
+}
+
+fn upstream_status_str(status: crate::messages::UpstreamActivityStatus) -> &'static str {
+    match status {
+        crate::messages::UpstreamActivityStatus::Started
+        | crate::messages::UpstreamActivityStatus::InProgress => "running",
+        crate::messages::UpstreamActivityStatus::Completed => "completed",
+        crate::messages::UpstreamActivityStatus::Failed => "failed",
     }
 }
 

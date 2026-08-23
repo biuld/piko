@@ -6,12 +6,15 @@ pub(super) fn tool_lines(
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let presented = present_tool(
-        &tool.name,
-        &tool.args,
-        tool.result.as_deref(),
-        tool.result_details.as_deref(),
-    );
+    let presented = match &tool.upstream {
+        Some(up) => upstream_presentation(tool, up),
+        None => present_tool(
+            &tool.name,
+            &tool.args,
+            tool.result.as_deref(),
+            tool.result_details.as_deref(),
+        ),
+    };
     // Card tone: command badge (exit code) wins over protocol ToolStatus for shell tools.
     let bg = card_bg(tool.status, presented.title_badge.as_ref(), theme);
     let title_style = Style::default()

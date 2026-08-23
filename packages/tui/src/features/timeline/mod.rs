@@ -15,6 +15,7 @@ mod highlight;
 mod layout;
 mod line_cache;
 mod markdown;
+mod projection;
 mod render;
 mod render_diff;
 mod store;
@@ -26,7 +27,7 @@ pub use component::TimelineKind;
 pub use component::{
     AssistantMessageComponent, ComponentId, ContentBlock, CustomMessageComponent, ErrorComponent,
     SessionFactComponent, SummaryComponent, SummaryKind, TimelineComponent, TimelineEntry,
-    ToolEntry, UserMessageComponent,
+    ToolEntry, UpstreamInfo, UserMessageComponent,
 };
 pub(crate) use layout::TimelineRenderPlan;
 pub use store::TimelineStore;

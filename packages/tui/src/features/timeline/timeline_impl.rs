@@ -215,6 +215,73 @@ impl Timeline {
             self.intern_tool_id(tool_call_id);
         }
 
+        // Upstream tool cards are projected interleaved with their committed
+        // assistant message's text runs. Collect them here so the committed
+        // message can place them at the right content position, and skip the
+        // standalone copy in the item loop.
+        let upstream_tools: HashMap<String, ToolEntry> = self
+            .projection
+            .items()
+            .iter()
+            .filter_map(|item| {
+                let CoreItem::Tool(tool) = item else {
+                    return None;
+                };
+                tool.upstream.as_ref()?;
+                Some((
+                    tool.tool_call_id.clone(),
+                    super::projection::project_tool_item(tool, &expanded),
+                ))
+            })
+            .collect();
+        let mut emitted_upstream: std::collections::HashSet<String> = self
+            .projection
+            .items()
+            .iter()
+            .flat_map(|item| {
+                let CoreItem::Committed(committed) = item else {
+                    return Vec::new();
+                };
+                let piko_protocol::Message::Assistant { content, .. } = &committed.message else {
+                    return Vec::new();
+                };
+                content
+                    .iter()
+                    .filter_map(|block| match block {
+                        piko_protocol::ContentBlock::UpstreamToolActivity {
+                            activity_id, ..
+                        } => Some(activity_id.clone()),
+                        piko_protocol::ContentBlock::UpstreamToolApproval {
+                            approval_id, ..
+                        } => Some(approval_id.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .collect();
+        // Live drafts: if an upstream tool captured a before-snapshot, the
+        // single streaming message is split into  text-before → card → text-after.
+        let mut draft_slices: HashMap<String, Vec<super::projection::DraftSlice>> = HashMap::new();
+        for item in self.projection.items() {
+            let CoreItem::Tool(tool) = item else {
+                continue;
+            };
+            let (Some(upstream_split), Some(parent)) = (
+                tool.upstream_split.as_ref(),
+                tool.parent_message_id.as_ref(),
+            ) else {
+                continue;
+            };
+            draft_slices
+                .entry(parent.clone())
+                .or_default()
+                .push(super::projection::DraftSlice {
+                    tool: super::projection::project_tool_item(tool, &expanded),
+                    text_before: upstream_split.before_text.chars().count(),
+                    thinking_before: upstream_split.before_thinking.chars().count(),
+                });
+        }
+
         let mut last_component_by_turn = HashMap::new();
         for item in self.projection.items() {
             let source_turn_id = match item {
@@ -222,65 +289,69 @@ impl Timeline {
                 CoreItem::Tool(tool) => tool.source_turn_id.clone(),
                 CoreItem::RealtimeDraft(_) | CoreItem::SessionEntry(_) => None,
             };
-            let component = match item {
-                CoreItem::Committed(committed) => {
-                    component_from_message(committed.message_id.clone(), &committed.message)
-                }
+            let components: Vec<TimelineComponent> = match item {
+                CoreItem::Committed(committed) => super::projection::components_from_message(
+                    committed.message_id.clone(),
+                    &committed.message,
+                    &expanded,
+                    &upstream_tools,
+                ),
                 CoreItem::RealtimeDraft(draft) => {
-                    let blocks = draft
-                        .content_segments
-                        .iter()
-                        .filter(|segment| !segment.text.is_empty())
-                        .map(|segment| match segment.kind {
-                            piko_client_core::RealtimeContentKind::Text => {
-                                ContentBlock::Text(segment.text.clone())
-                            }
-                            piko_client_core::RealtimeContentKind::Thinking => {
-                                ContentBlock::Thinking(segment.text.clone())
-                            }
-                        })
-                        .collect();
-                    Some(TimelineComponent::Assistant(AssistantMessageComponent {
-                        id: ComponentId::MessageId(draft.message_id.clone()),
-                        blocks,
-                        stop_reason: None,
-                        error_message: None,
+                    if let Some(mut slices) = draft_slices.get(&draft.message_id).cloned() {
+                        slices.sort_by_key(|s| (s.text_before, s.thinking_before));
+                        for slice in &slices {
+                            emitted_upstream.insert(slice.tool.id.clone());
+                        }
+                        super::projection::components_from_draft(draft, &slices)
+                    } else {
                         // Streaming draft has no committed timestamp yet.
-                        timestamp: None,
-                    }))
+                        vec![TimelineComponent::Assistant(AssistantMessageComponent {
+                            id: ComponentId::MessageId(draft.message_id.clone()),
+                            blocks: draft
+                                .content_segments
+                                .iter()
+                                .filter(|segment| !segment.text.is_empty())
+                                .map(|segment| match segment.kind {
+                                    piko_client_core::RealtimeContentKind::Text => {
+                                        ContentBlock::Text(segment.text.clone())
+                                    }
+                                    piko_client_core::RealtimeContentKind::Thinking => {
+                                        ContentBlock::Thinking(segment.text.clone())
+                                    }
+                                })
+                                .collect(),
+                            stop_reason: None,
+                            error_message: None,
+                            timestamp: None,
+                        })]
+                    }
                 }
                 CoreItem::Tool(tool) => {
-                    let result = if !tool.result_content.is_empty() {
-                        Some(protocol_blocks_to_text(&tool.result_content))
+                    // Upstream cards already emitted inside their committed
+                    // assistant message; skip the standalone copy.
+                    if tool.upstream.is_some() && emitted_upstream.contains(&tool.tool_call_id) {
+                        Vec::new()
                     } else {
-                        tool.result.as_ref().map(super::tool_format::json_for_entry)
-                    };
-                    let args = tool
-                        .partial_json
-                        .clone()
-                        .unwrap_or_else(|| super::tool_format::json_for_entry(&tool.args));
-                    let mut projected = ToolEntry::new(
-                        tool.tool_call_id.clone(),
-                        tool.tool_name.clone(),
-                        map_tool_status(tool.status),
-                        args,
-                        result,
-                        tool.parent_message_id.clone(),
-                    );
-                    projected.result_details = tool
-                        .result_details
-                        .as_ref()
-                        .map(super::tool_format::json_for_entry);
-                    projected.expanded = expanded.get(&projected.id).copied().unwrap_or(false);
-                    self.tool_calls.push(projected.clone());
-                    Some(TimelineComponent::Tool(projected))
+                        vec![TimelineComponent::Tool(
+                            super::projection::project_tool_item(tool, &expanded),
+                        )]
+                    }
                 }
-                CoreItem::SessionEntry(entry) => component_from_session_entry(&entry.entry),
+                CoreItem::SessionEntry(entry) => {
+                    super::projection::component_from_session_entry(&entry.entry)
+                        .into_iter()
+                        .collect()
+                }
             };
-            if let Some(component) = component {
+            for component in components {
+                if let TimelineComponent::Tool(tool) = &component
+                    && !self.tool_calls.iter().any(|t| t.id == tool.id)
+                {
+                    self.tool_calls.push(tool.clone());
+                }
                 self.components.push_back(component);
-                if let Some(turn_id) = source_turn_id {
-                    last_component_by_turn.insert(turn_id, self.components.len() - 1);
+                if let Some(turn_id) = &source_turn_id {
+                    last_component_by_turn.insert(turn_id.clone(), self.components.len() - 1);
                 }
             }
         }
@@ -383,107 +454,5 @@ impl Timeline {
                     .collect(),
             )
         })
-    }
-}
-
-fn component_from_message(
-    id: String,
-    message: &piko_protocol::Message,
-) -> Option<TimelineComponent> {
-    match message {
-        piko_protocol::Message::User { timestamp, .. } => {
-            Some(TimelineComponent::User(UserMessageComponent {
-                id: ComponentId::MessageId(id),
-                text: crate::text::message_to_text(message),
-                timestamp: *timestamp,
-            }))
-        }
-        piko_protocol::Message::Assistant {
-            content,
-            stop_reason,
-            error_message,
-            timestamp,
-            ..
-        } => Some(TimelineComponent::Assistant(AssistantMessageComponent {
-            id: ComponentId::MessageId(id),
-            blocks: content.iter().cloned().map(ContentBlock::from).collect(),
-            stop_reason: stop_reason.clone(),
-            error_message: error_message.clone(),
-            timestamp: *timestamp,
-        })),
-        _ => None,
-    }
-}
-
-fn component_from_session_entry(
-    entry: &piko_protocol::SessionTreeEntry,
-) -> Option<TimelineComponent> {
-    use piko_protocol::SessionTreeEntry;
-    match entry {
-        SessionTreeEntry::ModelChange(change) => {
-            Some(TimelineComponent::SessionFact(SessionFactComponent {
-                id: ComponentId::EntryId(change.id.clone()),
-                label: "model",
-                text: format!("changed to {}/{}", change.provider, change.model_id),
-            }))
-        }
-        SessionTreeEntry::ThinkingLevelChange(change) => {
-            Some(TimelineComponent::SessionFact(SessionFactComponent {
-                id: ComponentId::EntryId(change.id.clone()),
-                label: "thinking",
-                text: format!("changed to {}", change.thinking_level),
-            }))
-        }
-        SessionTreeEntry::ActiveToolsChange(change) if !change.active_tool_names.is_empty() => {
-            Some(TimelineComponent::SessionFact(SessionFactComponent {
-                id: ComponentId::EntryId(change.id.clone()),
-                label: "tools",
-                text: change.active_tool_names.join(", "),
-            }))
-        }
-        SessionTreeEntry::Compaction(compaction) => {
-            Some(TimelineComponent::Summary(SummaryComponent {
-                id: ComponentId::EntryId(compaction.id.clone()),
-                kind: SummaryKind::Compaction,
-                text: compaction.summary.clone(),
-            }))
-        }
-        SessionTreeEntry::BranchSummary(summary) => {
-            Some(TimelineComponent::Summary(SummaryComponent {
-                id: ComponentId::EntryId(summary.id.clone()),
-                kind: SummaryKind::Branch,
-                text: summary.summary.clone(),
-            }))
-        }
-        SessionTreeEntry::CustomMessage(custom) if custom.display => {
-            Some(TimelineComponent::CustomMessage(CustomMessageComponent {
-                id: ComponentId::EntryId(custom.id.clone()),
-                custom_type: custom.custom_type.clone(),
-                content: custom.content.clone(),
-            }))
-        }
-        _ => None,
-    }
-}
-
-fn protocol_blocks_to_text(blocks: &[piko_protocol::ContentBlock]) -> String {
-    blocks
-        .iter()
-        .map(|block| match block {
-            piko_protocol::ContentBlock::Text { text } => text.clone(),
-            piko_protocol::ContentBlock::Thinking { thinking, .. } => thinking.clone(),
-            piko_protocol::ContentBlock::Image { mime_type, .. } => format!("[image: {mime_type}]"),
-            other => other.text_projection(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn map_tool_status(status: piko_client_core::ToolStatus) -> crate::app::ToolStatus {
-    match status {
-        piko_client_core::ToolStatus::Running => crate::app::ToolStatus::Running,
-        piko_client_core::ToolStatus::Completed => crate::app::ToolStatus::Completed,
-        piko_client_core::ToolStatus::Failed => crate::app::ToolStatus::Failed,
-        piko_client_core::ToolStatus::Cancelled => crate::app::ToolStatus::Cancelled,
     }
 }

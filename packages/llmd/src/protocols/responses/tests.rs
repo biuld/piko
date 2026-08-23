@@ -330,7 +330,7 @@ fn complete_response_decodes_web_search_as_upstream_activity() {
             json!({
                 "id":"resp_search","status":"completed","output":[{
                     "type":"web_search_call","id":"ws_1","status":"completed",
-                    "action":{"type":"search","query":"piko"}
+                    "action":{"type":"search","queries":["piko"]}
                 }]
             }),
             &target_with_upstream_search(),
@@ -344,6 +344,10 @@ fn complete_response_decodes_web_search_as_upstream_activity() {
                 && activity.kind
                     == crate::capabilities::UpstreamToolKind::new("search").unwrap()
                 && activity.status == crate::tools::UpstreamActivityStatus::Completed
+                && activity.action
+                    == Some(piko_protocol::messages::UpstreamAction::Search {
+                        queries: vec!["piko".to_string()],
+                    })
     ));
 }
 
@@ -371,7 +375,7 @@ fn stream_decodes_web_search_lifecycle() {
         .push(json!({
             "type":"response.output_item.done","output_index":0,
             "item":{"type":"web_search_call","id":"ws_1","status":"completed",
-                "action":{"type":"search","query":"piko"}}
+                "action":{"type":"search","queries":["piko"]}}
         }))
         .unwrap();
     assert!(matches!(

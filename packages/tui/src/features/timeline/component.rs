@@ -1,4 +1,5 @@
 use piko_protocol::ContentBlock as ProtocolContentBlock;
+use piko_protocol::messages::UpstreamAction;
 
 use crate::app::ToolStatus;
 
@@ -159,6 +160,10 @@ pub struct ToolEntry {
     pub args: String,
     pub result: Option<String>,
     pub result_details: Option<String>,
+    /// Provider-side ("upstream") tool metadata when this card represents an
+    /// `UpstreamToolActivity` / `UpstreamToolApproval` block rather than a
+    /// locally dispatched tool call.
+    pub upstream: Option<Box<UpstreamInfo>>,
     /// Parent assistant message id (projection fidelity; not shown in card chrome).
     #[allow(dead_code)]
     pub parent_message_id: Option<String>,
@@ -183,8 +188,20 @@ impl ToolEntry {
             args,
             result,
             result_details: None,
+            upstream: None,
             parent_message_id,
             expanded: false,
         }
     }
+}
+
+/// Provider-side tool block extras.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct UpstreamInfo {
+    /// Open provider-neutral catalog identifier such as `search`.
+    pub kind: String,
+    /// Present when the upstream block is an approval request (`summary`).
+    pub summary: Option<String>,
+    /// Typed, cleaned action for a known upstream tool (e.g. `Search`/`OpenPage`).
+    pub action: Option<UpstreamAction>,
 }

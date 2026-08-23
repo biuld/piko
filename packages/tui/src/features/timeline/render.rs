@@ -23,10 +23,10 @@ use crate::{
 
 use super::{
     AssistantMessageComponent, ContentBlock, SummaryKind, Timeline, TimelineComponent, ToolEntry,
-    UserMessageComponent,
+    UpstreamInfo, UserMessageComponent,
     layout::TimelineRenderPlan,
     render_diff::render_tool_body,
-    tool_format::{BadgeTone, TitleBadge, ToolBody, present_tool},
+    tool_format::{BadgeTone, BodyLine, TitleBadge, ToolBody, ToolPresentation, present_tool},
 };
 
 mod body;
@@ -285,6 +285,8 @@ pub(super) const TOOL_TITLE_ROW_OFFSET: usize = 1;
 /// Expanded inserts body between title and bottom pad.
 mod tool;
 use tool::tool_lines;
+mod upstream;
+use upstream::upstream_presentation;
 
 #[cfg(test)]
 #[path = "render_more_tests.rs"]
@@ -292,3 +294,6 @@ mod more_tests;
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "render_upstream_tests.rs"]
+mod upstream_tests;

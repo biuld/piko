@@ -106,6 +106,7 @@ fn component_fingerprint(component: &TimelineComponent) -> u64 {
             tool.args.hash(&mut hasher);
             tool.result.hash(&mut hasher);
             tool.result_details.hash(&mut hasher);
+            tool.upstream.hash(&mut hasher);
             tool.expanded.hash(&mut hasher);
         }
         TimelineComponent::SessionFact(component) => {

@@ -28,6 +28,21 @@ impl UpstreamActivityStatus {
     }
 }
 
+/// Typed provider-side upstream action for a known tool (e.g. a web search).
+/// Decoded at the llmd boundary from the provider-echoed `action` value, with
+/// provider-internal markers stripped, so consumers read fields rather than
+/// JSON-parsing the opaque `arguments` echo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UpstreamAction {
+    /// Provider selected a `search` action. `queries` is the cleaned,
+    /// user-visible list (provider-internal `ws_call_id=` markers removed).
+    Search { queries: Vec<String> },
+    /// Provider selected an `open_page` action to fetch a URL. The trailing
+    /// `#ws_call_id=` fragment is stripped.
+    OpenPage { url: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ContentBlock {
@@ -51,6 +66,12 @@ pub enum ContentBlock {
         /// Open provider-neutral catalog identifier such as `search`.
         kind: String,
         status: UpstreamActivityStatus,
+        /// Provider-echoed call arguments (e.g. `{ "type": "search", "query": … }`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arguments: Option<serde_json::Value>,
+        /// Typed, cleaned view of the activity action for known upstream tools.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<UpstreamAction>,
     },
     UpstreamToolApproval {
         approval_id: String,

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::messages::{ContentBlock, Message};
+use piko_protocol::messages::{ContentBlock, Message, UpstreamAction};
 use piko_protocol::{MessageId, SessionTreeEntry, StreamItemKind, StreamItemOp};
 
 /// A single timeline item: either committed (authoritative) or a realtime draft.
@@ -73,6 +73,31 @@ pub struct ToolItem {
     pub source_turn_id: Option<String>,
     pub transcript_seq: Option<u64>,
     pub live_order: u64,
+    /// Provider-side ("upstream") marker when this card represents an upstream
+    /// tool activity/approval rather than a locally dispatched tool call.
+    pub upstream: Option<ToolUpstream>,
+    /// Live split anchor: the assistant text/thinking already emitted when this
+    /// upstream tool started. Lets the projection render the single message
+    /// draft as  text-before → card → text-after, mirroring a normal tool call.
+    pub upstream_split: Option<UpstreamSplit>,
+}
+
+/// Upstream tool metadata surfaced on a timeline tool card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolUpstream {
+    pub kind: String,
+    /// Present for an upstream approval request.
+    pub summary: Option<String>,
+    /// Typed, cleaned action for a known upstream tool (e.g. `Search`/`OpenPage`).
+    /// `None` for approvals or unknown action types, which stay opaque.
+    pub action: Option<UpstreamAction>,
+}
+
+/// Before-snapshot captured when an upstream tool starts streaming.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamSplit {
+    pub before_text: String,
+    pub before_thinking: String,
 }
 
 /// An authoritative committed transcript entry.
@@ -157,3 +182,5 @@ mod impls;
 #[cfg(test)]
 mod tests;
 mod tools;
+#[cfg(test)]
+mod upstream_tests;

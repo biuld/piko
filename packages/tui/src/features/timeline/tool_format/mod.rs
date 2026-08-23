@@ -18,7 +18,7 @@ mod tests;
 
 use serde_json::Value;
 
-use model::ToolPresentation;
+pub use model::ToolPresentation;
 use util::parse_json;
 
 pub use diff::{DiffRow, DiffView};

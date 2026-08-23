@@ -1,4 +1,5 @@
 use crate::capabilities::{ToolExecutionLocus, UpstreamToolKind};
+use piko_protocol::messages::UpstreamAction;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -83,6 +84,13 @@ pub struct UpstreamToolActivity {
     pub tool_name: String,
     pub kind: UpstreamToolKind,
     pub status: UpstreamActivityStatus,
+    /// Provider-echoed arguments for the upstream call (e.g. a web search
+    /// `action` with `query`), when the provider surfaces them.
+    pub arguments: Option<serde_json::Value>,
+    /// Typed, cleaned action for known upstream tools (e.g. a web search
+    /// `Search { queries }` / `OpenPage { url }`). Populated from the provider
+    /// `action` value at the decode boundary; consumers read it directly.
+    pub action: Option<UpstreamAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::messages::{UpstreamAction, UpstreamActivityStatus};
 use crate::{Message, MessageRole};
 
 pub type RequestId = String;
@@ -137,6 +138,25 @@ pub enum RealtimeDelta {
         content_index: u32,
         tool_call_id: String,
         delta: String,
+    },
+    /// Provider-side ("upstream") tool activity streamed live (e.g. a web
+    /// search started/in-progress/completed). Mirror of a tool call lifecycle
+    /// so the timeline can show a running card immediately.
+    UpstreamActivity {
+        activity_id: String,
+        tool_name: String,
+        kind: String,
+        status: UpstreamActivityStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arguments: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<UpstreamAction>,
+    },
+    /// Provider-side upstream tool approval requested streamed live.
+    UpstreamApproval {
+        approval_id: String,
+        tool_name: String,
+        summary: String,
     },
     MessageEnded {
         stop_reason: Option<String>,

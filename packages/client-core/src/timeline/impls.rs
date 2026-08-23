@@ -57,13 +57,24 @@ impl AgentTimeline {
 
         match &message {
             Message::Context { .. } => {}
-            Message::User { .. } | Message::Assistant { .. } => {
+            Message::User { .. } => {
                 if let Some(&draft_idx) = self.draft_ids.get(&message_id) {
                     self.items[draft_idx] = TimelineItem::Committed(Box::new(record.clone()));
                 } else {
                     self.items
                         .push(TimelineItem::Committed(Box::new(record.clone())));
                 }
+            }
+            Message::Assistant { content, .. } => {
+                if let Some(&draft_idx) = self.draft_ids.get(&message_id) {
+                    self.items[draft_idx] = TimelineItem::Committed(Box::new(record.clone()));
+                } else {
+                    self.items
+                        .push(TimelineItem::Committed(Box::new(record.clone())));
+                }
+                // Upstream (provider-side) activity is a first-class tool
+                // timeline item, so committed messages also project it.
+                self.upsert_committed_upstream(content, transcript_seq, source_turn_id.as_str());
             }
             Message::ToolCall {
                 id,
@@ -360,6 +371,8 @@ impl AgentTimeline {
                             source_turn_id,
                             transcript_seq: None,
                             live_order,
+                            upstream: None,
+                            upstream_split: None,
                         })));
                         self.tool_ids
                             .insert(patch.item_id.clone(), self.items.len() - 1);
@@ -367,6 +380,83 @@ impl AgentTimeline {
                     }
                 }
                 _ => return ApplyOutcome::Ignored,
+            }
+            return ApplyOutcome::Applied;
+        }
+
+        if patch.item_kind == StreamItemKind::Upstream && patch.op == StreamItemOp::Upsert {
+            let Some(fields) = patch.fields.as_ref() else {
+                return ApplyOutcome::Inconsistent;
+            };
+            let status = fields
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("running");
+            let kind = fields
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let summary = fields
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let tool_name = fields
+                .get("toolName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("upstream")
+                .to_string();
+            let args = fields.get("args").cloned().filter(|v| !v.is_null());
+            let parent = fields
+                .get("parentMessageId")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let action = fields.get("action").and_then(|v| {
+                serde_json::from_value::<piko_protocol::messages::UpstreamAction>(v.clone()).ok()
+            });
+            let upstream = ToolUpstream {
+                kind,
+                summary,
+                action,
+            };
+            match status {
+                "approval" | "running" => {
+                    self.apply_tool_started_with_turn(
+                        patch.item_id.clone(),
+                        tool_name,
+                        args.clone().unwrap_or(serde_json::Value::Null),
+                        parent.clone(),
+                        source_turn_id,
+                        None,
+                    );
+                }
+                "completed" | "failed" => {
+                    self.apply_tool_ended_with_turn(
+                        patch.item_id.clone(),
+                        Some(tool_name),
+                        None,
+                        Vec::new(),
+                        None,
+                        status == "failed",
+                        source_turn_id,
+                        None,
+                    );
+                }
+                _ => return ApplyOutcome::Ignored,
+            }
+            self.mark_upstream(&patch.item_id, upstream, args);
+            // Capture the before-snapshot on the very first running/approval
+            // event so the live draft can be split around the card.
+            if matches!(status, "approval" | "running") {
+                self.capture_upstream_split(&patch.item_id);
+            }
+            // Upstream frames advance the per-message delta sequence without
+            // being content deltas. Keep the parent draft's sequence in step so
+            // subsequent text/thinking deltas aren't rejected as out-of-order.
+            if let Some(parent) = &parent
+                && let Some(seq) = patch.delta_seq
+            {
+                self.advance_draft_seq(parent, seq);
             }
             return ApplyOutcome::Applied;
         }
@@ -412,6 +502,18 @@ impl AgentTimeline {
         }
         draft.last_delta_seq = delta_seq;
         ApplyOutcome::Applied
+    }
+
+    /// Advance a live draft's delta sequence without adding content. Used by
+    /// non-content stream frames (e.g. upstream tool lifecycle) that share the
+    /// per-message sequence so later text/thinking deltas stay in order.
+    fn advance_draft_seq(&mut self, message_id: &str, delta_seq: u64) {
+        let Some(&idx) = self.draft_ids.get(message_id) else {
+            return;
+        };
+        if let TimelineItem::RealtimeDraft(draft) = &mut self.items[idx] {
+            draft.last_delta_seq = draft.last_delta_seq.max(delta_seq);
+        }
     }
 
     pub(super) fn allocate_live_order(&mut self) -> u64 {
