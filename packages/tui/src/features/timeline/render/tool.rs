@@ -62,8 +62,11 @@ pub(super) fn tool_lines(
         if title_meta.is_none() && !presented.collapsed_preview.is_empty() {
             // Replace the forced 3-line pattern: pad · title · preview
             // (preview is the third row; bottom pad omitted to stay at 3).
-            lines.push(filled_line(
-                format!(" {}", presented.collapsed_preview),
+            // Long previews soft-wrap instead of getting clipped.
+            lines.extend(prefixed_wrap(
+                vec![Span::styled(" ", output_style)],
+                &presented.collapsed_preview,
+                output_style,
                 output_style,
                 width,
             ));

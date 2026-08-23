@@ -349,3 +349,84 @@ fn tool_block_renders_readable_fields_not_raw_json() {
         "expanded body should show file content: {expanded_text}"
     );
 }
+
+#[test]
+fn long_assistant_markdown_wraps_inside_left_column_not_under_timestamp() {
+    let theme = Theme::dark();
+    let ts = 1_786_359_296_000i64;
+    let width = 24u16;
+    let text = "abcdefghijklmnopqrstuvwxyz0123456789"; // longer than left column
+    let component = TimelineComponent::Assistant(AssistantMessageComponent {
+        id: ComponentId::MessageId("a-long".into()),
+        blocks: vec![ContentBlock::Text(text.into())],
+        stop_reason: Some("stop".into()),
+        error_message: None,
+        timestamp: Some(ts),
+    });
+    let lines = component_lines(&component, true, false, &theme, width);
+    // Clock stays pinned to the first body row; continuation rows must not
+    // repaint it.
+    let first: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        first.chars().filter(|c| *c == ':').count() >= 1,
+        "ts on first row: {first}"
+    );
+    for row in lines.iter().skip(1) {
+        let row_plain: String = row.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            !row_plain.contains(':'),
+            "continuation must not repaint clock: {row_plain}"
+        );
+    }
+    // Every source character must survive the wrap (no truncation).
+    let plain: String = lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    for ch in text.chars() {
+        assert!(plain.contains(ch), "char {ch} lost: {plain}");
+    }
+    // Narrow width forces at least one continuation row.
+    assert!(lines.len() >= 2, "expected wrap: {lines:?}");
+}
+
+#[test]
+fn long_assistant_cjk_wraps_without_splitting_glyphs_or_losing_chars() {
+    let theme = Theme::dark();
+    let ts = 1_786_359_296_000i64;
+    let width = 20u16;
+    let text = "你好世界你好世界你好世界"; // 8 han glyphs → 16 columns
+    let component = TimelineComponent::Assistant(AssistantMessageComponent {
+        id: ComponentId::MessageId("a-cjk".into()),
+        blocks: vec![ContentBlock::Text(text.into())],
+        stop_reason: Some("stop".into()),
+        error_message: None,
+        timestamp: Some(ts),
+    });
+    let lines = component_lines(&component, true, false, &theme, width);
+    // Every han glyph must survive (no truncation).
+    let source_chars: Vec<char> = text.chars().collect();
+    let plain: String = lines
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    for ch in source_chars {
+        assert!(plain.contains(ch), "han glyph {ch} lost: {plain}");
+    }
+    assert!(lines.len() >= 2, "expected wrap: {lines:?}");
+    // Timestamp stays on the first row.
+    let first: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(first.contains(':'), "ts on first row: {first}");
+}

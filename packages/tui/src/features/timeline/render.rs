@@ -17,16 +17,22 @@ use crate::{
     },
     ui::line_layout::{
         BodyWithTrailing, DEFAULT_EDGE_INSET, DEFAULT_TRAILING_SPACER, body_with_trailing,
-        filled_line, paint_cols, trailing_reserve, truncate_cols, truncate_paint_cols,
+        filled_line, paint_cols, prefixed_wrap, trailing_reserve, truncate_cols,
     },
 };
 
 use super::{
-    AssistantMessageComponent, ContentBlock, CustomMessageComponent, ErrorComponent, SummaryKind,
-    Timeline, TimelineComponent, ToolEntry, UserMessageComponent,
+    AssistantMessageComponent, ContentBlock, SummaryKind, Timeline, TimelineComponent, ToolEntry,
+    UserMessageComponent,
     layout::TimelineRenderPlan,
     render_diff::render_tool_body,
     tool_format::{BadgeTone, TitleBadge, ToolBody, present_tool},
+};
+
+mod body;
+use body::{
+    apply_message_trailing_chrome, custom_message_lines, error_lines, format_message_timestamp,
+    notice_lines, present_assistant_markdown, present_plain_body, present_plain_body_unguttered,
 };
 
 impl Timeline {
@@ -125,38 +131,24 @@ pub(super) fn component_lines(
             assistant_lines(component, thinking_visible, theme, width)
         }
         TimelineComponent::Tool(tool) => tool_lines(tool, hovered, theme, width),
-        TimelineComponent::SessionFact(component) => {
-            notice_lines(component.label, theme.accent_alt, component.text.clone())
-        }
+        TimelineComponent::SessionFact(component) => notice_lines(
+            component.label,
+            theme.accent_alt,
+            component.text.clone(),
+            width,
+        ),
         TimelineComponent::Summary(component) => {
             let label = match component.kind {
                 SummaryKind::Compaction => "compaction",
                 SummaryKind::Branch => "branch summary",
             };
-            notice_lines(label, theme.accent, component.text.clone())
+            notice_lines(label, theme.accent, component.text.clone(), width)
         }
-        TimelineComponent::CustomMessage(component) => custom_message_lines(component, theme),
+        TimelineComponent::CustomMessage(component) => {
+            custom_message_lines(component, theme, width)
+        }
         TimelineComponent::Error(component) => error_lines(component, theme, width),
     }
-}
-
-fn custom_message_lines(component: &CustomMessageComponent, theme: &Theme) -> Vec<Line<'static>> {
-    let text = match &component.content {
-        piko_protocol::CustomMessageContent::String(text) => text.clone(),
-        piko_protocol::CustomMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .map(|block| match block {
-                piko_protocol::ContentBlock::Text { text } => text.clone(),
-                piko_protocol::ContentBlock::Thinking { thinking, .. } => thinking.clone(),
-                piko_protocol::ContentBlock::Image { mime_type, .. } => {
-                    format!("[image: {mime_type}]")
-                }
-                other => other.text_projection(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    };
-    notice_lines(&component.custom_type, theme.accent, text)
 }
 
 fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
@@ -181,46 +173,17 @@ fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Ve
     lines
 }
 
-fn notice_lines(label: &str, color: Color, text: String) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled(
-        format!("{label} "),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    ))];
-    for (index, line) in text_lines(&text).into_iter().enumerate() {
-        if index == 0 {
-            lines[0]
-                .spans
-                .push(Span::styled(line, Style::default().fg(color)));
-        } else {
-            lines.push(Line::from(Span::styled(
-                format!("  {line}"),
-                Style::default().fg(color),
-            )));
-        }
-    }
-    lines
-}
-
-fn error_lines(component: &ErrorComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    let bg = theme.tool_error_bg;
-    let body = Style::default().fg(theme.error).bg(bg);
-    let mut lines = vec![filled_line("", body, width)];
-    for line in text_lines(&component.text) {
-        lines.push(filled_line(format!(" Error: {line}"), body, width));
-    }
-    lines.push(filled_line("", body, width));
-    lines
-}
-
 fn assistant_lines(
     component: &AssistantMessageComponent,
     thinking_visible: bool,
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
-    // ── Content presentation (never depends on timestamp) ─────────────────
-    // Timestamp is stream chrome applied after body lines exist. Protocol may
-    // omit epoch on drafts; missing clock only means reserve=0, not plain body.
+    // ── Timestamp / right-zone reserve decided up front ────────────────────
+    // The clock is pinned to the first body row, so every body block must wrap
+    // into a left column that leaves the reserve clear. Computing it here
+    // (instead of post-hoc truncation) means long markdown/plain text soft-wraps
+    // instead of being clipped by the chrome pass.
     let visible_blocks: Vec<&ContentBlock> = component
         .blocks
         .iter()
@@ -230,29 +193,46 @@ fn assistant_lines(
             ContentBlock::Image { .. } => true,
         })
         .collect();
+    let ts = format_message_timestamp(component.timestamp);
+    let has_resp_issue = component.error_message.is_some()
+        || component
+            .stop_reason
+            .as_deref()
+            .is_some_and(|r| !matches!(r, "stop" | "toolUse" | "tool_use"));
+    let show_ts = ts
+        .as_deref()
+        .filter(|_| !visible_blocks.is_empty() || has_resp_issue);
+    let reserve = show_ts
+        .map(|_| trailing_reserve(ts.as_deref(), DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET))
+        .unwrap_or(0);
 
     let mut body: Vec<Line<'static>> = Vec::new();
     for (index, block) in visible_blocks.iter().enumerate() {
         match block {
             ContentBlock::Text(text) => {
-                body.extend(present_assistant_markdown(text.trim(), theme));
+                body.extend(present_assistant_markdown(
+                    text.trim(),
+                    theme,
+                    width,
+                    reserve,
+                ));
             }
             ContentBlock::Thinking(text) if thinking_visible => {
                 let style = Style::default()
                     .fg(theme.thinking_text)
                     .add_modifier(Modifier::ITALIC);
-                body.extend(present_plain_body(text.trim(), style, width));
+                body.extend(present_plain_body(text.trim(), style, width, reserve));
             }
             ContentBlock::Thinking(_) => {
                 let style = Style::default()
                     .fg(theme.thinking_text)
                     .add_modifier(Modifier::ITALIC);
-                body.extend(present_plain_body("Thinking...", style, width));
+                body.extend(present_plain_body("Thinking...", style, width, reserve));
             }
             ContentBlock::Image { mime_type } => {
                 let style = Style::default().fg(theme.dim);
                 let label = format!("[image {mime_type}]");
-                body.extend(present_plain_body(&label, style, width));
+                body.extend(present_plain_body(&label, style, width, reserve));
             }
         }
         let has_visible_content_after = visible_blocks[index + 1..]
@@ -284,166 +264,12 @@ fn assistant_lines(
         };
         let err = Style::default().fg(theme.error);
         // Error lines keep no leading gutter (historical).
-        body.extend(present_plain_body_unguttered(&message, err, width));
+        body.extend(present_plain_body_unguttered(&message, err, width, reserve));
     }
 
     // ── Stream chrome: optional clock on first body row ───────────────────
-    let ts = format_message_timestamp(component.timestamp);
-    let show_ts = ts.as_deref().filter(|_| {
-        !body.is_empty()
-            || component.error_message.is_some()
-            || component
-                .stop_reason
-                .as_deref()
-                .is_some_and(|r| !matches!(r, "stop" | "toolUse" | "tool_use"))
-    });
     let dim = Style::default().fg(theme.dim);
     apply_message_trailing_chrome(body, show_ts, width, dim)
-}
-
-/// Markdown body only — no timestamp / reserve logic.
-fn present_assistant_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
-    let parsed = super::markdown::parse_markdown(text, theme);
-    if parsed.is_empty() {
-        return vec![Line::from(Span::from(" "))];
-    }
-    parsed
-        .into_iter()
-        .map(|mut line| {
-            if line.spans.is_empty() {
-                line.spans.push(Span::from(" "));
-            } else {
-                line.spans.insert(0, Span::from(" "));
-            }
-            line
-        })
-        .collect()
-}
-
-/// Soft-wrapped plain body with leading gutter (thinking / image).
-/// No full-width pad here — chrome layer may pad when a trailing clock is present.
-fn present_plain_body(text: &str, style: Style, width: u16) -> Vec<Line<'static>> {
-    body_with_trailing(BodyWithTrailing {
-        text,
-        trailing: None,
-        reserve: 0,
-        left_style: style,
-        trailing_style: Style::default(),
-        fill: Style::default(),
-        width,
-        leading_space: true,
-        pad_rows: false,
-    })
-}
-
-fn present_plain_body_unguttered(text: &str, style: Style, width: u16) -> Vec<Line<'static>> {
-    body_with_trailing(BodyWithTrailing {
-        text,
-        trailing: None,
-        reserve: 0,
-        left_style: style,
-        trailing_style: Style::default(),
-        fill: Style::default(),
-        width,
-        leading_space: false,
-        pad_rows: false,
-    })
-}
-
-/// Layout-only: pin trailing label (timestamp) on the first row and keep every
-/// row's left budget clear of the right chrome zone. Content is already final.
-fn apply_message_trailing_chrome(
-    lines: Vec<Line<'static>>,
-    trailing: Option<&str>,
-    width: u16,
-    trailing_style: Style,
-) -> Vec<Line<'static>> {
-    if lines.is_empty() {
-        return lines;
-    }
-    let reserve = trailing_reserve(trailing, DEFAULT_TRAILING_SPACER, DEFAULT_EDGE_INSET);
-    if reserve == 0 {
-        return lines;
-    }
-
-    let target = usize::from(width);
-    let edge = DEFAULT_EDGE_INSET;
-    let mid = DEFAULT_TRAILING_SPACER;
-
-    lines
-        .into_iter()
-        .enumerate()
-        .map(|(i, mut line)| {
-            if i == 0 {
-                if let Some(ts) = trailing {
-                    let right_w = paint_cols(ts);
-                    let left_budget = target
-                        .saturating_sub(right_w)
-                        .saturating_sub(mid)
-                        .saturating_sub(edge);
-                    line.spans = truncate_spans_to_cols(line.spans, left_budget);
-                    let left_w: usize = line
-                        .spans
-                        .iter()
-                        .map(|s| paint_cols(s.content.as_ref()))
-                        .sum();
-                    let spacer = target
-                        .saturating_sub(left_w)
-                        .saturating_sub(right_w)
-                        .saturating_sub(edge);
-                    if spacer > 0 {
-                        line.spans
-                            .push(Span::styled(" ".repeat(spacer), Style::default()));
-                    }
-                    line.spans
-                        .push(Span::styled(ts.to_string(), trailing_style));
-                    if edge > 0 {
-                        line.spans
-                            .push(Span::styled(" ".repeat(edge), Style::default()));
-                    }
-                }
-            } else {
-                let left_budget = target.saturating_sub(reserve);
-                line.spans = truncate_spans_to_cols(line.spans, left_budget);
-                let left_w: usize = line
-                    .spans
-                    .iter()
-                    .map(|s| paint_cols(s.content.as_ref()))
-                    .sum();
-                let pad = target.saturating_sub(left_w);
-                if pad > 0 {
-                    line.spans
-                        .push(Span::styled(" ".repeat(pad), Style::default()));
-                }
-            }
-            line
-        })
-        .collect()
-}
-
-fn truncate_spans_to_cols(spans: Vec<Span<'static>>, max_cols: usize) -> Vec<Span<'static>> {
-    if max_cols == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut used = 0usize;
-    for span in spans {
-        let w = paint_cols(span.content.as_ref());
-        if used.saturating_add(w) <= max_cols {
-            out.push(span);
-            used = used.saturating_add(w);
-            continue;
-        }
-        let room = max_cols.saturating_sub(used);
-        if room > 0 {
-            let clipped = truncate_paint_cols(span.content.as_ref(), room);
-            if !clipped.is_empty() {
-                out.push(Span::styled(clipped, span.style));
-            }
-        }
-        break;
-    }
-    out
 }
 
 /// Line index of the title row within a tool card produced by [`tool_lines`]
@@ -459,33 +285,6 @@ pub(super) const TOOL_TITLE_ROW_OFFSET: usize = 1;
 /// Expanded inserts body between title and bottom pad.
 mod tool;
 use tool::tool_lines;
-
-fn text_lines(text: &str) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-    text.lines().map(str::to_string).collect()
-}
-
-/// Format protocol epoch-ms for message chrome.
-///
-/// Same calendar day → `HH:MM`; same year → `MM-DD HH:MM`; else full date.
-fn format_message_timestamp(ts: Option<i64>) -> Option<String> {
-    use chrono::Datelike;
-
-    let ms = ts.filter(|n| *n > 0)?;
-    let utc = chrono::DateTime::from_timestamp_millis(ms)?;
-    let local = utc.with_timezone(&chrono::Local);
-    let now = chrono::Local::now();
-    let label = if local.date_naive() == now.date_naive() {
-        local.format("%H:%M").to_string()
-    } else if local.year() == now.year() {
-        local.format("%m-%d %H:%M").to_string()
-    } else {
-        local.format("%Y-%m-%d %H:%M").to_string()
-    };
-    Some(label)
-}
 
 #[cfg(test)]
 #[path = "render_more_tests.rs"]

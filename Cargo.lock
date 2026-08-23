@@ -5179,6 +5179,7 @@ dependencies = [
  "syntect",
  "toml 0.8.23",
  "two-face",
+ "unicode-segmentation",
  "unicode-width",
  "uuid",
 ]

@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::theme::Theme;
-use crate::ui::line_layout::{filled_line, pad_spans};
+use crate::ui::line_layout::{filled_line, prefixed_wrap};
 
 use super::tool_format::{BodyLine, CodeView, DiffRow, DiffView, LineKind, ToolBody};
 
@@ -22,7 +22,7 @@ pub(super) fn render_tool_body(
         ToolBody::Code(code) => render_code_view(code, theme, card_bg, width),
         ToolBody::Blocks(lines) => lines
             .iter()
-            .map(|line| render_body_line(line, theme, card_bg, width))
+            .flat_map(|line| render_body_line(line, theme, card_bg, width))
             .collect(),
     }
 }
@@ -37,7 +37,7 @@ fn render_diff_view(
     let gutter_w = diff.gutter_width();
     diff.rows
         .iter()
-        .map(|row| render_diff_row(row, gutter_w, theme, card_bg, width))
+        .flat_map(|row| render_diff_row(row, gutter_w, theme, card_bg, width))
         .collect()
 }
 
@@ -47,7 +47,7 @@ fn render_diff_row(
     theme: &Theme,
     card_bg: Color,
     width: u16,
-) -> Line<'static> {
+) -> Vec<Line<'static>> {
     let (line_no, sign, text, row_bg, text_fg, gutter_fg) = match row {
         DiffRow::Context { new_no, text, .. } => (
             Some(*new_no),
@@ -79,8 +79,10 @@ fn render_diff_row(
             } else {
                 format!(" ··· {omitted} lines")
             };
-            return filled_line(
-                label,
+            return prefixed_wrap(
+                Vec::new(),
+                &label,
+                Style::default().fg(theme.diff_gutter_fg).bg(card_bg),
                 Style::default().fg(theme.diff_gutter_fg).bg(card_bg),
                 width,
             );
@@ -95,13 +97,14 @@ fn render_diff_row(
     let body = Style::default().fg(text_fg).bg(row_bg);
     let sign_style = Style::default().fg(text_fg).bg(row_bg);
 
-    pad_spans(
+    prefixed_wrap(
         vec![
             Span::styled(" ", gutter),
             Span::styled(num, gutter),
             Span::styled(format!(" {sign} "), sign_style),
-            Span::styled(text.to_string(), body),
         ],
+        text,
+        body,
         body,
         width,
     )
@@ -116,24 +119,27 @@ fn render_code_view(
     let gutter_w = code.gutter_width();
     let gutter = Style::default().fg(theme.diff_gutter_fg).bg(card_bg);
     let body = Style::default().fg(theme.tool_output).bg(card_bg);
-    let mut lines = Vec::with_capacity(code.lines.len() + 1);
+    let mut lines = Vec::new();
     for (i, text) in code.lines.iter().enumerate() {
         let no = code.start_line.saturating_add(i);
         let num = format!("{no:>gutter_w$}");
-        lines.push(pad_spans(
+        lines.extend(prefixed_wrap(
             vec![
                 Span::styled(" ", gutter),
                 Span::styled(num, gutter),
                 Span::styled(" │ ", gutter),
-                Span::styled(text.clone(), body),
             ],
+            text,
+            body,
             body,
             width,
         ));
     }
     if let Some(footer) = &code.footer {
-        lines.push(filled_line(
-            footer.clone(),
+        lines.extend(prefixed_wrap(
+            Vec::new(),
+            footer,
+            Style::default().fg(theme.dim).bg(card_bg),
             Style::default().fg(theme.dim).bg(card_bg),
             width,
         ));
@@ -144,20 +150,30 @@ fn render_code_view(
 /// Shared left inset with tool title content (` " ▸ name"` starts with one space).
 const TOOL_BODY_INSET: &str = " ";
 
-fn render_body_line(line: &BodyLine, theme: &Theme, card_bg: Color, width: u16) -> Line<'static> {
+fn render_body_line(
+    line: &BodyLine,
+    theme: &Theme,
+    card_bg: Color,
+    width: u16,
+) -> Vec<Line<'static>> {
     match line {
-        BodyLine::Gap => filled_line("", Style::default().bg(card_bg), width),
+        BodyLine::Gap => vec![filled_line("", Style::default().bg(card_bg), width)],
         BodyLine::Meta { key, value } => {
             let key_style = Style::default().fg(theme.dim).bg(card_bg);
             let val_style = Style::default().fg(theme.tool_output).bg(card_bg);
             if value.is_empty() {
-                filled_line(format!("{TOOL_BODY_INSET}{key}"), key_style, width)
+                prefixed_wrap(
+                    vec![Span::styled(TOOL_BODY_INSET, key_style)],
+                    key,
+                    key_style,
+                    key_style,
+                    width,
+                )
             } else {
-                pad_spans(
-                    vec![
-                        Span::styled(format!("{TOOL_BODY_INSET}{key}  "), key_style),
-                        Span::styled(value.clone(), val_style),
-                    ],
+                prefixed_wrap(
+                    vec![Span::styled(format!("{TOOL_BODY_INSET}{key}  "), key_style)],
+                    value,
+                    val_style,
                     val_style,
                     width,
                 )
@@ -166,14 +182,26 @@ fn render_body_line(line: &BodyLine, theme: &Theme, card_bg: Color, width: u16) 
         BodyLine::Text { kind, text } => match kind {
             LineKind::Quote => {
                 let style = line_kind_style(*kind, theme, card_bg);
-                filled_line(format!("{TOOL_BODY_INSET}  {text}"), style, width)
+                prefixed_wrap(
+                    vec![Span::styled(format!("{TOOL_BODY_INSET}  "), style)],
+                    text,
+                    style,
+                    style,
+                    width,
+                )
             }
             LineKind::TodoDone | LineKind::TodoActive | LineKind::TodoPending => {
                 todo_checklist_line(*kind, text, theme, card_bg, width)
             }
             _ => {
                 let style = line_kind_style(*kind, theme, card_bg);
-                filled_line(format!("{TOOL_BODY_INSET}{text}"), style, width)
+                prefixed_wrap(
+                    vec![Span::styled(TOOL_BODY_INSET, style)],
+                    text,
+                    style,
+                    style,
+                    width,
+                )
             }
         },
     }
@@ -187,7 +215,7 @@ fn todo_checklist_line(
     theme: &Theme,
     card_bg: Color,
     width: u16,
-) -> Line<'static> {
+) -> Vec<Line<'static>> {
     let base = Style::default().bg(card_bg);
     let (mark_style, content_style) = match kind {
         LineKind::TodoDone => (
@@ -207,17 +235,16 @@ fn todo_checklist_line(
         Some((m, rest)) => (m, rest),
         None => (text, ""),
     };
-    let mark_part = format!("{TOOL_BODY_INSET}{mark}");
     let content_part = if content.is_empty() {
         String::new()
     } else {
-        format!(" {content}")
+        content.to_string()
     };
-    pad_spans(
-        vec![
-            Span::styled(mark_part, mark_style),
-            Span::styled(content_part, content_style),
-        ],
+    let mark_part = format!("{TOOL_BODY_INSET}{mark} ");
+    prefixed_wrap(
+        vec![Span::styled(mark_part, mark_style)],
+        &content_part,
+        content_style,
         base.fg(theme.dim),
         width,
     )

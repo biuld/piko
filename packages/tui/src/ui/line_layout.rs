@@ -17,6 +17,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
+pub use super::line_wrap::{prefixed_wrap, wrap_spans};
+
+use unicode_segmentation::UnicodeSegmentation;
+
 // ── Column measurement ───────────────────────────────────────────────────────
 //
 // All widths come from the `unicode-width` crate (Wide/Fullwidth → 2, else the
@@ -30,22 +34,20 @@ pub fn paint_cols(text: &str) -> usize {
 
 /// Take a prefix of `text` that fits in `max_cols` columns.
 /// Returns `(prefix, remainder)`.
+///
+/// Splits on grapheme-cluster boundaries so a multi-codepoint glyph (emoji
+/// ZWJ sequences, flags, family emoji) is never cut in half; each grapheme's
+/// width comes from the cluster-aware [`unicode_width::UnicodeWidthStr`].
 pub fn take_prefix_cols(text: &str, max_cols: usize) -> (String, &str) {
-    use unicode_width::UnicodeWidthChar;
-
     let mut cols = 0usize;
     let mut end = 0usize;
-    for (i, ch) in text.char_indices() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if w == 0 {
-            end = i + ch.len_utf8();
-            continue;
-        }
+    for grapheme in text.graphemes(true) {
+        let w = unicode_width::UnicodeWidthStr::width(grapheme);
         if cols.saturating_add(w) > max_cols {
             break;
         }
         cols += w;
-        end = i + ch.len_utf8();
+        end += grapheme.len();
     }
     (text[..end].to_string(), &text[end..])
 }
@@ -53,6 +55,8 @@ pub fn take_prefix_cols(text: &str, max_cols: usize) -> (String, &str) {
 /// Soft-wrap `text` to at most `max_cols` columns per line.
 /// Hard newlines are preserved; empty hard lines yield empty rows.
 pub fn soft_wrap(text: &str, max_cols: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthStr;
+
     let max_cols = max_cols.max(1);
     let mut out = Vec::new();
     for hard in text.split('\n') {
@@ -60,20 +64,21 @@ pub fn soft_wrap(text: &str, max_cols: usize) -> Vec<String> {
             out.push(String::new());
             continue;
         }
-        let mut rest = hard;
-        while !rest.is_empty() {
-            let (chunk, next) = take_prefix_cols(rest, max_cols);
-            if chunk.is_empty() {
-                // Pathological: double-width char into a 1-col budget.
-                let mut chars = rest.chars();
-                let ch = chars.next().expect("rest non-empty");
-                out.push(ch.to_string());
-                rest = chars.as_str();
-                continue;
+        let mut line = String::new();
+        let mut cols = 0usize;
+        for grapheme in hard.graphemes(true) {
+            let w = UnicodeWidthStr::width(grapheme);
+            // A wide glyph that does not fit the current row starts a new row
+            // instead of overflowing it; a lone glyph wider than the budget is
+            // placed on its own row rather than dropped.
+            if cols > 0 && cols.saturating_add(w) > max_cols {
+                out.push(std::mem::take(&mut line));
+                cols = 0;
             }
-            out.push(chunk);
-            rest = next;
+            line.push_str(grapheme);
+            cols += w;
         }
+        out.push(line);
     }
     out
 }
@@ -112,7 +117,7 @@ pub fn truncate_cols(text: &str, max_cols: usize) -> String {
 
 /// Fill a single style run to exact `width` paint columns (clip then pad).
 pub fn filled_line(text: impl Into<String>, style: Style, width: u16) -> Line<'static> {
-    use unicode_width::UnicodeWidthChar;
+    use unicode_width::UnicodeWidthStr;
 
     let target = usize::from(width);
     if target == 0 {
@@ -122,16 +127,12 @@ pub fn filled_line(text: impl Into<String>, style: Style, width: u16) -> Line<'s
     let raw = text.into();
     let mut out = String::with_capacity(raw.len().saturating_add(target));
     let mut cols = 0usize;
-    for ch in raw.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if w == 0 {
-            out.push(ch);
-            continue;
-        }
+    for grapheme in raw.graphemes(true) {
+        let w = UnicodeWidthStr::width(grapheme);
         if cols.saturating_add(w) > target {
             break;
         }
-        out.push(ch);
+        out.push_str(grapheme);
         cols += w;
     }
     if cols < target {
@@ -396,5 +397,29 @@ mod tests {
     fn truncate_cols_appends_ascii_ellipsis() {
         assert_eq!(truncate_cols("abcdefghij", 7), "abcd...");
         assert_eq!(truncate_cols("short", 10), "short");
+    }
+
+    #[test]
+    fn take_prefix_cols_never_splits_emoji_zwj_sequence() {
+        let fam = "👨‍👩‍👧‍👦";
+        let input = format!("{fam}{fam}");
+        let (prefix, rest) = take_prefix_cols(&input, 3);
+        assert_eq!(prefix, fam, "prefix: {prefix:?}");
+        assert_eq!(rest, fam, "rest: {rest:?}");
+    }
+
+    #[test]
+    fn soft_wrap_counts_emoji_zwj_as_one_cluster() {
+        // Two 2-col family emoji in a 3-col budget → one per row.
+        assert_eq!(soft_wrap("👨‍👩‍👧‍👦👨‍👩‍👧‍👦", 3), vec!["👨‍👩‍👧‍👦", "👨‍👩‍👧‍👦"]);
+    }
+
+    #[test]
+    fn soft_wrap_keeps_combining_mark_with_base() {
+        // Each precomposed e+combining cluster is one column.
+        assert_eq!(
+            soft_wrap("e\u{0301}e\u{0301}", 1),
+            vec!["e\u{0301}", "e\u{0301}"]
+        );
     }
 }
