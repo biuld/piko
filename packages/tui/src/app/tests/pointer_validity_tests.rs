@@ -242,6 +242,44 @@ fn streaming_append_between_paint_and_event_is_clickable() {
 }
 
 #[test]
+fn paint_consumed_plan_then_click_still_toggles_tool() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.timeline_mut().push(TimelineEntry::Tool(ToolEntry::new(
+        "one".into(),
+        "bash".into(),
+        ToolStatus::Completed,
+        r#"{"cmd":"true"}"#.into(),
+        Some("done".into()),
+        None,
+    )));
+    let terminal = Rect::new(0, 0, 80, 24);
+    let mut prepared = prepare_frame(&app, terminal);
+    let stream = prepared.product.plan.rects[&Region::Stream];
+    let (id, rect) = app
+        .timeline()
+        .tool_hits(stream, &app.theme)
+        .into_iter()
+        .next()
+        .expect("tool hit");
+
+    // render_prepared consumes the plan via `timeline_plan.take()` while
+    // drawing; the next input phase reuses the same PreparedFrame with no
+    // plan. refresh_timeline must rebuild it before a click is routed.
+    prepared.timeline = None;
+    prepared.refresh_timeline(&app);
+
+    let target = left_down_target(&app, &prepared, rect.x, rect.y);
+    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
+    assert!(matches!(
+        reduced.as_slice(),
+        [Action::Timeline(TimelineAction::ToggleTool(clicked))] if *clicked == id
+    ));
+    apply_batched(&mut app, reduced);
+    assert_eq!(app.timeline().tool_expanded("one"), Some(true));
+}
+
+#[test]
 fn hover_reconciles_after_scroll_from_last_pointer_position() {
     let mut app = app();
     push_tools(&mut app, 8);

@@ -46,11 +46,18 @@ impl PreparedFrame {
     /// Rebuild the retained timeline plan when content changed since it was
     /// painted (layout epoch mismatch). Pure scroll never bumps the epoch, so
     /// the common path stays a no-op and hit-testing reads the live offset.
+    ///
+    /// Paint consumes the plan while drawing (see `render_prepared`), so a
+    /// freshly painted frame has no plan to route input against. Rebuild it on
+    /// demand; a plan that is still present and at the current epoch is left
+    /// untouched.
     pub(crate) fn refresh_timeline(&mut self, app: &AppState) {
-        let Some(plan) = self.timeline.as_ref() else {
-            return;
-        };
-        if plan.epoch == app.timeline().layout_epoch() {
+        if self.timeline.is_some()
+            && self
+                .timeline
+                .as_ref()
+                .is_some_and(|plan| plan.epoch == app.timeline().layout_epoch())
+        {
             return;
         }
         let Some(area) = self.product.plan.rects.get(&Region::Stream).copied() else {
