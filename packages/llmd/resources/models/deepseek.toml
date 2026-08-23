@@ -57,6 +57,7 @@ output_per_million = 13.5
 [[models."deepseek-v4-pro".pricing.configuration.windows]]
 start = "09:00"
 end = "12:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-pro".pricing.configuration.windows.rates]
 input_per_million = 9.0
@@ -66,6 +67,7 @@ output_per_million = 27.0
 [[models."deepseek-v4-pro".pricing.configuration.windows]]
 start = "14:00"
 end = "18:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-pro".pricing.configuration.windows.rates]
 input_per_million = 9.0
@@ -109,6 +111,7 @@ output_per_million = 4.5
 [[models."deepseek-v4-flash".pricing.configuration.windows]]
 start = "09:00"
 end = "12:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-flash".pricing.configuration.windows.rates]
 input_per_million = 3.0
@@ -118,6 +121,7 @@ output_per_million = 9.0
 [[models."deepseek-v4-flash".pricing.configuration.windows]]
 start = "14:00"
 end = "18:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-flash".pricing.configuration.windows.rates]
 input_per_million = 3.0
@@ -163,6 +167,7 @@ output_per_million = 4.5
 [[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows]]
 start = "09:00"
 end = "12:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-flash-vision-exp".pricing.configuration.windows.rates]
 input_per_million = 3.0
@@ -172,6 +177,7 @@ output_per_million = 9.0
 [[models."deepseek-v4-flash-vision-exp".pricing.configuration.windows]]
 start = "14:00"
 end = "18:00"
+days = [1, 2, 3, 4, 5]
 
 [models."deepseek-v4-flash-vision-exp".pricing.configuration.windows.rates]
 input_per_million = 3.0

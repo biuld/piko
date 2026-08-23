@@ -151,6 +151,7 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
     let flash_peak = &flash_schedule.windows[0].rates;
     assert_eq!(flash_schedule.windows[0].start, "09:00");
     assert_eq!(flash_schedule.windows[0].end, "12:00");
+    assert_eq!(flash_schedule.windows[0].days, vec![1, 2, 3, 4, 5]);
     assert_eq!(flash_peak.input_per_million, 3.0);
     assert_eq!(flash_peak.cached_input_per_million, 0.10);
     assert_eq!(flash_peak.output_per_million, 9.0);
@@ -171,6 +172,7 @@ fn deepseek_catalog_selects_protocol_and_cny_pricing_per_model() {
     let pro_peak = &pro_schedule.windows[1].rates;
     assert_eq!(pro_schedule.windows[1].start, "14:00");
     assert_eq!(pro_schedule.windows[1].end, "18:00");
+    assert_eq!(pro_schedule.windows[1].days, vec![1, 2, 3, 4, 5]);
     assert_eq!(pro_peak.input_per_million, 9.0);
     assert_eq!(pro_peak.cached_input_per_million, 0.30);
     assert_eq!(pro_peak.output_per_million, 27.0);

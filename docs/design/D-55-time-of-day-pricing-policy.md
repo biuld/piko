@@ -64,6 +64,7 @@ output_per_million = 4.5
 [[configuration.windows]]
 start = "09:00"
 end = "12:00"
+days = [1, 2, 3, 4, 5]
 
 [configuration.windows.rates]
 input_per_million = 3.0
@@ -83,6 +84,7 @@ struct TimeOfDayPricing {
 struct TimeWindowPricing {
     start: NaiveTime,
     end: NaiveTime,
+    days: Vec<u8>,        // ISO weekday numbers, 1=Monday..7=Sunday; empty = every day
     rates: StandardTokenPricing,
 }
 ```
@@ -90,9 +92,12 @@ struct TimeWindowPricing {
 Estimation:
 
 1. Convert `context.occurred_at` to the configured `FixedOffset` and take its
-   `NaiveTime`.
-2. Select the first window whose half-open range contains that time; a window
-   with `start > end` spans midnight (`time >= start || time < end`).
+   `NaiveTime` and ISO weekday number.
+2. Select the first window whose half-open range contains that time on a day
+   the window allows. A non-crossing window applies when `weekday ∈ days` and
+   `start <= time < end`. A window with `start > end` spans midnight: it
+   matches `time >= start` on `weekday`, or `time < end` on the day after
+   `weekday` (see weekday semantics below).
 3. No match selects `default`.
 4. Run the shared standard estimation with the selected schedule.
 
@@ -102,14 +107,29 @@ Validation (fail closed at catalog load):
 - All rates are finite and non-negative; tier multipliers are positive
   (same rules as `token_tiered`).
 - `start != end` for every window.
+- Every `days` entry is in `1..=7` with no duplicates; an empty list means the
+  window applies every day.
 - No two windows overlap, so first-match selection is unambiguous.
+
+### Weekday semantics
+
+An empty `days` list preserves the original every-day behavior. For a window
+that crosses midnight, the weekday restriction applies to both sides: the late
+`[start, 24:00)` segment matches when the local weekday is in `days`, and the
+early `[00:00, end)` segment matches when the previous local weekday is in
+`days`. This keeps a Monday-Friday overnight window covering, for example,
+Friday 22:00 through Saturday 06:00.
+
+Overlap validation evaluates the two windows' covered `(weekday, time)`
+regions, so windows that overlap in time but are restricted to disjoint day
+sets are accepted.
 
 ### Catalog update
 
 `packages/llmd/resources/models/deepseek.toml` switches both V4 models to
 `policy = "time_of_day"` with `utc_offset = "+08:00"`, the official off-peak
-schedule as `default`, and two peak windows (09:00-12:00, 14:00-18:00) with the
-official peak rates:
+schedule as `default`, and two peak windows restricted to weekdays
+(Monday-Friday, 09:00-12:00 and 14:00-18:00) with the official peak rates:
 
 | Model | Default (off-peak) | Peak windows |
 |---|---|---|
@@ -123,12 +143,16 @@ consistent with the current catalog fields.
 
 - `time_of_day` picks the peak schedule at Beijing 10:30 and 15:00, and the
   default at Beijing 13:00.
+- A weekday-restricted window (Monday-Friday) applies its peak rates on a
+  weekday (Thursday/Friday) but falls back to the default on Saturday/Sunday.
 - Boundaries are half-open: Beijing 09:00 is peak; Beijing 12:00 is off-peak.
 - A midnight-crossing window (22:00-06:00) matches both 23:00 and 02:00.
 - Validation rejects `start == end`, overlapping windows, and a malformed
-  offset.
+  offset, plus weekday lists outside `1..=7` or containing duplicates.
+- Windows that overlap in time but are restricted to disjoint day sets are
+  accepted.
 - The loader test for the DeepSeek fixture asserts the new policy ID and both
-  rate sets.
+  rate sets and the weekday restriction.
 - Existing `token_tiered` tests (OpenAI tiers, cache write, OAuth basis)
   stay unchanged and green.
 

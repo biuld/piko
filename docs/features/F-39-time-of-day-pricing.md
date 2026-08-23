@@ -10,10 +10,11 @@
 piko estimates model-call cost from provider-reported token usage and a local,
 versioned price schedule. Some providers publish rates that depend on the
 wall-clock time of the request. DeepSeek moved the V4 family to peak/off-peak
-pricing effective 2026-08-16, where peak hours (Beijing time 09:00-12:00 and
-14:00-18:00) are charged at double the off-peak rate. piko must select the rate
-that was active when the request occurred so the session ledger stays honest
-across the day.
+pricing effective 2026-08-16: peak hours (Beijing time Monday-Friday
+09:00-12:00 and 14:00-18:00) are charged at double the off-peak rate, so the
+off-peak rate is exactly half the peak rate. piko must select the rate that was
+active when the request occurred so the session ledger stays honest across the
+day and the week.
 
 ## Problem
 
@@ -41,13 +42,16 @@ and F-32 made authoritative.
 
 - A registered time-of-day token pricing policy in `piko-llmd` that selects a
   token schedule from the request's local wall-clock time.
+- A per-window weekday restriction so a schedule can limit a window to a
+  specific set of days (e.g. Monday-Friday) and treat all other days as the
+  default (off-peak) schedule.
 - A request timestamp carried into billing estimation.
 - Fixed UTC-offset timezone expressions in policy configuration (sufficient
   for Beijing, UTC+8 year-round).
 - Half-open time windows with midnight-crossing support and validation of
-  invalid or overlapping windows.
+  invalid or overlapping windows and invalid weekday lists.
 - DeepSeek V4 Flash/Pro catalog entries updated to the official 2026-08-16 CNY
-  peak/off-peak schedule.
+  peak/off-peak schedule with the peak windows restricted to weekdays.
 
 ## Out of scope
 
@@ -62,14 +66,17 @@ and F-32 made authoritative.
 - A billing plan may select the `time_of_day` policy. Its configuration carries
   a fixed UTC offset, a default standard token schedule, and zero or more
   ordered windows, each with a start, an end, and its own standard token
-  schedule (including optional cache-write and token tiers).
+  schedule (including optional cache-write and token tiers). A window carries
+  an optional weekday list (ISO-8601 numbers, 1 = Monday .. 7 = Sunday); an
+  empty or omitted list applies the window every day of the week.
 - Estimation computes local wall-clock time as request time (UTC) plus the
   configured offset, then selects the first window whose half-open range
-  `[start, end)` contains that time. No match falls back to the default
-  schedule.
+  `[start, end)` contains that time on a day the window allows. No match falls
+  back to the default schedule.
 - A window may cross midnight (`start > end`). A window with `start == end` is
-  invalid, and overlapping windows are rejected during catalog validation so
-  rate selection stays deterministic.
+  invalid, overlapping windows are rejected during catalog validation so rate
+  selection stays deterministic, and a weekday list outside 1..=7 or with
+  duplicates is rejected.
 - Missing pricing plans still produce an empty cost ledger, and policy
   failures still leave cost unavailable with diagnostic telemetry (unchanged
   from F-29).
@@ -81,10 +88,13 @@ and F-32 made authoritative.
       window matches.
 - [x] Window boundaries are half-open: 09:00 Beijing time is peak, 12:00
       Beijing time is off-peak.
+- [x] A window restricted to weekdays (Monday-Friday) applies its rates only on
+      weekdays; weekend requests use the default (off-peak) schedule.
 - [x] Midnight-crossing windows work; invalid (`start == end`) and overlapping
-      windows are rejected at catalog validation.
+      windows and invalid weekday lists are rejected at catalog validation.
 - [x] DeepSeek V4 Flash and Pro catalogs carry the official CNY peak/off-peak
-      rates and produce correct estimates in both windows.
+      rates, restrict peak to weekdays, and produce correct estimates in both
+      windows and on weekends.
 - [x] Existing `token_tiered` behavior (OpenAI schedules, tiers, cache write)
       remains unchanged.
 
@@ -94,6 +104,7 @@ and F-32 made authoritative.
 |---|---|---|
 | How is the timezone expressed? | Fixed UTC offset in policy configuration | Beijing is UTC+8 all year; avoids a new IANA/database dependency for the only current consumer |
 | What applies when no window matches? | The default schedule | Peak is the declared exception; the rest of the day is off-peak by DeepSeek's definition |
+| How is a weekday restriction expressed? | A per-window list of ISO-8601 weekday numbers (1=Monday .. 7=Sunday); empty means every day | Covers the DeepSeek weekday-only peak while leaving existing every-day windows unchanged |
 | Can windows overlap? | No; rejected at validation | Keeps rate selection deterministic and catches catalog mistakes |
 | Can a window cross midnight? | Yes | Provider schedules may legitimately span midnight |
 | Which rate is authoritative? | The local catalog schedule at request time | Preserves ADR-012 and F-28's local-catalog authority |
