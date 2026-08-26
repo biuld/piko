@@ -117,6 +117,13 @@ During `AutoComplete::update`, the controller iterates through its registered `p
 - If one matches, it sets `active_provider_idx` to its index, sets `active = true`, and delegates the query retrieval to `provider.update()`.
 - If none matches, it clears state and sets `active = false`.
 
+The file provider only detects and describes the active query in this path.
+Filesystem traversal runs on the completion worker and returns a generation-
+tagged result. The app reducer accepts the result only when both generation and
+current trigger still match. Results are ranked deterministically by fuzzy
+score and path before the display cap is applied. Worker requests and results
+use the declared `piko-comms` TUI file-search thread-bridge contracts.
+
 ### Multi-Column Table Rendering
 
 ### Dock boundary chrome

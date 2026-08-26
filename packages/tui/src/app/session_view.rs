@@ -27,6 +27,7 @@ impl AppState {
         self.session.initializing = true;
         self.session.active_turns.clear();
         self.session.follow_ups.clear();
+        self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;
         self.last_turn_id = None;
@@ -49,6 +50,7 @@ impl AppState {
         self.session.initializing = false;
         self.session.active_turns.clear();
         self.session.follow_ups.clear();
+        self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;
         self.last_turn_id = None;

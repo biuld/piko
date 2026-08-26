@@ -284,6 +284,46 @@
     "cancellation": "disconnect_only"
   },
   {
+    "id": "tui.completion.file_search_requests",
+    "kind": "thread_bridge",
+    "owner": "FileCompletionWorker",
+    "producers": [
+      "TuiInputReducer"
+    ],
+    "consumer": "FileCompletionWorker",
+    "scope": "process",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "unbounded",
+      "value": {
+        "justification": "the worker coalesces queued generations before each filesystem scan"
+      }
+    },
+    "overflow": "not_applicable",
+    "closure": "process_exited",
+    "cancellation": "drop_interest_only"
+  },
+  {
+    "id": "tui.completion.file_search_results",
+    "kind": "thread_bridge",
+    "owner": "FileCompletionWorker",
+    "producers": [
+      "FileCompletionWorker"
+    ],
+    "consumer": "TuiEventLoop",
+    "scope": "process",
+    "delivery": "in_memory",
+    "capacity": {
+      "type": "unbounded",
+      "value": {
+        "justification": "generation checks discard stale results at the synchronous TUI boundary"
+      }
+    },
+    "overflow": "not_applicable",
+    "closure": "process_exited",
+    "cancellation": "drop_interest_only"
+  },
+  {
     "id": "hostd.client.output",
     "kind": "client_output",
     "owner": "HostClientConnection",

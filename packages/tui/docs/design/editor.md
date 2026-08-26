@@ -345,6 +345,9 @@ Rules:
 - Reference atoms are atomic for cursor movement and deletion.
 - References expand only during submission.
 - References are cleared after successful submission.
+- In-flight submissions retain an `EditorDraft` keyed by command id. Command
+  rejection restores that draft when safe and removes any optimistic follow-up
+  projection associated with the same command.
 
 Image references remain editor-local while drafting. Submission emits
 `MessageContent::Blocks`; hostd and orchd persist those blocks in the existing
@@ -400,6 +403,10 @@ Input priority:
 2. Suggestions handle Esc, Up, Down, Tab, Enter.
 3. Running turn handles Esc cancellation.
 4. Editor handles text editing, history, submission, and shortcuts.
+
+Bracketed paste follows the same focus-owner routing as key input. A surface
+without an active text field consumes the paste; it must never mutate the
+structurally replaced editor.
 
 Editor visibility and input behavior:
 

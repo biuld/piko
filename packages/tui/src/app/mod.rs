@@ -198,6 +198,7 @@ pub struct ActiveTurnUi {
 /// A follow-up this TUI submitted and can dequeue.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FollowUpUi {
+    pub command_id: Option<String>,
     pub agent_instance_id: String,
     pub text: String,
     pub content: piko_protocol::MessageContent,
@@ -216,12 +217,14 @@ pub struct SessionUiState {
     pub initializing: bool,
     pub shell_ready: bool,
     pub pending_turn_content: Option<piko_protocol::MessageContent>,
+    pending_turn_draft: Option<crate::features::editor::state::EditorDraft>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     /// agent_instance_id → active turn (id + status) for F-22 foreground projection.
     pub active_turns: HashMap<String, ActiveTurnUi>,
     /// Follow-ups this process queued for dequeue (newest last).
     pub follow_ups: Vec<FollowUpUi>,
+    pending_submissions: HashMap<String, pending::PendingSubmissionUi>,
     pub pending: pending::PendingCommands,
     /// Session-wide token/cost ledger projected from hostd (F-15 / D-29).
     pub cumulative_usage: Option<piko_protocol::messages::Usage>,

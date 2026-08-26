@@ -42,7 +42,9 @@ pub(super) fn drain_input(
             }
             CrosstermEvent::Paste(text) => {
                 flush_timeline_scroll(app, host, &mut timeline_scroll);
-                apply_action(app, host, EditorAction::InsertPaste(text).into());
+                if app.accepts_text_paste() {
+                    apply_action(app, host, EditorAction::InsertPaste(text).into());
+                }
                 end_batch = true;
             }
             CrosstermEvent::Mouse(event) => {

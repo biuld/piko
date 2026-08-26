@@ -138,6 +138,26 @@ impl AppState {
         }
     }
 
+    pub fn accepts_text_paste(&self) -> bool {
+        match self.focus_manager.active_mode() {
+            AppMode::Chat => true,
+            AppMode::Surface(SurfaceId::AuthSelector) => matches!(
+                self.auth_selector.state,
+                crate::features::auth_selector::AuthSelectorState::ApiKeyInput { .. }
+            ),
+            AppMode::Surface(SurfaceId::SummaryPrompt) => self
+                .summary_prompt
+                .as_ref()
+                .is_some_and(|workflow| workflow.input_active()),
+            AppMode::Surface(SurfaceId::Tree) => self.tree.label_editor.is_some(),
+            AppMode::Surface(SurfaceId::ToolInteraction) => self
+                .interactions
+                .front()
+                .is_some_and(|interaction| interaction.workflow.input_active()),
+            _ => false,
+        }
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         self.session.id.as_deref()
     }

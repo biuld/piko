@@ -61,12 +61,36 @@ impl AppState {
                 self.editor.delete();
                 self.refresh_suggestions();
             }
+            EditorAction::DeleteWordBackward => {
+                self.editor.delete_word_backward();
+                self.refresh_suggestions();
+            }
+            EditorAction::DeleteWordForward => {
+                self.editor.delete_word_forward();
+                self.refresh_suggestions();
+            }
+            EditorAction::DeleteToLineStart => {
+                self.editor.delete_to_line_start();
+                self.refresh_suggestions();
+            }
+            EditorAction::DeleteToLineEnd => {
+                self.editor.delete_to_line_end();
+                self.refresh_suggestions();
+            }
             EditorAction::CursorLeft => {
                 self.editor.move_left();
                 self.refresh_suggestions();
             }
             EditorAction::CursorRight => {
                 self.editor.move_right();
+                self.refresh_suggestions();
+            }
+            EditorAction::CursorWordLeft => {
+                self.editor.move_word_left();
+                self.refresh_suggestions();
+            }
+            EditorAction::CursorWordRight => {
+                self.editor.move_word_right();
                 self.refresh_suggestions();
             }
             EditorAction::CursorLineStart => {

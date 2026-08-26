@@ -39,22 +39,15 @@ pub enum KeyAction {
     // Newly added for alignment with pi-mono:
     CursorWordLeft,
     CursorWordRight,
-    JumpForward,
-    JumpBackward,
     DeleteWordBackward,
     DeleteWordForward,
     DeleteToLineStart,
     DeleteToLineEnd,
-    Yank,
-    YankPop,
-    Undo,
     Interrupt,
     Clear,
-    Suspend,
     ThinkingCycle,
     ThinkingToggle,
     SessionToggleNamedFilter,
-    EditorExternal,
     MessageFollowUp,
     MessageSteer,
     MessageDequeue,
@@ -166,8 +159,6 @@ impl Default for Keymap {
         keymap.bind("ctrl+a", KeyAction::CursorLineStart); // Overriden in Models / Tree contexts
         keymap.bind("end", KeyAction::CursorLineEnd);
         keymap.bind("ctrl+e", KeyAction::CursorLineEnd); // History context: routed as HistoryNext while browsing
-        keymap.bind("ctrl+]", KeyAction::JumpForward);
-        keymap.bind("ctrl+alt+]", KeyAction::JumpBackward);
         keymap.bind("pageup", KeyAction::TimelinePageUp);
         keymap.bind("pagedown", KeyAction::TimelinePageDown);
         keymap.bind("backspace", KeyAction::DeleteBackward);
@@ -179,9 +170,6 @@ impl Default for Keymap {
         keymap.bind("alt+delete", KeyAction::DeleteWordForward);
         keymap.bind("ctrl+u", KeyAction::DeleteToLineStart);
         keymap.bind("ctrl+k", KeyAction::DeleteToLineEnd);
-        keymap.bind("ctrl+y", KeyAction::Yank);
-        keymap.bind("alt+y", KeyAction::YankPop);
-        keymap.bind("ctrl+-", KeyAction::Undo);
         keymap.bind("shift+enter", KeyAction::NewLine);
         keymap.bind("enter", KeyAction::Submit);
         keymap.bind("tab", KeyAction::Complete);
@@ -194,14 +182,12 @@ impl Default for Keymap {
 
         // Application Actions & Overlays
         keymap.bind("ctrl+q", KeyAction::Exit);
-        keymap.bind("ctrl+z", KeyAction::Suspend);
         keymap.bind("shift+tab", KeyAction::ThinkingCycle);
         keymap.bind("ctrl+p", KeyAction::HistoryPrev); // Overriden to cycle model or filter tree in specific panels
         keymap.bind("ctrl+e", KeyAction::HistoryNext); // Editor routes as CursorLineEnd unless browsing history
         keymap.bind("ctrl+l", KeyAction::Models); // Open model selector
         keymap.bind("ctrl+t", KeyAction::ThinkingToggle);
         keymap.bind("ctrl+n", KeyAction::SessionToggleNamedFilter);
-        keymap.bind("ctrl+g", KeyAction::EditorExternal);
         keymap.bind("alt+enter", KeyAction::MessageFollowUp);
         keymap.bind("ctrl+enter", KeyAction::MessageSteer);
         keymap.bind("alt+up", KeyAction::MessageDequeue);
@@ -296,11 +282,9 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "app.exit" => KeyAction::Exit,
         "app.interrupt" => KeyAction::Interrupt,
         "app.clear" => KeyAction::Clear,
-        "app.suspend" => KeyAction::Suspend,
         "app.thinking.cycle" => KeyAction::ThinkingCycle,
         "app.thinking.toggle" => KeyAction::ThinkingToggle,
         "app.session.toggleNamedFilter" => KeyAction::SessionToggleNamedFilter,
-        "app.editor.external" => KeyAction::EditorExternal,
         "app.message.followUp" => KeyAction::MessageFollowUp,
         "app.message.steer" => KeyAction::MessageSteer,
         "app.message.dequeue" => KeyAction::MessageDequeue,
@@ -334,7 +318,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "tui.input.newLine" => KeyAction::NewLine,
         "tui.input.submit" => KeyAction::Submit,
         "tui.input.tab" => KeyAction::Complete,
-        "tui.input.copy" => KeyAction::Clear, // maps to clear/cancel in editor
 
         "tui.select.up" => KeyAction::SelectPrev,
         "tui.select.down" => KeyAction::SelectNext,
@@ -343,16 +326,12 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "tui.select.confirm" => KeyAction::Confirm,
         "tui.select.cancel" => KeyAction::Cancel,
 
-        "tui.editor.cursorUp" => KeyAction::SelectPrev,
-        "tui.editor.cursorDown" => KeyAction::SelectNext,
         "tui.editor.cursorLeft" => KeyAction::CursorLeft,
         "tui.editor.cursorRight" => KeyAction::CursorRight,
         "tui.editor.cursorWordLeft" => KeyAction::CursorWordLeft,
         "tui.editor.cursorWordRight" => KeyAction::CursorWordRight,
         "tui.editor.cursorLineStart" => KeyAction::CursorLineStart,
         "tui.editor.cursorLineEnd" => KeyAction::CursorLineEnd,
-        "tui.editor.jumpForward" => KeyAction::JumpForward,
-        "tui.editor.jumpBackward" => KeyAction::JumpBackward,
         "tui.editor.pageUp" => KeyAction::TimelinePageUp,
         "tui.editor.pageDown" => KeyAction::TimelinePageDown,
         "tui.editor.deleteCharBackward" => KeyAction::DeleteBackward,
@@ -361,9 +340,6 @@ fn action_from_id(id: &str) -> Option<KeyAction> {
         "tui.editor.deleteWordForward" => KeyAction::DeleteWordForward,
         "tui.editor.deleteToLineStart" => KeyAction::DeleteToLineStart,
         "tui.editor.deleteToLineEnd" => KeyAction::DeleteToLineEnd,
-        "tui.editor.yank" => KeyAction::Yank,
-        "tui.editor.yankPop" => KeyAction::YankPop,
-        "tui.editor.undo" => KeyAction::Undo,
 
         "tui.history.prev" => KeyAction::HistoryPrev,
         "tui.history.next" => KeyAction::HistoryNext,

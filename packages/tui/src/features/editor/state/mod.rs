@@ -11,32 +11,34 @@ use crate::{config::editor::EditorConfig, features::auto_completion::AutoComplet
 pub struct Editor {
     text: String,
     cursor: usize,
-    history: Vec<String>,
+    history: Vec<EditorDraft>,
     history_index: Option<usize>,
-    draft_before_history: Option<String>,
+    draft_before_history: Option<EditorDraft>,
     references: Vec<ReferenceBlock>,
     next_reference_id: usize,
     history_limit: usize,
     pub auto_complete: AutoComplete,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct ReferenceBlock {
+    start: usize,
     placeholder: String,
     payload: ReferencePayload,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum ReferencePayload {
     Text(String),
     Image { data: String, mime_type: String },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EditorDraft {
     text: String,
     cursor: usize,
     references: Vec<ReferenceBlock>,
+    next_reference_id: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,6 +64,7 @@ impl Default for Editor {
 }
 
 mod impls;
+mod render;
 mod submission;
 #[cfg(test)]
 mod tests;
@@ -71,26 +74,4 @@ fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
         index -= 1;
     }
     index
-}
-
-fn find_placeholder_before_cursor(
-    text: &str,
-    placeholder: &str,
-    cursor: usize,
-) -> Option<(usize, usize)> {
-    let before = text.get(..cursor)?;
-    before
-        .rfind(placeholder)
-        .filter(|start| *start + placeholder.len() == cursor)
-        .map(|start| (start, cursor))
-}
-
-fn find_placeholder_at_cursor(
-    text: &str,
-    placeholder: &str,
-    cursor: usize,
-) -> Option<(usize, usize)> {
-    text.get(cursor..)?
-        .starts_with(placeholder)
-        .then_some((cursor, cursor + placeholder.len()))
 }

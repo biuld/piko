@@ -4,7 +4,7 @@ impl Editor {
     pub fn take_submission(&mut self) -> Option<EditorSubmission> {
         let content = self.structured_content()?;
         let display_text = self.expanded_display_text().trim().to_string();
-        self.push_history(display_text.clone());
+        self.push_history(self.snapshot_draft());
         self.clear();
         Some(EditorSubmission {
             content,
@@ -17,6 +17,7 @@ impl Editor {
             text: self.text.clone(),
             cursor: self.cursor,
             references: self.references.clone(),
+            next_reference_id: self.next_reference_id,
         }
     }
 
@@ -24,6 +25,7 @@ impl Editor {
         self.text = draft.text;
         self.cursor = draft.cursor.min(self.text.len());
         self.references = draft.references;
+        self.next_reference_id = draft.next_reference_id;
         self.history_index = None;
         self.draft_before_history = None;
     }
@@ -33,11 +35,13 @@ impl Editor {
         let id = self.next_reference_id;
         self.next_reference_id += 1;
         let placeholder = format!("[Image #{id}: {filename}]");
+        let start = self.cursor;
+        self.insert_str(&placeholder);
         self.references.push(ReferenceBlock {
-            placeholder: placeholder.clone(),
+            start,
+            placeholder,
             payload: ReferencePayload::Image { data, mime_type },
         });
-        self.insert_str(&placeholder);
     }
 
     pub fn restore_content(&mut self, content: &piko_protocol::MessageContent) {
@@ -59,12 +63,19 @@ impl Editor {
     }
 
     fn expanded_display_text(&self) -> String {
-        let mut text = self.text.clone();
-        for reference in &self.references {
-            if let ReferencePayload::Text(content) = &reference.payload {
-                text = text.replace(&reference.placeholder, content);
+        let mut text = String::new();
+        let mut cursor = 0;
+        let mut references = self.references.iter().collect::<Vec<_>>();
+        references.sort_by_key(|reference| reference.start);
+        for reference in references {
+            text.push_str(&self.text[cursor..reference.start]);
+            match &reference.payload {
+                ReferencePayload::Text(content) => text.push_str(content),
+                ReferencePayload::Image { .. } => text.push_str(&reference.placeholder),
             }
+            cursor = reference.start + reference.placeholder.len();
         }
+        text.push_str(&self.text[cursor..]);
         text
     }
 
@@ -76,20 +87,16 @@ impl Editor {
         let mut cursor = 0usize;
         let mut has_image = false;
         while cursor < self.text.len() {
-            let Some((offset, reference)) = self
+            let Some(reference) = self
                 .references
                 .iter()
-                .filter_map(|reference| {
-                    self.text[cursor..]
-                        .find(&reference.placeholder)
-                        .map(|offset| (offset, reference))
-                })
-                .min_by_key(|(offset, _)| *offset)
+                .filter(|reference| reference.start >= cursor)
+                .min_by_key(|reference| reference.start)
             else {
                 pending_text.push_str(&self.text[cursor..]);
                 break;
             };
-            let start = cursor + offset;
+            let start = reference.start;
             pending_text.push_str(&self.text[cursor..start]);
             match &reference.payload {
                 ReferencePayload::Text(text) => pending_text.push_str(text),

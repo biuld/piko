@@ -33,16 +33,12 @@ These keys are active when the Editor is focused and not blocked by active overl
 
 | Keybinding ID | Default Key(s) | Description |
 |---|---|---|
-| `tui.editor.cursorUp` | `up` | Move cursor up |
-| `tui.editor.cursorDown` | `down` | Move cursor down |
 | `tui.editor.cursorLeft` | `left`, `ctrl+b` | Move cursor left one character |
 | `tui.editor.cursorRight` | `right`, `ctrl+f` | Move cursor right one character |
 | `tui.editor.cursorWordLeft` | `alt+left`, `ctrl+left`, `alt+b` | Move cursor left one word |
 | `tui.editor.cursorWordRight` | `alt+right`, `ctrl+right`, `alt+f` | Move cursor right one word |
 | `tui.editor.cursorLineStart` | `home`, `ctrl+a` | Move cursor to the start of the line |
 | `tui.editor.cursorLineEnd` | `end`, `ctrl+e` | Move cursor to the end of the line (Ctrl+E walks history forward while a history browse is active) |
-| `tui.editor.jumpForward` | `ctrl+]` | Jump forward to a specific character |
-| `tui.editor.jumpBackward` | `ctrl+alt+]` | Jump backward to a specific character |
 | `tui.editor.pageUp` | `pageup` | Scroll up one page |
 | `tui.editor.pageDown` | `pagedown` | Scroll down one page |
 | `tui.editor.deleteCharBackward` | `backspace` | Delete the character backward |
@@ -51,13 +47,9 @@ These keys are active when the Editor is focused and not blocked by active overl
 | `tui.editor.deleteWordForward` | `alt+d`, `alt+delete` | Delete the word forward |
 | `tui.editor.deleteToLineStart` | `ctrl+u` | Delete text from cursor to start of line |
 | `tui.editor.deleteToLineEnd` | `ctrl+k` | Delete text from cursor to end of line |
-| `tui.editor.yank` | `ctrl+y` | Paste deleted text from the kill ring (Yank) |
-| `tui.editor.yankPop` | `alt+y` | Cycle through previously deleted text |
-| `tui.editor.undo` | `ctrl+-` | Undo the last editor action |
 | `tui.input.newLine` | `shift+enter` | Insert a newline into the prompt (requires a terminal that can report modified Enter) |
 | `tui.input.submit` | `enter` | Submit the prompt to the LLM |
 | `tui.input.tab` | `tab` | Complete the selected suggestion |
-| `tui.input.copy` | `ctrl+c` | Copy the selected text to the system clipboard |
 
 ### 2. Selection & Navigation (List Overlays)
 These keys are active within selectable lists (e.g., Model Selector and Session List):
@@ -79,14 +71,12 @@ Global or editor-level shortcuts that open overlays, manage sessions, or interru
 | `app.interrupt` | `escape` | Cancel/abort the current model streaming or task |
 | `app.clear` | `ctrl+c` | Clear the editor contents |
 | `app.exit` | `ctrl+q` | Exit the piko TUI application |
-| `app.suspend` | `ctrl+z` | Suspend the app to background (Unix/macOS only) |
 | `app.thinking.cycle` | `shift+tab` | Cycle through reasoning/thinking levels |
 | `app.model.cycleForward` | `ctrl+p` | Cycle forward to the next model in active list |
 | `app.model.cycleBackward` | `shift+ctrl+p` | Cycle backward to the previous model in active list |
 | `app.model.select` | `ctrl+l` (or `f3`) | Open the model selector overlay |
 | `app.thinking.toggle` | `ctrl+t` | Toggle visibility of thinking/reasoning blocks |
 | `app.session.toggleNamedFilter` | `ctrl+n` | Cycle through named session filters in Session list |
-| `app.editor.external` | `ctrl+g` | Open active editor text in an external editor |
 | `app.message.followUp` | `alt+enter` | Queue a follow-up (`ChatSubmit` / FollowUp) |
 | `app.message.steer` | `ctrl+enter` | Steer the running turn only; fail if idle |
 | `app.message.dequeue` | `alt+up` | Restore the last follow-up this TUI queued |

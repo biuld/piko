@@ -6,7 +6,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Borders, Paragraph},
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::app::{
     HitId,
@@ -45,6 +45,27 @@ pub struct AutoComplete {
     pub list: SelectableList<CompletionRow>,
     pub active_provider_idx: Option<usize>,
     pub providers: Vec<Box<dyn AutoCompleteProvider>>,
+    file_search_tx: piko_comms::ThreadBridgeSender<
+        piko_comms::contracts::TuiFileSearchRequests,
+        FileSearchRequest,
+    >,
+    file_search_rx: piko_comms::ThreadBridgeReceiver<
+        piko_comms::contracts::TuiFileSearchResults,
+        FileSearchResult,
+    >,
+    file_generation: u64,
+    active_file_query: Option<(PathBuf, file_browser::FileQuery, u64)>,
+}
+
+struct FileSearchRequest {
+    cwd: PathBuf,
+    query: file_browser::FileQuery,
+    generation: u64,
+}
+
+struct FileSearchResult {
+    rows: Vec<CompletionRow>,
+    generation: u64,
 }
 
 impl Default for AutoComplete {
@@ -55,6 +76,34 @@ impl Default for AutoComplete {
 
 impl AutoComplete {
     pub fn new() -> Self {
+        let (request_tx, request_rx) = piko_comms::thread_bridge::<
+            piko_comms::contracts::TuiFileSearchRequests,
+            FileSearchRequest,
+        >();
+        let (result_tx, result_rx) = piko_comms::thread_bridge::<
+            piko_comms::contracts::TuiFileSearchResults,
+            FileSearchResult,
+        >();
+        std::thread::Builder::new()
+            .name("piko-file-completion".into())
+            .spawn(move || {
+                while let Ok(mut request) = request_rx.recv() {
+                    while let Ok(newer) = request_rx.try_recv() {
+                        request = newer;
+                    }
+                    let rows = file_browser::search(&request.cwd, &request.query);
+                    if result_tx
+                        .send(FileSearchResult {
+                            rows,
+                            generation: request.generation,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("file completion worker must start");
         Self {
             active: false,
             list: SelectableList::new(Vec::new()),
@@ -63,6 +112,10 @@ impl AutoComplete {
                 Box::new(SlashCommandProvider),
                 Box::new(FileBrowserProvider),
             ],
+            file_search_tx: request_tx,
+            file_search_rx: result_rx,
+            file_generation: 0,
+            active_file_query: None,
         }
     }
 
@@ -107,6 +160,7 @@ impl AutoComplete {
         self.active = false;
         self.list.clear();
         self.active_provider_idx = None;
+        self.active_file_query = None;
     }
 
     pub(crate) fn boundary_title(&self) -> &'static str {
@@ -164,11 +218,35 @@ impl AutoComplete {
         self.active_provider_idx = matched_idx;
         self.active = matched_idx.is_some();
 
-        let mut items = if let Some(idx) = matched_idx {
-            self.providers[idx].update(cwd, commands, text, cursor)
-        } else {
-            Vec::new()
-        };
+        if matched_idx == Some(1) {
+            let Some(query) = file_browser::query(text, cursor) else {
+                self.clear();
+                return;
+            };
+            let same_query =
+                self.active_file_query
+                    .as_ref()
+                    .is_some_and(|(active_cwd, active_query, _)| {
+                        active_cwd == cwd && active_query == &query
+                    });
+            if !same_query {
+                self.file_generation = self.file_generation.wrapping_add(1);
+                let generation = self.file_generation;
+                self.active_file_query = Some((cwd.to_path_buf(), query.clone(), generation));
+                self.list = SelectableList::new(Vec::new());
+                let _ = self.file_search_tx.send(FileSearchRequest {
+                    cwd: cwd.to_path_buf(),
+                    query,
+                    generation,
+                });
+            }
+            return;
+        }
+
+        self.active_file_query = None;
+        let mut items = matched_idx
+            .map(|idx| self.providers[idx].update(cwd, commands, text, cursor))
+            .unwrap_or_default();
 
         // Safety limit to avoid performance issues
         items.truncate(100);
@@ -176,6 +254,26 @@ impl AutoComplete {
         let prev = self.list.selected;
         self.list = SelectableList::new(items);
         self.list.selected = prev.min(self.list.len().saturating_sub(1));
+    }
+
+    pub fn poll_file_results(&mut self, text: &str, cursor: usize) -> bool {
+        let mut changed = false;
+        while let Ok(result) = self.file_search_rx.try_recv() {
+            let current_matches =
+                self.active_file_query
+                    .as_ref()
+                    .is_some_and(|(_, query, generation)| {
+                        *generation == result.generation
+                            && file_browser::query(text, cursor).as_ref() == Some(query)
+                    });
+            if current_matches {
+                let selected = self.list.selected;
+                self.list = SelectableList::new(result.rows);
+                self.list.selected = selected.min(self.list.len().saturating_sub(1));
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Renders the completions list in the allocated area (Minimal pane, no search).

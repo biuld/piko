@@ -15,6 +15,10 @@ impl AppState {
             effect::Msg::Tick => {
                 self.last_tick = std::time::Instant::now();
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
+                let text = self.editor.text();
+                self.editor
+                    .auto_complete
+                    .poll_file_results(&text, self.editor.cursor());
                 self.timeline_mut().viewport.apply_metrics();
                 Vec::new()
             }
@@ -36,6 +40,7 @@ impl AppState {
                     command_id,
                     result: Ok(piko_protocol::CommandResult::Empty),
                 } => {
+                    self.session.pending_submissions.remove(&command_id);
                     self.status = if self.session.pending.take(&command_id)
                         == Some(pending::PendingCommandKind::UsageRefresh)
                     {
@@ -85,8 +90,14 @@ impl AppState {
                         session_id: previous,
                     }));
                 } else {
+                    let pending_draft = self.session.pending_turn_draft.take();
+                    let pending_content = self.session.pending_turn_content.take();
                     self.clear_session_view();
-                    if let Some(content) = self.session.pending_turn_content.take()
+                    if let Some(draft) = pending_draft
+                        && self.editor.is_empty()
+                    {
+                        self.editor.restore_draft(draft);
+                    } else if let Some(content) = pending_content
                         && self.editor.is_empty()
                     {
                         self.editor.restore_content(&content);
@@ -105,9 +116,17 @@ impl AppState {
                 }
             }
             Some(pending::PendingCommandKind::ChatSubmit) => {
-                // Turn lifecycle is authoritative. A rejected submit never
-                // creates an active Turn, so there is no optimistic run state
-                // to clear here.
+                if let Some(submission) = self.session.pending_submissions.remove(&command_id) {
+                    if submission.optimistic_follow_up {
+                        self.session
+                            .follow_ups
+                            .retain(|item| item.command_id.as_deref() != Some(&command_id));
+                    }
+                    if self.editor.is_empty() {
+                        self.editor.restore_draft(submission.draft);
+                        self.refresh_suggestions();
+                    }
+                }
             }
             Some(pending::PendingCommandKind::ModelList) => {
                 self.status = format!("model list failed: {reason}");

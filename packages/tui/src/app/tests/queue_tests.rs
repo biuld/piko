@@ -33,6 +33,7 @@ fn queued_guidance_and_summary_show_follow_up_count() {
 
     let mut app = running_app();
     app.session.follow_ups.push(crate::app::FollowUpUi {
+        command_id: None,
         agent_instance_id: "task-1".into(),
         text: "later".into(),
         content: piko_protocol::MessageContent::String("later".into()),
@@ -103,6 +104,27 @@ fn alt_enter_while_running_queues_follow_up() {
 }
 
 #[test]
+fn rejected_follow_up_restores_draft_and_rolls_back_local_queue() {
+    let mut app = running_app();
+    app.editor.restore_text("do this next");
+    let effects = app.dispatch(EditorAction::FollowUp.into());
+    let command_id = match effects.as_slice() {
+        [Effect::Send(piko_protocol::Command::ChatSubmit { command_id, .. })] => command_id.clone(),
+        other => panic!("unexpected effects: {other:?}"),
+    };
+
+    app.handle_host_line(crate::host::HostLine::Message(Box::new(
+        piko_protocol::ServerMessage::CommandResponse {
+            command_id,
+            result: Err("rejected".into()),
+        },
+    )));
+
+    assert_eq!(app.editor.text(), "do this next");
+    assert!(app.session.follow_ups.is_empty());
+}
+
+#[test]
 fn steer_while_idle_keeps_draft() {
     let mut app = live_app();
     app.agent_panel.active_agent_instance_id = Some("task-1".into());
@@ -119,6 +141,7 @@ fn steer_while_idle_keeps_draft() {
 fn queued_event_does_not_replace_running_turn() {
     let mut app = running_app();
     app.session.follow_ups.push(crate::app::FollowUpUi {
+        command_id: None,
         agent_instance_id: "task-1".into(),
         text: "later".into(),
         content: piko_protocol::MessageContent::String("later".into()),
@@ -148,6 +171,7 @@ fn queued_event_does_not_replace_running_turn() {
 fn dequeue_restores_text_and_cancels_queued_turn() {
     let mut app = running_app();
     app.session.follow_ups.push(crate::app::FollowUpUi {
+        command_id: None,
         agent_instance_id: "task-1".into(),
         text: "bring back".into(),
         content: piko_protocol::MessageContent::String("bring back".into()),
@@ -170,6 +194,7 @@ fn dequeue_restores_text_and_cancels_queued_turn() {
 fn dequeue_waits_for_queued_event_then_cancels() {
     let mut app = running_app();
     app.session.follow_ups.push(crate::app::FollowUpUi {
+        command_id: None,
         agent_instance_id: "task-1".into(),
         text: "pending id".into(),
         content: piko_protocol::MessageContent::String("pending id".into()),

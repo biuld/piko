@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+pub(crate) struct PendingSubmissionUi {
+    pub draft: crate::features::editor::state::EditorDraft,
+    pub optimistic_follow_up: bool,
+}
+
 /// Correlates in-flight host commands by `command_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingCommandKind {

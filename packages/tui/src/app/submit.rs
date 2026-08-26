@@ -138,7 +138,7 @@ impl AppState {
             return self.reject_steer_idle();
         }
         if self.session.id.is_none() {
-            return self.queue_until_session(content);
+            return self.queue_until_session(content, submitted_draft);
         }
         if self.agent_panel.active_agent_instance_id.is_none() {
             self.editor.restore_draft(submitted_draft);
@@ -146,17 +146,18 @@ impl AppState {
             self.notify(NotificationLevel::Error, "no agent selected");
             return Vec::new();
         }
-        self.dispatch_content(content, display_text, delivery)
+        self.dispatch_content(content, display_text, submitted_draft, delivery)
     }
 
     fn dispatch_content(
         &mut self,
         content: piko_protocol::MessageContent,
         display_text: String,
+        submitted_draft: crate::features::editor::state::EditorDraft,
         delivery: Delivery,
     ) -> Vec<Effect> {
         let Some(session_id) = self.session.id.clone() else {
-            return self.queue_until_session(content);
+            return self.queue_until_session(content, submitted_draft);
         };
         let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.clone() else {
             self.editor.restore_content(&content);
@@ -166,13 +167,22 @@ impl AppState {
         };
         match delivery {
             Delivery::Steer if !self.viewed_agent_is_busy() => {
-                self.editor.restore_content(&content);
+                self.editor.restore_draft(submitted_draft);
                 self.reject_steer_idle()
             }
-            Delivery::Steer => self.send_steer(session_id, agent_instance_id, content),
+            Delivery::Steer => {
+                self.send_steer(session_id, agent_instance_id, content, submitted_draft)
+            }
             Delivery::FollowUp => {
                 let record = self.viewed_agent_is_busy();
-                self.send_chat(session_id, agent_instance_id, content, display_text, record)
+                self.send_chat(
+                    session_id,
+                    agent_instance_id,
+                    content,
+                    display_text,
+                    submitted_draft,
+                    record,
+                )
             }
         }
     }
@@ -183,11 +193,14 @@ impl AppState {
         agent_instance_id: String,
         content: piko_protocol::MessageContent,
         display_text: String,
+        submitted_draft: crate::features::editor::state::EditorDraft,
         record_follow_up: bool,
     ) -> Vec<Effect> {
         let target_name = self.agent_label(&agent_instance_id);
+        let submit_command_id = command_id();
         if record_follow_up {
             self.session.follow_ups.push(FollowUpUi {
+                command_id: Some(submit_command_id.clone()),
                 agent_instance_id: agent_instance_id.clone(),
                 text: display_text,
                 content: content.clone(),
@@ -195,10 +208,16 @@ impl AppState {
                 cancel_when_queued: false,
             });
         }
-        let submit_command_id = command_id();
         self.session.pending.track(
             submit_command_id.clone(),
             super::pending::PendingCommandKind::ChatSubmit,
+        );
+        self.session.pending_submissions.insert(
+            submit_command_id.clone(),
+            super::pending::PendingSubmissionUi {
+                draft: submitted_draft,
+                optimistic_follow_up: record_follow_up,
+            },
         );
         let status = if record_follow_up {
             format!("queued for {target_name}")
@@ -228,18 +247,31 @@ impl AppState {
         session_id: String,
         agent_instance_id: String,
         content: piko_protocol::MessageContent,
+        submitted_draft: crate::features::editor::state::EditorDraft,
     ) -> Vec<Effect> {
         let target_name = self.agent_label(&agent_instance_id);
         self.status = format!("steered {target_name}");
+        let submit_command_id = command_id();
+        self.session.pending.track(
+            submit_command_id.clone(),
+            super::pending::PendingCommandKind::ChatSubmit,
+        );
+        self.session.pending_submissions.insert(
+            submit_command_id.clone(),
+            super::pending::PendingSubmissionUi {
+                draft: submitted_draft,
+                optimistic_follow_up: false,
+            },
+        );
         let command = match content {
             piko_protocol::MessageContent::String(message) => Command::QueueSteer {
-                command_id: command_id(),
+                command_id: submit_command_id,
                 session_id,
                 agent_instance_id,
                 message,
             },
             content => Command::QueueSteerMessage {
-                command_id: command_id(),
+                command_id: submit_command_id,
                 session_id,
                 agent_instance_id,
                 content,
@@ -248,8 +280,13 @@ impl AppState {
         vec![Effect::send(command)]
     }
 
-    fn queue_until_session(&mut self, content: piko_protocol::MessageContent) -> Vec<Effect> {
+    fn queue_until_session(
+        &mut self,
+        content: piko_protocol::MessageContent,
+        draft: crate::features::editor::state::EditorDraft,
+    ) -> Vec<Effect> {
         self.session.pending_turn_content = Some(content);
+        self.session.pending_turn_draft = Some(draft);
         if !self.session.initializing {
             self.begin_session_hydration(None);
             let create_id = command_id();

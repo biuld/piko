@@ -14,7 +14,12 @@ impl PointerComponent<HitId> for Editor {
         gesture: PointerGesture,
     ) -> Vec<crate::app::command::Action> {
         if gesture == PointerGesture::Activate && hit.element == Some(HitId::Composer) {
-            self.move_to_column(hit.rect.width, hit.local_x());
+            self.move_to_position(
+                hit.rect.width,
+                hit.rect.height,
+                hit.local_x(),
+                hit.local_y(),
+            );
         }
         Vec::new()
     }

@@ -20,7 +20,8 @@ closes, the Editor reappears with its content preserved.
 └─────────────────────────────────────────────────────┘
 ```
 
-- Fixed height (default 3 rows: 1 content line + top border + bottom border)
+- Minimum height 3 rows; by default the composer grows to six visible content
+  rows before scrolling internally
 - Top and bottom borders only, no left/right border
 - **No elevated body fill** — the composer sits on the plane background. Pointer
   hover is visually inert; focus border and caret communicate input state.
@@ -66,6 +67,12 @@ agent is running, Enter steers the active turn (`QueueSteer`). **Alt+Enter**
 always queues a follow-up (`ChatSubmit` / FollowUp). **Ctrl+Enter** steers only
 and fails closed if the agent is idle. **Alt+↑** restores the last follow-up
 this TUI queued. Details: [message-queue.md](./message-queue.md).
+
+The submitted draft remains recoverable until hostd accepts the command. A
+rejected submit restores the complete draft, including reference payloads, when
+the composer is empty; if the user has already started a new draft, the failed
+draft remains available through history without overwriting newer input. A
+rejected follow-up must also disappear from the local queue projection.
 
 ### Slash command interception
 
@@ -131,7 +138,7 @@ Suggestions appear in workspace `Region::Suggest` (directly above the Editor), w
 | Tab / ↓ | Cycle selection downward (automatically updates the editor text with the selected option in real-time) |
 | Shift+Tab / ↑ | Cycle selection upward (automatically updates the editor text with the selected option in real-time) |
 | Enter | Accept the selected completion (for commands: immediately submits/executes; for files: locks path block and closes view) |
-| Esc | Cancel suggestions, restore original text, and return to normal editing |
+| Esc | Cancel suggestions, keep the current editor text, and return to normal editing |
 
 You can continue typing while suggestions are visible — the list filters in
 real time. When no items match, the suggestion area shows an empty state.
@@ -166,7 +173,8 @@ Editor has focus (no overlay active):
 
 | Key | Action |
 |-----|--------|
-| Ctrl+C / Ctrl+Q | Quit the TUI |
+| Ctrl+C | Clear the editor, or cancel the active turn |
+| Ctrl+Q | Quit the TUI |
 
 ## Esc key behavior from the Editor
 
@@ -188,7 +196,7 @@ When enabled (default), Shift+Enter inserts a newline. Enter always submits.
 When disabled, newline insertion is unavailable. This is controlled by the
 `tui.editor.multiline` setting on hostd.
 
-### Planned
+### Sizing
 
 | Setting | Description |
 |---------|-------------|
@@ -256,6 +264,8 @@ regular text.
   ordered `ContentBlock::Image` values before the message is sent to hostd.
 - **Cleared**: after submission, all stored pastes are cleared along with the
   editor state.
+- **History-safe**: history stores the draft structure, not only the displayed
+  marker text, so recalling an image or paste reference preserves its payload.
 
 ### Image references
 

@@ -18,31 +18,14 @@ impl Editor {
         self.trim_history();
     }
 
-    pub fn visible_height(&self, config: &EditorConfig, width: u16) -> u16 {
-        let content_lines = if config.auto_resize {
-            self.visual_lines(width)
-                .len()
-                .max(1)
-                .min(config.max_lines.max(1) as usize) as u16
-        } else {
-            1
-        };
-        content_lines + 2
-    }
-
-    pub fn cursor_line_col(&self, width: u16, visible_rows: u16) -> (u16, u16) {
-        let lines = self.visual_lines(width);
-        let index = self.cursor_visual_line_index(&lines);
-        let Some(line) = lines.get(index) else {
-            return (0, 0);
-        };
-        let window_start = Self::window_start_for_cursor(index, visible_rows, lines.len());
-        let col = UnicodeWidthStr::width(&self.text[line.start..self.cursor.min(line.end)]);
-        (index.saturating_sub(window_start) as u16, col as u16)
-    }
-
     pub fn insert_char(&mut self, ch: char) {
         self.exit_history_browse();
+        self.cursor = self.snap_cursor_out_of_reference(self.cursor, true);
+        for reference in &mut self.references {
+            if reference.start >= self.cursor {
+                reference.start += ch.len_utf8();
+            }
+        }
         self.text.insert(self.cursor, ch);
         self.cursor += ch.len_utf8();
     }
@@ -53,29 +36,32 @@ impl Editor {
 
     pub fn backspace(&mut self) {
         self.exit_history_browse();
-        if self.delete_adjacent_reference_backward() {
+        if self.delete_reference_at_cursor(true) {
             return;
         }
         let Some(prev) = self.prev_char_boundary(self.cursor) else {
             return;
         };
-        self.text.replace_range(prev..self.cursor, "");
-        self.cursor = prev;
+        self.replace_range(prev, self.cursor, "");
     }
 
     pub fn delete(&mut self) {
         self.exit_history_browse();
-        if self.delete_adjacent_reference_forward() {
+        if self.delete_reference_at_cursor(false) {
             return;
         }
         let Some(next) = self.next_char_boundary(self.cursor) else {
             return;
         };
-        self.text.replace_range(self.cursor..next, "");
+        self.replace_range(self.cursor, next, "");
     }
 
     pub fn move_left(&mut self) {
         self.exit_history_browse();
+        if let Some((start, _)) = self.reference_range_touching_cursor(self.cursor, true) {
+            self.cursor = start;
+            return;
+        }
         let line_start = self.current_line_start();
         if self.cursor > line_start
             && let Some(prev) = self.prev_char_boundary(self.cursor)
@@ -86,6 +72,10 @@ impl Editor {
 
     pub fn move_right(&mut self) {
         self.exit_history_browse();
+        if let Some((_, end)) = self.reference_range_touching_cursor(self.cursor, false) {
+            self.cursor = end;
+            return;
+        }
         let line_end = self.current_line_end();
         if self.cursor < line_end
             && let Some(next) = self.next_char_boundary(self.cursor)
@@ -104,12 +94,17 @@ impl Editor {
         self.cursor = self.current_line_end();
     }
 
-    /// Move the cursor to display column `col` of the current visual line
-    /// (pointer clicks). `col` is clamped to the line's display width.
-    pub fn move_to_column(&mut self, width: u16, col: u16) {
+    /// Move the cursor to a visible composer row/column (pointer clicks).
+    pub fn move_to_position(&mut self, width: u16, height: u16, col: u16, row: u16) {
         self.exit_history_browse();
         let lines = self.visual_lines(width);
-        let index = self.cursor_visual_line_index(&lines);
+        let visible_rows = height.saturating_sub(2).max(1);
+        let cursor_index = self.cursor_visual_line_index(&lines);
+        let window_start = Self::window_start_for_cursor(cursor_index, visible_rows, lines.len());
+        let content_row = row.saturating_sub(1).min(visible_rows.saturating_sub(1));
+        let index = window_start
+            .saturating_add(content_row as usize)
+            .min(lines.len().saturating_sub(1));
         let Some(line) = lines.get(index) else {
             return;
         };
@@ -123,7 +118,55 @@ impl Editor {
             }
             used += w;
         }
-        self.cursor = target;
+        self.cursor = self.snap_cursor_out_of_reference(target, col >= used / 2);
+    }
+
+    pub fn move_word_left(&mut self) {
+        self.exit_history_browse();
+        if let Some((start, _)) = self.reference_range_touching_cursor(self.cursor, true) {
+            self.cursor = start;
+            return;
+        }
+        let before = &self.text[..self.cursor];
+        let trimmed = before.trim_end_matches(|ch: char| !ch.is_alphanumeric() && ch != '_');
+        let word = trimmed.trim_end_matches(|ch: char| ch.is_alphanumeric() || ch == '_');
+        let target = word.len().max(self.current_line_start());
+        self.cursor = self.snap_cursor_out_of_reference(target, false);
+    }
+
+    pub fn move_word_right(&mut self) {
+        self.exit_history_browse();
+        if let Some((_, end)) = self.reference_range_touching_cursor(self.cursor, false) {
+            self.cursor = end;
+            return;
+        }
+        let line_end = self.current_line_end();
+        let after = &self.text[self.cursor..line_end];
+        let skipped = after.trim_start_matches(|ch: char| !ch.is_alphanumeric() && ch != '_');
+        let word_end = skipped.trim_start_matches(|ch: char| ch.is_alphanumeric() || ch == '_');
+        self.cursor = self.snap_cursor_out_of_reference(line_end - word_end.len(), true);
+    }
+
+    pub fn delete_word_backward(&mut self) {
+        let end = self.cursor;
+        self.move_word_left();
+        self.replace_range(self.cursor, end, "");
+    }
+
+    pub fn delete_word_forward(&mut self) {
+        let start = self.cursor;
+        self.move_word_right();
+        self.replace_range(start, self.cursor, "");
+    }
+
+    pub fn delete_to_line_start(&mut self) {
+        let start = self.current_line_start();
+        self.replace_range(start, self.cursor, "");
+    }
+
+    pub fn delete_to_line_end(&mut self) {
+        let end = self.current_line_end();
+        self.replace_range(self.cursor, end, "");
     }
 
     #[cfg(test)]
@@ -149,11 +192,13 @@ impl Editor {
         if line_count > config.large_paste_lines || text.chars().count() > config.large_paste_chars
         {
             let placeholder = self.next_paste_placeholder(text, line_count);
+            let start = self.cursor;
+            self.insert_str(&placeholder);
             self.references.push(ReferenceBlock {
-                placeholder: placeholder.clone(),
+                start,
+                placeholder,
                 payload: ReferencePayload::Text(text.to_string()),
             });
-            self.insert_str(&placeholder);
         } else {
             self.insert_str(text);
         }
@@ -161,17 +206,37 @@ impl Editor {
 
     pub fn insert_reference_block(&mut self, placeholder: String, content: String) {
         self.exit_history_browse();
+        let start = self.cursor;
+        self.insert_str(&placeholder);
         self.references.push(ReferenceBlock {
-            placeholder: placeholder.clone(),
+            start,
+            placeholder,
             payload: ReferencePayload::Text(content),
         });
-        self.insert_str(&placeholder);
     }
 
     pub fn replace_range(&mut self, start: usize, end: usize, replacement: &str) {
         self.exit_history_browse();
-        let start = clamp_to_char_boundary(&self.text, start.min(self.text.len()));
-        let end = clamp_to_char_boundary(&self.text, end.min(self.text.len())).max(start);
+        let mut start = clamp_to_char_boundary(&self.text, start.min(self.text.len()));
+        let mut end = clamp_to_char_boundary(&self.text, end.min(self.text.len())).max(start);
+        for (reference_start, reference_end) in self.reference_ranges() {
+            if start < reference_end && end > reference_start {
+                start = start.min(reference_start);
+                end = end.max(reference_end);
+            }
+        }
+        let removed_len = end - start;
+        let inserted_len = replacement.len();
+        self.references.retain_mut(|reference| {
+            let reference_end = reference.start + reference.placeholder.len();
+            if start < reference_end && end > reference.start {
+                return false;
+            }
+            if reference.start >= end {
+                reference.start = reference.start - removed_len + inserted_len;
+            }
+            true
+        });
         self.text.replace_range(start..end, replacement);
         self.cursor = start + replacement.len();
     }
@@ -181,7 +246,7 @@ impl Editor {
             return;
         }
         if self.history_index.is_none() {
-            self.draft_before_history = Some(self.text.clone());
+            self.draft_before_history = Some(self.snapshot_draft());
         }
         let next_index = self
             .history_index
@@ -207,97 +272,45 @@ impl Editor {
             return;
         };
         if index + 1 >= self.history.len() {
-            let draft = self.draft_before_history.take().unwrap_or_default();
-            self.text = draft;
-            self.cursor = self.text.len();
+            let draft = self.draft_before_history.take().unwrap_or(EditorDraft {
+                text: String::new(),
+                cursor: 0,
+                references: Vec::new(),
+                next_reference_id: 1,
+            });
+            self.text = draft.text;
+            self.cursor = draft.cursor;
+            self.references = draft.references;
+            self.next_reference_id = draft.next_reference_id;
             self.history_index = None;
         } else {
             self.set_from_history(index + 1);
         }
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, block: Block<'static>) {
-        let visible_rows = area.height.saturating_sub(2).max(1);
-        let visual_lines = self.visual_lines(area.width);
-        let cursor_index = self.cursor_visual_line_index(&visual_lines);
-        let window_start =
-            Self::window_start_for_cursor(cursor_index, visible_rows, visual_lines.len());
-        let lines = visual_lines
-            .into_iter()
-            .skip(window_start)
-            .take(visible_rows as usize)
-            .map(|line| Line::from(Span::raw(self.text[line.start..line.end].to_string())))
-            .collect::<Vec<_>>();
-        let paragraph = Paragraph::new(lines).block(block);
-        frame.render_widget(paragraph, area);
-    }
-
-    pub(super) fn cursor_visual_line_index(&self, lines: &[std::ops::Range<usize>]) -> usize {
-        lines
-            .partition_point(|line| line.start <= self.cursor)
-            .saturating_sub(1)
-    }
-
-    pub(super) fn window_start_for_cursor(
-        cursor_index: usize,
-        visible_rows: u16,
-        total_lines: usize,
-    ) -> usize {
-        let visible_rows = visible_rows.max(1) as usize;
-        let max_start = total_lines.saturating_sub(visible_rows);
-        cursor_index
-            .saturating_add(1)
-            .saturating_sub(visible_rows)
-            .min(max_start)
-    }
-
-    pub(super) fn visual_lines(&self, width: u16) -> Vec<std::ops::Range<usize>> {
-        let max_width = width.max(1) as usize;
-        if self.text.is_empty() {
-            return std::iter::once(0..0).collect();
-        }
-
-        let mut lines = Vec::new();
-        let mut line_start = 0;
-        let mut line_width = 0usize;
-
-        for (index, ch) in self.text.char_indices() {
-            if ch == '\n' {
-                lines.push(line_start..index);
-                line_start = index + ch.len_utf8();
-                line_width = 0;
-                continue;
-            }
-
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0).max(1);
-            if line_width > 0 && line_width + ch_width > max_width {
-                lines.push(line_start..index);
-                line_start = index;
-                line_width = 0;
-            }
-            line_width += ch_width;
-        }
-
-        lines.push(line_start..self.text.len());
-        lines
-    }
-
     pub(super) fn insert_str(&mut self, text: &str) {
+        for reference in &mut self.references {
+            if reference.start >= self.cursor {
+                reference.start += text.len();
+            }
+        }
         self.text.insert_str(self.cursor, text);
         self.cursor += text.len();
     }
 
-    pub(super) fn push_history(&mut self, text: String) {
-        if self.history.last() != Some(&text) {
-            self.history.push(text);
+    pub(super) fn push_history(&mut self, draft: EditorDraft) {
+        if self.history.last() != Some(&draft) {
+            self.history.push(draft);
         }
         self.trim_history();
     }
 
     pub(super) fn set_from_history(&mut self, index: usize) {
-        if let Some(text) = self.history.get(index) {
-            self.text = text.clone();
-            self.cursor = self.text.len();
+        if let Some(draft) = self.history.get(index).cloned() {
+            self.text = draft.text;
+            self.cursor = draft.cursor;
+            self.references = draft.references;
+            self.next_reference_id = draft.next_reference_id;
             self.history_index = Some(index);
         }
     }
@@ -332,34 +345,48 @@ impl Editor {
         }
     }
 
-    pub(super) fn delete_adjacent_reference_backward(&mut self) -> bool {
-        let Some((start, end)) = self
-            .references
-            .iter()
-            .filter_map(|reference| {
-                find_placeholder_before_cursor(&self.text, &reference.placeholder, self.cursor)
-            })
-            .find(|(_, end)| *end == self.cursor)
-        else {
+    fn delete_reference_at_cursor(&mut self, backward: bool) -> bool {
+        let Some((start, end)) = self.reference_range_touching_cursor(self.cursor, backward) else {
             return false;
         };
         self.replace_range(start, end, "");
         true
     }
 
-    pub(super) fn delete_adjacent_reference_forward(&mut self) -> bool {
-        let Some((start, end)) = self
+    pub(super) fn reference_ranges(&self) -> Vec<(usize, usize)> {
+        let mut ranges = self
             .references
             .iter()
-            .filter_map(|reference| {
-                find_placeholder_at_cursor(&self.text, &reference.placeholder, self.cursor)
+            .map(|reference| {
+                (
+                    reference.start,
+                    reference.start + reference.placeholder.len(),
+                )
             })
-            .find(|(start, _)| *start == self.cursor)
-        else {
-            return false;
-        };
-        self.replace_range(start, end, "");
-        true
+            .collect::<Vec<_>>();
+        ranges.sort_unstable();
+        ranges
+    }
+
+    fn reference_range_touching_cursor(
+        &self,
+        cursor: usize,
+        backward: bool,
+    ) -> Option<(usize, usize)> {
+        self.reference_ranges().into_iter().find(|(start, end)| {
+            if backward {
+                *start < cursor && cursor <= *end
+            } else {
+                *start <= cursor && cursor < *end
+            }
+        })
+    }
+
+    fn snap_cursor_out_of_reference(&self, cursor: usize, prefer_end: bool) -> usize {
+        self.reference_ranges()
+            .into_iter()
+            .find(|(start, end)| *start < cursor && cursor < *end)
+            .map_or(cursor, |(start, end)| if prefer_end { end } else { start })
     }
 
     pub(super) fn prev_char_boundary(&self, cursor: usize) -> Option<usize> {

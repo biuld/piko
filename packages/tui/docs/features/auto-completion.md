@@ -60,6 +60,9 @@ Tab cycle | Enter execute
 - **File Browser (`@`)**:
   - When the query is empty (just `@`), it displays the top-level files and directories in the current directory (`cwd`).
   - As soon as characters are typed (e.g. `@src`), it switches to a **global recursive fuzzy search**, scanning the entire project workspace (excluding ignored paths like `.git`, `node_modules`, `target`, `dist`, and `build`) to find matching files.
+- File discovery runs outside the input reducer. Results carry a query
+  generation and stale generations are ignored, so typing never waits for a
+  workspace traversal and an older search cannot replace newer suggestions.
 - The list is scrollable, tracking the selected item statefully.
 
 ### Navigation and Cycling

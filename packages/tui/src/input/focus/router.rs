@@ -397,22 +397,20 @@ impl InputRouter {
                     Some(EditorAction::DeleteForward.into())
                 }
             }
-            Some(KeyAction::DeleteWordBackward) => Some(EditorAction::DeleteBackward.into()),
-            Some(KeyAction::DeleteWordForward) => Some(EditorAction::DeleteForward.into()),
-            Some(KeyAction::DeleteToLineStart) => Some(EditorAction::DeleteBackward.into()),
-            Some(KeyAction::DeleteToLineEnd) => Some(EditorAction::DeleteForward.into()),
+            Some(KeyAction::DeleteWordBackward) => Some(EditorAction::DeleteWordBackward.into()),
+            Some(KeyAction::DeleteWordForward) => Some(EditorAction::DeleteWordForward.into()),
+            Some(KeyAction::DeleteToLineStart) => Some(EditorAction::DeleteToLineStart.into()),
+            Some(KeyAction::DeleteToLineEnd) => Some(EditorAction::DeleteToLineEnd.into()),
             Some(KeyAction::Submit) => Some(EditorAction::Submit.into()),
             Some(KeyAction::MessageFollowUp) => Some(EditorAction::FollowUp.into()),
             Some(KeyAction::MessageSteer) => Some(EditorAction::Steer.into()),
             Some(KeyAction::MessageDequeue) => Some(EditorAction::DequeueFollowUp.into()),
             Some(KeyAction::ClipboardPasteImage) => Some(EditorAction::PasteImage.into()),
             Some(KeyAction::Complete) => Some(EditorAction::AcceptSuggestion.into()),
-            Some(KeyAction::CursorLeft | KeyAction::CursorWordLeft) => {
-                Some(EditorAction::CursorLeft.into())
-            }
-            Some(KeyAction::CursorRight | KeyAction::CursorWordRight) => {
-                Some(EditorAction::CursorRight.into())
-            }
+            Some(KeyAction::CursorLeft) => Some(EditorAction::CursorLeft.into()),
+            Some(KeyAction::CursorRight) => Some(EditorAction::CursorRight.into()),
+            Some(KeyAction::CursorWordLeft) => Some(EditorAction::CursorWordLeft.into()),
+            Some(KeyAction::CursorWordRight) => Some(EditorAction::CursorWordRight.into()),
             Some(KeyAction::CursorLineStart) => Some(EditorAction::CursorLineStart.into()),
             Some(KeyAction::CursorLineEnd) => Some(EditorAction::CursorLineEnd.into()),
             Some(KeyAction::Cancel | KeyAction::Clear | KeyAction::Interrupt) => {

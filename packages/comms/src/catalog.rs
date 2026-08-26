@@ -310,6 +310,46 @@ pub mod contracts {
         }
     );
     contract!(
+        TuiFileSearchRequests,
+        ThreadBridgeContract,
+        TUI_FILE_SEARCH_REQUESTS,
+        CommunicationSpec {
+            id: "tui.completion.file_search_requests",
+            kind: CommunicationKind::ThreadBridge,
+            owner: "FileCompletionWorker",
+            producers: &["TuiInputReducer"],
+            consumer: "FileCompletionWorker",
+            scope: CommunicationScope::Process,
+            delivery: DeliveryGuarantee::InMemory,
+            capacity: CapacityPolicy::Unbounded {
+                justification: "the worker coalesces queued generations before each filesystem scan",
+            },
+            overflow: OverflowPolicy::NotApplicable,
+            closure: ClosureMeaning::ProcessExited,
+            cancellation: CancellationMeaning::DropInterestOnly,
+        }
+    );
+    contract!(
+        TuiFileSearchResults,
+        ThreadBridgeContract,
+        TUI_FILE_SEARCH_RESULTS,
+        CommunicationSpec {
+            id: "tui.completion.file_search_results",
+            kind: CommunicationKind::ThreadBridge,
+            owner: "FileCompletionWorker",
+            producers: &["FileCompletionWorker"],
+            consumer: "TuiEventLoop",
+            scope: CommunicationScope::Process,
+            delivery: DeliveryGuarantee::InMemory,
+            capacity: CapacityPolicy::Unbounded {
+                justification: "generation checks discard stale results at the synchronous TUI boundary",
+            },
+            overflow: OverflowPolicy::NotApplicable,
+            closure: ClosureMeaning::ProcessExited,
+            cancellation: CancellationMeaning::DropInterestOnly,
+        }
+    );
+    contract!(
         HostCommandOutput,
         MailboxContract,
         HOST_COMMAND_OUTPUT,
@@ -404,6 +444,8 @@ pub mod contracts {
         INTERACTION_REPLY,
         TUI_HOST_BRIDGE,
         DESKTOP_HOST_BRIDGE,
+        TUI_FILE_SEARCH_REQUESTS,
+        TUI_FILE_SEARCH_RESULTS,
         HOST_COMMAND_OUTPUT,
         TRAJECTORY_WRITES,
         TRAJECTORY_LIVE,

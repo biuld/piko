@@ -137,3 +137,78 @@ fn cursor_row_stays_inside_visible_window_when_content_exceeds_max_lines() {
     assert_eq!(editor.visible_height(&EditorConfig::default(), 80), 8);
     assert_eq!(editor.cursor_line_col(80, 6), (5, 1));
 }
+
+#[test]
+fn reference_cursor_movement_and_editing_preserve_atomic_payload() {
+    let mut editor = Editor::default();
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    editor.move_left();
+    assert_eq!(editor.cursor(), 0);
+    editor.insert_char('x');
+
+    let submission = editor.take_submission().unwrap();
+    assert!(matches!(
+        submission.content,
+        piko_protocol::MessageContent::Blocks(ref blocks)
+            if matches!(blocks.as_slice(), [
+                piko_protocol::ContentBlock::Text { text },
+                piko_protocol::ContentBlock::Image { data, .. }
+            ] if text == "x" && data == "AA==")
+    ));
+}
+
+#[test]
+fn word_movement_never_stops_inside_a_reference() {
+    let mut editor = Editor::default();
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    editor.insert_char(' ');
+    editor.move_word_left();
+    assert_eq!(editor.cursor(), 0);
+    editor.move_word_right();
+    assert_eq!(editor.cursor(), "[Image #1: clipboard.png]".len());
+}
+
+#[test]
+fn edits_before_a_reference_keep_its_payload_position_in_sync() {
+    let mut editor = Editor::default();
+    editor.restore_text("ab");
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    editor.move_line_start();
+    editor.delete();
+    let submission = editor.take_submission().unwrap();
+    assert!(matches!(
+        submission.content,
+        piko_protocol::MessageContent::Blocks(ref blocks)
+            if matches!(blocks.as_slice(), [
+                piko_protocol::ContentBlock::Text { text },
+                piko_protocol::ContentBlock::Image { data, .. }
+            ] if text == "b" && data == "AA==")
+    ));
+}
+
+#[test]
+fn history_recall_preserves_image_payload() {
+    let mut editor = Editor::default();
+    editor.insert_image("clipboard.png", "AA==".into(), "image/png".into());
+    let original = editor.take_submission().unwrap().content;
+    editor.history_prev();
+    assert_eq!(editor.take_submission().unwrap().content, original);
+}
+
+#[test]
+fn pointer_position_selects_the_clicked_visual_row() {
+    let mut editor = Editor::default();
+    editor.restore_text("one\ntwo");
+    editor.move_to_position(20, 4, 1, 1);
+    assert_eq!(editor.cursor(), 1);
+}
+
+#[test]
+fn word_and_line_deletion_use_their_full_ranges() {
+    let mut editor = Editor::default();
+    editor.restore_text("one two three");
+    editor.delete_word_backward();
+    assert_eq!(editor.text(), "one two ");
+    editor.delete_to_line_start();
+    assert!(editor.is_empty());
+}

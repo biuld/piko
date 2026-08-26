@@ -31,6 +31,8 @@ flowchart LR
     end
     subgraph tui["tui"]
         ntui_host_process_bridge["tui.host.process_bridge<br/>ThreadBridge / Process<br/>Unbounded — blocking host stdout reader crosses into the synchronous TUI loop"]
+        ntui_completion_file_search_requests["tui.completion.file_search_requests<br/>ThreadBridge / Process<br/>Unbounded — the worker coalesces queued generations before each filesystem scan"]
+        ntui_completion_file_search_results["tui.completion.file_search_results<br/>ThreadBridge / Process<br/>Unbounded — generation checks discard stale results at the synchronous TUI boundary"]
     end
     ncomponent_AgentActor["AgentActor"]
     ncomponent_AgentExecutionRuntime["AgentExecutionRuntime"]
@@ -43,6 +45,7 @@ flowchart LR
     ncomponent_ExecutionActor["ExecutionActor"]
     ncomponent_ExecutionSupervisor["ExecutionSupervisor"]
     ncomponent_ExecutionTerminalWaiter["ExecutionTerminalWaiter"]
+    ncomponent_FileCompletionWorker["FileCompletionWorker"]
     ncomponent_HostApp["HostApp"]
     ncomponent_HostObservationProjection["HostObservationProjection"]
     ncomponent_HostPromptAssemblyPort["HostPromptAssemblyPort"]
@@ -56,6 +59,7 @@ flowchart LR
     ncomponent_TrajectoryWebViewer["TrajectoryWebViewer"]
     ncomponent_TrajectoryWriterTask["TrajectoryWriterTask"]
     ncomponent_TuiEventLoop["TuiEventLoop"]
+    ncomponent_TuiInputReducer["TuiInputReducer"]
     ncomponent_UserInteractionGateway["UserInteractionGateway"]
     ncomponent_AgentRuntime --> norchd_agent_commands
     ncomponent_ExecutionTerminalWaiter --> norchd_agent_commands
@@ -90,6 +94,10 @@ flowchart LR
     ntui_host_process_bridge --> ncomponent_TuiEventLoop
     ncomponent_HostStdoutReaderThread --> ndesktop_host_process_bridge
     ndesktop_host_process_bridge --> ncomponent_DesktopEventLoop
+    ncomponent_TuiInputReducer --> ntui_completion_file_search_requests
+    ntui_completion_file_search_requests --> ncomponent_FileCompletionWorker
+    ncomponent_FileCompletionWorker --> ntui_completion_file_search_results
+    ntui_completion_file_search_results --> ncomponent_TuiEventLoop
     ncomponent_HostApp --> nhostd_client_output
     ncomponent_HostServerCommandTask --> nhostd_client_output
     nhostd_client_output --> ncomponent_HostTransport

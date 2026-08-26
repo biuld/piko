@@ -185,3 +185,12 @@ fn notification_panel_routes_selection_and_copy_keys() {
         Some(Action::Notifications(NotificationAction::CopySelected))
     ));
 }
+
+#[test]
+fn non_text_surface_does_not_accept_bracketed_paste() {
+    let mut app = app();
+    app.push_surface(crate::app::SurfaceId::Models);
+    assert!(!app.accepts_text_paste());
+    app.clear_focus();
+    assert!(app.accepts_text_paste());
+}

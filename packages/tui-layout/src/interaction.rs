@@ -15,6 +15,10 @@ impl<E> ComponentHit<E> {
     pub fn local_x(&self) -> u16 {
         self.x.saturating_sub(self.rect.x)
     }
+
+    pub fn local_y(&self) -> u16 {
+        self.y.saturating_sub(self.rect.y)
+    }
 }
 
 /// Pointer gestures after terminal-adapter event normalization.

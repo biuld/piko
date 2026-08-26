@@ -88,6 +88,9 @@ If no overlay is visible, keys are routed to the Editor:
 
 To support the above design, the `KeyAction` enum and defaults mapping in `packages/tui/src/input/keymap.rs` must be aligned with the feature specifications:
 
-- **Add missing variants**: Add all missing actions such as `CursorWordLeft`, `CursorWordRight`, `DeleteWordBackward`, `DeleteWordForward`, `DeleteToLineStart`, `DeleteToLineEnd`, `Yank`, `YankPop`, `Undo`, etc.
+- **Keep advertised variants executable**: word movement/deletion and
+  line-range deletion map to distinct editor actions. Unsupported jump, kill
+  ring, undo, suspend, and external-editor actions are not registered or
+  advertised until their complete workflows exist.
 - **Normalize defaults**: Bind `ctrl+q` for Exit (freeing `ctrl+c`), and route `ctrl+c` to `Cancel`/`Clear` / `Interrupt` globally.
 - **Scoping check in dispatch**: Ensure that the routing implementation under `packages/tui/src/input/focus.rs` implements clean pattern matching for `AppMode` to apply these scoped key behaviors.
