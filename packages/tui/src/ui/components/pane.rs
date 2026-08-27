@@ -26,13 +26,7 @@
 //! ────────────────────────────────────────
 //! ```
 
-use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
-};
+use ratatui::{layout::Rect, style::Color, text::Line, widgets::Borders};
 
 use crate::theme::Theme;
 use crate::ui::components::feedback::frame_border_style;
@@ -371,116 +365,27 @@ impl<'a> PaneSpec<'a> {
     /// The content zone [`render_pane`] paints into for this area — pure
     /// geometry shared by renderers and hit-testing so they cannot drift.
     pub fn content_rect(&self, area: Rect) -> Option<Rect> {
-        let bordered = Block::default().borders(self.borders).inner(area);
-        let inner = inset_xy(bordered, self.padding);
-        if inner.width == 0 || inner.height == 0 {
-            return None;
-        }
-        let footer_h = footer_height(self.footer);
-        let show_search = !matches!(self.search, PaneSearch::Hidden);
-        let show_rule = show_search && self.search_rule;
-        let show_tip = self.tip.is_some_and(|t| !t.is_empty());
-        let chrome = u16::from(show_search)
-            .saturating_add(u16::from(show_rule))
-            .saturating_add(u16::from(show_tip))
-            .saturating_add(footer_h);
-        if inner.height <= chrome {
-            // Mirrors render_pane's fallback: content is inner minus footer
-            // when a footer fits, otherwise the whole inner.
-            if footer_h > 0 && inner.height > footer_h {
-                return Some(Rect::new(
-                    inner.x,
-                    inner.y,
-                    inner.width,
-                    inner.height - footer_h,
-                ));
-            }
-            return Some(inner);
-        }
-        Some(Rect::new(
-            inner.x,
-            inner
-                .y
-                .saturating_add(u16::from(show_search))
-                .saturating_add(u16::from(show_rule)),
-            inner.width,
-            inner.height - chrome,
-        ))
+        render::prepare_pane(area, self).map(|plan| plan.content)
     }
 
     /// Reserved footer geometry, derived without painting.
     pub fn footer_rect(&self, area: Rect) -> Option<Rect> {
-        let PaneFooter::Reserved { .. } = self.footer else {
-            return None;
-        };
-        let bordered = Block::default().borders(self.borders).inner(area);
-        let inner = inset_xy(bordered, self.padding);
-        let height = footer_height(self.footer).min(inner.height);
-        (height > 0).then_some(Rect::new(
-            inner.x,
-            inner.y.saturating_add(inner.height.saturating_sub(height)),
-            inner.width,
-            height,
-        ))
+        matches!(self.footer, PaneFooter::Reserved { .. })
+            .then(|| render::prepare_pane(area, self).and_then(|plan| plan.footer))
+            .flatten()
     }
 
     /// Search/custom-input row geometry, derived without painting.
     pub fn search_rect(&self, area: Rect) -> Option<Rect> {
-        if matches!(self.search, PaneSearch::Hidden) {
-            return None;
-        }
-        let bordered = Block::default().borders(self.borders).inner(area);
-        let inner = inset_xy(bordered, self.padding);
-        (inner.width > 0 && inner.height > 0).then_some(Rect::new(inner.x, inner.y, inner.width, 1))
+        render::prepare_pane(area, self).and_then(|plan| plan.search)
     }
 
     /// Clickable title-affix geometry. Selection counters and labels remain
     /// informational; close and mode options expose semantic targets.
     pub fn title_affix_regions(&self, area: Rect) -> Vec<(Rect, PaneAffixHit)> {
-        if self.title_affixes.is_empty() || area.width < 3 || area.height == 0 {
-            return Vec::new();
-        }
-        let displays: Vec<String> = self
-            .title_affixes
-            .iter()
-            .map(PaneTitleAffix::display)
-            .collect();
-        let cluster = displays.join("  ");
-        let line_width = cluster.chars().count() as u16 + 2;
-        let start = area
-            .x
-            .saturating_add(area.width.saturating_sub(1).saturating_sub(line_width));
-        let mut x = start.saturating_add(1);
-        let mut out = Vec::new();
-        for (affix, display) in self.title_affixes.iter().zip(displays) {
-            match affix {
-                PaneTitleAffix::Close => out.push((
-                    Rect::new(x, area.y, display.chars().count() as u16, 1),
-                    PaneAffixHit::Close,
-                )),
-                PaneTitleAffix::ModeStrip(strip) => {
-                    let mut option_x = x;
-                    for (index, option) in strip.options.iter().enumerate() {
-                        let width = option.chars().count() as u16
-                            + if index == strip.clamped_active() {
-                                2
-                            } else {
-                                0
-                            };
-                        out.push((
-                            Rect::new(option_x, area.y, width, 1),
-                            PaneAffixHit::ModeOption(index),
-                        ));
-                        option_x = option_x.saturating_add(width).saturating_add(3); // " | "
-                    }
-                }
-                PaneTitleAffix::Label(_) | PaneTitleAffix::Selection { .. } => {}
-            }
-            x = x
-                .saturating_add(display.chars().count() as u16)
-                .saturating_add(2);
-        }
-        out
+        render::prepare_pane(area, self)
+            .map(|plan| plan.affix_hits)
+            .unwrap_or_default()
     }
 
     pub fn focused(mut self, focused: bool) -> Self {
@@ -491,8 +396,13 @@ impl<'a> PaneSpec<'a> {
 
 /// Zones after chrome is painted.
 mod render;
-pub use render::{PaneAreas, format_title_affixes, render_pane, section_rule_line};
-use render::{footer_height, inset_xy};
+#[allow(unused_imports)]
+use render::footer_height;
+#[allow(unused_imports)]
+pub use render::{
+    PaneAreas, PanePlan, format_title_affixes, paint_pane, prepare_pane, render_pane,
+    section_rule_line,
+};
 
 #[cfg(test)]
 mod tests;

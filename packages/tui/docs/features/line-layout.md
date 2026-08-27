@@ -2,6 +2,10 @@
 
 > Status: reviewed
 >
+> Foundation contract: [layout-primitives.md](./layout-primitives.md). This
+> document defines the specialized in-row composition helpers above the shared
+> text-layout and wrapping model.
+>
 > Product layout *principles* for stream chrome: [ui-ux.md](./ui-ux.md)
 > (*Stream projection layout principles*). This doc is the **shared toolkit
 > contract**, not “how timestamps” or “how tool titles” are designed.

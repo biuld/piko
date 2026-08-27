@@ -10,73 +10,13 @@ use ratatui::{
 };
 
 use super::line_layout::{pad_spans, paint_cols, soft_wrap};
-use crate::terminal::text::TerminalTextPolicy;
+use super::text_layout::{to_lines, wrap_spans as prepare_spans};
 
 /// Soft-wrap styled spans to at most `max_cols` columns, preserving span
 /// styles and hard newlines. Adjacent spans on the same row keep their own
 /// styles; a span wider than the budget is split at column boundaries.
 pub fn wrap_spans(spans: Vec<Span<'static>>, max_cols: usize) -> Vec<Line<'static>> {
-    let policy = TerminalTextPolicy;
-    let max_cols = max_cols.max(1);
-    let mut rows: Vec<Line<'static>> = Vec::new();
-    let mut cur: Vec<Span<'static>> = Vec::new();
-    let mut cur_cols = 0usize;
-    let mut pending: Option<(String, Style)> = None;
-
-    // Flush the accumulated graphemes of the current style into the row buffer.
-    let flush_pending = |cur: &mut Vec<Span<'static>>, pending: &mut Option<(String, Style)>| {
-        if let Some((text, style)) = pending.take()
-            && !text.is_empty()
-        {
-            cur.push(Span::styled(text, style));
-        }
-    };
-    let start_row =
-        |cur: &mut Vec<Span<'static>>, cur_cols: &mut usize, rows: &mut Vec<Line<'static>>| {
-            rows.push(Line::from(std::mem::take(cur)));
-            *cur_cols = 0;
-        };
-
-    for span in spans {
-        let style = span.style;
-        // Hard newlines inside a span terminate the current row.
-        for (segment_index, segment) in span.content.split('\n').enumerate() {
-            if segment_index > 0 {
-                flush_pending(&mut cur, &mut pending);
-                start_row(&mut cur, &mut cur_cols, &mut rows);
-            }
-
-            for grapheme in policy.graphemes(segment) {
-                let w = policy.width(grapheme);
-                if w > 0 && cur_cols > 0 && cur_cols.saturating_add(w) > max_cols {
-                    flush_pending(&mut cur, &mut pending);
-                    start_row(&mut cur, &mut cur_cols, &mut rows);
-                }
-                // Keep consecutive graphemes of the same style together so a
-                // styled run stays one span until it actually wraps.
-                if pending.as_ref().is_some_and(|(_, s)| *s != style) {
-                    flush_pending(&mut cur, &mut pending);
-                    pending = Some((String::new(), style));
-                } else if pending.is_none() {
-                    pending = Some((String::new(), style));
-                }
-                if let Some((buf, _)) = pending.as_mut() {
-                    buf.push_str(grapheme);
-                }
-                cur_cols = cur_cols.saturating_add(w);
-                if cur_cols >= max_cols {
-                    flush_pending(&mut cur, &mut pending);
-                    start_row(&mut cur, &mut cur_cols, &mut rows);
-                }
-            }
-        }
-    }
-
-    flush_pending(&mut cur, &mut pending);
-    if !cur.is_empty() {
-        rows.push(Line::from(cur));
-    }
-    rows
+    to_lines(&prepare_spans(spans, max_cols))
 }
 
 /// Lay out a styled prefix plus flowing `text` into `width` columns: the

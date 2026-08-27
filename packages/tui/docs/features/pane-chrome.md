@@ -1,6 +1,9 @@
 # Pane chrome
 
 > Status: reviewed
+>
+> Foundation contract: [layout-primitives.md](./layout-primitives.md). This
+> document defines the Pane-specific chrome profile within that contract.
 
 ## Overview
 

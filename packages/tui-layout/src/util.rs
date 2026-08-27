@@ -2,6 +2,8 @@
 
 use ratatui::layout::Rect;
 
+use crate::padding::Padding;
+
 /// Default left/right inset often used for edge-flush content leaves.
 pub const DEFAULT_HORIZONTAL_INSET: u16 = 1;
 
@@ -11,12 +13,7 @@ pub fn inset_horizontal(area: Rect, inset: u16) -> Rect {
         return area;
     }
     let horizontal = inset.min(area.width.saturating_sub(1) / 2);
-    Rect {
-        x: area.x.saturating_add(horizontal),
-        y: area.y,
-        width: area.width.saturating_sub(horizontal.saturating_mul(2)),
-        height: area.height,
-    }
+    Padding::horizontal(horizontal).apply(area)
 }
 
 #[cfg(test)]

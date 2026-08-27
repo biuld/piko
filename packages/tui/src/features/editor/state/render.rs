@@ -1,11 +1,12 @@
 use super::*;
 use crate::theme::Theme;
+use crate::ui::text_layout::{Breakability, TextLayout, TextRun, wrap_runs};
 use ratatui::style::Style;
 use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 pub(super) struct EditorLayout {
+    pub(super) text: TextLayout<()>,
     pub(super) lines: Vec<std::ops::Range<usize>>,
-    pub(super) show_scrollbar: bool,
 }
 
 impl Editor {
@@ -24,13 +25,13 @@ impl Editor {
 
     pub fn cursor_line_col(&self, width: u16, visible_rows: u16) -> (u16, u16) {
         let layout = self.layout_for_viewport(width, visible_rows);
-        let index = self.cursor_visual_line_index(&layout.lines);
-        let Some(line) = layout.lines.get(index) else {
+        let position = layout.text.visual_position(self.cursor);
+        let index = position.row.min(layout.lines.len().saturating_sub(1));
+        if layout.lines.get(index).is_none() {
             return (0, 0);
-        };
+        }
         let window_start = self.window_start(&layout, visible_rows);
-        let col = display_width(&self.text[line.start..self.cursor.min(line.end)]);
-        (index.saturating_sub(window_start) as u16, col as u16)
+        (index.saturating_sub(window_start) as u16, position.col)
     }
 
     pub(crate) fn cursor_is_visible(&self, width: u16, visible_rows: u16) -> bool {
@@ -46,40 +47,42 @@ impl Editor {
         let visible_rows = inner.height.max(1);
         let layout = self.layout_for_viewport(inner.width, visible_rows);
         let window_start = self.window_start(&layout, visible_rows);
+        let viewport = self
+            .viewport
+            .prepare(inner, layout.lines.len(), visible_rows, window_start);
+        let visible = viewport.visible.clone();
         let lines = layout
+            .text
             .lines
             .iter()
-            .skip(window_start)
-            .take(visible_rows as usize)
-            .map(|line| Line::from(Span::raw(self.text[line.start..line.end].to_string())))
+            .skip(visible.start)
+            .take(visible.len())
+            .map(|line| {
+                Line::from(
+                    line.fragments
+                        .iter()
+                        .map(|fragment| Span::raw(fragment.text.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
             .collect::<Vec<_>>();
 
         frame.render_widget(block, area);
         // Keep the gutter reserved even while the scrollbar is hidden so
         // wrapping and Composer height do not jump when overflow begins.
-        let content_area = Rect::new(
-            inner.x,
-            inner.y,
-            inner.width.saturating_sub(1),
-            inner.height,
-        );
-        frame.render_widget(Paragraph::new(lines), content_area);
+        frame.render_widget(Paragraph::new(lines), viewport.content);
 
-        if layout.show_scrollbar {
+        if let Some(metrics) = viewport.scrollbar {
             let mut scrollbar_state = ScrollbarState::new(layout.lines.len())
-                .position(EditorViewport::scrollbar_position_for_top(
-                    window_start,
-                    layout.lines.len(),
-                    visible_rows,
-                ))
-                .viewport_content_length(usize::from(visible_rows));
+                .position(metrics.content_position())
+                .viewport_content_length(metrics.visible_rows.max(1));
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
                     .end_symbol(None)
                     .track_style(Style::default().fg(theme.scrollbar_bg))
                     .thumb_style(Style::default().fg(theme.scrollbar_fg)),
-                inner,
+                viewport.gutter,
                 &mut scrollbar_state,
             );
         }
@@ -99,18 +102,18 @@ impl Editor {
 
     pub(crate) fn scroll_to_row(&mut self, width: u16, visible_rows: u16, row: u16) {
         let layout = self.layout_for_viewport(width, visible_rows);
-        if !layout.show_scrollbar {
+        let visible_rows = visible_rows.max(1);
+        let current_top = self.viewport.top_offset(layout.lines.len(), visible_rows);
+        let plan = self.viewport.prepare(
+            Rect::new(0, 0, width, visible_rows),
+            layout.lines.len(),
+            visible_rows,
+            current_top,
+        );
+        let Some(metrics) = plan.scrollbar else {
             return;
-        }
-
-        let track_length = usize::from(visible_rows.max(1));
-        let track_row = usize::from(row.min(visible_rows.saturating_sub(1)));
-        let max_top = layout.lines.len().saturating_sub(track_length);
-        let top_offset = if track_length <= 1 {
-            0
-        } else {
-            track_row.saturating_mul(max_top) / (track_length - 1)
         };
+        let top_offset = metrics.top_for_track_row(row);
         self.viewport
             .set_top_offset(top_offset, layout.lines.len(), visible_rows);
     }
@@ -139,15 +142,15 @@ impl Editor {
     }
 
     pub(super) fn layout_for_viewport(&self, width: u16, visible_rows: u16) -> EditorLayout {
-        let visible_rows = usize::from(visible_rows.max(1));
+        let _visible_rows = visible_rows.max(1);
         // Reserve a one-cell gutter at every size. The scrollbar only paints
         // when these consistently wrapped lines exceed the viewport.
         let content_width = width.saturating_sub(1).max(1);
-        let lines = self.visual_lines(content_width);
-        EditorLayout {
-            show_scrollbar: lines.len() > visible_rows,
-            lines,
-        }
+        let text = self.text_layout(content_width);
+        let lines: Vec<std::ops::Range<usize>> = (0..text.lines.len())
+            .filter_map(|row| text.line_source_range(row))
+            .collect();
+        EditorLayout { text, lines }
     }
 
     pub(super) fn cursor_visual_line_index(&self, lines: &[std::ops::Range<usize>]) -> usize {
@@ -156,52 +159,37 @@ impl Editor {
             .saturating_sub(1)
     }
 
-    pub(super) fn visual_lines(&self, width: u16) -> Vec<std::ops::Range<usize>> {
-        let max_width = width.max(1) as usize;
-        if self.text.is_empty() {
-            return std::iter::once(0..0).collect();
-        }
-
-        let mut lines = Vec::new();
-        let mut line_start = 0;
-        let mut line_width = 0usize;
-        let reference_ranges = self.reference_ranges();
+    /// Prepare the editor's source-aware visual layout.  Reference
+    /// placeholders are atomic runs, while ordinary text wraps at grapheme
+    /// boundaries; the resulting plan is also used by pointer placement.
+    pub(super) fn text_layout(&self, width: u16) -> TextLayout<()> {
+        let mut runs = Vec::new();
         let mut cursor = 0usize;
-        let policy = crate::terminal::text::TerminalTextPolicy;
-        while cursor < self.text.len() {
-            if let Some((_, end)) = reference_ranges.iter().find(|(start, _)| *start == cursor) {
-                let atom_width = display_width(&self.text[cursor..*end]).max(1);
-                if line_width > 0 && line_width + atom_width > max_width {
-                    lines.push(line_start..cursor);
-                    line_start = cursor;
-                    line_width = 0;
-                }
-                line_width += atom_width;
-                cursor = *end;
-                continue;
+        for (start, end) in self.reference_ranges() {
+            if start > cursor {
+                runs.push(
+                    TextRun::new(
+                        self.text[cursor..start].to_string(),
+                        (),
+                        Breakability::Grapheme,
+                    )
+                    .with_source(cursor..start),
+                );
             }
-            let (offset, grapheme) = policy
-                .grapheme_indices(&self.text[cursor..])
-                .next()
-                .expect("valid grapheme");
-            let index = cursor + offset;
-            if grapheme == "\n" {
-                lines.push(line_start..index);
-                line_start = index + grapheme.len();
-                line_width = 0;
-                cursor = line_start;
-                continue;
+            if end > start {
+                runs.push(
+                    TextRun::new(self.text[start..end].to_string(), (), Breakability::Atomic)
+                        .with_source(start..end),
+                );
             }
-            let ch_width = display_width(grapheme).max(1);
-            if line_width > 0 && line_width + ch_width > max_width {
-                lines.push(line_start..index);
-                line_start = index;
-                line_width = 0;
-            }
-            line_width += ch_width;
-            cursor = index + grapheme.len();
+            cursor = end;
         }
-        lines.push(line_start..self.text.len());
-        lines
+        if cursor < self.text.len() || runs.is_empty() {
+            runs.push(
+                TextRun::new(self.text[cursor..].to_string(), (), Breakability::Grapheme)
+                    .with_source(cursor..self.text.len()),
+            );
+        }
+        wrap_runs(runs, usize::from(width.max(1)))
     }
 }

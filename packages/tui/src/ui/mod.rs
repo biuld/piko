@@ -5,3 +5,5 @@ pub mod interaction_hints;
 pub mod line_layout;
 /// Column-aware span wrapping + prefixed rows (gutter / labeled text).
 pub mod line_wrap;
+/// Prepared, source-aware terminal text layout.
+pub mod text_layout;

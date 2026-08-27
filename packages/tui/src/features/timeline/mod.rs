@@ -13,6 +13,8 @@ use crate::{
 mod component;
 mod highlight;
 mod layout;
+#[cfg(test)]
+mod layout_tests;
 mod line_cache;
 mod markdown;
 mod projection;
@@ -48,7 +50,7 @@ pub struct Timeline {
     hit_ids: HashMap<String, u64>,
     next_hit_id: u64,
     /// Bumped by every mutation that can change render-plan geometry
-    /// (`lines` / `row_owners`). Scroll does not bump it.
+    /// (`lines` / content ownership). Scroll does not bump it.
     layout_epoch: u64,
     projection: piko_client_core::AgentTimeline,
     next_local_id: u64,

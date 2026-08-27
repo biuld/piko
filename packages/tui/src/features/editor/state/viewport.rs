@@ -1,18 +1,21 @@
-/// Scroll state for the editor's wrapped-line viewport.
-///
-/// Like the timeline viewport, the state is bottom-origin: zero means the
-/// viewport is pinned to the last visible line. Rendering converts it to the
-/// top-origin offset required by the editor paragraph and scrollbar.
+//! Editor viewport adapter over the shared top-origin viewport state.
+
+use piko_tui_layout::{ViewportMetrics, ViewportMode, ViewportPlan, ViewportState};
+use ratatui::layout::Rect;
+
+/// Product policy layered over generic wrapped-row window state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct EditorViewport {
-    offset_from_bottom: usize,
+    state: ViewportState,
     follow_cursor: bool,
 }
 
 impl Default for EditorViewport {
     fn default() -> Self {
+        let mut state = ViewportState::default();
+        state.follow_end();
         Self {
-            offset_from_bottom: 0,
+            state,
             follow_cursor: true,
         }
     }
@@ -20,7 +23,7 @@ impl Default for EditorViewport {
 
 impl EditorViewport {
     pub(super) fn reset(&mut self) {
-        self.offset_from_bottom = 0;
+        self.state.follow_end();
         self.follow_cursor = true;
     }
 
@@ -33,36 +36,37 @@ impl EditorViewport {
     }
 
     pub(super) fn top_offset(&self, content_height: usize, viewport_height: u16) -> usize {
-        max_scroll(content_height, viewport_height).saturating_sub(self.offset_from_bottom)
+        let mut state = self.state;
+        state.update_metrics(ViewportMetrics::new(
+            content_height,
+            usize::from(viewport_height.max(1)),
+        ));
+        state.top()
     }
 
-    /// Convert a viewport top offset to the position expected by ratatui's
-    /// scrollbar. A scrollbar position is content-relative rather than a
-    /// scroll-window offset, so the latest viewport maps to the last content
-    /// item.
-    pub(super) fn scrollbar_position_for_top(
-        top_offset: usize,
+    /// Prepare shared geometry using the product's effective top row. Cursor
+    /// following can choose a temporary top row for paint without mutating
+    /// the persisted viewport state.
+    pub(super) fn prepare(
+        &self,
+        outer: Rect,
         content_height: usize,
         viewport_height: u16,
-    ) -> usize {
-        let max_scroll = max_scroll(content_height, viewport_height);
-        if max_scroll == 0 {
-            return 0;
-        }
-        top_offset
-            .min(max_scroll)
-            .saturating_mul(content_height.saturating_sub(1))
-            .saturating_add(max_scroll / 2)
-            / max_scroll
+        top_offset: usize,
+    ) -> ViewportPlan {
+        let mut state = self.with_metrics(content_height, viewport_height);
+        state.scroll_to(top_offset);
+        state.prepare(outer, 1)
     }
 
     pub(super) fn scroll_up(&mut self, amount: usize, content_height: usize, viewport_height: u16) {
-        let max = max_scroll(content_height, viewport_height);
-        if max == 0 {
+        let mut state = self.with_metrics(content_height, viewport_height);
+        if state.max_scroll() == 0 {
             return;
         }
         self.follow_cursor = false;
-        self.offset_from_bottom = self.offset_from_bottom.saturating_add(amount).min(max);
+        state.scroll_by(-(amount.min(isize::MAX as usize) as isize));
+        self.state = state;
     }
 
     pub(super) fn scroll_down(
@@ -71,15 +75,13 @@ impl EditorViewport {
         content_height: usize,
         viewport_height: u16,
     ) {
-        let max = max_scroll(content_height, viewport_height);
-        if max == 0 {
+        let mut state = self.with_metrics(content_height, viewport_height);
+        if state.max_scroll() == 0 {
             return;
         }
-        self.follow_cursor = false;
-        self.offset_from_bottom = self.offset_from_bottom.min(max).saturating_sub(amount);
-        if self.offset_from_bottom == 0 {
-            self.follow_cursor = true;
-        }
+        state.scroll_by(amount.min(isize::MAX as usize) as isize);
+        self.follow_cursor = state.mode() == ViewportMode::FollowEnd;
+        self.state = state;
     }
 
     pub(super) fn set_top_offset(
@@ -88,19 +90,26 @@ impl EditorViewport {
         content_height: usize,
         viewport_height: u16,
     ) {
-        let max = max_scroll(content_height, viewport_height);
-        self.offset_from_bottom = max.saturating_sub(top_offset.min(max));
+        let mut state = self.with_metrics(content_height, viewport_height);
+        state.scroll_to(top_offset);
         self.follow_cursor = false;
+        self.state = state;
     }
-}
 
-fn max_scroll(content_height: usize, viewport_height: u16) -> usize {
-    content_height.saturating_sub(usize::from(viewport_height.max(1)))
+    fn with_metrics(&self, content_height: usize, viewport_height: u16) -> ViewportState {
+        let mut state = self.state;
+        state.update_metrics(ViewportMetrics::new(
+            content_height,
+            usize::from(viewport_height.max(1)),
+        ));
+        state
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::EditorViewport;
+    use ratatui::layout::Rect;
 
     #[test]
     fn viewport_scrolls_from_bottom_and_clamps() {
@@ -123,17 +132,22 @@ mod tests {
     }
 
     #[test]
-    fn scrollbar_position_maps_viewport_edges_to_content_edges() {
+    fn prepared_scrollbar_maps_viewport_edges_to_content_edges() {
         let mut viewport = EditorViewport::default();
+        let outer = Rect::new(0, 0, 10, 4);
+        let bottom = viewport.prepare(outer, 10, 4, viewport.top_offset(10, 4));
         assert_eq!(
-            EditorViewport::scrollbar_position_for_top(viewport.top_offset(10, 4), 10, 4),
-            9
+            bottom.scrollbar.unwrap().top,
+            6,
+            "follow-end top is the window offset"
         );
 
         viewport.scroll_up(6, 10, 4);
+        let top = viewport.prepare(outer, 10, 4, viewport.top_offset(10, 4));
         assert_eq!(
-            EditorViewport::scrollbar_position_for_top(viewport.top_offset(10, 4), 10, 4),
-            0
+            top.scrollbar.unwrap().top,
+            0,
+            "scrolling to the beginning maps to top"
         );
     }
 }

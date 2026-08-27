@@ -2,7 +2,11 @@
 
 > Status: reviewed
 >
-> Package: `piko-tui` (product) · `piko-tui-layout` (hit contract unchanged)
+> Package: `piko-tui` (product) · `piko-tui-layout` (generic hit vocabulary)
+>
+> Foundation follow-up: [layout-primitives.md](./layout-primitives.md) retains
+> this document's dual snapshot/live behavior and permits the generic layout
+> crate to own product-neutral content-space hit vocabulary.
 >
 > Amends: [`pointer-input.md`](./pointer-input.md). This PRD supersedes that
 > PRD's "last painted frame" geometry assumption **for scrollable regions**;

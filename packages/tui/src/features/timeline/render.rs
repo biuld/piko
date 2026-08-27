@@ -55,7 +55,7 @@ impl Timeline {
     pub(crate) fn render_prepared(
         &self,
         frame: &mut Frame<'_>,
-        area: Rect,
+        _area: Rect,
         theme: &Theme,
         welcome: WelcomeView<'_>,
         mut plan: TimelineRenderPlan,
@@ -82,17 +82,17 @@ impl Timeline {
                 .block(block),
             plan.content_area,
         );
-        if self.viewport.max_scroll() > 0 {
-            let mut scrollbar_state = ScrollbarState::new(self.viewport.content_height())
-                .position(self.viewport.scrollbar_position())
-                .viewport_content_length(self.viewport.viewport_height());
+        if let Some(metrics) = plan.viewport.scrollbar {
+            let mut scrollbar_state = ScrollbarState::new(metrics.content_rows)
+                .position(metrics.content_position())
+                .viewport_content_length(metrics.visible_rows.max(1));
             frame.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
                     .end_symbol(None)
                     .style(Style::default().fg(theme.border_muted))
                     .thumb_style(Style::default().fg(theme.dim)),
-                area,
+                plan.viewport.gutter,
                 &mut scrollbar_state,
             );
         }

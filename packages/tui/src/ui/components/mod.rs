@@ -1,8 +1,10 @@
 pub mod choice_workflow;
+pub mod divider;
 pub mod dock_line;
 pub mod feedback;
 pub mod menu;
 pub mod pane;
+pub mod scroll_view;
 pub mod selectable_list;
 pub mod text_box;
 

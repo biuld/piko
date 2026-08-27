@@ -83,6 +83,37 @@ fn content_rect_matches_manual_geometry() {
 }
 
 #[test]
+fn prepared_pane_plan_is_the_geometry_source_for_chrome_and_hits() {
+    let area = Rect::new(3, 4, 60, 14);
+    let spec = PaneSpec::new("Settings")
+        .affix(PaneTitleAffix::mode_strip(["Current", "All"], 1))
+        .affix(PaneTitleAffix::Close)
+        .search_filter("abc")
+        .tip("tip")
+        .footer(PaneFooter::Reserved { height: 1 });
+    let plan = prepare_pane(area, &spec).expect("prepared pane");
+
+    assert_eq!(spec.content_rect(area), Some(plan.content));
+    assert_eq!(spec.search_rect(area), plan.search);
+    assert_eq!(spec.footer_rect(area), plan.footer);
+    assert_eq!(plan.clip, plan.content);
+    assert!(plan.affix_hits.iter().all(|(rect, _)| rect.x >= area.x
+        && rect.y >= area.y
+        && rect.right() <= area.right()
+        && rect.bottom() <= area.bottom()));
+    assert!(
+        plan.affix_hits
+            .iter()
+            .any(|(_, hit)| *hit == PaneAffixHit::Close)
+    );
+    assert!(
+        plan.affix_hits
+            .iter()
+            .any(|(_, hit)| *hit == PaneAffixHit::ModeOption(1))
+    );
+}
+
+#[test]
 fn mode_strip_clamps_active() {
     let strip = PaneModeStrip::new(["A", "B"], 99);
     assert_eq!(strip.display(), "A | [B]");

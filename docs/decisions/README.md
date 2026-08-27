@@ -31,3 +31,5 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-020](ADR-020-bounded-output-reserve.md) | Context preflight reserves a bounded output allowance | accepted |
 | [ADR-021](ADR-021-respond-first-steer-steps.md) | Steered user messages are answered before further tool work | accepted |
 | [ADR-022](ADR-022-desktop-client-reintroduction.md) | Reintroduce a first-party desktop client on island-rs with shared projections and transport | accepted |
+| [ADR-023](ADR-023-tui-normalized-input-and-bindings.md) | Normalize TUI input at one adapter boundary and keep scoped bindings host-owned | accepted |
+| [ADR-024](ADR-024-tui-layout-primitives.md) | Use typed prepared layout plans and shared top-origin viewport/content geometry | accepted |

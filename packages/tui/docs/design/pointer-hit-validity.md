@@ -3,6 +3,10 @@
 > Status: accepted
 >
 > PRD: [`../features/pointer-hit-validity.md`](../features/pointer-hit-validity.md)
+>
+> Foundation follow-up:
+> [`layout-primitives.md`](./layout-primitives.md) generalizes this design's
+> content-space ownership and live viewport resolution beyond Timeline.
 
 ## Goal
 

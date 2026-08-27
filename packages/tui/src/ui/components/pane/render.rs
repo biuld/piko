@@ -1,4 +1,13 @@
 use super::*;
+use crate::ui::line_layout::paint_cols;
+use piko_tui_layout::{Padding, intersection};
+use ratatui::{
+    Frame,
+    layout::{Alignment, Rect},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Clear, Paragraph},
+};
 
 /// Join title affixes for the right title segment (double-space separation).
 pub fn format_title_affixes(affixes: &[PaneTitleAffix]) -> String {
@@ -10,6 +19,25 @@ pub fn format_title_affixes(affixes: &[PaneTitleAffix]) -> String {
         .join("  ")
 }
 
+/// One prepared Pane geometry snapshot.  Every chrome zone and affix hit is
+/// derived once and can be shared by paint and pointer composition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanePlan {
+    pub outer: Rect,
+    /// Block interior before the Pane's content padding is applied.
+    pub frame: Rect,
+    pub title: Option<Rect>,
+    pub search: Option<Rect>,
+    pub search_rule: Option<Rect>,
+    pub content: Rect,
+    pub tip: Option<Rect>,
+    pub footer: Option<Rect>,
+    /// The area in which a child may paint or expose content hits.
+    pub clip: Rect,
+    pub affix_hits: Vec<(Rect, PaneAffixHit)>,
+}
+
+/// Compatibility view returned by [`render_pane`].
 #[derive(Clone, Copy, Debug)]
 pub struct PaneAreas {
     /// Main body (list, table, form, …).
@@ -21,20 +49,144 @@ pub struct PaneAreas {
     pub inner: Rect,
 }
 
-/// Clear area, draw border/title/search/tip/footer chrome, return body rects.
-///
-/// Returns `None` when the area is too small to show content.
+/// Prepare Pane chrome geometry without painting.
+pub fn prepare_pane(area: Rect, spec: &PaneSpec<'_>) -> Option<PanePlan> {
+    let frame = Block::default().borders(spec.borders).inner(area);
+    let inner = inset_xy(frame, spec.padding);
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    let title = (area.height > 0 && (!spec.title.is_empty() || !spec.title_affixes.is_empty()))
+        .then_some(Rect::new(area.x, area.y, area.width, 1));
+    let affix_hits = title_affix_hits(area, spec);
+    let show_search = !matches!(spec.search, PaneSearch::Hidden);
+    let show_rule = show_search && spec.search_rule;
+    let show_tip = spec.tip.is_some_and(|tip| !tip.is_empty());
+    let footer_h = footer_height(spec.footer);
+    let chrome = u16::from(show_search)
+        .saturating_add(u16::from(show_rule))
+        .saturating_add(u16::from(show_tip))
+        .saturating_add(footer_h);
+
+    if inner.height <= chrome {
+        let (content, footer) = if footer_h > 0 && inner.height > footer_h {
+            (
+                Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h),
+                Some(Rect::new(
+                    inner.x,
+                    inner.y.saturating_add(inner.height - footer_h),
+                    inner.width,
+                    footer_h,
+                )),
+            )
+        } else {
+            (inner, None)
+        };
+        return Some(PanePlan {
+            outer: area,
+            frame,
+            title,
+            search: None,
+            search_rule: None,
+            content,
+            tip: None,
+            footer,
+            clip: content,
+            affix_hits,
+        });
+    }
+
+    let mut y = inner.y;
+    let search = show_search.then(|| {
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        y = y.saturating_add(1);
+        rect
+    });
+    let search_rule = show_rule.then(|| {
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        y = y.saturating_add(1);
+        rect
+    });
+    let content_height = inner.height.saturating_sub(chrome);
+    let content = Rect::new(inner.x, y, inner.width, content_height);
+    y = y.saturating_add(content_height);
+    let tip = show_tip.then(|| {
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        y = y.saturating_add(1);
+        rect
+    });
+    let footer = (footer_h > 0).then_some(Rect::new(inner.x, y, inner.width, footer_h));
+    Some(PanePlan {
+        outer: area,
+        frame,
+        title,
+        search,
+        search_rule,
+        content,
+        tip,
+        footer,
+        clip: content,
+        affix_hits,
+    })
+}
+
+/// Paint a previously prepared Pane plan.
+pub fn paint_pane(frame: &mut Frame<'_>, plan: &PanePlan, spec: &PaneSpec<'_>, theme: &Theme) {
+    frame.render_widget(Clear, plan.outer);
+    if let Some(color) = spec.fill {
+        frame.render_widget(
+            Block::default().style(Style::default().bg(color)),
+            plan.outer,
+        );
+    }
+
+    let block = pane_block(spec, theme);
+    frame.render_widget(block, plan.outer);
+
+    if let Some(area) = plan.search {
+        paint_search(frame, area, &spec.search, theme);
+    }
+    if let Some(area) = plan.search_rule {
+        paint_rule(frame, area, theme);
+    }
+    if let Some(area) = plan.tip
+        && let Some(tip) = spec.tip
+    {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                tip.to_string(),
+                Style::default().fg(theme.muted),
+            ))),
+            area,
+        );
+    }
+    if let Some(area) = plan.footer
+        && let PaneFooter::Hints(hints) = spec.footer
+    {
+        paint_hints(frame, area, hints, theme);
+    }
+}
+
+/// Clear area, draw chrome, and return the compatibility body view.
 pub fn render_pane(
     frame: &mut Frame<'_>,
     area: Rect,
     spec: &PaneSpec<'_>,
     theme: &Theme,
 ) -> Option<PaneAreas> {
-    frame.render_widget(Clear, area);
-    if let Some(color) = spec.fill {
-        frame.render_widget(Block::default().style(Style::default().bg(color)), area);
-    }
+    let plan = prepare_pane(area, spec)?;
+    paint_pane(frame, &plan, spec, theme);
+    Some(PaneAreas {
+        content: plan.content,
+        footer: matches!(spec.footer, PaneFooter::Reserved { .. })
+            .then_some(plan.footer)
+            .flatten(),
+        inner: inset_xy(plan.frame, spec.padding),
+    })
+}
 
+fn pane_block(spec: &PaneSpec<'_>, theme: &Theme) -> Block<'static> {
     let mut block = Block::default()
         .borders(spec.borders)
         .border_style(frame_border_style(spec.focused, theme));
@@ -60,104 +212,83 @@ pub fn render_pane(
         }
     }
 
-    let bordered = block.inner(area);
-    frame.render_widget(block, area);
+    block
+}
 
-    let inner = inset_xy(bordered, spec.padding);
-    if inner.width == 0 || inner.height == 0 {
-        return None;
+fn title_affix_hits(area: Rect, spec: &PaneSpec<'_>) -> Vec<(Rect, PaneAffixHit)> {
+    if area.width == 0 || area.height == 0 || spec.title_affixes.is_empty() {
+        return Vec::new();
     }
+    let title_area = Rect::new(area.x, area.y, area.width, 1);
+    let displays: Vec<String> = spec
+        .title_affixes
+        .iter()
+        .map(PaneTitleAffix::display)
+        .collect();
+    let cluster = displays.join("  ");
+    let cluster_width =
+        crate::ui::line_layout::paint_cols(&cluster).min(usize::from(u16::MAX)) as u16;
+    let mut x = area
+        .x
+        .saturating_add(area.width.saturating_sub(cluster_width.saturating_add(2)));
+    let mut hits = Vec::new();
 
-    let show_search = !matches!(spec.search, PaneSearch::Hidden);
-    let show_rule = show_search && spec.search_rule;
-    let show_tip = spec.tip.is_some_and(|t| !t.is_empty());
-    let footer_h = footer_height(spec.footer);
-
-    let search_h: u16 = u16::from(show_search);
-    let rule_h: u16 = u16::from(show_rule);
-    let tip_h: u16 = u16::from(show_tip);
-    let chrome = search_h
-        .saturating_add(rule_h)
-        .saturating_add(tip_h)
-        .saturating_add(footer_h);
-
-    if inner.height <= chrome {
-        return paint_fallback(frame, inner, spec, theme, footer_h);
-    }
-
-    let mut constraints: Vec<Constraint> = Vec::with_capacity(5);
-    if show_search {
-        constraints.push(Constraint::Length(1));
-    }
-    if show_rule {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(1));
-    if show_tip {
-        constraints.push(Constraint::Length(1));
-    }
-    if footer_h > 0 {
-        constraints.push(Constraint::Length(footer_h));
-    }
-
-    let chunks = Layout::vertical(constraints).split(inner);
-    let mut idx = 0usize;
-
-    if show_search {
-        paint_search(frame, chunks[idx], &spec.search, theme);
-        idx += 1;
-    }
-    if show_rule {
-        paint_rule(frame, chunks[idx], theme);
-        idx += 1;
-    }
-
-    let content = chunks[idx];
-    idx += 1;
-
-    if show_tip {
-        if let Some(tip) = spec.tip {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    tip.to_string(),
-                    Style::default().fg(theme.muted),
-                ))),
-                chunks[idx],
-            );
-        }
-        idx += 1;
-    }
-
-    let footer = if footer_h > 0 {
-        let footer_area = chunks[idx];
-        match spec.footer {
-            PaneFooter::Hints(hints) => {
-                paint_hints(frame, footer_area, hints, theme);
-                None
+    for (affix, display) in spec.title_affixes.iter().zip(displays) {
+        match affix {
+            PaneTitleAffix::Close => {
+                push_affix_hit(
+                    &mut hits,
+                    title_area,
+                    x,
+                    paint_cols(&display),
+                    PaneAffixHit::Close,
+                );
             }
-            PaneFooter::Reserved { .. } => Some(footer_area),
-            PaneFooter::None => None,
+            PaneTitleAffix::ModeStrip(strip) => {
+                let mut option_x = x;
+                for (index, option) in strip.options.iter().enumerate() {
+                    let width = paint_cols(option)
+                        .saturating_add((index == strip.clamped_active()) as usize * 2);
+                    push_affix_hit(
+                        &mut hits,
+                        title_area,
+                        option_x,
+                        width,
+                        PaneAffixHit::ModeOption(index),
+                    );
+                    option_x = option_x
+                        .saturating_add(width.min(usize::from(u16::MAX)) as u16)
+                        .saturating_add(3);
+                }
+            }
+            PaneTitleAffix::Label(_) | PaneTitleAffix::Selection { .. } => {}
         }
-    } else {
-        None
-    };
+        x = x
+            .saturating_add(paint_cols(&display).min(usize::from(u16::MAX)) as u16)
+            .saturating_add(2);
+    }
+    hits
+}
 
-    Some(PaneAreas {
-        content,
-        footer,
-        inner,
-    })
+fn push_affix_hit(
+    hits: &mut Vec<(Rect, PaneAffixHit)>,
+    title_area: Rect,
+    x: u16,
+    width: usize,
+    hit: PaneAffixHit,
+) {
+    let rect = Rect::new(x, title_area.y, width.min(usize::from(u16::MAX)) as u16, 1);
+    if let Some(rect) = intersection(title_area, rect)
+        && rect.width > 0
+    {
+        hits.push((rect, hit));
+    }
 }
 
 pub(super) fn inset_xy(area: Rect, pad: PanePadding) -> Rect {
     let hx = pad.horizontal.min(area.width.saturating_sub(1) / 2);
     let vy = pad.vertical.min(area.height.saturating_sub(1) / 2);
-    Rect {
-        x: area.x.saturating_add(hx),
-        y: area.y.saturating_add(vy),
-        width: area.width.saturating_sub(hx.saturating_mul(2)),
-        height: area.height.saturating_sub(vy.saturating_mul(2)),
-    }
+    Padding::new(vy, hx, vy, hx).apply(area)
 }
 
 pub(super) fn footer_height(footer: PaneFooter<'_>) -> u16 {
@@ -165,40 +296,6 @@ pub(super) fn footer_height(footer: PaneFooter<'_>) -> u16 {
         PaneFooter::None => 0,
         PaneFooter::Hints(hints) => u16::from(!hints.is_empty()),
         PaneFooter::Reserved { height } => height.max(1),
-    }
-}
-
-fn paint_fallback(
-    frame: &mut Frame<'_>,
-    inner: Rect,
-    spec: &PaneSpec<'_>,
-    theme: &Theme,
-    footer_h: u16,
-) -> Option<PaneAreas> {
-    if footer_h > 0 && inner.height > footer_h {
-        let chunks =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(footer_h)]).split(inner);
-        let footer = match spec.footer {
-            PaneFooter::Hints(hints) => {
-                paint_hints(frame, chunks[1], hints, theme);
-                None
-            }
-            PaneFooter::Reserved { .. } => Some(chunks[1]),
-            PaneFooter::None => None,
-        };
-        Some(PaneAreas {
-            content: chunks[0],
-            footer,
-            inner,
-        })
-    } else if inner.height >= 1 {
-        Some(PaneAreas {
-            content: inner,
-            footer: None,
-            inner,
-        })
-    } else {
-        None
     }
 }
 

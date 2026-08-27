@@ -106,21 +106,14 @@ impl Editor {
         let index = window_start
             .saturating_add(content_row as usize)
             .min(layout.lines.len().saturating_sub(1));
-        let Some(line) = layout.lines.get(index) else {
+        let Some(_line) = layout.lines.get(index) else {
             return;
         };
-        let mut target = line.end;
-        let mut used = 0u16;
-        let policy = crate::terminal::text::TerminalTextPolicy;
-        for (offset, grapheme) in policy.grapheme_indices(&self.text[line.start..line.end]) {
-            let w = display_width(grapheme) as u16;
-            if used + w > col {
-                target = line.start + offset;
-                break;
-            }
-            used += w;
-        }
-        self.cursor = self.snap_cursor_out_of_reference(target, col >= used / 2);
+        let target =
+            layout
+                .text
+                .source_position(index, col, crate::ui::text_layout::PositionBias::Nearest);
+        self.cursor = self.snap_cursor_out_of_reference(target, true);
     }
 
     pub fn move_word_left(&mut self) {

@@ -1,7 +1,4 @@
-use crate::{
-    config::editor::EditorConfig, features::auto_completion::AutoComplete,
-    terminal::text::display_width,
-};
+use crate::{config::editor::EditorConfig, features::auto_completion::AutoComplete};
 use ratatui::{
     Frame,
     layout::Rect,

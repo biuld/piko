@@ -4,20 +4,21 @@
 //! `TurnDiff` events. Presentation-only.
 
 use piko_protocol::TurnDiffEvent;
-use piko_tui_layout::{Component, SurfacePanel};
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::Style,
-    text::{Line, Span},
-    widgets::{Paragraph, Wrap},
-};
+use piko_tui_layout::{Component, SurfacePanel, ViewportMetrics, ViewportState};
+use ratatui::{Frame, layout::Rect, style::Style};
+use std::cell::Cell;
 
 use crate::app::HitId;
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneFooter, PaneSpec, render_pane};
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
+use crate::ui::{
+    components::{
+        pane::{PaneFooter, PaneSpec, render_pane},
+        scroll_view::paint_scroll_view,
+    },
+    text_layout::{Breakability, TextRun, wrap_runs},
+};
 
 use super::centered_rect;
 
@@ -37,7 +38,16 @@ impl Component<HitId, DiagnosticsCtx<'_>> for DiagnosticsPanel {
             .footer(PaneFooter::Reserved { height: 1 })
             .focused(true);
         spec.content_rect(popup)
-            .map(|rect| vec![(rect, HitId::Content)])
+            .map(|rect| {
+                // The viewport reserves the scrollbar gutter before text
+                // layout, including while content fits.  Do not let the
+                // static content gate turn that gutter into a child hit.
+                let content = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height);
+                (content.width > 0 && content.height > 0)
+                    .then_some((content, HitId::Content))
+                    .into_iter()
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -77,7 +87,7 @@ pub struct DiagnosticsPanel {
     kind: DiagnosticsKind,
     title: String,
     lines: Vec<String>,
-    scroll: u16,
+    viewport: Cell<ViewportState>,
 }
 
 impl DiagnosticsPanel {
@@ -86,18 +96,21 @@ impl DiagnosticsPanel {
     }
 
     pub fn scroll_up(&mut self, n: u16) {
-        self.scroll = self.scroll.saturating_sub(n);
+        let mut viewport = self.viewport.get();
+        viewport.scroll_by(-(n as isize));
+        self.viewport.set(viewport);
     }
 
     pub fn scroll_down(&mut self, n: u16) {
-        let max = self.lines.len().saturating_sub(1) as u16;
-        self.scroll = (self.scroll.saturating_add(n)).min(max);
+        let mut viewport = self.viewport.get();
+        viewport.scroll_by(n as isize);
+        self.viewport.set(viewport);
     }
 
     pub fn set_diff(&mut self, diff: &TurnDiffEvent) {
         self.kind = DiagnosticsKind::Diff;
         self.title = format!("turn diff · {}", short(&diff.turn_id));
-        self.scroll = 0;
+        self.viewport.get_mut().scroll_to(0);
         self.lines = format_diff(diff);
     }
 
@@ -109,7 +122,7 @@ impl DiagnosticsPanel {
     ) {
         self.kind = kind;
         self.title = title.into();
-        self.scroll = 0;
+        self.viewport.get_mut().scroll_to(0);
         self.lines = vec![message.into()];
     }
 
@@ -126,16 +139,31 @@ impl DiagnosticsPanel {
             return;
         };
 
-        let styled: Vec<Line<'_>> = self
-            .lines
-            .iter()
-            .map(|line| style_diagnostic_line(line, self.kind, theme))
-            .collect();
-
-        let paragraph = Paragraph::new(styled)
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
-        frame.render_widget(paragraph, areas.content);
+        let text_width = areas.content.width.saturating_sub(1).max(1);
+        let mut runs = Vec::new();
+        for (index, line) in self.lines.iter().enumerate() {
+            runs.push(TextRun::new(
+                line.clone(),
+                diagnostic_style(line, self.kind, theme),
+                Breakability::Grapheme,
+            ));
+            if index + 1 < self.lines.len() {
+                runs.push(TextRun::new(
+                    String::new(),
+                    Style::default(),
+                    Breakability::HardBreak,
+                ));
+            }
+        }
+        let layout = wrap_runs(runs, usize::from(text_width));
+        let mut viewport = self.viewport.get();
+        viewport.update_metrics(ViewportMetrics::new(
+            layout.row_count(),
+            usize::from(areas.content.height),
+        ));
+        let plan = viewport.prepare(areas.content, 1);
+        self.viewport.set(viewport);
+        paint_scroll_view(frame, &layout, &plan, theme);
     }
 }
 
@@ -170,8 +198,8 @@ fn format_diff(diff: &TurnDiffEvent) -> Vec<String> {
     lines
 }
 
-fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme) -> Line<'a> {
-    let style = match kind {
+fn diagnostic_style(line: &str, kind: DiagnosticsKind, theme: &Theme) -> Style {
+    match kind {
         DiagnosticsKind::Diff if line.starts_with('+') && !line.starts_with("+++") => {
             Style::default().fg(theme.diff_insert_fg)
         }
@@ -181,8 +209,7 @@ fn style_diagnostic_line<'a>(line: &'a str, kind: DiagnosticsKind, theme: &Theme
         DiagnosticsKind::Diff if line.starts_with("@@") => Style::default().fg(theme.info),
         _ if line.starts_with("──") => Style::default().fg(theme.muted),
         _ => Style::default().fg(theme.text),
-    };
-    Line::from(Span::styled(line, style))
+    }
 }
 
 #[cfg(test)]
@@ -222,6 +249,10 @@ mod tests {
     fn wheel_scrolls_only_diagnostic_content() {
         let mut panel = DiagnosticsPanel::new();
         panel.lines = (0..10).map(|i| i.to_string()).collect();
+        panel
+            .viewport
+            .get_mut()
+            .update_metrics(ViewportMetrics::new(10, 5));
         let hit = ComponentHit {
             element: Some(HitId::Content),
             rect: Rect::new(0, 0, 10, 5),
@@ -229,7 +260,7 @@ mod tests {
             y: 1,
         };
         panel.pointer_event(hit, PointerGesture::ScrollDown);
-        assert_eq!(panel.scroll, 3);
+        assert_eq!(panel.viewport.get().top(), 3);
         panel.pointer_event(
             ComponentHit {
                 element: None,
@@ -237,6 +268,6 @@ mod tests {
             },
             PointerGesture::ScrollDown,
         );
-        assert_eq!(panel.scroll, 3);
+        assert_eq!(panel.viewport.get().top(), 3);
     }
 }

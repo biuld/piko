@@ -1,3 +1,4 @@
+use piko_tui_layout::{ContentHitPlan, ViewportPlan, row_owners};
 use ratatui::{layout::Rect, text::Line};
 
 use crate::{app::HitId, layout::DEFAULT_HORIZONTAL_INSET, theme::Theme};
@@ -20,10 +21,11 @@ pub(crate) struct TimelineRenderPlan {
     /// Paint-time snapshot of the viewport top offset. Hit-testing reads the
     /// viewport live instead, so scroll can never make this plan stale.
     pub top_offset: usize,
-    /// Content-space row ownership, one entry per content row.
-    pub row_owners: Vec<Option<RowOwner>>,
-    /// Visible content rows, excluding the pending "N new items" banner row.
-    pub visible_height: usize,
+    /// Generic content-space resolver shared with other scrollable surfaces.
+    pub content_hits: ContentHitPlan<RowOwner>,
+    /// Shared viewport geometry, including the always-reserved scrollbar
+    /// gutter and the current scrollbar metrics.
+    pub viewport: ViewportPlan,
     /// `Timeline::layout_epoch` at plan time; mismatch triggers a recompute
     /// before an event is routed against this plan.
     pub epoch: u64,
@@ -35,22 +37,9 @@ impl TimelineRenderPlan {
     /// one-row title rect, or `None` for the Stream default (message/gap rows,
     /// banner row, scrollbar gutter, out-of-range content).
     pub(crate) fn resolve(&self, x: u16, y: u16, top_offset: usize) -> Option<(HitId, Rect)> {
-        let left = usize::from(self.content_area.x);
-        let right = left.saturating_add(usize::from(self.content_area.width));
-        let top = usize::from(self.content_area.y);
-        let bottom = top.saturating_add(self.visible_height);
-        let (x, y) = (usize::from(x), usize::from(y));
-        if x < left || x >= right || y < top || y >= bottom {
-            return None;
-        }
-        let content_row = y - top + top_offset;
-        let Some(Some(RowOwner::Tool(id))) = self.row_owners.get(content_row).copied() else {
-            return None;
-        };
-        Some((
-            HitId::TimelineTool(id),
-            Rect::new(self.content_area.x, y as u16, self.content_area.width, 1),
-        ))
+        let resolved = self.content_hits.resolve(top_offset, x, y)?;
+        let RowOwner::Tool(id) = resolved.owner;
+        Some((HitId::TimelineTool(id), resolved.rect))
     }
 }
 
@@ -64,7 +53,7 @@ impl Timeline {
         let content_band = Rect {
             x: area.x,
             y: area.y,
-            width: area.width.saturating_sub(1).max(1),
+            width: area.width.saturating_sub(1),
             height: area.height,
         };
         let left = DEFAULT_HORIZONTAL_INSET.min(content_band.width.saturating_sub(1));
@@ -115,10 +104,10 @@ impl Timeline {
         cache.retain_ids(&seen_ids);
         drop(cache);
 
-        let mut row_owners = vec![None; lines.len()];
+        let mut owners = vec![None; lines.len()];
         for (title_row, hit_id) in tool_title_rows {
-            if title_row < row_owners.len() {
-                row_owners[title_row] = Some(RowOwner::Tool(hit_id));
+            if title_row < owners.len() {
+                owners[title_row] = Some(RowOwner::Tool(hit_id));
             }
         }
 
@@ -127,14 +116,33 @@ impl Timeline {
             usize::from(content_area.height.saturating_sub(u16::from(has_pending))).max(1);
         self.viewport.set_metrics(lines.len(), visible_height);
         let top_offset = self.viewport.top_offset();
+        let viewport_outer = Rect::new(
+            content_area.x,
+            content_area.y,
+            content_area.width.saturating_add(u16::from(area.width > 0)),
+            content_area.height,
+        );
+        let viewport = self.viewport.prepare(viewport_outer);
+
+        let content_hits = ContentHitPlan::new(
+            content_area,
+            Rect::new(
+                content_area.x,
+                content_area.y,
+                content_area.width,
+                visible_height.min(usize::from(content_area.height)) as u16,
+            ),
+            row_owners(owners.iter().copied()),
+            self.layout_epoch,
+        );
 
         TimelineRenderPlan {
             lines,
             content_area,
             stream_rect: area,
             top_offset,
-            row_owners,
-            visible_height,
+            content_hits,
+            viewport,
             epoch: self.layout_epoch,
         }
     }
@@ -413,83 +421,5 @@ mod tests {
         timeline.toggle_tool(hit_id);
         assert_eq!(timeline.tool_expanded("call-1"), Some(true));
         assert!(timeline.tool_calls.iter().any(|tool| tool.expanded));
-    }
-
-    #[test]
-    fn resolve_tracks_live_scroll_offset_on_the_same_plan() {
-        let theme = Theme::dark();
-        let mut timeline = Timeline::new();
-        for i in 0..8 {
-            timeline.push(TimelineEntry::Tool(tool(&format!("t{i}"), "done")));
-        }
-        let area = Rect::new(0, 0, 40, 6);
-
-        // Pin to latest and find the bottom-most visible tool title that has
-        // room to shift down by one wheel step.
-        let plan = timeline.render_plan(area, &theme, None);
-        let hits = timeline.tool_hits(area, &theme);
-        let (id, rect) = hits
-            .iter()
-            .rev()
-            .find(|(_, r)| r.y + 3 < plan.content_area.bottom())
-            .copied()
-            .expect("visible tool with room to scroll");
-
-        // Wheel up (history) shifts content down by 3; the SAME plan plus the
-        // live offset must resolve the tool at its new screen row.
-        timeline.scroll_up(3);
-        let new_top = timeline.viewport.top_offset();
-        assert_eq!(
-            plan.resolve(rect.x, rect.y + 3, new_top),
-            Some((
-                HitId::TimelineTool(id),
-                Rect::new(rect.x, rect.y + 3, rect.width, 1)
-            )),
-            "hit must follow the tool through a live offset change"
-        );
-        // The old row no longer owns the tool (title rows are card-width apart,
-        // so three rows down from a title is a pad/gap row).
-        assert_ne!(
-            plan.resolve(rect.x, rect.y, new_top),
-            Some((HitId::TimelineTool(id), rect))
-        );
-    }
-
-    #[test]
-    fn non_tool_and_banner_rows_resolve_to_stream_default() {
-        let theme = Theme::dark();
-        let mut timeline = Timeline::new();
-        timeline.push(TimelineEntry::Tool(tool("one", "first")));
-        timeline.push(TimelineEntry::Tool(tool("two", "second")));
-        let area = Rect::new(0, 0, 40, 4);
-
-        let plan = timeline.render_plan(area, &theme, None);
-        let top = timeline.viewport.top_offset();
-        // Gap rows between tool titles never resolve to a tool.
-        let hits = timeline.tool_hits(area, &theme);
-        for window in hits.windows(2) {
-            let (_, a) = window[0];
-            let (_, b) = window[1];
-            if a.y + 1 < b.y {
-                assert_eq!(plan.resolve(plan.content_area.x, a.y + 1, top), None);
-            }
-        }
-        // Scrollbar gutter column is outside the content band.
-        assert_eq!(plan.resolve(area.x, plan.content_area.y, top), None);
-
-        // Pending banner row is excluded from hit rows.
-        timeline.scroll_up(3);
-        timeline.viewport.mark_appended();
-        let pending = timeline.render_plan(area, &theme, None);
-        let banner_y = pending.content_area.bottom() - 1;
-        assert_eq!(
-            pending.resolve(
-                pending.content_area.x,
-                banner_y,
-                timeline.viewport.top_offset()
-            ),
-            None,
-            "banner row must never resolve to a tool"
-        );
     }
 }
