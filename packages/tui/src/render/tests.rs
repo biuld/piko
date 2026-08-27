@@ -305,46 +305,6 @@ fn notification_panel_renders_metadata_then_wrapped_body() {
     );
 }
 
-fn assert_editor_focus_feedback(mut app: AppState) {
-    let area = Rect::new(0, 0, 80, 24);
-    let composer = compose_frame(&app, area).plan.rects[&Region::Composer];
-
-    let idle = draw(&app, area);
-    // Composer has no elevated fill — body cells must not use bg_elevated.
-    assert_ne!(
-        idle.backend().buffer()[(composer.x + 1, composer.y + 1)].bg,
-        app.theme.bg_elevated
-    );
-    assert_eq!(
-        idle.backend().buffer()[(composer.x, composer.y)].fg,
-        app.theme.prompt_border_active
-    );
-
-    app.hovered = Some((Region::Composer, Some(HitId::Composer)));
-    let hovered = draw(&app, area);
-
-    assert_ne!(
-        hovered.backend().buffer()[(composer.x + 1, composer.y + 1)].bg,
-        app.theme.bg_elevated
-    );
-    assert_eq!(
-        hovered.backend().buffer()[(composer.x, composer.y)].fg,
-        app.theme.prompt_border_active
-    );
-}
-
-#[test]
-fn editor_component_ignores_hover_and_keeps_focus_feedback_in_dark_theme() {
-    assert_editor_focus_feedback(app());
-}
-
-#[test]
-fn editor_component_ignores_hover_and_keeps_focus_feedback_in_light_theme() {
-    let mut light = app();
-    light.theme = crate::theme::Theme::light();
-    assert_editor_focus_feedback(light);
-}
-
 #[test]
 fn workflow_component_keeps_selection_above_hover() {
     let mut app = app();

@@ -126,8 +126,9 @@ fn visible_height_grows_with_lines() {
 fn visible_height_grows_with_wrapped_visual_lines() {
     let mut editor = Editor::default();
     editor.restore_text("abcd");
-    assert_eq!(editor.visible_height(&EditorConfig::default(), 2), 4);
-    assert_eq!(editor.cursor_line_col(2, 2), (1, 2));
+    // One cell is permanently reserved for the possible scrollbar gutter.
+    assert_eq!(editor.visible_height(&EditorConfig::default(), 2), 6);
+    assert_eq!(editor.cursor_line_col(2, 2), (1, 1));
 }
 
 #[test]
@@ -201,6 +202,20 @@ fn pointer_position_selects_the_clicked_visual_row() {
     editor.restore_text("one\ntwo");
     editor.move_to_position(20, 4, 1, 1);
     assert_eq!(editor.cursor(), 1);
+}
+
+#[test]
+fn cursor_follow_keeps_a_clicked_line_visible_after_editing() {
+    let mut editor = Editor::default();
+    editor.restore_text("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten");
+    editor.scroll_up(80, 6, 3);
+    assert!(!editor.cursor_is_visible(80, 6));
+
+    editor.move_to_position(80, 8, 0, 1);
+    assert!(editor.cursor_is_visible(80, 6));
+    editor.move_left();
+    assert!(editor.cursor_is_visible(80, 6));
+    assert_eq!(editor.viewport.top_offset(10, 6), 1);
 }
 
 #[test]

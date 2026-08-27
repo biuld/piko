@@ -12,6 +12,7 @@ use ratatui::{
 pub struct Editor {
     text: String,
     cursor: usize,
+    viewport: EditorViewport,
     history: Vec<EditorDraft>,
     history_index: Option<usize>,
     draft_before_history: Option<EditorDraft>,
@@ -53,6 +54,7 @@ impl Default for Editor {
         Self {
             text: String::new(),
             cursor: 0,
+            viewport: EditorViewport::default(),
             history: Vec::new(),
             history_index: None,
             draft_before_history: None,
@@ -69,6 +71,9 @@ mod render;
 mod submission;
 #[cfg(test)]
 mod tests;
+mod viewport;
+
+use viewport::EditorViewport;
 
 fn clamp_to_char_boundary(text: &str, mut index: usize) -> usize {
     while index > 0 && !text.is_char_boundary(index) {

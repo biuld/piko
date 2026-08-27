@@ -3,7 +3,8 @@
 //! crossterm reports mouse coordinates **0-based** (same space as ratatui
 //! cells), so `(column, row)` maps directly into the hit map. Clicks resolve
 //! to the same actions the keyboard router produces; wheel scrolls the
-//! stream; composer clicks place the text cursor; hover is tracked.
+//! stream or Composer viewport; composer clicks place the text cursor or
+//! scrollbar position; hover is tracked.
 
 #[cfg(test)]
 use crossterm::event::MouseEvent;

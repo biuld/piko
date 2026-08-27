@@ -382,7 +382,13 @@ Rules:
 - Borders are top and bottom only.
 - Content height is one row unless auto-resize is enabled.
 - With auto-resize enabled, content height grows up to `max_lines`.
-- Longer content scrolls internally.
+- The editor always reserves a one-cell content gutter on the right. Longer
+  content scrolls internally and paints the scrollbar there when it overflows.
+- The editor owns a bottom-origin viewport, like the timeline. The viewport's
+  top offset is shared by paragraph slicing, cursor visibility, and scrollbar
+  position. Wheel input changes that viewport; normal editing resumes cursor
+  following and adjusts the viewport only when needed. When the cursor is at
+  the end of the document, the viewport is at the latest content.
 - Terminal cursor is shown only when the Editor accepts input.
 - Cursor position is clamped within the visible content area.
 

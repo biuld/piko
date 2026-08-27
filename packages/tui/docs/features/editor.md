@@ -21,7 +21,8 @@ closes, the Editor reappears with its content preserved.
 ```
 
 - Minimum height 3 rows; by default the composer grows to six visible content
-  rows before scrolling internally
+  rows before scrolling internally. A one-cell right gutter is always reserved;
+  overflow paints the scrollbar in that gutter
 - Top and bottom borders only, no left/right border
 - **No elevated body fill** — the composer sits on the plane background. Pointer
   hover is visually inert; focus border and caret communicate input state.
@@ -51,8 +52,11 @@ at end-of-line stops (does not wrap to adjacent lines).
 ### Multi-line editing
 
 The Editor supports multiple lines. The visible area shows one line of content;
-longer input scrolls within the fixed-height region. A newline key inserts a
-line break.
+longer input scrolls within the fixed-height region. The right-side gutter stays
+reserved at all times and paints a scrollbar when the content exceeds the
+visible rows. Mouse-wheel scrolling moves the editor viewport and its scrollbar
+together; clicking the gutter jumps to the corresponding content position. A
+newline key inserts a line break.
 
 ## Submission
 

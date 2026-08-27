@@ -96,16 +96,17 @@ impl Editor {
 
     /// Move the cursor to a visible composer row/column (pointer clicks).
     pub fn move_to_position(&mut self, width: u16, height: u16, col: u16, row: u16) {
+        let viewport = self.viewport;
         self.exit_history_browse();
-        let lines = self.visual_lines(width);
+        self.viewport = viewport;
         let visible_rows = height.saturating_sub(2).max(1);
-        let cursor_index = self.cursor_visual_line_index(&lines);
-        let window_start = Self::window_start_for_cursor(cursor_index, visible_rows, lines.len());
+        let layout = self.layout_for_viewport(width, visible_rows);
+        let window_start = self.window_start(&layout, visible_rows);
         let content_row = row.saturating_sub(1).min(visible_rows.saturating_sub(1));
         let index = window_start
             .saturating_add(content_row as usize)
-            .min(lines.len().saturating_sub(1));
-        let Some(line) = lines.get(index) else {
+            .min(layout.lines.len().saturating_sub(1));
+        let Some(line) = layout.lines.get(index) else {
             return;
         };
         let mut target = line.end;
@@ -182,6 +183,7 @@ impl Editor {
     pub fn restore_text(&mut self, text: &str) {
         self.text = text.to_string();
         self.cursor = self.text.len();
+        self.viewport.reset();
         self.references.clear();
         self.history_index = None;
         self.draft_before_history = None;
@@ -284,6 +286,7 @@ impl Editor {
             self.references = draft.references;
             self.next_reference_id = draft.next_reference_id;
             self.history_index = None;
+            self.viewport.reset();
         } else {
             self.set_from_history(index + 1);
         }
@@ -313,6 +316,7 @@ impl Editor {
             self.references = draft.references;
             self.next_reference_id = draft.next_reference_id;
             self.history_index = Some(index);
+            self.viewport.reset();
         }
     }
 
@@ -325,6 +329,7 @@ impl Editor {
     pub(super) fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
+        self.viewport.reset();
         self.history_index = None;
         self.draft_before_history = None;
         self.references.clear();
@@ -334,6 +339,7 @@ impl Editor {
     pub(super) fn exit_history_browse(&mut self) {
         self.history_index = None;
         self.draft_before_history = None;
+        self.viewport.resume_cursor_follow();
     }
 
     pub(super) fn next_paste_placeholder(&mut self, text: &str, line_count: usize) -> String {

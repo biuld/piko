@@ -24,6 +24,7 @@ impl Editor {
     pub fn restore_draft(&mut self, draft: EditorDraft) {
         self.text = draft.text;
         self.cursor = draft.cursor.min(self.text.len());
+        self.viewport.reset();
         self.references = draft.references;
         self.next_reference_id = draft.next_reference_id;
         self.history_index = None;

@@ -7,8 +7,9 @@
 ## Goal
 
 Consume the per-frame hit map with real mouse events: clicks resolve to the
-same actions as the keyboard, wheel scrolls the stream, composer clicks place
-the text cursor, and hover gives soft feedback on actionable targets. No drag.
+same actions as the keyboard, wheel scrolls the stream or Composer viewport,
+Composer clicks place the text cursor or jump through its scrollbar gutter,
+and hover gives soft feedback on actionable targets. No drag.
 
 ## Architecture
 
@@ -51,7 +52,8 @@ precedence stays with the component that owns the business state.
 
 - Choice, tab, submit, suggestion, and notice targets receive `bg_hover`.
 - Composer does not paint hover feedback. It keeps its focus-owned prompt
-  border (no elevated body fill); click still places the caret.
+  border (no elevated body fill); content clicks place the caret and gutter
+  clicks move the editor viewport.
 - Suggestion-row activate maps to `AcceptAndSubmitSuggestion` (same as Enter).
 - Stream, surface defaults, stale targets, and plane targets hidden by a modal
   receive no feedback.
@@ -105,7 +107,7 @@ pub enum HitId {
 | ToolInteraction | `Choice` / `Tab` / `Submit` | Matching workflow action(s) |
 | NotificationCenter | `Notice` | `NotificationAction::Clear` |
 | AutoComplete | `Suggest(i)` | Click selects then accepts; wheel only moves selection |
-| Editor | `Composer` | Move cursor from local hit coordinate |
+| Editor | `Composer` | Wheel-scroll viewport; move cursor or scrollbar position from local hit coordinate |
 | Timeline | wheel over `Stream` or tool | `TimelineAction::ScrollUp/Down(3)` |
 | Timeline | click `TimelineTool(i)` | `TimelineAction::ToggleTool(i)` |
 | Select/active Browse owner | `Row(i)` | Select source row, then `SurfaceAction::Confirm` |
@@ -145,9 +147,11 @@ Unit tests in `app/tests/pointer_tests.rs`:
 1. Approval choice click → matching decision; background click → no action.
 2. Tool interaction choice click → `Choice` + `Submit`; tab click →
    `GotoStep`; submit click → `Submit`.
-3. Wheel over Stream → timeline scroll action; wheel over selectable surfaces
-   and Suggest → selection movement; unsupported regions → no action.
-4. Composer click (no modal) → editor cursor moves to the column.
+3. Wheel over Stream → timeline scroll action; wheel over Composer → editor
+   viewport scroll; wheel over selectable surfaces and Suggest → selection
+   movement; unsupported regions → no action.
+4. Composer content click (no modal) → editor cursor moves to the column;
+   gutter click moves the editor viewport.
 5. Notice click → clear; Suggest row click → accept that suggestion; a
    viewport-shifted Suggest hit retains its source candidate index.
 6. `Moved` updates `AppState::hovered` without actions.
@@ -195,7 +199,8 @@ Landed as designed:
   rows; title close/mode affordances use Pane-derived geometry.
 - `app/tests/pointer_tests.rs` covers approval decisions, workflow choice /
   tab / submit clicks, wheel zones, composer cursor, notice clear, suggestion
-  accept, and hover tracking.
+  accept, and hover tracking. Editor rendering tests cover Composer wheel
+  scrolling and the shared content/scrollbar viewport.
 
 ### Pane integration for Decide docks
 

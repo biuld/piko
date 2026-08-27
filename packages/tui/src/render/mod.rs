@@ -26,6 +26,8 @@ use crate::{
 use piko_tui_layout::{Component, InteractionState};
 
 #[cfg(test)]
+mod editor_tests;
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
@@ -400,12 +402,19 @@ fn render_editor(
     let block = Block::default()
         .borders(Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color));
-    app.editor.render(frame, area, block);
+    app.editor.render(frame, area, block, &app.theme);
 
-    if focused {
+    if focused
+        && app
+            .editor
+            .cursor_is_visible(area.width, area.height.saturating_sub(2).max(1))
+    {
         let visible_rows = area.height.saturating_sub(2).max(1);
         let (row, col) = app.editor.cursor_line_col(area.width, visible_rows);
-        let cursor_x = area.x + col.min(area.width.saturating_sub(1));
+        // Keep the terminal caret out of the permanently reserved scrollbar
+        // gutter when the cursor is at the end of a full visual line.
+        let content_width = area.width.saturating_sub(1).max(1);
+        let cursor_x = area.x + col.min(content_width.saturating_sub(1));
         let cursor_y = area.y + 1 + row.min(visible_rows.saturating_sub(1));
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
