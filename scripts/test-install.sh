@@ -30,7 +30,7 @@ PIKO_HOSTD_BINARY="$hostd_binary" \
 test -x "$INSTALL_ROOT/bin/piko"
 test -x "$INSTALL_ROOT/bin/piko-hostd"
 test -f "$INSTALL_ROOT/settings.toml"
-test -f "$INSTALL_ROOT/keybindings.json"
+test ! -e "$INSTALL_ROOT/keybindings.json"
 test -f "$INSTALL_ROOT/agents/spec/main.toml"
 test -d "$INSTALL_ROOT/agents/sessions"
 test -f "$INSTALL_ROOT/models/openai.toml"

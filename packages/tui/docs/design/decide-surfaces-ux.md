@@ -17,7 +17,7 @@
 
 Approval (`SurfaceId::Approval`) and Ask User / Tool Interaction (`SurfaceId::ToolInteraction`) are the two **Decide** surfaces that share the Interactive Workflow visual pattern: a blocking ComposerBand dock that replaces the editor while the host waits for a structured decision. Today they share `InteractiveWorkflow` paint and pointer geometry, but **not** the same keyboard / selection contract. Approval looks like a navigable choice list while remaining letter-shortcut-only (Enter always “Accept once”); its selection cannot persist because `ApprovalPanel::workflow()` rebuilds a fresh workflow every render. Tool Interaction already owns a durable `InteractiveWorkflow` and correctly wires ↑/↓ / Enter / Tab.
 
-This design unifies both surfaces under one **Decide language** (↑/↓ select, Enter confirm selected target, Esc cancel/decline, hover preview, click = keyboard confirm). Approval drops letter shortcuts (`a`/`w`/`p`); scoped grants are chosen only by list selection + Enter (or click). Ask User keeps multi-question tabs, optional confirm, and inline text on choices. The recommended approach is **Option A**: keep a thin Interactive Workflow shell for tabs / prompt / confirm / inline input / help-override, and for the choice body reuse **list feedback helpers + unfiltered clamp selection semantics**—without embedding `SelectableList<T>`, without list filter/panel chrome, and without rewriting Decide surfaces as SelectableList panels.
+This design unifies both surfaces under one **Decide language** (↑/↓ select, Enter confirm selected target, Esc cancel/decline, hover preview, click = keyboard confirm). Approval drops letter shortcuts (`a`/`w`/`p`); scoped grants are chosen only by list selection + Enter (or click). Ask User keeps multi-question tabs, optional confirm, and inline text on choices. The recommended approach is **Option A**: keep a thin Interactive Workflow shell for tabs / prompt / confirm / inline input, with shortcut discovery supplied by the registry-derived Guidance Row, and for the choice body reuse **list feedback helpers + unfiltered clamp selection semantics**—without embedding `SelectableList<T>`, without list filter/panel chrome, and without rewriting Decide surfaces as SelectableList panels.
 
 **No protocol change.** Security boundaries stay: Approval → `Command::ApprovalRespond`; Ask User → `Command::UserInteractionRespond`. hostd remains authoritative for durable pending state; TUI owns only ephemeral UI selection and focus.
 
@@ -124,7 +124,7 @@ This design unifies both surfaces under one **Decide language** (↑/↓ select,
 | Tabs / multi-question | No | Yes | Workflow shell |
 | Confirm step | No | Yes | Workflow shell |
 | Inline text on selected choice | No | Yes | Workflow shell |
-| help_override | No | Yes | Workflow shell |
+| registry-derived Guidance | No | Yes | Shared Guidance Row |
 | Hover | `paint_index_hover` (index regions) | Private full-HitId hover | Choice indices → shared helper; Tab/Submit separate |
 | Hit regions | `selectable_row_regions` (list viewport) | `rows_in` body geometry | Workflow geometry builder owns all |
 | Dock Fixed content budget | List budgets elsewhere | `dock_content_rows` = body height | Keep Fixed standard_info |
@@ -135,7 +135,7 @@ This design unifies both surfaces under one **Decide language** (↑/↓ select,
 | Option | Description | Pros | Cons |
 |--------|-------------|------|------|
 | **A. Shell + list feedback + clamp semantics for choice body** | Feedback helpers + clamp selection; shell owns tabs/prompt/confirm/input/help | Minimal churn; fixes Approval; matches feedback PRD; preserves multi-question | Shell + body must share one geometry builder |
-| **B. Full rewrite as SelectableList surface** | Each Decide surface becomes a SelectableList panel | One panel type | Tabs, confirm, inline input, help_override, Fixed dock body do not fit without bloating list |
+| **B. Full rewrite as SelectableList surface** | Each Decide surface becomes a SelectableList panel | One panel type | Tabs, confirm, inline input, registry-derived Guidance, Fixed dock body do not fit without bloating list |
 | **C. Keep custom paint; only align contract** | Fix keys/state; private paint forever | Smallest early diff | Drift; violates “compose don’t fork” as end state |
 | **D. Other** | e.g. new parallel `ChoiceList` crate | Greenfield | Extra component without payoff over A |
 
@@ -152,7 +152,7 @@ This design unifies both surfaces under one **Decide language** (↑/↓ select,
 - Multi-question tabs and `goto_step` / `next_step` / `prev_step` / `confirm_focused`.
 - Prompt line, blank spacers, confirm body content.
 - Inline `TextBox` on a choice and input-active key capture.
-- `help_override` and state-derived help line.
+- Registry-derived shortcut guidance in the resident Guidance Row.
 - Pane chrome (`render_modal` / embedded `render`) and full `HitId::{Tab,Submit,Choice,TextInput}` region map.
 - Mapping selection → domain command (Approval decision vs interaction answers).
 - Filter/search, `selectable_row_regions`, Stacked/Columns/Settings panel body strategies.
@@ -181,7 +181,7 @@ flowchart TB
     Tabs[Tabs + active question]
     Prompt[Prompt line]
     Confirm[Confirm step]
-    Help[help_text / help_override]
+    Help[registry-derived Guidance]
     Input[Inline TextBox on choice]
   end
 
@@ -423,7 +423,6 @@ pub struct InteractiveWorkflow {
     pub require_confirm: bool,
     pub confirm_focused: bool,
     pub target_entry_id: Option<String>, // tree only; optional later cleanup
-    pub help_override: Option<String>,
 }
 
 pub struct Question {
@@ -606,7 +605,7 @@ packages/tui/src/input/focus/router.rs
   # ToolInteraction: unchanged
   # SummaryPrompt: SelectNext/Prev chords → choice nav via fixed select_surface_*
 
-packages/tui/src/input/keymap.rs
+packages/tui/src/input/binding/defaults.rs
   # Drop default binds for app.approval.acceptSession/acceptWorkspace/…
   # (or leave unbound; not advertised)
 
@@ -804,7 +803,7 @@ Migration: none; in-memory only. On `push` / new front request, reset `selected_
 Treat Approval as Models-like list with five `SelectableItem`s and Standard pane.
 
 - **Pros:** Maximum reuse of panel paint path.  
-- **Cons:** Loses natural multi-question shell for Ask User; confirm step becomes fake list; inline input bolted on; help_override still custom; large rewrite.  
+- **Cons:** Loses natural multi-question shell for Ask User; confirm step becomes fake list; inline input bolted on; registry-derived Guidance still needs a separate projection; large rewrite.
 - **Rejected.**
 
 ### 2. Option C — Contract-only alignment without feedback composition
@@ -969,7 +968,7 @@ Ordered PRs; each should keep `cargo test -p piko-tui` green.
 
 ### PR2 — Approval durable selection + keyboard parity
 
-- **Files:** `features/approval/mod.rs`; `app/command.rs`; `dispatch/actions.rs`; `input/focus/router.rs`; `input/keymap.rs`; tests under `app/tests/`; `docs/design/keybindings.md` if present.
+- **Files:** `features/approval/mod.rs`; `app/command.rs`; `dispatch/actions.rs`; `input/focus/router.rs`; `input/binding/defaults.rs`; tests under `app/tests/`; `docs/design/keybindings.md` if present.
 - **Deps:** PR1 preferred.
 - **Desc:** `selected_idx` on pending approval; SelectNext/Prev/Choice; Enter → **`ConfirmSelected`**; remove `a`/`w`/`p` routing + default binds; help without digits/letters; unit + routing tests (Esc decline, Enter selected, letters ignored).
 

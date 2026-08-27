@@ -1,14 +1,13 @@
+use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 use ratatui::{
     Frame,
     layout::{Position, Rect},
 };
-use unicode_width::UnicodeWidthStr;
-
-use piko_tui_layout::{Component, InteractionState, SurfacePanel};
 
 use crate::{
     app::{HitId, command::SurfaceAction},
     navigation::{SelectBandBudget, SurfaceId},
+    terminal::text::display_width,
     theme::Theme,
     ui::components::{
         menu::{MenuConfirmResult, MenuRow, MenuRowKind, MenuRowLayout, MenuStack},
@@ -277,13 +276,6 @@ impl AuthSelector {
         }
     }
 
-    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
-        match self.state {
-            AuthSelectorState::Menu => crate::ui::components::feedback::default_list_hints(),
-            AuthSelectorState::ApiKeyInput { .. } => "Enter save · Esc back".into(),
-        }
-    }
-
     pub fn select_next(&mut self) {
         if let AuthSelectorState::Menu = self.state {
             self.menu.select_next(&self.filter);
@@ -358,7 +350,7 @@ impl AuthSelector {
 
                 frame.render_widget(Paragraph::new(lines), areas.content);
 
-                let label_width = UnicodeWidthStr::width(API_KEY_LABEL);
+                let label_width = display_width(API_KEY_LABEL);
                 let origin = Position::new(
                     areas
                         .content

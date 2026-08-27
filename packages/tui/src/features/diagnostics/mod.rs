@@ -16,20 +16,25 @@ use ratatui::{
 use crate::app::HitId;
 use crate::navigation::SurfaceId;
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneSpec, render_pane};
+use crate::ui::components::pane::{PaneFooter, PaneSpec, render_pane};
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 use super::centered_rect;
 
-impl Component<HitId, Theme> for DiagnosticsPanel {
-    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
-        self.render(frame, area, ctx);
+pub struct DiagnosticsCtx<'a> {
+    pub theme: &'a Theme,
+    pub hints: Option<&'a str>,
+}
+
+impl Component<HitId, DiagnosticsCtx<'_>> for DiagnosticsPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &DiagnosticsCtx<'_>) {
+        self.render(frame, area, ctx.theme, ctx.hints);
     }
 
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
         let popup = centered_rect(82, 70, area);
         let spec = PaneSpec::new(self.title.as_str())
-            .hints("↑/↓ scroll · Esc close")
+            .footer(PaneFooter::Reserved { height: 1 })
             .focused(true);
         spec.content_rect(popup)
             .map(|rect| vec![(rect, HitId::Content)])
@@ -54,7 +59,7 @@ impl PointerComponent<HitId> for DiagnosticsPanel {
     }
 }
 
-impl SurfacePanel<SurfaceId, HitId, Theme> for DiagnosticsPanel {
+impl SurfacePanel<SurfaceId, HitId, DiagnosticsCtx<'_>> for DiagnosticsPanel {
     fn region(&self) -> SurfaceId {
         SurfaceId::Diagnostics
     }
@@ -108,12 +113,15 @@ impl DiagnosticsPanel {
         self.lines = vec![message.into()];
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme, hints: Option<&str>) {
         let popup = centered_rect(82, 70, area);
         let title = self.title.as_str();
-        let spec = PaneSpec::new(title)
-            .hints("↑/↓ scroll · Esc close")
-            .focused(true);
+        let mut spec = PaneSpec::new(title).focused(true);
+        if let Some(hints) = hints.filter(|value| !value.is_empty()) {
+            spec = spec.hints(hints);
+        } else {
+            spec = spec.footer(PaneFooter::Reserved { height: 1 });
+        }
         let Some(areas) = render_pane(frame, popup, &spec, theme) else {
             return;
         };

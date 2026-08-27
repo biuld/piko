@@ -20,7 +20,7 @@ impl Editor {
             return (0, 0);
         };
         let window_start = Self::window_start_for_cursor(index, visible_rows, lines.len());
-        let col = UnicodeWidthStr::width(&self.text[line.start..self.cursor.min(line.end)]);
+        let col = display_width(&self.text[line.start..self.cursor.min(line.end)]);
         (index.saturating_sub(window_start) as u16, col as u16)
     }
 
@@ -69,9 +69,10 @@ impl Editor {
         let mut line_width = 0usize;
         let reference_ranges = self.reference_ranges();
         let mut cursor = 0usize;
+        let policy = crate::terminal::text::TerminalTextPolicy;
         while cursor < self.text.len() {
             if let Some((_, end)) = reference_ranges.iter().find(|(start, _)| *start == cursor) {
-                let atom_width = UnicodeWidthStr::width(&self.text[cursor..*end]).max(1);
+                let atom_width = display_width(&self.text[cursor..*end]).max(1);
                 if line_width > 0 && line_width + atom_width > max_width {
                     lines.push(line_start..cursor);
                     line_start = cursor;
@@ -81,23 +82,26 @@ impl Editor {
                 cursor = *end;
                 continue;
             }
-            let ch = self.text[cursor..].chars().next().expect("valid cursor");
-            let index = cursor;
-            if ch == '\n' {
+            let (offset, grapheme) = policy
+                .grapheme_indices(&self.text[cursor..])
+                .next()
+                .expect("valid grapheme");
+            let index = cursor + offset;
+            if grapheme == "\n" {
                 lines.push(line_start..index);
-                line_start = index + ch.len_utf8();
+                line_start = index + grapheme.len();
                 line_width = 0;
-                cursor += ch.len_utf8();
+                cursor = line_start;
                 continue;
             }
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0).max(1);
+            let ch_width = display_width(grapheme).max(1);
             if line_width > 0 && line_width + ch_width > max_width {
                 lines.push(line_start..index);
                 line_start = index;
                 line_width = 0;
             }
             line_width += ch_width;
-            cursor += ch.len_utf8();
+            cursor = index + grapheme.len();
         }
         lines.push(line_start..self.text.len());
         lines

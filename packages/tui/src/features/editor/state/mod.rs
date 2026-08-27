@@ -1,12 +1,13 @@
+use crate::{
+    config::editor::EditorConfig, features::auto_completion::AutoComplete,
+    terminal::text::display_width,
+};
 use ratatui::{
     Frame,
     layout::Rect,
     text::{Line, Span},
     widgets::{Block, Paragraph},
 };
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-use crate::{config::editor::EditorConfig, features::auto_completion::AutoComplete};
 
 pub struct Editor {
     text: String,

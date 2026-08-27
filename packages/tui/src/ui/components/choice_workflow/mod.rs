@@ -71,8 +71,6 @@ pub struct ChoiceWorkflow {
     pub require_confirm: bool,
     pub confirm_focused: bool,
     pub target_entry_id: Option<String>,
-    /// When set, replaces the state-derived help line.
-    pub help_override: Option<String>,
 }
 
 impl ChoiceWorkflow {
@@ -83,13 +81,7 @@ impl ChoiceWorkflow {
             require_confirm,
             confirm_focused: false,
             target_entry_id: None,
-            help_override: None,
         }
-    }
-
-    pub fn with_help(mut self, help: impl Into<String>) -> Self {
-        self.help_override = Some(help.into());
-        self
     }
 
     pub fn select_next(&mut self) {
@@ -200,10 +192,8 @@ impl ChoiceWorkflow {
         self.body_lines(theme).len() as u16
     }
 
+    #[cfg(test)]
     pub fn help_text(&self) -> String {
-        if let Some(help) = &self.help_override {
-            return help.clone();
-        }
         if self.confirm_focused {
             "Enter to submit · Tab to cycle · Esc to cancel".into()
         } else if !self.questions.is_empty() {

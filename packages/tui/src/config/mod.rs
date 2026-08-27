@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::input::binding::KeybindingSettings;
+
 pub mod bottom_bar;
 pub mod editor;
 pub mod theme;
@@ -48,15 +50,19 @@ pub struct TuiConfig {
     /// and is not a host runtime setting.
     #[serde(default)]
     pub hide_thinking_block: bool,
+    #[serde(default)]
+    pub keybindings: KeybindingSettings,
 }
 
 impl TuiConfig {
-    /// Build from hostd-provided settings JSON value. Unknown or missing keys
-    /// fall back to defaults.
-    pub fn from_hostd_settings(raw: Option<&serde_json::Value>) -> Self {
+    /// Fallible settings projection used by the event path so malformed
+    /// host-owned updates can be diagnosed without replacing a valid config.
+    pub fn try_from_hostd_settings(
+        raw: Option<&serde_json::Value>,
+    ) -> Result<Self, serde_json::Error> {
         let Some(raw) = raw else {
-            return Self::default();
+            return Ok(Self::default());
         };
-        serde_json::from_value(raw.clone()).unwrap_or_default()
+        serde_json::from_value(raw.clone())
     }
 }

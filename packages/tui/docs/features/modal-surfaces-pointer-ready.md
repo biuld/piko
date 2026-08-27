@@ -140,8 +140,10 @@ The frame plan exposes hit regions derived from its solved rects:
 
 ## Configuration
 
-No user-facing configuration in the initial version. Keybindings keep using
-the existing `Keymap` system; pointer input adds no settings.
+No user-facing pointer configuration is added here. Keyboard behavior is
+owned by the scoped command registry in
+[Keybindings and Command Routing](./keybindings.md); pointer input adds no
+separate settings.
 
 ## Non-goals
 
@@ -163,8 +165,8 @@ the existing `Keymap` system; pointer input adds no settings.
       (engine unit tests with dummy enums + product z-order integration test).
 - [x] Surfaces render only into solver-produced rects; no ad-hoc rect math in
       feature renderers.
-- [x] Approval and Tool Interaction panels show only routed keys in their help
-      lines (approval uses a help override), and letter shortcuts ignore
+- [x] Approval and Tool Interaction panels show only routed keys in the
+      resident Guidance row, and letter shortcuts ignore
       Ctrl/Alt-modified events.
 - [x] The frame plan's hit-test is covered by unit tests with dummy region
       enums in `piko-tui-layout`, and by an integration test in `piko-tui`

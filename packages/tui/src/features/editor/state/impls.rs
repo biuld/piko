@@ -110,8 +110,9 @@ impl Editor {
         };
         let mut target = line.end;
         let mut used = 0u16;
-        for (offset, ch) in self.text[line.start..line.end].char_indices() {
-            let w = UnicodeWidthStr::width(ch.to_string().as_str()) as u16;
+        let policy = crate::terminal::text::TerminalTextPolicy;
+        for (offset, grapheme) in policy.grapheme_indices(&self.text[line.start..line.end]) {
+            let w = display_width(grapheme) as u16;
             if used + w > col {
                 target = line.start + offset;
                 break;
@@ -390,17 +391,11 @@ impl Editor {
     }
 
     pub(super) fn prev_char_boundary(&self, cursor: usize) -> Option<usize> {
-        self.text[..cursor]
-            .char_indices()
-            .last()
-            .map(|(index, _)| index)
+        crate::terminal::text::TerminalTextPolicy.previous_grapheme_boundary(&self.text, cursor)
     }
 
     pub(super) fn next_char_boundary(&self, cursor: usize) -> Option<usize> {
-        self.text[cursor..]
-            .chars()
-            .next()
-            .map(|ch| cursor + ch.len_utf8())
+        crate::terminal::text::TerminalTextPolicy.next_grapheme_boundary(&self.text, cursor)
     }
 
     pub(super) fn current_line_start(&self) -> usize {

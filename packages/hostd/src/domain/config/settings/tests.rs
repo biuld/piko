@@ -372,3 +372,52 @@ fn host_namespace_value_exposes_trajectory_bind_and_port() {
     assert_eq!(trajectory["bind"], serde_json::json!("localhost"));
     assert_eq!(trajectory["port"], serde_json::json!(8080));
 }
+
+#[test]
+fn tui_settings_merge_recursively_by_rule_id() {
+    let base = HostSettings {
+        tui: Some(serde_json::json!({
+            "bottom_bar": {"items": ["agent", "model"]},
+            "keybindings": {
+                "rules": {
+                    "default-editor-submit": {"key": "enter"},
+                    "default-editor-newline-enhanced": {"enabled": true}
+                }
+            }
+        })),
+        ..HostSettings::default()
+    };
+    let overrides = HostSettings {
+        tui: Some(serde_json::json!({
+            "keybindings": {
+                "rules": {
+                    "default-editor-submit": {"key": "ctrl+enter"},
+                    "custom-editor-newline": {
+                        "key": "ctrl+j",
+                        "command": "editor.newline",
+                        "scope": "editor"
+                    }
+                }
+            }
+        })),
+        ..HostSettings::default()
+    };
+
+    let tui = merge(base, overrides).tui.expect("merged TUI settings");
+    assert_eq!(
+        tui["bottom_bar"]["items"],
+        serde_json::json!(["agent", "model"])
+    );
+    assert_eq!(
+        tui["keybindings"]["rules"]["default-editor-submit"]["key"],
+        serde_json::json!("ctrl+enter")
+    );
+    assert_eq!(
+        tui["keybindings"]["rules"]["default-editor-newline-enhanced"]["enabled"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        tui["keybindings"]["rules"]["custom-editor-newline"]["scope"],
+        serde_json::json!("editor")
+    );
+}

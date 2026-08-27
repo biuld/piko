@@ -10,9 +10,9 @@ mod input;
 mod layout;
 mod navigation;
 mod render;
+mod terminal;
 mod text;
 mod theme;
-mod tui;
 mod ui;
 
 use std::{env, time::Duration};
@@ -21,14 +21,12 @@ use anyhow::{Context, Result};
 use app::{AppState, InitialOptions};
 use cli::CliArgs;
 use host::HostdClient;
-use input::keymap::Keymap;
-use tui::TerminalGuard;
+use terminal::{TuiRuntime, emergency_cleanup};
 
 fn main() -> Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        emergency_cleanup();
         original_hook(panic_info);
     }));
 
@@ -41,7 +39,7 @@ fn main() -> Result<()> {
         host_log.log_level.as_deref(),
     )?;
 
-    let mut terminal = TerminalGuard::enter()?;
+    let mut runtime = TuiRuntime::enter()?;
     let initial_options = InitialOptions {
         model_id: args.model_id,
         provider: args.provider,
@@ -51,7 +49,7 @@ fn main() -> Result<()> {
         no_tools: args.no_tools,
     };
     let mut app = AppState::new(cwd, args.session_id, args.continue_session, initial_options);
-    let keymap = Keymap::load(&app.cwd());
+    app.configure_terminal_profile(runtime.profile.clone());
     let exit_after = env::var("PIKO_TUI_EXIT_AFTER_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -60,14 +58,14 @@ fn main() -> Result<()> {
     event_loop::run_bootstrap_effects(&mut app, &mut host, effects);
 
     let result = event_loop::run(
-        &mut terminal.terminal,
+        &mut runtime.session.terminal,
         &mut app,
         &mut host,
-        &keymap,
+        &runtime.input,
         exit_after,
     );
 
-    terminal.exit()?;
+    runtime.exit()?;
     host.shutdown();
     result
 }

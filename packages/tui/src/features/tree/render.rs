@@ -26,11 +26,13 @@ pub struct TreeCtx<'a> {
     pub filter: &'a str,
     pub summary_prompt: Option<&'a ChoiceWorkflow>,
     pub theme: &'a Theme,
+    pub tip: Option<&'a str>,
+    pub hints: Option<&'a str>,
 }
 
 impl Component<HitId, TreeCtx<'_>> for TreePanel {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &TreeCtx<'_>) {
-        TreePanel::render(self, frame, area, ctx.filter, ctx.summary_prompt, ctx.theme);
+        TreePanel::render_with_context(self, frame, area, ctx);
     }
 
     fn render_with_state(
@@ -40,7 +42,7 @@ impl Component<HitId, TreeCtx<'_>> for TreePanel {
         ctx: &TreeCtx<'_>,
         interaction: InteractionState<HitId>,
     ) {
-        TreePanel::render(self, frame, area, ctx.filter, ctx.summary_prompt, ctx.theme);
+        TreePanel::render_with_context(self, frame, area, ctx);
         if let Some(workflow) = ctx.summary_prompt {
             if let Some(footer) = self.summary_footer_rect(area) {
                 workflow.render_embedded_hover(frame, footer, ctx.theme, interaction);
@@ -132,7 +134,7 @@ impl TreePanel {
         if self.label_editor.is_none() {
             return Vec::new();
         }
-        let prefix = "Label (Enter to save, Esc to cancel): ";
+        let prefix = "Label: ";
         let spec = PaneSpec::new("Session Tree")
             .mode(crate::ui::components::pane::PaneMode::Standard)
             .search(PaneSearch::Custom(Line::default()));
@@ -191,7 +193,7 @@ impl TreePanel {
         let spec = PaneSpec::new("Session Tree")
             .mode(crate::ui::components::pane::PaneMode::Standard)
             .search_filter(&self.filter)
-            .tip("Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold")
+            .tip(" ")
             .footer(PaneFooter::Reserved { height: 7 });
         spec.footer_rect(area)
     }
@@ -201,7 +203,9 @@ impl TreePanel {
         let footer = if summary_prompt {
             PaneFooter::Reserved { height: 7 }
         } else {
-            PaneFooter::Hints("Enter confirm · Esc close".into())
+            // Hit testing only needs the one-row footer budget. Render text is
+            // supplied by the binding-derived context.
+            PaneFooter::Reserved { height: 1 }
         };
         let title = if self.show_label_timestamps {
             "Session Tree [+time]"
@@ -228,7 +232,7 @@ impl TreePanel {
                 filter: &self.filter,
                 placeholder: None,
             })
-            .tip("Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold")
+            .tip(" ")
             .footer(footer)
             .focused(true);
         let items: Vec<SelectableItem> = self
@@ -239,14 +243,12 @@ impl TreePanel {
             .collect();
         selectable_row_regions(area, &spec, &items, self.selected_idx, "")
     }
-    pub fn render(
-        &self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        filter: &str,
-        summary_prompt: Option<&ChoiceWorkflow>,
-        theme: &Theme,
-    ) {
+    fn render_with_context(&self, frame: &mut Frame<'_>, area: Rect, ctx: &TreeCtx<'_>) {
+        let filter = ctx.filter;
+        let summary_prompt = ctx.summary_prompt;
+        let theme = ctx.theme;
+        let tip = ctx.tip;
+        let hints = ctx.hints;
         let mut left_title = "Session Tree".to_string();
         if self.show_label_timestamps {
             left_title.push_str(" [+time]");
@@ -271,13 +273,8 @@ impl TreePanel {
             )
         };
 
-        let help_text = "Tab/Shift+Tab cycle · Shift+L label · Alt+←/→ fold";
-
         let search = if let Some(editor) = &self.label_editor {
-            let mut spans = vec![Span::styled(
-                "Label (Enter to save, Esc to cancel): ",
-                Style::default().fg(theme.accent),
-            )];
+            let mut spans = vec![Span::styled("Label: ", Style::default().fg(theme.accent))];
             let tb_line = editor.input.render_line(theme, true);
             spans.extend(tb_line.spans);
             PaneSearch::Custom(Line::from(spans))
@@ -299,7 +296,11 @@ impl TreePanel {
         let footer = if summary_prompt.is_some() {
             PaneFooter::Reserved { height: 7 }
         } else {
-            PaneFooter::Hints("Enter confirm · Esc close".into())
+            hints
+                .filter(|value| !value.is_empty())
+                .map_or(PaneFooter::Reserved { height: 1 }, |value| {
+                    PaneFooter::Hints(value.into())
+                })
         };
 
         let spec = PaneSpec::new(&left_title)
@@ -312,7 +313,7 @@ impl TreePanel {
                 PaneTitleAffix::selection(sel_at, sel_of),
             ])
             .search(search)
-            .tip(help_text)
+            .tip(tip.or(Some(" ")))
             .footer(footer)
             .focused(true);
 
@@ -435,44 +436,4 @@ pub(crate) fn tree_row_prefix(row: &visible::TreeRow) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::tree_row_prefix;
-    use crate::features::tree::visible::{ConnectorKind, Gutter, TreeRow};
-
-    #[test]
-    fn tree_row_prefix_places_connector_at_depth_position() {
-        let row = TreeRow {
-            entry_id: "branch".into(),
-            depth: 2,
-            connector: ConnectorKind::Corner,
-            gutters: Vec::new(),
-            is_active_path: false,
-            is_folded: false,
-            label: None,
-            text_preview: String::new(),
-            role_preview: String::new(),
-        };
-
-        assert_eq!(tree_row_prefix(&row), "   └─ ");
-    }
-
-    #[test]
-    fn tree_row_prefix_preserves_vertical_gutters() {
-        let row = TreeRow {
-            entry_id: "descendant".into(),
-            depth: 3,
-            connector: ConnectorKind::Branch,
-            gutters: vec![Gutter {
-                position: 0,
-                kind: ConnectorKind::Vertical,
-            }],
-            is_active_path: false,
-            is_folded: false,
-            label: None,
-            text_preview: String::new(),
-            role_preview: String::new(),
-        };
-
-        assert_eq!(tree_row_prefix(&row), "│     ├─ ");
-    }
-}
+mod tests;

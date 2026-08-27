@@ -19,7 +19,7 @@ use crate::{
         tool_interaction::ToolInteractionPanel,
         tree::TreePanel,
     },
-    input::focus::FocusManager,
+    input::{binding::BindingRegistry, focus::FocusManager},
     theme::Theme,
     ui::components::{choice_workflow::ChoiceWorkflow, text_box::TextBox},
 };
@@ -135,6 +135,7 @@ pub struct AppState {
 
     // core input
     pub editor: Editor,
+    pub binding_registry: BindingRegistry,
     pub command_catalog: Vec<command::TuiCommandEntry>,
 
     // session-level status

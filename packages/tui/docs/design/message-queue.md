@@ -6,7 +6,7 @@
 ## Goal
 
 Give the Composer first-class start / steer / queue / dequeue. Text uses the
-legacy commands; multimodal input uses `ChatSubmitMessage` and
+scoped command registry; multimodal input uses `ChatSubmitMessage` and
 `QueueSteerMessage` with the same host-owned admission semantics.
 
 ## Mapping
@@ -51,5 +51,5 @@ the `/agents` detail read that summary. BottomBar stays name-only.
 
 - `app/turn.rs` — submit / follow-up / steer / dequeue
 - `app/event/lifecycle.rs` — bind Queued ids; preserve running turns
-- `input/focus/router.rs` + `input/keymap.rs` — bindings
+- `input/focus/router.rs` + `input/command/` + `input/binding/` — bindings
 - `features/guidance_row` — running / dequeue hints

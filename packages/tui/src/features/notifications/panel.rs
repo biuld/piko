@@ -18,7 +18,7 @@ use crate::{
     navigation::SurfaceId,
     theme::Theme,
     ui::{
-        components::pane::{PaneAffixHit, PaneSpec, PaneTitleAffix, render_pane},
+        components::pane::{PaneAffixHit, PaneFooter, PaneSpec, PaneTitleAffix, render_pane},
         interaction::paint_element_hover,
         line_layout::{paint_cols, soft_wrap, truncate_paint_cols},
     },
@@ -28,6 +28,7 @@ pub struct NotificationPanelCtx<'a> {
     pub session_id: Option<&'a str>,
     pub now: Instant,
     pub theme: &'a Theme,
+    pub hints: Option<&'a str>,
 }
 
 impl NotificationCenter {
@@ -37,8 +38,22 @@ impl NotificationCenter {
                 &["Current", "All"],
                 usize::from(self.view_scope == NotificationViewScope::All),
             )])
-            .hints("Tab scope · ↑/↓ select · c/Enter copy · PgUp/PgDn scroll · Esc close")
+            .footer(PaneFooter::Reserved { height: 1 })
             .focused(true)
+    }
+
+    fn modal_spec_with_hints<'a>(&self, hints: Option<&'a str>) -> PaneSpec<'a> {
+        let spec = PaneSpec::new("Notifications")
+            .title_affixes([PaneTitleAffix::mode_strip_static(
+                &["Current", "All"],
+                usize::from(self.view_scope == NotificationViewScope::All),
+            )])
+            .focused(true);
+        if let Some(hints) = hints.filter(|value| !value.is_empty()) {
+            spec.hints(hints)
+        } else {
+            spec.footer(PaneFooter::Reserved { height: 1 })
+        }
     }
 
     fn title_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
@@ -85,7 +100,7 @@ impl NotificationCenter {
         ctx: &NotificationPanelCtx<'_>,
         interaction: InteractionState<HitId>,
     ) {
-        let spec = self.modal_spec();
+        let spec = self.modal_spec_with_hints(ctx.hints);
         let Some(areas) = render_pane(frame, area, &spec, ctx.theme) else {
             return;
         };

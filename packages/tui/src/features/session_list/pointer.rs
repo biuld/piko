@@ -16,7 +16,14 @@ use crate::{
 
 impl Component<HitId, SessionListCtx<'_>> for SessionList {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &SessionListCtx<'_>) {
-        self.render(frame, area, ctx.active_session_id, ctx.theme);
+        self.render(
+            frame,
+            area,
+            ctx.active_session_id,
+            ctx.theme,
+            ctx.tip,
+            ctx.hints,
+        );
     }
 
     fn render_with_state(
@@ -26,7 +33,14 @@ impl Component<HitId, SessionListCtx<'_>> for SessionList {
         ctx: &SessionListCtx<'_>,
         interaction: InteractionState<HitId>,
     ) {
-        self.render(frame, area, ctx.active_session_id, ctx.theme);
+        self.render(
+            frame,
+            area,
+            ctx.active_session_id,
+            ctx.theme,
+            ctx.tip,
+            ctx.hints,
+        );
         paint_row_hover(
             frame,
             &self.row_regions(area),

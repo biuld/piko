@@ -2,7 +2,9 @@ use piko_protocol::{Command, TurnStatus};
 
 use crate::{
     app::{AppState, FollowUpUi, QueueStatus, command_id, effect::Effect},
+    features::guidance_row::binding_hint,
     features::notifications::NotificationLevel,
+    input::command::CommandId,
 };
 
 #[derive(Clone, Copy)]
@@ -307,10 +309,11 @@ impl AppState {
 
     fn reject_steer_idle(&mut self) -> Vec<Effect> {
         self.status = "agent is not running".to_string();
-        self.notify(
-            NotificationLevel::Error,
-            "agent is not running; use Alt+Enter to queue",
+        let message = binding_hint(self, CommandId::EditorFollowUp).map_or_else(
+            || "agent is not running".to_string(),
+            |key| format!("agent is not running; use {key} to queue"),
         );
+        self.notify(NotificationLevel::Error, message);
         Vec::new()
     }
 

@@ -20,8 +20,8 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use crate::{
     app::{AppState, command::Action, effect::Msg},
     host::HostdClient,
-    input::keymap::Keymap,
     layout::PreparedFrame,
+    terminal::InputNormalizer,
 };
 
 pub use cycle::{CycleBudget, CycleWork, should_paint};
@@ -43,7 +43,7 @@ pub fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut AppState,
     host: &mut HostdClient,
-    keymap: &Keymap,
+    normalizer: &InputNormalizer,
     exit_after: Option<Duration>,
 ) -> Result<()> {
     let budget = Budget::standard();
@@ -58,7 +58,7 @@ pub fn run(
             return Ok(());
         }
 
-        let work = step(app, host, keymap, &mut prepared, budget)?;
+        let work = step(app, host, normalizer, &mut prepared, budget)?;
         let now = Instant::now();
         let host_due = now.duration_since(last_host_paint) >= budget.host_paint_interval;
         if should_paint(work, host_due) {
@@ -78,11 +78,11 @@ pub fn run(
 fn step(
     app: &mut AppState,
     host: &mut HostdClient,
-    keymap: &Keymap,
+    normalizer: &InputNormalizer,
     prepared: &mut PreparedFrame,
     budget: Budget,
 ) -> Result<CycleWork> {
-    let input = drain_input(app, host, keymap, prepared, budget)?;
+    let input = drain_input(app, host, normalizer, prepared, budget)?;
     let had_host = drain_host(app, host, budget);
     let tick = maybe_tick(app, host, budget);
     Ok(CycleWork {

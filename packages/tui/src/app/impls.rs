@@ -37,6 +37,7 @@ impl AppState {
             pointer_position: None,
             pointer_left_down: false,
             editor: Editor::default(),
+            binding_registry: BindingRegistry::default(),
             command_catalog: crate::app::command::merge_command_catalog(&[]),
             status: "starting hostd".to_string(),
             queue_status: QueueStatus::default(),
@@ -67,6 +68,14 @@ impl AppState {
             host_settings: HostRuntimeSettings::default(),
             theme: Theme::load(&TuiConfig::default().theme.name),
         }
+    }
+
+    /// Attach the process-local terminal profile before event processing.
+    pub fn configure_terminal_profile(&mut self, profile: crate::terminal::TerminalProfile) {
+        let color = profile.color;
+        self.binding_registry =
+            BindingRegistry::compile_with_diagnostics(profile, Some(&self.tui_config.keybindings));
+        self.theme = self.theme.for_color_level(color);
     }
 
     /// Whether managed/user feature `todo` is enabled (default true).
@@ -138,6 +147,30 @@ impl AppState {
         }
     }
 
+    /// Whether the current focus owner exposes an editable text sink.
+    ///
+    /// Input routing uses this shared predicate while building the immutable
+    /// scope stack; it must not take a mutable borrow merely to answer a
+    /// presence question.
+    pub fn active_text_box_is_present(&self) -> bool {
+        match self.focus_manager.active_mode() {
+            AppMode::Surface(SurfaceId::AuthSelector) => matches!(
+                self.auth_selector.state,
+                crate::features::auth_selector::AuthSelectorState::ApiKeyInput { .. }
+            ),
+            AppMode::Surface(SurfaceId::SummaryPrompt) => self
+                .summary_prompt
+                .as_ref()
+                .is_some_and(|workflow| workflow.input_active()),
+            AppMode::Surface(SurfaceId::Tree) => self.tree.label_editor.is_some(),
+            AppMode::Surface(SurfaceId::ToolInteraction) => self
+                .interactions
+                .front()
+                .is_some_and(|interaction| interaction.workflow.input_active()),
+            _ => false,
+        }
+    }
+
     pub fn accepts_text_paste(&self) -> bool {
         match self.focus_manager.active_mode() {
             AppMode::Chat => true,
@@ -191,10 +224,6 @@ impl AppState {
             .get(agent_instance_id)
             .map(|t| t.status);
         piko_protocol::AgentForeground::project(blocked, turn_status, Some(activity))
-    }
-
-    pub fn cwd(&self) -> PathBuf {
-        self.cwd.clone()
     }
 
     pub fn push_focus(&mut self, mode: AppMode) {

@@ -2,7 +2,8 @@ use ratatui::{
     layout::Position,
     text::{Line, Span},
 };
-use unicode_width::UnicodeWidthStr;
+
+use crate::terminal::text::TerminalTextPolicy;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextBox {
@@ -48,13 +49,14 @@ impl TextBox {
 
     /// Display width of the field content before the caret (mask-aware).
     pub fn width_before_cursor(&self) -> usize {
+        let policy = TerminalTextPolicy;
         if let Some(mask) = self.mask_char {
-            self.text[..self.cursor.min(self.text.len())]
-                .chars()
+            policy
+                .graphemes(&self.text[..self.cursor.min(self.text.len())])
                 .count()
-                * unicode_width::UnicodeWidthChar::width(mask).unwrap_or(1)
+                * policy.width(&mask.to_string()).max(1)
         } else {
-            UnicodeWidthStr::width(&self.text[..self.cursor.min(self.text.len())])
+            policy.width(&self.text[..self.cursor.min(self.text.len())])
         }
     }
 
@@ -80,14 +82,17 @@ impl TextBox {
 
     /// Move the caret to the nearest character boundary at a display column.
     pub fn move_to_column(&mut self, column: u16) {
+        let policy = TerminalTextPolicy;
         let target = usize::from(column);
         let mut width = 0usize;
         self.cursor = self.text.len();
-        for (byte, ch) in self.text.char_indices() {
+        for (byte, grapheme) in policy.grapheme_indices(&self.text) {
             let char_width = if self.mask_char.is_some() {
-                1
+                self.mask_char
+                    .map(|mask| policy.width(&mask.to_string()).max(1))
+                    .unwrap_or(1)
             } else {
-                unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+                policy.width(grapheme)
             };
             if width.saturating_add(char_width) > target {
                 self.cursor = byte;
@@ -98,19 +103,13 @@ impl TextBox {
     }
 
     pub fn backspace(&mut self) -> bool {
-        let Some(prev) = self.prev_char_boundary(self.cursor) else {
+        let policy = TerminalTextPolicy;
+        let Some(prev) = policy.previous_grapheme_boundary(&self.text, self.cursor) else {
             return false;
         };
         self.text.replace_range(prev..self.cursor, "");
         self.cursor = prev;
         true
-    }
-
-    fn prev_char_boundary(&self, cursor: usize) -> Option<usize> {
-        self.text[..cursor]
-            .char_indices()
-            .last()
-            .map(|(index, _)| index)
     }
 
     pub fn render_line(&self, theme: &crate::theme::Theme, focused: bool) -> Line<'static> {
@@ -127,19 +126,18 @@ impl TextBox {
             Line::from(spans)
         } else {
             let cursor = self.cursor;
+            let policy = TerminalTextPolicy;
 
             let display_text = if let Some(mask) = self.mask_char {
-                let char_count =
-                    self.text[..cursor].chars().count() + self.text[cursor..].chars().count();
-                mask.to_string().repeat(char_count)
+                mask.to_string()
+                    .repeat(policy.graphemes(&self.text).count())
             } else {
                 self.text.clone()
             };
 
             let cursor_byte_in_display = if let Some(mask) = self.mask_char {
-                // cursor_char_idx is a *char count*, convert to byte offset for display_text
-                let char_count_before = self.text[..cursor].chars().count();
-                char_count_before * mask.len_utf8()
+                let grapheme_count_before = policy.graphemes(&self.text[..cursor]).count();
+                grapheme_count_before * mask.len_utf8()
             } else {
                 cursor
             };

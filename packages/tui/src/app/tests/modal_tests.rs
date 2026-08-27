@@ -5,8 +5,8 @@ use crossterm::event::{KeyEventKind, KeyEventState};
 use crate::app::{AppMode, AppState, InitialOptions, SurfaceId, command::ToolInteractionAction};
 use crate::features::approval::PendingApproval;
 use crate::features::tool_interaction::ToolInteractionPanel;
+use crate::input::binding::BindingRegistry;
 use crate::input::focus::InputRouter;
-use crate::input::keymap::Keymap;
 use crate::navigation::FocusManagerExt;
 
 fn app() -> AppState {
@@ -68,7 +68,7 @@ fn f4_does_not_steal_focus_from_pending_decide() {
     app.session.id = Some("session-1".into());
     push_approval(&mut app);
 
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     let action = InputRouter::route_key(
         &app,
         &keymap,
@@ -93,7 +93,7 @@ fn approval_list_nav_enter_confirms_selected() {
     app.session.id = Some("session-1".into());
     push_approval(&mut app);
 
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     // Letter shortcuts are removed — plain 'a' does not accept session.
     let action = InputRouter::route_key(
         &app,
@@ -186,7 +186,7 @@ fn tool_interaction_arrows_move_choices_tab_moves_steps() {
         .workflow = workflow;
     app.push_surface(SurfaceId::ToolInteraction);
 
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     // Down moves to the next choice within the question.
     let action = InputRouter::route_key(
         &app,

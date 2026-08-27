@@ -86,6 +86,14 @@ fn paint_regions(
             version: env!("CARGO_PKG_VERSION"),
             cwd: &app.cwd,
             spinner_frame: app.spinner_frame,
+            submit_hint: crate::features::guidance_row::binding_hint(
+                app,
+                crate::input::command::CommandId::EditorSubmit,
+            ),
+            quit_hint: crate::features::guidance_row::binding_hint(
+                app,
+                crate::input::command::CommandId::AppQuit,
+            ),
         };
         if let Some(plan) = timeline_plan.take() {
             app.timeline()
@@ -269,29 +277,39 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
             render_panel(&app.agent_panel, frame, area, &view, interaction);
         }
         SurfaceId::Sessions => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = SessionListCtx {
                 active_session_id: app.session_id(),
                 theme: &app.theme,
+                tip: hints.tip.as_deref(),
+                hints: hints.footer.as_deref(),
             };
             render_panel(&app.sessions, frame, area, &ctx, interaction);
         }
         SurfaceId::Tree => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = TreeCtx {
                 filter: &app.tree.filter,
                 summary_prompt: None,
                 theme: &app.theme,
+                tip: hints.tip.as_deref(),
+                hints: hints.footer.as_deref(),
             };
             render_panel(&app.tree, frame, area, &ctx, interaction);
         }
         SurfaceId::SummaryPrompt => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = TreeCtx {
                 filter: &app.tree.filter,
                 summary_prompt: app.summary_prompt.as_ref(),
                 theme: &app.theme,
+                tip: hints.tip.as_deref(),
+                hints: hints.footer.as_deref(),
             };
             render_panel(&app.tree, frame, area, &ctx, interaction);
         }
         SurfaceId::Usage => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = UsageCtx {
                 rows: &app.agent_usage,
                 scroll: app.usage_scroll,
@@ -299,21 +317,36 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 viewed_agent_instance_id: app.agent_panel.active_agent_instance_id.as_deref(),
                 has_session: app.session_id().is_some(),
                 theme: &app.theme,
+                hints: hints.footer.as_deref(),
             };
             render_panel(&UsagePanel, frame, area, &ctx, interaction);
         }
         SurfaceId::Notifications => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = NotificationPanelCtx {
                 session_id: app.session_id(),
                 now: app.last_tick,
                 theme: &app.theme,
+                hints: hints.footer.as_deref(),
             };
             render_panel(&app.notifications, frame, area, &ctx, interaction);
         }
         SurfaceId::Diagnostics => {
-            render_panel(&app.diagnostics, frame, area, &app.theme, interaction)
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
+            let ctx = crate::features::diagnostics::DiagnosticsCtx {
+                theme: &app.theme,
+                hints: hints.footer.as_deref(),
+            };
+            render_panel(&app.diagnostics, frame, area, &ctx, interaction)
         }
-        SurfaceId::Settings => render_panel(&app.settings, frame, area, &app.theme, interaction),
+        SurfaceId::Settings => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
+            let ctx = crate::features::settings::SettingsCtx {
+                theme: &app.theme,
+                hints: hints.footer.as_deref(),
+            };
+            render_panel(&app.settings, frame, area, &ctx, interaction)
+        }
         SurfaceId::Models => {
             let ctx = ModelCtx {
                 active_model_id: app.model.active_model_id.as_deref(),

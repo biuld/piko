@@ -463,7 +463,7 @@ Landed in this pass:
   auto-resolving interactions never become a visible barrier, and
   `InteractionEvent::Resolved` pops focus instead of clearing it.
 - `piko-tui`: `InteractiveWorkflow` completion — ↑/↓ choose, Tab/Shift+Tab
-  steps, truthful help (approval uses a help override), Ctrl/Alt modifier
+  steps, truthful registry-derived Guidance, Ctrl/Alt modifier
   checks on approval letters, submit/cancel input lock, opaque backdrop
   (`Clear` + theme background), and `component_regions` exposing tabs /
   choices / submit as hit data.

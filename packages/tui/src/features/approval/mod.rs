@@ -126,12 +126,7 @@ impl ApprovalPanel {
             ],
         );
         question.selected_idx = approval.selected_idx.min(Self::CHOICE_COUNT - 1);
-        Some(
-            ChoiceWorkflow::new(vec![question], false).with_help(format!(
-                "↑↓ select · Enter confirm · Esc decline · tool {}",
-                approval.tool_name,
-            )),
-        )
+        Some(ChoiceWorkflow::new(vec![question], false))
     }
 
     /// Render the approval dock if there is a pending request.

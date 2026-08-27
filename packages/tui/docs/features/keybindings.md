@@ -1,163 +1,326 @@
-# Keybindings System
+# Keybindings and Command Routing
+
+> Status: implemented
+>
+> Related: [Terminal Capabilities](./terminal-capabilities.md)
 
 ## Overview
 
-The Keybindings System is the central hub for keyboard shortcut definition, custom configuration, and event routing within the piko terminal user interface. It ensures that standard keypresses map consistently to actions (like navigating, submitting prompts, opening overlay panels, and approving actions) while allowing full customization via user-defined configuration files.
+The keybinding system maps normalized terminal input to stable TUI commands
+through an ordered stack of active scopes. A command has one product meaning;
+bindings decide which reachable keystrokes invoke it in a given context.
+Focused components translate shared interaction commands such as confirm,
+cancel, and selection movement into root application actions.
 
-## Input Routing & Context Scoping
+Terminal decoding and key reachability belong to Terminal Capabilities.
+Keybinding resolution never receives raw Crossterm events and never branches on
+a terminal brand or operating system.
 
-At terminal startup, piko negotiates crossterm keyboard enhancement when the
-terminal supports it. This preserves the Shift modifier on Enter so
-`Shift+Enter` remains distinct from the submit key. Unsupported terminals may
-not be able to distinguish those physical keypresses. The negotiation requests
-enhanced encoding for all keys in addition to disambiguating modified keys;
-this is required for reliable modified functional keys in terminals such as
-Ghostty.
+## Problem
 
-Keyboard events flow through a three-priority sequence to handle both global shortcuts and context-sensitive local keys:
+The current implementation has four overlapping sources of keyboard behavior:
 
-1. **Priority 1: Global Shortcuts (Esc/Enter)**
-   - Certain universal keys are intercepted first. E.g., `Esc` closes active overlays or cancels the running turn, while `Enter` accepts autocomplete suggestions if they are open.
-2. **Priority 2: Focus Owner (Mode-Specific Routing)**
-   - The active panel/mode (such as the Session Tree, Model Selector, or Approval Panel) gets the opportunity to process the key first.
-   - **Context-Scoped Routing**: Keys mapped for a specific overlay (e.g., `ctrl+a` or `ctrl+d` for Approvals) are *only* active when that specific overlay has focus. When the overlay is closed, these keys fall back to their normal global or editor behaviors (e.g., `ctrl+a` goes to line start in the editor).
-3. **Priority 3: Editor Fallback**
-   - If no overlay panel consumes the key, the key event is routed to the Editor for text composition, history browsing, or cursor movement.
+1. `KeyAction` variants;
+2. string action IDs in `action_from_id`;
+3. raw `KeyCode` and modifier checks in `InputRouter`;
+4. feature-specific key behavior embedded in surface branches.
 
-## Default Keybindings Map
+This creates observable defects:
 
-Below is the organized list of all default keyboard shortcuts in piko, aligned with `pi-mono`.
+- the same key is registered repeatedly and then reinterpreted by router state;
+- documented actions and executable actions drift;
+- configuration adds or overwrites a chord but cannot reliably remove a
+  default binding;
+- one command cannot have several explicit context-scoped bindings in the
+  current JSON object shape;
+- malformed entries, unknown command IDs, and collisions are silently ignored
+  or overwritten;
+- guidance cannot ask one authority which binding is effective now;
+- raw key checks bypass configuration and terminal capability fallbacks;
+- `Shift+Enter`, `Ctrl+Enter`, and other modified keys may be advertised even
+  when the active terminal path cannot distinguish them.
 
-### 1. Editor Navigation & Editing
-These keys are active when the Editor is focused and not blocked by active overlays:
+## User journeys
 
-| Keybinding ID | Default Key(s) | Description |
+1. A user presses `Enter` in Chat and submits, then presses the same key in a
+   selector and confirms the selected item. The active scope, not a raw-key
+   special case, selects the command.
+2. Suggestions appear above the composer. Their transient scope handles
+   navigation and acceptance before the Editor scope without mutating the
+   underlying keymap.
+3. A baseline-capability terminal cannot reliably report `Shift+Enter`. Its
+   fallback rule selects `Ctrl+J`, so newline still has exactly one active key.
+4. A user changes one binding in project settings. The host applies the normal
+   settings precedence, the TUI recompiles the effective rules, and unrelated
+   defaults remain intact.
+5. A user disables a default binding. A stable rule ID removes that rule rather
+   than assigning the chord to a dummy action.
+6. Two custom rules collide in the same active scope. The TUI reports the exact
+   rule IDs and chord instead of selecting one based on map iteration order.
+7. A user asks which command a chord invoked. Diagnostics show normalized
+   input, active scopes, candidates, rejected conditions, and the winning rule.
+
+## Concepts
+
+### Command
+
+A command is a stable, user-facing semantic operation such as
+`editor.newline`, `ui.cancel`, `selection.next`, or `session.tree.open`.
+Commands are declared once in a command catalog with:
+
+- stable ID;
+- title and description;
+- allowed scopes;
+- repeat policy;
+- enablement predicate;
+- optional terminal capability requirement;
+- dispatch adapter to an existing root `Action`.
+
+Only commands in the catalog may be configured or advertised. A command that
+has no complete implementation is not registered.
+
+### Binding rule
+
+A binding rule connects one normalized keystroke to one command in one scope.
+It may further narrow activation with closed context conditions.
+
+```text
+key + scope + conditions → command
+```
+
+Binding rules do not contain application mutation logic.
+
+### Scope
+
+Scopes form an ordered runtime stack:
+
+```text
+transient owner     suggestion / approval / tool interaction
+focused component  tree / selector / notification list / text field
+workspace owner    editor / timeline
+application        true global commands
+```
+
+Resolution checks the most specific active scope first. An unhandled key may
+continue to the parent scope only when the scope explicitly allows propagation.
+A blocking surface never leaks input to the workspace.
+
+### Context
+
+Context is an immutable snapshot for one input event. It contains closed,
+typed facts such as:
+
+- active focus and transient owner;
+- whether a text sink accepts text;
+- suggestion visibility;
+- running-turn state;
+- editor empty, multiline, and history-browse state;
+- command availability;
+- effective terminal keyboard profile.
+
+User rules may require context atoms or their negation. Conditions narrow a
+command's catalog scope; they cannot broaden it.
+
+## Resolution contract
+
+For each key event:
+
+1. Terminal Capabilities normalizes the backend event into a canonical
+   keystroke and event kind.
+2. Release events are ignored. Repeat events remain eligible only for commands
+   whose catalog entry allows repeat.
+3. The TUI captures one binding context and ordered scope stack.
+4. The resolver checks rules in the first active scope containing a matching,
+   enabled, reachable command.
+5. One match dispatches its command.
+6. Multiple matches at the same precedence are a conflict: no command runs and
+   diagnostics identify every candidate.
+7. If two active rules invoke the same command in the same context, that is
+   also a conflict: one behavior never has two simultaneously active keys.
+8. If no command matches and the scope declares a text sink, printable text is
+   delivered to that sink.
+9. Otherwise the key is consumed or propagated according to the scope policy.
+
+Resolution is deterministic and independent of hash-map or file iteration
+order.
+
+## Shared interaction commands
+
+The following commands express consistent interaction semantics and are
+interpreted by the active focus owner:
+
+| Command | Meaning |
+|---|---|
+| `ui.cancel` | Cancel or close the current interaction layer |
+| `ui.confirm` | Confirm the focused choice or workflow step |
+| `selection.previous` | Move to the previous visible choice |
+| `selection.next` | Move to the next visible choice |
+| `selection.pagePrevious` | Move or scroll one page backward |
+| `selection.pageNext` | Move or scroll one page forward |
+| `text.deleteBackward` | Delete from the active text sink |
+| `completion.accept` | Accept the selected completion |
+
+Feature-specific commands remain specific. For example, approval decline,
+queue follow-up, and tree folding are not aliases for unrelated editor actions.
+
+## Default policy
+
+Defaults favor chords that remain stable through common terminal and
+multiplexer paths. Capability-dependent rules are mutually exclusive: they
+select one effective key instead of adding aliases for different commands.
+
+### Application and workspace
+
+| Scope | Key | Command |
 |---|---|---|
-| `tui.editor.cursorLeft` | `left`, `ctrl+b` | Move cursor left one character |
-| `tui.editor.cursorRight` | `right`, `ctrl+f` | Move cursor right one character |
-| `tui.editor.cursorWordLeft` | `alt+left`, `ctrl+left`, `alt+b` | Move cursor left one word |
-| `tui.editor.cursorWordRight` | `alt+right`, `ctrl+right`, `alt+f` | Move cursor right one word |
-| `tui.editor.cursorLineStart` | `home`, `ctrl+a` | Move cursor to the start of the line |
-| `tui.editor.cursorLineEnd` | `end`, `ctrl+e` | Move cursor to the end of the line (Ctrl+E walks history forward while a history browse is active) |
-| `tui.editor.pageUp` | `pageup` | Scroll up one page |
-| `tui.editor.pageDown` | `pagedown` | Scroll down one page |
-| `tui.editor.deleteCharBackward` | `backspace` | Delete the character backward |
-| `tui.editor.deleteCharForward` | `delete`, `ctrl+d` | Delete the character forward |
-| `tui.editor.deleteWordBackward` | `ctrl+w`, `alt+backspace` | Delete the word backward |
-| `tui.editor.deleteWordForward` | `alt+d`, `alt+delete` | Delete the word forward |
-| `tui.editor.deleteToLineStart` | `ctrl+u` | Delete text from cursor to start of line |
-| `tui.editor.deleteToLineEnd` | `ctrl+k` | Delete text from cursor to end of line |
-| `tui.input.newLine` | `shift+enter` | Insert a newline into the prompt (requires a terminal that can report modified Enter) |
-| `tui.input.submit` | `enter` | Submit the prompt to the LLM |
-| `tui.input.tab` | `tab` | Complete the selected suggestion |
+| Application | `Ctrl+Q` | `app.quit` |
+| Workspace | `F2` | `session.tree.open` |
+| Workspace | `F3` | `model.selector.open` |
+| Workspace | `F4` | `agent.selector.open` |
+| Workspace | `F8` | `notification.dismissVisible` |
+| Timeline | `PageUp` | `timeline.pageUp` |
+| Timeline | `PageDown` | `timeline.pageDown` |
 
-### 2. Selection & Navigation (List Overlays)
-These keys are active within selectable lists (e.g., Model Selector and Session List):
+Application commands that open a surface are disabled while a blocking owner
+has authority. They are not implemented as an extra pre-routing priority.
 
-| Keybinding ID | Default Key(s) | Description |
+### Editor
+
+| Key | Command | Condition |
 |---|---|---|
-| `tui.select.up` | `up` | Move selection highlight up |
-| `tui.select.down` | `down` | Move selection highlight down |
-| `tui.select.pageUp` | `pageup` | Move selection highlight up one page |
-| `tui.select.pageDown` | `pagedown` | Move selection highlight down one page |
-| `tui.select.confirm` | `enter` | Confirm the highlighted option |
-| `tui.select.cancel` | `escape`, `ctrl+c` | Close the selection list without choosing |
+| `Enter` | `editor.submit` | editor focused |
+| `Shift+Enter` | `editor.newline` | multiline and enhanced keyboard active |
+| `Ctrl+J` | `editor.newline` | multiline and enhanced keyboard inactive |
+| `Ctrl+P` | `editor.history.previous` | suggestions hidden |
+| `Ctrl+N` | `editor.history.next` | history browse active |
+| `Esc` | `ui.cancel` | suggestions visible |
+| `Esc` | `turn.interrupt` | turn running and suggestions hidden |
+| `Esc` | `workspace.idleEscape` | editor empty, idle, and suggestions hidden |
+| `Ctrl+C` | `turn.interrupt` | turn running |
+| `Ctrl+C` | `editor.clear` | no turn running |
+| `Tab` | `completion.accept` | suggestions visible |
+| `Shift+Tab` | `selection.previous` | suggestions visible |
 
-### 3. Application Actions & Overlays
-Global or editor-level shortcuts that open overlays, manage sessions, or interrupt/exit the program:
+`Ctrl+E` always means line end in the editor; it is not conditionally changed
+into history navigation. Plain `Enter` while a turn is running follows the
+authoritative message-queue behavior, so a duplicate explicit steer binding is
+not required by default. Capability-dependent queue shortcuts may remain as
+additional commands when their chord is reachable.
 
-| Keybinding ID | Default Key(s) | Description |
-|---|---|---|
-| `app.interrupt` | `escape` | Cancel/abort the current model streaming or task |
-| `app.clear` | `ctrl+c` | Clear the editor contents |
-| `app.exit` | `ctrl+q` | Exit the piko TUI application |
-| `app.thinking.cycle` | `shift+tab` | Cycle through reasoning/thinking levels |
-| `app.model.cycleForward` | `ctrl+p` | Cycle forward to the next model in active list |
-| `app.model.cycleBackward` | `shift+ctrl+p` | Cycle backward to the previous model in active list |
-| `app.model.select` | `ctrl+l` (or `f3`) | Open the model selector overlay |
-| `app.thinking.toggle` | `ctrl+t` | Toggle visibility of thinking/reasoning blocks |
-| `app.session.toggleNamedFilter` | `ctrl+n` | Cycle through named session filters in Session list |
-| `app.message.followUp` | `alt+enter` | Queue a follow-up (`ChatSubmit` / FollowUp) |
-| `app.message.steer` | `ctrl+enter` | Steer the running turn only; fail if idle |
-| `app.message.dequeue` | `alt+up` | Restore the last follow-up this TUI queued |
-| `app.clipboard.pasteImage` | `ctrl+v` (`alt+v` on Windows) | Paste an image from the clipboard |
-| `app.session.new` | *None* | Start a new chat session |
-| `app.session.tree` | `f2` (or *None*) | Open the session list/tree view |
-| `app.session.fork` | *None* | Fork the current session from the selected point |
-| `app.session.resume` | *None* | Resume a selected session |
-| `app.notifications.clear` | `f8` | Dismiss the currently visible notice |
+### Selection and workflows
 
-### 4. Tree-Panel Navigation
-These keys are active when the Session Tree panel is focused:
+| Key | Command |
+|---|---|
+| `Up` | `selection.previous` |
+| `Down` | `selection.next` |
+| `PageUp` | `selection.previousPage` |
+| `PageDown` | `selection.nextPage` |
+| `Enter` | confirm |
+| `Esc` | cancel; Approval binds its explicit decline command |
 
-| Keybinding ID | Default Key(s) | Description |
-|---|---|---|
-| `app.tree.foldOrUp` | `ctrl+left`, `alt+left` | Fold tree branch or move to parent node |
-| `app.tree.unfoldOrDown` | `ctrl+right`, `alt+right` | Unfold tree branch or move down to child |
-| `app.tree.editLabel` | `shift+l` | Edit the label of the highlighted session node |
-| `app.tree.toggleLabelTimestamp` | `shift+t` | Toggle displaying timestamps next to tree node labels |
-| `app.session.togglePath` | `ctrl+p` | Toggle displaying directory path next to session labels |
-| `app.session.toggleSort` | `ctrl+s` | Toggle sorting sessions by timestamp vs name |
-| `app.session.rename` | `ctrl+r` | Rename the highlighted session |
-| `app.session.delete` | `ctrl+d` | Delete the highlighted session |
-| `app.session.deleteNoninvasive` | `ctrl+backspace` | Delete the highlighted session (only if query is empty) |
-| `app.tree.filter.default` | `ctrl+d` | Reset session tree filter to default view |
-| `app.tree.filter.noTools` | `ctrl+t` | Filter tree to hide tool result nodes |
-| `app.tree.filter.userOnly` | `ctrl+u` | Filter tree to show user-authored messages only |
-| `app.tree.filter.labeledOnly` | `ctrl+l` | Filter tree to show only labeled session nodes |
-| `app.tree.filter.all` | `ctrl+a` | Disable all filters and show all tree nodes |
-| `app.tree.filter.cycleForward` | `ctrl+o` | Cycle forward through tree filter modes |
-| `app.tree.filter.cycleBackward` | `shift+ctrl+o` | Cycle backward through tree filter modes |
+Tree, approval, tool interaction, and notification operations add commands in
+their own scopes. They do not hard-code raw terminal keys in the root router.
 
-### 5. Model Selector Panel Actions
-These keys are active when the Model Selector overlay panel is open:
+## Text input
 
-| Keybinding ID | Default Key(s) | Description |
-|---|---|---|
-| `app.models.save` | `ctrl+s` | Save the current model configuration |
-| `app.models.enableAll` | `ctrl+a` | Enable all available models |
-| `app.models.clearAll` | `ctrl+x` | Disable/deselect all models |
-| `app.models.toggleProvider` | `ctrl+p` | Toggle all models for the selected provider |
-| `app.models.reorderUp` | `alt+up` | Move highlighted model up in priority order |
-| `app.models.reorderDown` | `alt+down` | Move highlighted model down in priority order |
+Printable text is not represented as a command per character. After binding
+resolution, the active scope's declared text sink receives normalized text.
+This covers the composer, filters, labels, and workflow fields without letting
+text leak through a modal barrier.
 
-### 6. Approval Mode Panel Actions
-These keys are active when the Approval Panel is shown:
-
-| Keybinding ID | Default Key(s) | Description |
-|---|---|---|
-| `app.approval.accept` | `enter` | Accept the pending tool/command execution |
-| `app.approval.acceptSession` | `a` | Accept execution for the remainder of this session |
-| `app.approval.acceptWorkspace` | `w` | Accept execution for all sessions in this workspace |
-| `app.approval.acceptPermanent` | `p` | Permanently trust/accept this tool/command |
-| `app.approval.decline` | `escape`, `ctrl+d` | Decline/reject the pending execution |
-
----
+IME and keyboard-layout-produced text must be preserved. Terminal enhancement
+flags that replace text with key identities are not enabled unless the backend
+also preserves the associated text required by piko.
 
 ## Configuration
 
-Custom keybindings can be defined globally and per-project using a JSON file:
+Bindings move into host-owned settings. The TUI does not read global or project
+keybinding files directly.
 
-- **Global Config**: `~/.piko/keybindings.json`
-- **Project Config**: `<working-dir>/.piko/keybindings.json`
+```toml
+[tui.keybindings.rules.default-editor-newline-fallback]
+key = "ctrl+j"
+command = "editor.newline"
+scope = "editor"
+when = ["editor.multiline"]
 
-### JSON Structure
-
-Users define customization by specifying bindings mapped to `KeyId` strings (e.g., `"ctrl+c"`, `"escape"`, `"shift+enter"`):
-
-```json
-{
-  "bindings": {
-    "app.exit": "ctrl+q",
-    "app.clear": "ctrl+c",
-    "tui.input.newLine": "shift+enter",
-    "tui.editor.cursorLineStart": ["home", "ctrl+a"]
-  }
-}
+[tui.keybindings.rules.default-editor-history-previous]
+enabled = false
 ```
+
+Rules are keyed by stable rule ID so normal global/project settings merging can
+override or disable one rule without replacing the whole registry. Multiple
+rules for one command are valid, including explicit input aliases. Capability-
+dependent rules are mutually exclusive, as with enhanced/fallback newline.
+Conditions within one rule are AND. Guidance chooses one canonical key while
+input resolution retains configured aliases.
+
+The host owns persistence and layer merging. The TUI owns semantic compilation
+against its command, scope, context, and terminal-capability catalogs. On an
+invalid update, the TUI keeps the last valid compiled registry and surfaces a
+diagnostic.
+
+The existing `~/.piko/keybindings.json` and `.piko/keybindings.json` paths are
+outside this contract. They are not read, detected, migrated, or used for
+startup diagnostics. They may be removed; host-owned `[tui.keybindings]` is
+the sole custom binding authority.
+
+## Guidance and discovery
+
+- All displayed shortcut hints are queried from the effective binding registry.
+- A hint includes only bindings active in the current context and reachable
+  through the current terminal profile.
+- Diagnostics can list commands with no reachable binding.
+- Conflict diagnostics include normalized chord, active scope, conditions,
+  source rule IDs, and resolution result.
+- A future binding browser may search the same command catalog; it must not
+  maintain a second list.
+
+## Acceptance criteria
+
+- [x] `KeyAction` and `action_from_id` are replaced by one command catalog.
+- [x] Production focus routing contains no raw `KeyCode` or modifier matching.
+- [x] One scope-stack resolver handles application, workspace, surface,
+     transient, and text-sink input.
+- [x] Blocking focus owners cannot propagate keys or text to the editor.
+- [x] Default rules have stable IDs and deterministic precedence.
+- [x] For every reachable context, key-to-command resolution is unique;
+     command-to-key guidance chooses one deterministic canonical key.
+- [x] User rules can add, override, and disable bindings without dummy actions.
+- [x] Unknown commands, invalid scopes, malformed conditions, unreachable
+     chords, and same-precedence conflicts produce visible diagnostics.
+- [x] Every registered command has an executable dispatch path and every
+     advertised hint comes from an active binding rule.
+- [x] `Enter` and newline remain distinct in enhanced and baseline profiles.
+- [x] `Ctrl+J` inserts newline in the baseline profile.
+- [x] Text input, including composed Unicode, bypasses neither modal authority
+     nor capability normalization.
+- [x] Repeat policy prevents repeated destructive or lifecycle commands.
+- [x] Host-owned global/project settings are the sole custom binding authority.
+- [x] Capability and context matrix tests cover every default-rule collision.
+- [x] PTY tests verify the effective bindings seen through enhanced and baseline
+     terminal input paths.
+- [x] `cargo test -p piko-tui` and workspace clippy pass.
 
 ## Non-goals
 
-- An interactive, in-app keyboard shortcut re-binder.
-- Defining multi-key chord sequences (e.g., `ctrl+k ctrl+c`).
-- Overriding system-level mouse scrolling or selection behaviors.
+- Terminal-brand-specific default keymaps.
+- Vim/Emacs modal editing presets in the initial implementation.
+- Arbitrary scripts or macros as binding commands.
+- Multi-stroke chord sequences in the initial implementation.
+- OS-global shortcuts.
+- Allowing user rules to bypass blocking focus or command safety conditions.
+
+## Product decisions
+
+| Question | Decision | Rationale |
+|---|---|---|
+| Registry direction | Key + active scope → command | The same key legitimately means different things in different focus owners |
+| Command identity | Stable catalog ID | Config, dispatch, hints, and diagnostics share one authority |
+| Context language | Closed atoms with negation | Contextual power without arbitrary runtime expressions |
+| Collision behavior | Reject ambiguity | Silent last-write wins is not debuggable |
+| Active aliases | Allowed for one command; guidance chooses a canonical key | Input may retain explicit aliases without duplicating discoverability |
+| Text input | Declared text-sink fallback | Printable text is data, not thousands of commands |
+| Customization authority | hostd settings | Preserves the host-authoritative configuration model |
+| Fallback newline | `Ctrl+J` | Distinct from carriage-return Enter in Crossterm raw mode |
+| Old JSON | Clean break; ignored and undetected | Host-owned settings are the sole custom binding authority |

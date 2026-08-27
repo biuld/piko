@@ -30,12 +30,13 @@ pub struct UsageCtx<'a> {
     pub viewed_agent_instance_id: Option<&'a str>,
     pub has_session: bool,
     pub theme: &'a Theme,
+    pub hints: Option<&'a str>,
 }
 
 impl Component<HitId, UsageCtx<'_>> for UsagePanel {
     fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &UsageCtx<'_>) {
         let spec = PaneSpec::new("usage")
-            .hints("↑/↓ scroll · Esc close")
+            .hints(ctx.hints.unwrap_or_default())
             .focused(true);
         let Some(areas) = render_pane(frame, area, &spec, ctx.theme) else {
             return;

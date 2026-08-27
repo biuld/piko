@@ -15,7 +15,7 @@ fn app() -> AppState {
 #[test]
 fn plain_j_reaches_editor_as_text() {
     let app = app();
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     let action = InputRouter::route_key(
         &app,
         &keymap,
@@ -44,8 +44,16 @@ fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
 
 #[test]
 fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
-    let app = app();
-    let keymap = Keymap::default();
+    let mut app = app();
+    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
+    app.session.active_turns.insert(
+        "agent-1".into(),
+        crate::app::ActiveTurnUi {
+            turn_id: "turn-1".into(),
+            status: piko_protocol::TurnStatus::Running,
+        },
+    );
+    let keymap = BindingRegistry::default();
 
     assert!(matches!(
         InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::ALT)),
@@ -64,7 +72,7 @@ fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
 #[test]
 fn shift_enter_inserts_a_newline() {
     let app = app();
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
 
     let action = InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::SHIFT));
 
@@ -78,7 +86,7 @@ fn shift_enter_inserts_a_newline() {
 fn shift_enter_is_disabled_when_multiline_is_off() {
     let mut app = app();
     app.tui_config.editor.multiline = false;
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
 
     assert!(
         InputRouter::route_key(&app, &keymap, key(KeyCode::Enter, KeyModifiers::SHIFT),).is_none()
@@ -88,7 +96,7 @@ fn shift_enter_is_disabled_when_multiline_is_off() {
 #[test]
 fn ctrl_j_has_no_default_binding() {
     let app = app();
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
 
     assert!(
         InputRouter::route_key(
@@ -104,7 +112,7 @@ fn ctrl_j_has_no_default_binding() {
 fn ctrl_a_moves_cursor_to_line_start() {
     let mut app = app();
     app.editor.restore_text("hello");
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
 
     let action = InputRouter::route_key(
         &app,
@@ -122,7 +130,7 @@ fn ctrl_a_moves_cursor_to_line_start() {
 fn ctrl_e_moves_cursor_to_line_end_when_not_browsing_history() {
     let mut app = app();
     app.editor.restore_text("hello");
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
 
     let action = InputRouter::route_key(
         &app,
@@ -137,7 +145,7 @@ fn ctrl_e_moves_cursor_to_line_end_when_not_browsing_history() {
 }
 
 #[test]
-fn ctrl_e_continues_history_browse_when_active() {
+fn ctrl_e_remains_line_end_while_history_browse_is_active() {
     let mut app = app();
     // Submit "hello" so it lands in history, then start browsing with Ctrl+P.
     app.editor.restore_text("hello");
@@ -146,7 +154,7 @@ fn ctrl_e_continues_history_browse_when_active() {
     app.dispatch(crate::app::command::EditorAction::HistoryPrev.into());
     assert!(app.editor.is_browsing_history());
 
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     let action = InputRouter::route_key(
         &app,
         &keymap,
@@ -155,7 +163,7 @@ fn ctrl_e_continues_history_browse_when_active() {
 
     assert!(matches!(
         action,
-        Some(Action::Editor(EditorAction::HistoryNext))
+        Some(Action::Editor(EditorAction::CursorLineEnd))
     ));
 }
 
@@ -164,7 +172,7 @@ fn notification_panel_routes_selection_and_copy_keys() {
     let mut app = app();
     app.notifications.open_modal();
     app.push_surface(crate::app::SurfaceId::Notifications);
-    let keymap = Keymap::default();
+    let keymap = BindingRegistry::default();
     let event = |code| KeyEvent {
         code,
         modifiers: KeyModifiers::NONE,

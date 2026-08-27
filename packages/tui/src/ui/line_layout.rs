@@ -18,8 +18,7 @@ use ratatui::{
 };
 
 pub use super::line_wrap::{prefixed_wrap, wrap_spans};
-
-use unicode_segmentation::UnicodeSegmentation;
+use crate::terminal::text::{TerminalTextPolicy, display_width};
 
 // ── Column measurement ───────────────────────────────────────────────────────
 //
@@ -27,9 +26,9 @@ use unicode_segmentation::UnicodeSegmentation;
 // crate's default for Ambiguous/Neutral). No locale-specific “non-ASCII ≥ 2”
 // override — that was over-conservative and wrong for many symbols.
 
-/// Display width via [`unicode_width::UnicodeWidthStr`].
+/// Display width through the shared terminal text policy.
 pub fn paint_cols(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
+    display_width(text)
 }
 
 /// Take a prefix of `text` that fits in `max_cols` columns.
@@ -37,62 +36,22 @@ pub fn paint_cols(text: &str) -> usize {
 ///
 /// Splits on grapheme-cluster boundaries so a multi-codepoint glyph (emoji
 /// ZWJ sequences, flags, family emoji) is never cut in half; each grapheme's
-/// width comes from the cluster-aware [`unicode_width::UnicodeWidthStr`].
+/// width comes from the shared cluster-aware terminal policy.
 pub fn take_prefix_cols(text: &str, max_cols: usize) -> (String, &str) {
-    let mut cols = 0usize;
-    let mut end = 0usize;
-    for grapheme in text.graphemes(true) {
-        let w = unicode_width::UnicodeWidthStr::width(grapheme);
-        if cols.saturating_add(w) > max_cols {
-            break;
-        }
-        cols += w;
-        end += grapheme.len();
-    }
-    (text[..end].to_string(), &text[end..])
+    let policy = TerminalTextPolicy;
+    let (prefix, _) = policy.prefix(text, max_cols);
+    (prefix.to_string(), &text[prefix.len()..])
 }
 
 /// Soft-wrap `text` to at most `max_cols` columns per line.
 /// Hard newlines are preserved; empty hard lines yield empty rows.
 pub fn soft_wrap(text: &str, max_cols: usize) -> Vec<String> {
-    use unicode_width::UnicodeWidthStr;
-
-    let max_cols = max_cols.max(1);
-    let mut out = Vec::new();
-    for hard in text.split('\n') {
-        if hard.is_empty() {
-            out.push(String::new());
-            continue;
-        }
-        let mut line = String::new();
-        let mut cols = 0usize;
-        for grapheme in hard.graphemes(true) {
-            let w = UnicodeWidthStr::width(grapheme);
-            // A wide glyph that does not fit the current row starts a new row
-            // instead of overflowing it; a lone glyph wider than the budget is
-            // placed on its own row rather than dropped.
-            if cols > 0 && cols.saturating_add(w) > max_cols {
-                out.push(std::mem::take(&mut line));
-                cols = 0;
-            }
-            line.push_str(grapheme);
-            cols += w;
-        }
-        out.push(line);
-    }
-    out
+    TerminalTextPolicy.soft_wrap(text, max_cols)
 }
 
 /// Truncate to columns (no ellipsis).
 pub fn truncate_paint_cols(text: &str, max_cols: usize) -> String {
-    if max_cols == 0 {
-        return String::new();
-    }
-    if paint_cols(text) <= max_cols {
-        return text.to_string();
-    }
-    let (chunk, _) = take_prefix_cols(text, max_cols);
-    chunk
+    TerminalTextPolicy.truncate(text, max_cols)
 }
 
 /// Truncate to columns, suffixing ASCII `...` when clipped.
@@ -117,8 +76,7 @@ pub fn truncate_cols(text: &str, max_cols: usize) -> String {
 
 /// Fill a single style run to exact `width` paint columns (clip then pad).
 pub fn filled_line(text: impl Into<String>, style: Style, width: u16) -> Line<'static> {
-    use unicode_width::UnicodeWidthStr;
-
+    let policy = TerminalTextPolicy;
     let target = usize::from(width);
     if target == 0 {
         return Line::from(Span::styled(String::new(), style));
@@ -127,8 +85,8 @@ pub fn filled_line(text: impl Into<String>, style: Style, width: u16) -> Line<'s
     let raw = text.into();
     let mut out = String::with_capacity(raw.len().saturating_add(target));
     let mut cols = 0usize;
-    for grapheme in raw.graphemes(true) {
-        let w = UnicodeWidthStr::width(grapheme);
+    for grapheme in policy.graphemes(&raw) {
+        let w = policy.width(grapheme);
         if cols.saturating_add(w) > target {
             break;
         }

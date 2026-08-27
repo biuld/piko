@@ -15,9 +15,8 @@ use crate::{
     navigation::SurfaceId,
     theme::Theme,
     ui::components::{
-        feedback::{settings_apply_hints, settings_open_hints},
         menu::{MenuConfirmResult, MenuRowLayout, MenuStack},
-        pane::{PaneAffixHit, PaneMode, PaneSpec, PaneTitleAffix},
+        pane::{PaneAffixHit, PaneFooter, PaneMode, PaneSpec, PaneTitleAffix},
         selectable_list::{
             SelectableItem, paint_row_hover, render_selectable_list_with_pane,
             selectable_row_regions,
@@ -26,28 +25,39 @@ use crate::{
     ui::interaction::{ComponentHit, PointerComponent, PointerGesture, paint_element_hover},
 };
 
-impl Component<HitId, Theme> for SettingsPanel {
-    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &Theme) {
-        self.render(frame, area, ctx);
+pub struct SettingsCtx<'a> {
+    pub theme: &'a Theme,
+    pub hints: Option<&'a str>,
+}
+
+impl Component<HitId, SettingsCtx<'_>> for SettingsPanel {
+    fn render(&self, frame: &mut Frame<'_>, area: Rect, ctx: &SettingsCtx<'_>) {
+        self.render(frame, area, ctx.theme, ctx.hints);
     }
 
     fn render_with_state(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        ctx: &Theme,
+        ctx: &SettingsCtx<'_>,
         interaction: InteractionState<HitId>,
     ) {
-        self.render(frame, area, ctx);
+        self.render(frame, area, ctx.theme, ctx.hints);
         let regions = self.row_regions(area);
         paint_row_hover(
             frame,
             &regions,
             interaction,
             self.stack.selected_index(),
-            ctx,
+            ctx.theme,
         );
-        paint_element_hover(frame, &self.close_region(area), interaction, None, ctx);
+        paint_element_hover(
+            frame,
+            &self.close_region(area),
+            interaction,
+            None,
+            ctx.theme,
+        );
     }
 
     fn component_regions(&self, area: Rect) -> Vec<(Rect, HitId)> {
@@ -86,7 +96,7 @@ impl PointerComponent<HitId> for SettingsPanel {
     }
 }
 
-impl SurfacePanel<SurfaceId, HitId, Theme> for SettingsPanel {
+impl SurfacePanel<SurfaceId, HitId, SettingsCtx<'_>> for SettingsPanel {
     fn region(&self) -> SurfaceId {
         SurfaceId::Settings
     }
@@ -122,15 +132,13 @@ impl SettingsPanel {
         };
         let at_root = self.stack.at_root();
         let title = if at_root { "Settings" } else { &current.title };
-        let hints = match current.layout {
-            MenuRowLayout::SettingsOption => settings_apply_hints(),
-            _ => settings_open_hints(at_root),
-        };
         let mut spec = PaneSpec::new(title)
             .mode(PaneMode::Standard)
             .search_filter(&self.filter)
             .search_rule(true)
-            .hints(hints)
+            // Hit testing only needs the one-row footer budget. Render text
+            // is supplied by the binding-derived context.
+            .footer(PaneFooter::Reserved { height: 1 })
             .focused(true);
         if at_root {
             spec = spec.affix(PaneTitleAffix::Close);
@@ -177,7 +185,7 @@ impl SettingsPanel {
         self.stack.confirm(&mut self.filter)
     }
 
-    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    pub fn render(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme, hints: Option<&str>) {
         let Some(current) = self.stack.current() else {
             return;
         };
@@ -189,17 +197,16 @@ impl SettingsPanel {
             .iter()
             .map(|row| row.to_item(current.layout))
             .collect();
-        let hints = match current.layout {
-            MenuRowLayout::SettingsOption => settings_apply_hints(),
-            _ => settings_open_hints(at_root),
-        };
-
         let mut spec = PaneSpec::new(title)
             .mode(PaneMode::Standard)
             .search_filter(&self.filter)
             .search_rule(true)
-            .hints(hints)
             .focused(true);
+        if let Some(hints) = hints.filter(|value| !value.is_empty()) {
+            spec = spec.hints(hints);
+        } else {
+            spec = spec.footer(PaneFooter::Reserved { height: 1 });
+        }
         if at_root {
             spec = spec.affix(PaneTitleAffix::Close);
         }

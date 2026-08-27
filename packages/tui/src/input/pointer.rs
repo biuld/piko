@@ -5,7 +5,8 @@
 //! to the same actions the keyboard router produces; wheel scrolls the
 //! stream; composer clicks place the text cursor; hover is tracked.
 
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+#[cfg(test)]
+use crossterm::event::MouseEvent;
 #[cfg(test)]
 use ratatui::layout::Rect;
 
@@ -16,6 +17,7 @@ use crate::app::{
 use crate::features::timeline::WHEEL_STEP;
 use crate::layout::PreparedFrame;
 use crate::navigation::Region;
+use crate::terminal::{PointerEvent, PointerKind};
 use crate::ui::interaction::{ComponentHit, PointerGesture};
 
 /// Route one mouse event to keyboard-equivalent actions and immediately reduce
@@ -34,15 +36,25 @@ pub fn route_pointer(app: &mut AppState, terminal: Rect, event: MouseEvent) -> V
     reduced
 }
 
+/// Compatibility adapter for unit tests that construct raw Crossterm events.
+#[cfg(test)]
+pub fn route_pointer_with_hitmap(
+    app: &AppState,
+    prepared: &PreparedFrame,
+    event: MouseEvent,
+) -> Vec<Action> {
+    route_normalized_pointer_with_hitmap(app, prepared, event.into())
+}
+
 /// Production pointer path: resolve against the geometry retained by the last
 /// painted frame. Scrollable regions resolve against live state (content-space
 /// row map + current viewport offset), so scroll batches can never make a hit
 /// stale; the per-frame map remains authoritative for static regions, z-order,
 /// and modal barriers.
-pub fn route_pointer_with_hitmap(
+pub fn route_normalized_pointer_with_hitmap(
     app: &AppState,
     prepared: &PreparedFrame,
-    event: MouseEvent,
+    event: PointerEvent,
 ) -> Vec<Action> {
     let (x, y) = (event.column, event.row);
     let target = resolve_target(app, prepared, x, y);
@@ -54,24 +66,24 @@ pub fn route_pointer_with_hitmap(
         }
     ) {
         match event.kind {
-            MouseEventKind::ScrollUp => {
+            PointerKind::ScrollUp => {
                 return vec![TimelineAction::ScrollUp(WHEEL_STEP).into()];
             }
-            MouseEventKind::ScrollDown => {
+            PointerKind::ScrollDown => {
                 return vec![TimelineAction::ScrollDown(WHEEL_STEP).into()];
             }
             _ => {}
         }
     }
     let action = match event.kind {
-        MouseEventKind::Down(MouseButton::Left) => PointerAction::LeftDown(target),
-        MouseEventKind::Up(MouseButton::Left) => PointerAction::LeftUp(target),
-        MouseEventKind::Moved => PointerAction::Move(top_modal_hit(app, prepared, x, y)),
-        MouseEventKind::ScrollUp => PointerAction::Gesture {
+        PointerKind::Down(crossterm::event::MouseButton::Left) => PointerAction::LeftDown(target),
+        PointerKind::Up(crossterm::event::MouseButton::Left) => PointerAction::LeftUp(target),
+        PointerKind::Moved => PointerAction::Move(top_modal_hit(app, prepared, x, y)),
+        PointerKind::ScrollUp => PointerAction::Gesture {
             target,
             gesture: PointerGesture::ScrollUp,
         },
-        MouseEventKind::ScrollDown => PointerAction::Gesture {
+        PointerKind::ScrollDown => PointerAction::Gesture {
             target,
             gesture: PointerGesture::ScrollDown,
         },

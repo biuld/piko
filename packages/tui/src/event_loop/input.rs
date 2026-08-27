@@ -1,15 +1,16 @@
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event as CrosstermEvent, KeyEventKind};
+use crossterm::event::{self, Event as CrosstermEvent};
 
 use crate::{
     app::{
         AppState,
-        command::{Action, EditorAction, TimelineAction},
+        command::{Action, TimelineAction},
     },
-    input::{batch::TimelineScrollBatch, focus::InputRouter, keymap::Keymap},
+    input::{batch::TimelineScrollBatch, focus::InputRouter},
     layout::PreparedFrame,
+    terminal::InputNormalizer,
 };
 
 use super::{CycleBudget, apply_action, effects::run_effects};
@@ -18,7 +19,7 @@ use crate::host::HostdClient;
 pub(super) fn drain_input(
     app: &mut AppState,
     host: &mut HostdClient,
-    keymap: &Keymap,
+    normalizer: &InputNormalizer,
     prepared: &mut PreparedFrame,
     budget: CycleBudget,
 ) -> Result<bool> {
@@ -33,50 +34,68 @@ pub(super) fn drain_input(
     loop {
         let mut end_batch = false;
         match event::read().context("read terminal event")? {
-            CrosstermEvent::Key(key) if key.kind != KeyEventKind::Release => {
-                flush_timeline_scroll(app, host, &mut timeline_scroll);
-                if let Some(action) = InputRouter::route_key(app, keymap, key) {
-                    apply_action(app, host, action);
-                    end_batch = true;
-                }
-            }
-            CrosstermEvent::Paste(text) => {
-                flush_timeline_scroll(app, host, &mut timeline_scroll);
-                if app.accepts_text_paste() {
-                    apply_action(app, host, EditorAction::InsertPaste(text).into());
-                }
-                end_batch = true;
-            }
-            CrosstermEvent::Mouse(event) => {
-                // Content may have changed since the last paint (streaming,
-                // expansion toggle). Refresh the plan once per event if its
-                // layout epoch is stale; pure scroll is a no-op here because
-                // hit-testing reads the viewport offset live.
-                prepared.refresh_timeline(app);
-                app.pointer_position = Some((event.column, event.row));
-                for action in crate::input::pointer::route_pointer_with_hitmap(app, prepared, event)
-                {
-                    match action {
-                        Action::Timeline(
-                            action @ (TimelineAction::ScrollUp(_) | TimelineAction::ScrollDown(_)),
-                        ) => {
-                            if let Some(flushed) = timeline_scroll.push(action) {
-                                apply_action(app, host, flushed.into());
-                                state_changed = true;
+            event @ (CrosstermEvent::Key(_)
+            | CrosstermEvent::Paste(_)
+            | CrosstermEvent::Mouse(_)
+            | CrosstermEvent::Resize(_, _)
+            | CrosstermEvent::FocusGained
+            | CrosstermEvent::FocusLost) => {
+                if let Some(input) = normalizer.normalize(event) {
+                    match input {
+                        crate::terminal::NormalizedInput::Key { .. } => {
+                            flush_timeline_scroll(app, host, &mut timeline_scroll);
+                            if let Some(action) =
+                                InputRouter::route_input(app, &app.binding_registry, input)
+                            {
+                                apply_action(app, host, action);
+                                end_batch = true;
                             }
                         }
-                        action => {
+                        crate::terminal::NormalizedInput::Paste(text) => {
                             flush_timeline_scroll(app, host, &mut timeline_scroll);
-                            apply_action(app, host, action);
+                            if let Some(action) = InputRouter::route_input(
+                                app,
+                                &app.binding_registry,
+                                normalizer.normalize_paste(text),
+                            ) {
+                                apply_action(app, host, action);
+                            }
+                            end_batch = true;
+                        }
+                        crate::terminal::NormalizedInput::Pointer(pointer) => {
+                            prepared.refresh_timeline(app);
+                            app.pointer_position = Some((pointer.column, pointer.row));
+                            for action in
+                                crate::input::pointer::route_normalized_pointer_with_hitmap(
+                                    app, prepared, pointer,
+                                )
+                            {
+                                match action {
+                                    Action::Timeline(
+                                        action @ (TimelineAction::ScrollUp(_)
+                                        | TimelineAction::ScrollDown(_)),
+                                    ) => {
+                                        if let Some(flushed) = timeline_scroll.push(action) {
+                                            apply_action(app, host, flushed.into());
+                                            state_changed = true;
+                                        }
+                                    }
+                                    action => {
+                                        flush_timeline_scroll(app, host, &mut timeline_scroll);
+                                        apply_action(app, host, action);
+                                        end_batch = true;
+                                    }
+                                }
+                            }
+                        }
+                        crate::terminal::NormalizedInput::Resize { .. }
+                        | crate::terminal::NormalizedInput::FocusGained
+                        | crate::terminal::NormalizedInput::FocusLost => {
                             end_batch = true;
                         }
                     }
                 }
             }
-            CrosstermEvent::Resize(_, _) => {
-                end_batch = true;
-            }
-            _ => {}
         }
         processed = processed.saturating_add(1);
         state_changed |= end_batch;

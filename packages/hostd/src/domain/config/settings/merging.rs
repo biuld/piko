@@ -66,8 +66,42 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         },
         mcp: overrides.mcp.or(base.mcp),
         prompt: overrides.prompt.or(base.prompt),
-        tui: overrides.tui.or(base.tui),
+        tui: merge_json(base.tui, overrides.tui),
     }
+}
+
+/// Merge opaque frontend settings structurally so a project can override one
+/// stable keybinding rule without replacing unrelated global TUI settings.
+/// Arrays and scalar values remain ordinary replace-on-override values.
+pub(crate) fn merge_json(
+    base: Option<serde_json::Value>,
+    overrides: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    match (base, overrides) {
+        (Some(mut base), Some(overrides)) => {
+            merge_json_value(&mut base, overrides);
+            Some(base)
+        }
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+fn merge_json_value(base: &mut serde_json::Value, overrides: serde_json::Value) {
+    if let serde_json::Value::Object(overrides) = overrides {
+        if let Some(base) = base.as_object_mut() {
+            for (key, value) in overrides {
+                if let Some(existing) = base.get_mut(&key) {
+                    merge_json_value(existing, value);
+                } else {
+                    base.insert(key, value);
+                }
+            }
+            return;
+        }
+        *base = serde_json::Value::Object(overrides);
+        return;
+    }
+    *base = overrides;
 }
 
 pub(crate) fn merge_compaction(

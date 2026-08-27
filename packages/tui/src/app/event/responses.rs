@@ -249,17 +249,52 @@ impl AppState {
             }
             Ok(piko_protocol::CommandResult::ConfigEntry { namespace, value }) => {
                 if namespace == "tui" {
-                    self.tui_config = TuiConfig::from_hostd_settings(Some(&value));
-                    self.editor.configure(&self.tui_config.editor);
-                    self.timelines
-                        .set_thinking_visible(!self.tui_config.hide_thinking_block);
-                    self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
-                    if let Some(name) = value
-                        .get("theme")
-                        .and_then(|t| t.get("name"))
-                        .and_then(|n| n.as_str())
-                    {
-                        self.theme = crate::theme::Theme::load(name);
+                    match TuiConfig::try_from_hostd_settings(Some(&value)) {
+                        Ok(config) => {
+                            let profile = self.binding_registry.profile().clone();
+                            match crate::input::binding::BindingRegistry::compile(
+                                profile,
+                                Some(&config.keybindings),
+                            ) {
+                                Ok(registry) => {
+                                    self.tui_config = config;
+                                    self.binding_registry = registry;
+                                    self.editor.configure(&self.tui_config.editor);
+                                    self.timelines
+                                        .set_thinking_visible(!self.tui_config.hide_thinking_block);
+                                    self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
+                                    if let Some(name) = value
+                                        .get("theme")
+                                        .and_then(|t| t.get("name"))
+                                        .and_then(|n| n.as_str())
+                                    {
+                                        self.theme = crate::theme::Theme::load(name)
+                                            .for_color_level(self.binding_registry.profile().color);
+                                    }
+                                }
+                                Err(diagnostics) => {
+                                    let message = diagnostics
+                                        .iter()
+                                        .map(ToString::to_string)
+                                        .collect::<Vec<_>>()
+                                        .join("; ");
+                                    self.notify(
+                                        NotificationLevel::Warning,
+                                        format!(
+                                            "invalid keybindings; previous bindings retained: {message}"
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            self.notify(
+                                NotificationLevel::Warning,
+                                format!(
+                                    "invalid TUI settings; previous settings retained: {error}"
+                                ),
+                            );
+                        }
                     }
                 } else if namespace == "host" {
                     self.host_settings.apply_host_json(&value);

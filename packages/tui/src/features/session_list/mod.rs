@@ -1,5 +1,7 @@
 use piko_protocol::{SessionListScope, SessionSummary};
 mod pointer;
+#[cfg(test)]
+mod tests;
 
 use ratatui::{
     Frame,
@@ -10,7 +12,7 @@ use ratatui::{
 
 use crate::app::HitId;
 use crate::theme::Theme;
-use crate::ui::components::pane::{PaneAffixHit, PaneSpec, PaneTitleAffix};
+use crate::ui::components::pane::{PaneAffixHit, PaneFooter, PaneSpec, PaneTitleAffix};
 use crate::ui::components::selectable_list::{
     ColumnAlign, ColumnCell, SelectableItem, SelectableList, SelectablePanelBody,
     paint_selectable_panel, selectable_row_regions,
@@ -22,6 +24,8 @@ const SESSION_STATUS_COLUMN_WIDTH: u16 = 15;
 pub struct SessionListCtx<'a> {
     pub active_session_id: Option<&'a str>,
     pub theme: &'a Theme,
+    pub tip: Option<&'a str>,
+    pub hints: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,8 +116,11 @@ impl SessionList {
                 ),
             ])
             .search_filter(&self.filter)
-            .tip("Tab scope · Ctrl+N named · path")
-            .hints("Enter resume · Esc close")
+            // Hit testing only needs the same one-row chrome budget. The
+            // actual text is supplied by the render context from the binding
+            // registry.
+            .tip(" ")
+            .footer(PaneFooter::Reserved { height: 1 })
             .focused(true);
         selectable_row_regions(area, &spec, &items, selected, "")
             .into_iter()
@@ -249,6 +256,8 @@ impl SessionList {
         area: Rect,
         active_session_id: Option<&str>,
         theme: &Theme,
+        tip: Option<&str>,
+        hints: Option<&str>,
     ) {
         let filter = self.filter.as_str();
 
@@ -302,16 +311,19 @@ impl SessionList {
             .map(|item| session_row(item, active_session_id, self.show_path, show_path_col))
             .collect();
 
-        let spec = PaneSpec::new("Resume Session")
+        let mut spec = PaneSpec::new("Resume Session")
             .mode(crate::ui::components::pane::PaneMode::Standard)
             .title_affixes([
                 PaneTitleAffix::mode_strip_static(&["Current", "All"], scope_active),
                 PaneTitleAffix::selection(counter_at, counter_of),
             ])
             .search_filter(filter)
-            .tip("Tab scope · Ctrl+N named · path")
-            .hints("Enter resume · Esc close")
+            .tip(tip.or(Some(" ")))
             .focused(true);
+        spec = match hints.filter(|value| !value.is_empty()) {
+            Some(hints) => spec.hints(hints),
+            None => spec.footer(PaneFooter::Reserved { height: 1 }),
+        };
 
         let body = if self.loading {
             SelectablePanelBody::Message(
@@ -436,65 +448,5 @@ fn format_age(timestamp_str: Option<&str>) -> String {
         format!("{}h", diff_secs / 3600)
     } else {
         format!("{}d", diff_secs / 86400)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use piko_protocol::SessionSummary;
-
-    fn summary(session_id: &str) -> SessionSummary {
-        SessionSummary {
-            session_id: session_id.into(),
-            cwd: "/tmp".into(),
-            seq: 1,
-            name: None,
-            first_message: None,
-            message_count: 0,
-            created_at: None,
-            modified_at: None,
-            session_path: None,
-            parent_session_path: None,
-            integrity_error: None,
-        }
-    }
-
-    #[test]
-    fn session_row_marks_active_session() {
-        let row = session_row(&summary("s1"), Some("s1"), false, false);
-        assert!(row.is_active);
-        assert!(
-            row.cells
-                .iter()
-                .all(|cell| !cell.text.eq_ignore_ascii_case("active")),
-            "active state must come from the component default, not a hand-drawn cell"
-        );
-        let row = session_row(&summary("s1"), Some("s2"), false, false);
-        assert!(!row.is_active);
-    }
-
-    #[test]
-    fn integrity_status_fits_its_column() {
-        let mut broken = summary("broken");
-        broken.integrity_error = Some("checksum mismatch".into());
-
-        let row = session_row(&broken, None, false, false);
-        let status = &row.cells[1].text;
-
-        assert_eq!(status, "integrity error");
-        assert!(status.chars().count() <= usize::from(SESSION_STATUS_COLUMN_WIDTH));
-    }
-
-    #[test]
-    fn all_rows_in_full_searchable_viewport_have_pointer_regions() {
-        let mut sessions = SessionList::new();
-        sessions.load((0..12).map(|i| summary(&format!("s{i:02}"))).collect());
-
-        let regions = sessions.row_regions(Rect::new(0, 0, 80, 20));
-
-        assert_eq!(regions.len(), 12);
-        assert_eq!(regions.first().map(|(rect, _)| rect.y), Some(4));
-        assert_eq!(regions.last().map(|(rect, _)| rect.y), Some(15));
     }
 }

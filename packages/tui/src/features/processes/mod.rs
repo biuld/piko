@@ -90,14 +90,6 @@ impl ProcessPanel {
         SelectBandBudget::standard_info(self.processes.len().clamp(1, 10) as u16)
     }
 
-    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
-        if self.confirming_process_id.is_some() {
-            "Enter confirm stop · Esc cancel".into()
-        } else {
-            "↑/↓ browse · Enter stop · Esc close".into()
-        }
-    }
-
     pub fn select_next(&mut self) {
         self.confirming_process_id = None;
         self.processes.select_next("", |_| true);

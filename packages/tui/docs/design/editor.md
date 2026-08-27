@@ -457,26 +457,14 @@ pub struct EditorConfig {
 }
 ```
 
-Keybindings stay in `~/.piko/keybindings.json` and `.piko/keybindings.json`.
-Binding IDs:
-
-| Binding ID | Default |
-|---|---|
-| `tui.editor.cursorLeft` | Left |
-| `tui.editor.cursorRight` | Right |
-| `tui.editor.cursorLineStart` | Home |
-| `tui.editor.cursorLineEnd` | End |
-| `tui.editor.deleteCharBackward` | Backspace |
-| `tui.editor.deleteCharForward` | Delete |
-| `tui.input.newLine` | Shift+Enter |
-| `tui.input.submit` | Enter |
-| `tui.input.tab` | Tab |
-| `tui.history.prev` | Ctrl+P |
-| `tui.history.next` | Ctrl+E |
+Keybindings are defined by the host-owned `[tui.keybindings]` rule registry;
+see [Scoped Command and Keybinding Runtime](./keybindings.md). Standalone
+`keybindings.json` files are outside the contract and are neither read nor
+migrated.
 
 `multiline` controls whether the newline action is available. Enter remains the
-submit action in both modes; with `multiline = true`, Shift+Enter inserts a
-newline.
+submit action in both modes; with `multiline = true`, the effective terminal
+profile selects Shift+Enter on enhanced paths and Ctrl+J on baseline paths.
 
 ## Protocol Boundary
 

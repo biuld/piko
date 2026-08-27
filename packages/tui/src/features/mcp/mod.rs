@@ -109,10 +109,6 @@ impl McpPanel {
         SelectBandBudget::standard_info(content_rows)
     }
 
-    pub fn interaction_hints(&self) -> crate::ui::interaction_hints::InteractionHints<'static> {
-        "↑/↓ browse · Esc close".into()
-    }
-
     pub fn select_next(&mut self) {
         self.servers.select_next("", |_| true);
     }

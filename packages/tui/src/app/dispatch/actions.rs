@@ -193,7 +193,12 @@ impl AppState {
                 } else if n == 0 {
                     "no agents in session".to_string()
                 } else {
-                    format!("{n} agent(s) — Enter to view")
+                    let hint = crate::features::guidance_row::binding_hint(
+                        self,
+                        crate::input::command::CommandId::UiConfirm,
+                    )
+                    .unwrap_or_else(|| "unbound".to_string());
+                    format!("{n} agent(s) — {hint} to view")
                 };
             }
             SurfaceAction::Close => self.close_surface(),

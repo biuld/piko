@@ -1,12 +1,10 @@
 //! Pure strip projection: TodoList → header / rows / scroll hint (no ratatui).
 
-use piko_protocol::{TodoList, TodoStatus};
-use unicode_width::UnicodeWidthStr;
-
 use crate::features::dock_stack::TODOS_MAX_ITEM_ROWS;
 use crate::ui::components::feedback::{
     DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, SCROLL_DOWN_GLYPH, SCROLL_UP_GLYPH, SUCCESS_GLYPH,
 };
+use piko_protocol::{TodoList, TodoStatus};
 
 /// Projected strip content for one paint frame.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,7 +85,9 @@ pub fn project_strip(
         .map(|item| {
             let mark = status_mark(item.status);
             // "mark" + space + content
-            let content_budget = width.saturating_sub((mark.width() as u16).saturating_add(1));
+            let content_budget = width.saturating_sub(
+                (crate::terminal::text::display_width(mark) as u16).saturating_add(1),
+            );
             TodoStripRow {
                 mark,
                 content: truncate_line(&item.content, content_budget),
@@ -150,7 +150,7 @@ fn truncate_line(text: &str, width: u16) -> String {
         return String::new();
     }
     let max = width as usize;
-    if text.width() <= max {
+    if crate::terminal::text::display_width(text) <= max {
         return text.to_string();
     }
     if max <= 1 {
@@ -159,7 +159,7 @@ fn truncate_line(text: &str, width: u16) -> String {
     let mut out = String::new();
     let mut used = 0usize;
     for ch in text.chars() {
-        let w = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
+        let w = crate::terminal::text::display_width(ch.encode_utf8(&mut [0; 4]));
         if used + w + 1 > max {
             break;
         }

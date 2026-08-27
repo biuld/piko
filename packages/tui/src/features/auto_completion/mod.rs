@@ -18,7 +18,6 @@ use crate::ui::components::selectable_list::{
 };
 use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
-use crate::ui::interaction_hints::InteractionHints;
 
 pub mod file_browser;
 pub mod provider;
@@ -125,12 +124,6 @@ impl AutoComplete {
 
     pub fn len(&self) -> usize {
         self.list.len()
-    }
-
-    pub fn interaction_hints(&self) -> InteractionHints<'static> {
-        self.active_provider_idx
-            .map(|idx| self.providers[idx].hints())
-            .unwrap_or_else(|| InteractionHints::new("Esc cancel"))
     }
 
     pub fn select_next(&mut self) {

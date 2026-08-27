@@ -28,6 +28,10 @@ pub struct WelcomeView<'a> {
     pub cwd: &'a Path,
     /// Advances on the app tick; drives logo style cycle + highlight wave.
     pub spinner_frame: usize,
+    /// Effective key for the editor submit command, when bound.
+    pub submit_hint: Option<String>,
+    /// Effective key for the application quit command, when bound.
+    pub quit_hint: Option<String>,
 }
 
 /// Preferred inner width of the welcome card (excluding borders).
@@ -105,7 +109,7 @@ fn card_body_lines(
     lines.push(Line::from(""));
     lines.push(hairline(content_w, theme));
     lines.push(Line::from(""));
-    lines.extend(tip_lines(theme, content_w));
+    lines.extend(tip_lines(theme, content_w, view));
 
     lines
 }
@@ -189,17 +193,17 @@ fn border_style_for_frame(spinner_frame: usize, theme: &Theme) -> Style {
     })
 }
 
-fn tip_lines(theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    const TIPS: &[(&str, &str)] = &[
-        ("Enter", "submit prompt"),
+fn tip_lines(theme: &Theme, width: u16, view: &WelcomeView<'_>) -> Vec<Line<'static>> {
+    let tips = [
+        (view_hint(view.submit_hint.as_deref()), "submit prompt"),
         ("/", "commands"),
-        ("Ctrl+Q", "quit"),
+        (view_hint(view.quit_hint.as_deref()), "quit"),
     ];
 
     // Key column width covers longest key + gap.
     let key_col = 8u16;
     let left_pad = 2u16;
-    TIPS.iter()
+    tips.iter()
         .map(|(key, desc)| {
             let key_text = format!("{key:<width$}", width = key_col as usize);
             let desc_budget = width
@@ -214,6 +218,10 @@ fn tip_lines(theme: &Theme, width: u16) -> Vec<Line<'static>> {
             ])
         })
         .collect()
+}
+
+fn view_hint(hint: Option<&str>) -> &str {
+    hint.unwrap_or("unbound")
 }
 
 fn hairline(width: u16, theme: &Theme) -> Line<'static> {
@@ -303,6 +311,8 @@ mod tests {
             version,
             cwd,
             spinner_frame: frame,
+            submit_hint: Some("Enter".into()),
+            quit_hint: Some("Ctrl+Q".into()),
         }
     }
 

@@ -7,7 +7,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::theme::Theme;
-use crate::ui::interaction_hints::InteractionHints;
 
 // ── Glyphs ───────────────────────────────────────────────────────────────────
 //
@@ -154,25 +153,6 @@ pub fn loading_line(frame_idx: usize, theme: &Theme) -> Line<'static> {
 pub fn empty_line(has_filter: bool, theme: &Theme) -> Line<'static> {
     let text = if has_filter { NO_MATCHES } else { EMPTY_LIST };
     Line::from(Span::styled(text, Style::default().fg(theme.dim)))
-}
-
-/// Default selectable-list interaction hints.
-pub fn default_list_hints() -> InteractionHints<'static> {
-    InteractionHints::new("↑/↓ navigate · Enter confirm · Esc cancel")
-}
-
-/// Settings catalog / branch: open or back (pipe-separated, screenshot language).
-pub fn settings_open_hints(at_root: bool) -> InteractionHints<'static> {
-    InteractionHints::new(if at_root {
-        "↑/↓ nav | Enter open | → expand | Esc close"
-    } else {
-        "↑/↓ nav | Enter open | Esc back"
-    })
-}
-
-/// Settings choice leaf: apply value.
-pub fn settings_apply_hints() -> InteractionHints<'static> {
-    InteractionHints::new("↑/↓ nav | Enter apply | Esc back")
 }
 
 #[cfg(test)]

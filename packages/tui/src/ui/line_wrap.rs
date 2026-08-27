@@ -9,16 +9,14 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use unicode_segmentation::UnicodeSegmentation;
-
 use super::line_layout::{pad_spans, paint_cols, soft_wrap};
+use crate::terminal::text::TerminalTextPolicy;
 
 /// Soft-wrap styled spans to at most `max_cols` columns, preserving span
 /// styles and hard newlines. Adjacent spans on the same row keep their own
 /// styles; a span wider than the budget is split at column boundaries.
 pub fn wrap_spans(spans: Vec<Span<'static>>, max_cols: usize) -> Vec<Line<'static>> {
-    use unicode_width::UnicodeWidthStr;
-
+    let policy = TerminalTextPolicy;
     let max_cols = max_cols.max(1);
     let mut rows: Vec<Line<'static>> = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();
@@ -48,8 +46,8 @@ pub fn wrap_spans(spans: Vec<Span<'static>>, max_cols: usize) -> Vec<Line<'stati
                 start_row(&mut cur, &mut cur_cols, &mut rows);
             }
 
-            for grapheme in segment.graphemes(true) {
-                let w = UnicodeWidthStr::width(grapheme);
+            for grapheme in policy.graphemes(segment) {
+                let w = policy.width(grapheme);
                 if w > 0 && cur_cols > 0 && cur_cols.saturating_add(w) > max_cols {
                     flush_pending(&mut cur, &mut pending);
                     start_row(&mut cur, &mut cur_cols, &mut rows);

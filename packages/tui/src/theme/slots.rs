@@ -9,6 +9,8 @@
 
 use ratatui::style::Color;
 
+use crate::terminal::ColorLevel;
+
 /// Fully resolved theme: every semantic color is a typed field.
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -265,6 +267,133 @@ impl Theme {
             _ => self.md_heading_h6,
         }
     }
+
+    /// Resolve every semantic slot to the color depth selected by the
+    /// process-local terminal profile. Components keep consuming slots and
+    /// never need to know how a terminal represents colors.
+    pub fn for_color_level(&self, level: ColorLevel) -> Self {
+        let mut theme = self.clone();
+        macro_rules! quantize {
+            ($($field:ident),* $(,)?) => {
+                $(theme.$field = quantize_color(theme.$field, level);)*
+            };
+        }
+        theme_slots!(quantize);
+        theme
+    }
+}
+
+fn quantize_color(color: Color, level: ColorLevel) -> Color {
+    if matches!(color, Color::Reset) {
+        return Color::Reset;
+    }
+    match level {
+        ColorLevel::TrueColor => color,
+        ColorLevel::TerminalDefault => match color {
+            Color::Black
+            | Color::Red
+            | Color::Green
+            | Color::Yellow
+            | Color::Blue
+            | Color::Magenta
+            | Color::Cyan
+            | Color::Gray
+            | Color::DarkGray
+            | Color::LightRed
+            | Color::LightGreen
+            | Color::LightYellow
+            | Color::LightBlue
+            | Color::LightMagenta
+            | Color::LightCyan
+            | Color::White => color,
+            Color::Indexed(index) if index < 16 => Color::Indexed(index),
+            _ => Color::Reset,
+        },
+        ColorLevel::Ansi16 => Color::Indexed(nearest_ansi16(rgb(color))),
+        ColorLevel::Ansi256 => Color::Indexed(nearest_ansi256(rgb(color))),
+    }
+}
+
+fn rgb(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Indexed(index) => ansi256_rgb(index),
+        Color::Black => (0, 0, 0),
+        Color::Red => (205, 0, 0),
+        Color::Green => (0, 205, 0),
+        Color::Yellow => (205, 205, 0),
+        Color::Blue => (0, 0, 238),
+        Color::Magenta => (205, 0, 205),
+        Color::Cyan => (0, 205, 205),
+        Color::Gray => (229, 229, 229),
+        Color::DarkGray => (127, 127, 127),
+        Color::LightRed => (255, 0, 0),
+        Color::LightGreen => (0, 255, 0),
+        Color::LightYellow => (255, 255, 0),
+        Color::LightBlue => (92, 92, 255),
+        Color::LightMagenta => (255, 0, 255),
+        Color::LightCyan => (0, 255, 255),
+        Color::White => (255, 255, 255),
+        Color::Reset => (128, 128, 128),
+    }
+}
+
+fn ansi256_rgb(index: u8) -> (u8, u8, u8) {
+    match index {
+        0..=15 => [
+            (0, 0, 0),
+            (205, 0, 0),
+            (0, 205, 0),
+            (205, 205, 0),
+            (0, 0, 238),
+            (205, 0, 205),
+            (0, 205, 205),
+            (229, 229, 229),
+            (127, 127, 127),
+            (255, 0, 0),
+            (0, 255, 0),
+            (255, 255, 0),
+            (92, 92, 255),
+            (255, 0, 255),
+            (0, 255, 255),
+            (255, 255, 255),
+        ][index as usize],
+        16..=231 => {
+            let value = index - 16;
+            let r = value / 36;
+            let g = (value % 36) / 6;
+            let b = value % 6;
+            let scale = |channel: u8| if channel == 0 { 0 } else { 55 + channel * 40 };
+            (scale(r), scale(g), scale(b))
+        }
+        232..=255 => {
+            let value = 8 + (index - 232) * 10;
+            (value, value, value)
+        }
+    }
+}
+
+fn nearest_ansi16((r, g, b): (u8, u8, u8)) -> u8 {
+    nearest((r, g, b), (0..16).map(ansi256_rgb))
+}
+
+fn nearest_ansi256((r, g, b): (u8, u8, u8)) -> u8 {
+    nearest((r, g, b), (0..=255).map(ansi256_rgb))
+}
+
+fn nearest<I>(target: (u8, u8, u8), colors: I) -> u8
+where
+    I: Iterator<Item = (u8, u8, u8)>,
+{
+    colors
+        .enumerate()
+        .min_by_key(|(_, (r, g, b))| {
+            let dr = i32::from(*r) - i32::from(target.0);
+            let dg = i32::from(*g) - i32::from(target.1);
+            let db = i32::from(*b) - i32::from(target.2);
+            dr * dr + dg * dg + db * db
+        })
+        .map_or(0, |(index, _)| index as u8)
 }
 
 #[cfg(test)]
@@ -283,5 +412,28 @@ mod slot_tests {
         for name in Theme::SLOT_NAMES {
             assert!(seen.insert(*name), "duplicate slot {name}");
         }
+    }
+
+    #[test]
+    fn color_levels_quantize_every_semantic_slot() {
+        let mut theme = Theme::dark();
+        theme.accent = Color::Rgb(12, 130, 240);
+
+        assert_eq!(
+            theme.for_color_level(ColorLevel::TrueColor).accent,
+            Color::Rgb(12, 130, 240)
+        );
+        assert!(matches!(
+            theme.for_color_level(ColorLevel::Ansi256).accent,
+            Color::Indexed(_)
+        ));
+        assert!(matches!(
+            theme.for_color_level(ColorLevel::Ansi16).accent,
+            Color::Indexed(index) if index < 16
+        ));
+        assert_eq!(
+            theme.for_color_level(ColorLevel::TerminalDefault).accent,
+            Color::Reset
+        );
     }
 }

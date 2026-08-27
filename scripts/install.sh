@@ -127,8 +127,6 @@ install_config() {
 
 install_config "$ROOT/packages/hostd/resources/settings.toml" \
   "$PIKO_INSTALL_ROOT/settings.toml"
-install_config "$ROOT/packages/tui/resources/keybindings.json" \
-  "$PIKO_INSTALL_ROOT/keybindings.json"
 
 for source in "$ROOT"/packages/hostd/resources/agents/*.toml; do
   install_config "$source" "$PIKO_INSTALL_ROOT/agents/spec/$(basename "$source")"

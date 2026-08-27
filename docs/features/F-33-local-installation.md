@@ -69,8 +69,9 @@ configuration they require.
 - [x] `~/.piko/bin/piko` and `~/.piko/bin/piko-hostd` are executable after install.
 - [x] Every repository-shipped agent, model catalog, and theme exists as an
       editable file under `~/.piko`.
-- [x] `settings.toml`, `auth.json`, and `keybindings.json` are initialized;
-      `auth.json` is private to the user on Unix.
+- [x] `settings.toml` and `auth.json` are initialized; keybinding rules live
+      under host-owned `[tui.keybindings]` in `settings.toml`, and `auth.json`
+      is private to the user on Unix.
 - [x] Editing an installed catalog changes runtime behavior without rebuilding.
 - [x] Reinstalling preserves an existing configuration file byte-for-byte.
 - [x] Production binaries do not embed the editable TOML resources.

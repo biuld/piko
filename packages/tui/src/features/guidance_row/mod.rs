@@ -13,19 +13,30 @@ use ratatui::{
 use crate::{
     app::{AppState, HitId},
     features::notifications::{Notification, NotificationLevel, level_glyph},
+    input::{
+        binding::{BindingContext, active_scope_stack},
+        command::CommandId,
+    },
     navigation::{SurfaceGuidance, SurfaceId},
-    ui::components::{dock_line, feedback::default_list_hints, hover_bg},
+    ui::components::{dock_line, hover_bg},
 };
-
-const COMPOSER_HINTS: &str = "/ commands · @ files · Enter send";
-const RUNNING_HINTS: &str = "Enter steer · Alt+Enter queue · Alt+↑ dequeue";
-const DEQUEUE_HINTS: &str = "Alt+↑ dequeue · / commands · Enter send";
 
 /// One frame's selected Guidance Row projection.
 pub enum GuidanceContent<'a> {
     Notice(&'a Notification),
     Hint(Cow<'a, str>),
     Empty,
+}
+
+/// Binding-derived pane chrome for surfaces that cover the workspace plane.
+///
+/// These panes cannot use the resident Guidance row because their modal layer
+/// owns the whole body. Keeping their tip/footer text here makes them use the
+/// same context-sensitive registry queries as the resident row.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PaneHints {
+    pub tip: Option<String>,
+    pub footer: Option<String>,
 }
 
 impl GuidanceContent<'_> {
@@ -45,12 +56,9 @@ pub fn resolve(app: &AppState) -> GuidanceContent<'_> {
 
     let Some(surface) = app.modal_surface() else {
         if app.editor.auto_complete.is_active() {
-            return app
-                .editor
-                .auto_complete
-                .interaction_hints()
-                .single_line()
-                .map(|hint| GuidanceContent::Hint(Cow::Borrowed(hint)))
+            return suggestion_hint(app)
+                .map(Cow::Owned)
+                .map(GuidanceContent::Hint)
                 .unwrap_or(GuidanceContent::Empty);
         }
         return GuidanceContent::Hint(composer_hint(app));
@@ -62,12 +70,28 @@ pub fn resolve(app: &AppState) -> GuidanceContent<'_> {
 }
 
 fn composer_hint(app: &AppState) -> Cow<'static, str> {
+    let submit = binding_hint(app, CommandId::EditorSubmit);
+    let follow_up = binding_hint(app, CommandId::EditorFollowUp);
+    let dequeue = binding_hint(app, CommandId::EditorDequeueFollowUp);
     let summary = app.queue_summary();
     let pending = queue_pending_hint(&summary);
     if app.viewed_agent_is_busy() {
+        let mut parts = Vec::new();
+        if let Some(key) = submit {
+            parts.push(format!("{key} steer"));
+        }
+        if let Some(key) = follow_up {
+            parts.push(format!("{key} queue"));
+        }
+        if let Some(key) = dequeue {
+            parts.push(format!("{key} dequeue"));
+        }
         return match pending {
-            Some(pending) => Cow::Owned(format!("{RUNNING_HINTS} · {pending}")),
-            None => Cow::Borrowed(RUNNING_HINTS),
+            Some(pending) => {
+                parts.push(pending);
+                Cow::Owned(parts.join(" · "))
+            }
+            None => Cow::Owned(parts.join(" · ")),
         };
     }
     let viewed = app.agent_panel.active_agent_instance_id.as_deref();
@@ -77,12 +101,28 @@ fn composer_hint(app: &AppState) -> Cow<'static, str> {
         .iter()
         .any(|item| viewed.is_some_and(|id| item.agent_instance_id == id));
     if has_follow_up || pending.is_some() {
+        let mut parts = Vec::new();
+        if let Some(key) = dequeue {
+            parts.push(format!("{key} dequeue"));
+        }
+        parts.push("/ commands".to_string());
+        parts.push("@ files".to_string());
+        if let Some(key) = submit {
+            parts.push(format!("{key} send"));
+        }
         return match pending {
-            Some(pending) => Cow::Owned(format!("{DEQUEUE_HINTS} · {pending}")),
-            None => Cow::Borrowed(DEQUEUE_HINTS),
+            Some(pending) => {
+                parts.push(pending);
+                Cow::Owned(parts.join(" · "))
+            }
+            None => Cow::Owned(parts.join(" · ")),
         };
     }
-    Cow::Borrowed(COMPOSER_HINTS)
+    let mut parts = vec!["/ commands".to_string(), "@ files".to_string()];
+    if let Some(key) = submit {
+        parts.push(format!("{key} send"));
+    }
+    Cow::Owned(parts.join(" · "))
 }
 
 fn queue_pending_hint(summary: &crate::app::QueueStatus) -> Option<String> {
@@ -100,36 +140,134 @@ fn queue_pending_hint(summary: &crate::app::QueueStatus) -> Option<String> {
     }
 }
 
+fn suggestion_hint(app: &AppState) -> Option<String> {
+    joined_hint([
+        binding_pair_hint(app, CommandId::SelectionPrevious, CommandId::SelectionNext)
+            .map(|key| format!("{key} navigate")),
+        binding_hint(app, CommandId::CompletionAccept).map(|key| format!("{key} accept")),
+        binding_hint(app, CommandId::CompletionAcceptAndSubmit).map(|key| format!("{key} execute")),
+        binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} cancel")),
+    ])
+}
+
 fn surface_hint<'a>(app: &'a AppState, surface: SurfaceId) -> Option<Cow<'a, str>> {
     match surface.spec().guidance {
-        SurfaceGuidance::DefaultList => default_list_hints().single_line().map(Cow::Borrowed),
+        SurfaceGuidance::DefaultList => default_list_hint(app).map(Cow::Owned),
         SurfaceGuidance::Feature => match surface {
-            SurfaceId::AuthSelector => app
-                .auth_selector
-                .interaction_hints()
-                .single_line()
-                .map(Cow::Borrowed),
-            SurfaceId::Mcp => app.mcp.interaction_hints().single_line().map(Cow::Borrowed),
-            SurfaceId::Processes => app
-                .processes
-                .interaction_hints()
-                .single_line()
-                .map(Cow::Borrowed),
+            SurfaceId::AuthSelector if app.active_text_box_is_present() => joined_hint([
+                binding_hint(app, CommandId::UiConfirm).map(|key| format!("{key} save")),
+                binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} back")),
+            ])
+            .map(Cow::Owned),
+            SurfaceId::AuthSelector => default_list_hint(app).map(Cow::Owned),
+            SurfaceId::Mcp | SurfaceId::Processes => joined_hint([
+                binding_pair_hint(app, CommandId::SelectionPrevious, CommandId::SelectionNext)
+                    .map(|key| format!("{key} browse")),
+                binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} close")),
+            ])
+            .map(Cow::Owned),
             _ => None,
         },
         SurfaceGuidance::Workflow => match surface {
-            SurfaceId::Approval => app
-                .approvals
-                .workflow()
-                .map(|workflow| Cow::Owned(workflow.help_text())),
-            SurfaceId::ToolInteraction => app
-                .interactions
-                .front()
-                .map(|interaction| Cow::Owned(interaction.workflow.help_text())),
-            _ => None,
+            SurfaceId::Approval if !app.approvals.is_empty() => joined_hint([
+                binding_pair_hint(app, CommandId::ApprovalPrevious, CommandId::ApprovalNext)
+                    .map(|key| format!("{key} select")),
+                binding_hint(app, CommandId::ApprovalConfirm).map(|key| format!("{key} confirm")),
+                binding_hint(app, CommandId::ApprovalDecline).map(|key| format!("{key} decline")),
+            ])
+            .map(Cow::Owned),
+            SurfaceId::ToolInteraction if !app.interactions.is_empty() => joined_hint([
+                binding_pair_hint(
+                    app,
+                    CommandId::WorkflowPreviousChoice,
+                    CommandId::WorkflowNextChoice,
+                )
+                .map(|key| format!("{key} select")),
+                binding_hint(app, CommandId::WorkflowSubmit).map(|key| format!("{key} submit")),
+                binding_hint(app, CommandId::WorkflowCancel).map(|key| format!("{key} cancel")),
+                binding_pair_hint(
+                    app,
+                    CommandId::WorkflowPreviousStep,
+                    CommandId::WorkflowNextStep,
+                )
+                .map(|key| format!("{key} step")),
+            ])
+            .map(Cow::Owned),
+            _ => default_list_hint(app).map(Cow::Owned),
         },
         SurfaceGuidance::None => None,
     }
+}
+
+pub(crate) fn pane_hints(app: &AppState, surface: SurfaceId) -> PaneHints {
+    match surface {
+        SurfaceId::Sessions => PaneHints {
+            tip: joined_hint([
+                binding_hint(app, CommandId::SessionToggleScope).map(|key| format!("{key} scope")),
+                binding_hint(app, CommandId::SessionToggleNamed).map(|key| format!("{key} named")),
+                binding_hint(app, CommandId::SessionTogglePath).map(|key| format!("{key} path")),
+            ]),
+            footer: navigation_hint(app, "resume", "close"),
+        },
+        SurfaceId::Tree => PaneHints {
+            tip: joined_hint([
+                binding_pair_hint(
+                    app,
+                    CommandId::TreeFilterCycleBackward,
+                    CommandId::TreeFilterCycleForward,
+                )
+                .map(|key| format!("{key} filter")),
+                binding_hint(app, CommandId::TreeEditLabel).map(|key| format!("{key} label")),
+                binding_pair_hint(app, CommandId::TreeFoldOrUp, CommandId::TreeUnfoldOrDown)
+                    .map(|key| format!("{key} fold")),
+            ]),
+            footer: navigation_hint(app, "confirm", "close"),
+        },
+        SurfaceId::SummaryPrompt => PaneHints {
+            tip: navigation_hint(app, "select", "cancel"),
+            footer: None,
+        },
+        SurfaceId::Usage | SurfaceId::Diagnostics => PaneHints {
+            tip: None,
+            footer: navigation_hint(app, "scroll", "close"),
+        },
+        SurfaceId::Notifications => PaneHints {
+            tip: None,
+            footer: joined_hint([
+                binding_hint(app, CommandId::NotificationToggleScope)
+                    .map(|key| format!("{key} scope")),
+                binding_pair_hint(
+                    app,
+                    CommandId::NotificationPrevious,
+                    CommandId::NotificationNext,
+                )
+                .map(|key| format!("{key} select")),
+                binding_hint(app, CommandId::NotificationCopySelected)
+                    .map(|key| format!("{key} copy")),
+                binding_pair_hint(
+                    app,
+                    CommandId::NotificationPageUp,
+                    CommandId::NotificationPageDown,
+                )
+                .map(|key| format!("{key} scroll")),
+                binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} close")),
+            ]),
+        },
+        SurfaceId::Settings => PaneHints {
+            tip: None,
+            footer: navigation_hint(app, "open", "close"),
+        },
+        _ => PaneHints::default(),
+    }
+}
+
+fn navigation_hint(app: &AppState, confirm_label: &str, cancel_label: &str) -> Option<String> {
+    joined_hint([
+        binding_pair_hint(app, CommandId::SelectionPrevious, CommandId::SelectionNext)
+            .map(|key| format!("{key} navigate")),
+        binding_hint(app, CommandId::UiConfirm).map(|key| format!("{key} {confirm_label}")),
+        binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} {cancel_label}")),
+    ])
 }
 
 pub fn render(
@@ -146,11 +284,17 @@ pub fn render(
                 NotificationLevel::Error => app.theme.error,
             };
             let glyph = level_glyph(notification.level);
-            let line = Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!(" {glyph}  "), Style::default().fg(color)),
                 Span::styled(notification.message.clone(), Style::default().fg(color)),
-                Span::styled(" · F8 dismiss", Style::default().fg(app.theme.dim)),
-            ]);
+            ];
+            if let Some(key) = binding_hint(app, CommandId::NotificationDismissVisible) {
+                spans.push(Span::styled(
+                    format!(" · {key} dismiss"),
+                    Style::default().fg(app.theme.dim),
+                ));
+            }
+            let line = Line::from(spans);
             let background = (interaction.hovered == Some(HitId::Notice))
                 .then(|| hover_bg(&app.theme))
                 .flatten();
@@ -161,4 +305,34 @@ pub fn render(
         }
         GuidanceContent::Empty => {}
     }
+}
+
+pub(crate) fn binding_hint(app: &AppState, command: CommandId) -> Option<String> {
+    let context = BindingContext::from_app(app, app.binding_registry.profile());
+    let scopes = active_scope_stack(app);
+    app.binding_registry.hint_for(command, &context, &scopes)
+}
+
+pub(crate) fn binding_pair_hint(
+    app: &AppState,
+    previous: CommandId,
+    next: CommandId,
+) -> Option<String> {
+    let previous = binding_hint(app, previous)?;
+    let next = binding_hint(app, next)?;
+    Some(format!("{previous}/{next}"))
+}
+
+pub(crate) fn joined_hint<const N: usize>(parts: [Option<String>; N]) -> Option<String> {
+    let parts = parts.into_iter().flatten().collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+fn default_list_hint(app: &AppState) -> Option<String> {
+    joined_hint([
+        binding_pair_hint(app, CommandId::SelectionPrevious, CommandId::SelectionNext)
+            .map(|key| format!("{key} navigate")),
+        binding_hint(app, CommandId::UiConfirm).map(|key| format!("{key} confirm")),
+        binding_hint(app, CommandId::UiCancel).map(|key| format!("{key} cancel")),
+    ])
 }

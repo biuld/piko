@@ -192,9 +192,11 @@ The Esc key has a priority chain when the Editor has focus:
 
 ### Multiline mode
 
-When enabled (default), Shift+Enter inserts a newline. Enter always submits.
-When disabled, newline insertion is unavailable. This is controlled by the
-`tui.editor.multiline` setting on hostd.
+When enabled (default), the effective terminal profile chooses the reliable
+newline chord: enhanced terminals use Shift+Enter, while baseline terminals
+use Ctrl+J. Enter always submits. When disabled, newline insertion is
+unavailable. This is controlled by the `tui.editor.multiline` setting on
+hostd.
 
 ### Sizing
 
@@ -205,24 +207,10 @@ When disabled, newline insertion is unavailable. This is controlled by the
 
 ### Key binding customization
 
-All editor key bindings can be customized via `~/.piko/keybindings.json`
-(global) and `.piko/keybindings.json` (project-level). Editor bindings use
-the `tui.editor.*` and `tui.input.*` namespaces:
-
-| Binding ID | Default |
-|------------|---------|
-| `tui.editor.cursorLeft` | Left |
-| `tui.editor.cursorRight` | Right |
-| `tui.editor.cursorLineStart` | Home |
-| `tui.editor.cursorLineEnd` | End |
-| `tui.editor.deleteCharBackward` | Backspace |
-| `tui.editor.deleteCharForward` | Delete |
-| `tui.input.newLine` | Shift+Enter |
-| `tui.input.submit` | Enter |
-| `tui.input.tab` | Tab |
-| `tui.history.prev` | Ctrl+P |
-| `tui.history.next` | Ctrl+E |
-| `app.clipboard.pasteImage` | Ctrl+V / Alt+V |
+Editor bindings use the host-owned `[tui.keybindings]` rule registry described
+in [Keybindings and Command Routing](./keybindings.md). The TUI does not read
+or migrate standalone `keybindings.json` files; those paths are intentionally
+outside the current configuration contract.
 
 ## Behavior when overlays are active
 

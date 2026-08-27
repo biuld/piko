@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use crate::app::command::TuiCommandEntry;
 use crate::features::auto_completion::{CompletionRow, provider::AutoCompleteProvider};
 use crate::ui::components::selectable_list::ColumnCell;
-use crate::ui::interaction_hints::InteractionHints;
 
 pub struct FileBrowserProvider;
 
@@ -32,10 +31,6 @@ impl AutoCompleteProvider for FileBrowserProvider {
 
     fn label(&self) -> &'static str {
         "file browser"
-    }
-
-    fn hints(&self) -> InteractionHints<'static> {
-        InteractionHints::new("Tab cycle | Enter accept")
     }
 }
 

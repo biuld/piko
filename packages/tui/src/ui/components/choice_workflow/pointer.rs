@@ -1,18 +1,17 @@
+use super::{ChoiceWorkflow, clamp_rect, row_rect};
+use crate::{
+    app::HitId,
+    terminal::text::display_width,
+    theme::Theme,
+    ui::components::{
+        feedback::selected_bg, hover_bg, selectable_list::paint_index_hover, selection_prefix,
+    },
+};
 use piko_tui_layout::InteractionState;
 use ratatui::{
     Frame,
     layout::{Position, Rect},
     style::Style,
-};
-use unicode_width::UnicodeWidthStr;
-
-use super::{ChoiceWorkflow, clamp_rect, row_rect};
-use crate::{
-    app::HitId,
-    theme::Theme,
-    ui::components::{
-        feedback::selected_bg, hover_bg, selectable_list::paint_index_hover, selection_prefix,
-    },
 };
 
 impl ChoiceWorkflow {
@@ -184,12 +183,12 @@ impl ChoiceWorkflow {
         let y = *rows.choice_y.get(choice)?;
         let label = &question.choices.get(choice)?.label;
         let number = format!("{}. ", choice + 1);
-        let prefix_w = UnicodeWidthStr::width(selection_prefix(true).as_str()) as u16;
+        let prefix_w = display_width(selection_prefix(true).as_str()) as u16;
         let x = inner
             .x
             .saturating_add(prefix_w)
-            .saturating_add(UnicodeWidthStr::width(number.as_str()) as u16)
-            .saturating_add(UnicodeWidthStr::width(label.as_str()) as u16)
+            .saturating_add(display_width(number.as_str()) as u16)
+            .saturating_add(display_width(label.as_str()) as u16)
             .saturating_add(2); // ": "
         Some(Position::new(x, y))
     }
