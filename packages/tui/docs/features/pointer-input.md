@@ -10,8 +10,8 @@ Mouse input is dispatched through the hit map retained by the last painted
 prepared frame: a pointer event becomes a coordinate, the coordinate
 resolves to a region + element, and the element maps to the **same actions the
 keyboard uses**. Wheel scrolling and cursor placement are handled directly by
-the owning region. Hover gives soft visual feedback on actionable targets;
-drag remains a non-goal.
+the owning region. Hover gives soft visual feedback on actionable targets.
+Dragging over Timeline text creates a visual selection that `Ctrl+C` copies.
 
 ## Problem
 
@@ -32,6 +32,8 @@ notifications with the mouse.
 4. The user clicks the composer and the text cursor moves to the clicked
    column.
 5. A warning notice is visible; clicking it dismisses it.
+6. The user drags across Timeline rows, sees the selected cells highlighted,
+   and presses `Ctrl+C` to copy the rendered transcript text.
 
 ## In scope
 
@@ -42,10 +44,12 @@ notifications with the mouse.
 - Hover tracking and soft visual feedback for actionable targets already
   represented by the hit map.
 - Mouse capture lifecycle (enable on enter, disable on exit).
+- Timeline text drag selection, including wrapped and wide-character rows;
+  `Ctrl+C` copies the active selection.
 
 ## Out of scope
 
-- Drag (text selection, scrolling by drag).
+- Drag outside Timeline text selection; scrolling by drag.
 - Right-click and middle-click actions.
 - Touch events.
 
@@ -105,6 +109,17 @@ modal surfaces
   source indices after the viewport shifts.
 - Wheel over fixed read-only content, form inputs, and chrome is ignored.
 
+### Timeline text selection
+
+- Left-button drag inside the Stream selects rendered cells in content-space,
+  so a selection remains aligned with the viewport while painting.
+- A click without movement keeps existing click semantics (including tool-card
+  toggles) and does not leave an empty selection.
+- `Ctrl+C` copies a non-empty Timeline selection before the editor's clear or
+  turn-interrupt behavior. A new Timeline click replaces the old selection.
+- Selection is cleared when Timeline layout identity changes, avoiding stale
+  highlights after streamed or projected content is rebuilt.
+
 ### Hover
 
 - Mouse movement emits a pointer action; the pointer reducer updates
@@ -135,8 +150,8 @@ runs and disabled on exit.
 
 ## Non-goals
 
-- This feature does not implement drag, double-click, right-click, middle-click,
-  touch, text selection, or draggable scrollbars.
+- This feature does not implement double-click word selection, right-click,
+  middle-click, touch, selection outside Timeline, or draggable scrollbars.
 - Read-only Usage content and bottom chrome do not pretend to be actionable.
 
 ## Acceptance criteria
@@ -171,6 +186,8 @@ runs and disabled on exit.
       pointer behavior.
 - [x] Production pointer routing borrows `AppState` immutably; all pointer-owned
       mutation occurs in the reducer.
+- [x] Timeline drag selects rendered text across rows and wide glyphs;
+      `Ctrl+C` copies it without breaking click-to-toggle tool cards.
 
 ## Implementation status
 
@@ -209,6 +226,7 @@ of the interaction model.
 | Wheel step size | 3 rows | Comfortable vs 1 (slow) / 8 (page) |
 | Hover behavior | Soft preview, no select-on-hover | Signals clickability without moving the keyboard target |
 | Composer clickable when modal open | No | Modal owns focus; composer not an input target |
+| Timeline selection copy | `Ctrl+C` | Selection is more specific than editor clear / turn interrupt |
 
 ## Open questions
 

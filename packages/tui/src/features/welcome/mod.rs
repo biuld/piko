@@ -312,7 +312,7 @@ mod tests {
             cwd,
             spinner_frame: frame,
             submit_hint: Some("Enter".into()),
-            quit_hint: Some("Ctrl+Q".into()),
+            quit_hint: Some("Ctrl+D".into()),
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
         assert!(joined.contains("quit"));
         assert!(
             rows.iter().any(|line| {
-                line.contains("Ctrl+Q") && line.contains("quit") && !line.contains("Ctrl+Qquit")
+                line.contains("Ctrl+D") && line.contains("quit") && !line.contains("Ctrl+Dquit")
             }),
             "tip key and description must be separated: {joined}"
         );

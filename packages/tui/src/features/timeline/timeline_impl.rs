@@ -13,6 +13,7 @@ impl Timeline {
             projection: piko_client_core::AgentTimeline::new(),
             next_local_id: 1,
             line_cache: std::cell::RefCell::new(super::line_cache::LineCache::default()),
+            selection: std::cell::RefCell::new(super::selection::TimelineSelection::default()),
             projection_dirty: false,
             defer_projection_sync: false,
         }
@@ -147,6 +148,30 @@ impl Timeline {
         self.viewport.jump_latest();
     }
 
+    pub(crate) fn start_selection(&mut self, point: SelectionPoint) {
+        self.selection.get_mut().start(point);
+    }
+
+    pub(crate) fn update_selection(&mut self, point: SelectionPoint) {
+        self.selection.get_mut().update(point);
+    }
+
+    pub(crate) fn finish_selection(&mut self, point: SelectionPoint) -> bool {
+        self.selection.get_mut().finish(point)
+    }
+
+    pub(crate) fn has_selection(&self) -> bool {
+        self.selection.borrow().is_active()
+    }
+
+    pub(crate) fn selection_in_progress(&self) -> bool {
+        self.selection.borrow().is_dragging()
+    }
+
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        self.selection.borrow().selected_text()
+    }
+
     pub fn clear(&mut self) {
         self.components.clear();
         self.tool_calls.clear();
@@ -155,6 +180,7 @@ impl Timeline {
         self.viewport.jump_latest();
         self.projection.clear();
         self.line_cache.borrow_mut().clear();
+        self.selection.get_mut().clear();
         self.projection_dirty = false;
         self.defer_projection_sync = false;
         self.bump_layout_epoch();

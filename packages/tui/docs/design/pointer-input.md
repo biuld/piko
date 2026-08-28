@@ -9,7 +9,8 @@
 Consume the per-frame hit map with real mouse events: clicks resolve to the
 same actions as the keyboard, wheel scrolls the stream or Composer viewport,
 Composer clicks place the text cursor or jump through its scrollbar gutter,
-and hover gives soft feedback on actionable targets. No drag.
+hover gives soft feedback on actionable targets, and Timeline drag creates a
+copyable content-space text selection.
 
 ## Architecture
 
@@ -62,6 +63,21 @@ precedence stays with the component that owns the business state.
 
 No visual state is added to `piko-tui-layout`, and the generic `Component`
 contract does not change.
+
+### Timeline selection
+
+The Timeline owns a small selection model: content-row/column anchor and head,
+the current rendered-line snapshot, and the layout epoch. Pointer routing maps
+screen coordinates through the retained `TimelineRenderPlan` and live viewport
+top into content coordinates. Paint maps the selected half-open cell ranges
+back into the visible window and applies `theme.bg_visual` after transcript
+paint. Copy slices grapheme clusters by terminal display width, trims painted
+right padding, and joins selected visual rows with newlines.
+
+Down starts a candidate selection, Drag updates it, and Up commits it. Up with
+no movement clears the candidate and preserves the existing tool-title toggle.
+A layout-epoch change clears selection so projection rebuilds cannot leave a
+highlight attached to different content.
 
 ### Plane hit specs
 
@@ -159,6 +175,8 @@ Unit tests in `app/tests/pointer_tests.rs`:
    selected paint, and non-actionable hits remain unchanged.
 8. Timeline tool block click toggles only that block; viewport clipping and
    inter-component gaps remain exact.
+9. Timeline drag highlights and copies multi-row / wide-glyph text; a click
+   remains a click rather than a one-cell selection.
 
 Run:
 
@@ -171,7 +189,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Non-goals (this design)
 
-- Drag handling, right/middle buttons, touch.
+- Drag handling outside Timeline text selection, right/middle buttons, touch.
 - Double-click and pointer-specific business commands; components reuse the
   existing keyboard action vocabulary.
 

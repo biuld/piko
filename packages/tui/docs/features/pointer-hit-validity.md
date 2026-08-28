@@ -109,8 +109,8 @@ No user-facing configuration.
 
 ## Non-goals
 
-- No drag, text selection, double-click, or draggable scrollbars (unchanged
-  from `pointer-input.md`).
+- Timeline text drag follows the selection contract in `pointer-input.md`;
+  double-click, selection elsewhere, and draggable scrollbars remain out of scope.
 - Static regions do not migrate to live resolution; the per-frame map remains
   authoritative for composition, z-order, and modal barriers.
 - This PRD defines the contract for list migration; landing the migration for

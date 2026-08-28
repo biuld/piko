@@ -107,7 +107,9 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == hit_id
+        [Action::Timeline(TimelineAction::SelectionFinish {
+            activate_tool: Some(id), ..
+        })] if *id == hit_id
     ));
 
     let todo = build_surface_hitmap(&app, terminal)
@@ -129,6 +131,44 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
         !app.todo_lists.is_collapsed(),
         "release-only activate expands the collapsed default"
     );
+}
+
+#[test]
+fn timeline_drag_selects_text_and_copy_uses_the_clipboard_effect() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.timeline_mut().push(TimelineEntry::Tool(ToolEntry::new(
+        "tool-1".into(),
+        "bash".into(),
+        ToolStatus::Completed,
+        r#"{"cmd":"true"}"#.into(),
+        Some("done".into()),
+        None,
+    )));
+    let terminal = Rect::new(0, 0, 80, 24);
+    let stream = compose_frame(&app, terminal).plan.rects[&Region::Stream];
+    let (_, title) = app.timeline().tool_hits(stream, &app.theme)[0];
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        let x = if matches!(kind, MouseEventKind::Down(_)) {
+            title.x
+        } else {
+            title.x.saturating_add(5)
+        };
+        for action in route_pointer(&mut app, terminal, mouse(kind, x, title.y)) {
+            let _ = app.dispatch(action);
+        }
+    }
+    assert!(app.timeline().has_selection());
+    let effects = app.dispatch(TimelineAction::CopySelection.into());
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::CopyText { text, .. }] if !text.is_empty()
+    ));
+    assert_eq!(app.timeline().tool_expanded("tool-1"), Some(false));
 }
 
 #[test]

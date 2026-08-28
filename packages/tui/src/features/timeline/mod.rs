@@ -20,6 +20,7 @@ mod markdown;
 mod projection;
 mod render;
 mod render_diff;
+mod selection;
 mod store;
 mod tool_format;
 mod viewport;
@@ -32,6 +33,7 @@ pub use component::{
     ToolEntry, UpstreamInfo, UserMessageComponent,
 };
 pub(crate) use layout::TimelineRenderPlan;
+pub(crate) use selection::SelectionPoint;
 pub use store::TimelineStore;
 pub use viewport::ScrollViewport;
 
@@ -55,6 +57,7 @@ pub struct Timeline {
     projection: piko_client_core::AgentTimeline,
     next_local_id: u64,
     line_cache: RefCell<line_cache::LineCache>,
+    selection: RefCell<selection::TimelineSelection>,
     projection_dirty: bool,
     defer_projection_sync: bool,
 }

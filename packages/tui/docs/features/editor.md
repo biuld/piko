@@ -178,7 +178,7 @@ Editor has focus (no overlay active):
 | Key | Action |
 |-----|--------|
 | Ctrl+C | Clear the editor, or cancel the active turn |
-| Ctrl+Q | Quit the TUI |
+| Ctrl+D | Quit the TUI |
 
 ## Esc key behavior from the Editor
 

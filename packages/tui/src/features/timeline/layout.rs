@@ -103,6 +103,9 @@ impl Timeline {
         }
         cache.retain_ids(&seen_ids);
         drop(cache);
+        self.selection
+            .borrow_mut()
+            .update_snapshot(&lines, self.layout_epoch);
 
         let mut owners = vec![None; lines.len()];
         for (title_row, hit_id) in tool_title_rows {

@@ -79,6 +79,7 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         TimelineUp => TimelineAction::ScrollUp(1).into(),
         TimelineDown => TimelineAction::ScrollDown(1).into(),
         TimelineJumpLatest => TimelineAction::JumpLatest.into(),
+        TimelineCopySelection => TimelineAction::CopySelection.into(),
         UiCancel => cancel_action(app),
         UiConfirm => match surface {
             Some(SurfaceId::Notifications) => NotificationAction::CopySelected.into(),

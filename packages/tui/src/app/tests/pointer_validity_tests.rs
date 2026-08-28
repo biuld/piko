@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 
 use crate::app::{
     AppState, HitId, InitialOptions, SurfaceId, ToolStatus,
-    command::{Action, PointerAction, PointerTarget, TimelineAction},
+    command::{Action, TimelineAction},
     effect::Msg,
 };
 use crate::features::timeline::{TimelineEntry, ToolEntry};
@@ -49,23 +49,33 @@ fn push_tools(app: &mut AppState, count: usize) {
     }
 }
 
-fn left_down_target(app: &AppState, prepared: &PreparedFrame, x: u16, y: u16) -> PointerTarget {
+fn clicked_element(app: &AppState, prepared: &PreparedFrame, x: u16, y: u16) -> Option<HitId> {
     let actions = route_pointer_with_hitmap(
+        app,
+        prepared,
+        mouse(MouseEventKind::Up(MouseButton::Left), x, y),
+    );
+    match actions.as_slice() {
+        [Action::Timeline(TimelineAction::SelectionFinish { activate_tool, .. })] => {
+            activate_tool.map(HitId::TimelineTool)
+        }
+        other => panic!("expected one Timeline selection finish, got {other:?}"),
+    }
+}
+
+fn click_timeline(app: &mut AppState, prepared: &PreparedFrame, x: u16, y: u16) {
+    let down = route_pointer_with_hitmap(
         app,
         prepared,
         mouse(MouseEventKind::Down(MouseButton::Left), x, y),
     );
-    match actions.as_slice() {
-        [Action::Pointer(PointerAction::LeftDown(target))] => *target,
-        other => panic!("expected one LeftDown, got {other:?}"),
-    }
-}
-
-fn clicked_element(app: &AppState, prepared: &PreparedFrame, x: u16, y: u16) -> Option<HitId> {
-    match left_down_target(app, prepared, x, y) {
-        PointerTarget::Component { hit, .. } => hit.element,
-        other => panic!("expected a component target, got {other:?}"),
-    }
+    apply_batched(app, down);
+    let up = route_pointer_with_hitmap(
+        app,
+        prepared,
+        mouse(MouseEventKind::Up(MouseButton::Left), x, y),
+    );
+    apply_batched(app, up);
 }
 
 /// Apply a routed action exactly like the input batch does, without repainting
@@ -123,12 +133,12 @@ fn wheel_batch_then_click_resolves_post_scroll_geometry() {
     );
 
     // Resolving + reducing the fresh target toggles exactly that tool.
-    let target = left_down_target(&app, &prepared, rect.x, rect.y + 3);
-    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
-    assert!(matches!(
-        reduced.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == hit_id
-    ));
+    click_timeline(&mut app, &prepared, rect.x, rect.y + 3);
+    assert_eq!(
+        app.timeline()
+            .tool_expanded(&format!("tool-{}", hit_id.saturating_sub(1))),
+        Some(true)
+    );
 }
 
 #[test]
@@ -155,17 +165,11 @@ fn expand_then_click_other_tool_in_same_batch() {
     let mut prepared = prepare_frame(&app, terminal);
     let stream = prepared.product.plan.rects[&Region::Stream];
     let hits = app.timeline().tool_hits(stream, &app.theme);
-    let (id_one, rect_one) = hits[0];
+    let (_, rect_one) = hits[0];
     let (id_two, _) = hits[1];
 
     // Expand "one" (changes body height → layout epoch bump).
-    let target = left_down_target(&app, &prepared, rect_one.x, rect_one.y);
-    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
-    assert!(matches!(
-        reduced.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == id_one
-    ));
-    apply_batched(&mut app, reduced);
+    click_timeline(&mut app, &prepared, rect_one.x, rect_one.y);
     assert_eq!(app.timeline().tool_expanded("one"), Some(true));
     assert_ne!(
         prepared.timeline.as_ref().unwrap().epoch,
@@ -187,13 +191,7 @@ fn expand_then_click_other_tool_in_same_batch() {
         .find(|(id, _)| *id == id_two)
         .expect("second tool hit")
         .1;
-    let target = left_down_target(&app, &prepared, rect_two.x, rect_two.y);
-    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
-    assert!(matches!(
-        reduced.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == id_two
-    ));
-    apply_batched(&mut app, reduced);
+    click_timeline(&mut app, &prepared, rect_two.x, rect_two.y);
     assert_eq!(app.timeline().tool_expanded("two"), Some(true));
 }
 
@@ -224,19 +222,13 @@ fn streaming_append_between_paint_and_event_is_clickable() {
     prepared.refresh_timeline(&app);
 
     let stream = prepared.product.plan.rects[&Region::Stream];
-    let (id, rect) = app
+    let (_, rect) = app
         .timeline()
         .tool_hits(stream, &app.theme)
         .into_iter()
         .next_back()
         .expect("new tool hit");
-    let target = left_down_target(&app, &prepared, rect.x, rect.y);
-    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
-    assert!(matches!(
-        reduced.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(clicked))] if *clicked == id
-    ));
-    apply_batched(&mut app, reduced);
+    click_timeline(&mut app, &prepared, rect.x, rect.y);
     assert_eq!(app.timeline().tool_expanded("two"), Some(true));
     assert_eq!(app.timeline().tool_expanded("one"), Some(false));
 }
@@ -256,7 +248,7 @@ fn paint_consumed_plan_then_click_still_toggles_tool() {
     let terminal = Rect::new(0, 0, 80, 24);
     let mut prepared = prepare_frame(&app, terminal);
     let stream = prepared.product.plan.rects[&Region::Stream];
-    let (id, rect) = app
+    let (_, rect) = app
         .timeline()
         .tool_hits(stream, &app.theme)
         .into_iter()
@@ -269,13 +261,7 @@ fn paint_consumed_plan_then_click_still_toggles_tool() {
     prepared.timeline = None;
     prepared.refresh_timeline(&app);
 
-    let target = left_down_target(&app, &prepared, rect.x, rect.y);
-    let reduced = app.reduce_pointer_action(PointerAction::LeftDown(target));
-    assert!(matches!(
-        reduced.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(clicked))] if *clicked == id
-    ));
-    apply_batched(&mut app, reduced);
+    click_timeline(&mut app, &prepared, rect.x, rect.y);
     assert_eq!(app.timeline().tool_expanded("one"), Some(true));
 }
 

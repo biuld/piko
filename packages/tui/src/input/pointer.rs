@@ -15,7 +15,7 @@ use crate::app::{
     AppState, HitId,
     command::{Action, PointerAction, PointerTarget, TimelineAction},
 };
-use crate::features::timeline::WHEEL_STEP;
+use crate::features::timeline::{SelectionPoint, WHEEL_STEP};
 use crate::layout::PreparedFrame;
 use crate::navigation::Region;
 use crate::terminal::{PointerEvent, PointerKind};
@@ -59,6 +59,17 @@ pub fn route_normalized_pointer_with_hitmap(
 ) -> Vec<Action> {
     let (x, y) = (event.column, event.row);
     let target = resolve_target(app, prepared, x, y);
+    if app.timeline().selection_in_progress() {
+        match event.kind {
+            PointerKind::Drag(crossterm::event::MouseButton::Left) => {
+                return stream_selection_action(app, prepared, x, y, true, false);
+            }
+            PointerKind::Up(crossterm::event::MouseButton::Left) => {
+                return stream_selection_action(app, prepared, x, y, false, true);
+            }
+            _ => {}
+        }
+    }
     if matches!(
         target,
         PointerTarget::Component {
@@ -72,6 +83,15 @@ pub fn route_normalized_pointer_with_hitmap(
             }
             PointerKind::ScrollDown => {
                 return vec![TimelineAction::ScrollDown(WHEEL_STEP).into()];
+            }
+            PointerKind::Down(crossterm::event::MouseButton::Left) => {
+                return stream_selection_action(app, prepared, x, y, false, false);
+            }
+            PointerKind::Drag(crossterm::event::MouseButton::Left) => {
+                return stream_selection_action(app, prepared, x, y, true, false);
+            }
+            PointerKind::Up(crossterm::event::MouseButton::Left) => {
+                return stream_selection_action(app, prepared, x, y, false, true);
             }
             _ => {}
         }
@@ -89,6 +109,59 @@ pub fn route_normalized_pointer_with_hitmap(
             gesture: PointerGesture::ScrollDown,
         },
         _ => return Vec::new(),
+    };
+    vec![action.into()]
+}
+
+fn stream_selection_action(
+    app: &AppState,
+    prepared: &PreparedFrame,
+    x: u16,
+    y: u16,
+    drag: bool,
+    finish: bool,
+) -> Vec<Action> {
+    let Some(plan) = prepared.timeline.as_ref() else {
+        return Vec::new();
+    };
+    if plan.content_area.is_empty() {
+        return Vec::new();
+    }
+    let continuing = app.timeline().selection_in_progress() && (drag || finish);
+    if !continuing
+        && (x < plan.content_area.x
+            || x >= plan.content_area.right()
+            || y < plan.content_area.y
+            || y >= plan.content_area.bottom())
+    {
+        return Vec::new();
+    }
+    let x = x.clamp(
+        plan.content_area.x,
+        plan.content_area.right().saturating_sub(1),
+    );
+    let y = y.clamp(
+        plan.content_area.y,
+        plan.content_area.bottom().saturating_sub(1),
+    );
+    let top = app.timeline().viewport.top_offset();
+    let point = SelectionPoint {
+        row: top.saturating_add(usize::from(y - plan.content_area.y)),
+        col: x - plan.content_area.x,
+    };
+    let activate_tool = plan.resolve(x, y, top).and_then(|(id, _)| match id {
+        HitId::TimelineTool(id) => Some(id),
+        _ => None,
+    });
+    let action = if finish {
+        TimelineAction::SelectionFinish {
+            point,
+            activate_tool,
+        }
+    } else if drag {
+        TimelineAction::SelectionUpdate(point)
+    } else {
+        TimelineAction::SelectionStart(point)
     };
     vec![action.into()]
 }

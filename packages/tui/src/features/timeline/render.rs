@@ -82,6 +82,13 @@ impl Timeline {
                 .block(block),
             plan.content_area,
         );
+        self.selection.borrow().paint(
+            frame,
+            plan.content_area,
+            plan.top_offset,
+            plan.viewport.visible.len(),
+            Style::default().bg(theme.bg_visual),
+        );
         if let Some(metrics) = plan.viewport.scrollbar {
             let mut scrollbar_state = ScrollbarState::new(metrics.content_rows)
                 .position(metrics.content_position())

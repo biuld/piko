@@ -18,6 +18,10 @@ pub enum Effect {
         notification_id: u64,
         text: String,
     },
+    CopyText {
+        text: String,
+        success: String,
+    },
     ReadClipboardImage,
     ReadImageFile {
         path: PathBuf,
@@ -38,6 +42,13 @@ impl Effect {
         Self::CopyToClipboard {
             notification_id,
             text: text.into(),
+        }
+    }
+
+    pub fn copy_text(text: impl Into<String>, success: impl Into<String>) -> Self {
+        Self::CopyText {
+            text: text.into(),
+            success: success.into(),
         }
     }
 

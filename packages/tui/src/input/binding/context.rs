@@ -190,6 +190,7 @@ pub struct BindingContext {
     pub notice_visible: bool,
     pub terminal_enhanced: bool,
     pub text_input_active: bool,
+    pub timeline_selection_active: bool,
 }
 
 impl BindingContext {
@@ -211,6 +212,7 @@ impl BindingContext {
                 .is_some(),
             terminal_enhanced: profile.key_reachability.enhanced_keyboard,
             text_input_active: app.active_text_box_is_present(),
+            timeline_selection_active: app.timeline().has_selection(),
         }
     }
 
@@ -224,6 +226,7 @@ impl BindingContext {
             ContextAtom::NoticeVisible => self.notice_visible,
             ContextAtom::TerminalEnhancedKeyboard => self.terminal_enhanced,
             ContextAtom::TextInputActive => self.text_input_active,
+            ContextAtom::TimelineSelectionActive => self.timeline_selection_active,
         }
     }
 }
@@ -238,6 +241,7 @@ pub enum ContextAtom {
     NoticeVisible,
     TerminalEnhancedKeyboard,
     TextInputActive,
+    TimelineSelectionActive,
 }
 
 impl ContextAtom {
@@ -255,6 +259,7 @@ impl ContextAtom {
             "notice.visible" => Self::NoticeVisible,
             "terminal.enhancedKeyboard" => Self::TerminalEnhancedKeyboard,
             "text.inputActive" => Self::TextInputActive,
+            "timeline.selectionActive" => Self::TimelineSelectionActive,
             _ => return None,
         };
         Some((atom, negated))

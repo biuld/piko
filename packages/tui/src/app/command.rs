@@ -103,6 +103,13 @@ pub enum TimelineAction {
     JumpLatest,
     /// Toggle one tool block by its stable interned hit id.
     ToggleTool(u64),
+    SelectionStart(crate::features::timeline::SelectionPoint),
+    SelectionUpdate(crate::features::timeline::SelectionPoint),
+    SelectionFinish {
+        point: crate::features::timeline::SelectionPoint,
+        activate_tool: Option<u64>,
+    },
+    CopySelection,
 }
 
 #[derive(Debug)]

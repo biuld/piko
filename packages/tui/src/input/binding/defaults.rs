@@ -17,7 +17,7 @@ macro_rules! rule {
 /// than replacing the whole keymap.
 pub fn default_rules() -> Vec<BindingRule> {
     vec![
-        rule!("default-app-quit", "ctrl+q", AppQuit, Application),
+        rule!("default-app-quit", "ctrl+d", AppQuit, Application),
         rule!("default-workspace-tree", "f2", SessionTreeOpen, Workspace),
         rule!(
             "default-workspace-models",
@@ -157,12 +157,6 @@ pub fn default_rules() -> Vec<BindingRule> {
             Editor
         ),
         rule!(
-            "default-editor-ctrl-delete-forward",
-            "ctrl+d",
-            TextDeleteForward,
-            Editor
-        ),
-        rule!(
             "default-editor-delete-word-backward",
             "ctrl+w",
             TextDeleteWordBackward,
@@ -235,14 +229,21 @@ pub fn default_rules() -> Vec<BindingRule> {
             "ctrl+c",
             TurnInterrupt,
             Editor,
-            ["turn.running"]
+            ["turn.running", "!timeline.selectionActive"]
+        ),
+        rule!(
+            "default-timeline-copy-selection",
+            "ctrl+c",
+            TimelineCopySelection,
+            Editor,
+            ["timeline.selectionActive"]
         ),
         rule!(
             "default-editor-clear",
             "ctrl+c",
             EditorClear,
             Editor,
-            ["!turn.running"]
+            ["!turn.running", "!timeline.selectionActive"]
         ),
         rule!(
             "default-workspace-idle-escape",

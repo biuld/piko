@@ -173,7 +173,7 @@ select one effective key instead of adding aliases for different commands.
 
 | Scope | Key | Command |
 |---|---|---|
-| Application | `Ctrl+Q` | `app.quit` |
+| Application | `Ctrl+D` | `app.quit` |
 | Workspace | `F2` | `session.tree.open` |
 | Workspace | `F3` | `model.selector.open` |
 | Workspace | `F4` | `agent.selector.open` |
@@ -198,6 +198,7 @@ has authority. They are not implemented as an extra pre-routing priority.
 | `Esc` | `workspace.idleEscape` | editor empty, idle, and suggestions hidden |
 | `Ctrl+C` | `turn.interrupt` | turn running |
 | `Ctrl+C` | `editor.clear` | no turn running |
+| `Ctrl+C` | `timeline.copySelection` | Timeline selection active |
 | `Tab` | `completion.accept` | suggestions visible |
 | `Shift+Tab` | `selection.previous` | suggestions visible |
 

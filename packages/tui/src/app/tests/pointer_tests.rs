@@ -339,7 +339,21 @@ fn timeline_tool_block_hit_wins_over_stream_and_toggles_that_block() {
     );
     assert!(matches!(
         actions.as_slice(),
-        [Action::Timeline(TimelineAction::ToggleTool(id))] if *id == hit_id
+        [Action::Timeline(TimelineAction::SelectionStart(_))]
+    ));
+    for action in actions {
+        let _ = app.dispatch(action);
+    }
+    let actions = route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Up(MouseButton::Left), x, y),
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Timeline(TimelineAction::SelectionFinish {
+            activate_tool: Some(id), ..
+        })] if *id == hit_id
     ));
 }
 

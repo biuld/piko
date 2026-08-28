@@ -33,6 +33,10 @@ pub(crate) fn run_effects(app: &mut AppState, host: &mut HostdClient, effects: V
                 }
                 Err(err) => app.push_error(format!("could not copy notification: {err}")),
             },
+            Effect::CopyText { text, success } => match copy_to_clipboard(&text) {
+                Ok(()) => app.status = success,
+                Err(err) => app.push_error(format!("could not copy text: {err}")),
+            },
             Effect::ReadClipboardImage => match read_clipboard_image() {
                 Ok((filename, data, mime_type)) => {
                     let follow_up = app.dispatch(

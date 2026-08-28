@@ -131,6 +131,22 @@ impl AppState {
             TimelineAction::ScrollDown(n) => self.timeline_mut().scroll_down(n),
             TimelineAction::JumpLatest => self.timeline_mut().jump_latest(),
             TimelineAction::ToggleTool(index) => self.timeline_mut().toggle_tool(index),
+            TimelineAction::SelectionStart(point) => self.timeline_mut().start_selection(point),
+            TimelineAction::SelectionUpdate(point) => self.timeline_mut().update_selection(point),
+            TimelineAction::SelectionFinish {
+                point,
+                activate_tool,
+            } => {
+                let dragged = self.timeline_mut().finish_selection(point);
+                if !dragged && let Some(tool) = activate_tool {
+                    self.timeline_mut().toggle_tool(tool);
+                }
+            }
+            TimelineAction::CopySelection => {
+                if let Some(text) = self.timeline().selected_text() {
+                    return vec![Effect::copy_text(text, "timeline copied")];
+                }
+            }
         }
         Vec::new()
     }

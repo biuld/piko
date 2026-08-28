@@ -37,6 +37,7 @@ const CANCEL: &[ScopeKind] = &[ScopeKind::Selection, ScopeKind::Suggestions];
 const SELECTION_COMMAND: &[ScopeKind] = &[ScopeKind::Selection, ScopeKind::Suggestions];
 const SUGGESTIONS: &[ScopeKind] = &[ScopeKind::Suggestions];
 const TIMELINE: &[ScopeKind] = &[ScopeKind::Timeline];
+const TIMELINE_COPY: &[ScopeKind] = &[ScopeKind::Editor, ScopeKind::Timeline];
 const SELECTION: &[ScopeKind] = &[ScopeKind::Selection];
 const TREE: &[ScopeKind] = &[ScopeKind::Tree];
 const SESSIONS: &[ScopeKind] = &[ScopeKind::Sessions];
@@ -115,6 +116,7 @@ pub fn catalog() -> Vec<CommandSpec> {
         TimelineUp, "Timeline up", "Scroll the conversation up one row", TIMELINE, Repeatable, enabled;
         TimelineDown, "Timeline down", "Scroll the conversation down one row", TIMELINE, Repeatable, enabled;
         TimelineJumpLatest, "Timeline latest", "Jump to the newest conversation entry", TIMELINE, PressOnly, enabled;
+        TimelineCopySelection, "Copy timeline selection", "Copy selected timeline text", TIMELINE_COPY, PressOnly, enabled;
         UiCancel, "Cancel", "Cancel the current interaction", CANCEL, PressOnly, enabled;
         UiConfirm, "Confirm", "Confirm the focused choice", SELECTION, PressOnly, enabled;
         SelectionPrevious, "Previous", "Move to the previous choice", SELECTION_COMMAND, Repeatable, enabled;

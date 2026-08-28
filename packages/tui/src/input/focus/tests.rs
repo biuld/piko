@@ -1,5 +1,8 @@
 use super::*;
-use crate::app::{AppState, InitialOptions};
+use crate::app::{
+    AppState, InitialOptions,
+    command::{AppAction, TimelineAction},
+};
 use crossterm::event::{KeyEventKind, KeyEventState};
 use std::path::PathBuf;
 
@@ -106,6 +109,38 @@ fn ctrl_j_has_no_default_binding() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn ctrl_d_quits_instead_of_deleting_forward() {
+    let mut app = app();
+    app.editor.restore_text("hello");
+    let action = InputRouter::route_key(
+        &app,
+        &BindingRegistry::default(),
+        key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+    );
+    assert!(matches!(action, Some(Action::App(AppAction::Quit))));
+}
+
+#[test]
+fn ctrl_c_copies_an_active_timeline_selection_before_editor_clear() {
+    let mut app = app();
+    app.timeline_mut()
+        .start_selection(crate::features::timeline::SelectionPoint { row: 0, col: 0 });
+    app.timeline_mut()
+        .update_selection(crate::features::timeline::SelectionPoint { row: 0, col: 1 });
+    app.timeline_mut()
+        .finish_selection(crate::features::timeline::SelectionPoint { row: 0, col: 1 });
+    let action = InputRouter::route_key(
+        &app,
+        &BindingRegistry::default(),
+        key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+    assert!(matches!(
+        action,
+        Some(Action::Timeline(TimelineAction::CopySelection))
+    ));
 }
 
 #[test]

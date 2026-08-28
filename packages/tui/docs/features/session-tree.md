@@ -113,7 +113,6 @@ Filter shortcuts:
 
 | Key | Action |
 |-----|--------|
-| Ctrl+D | Reset to default filter |
 | Ctrl+T | Toggle no-tools filter |
 | Ctrl+U | Toggle user-only filter |
 | Ctrl+L | Toggle labeled-only filter |
@@ -188,7 +187,6 @@ binding IDs are:
 | `app.tree.unfoldOrDown` | Ctrl+Right, Alt+Right |
 | `app.tree.editLabel` | Shift+L |
 | `app.tree.toggleLabelTimestamp` | Shift+T |
-| `app.tree.filter.default` | Ctrl+D |
 | `app.tree.filter.noTools` | Ctrl+T |
 | `app.tree.filter.userOnly` | Ctrl+U |
 | `app.tree.filter.labeledOnly` | Ctrl+L |

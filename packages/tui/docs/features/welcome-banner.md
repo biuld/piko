@@ -29,7 +29,7 @@ timeline component paints.
 │          │                               │        │
 │          │     Enter    submit prompt    │        │
 │          │     /        commands         │        │
-│          │     Ctrl+Q   quit             │        │
+│          │     Ctrl+D   quit             │        │
 │          └───────────────────────────────┘        │
 │                                                   │
 └───────────────────────────────────────────────────┘

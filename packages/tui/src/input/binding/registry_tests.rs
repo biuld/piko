@@ -121,7 +121,7 @@ fn press_only_commands_ignore_repeat_events() {
     let scopes = active_scope_stack(&app);
     assert_eq!(
         registry.resolve(
-            KeyStroke::parse("ctrl+q").unwrap(),
+            KeyStroke::parse("ctrl+d").unwrap(),
             KeyPhase::Repeat,
             &context,
             &scopes,
