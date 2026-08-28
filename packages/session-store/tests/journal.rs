@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 use std::fs::OpenOptions as FsOpenOptions;
 use std::io::Write;
 
-use piko_protocol::{AgentInstanceIdentity, Message, MessageContent, Usage};
+use piko_protocol::{
+    AgentInstanceIdentity, ContentBlock, Message, MessageContent, ModelStepOutcome, Usage,
+};
 use piko_session_store::{
-    CompactionRecordedV1, EventData, MessageCommittedV1, NewSession, OpenOptions, ProposedCommit,
-    RawEvent, SessionStore, StoreError, UsageAttribution, UsageCorrectedV1, UsageQuery,
-    UsageRecordedV1,
+    CompactionRecordedV1, EventData, ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1,
+    NewSession, OpenOptions, ProposedCommit, RawEvent, SessionStore, StoreError, UsageAttribution,
+    UsageCorrectedV1, UsageQuery, UsageRecordedV1,
 };
 use tempfile::tempdir;
 
@@ -46,6 +48,202 @@ fn message(id: &str, agent_parent: Option<&str>, tree_parent: Option<&str>) -> E
             timestamp: Some(2),
         },
     })
+}
+
+fn model_step_messages() -> (EventData, EventData, EventData) {
+    let assistant = EventData::MessageCommitted(MessageCommittedV1 {
+        message_id: "assistant-1".into(),
+        agent_instance_id: "root".into(),
+        agent_parent_message_id: None,
+        tree_parent_entry_id: None,
+        execution_id: Some("execution-1".into()),
+        source_turn_id: Some("turn-1".into()),
+        committed_at: 3,
+        message: Message::Assistant {
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "inspect".into(),
+                    thinking_signature: None,
+                    duration_ms: Some(7),
+                },
+                ContentBlock::Text {
+                    text: "I will inspect this".into(),
+                },
+            ],
+            checkpoint: None,
+            provider: "test".into(),
+            model: "model".into(),
+            usage: None,
+            stop_reason: Some("tool_calls".into()),
+            error_message: None,
+            timestamp: Some(3),
+        },
+    });
+    let tool_call = EventData::MessageCommitted(MessageCommittedV1 {
+        message_id: "tool-call-message-1".into(),
+        agent_instance_id: "root".into(),
+        agent_parent_message_id: Some("assistant-1".into()),
+        tree_parent_entry_id: Some("assistant-1".into()),
+        execution_id: Some("execution-1".into()),
+        source_turn_id: Some("turn-1".into()),
+        committed_at: 3,
+        message: Message::ToolCall {
+            id: "call-1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({"path": "README.md"}),
+            model: None,
+            provider: None,
+            timestamp: Some(3),
+        },
+    });
+    let boundary = EventData::ModelStepCommitted(ModelStepCommittedV1 {
+        model_step_id: "step-1".into(),
+        step_index: 1,
+        run_id: "run-1".into(),
+        execution_id: "execution-1".into(),
+        agent_instance_id: "root".into(),
+        source_turn_id: Some("turn-1".into()),
+        assistant_message_id: "assistant-1".into(),
+        tool_call_message_ids: vec!["tool-call-message-1".into()],
+        outcome: ModelStepOutcome::ToolCalls,
+        started_at: 2,
+        finished_at: 3,
+    });
+    (assistant, tool_call, boundary)
+}
+
+#[test]
+fn model_step_commit_replays_as_an_atomic_authoritative_relation() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("session");
+    let opened = SessionStore::create(&path, new_session("s1")).unwrap();
+    opened
+        .store
+        .append(
+            1,
+            commit(
+                "execution-start",
+                2,
+                event(
+                    "execution-start-event",
+                    EventData::ExecutionStarted(ExecutionStartedV1 {
+                        run_id: "run-1".into(),
+                        execution_id: "execution-1".into(),
+                        request_id: "turn-1".into(),
+                        agent_instance_id: "root".into(),
+                        admitted_revision: 1,
+                        base_message_id: None,
+                        tree_base_entry_id: None,
+                        source_turn_id: Some("turn-1".into()),
+                        detached_recipient_agent_instance_id: None,
+                        prompt_assembly_version: 1,
+                        prompt_digest: "digest".into(),
+                        started_at: 2,
+                    }),
+                ),
+            ),
+        )
+        .unwrap();
+    let (assistant, tool_call, boundary) = model_step_messages();
+    let proposed = ProposedCommit {
+        commit_id: "model-step-commit".into(),
+        committed_at: 3,
+        causation_id: None,
+        correlation_id: Some("turn-1".into()),
+        events: vec![
+            event("assistant-event", assistant),
+            event("tool-call-event", tool_call),
+            event("model-step-event", boundary),
+        ],
+        extensions: BTreeMap::new(),
+    };
+    let first = opened.store.append(2, proposed.clone()).unwrap();
+    let retry = opened.store.append(2, proposed).unwrap();
+    assert_eq!(first, retry);
+
+    let aggregate = opened.store.aggregate();
+    let execution = aggregate.executions.get("execution-1").unwrap();
+    assert_eq!(execution.started.run_id, "run-1");
+    assert_eq!(execution.model_step_ids, ["step-1"]);
+    assert_eq!(
+        aggregate.model_steps["step-1"].data.tool_call_message_ids,
+        ["tool-call-message-1"]
+    );
+    assert_eq!(aggregate.revision, 3);
+
+    drop(opened);
+    let reopened = SessionStore::open(&path, OpenOptions::default()).unwrap();
+    assert_eq!(
+        reopened.aggregate.model_steps["step-1"].data.outcome,
+        ModelStepOutcome::ToolCalls
+    );
+}
+
+#[test]
+fn model_step_boundary_rejects_messages_from_an_earlier_revision() {
+    let temp = tempdir().unwrap();
+    let opened = SessionStore::create(&temp.path().join("session"), new_session("s1")).unwrap();
+    opened
+        .store
+        .append(
+            1,
+            commit(
+                "execution-start",
+                2,
+                event(
+                    "execution-start-event",
+                    EventData::ExecutionStarted(ExecutionStartedV1 {
+                        run_id: "run-1".into(),
+                        execution_id: "execution-1".into(),
+                        request_id: "turn-1".into(),
+                        agent_instance_id: "root".into(),
+                        admitted_revision: 1,
+                        base_message_id: None,
+                        tree_base_entry_id: None,
+                        source_turn_id: Some("turn-1".into()),
+                        detached_recipient_agent_instance_id: None,
+                        prompt_assembly_version: 1,
+                        prompt_digest: "digest".into(),
+                        started_at: 2,
+                    }),
+                ),
+            ),
+        )
+        .unwrap();
+    let (assistant, tool_call, boundary) = model_step_messages();
+    opened
+        .store
+        .append(
+            2,
+            ProposedCommit {
+                commit_id: "messages-without-boundary".into(),
+                committed_at: 3,
+                causation_id: None,
+                correlation_id: Some("turn-1".into()),
+                events: vec![
+                    event("assistant-event", assistant),
+                    event("tool-call-event", tool_call),
+                ],
+                extensions: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+
+    let error = opened
+        .store
+        .append(
+            3,
+            commit(
+                "late-model-step-boundary",
+                4,
+                event("model-step-event", boundary),
+            ),
+        )
+        .expect_err("a boundary cannot retroactively make earlier messages atomic");
+
+    assert!(matches!(error, StoreError::InvalidEvent(message) if message.contains("revision")));
+    assert_eq!(opened.store.aggregate().revision, 3);
+    assert!(opened.store.aggregate().model_steps.is_empty());
 }
 
 #[test]

@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionTerminal {
+    pub run_id: String,
     pub outcome: piko_protocol::execution::ExecutionOutcome,
     pub transcript: Vec<piko_protocol::Message>,
     pub head_message_id: Option<String>,
@@ -30,7 +31,8 @@ pub(super) async fn supervise_execution(
             tracing::info!(
                 target: "agent.run_completed",
                 session_id = %identity.session_id,
-                run_id = %identity.execution_id,
+                run_id = %identity.run_id,
+                execution_id = %identity.execution_id,
                 agent_instance_id = %identity.agent_instance_id,
                 "Agent run completed"
             );
@@ -40,7 +42,8 @@ pub(super) async fn supervise_execution(
             tracing::info!(
                 target: "agent.run_cancelled",
                 session_id = %identity.session_id,
-                run_id = %identity.execution_id,
+                run_id = %identity.run_id,
+                execution_id = %identity.execution_id,
                 agent_instance_id = %identity.agent_instance_id,
                 reason = ?reason,
                 "Agent run cancelled"
@@ -51,7 +54,8 @@ pub(super) async fn supervise_execution(
             tracing::error!(
                 target: "agent.run_failed",
                 session_id = %identity.session_id,
-                run_id = %identity.execution_id,
+                run_id = %identity.run_id,
+                execution_id = %identity.execution_id,
                 agent_instance_id = %identity.agent_instance_id,
                 error = %truncate(error, 512),
                 "Agent run failed"
@@ -59,6 +63,7 @@ pub(super) async fn supervise_execution(
         }
     }
     let candidate = ExecutionTerminal {
+        run_id: identity.run_id.clone(),
         outcome: outcome.clone(),
         transcript,
         head_message_id,

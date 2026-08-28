@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use piko_protocol::{
     AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, Message,
-    SessionTreeEntry,
+    ModelStepBoundary, SessionTreeEntry,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +69,7 @@ pub struct ExecutionProjection {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub report: Option<AgentRunReport>,
+    pub model_steps: Vec<ModelStepBoundary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

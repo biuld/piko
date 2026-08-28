@@ -1,6 +1,30 @@
 use super::*;
 
 impl AppState {
+    pub(super) fn apply_model_step_committed(
+        &mut self,
+        boundary: piko_protocol::ModelStepBoundary,
+    ) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        if !self.accepts_session(&boundary.session_id) {
+            return effects;
+        }
+        let agent_instance_id = boundary.agent_instance_id.clone();
+        let mut outcome = piko_client_core::ApplyOutcome::Ignored;
+        self.with_agent_timeline(&agent_instance_id, |timeline| {
+            outcome = timeline.apply_model_step_committed(boundary);
+        });
+        if outcome == piko_client_core::ApplyOutcome::Inconsistent
+            && let Some(session_id) = self.session.id.clone()
+        {
+            effects.push(Effect::send(Command::StateSnapshot {
+                command_id: command_id(),
+                session_id,
+            }));
+        }
+        effects
+    }
+
     pub(super) fn apply_transcript_committed(
         &mut self,
         committed: piko_protocol::TranscriptCommittedEvent,

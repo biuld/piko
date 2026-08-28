@@ -164,6 +164,7 @@ fn tool_start_and_end_update_one_timeline_item() {
                 tool_name: "read".into(),
                 result: json!({ "ok": true }),
                 is_error: false,
+                parent_message_id: None,
                 source_turn_id: Some("turn-1".into()),
             },
         )
@@ -208,6 +209,7 @@ fn committed_tool_result_updates_existing_tool_call() {
                 tool_name: "run".into(),
                 result: json!({"done": true}),
                 is_error: true,
+                parent_message_id: None,
                 source_turn_id: Some("turn-1".into()),
             },
         )

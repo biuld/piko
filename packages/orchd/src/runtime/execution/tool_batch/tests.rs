@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use piko_llmd::gateway::{ErrorClass, FinishReason, InferenceError, InferenceEvent};
 use piko_protocol::Message;
 use piko_protocol::execution::{CancelExecutionRequest, CancelReason};
 use piko_protocol::tools::ToolSetPolicy;
@@ -428,4 +429,52 @@ async fn routes_carry_resolved_mode_and_set_cap() {
     );
     assert_eq!(routes["par_a"].max_concurrent_calls, Some(3));
     assert_eq!(routes["seq_c"].max_concurrent_calls, Some(3));
+}
+
+#[tokio::test]
+async fn stream_error_commits_failed_model_step_before_failed_terminal() {
+    let gateway = Arc::new(ToolCallingGateway::new());
+    gateway.push_step(vec![
+        InferenceEvent::reasoning("partial thought"),
+        InferenceEvent::function_call("discarded-call", "par_a", "{}"),
+        InferenceEvent::Error(InferenceError::new(
+            ErrorClass::Upstream,
+            "test",
+            "stream",
+            "connection lost",
+        )),
+    ]);
+    let harness = tool_batch_harness(gateway, None).await;
+    let (tools, routes) = discover_batch_routes(&harness.runtime).await;
+
+    let terminal = run_batch(&harness.runtime, "exec-stream-error", tools, routes).await;
+
+    assert!(matches!(
+        terminal.outcome,
+        piko_protocol::ExecutionOutcome::Failed { ref error }
+            if error.contains("connection lost")
+    ));
+    let steps = harness.commits.model_steps();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].outcome, piko_protocol::ModelStepOutcome::Failed);
+    assert!(steps[0].tool_calls.is_empty());
+    assert_eq!(harness.provider.execution_count("par_a"), 0);
+}
+
+#[tokio::test]
+async fn cancelled_finish_commits_cancelled_model_step_before_cancelled_terminal() {
+    let gateway = Arc::new(ToolCallingGateway::new());
+    gateway.push_step(vec![InferenceEvent::Completed(FinishReason::Cancelled)]);
+    let harness = tool_batch_harness(gateway, None).await;
+    let (tools, routes) = discover_batch_routes(&harness.runtime).await;
+
+    let terminal = run_batch(&harness.runtime, "exec-model-cancel", tools, routes).await;
+
+    assert!(matches!(
+        terminal.outcome,
+        piko_protocol::ExecutionOutcome::Cancelled { .. }
+    ));
+    let steps = harness.commits.model_steps();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].outcome, piko_protocol::ModelStepOutcome::Cancelled);
 }

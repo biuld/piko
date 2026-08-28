@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, VecDeque},
 };
 
-use piko_protocol::TranscriptCommittedEvent;
+use piko_protocol::{ModelStepBoundary, TranscriptCommittedEvent};
 
 use crate::{
     app::{HitId, command::TimelineAction},

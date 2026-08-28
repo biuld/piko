@@ -42,6 +42,17 @@ pub(super) fn handle_host(
                 }
             }
         }
+        ServerMessage::ModelStepCommitted(boundary) => {
+            if !is_live_session_event(state, &boundary.session_id) {
+                return;
+            }
+            if let Some(session) = &mut state.live_session {
+                let timeline = session.timeline_mut(&boundary.agent_instance_id);
+                if timeline.apply_model_step_committed(boundary) == ApplyOutcome::Inconsistent {
+                    request_refresh(state, ctx, effects);
+                }
+            }
+        }
         ServerMessage::StreamItem(patch) => {
             events::handle_stream_item(state, patch, ctx, effects);
         }
@@ -452,6 +463,11 @@ fn apply_sequenced_to_timeline(
                 event.message.clone(),
                 event.source_turn_id.clone(),
             );
+        }
+        ServerMessage::ModelStepCommitted(boundary)
+            if boundary.session_id == expected_session_id =>
+        {
+            let _ = timeline.apply_model_step_committed(boundary.clone());
         }
         ServerMessage::StreamItem(patch)
             if patch.session_id.as_deref() == Some(expected_session_id) =>

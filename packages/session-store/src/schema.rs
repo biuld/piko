@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use piko_protocol::{
     AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec,
-    DurableAgentInput, Message, TodoList, Usage,
+    DurableAgentInput, Message, ModelStepOutcome, TodoList, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -109,6 +109,7 @@ impl RawEvent {
                 | "agent_input_dequeued"
                 | "execution_started"
                 | "execution_finished"
+                | "model_step_committed"
                 | "inbox_report_committed"
                 | "inbox_report_consumed"
                 | "compaction_recorded"
@@ -194,6 +195,7 @@ pub enum EventData {
         report: AgentRunReport,
         finished_at: i64,
     },
+    ModelStepCommitted(ModelStepCommittedV1),
     InboxReportCommitted {
         item: AgentInboxItem,
     },
@@ -237,6 +239,7 @@ impl EventData {
             Self::AgentInputDequeued { .. } => "agent_input_dequeued",
             Self::ExecutionStarted(_) => "execution_started",
             Self::ExecutionFinished { .. } => "execution_finished",
+            Self::ModelStepCommitted(_) => "model_step_committed",
             Self::InboxReportCommitted { .. } => "inbox_report_committed",
             Self::InboxReportConsumed { .. } => "inbox_report_consumed",
             Self::CompactionRecorded(_) => "compaction_recorded",
@@ -312,6 +315,23 @@ pub struct ExecutionStartedV1 {
     pub prompt_assembly_version: u32,
     pub prompt_digest: String,
     pub started_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStepCommittedV1 {
+    pub model_step_id: String,
+    pub step_index: u32,
+    pub run_id: String,
+    pub execution_id: String,
+    pub agent_instance_id: String,
+    pub source_turn_id: Option<String>,
+    pub assistant_message_id: String,
+    #[serde(default)]
+    pub tool_call_message_ids: Vec<String>,
+    pub outcome: ModelStepOutcome,
+    pub started_at: i64,
+    pub finished_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

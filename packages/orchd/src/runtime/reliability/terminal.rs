@@ -8,6 +8,7 @@ use piko_protocol::{AgentDurableCommand, AgentRunReport, CommitError, ExecutionO
 /// Frozen terminal state. Publication data is private until `commit` returns a
 /// `CommittedTerminal` capability.
 pub(crate) struct PendingTerminal {
+    run_id: String,
     execution_id: String,
     report: AgentRunReport,
     transcript: Vec<Message>,
@@ -58,6 +59,7 @@ impl PendingTerminal {
             artifacts: Vec::new(),
         };
         Self {
+            run_id: candidate.run_id.clone(),
             execution_id,
             report,
             transcript: candidate.transcript.clone(),
@@ -81,7 +83,7 @@ impl PendingTerminal {
             .commit_agent_command(
                 session_id,
                 AgentDurableCommand::RunTerminal {
-                    run_id: self.execution_id.clone(),
+                    run_id: self.run_id.clone(),
                     report: self.report.clone(),
                     finished_at: self.finished_at,
                 },

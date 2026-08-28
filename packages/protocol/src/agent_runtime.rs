@@ -75,6 +75,9 @@ pub struct SessionEventEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEvent {
+    ModelStepCommitted {
+        boundary: crate::execution::ModelStepBoundary,
+    },
     MessageCommitted {
         transcript_seq: u64,
         message_id: MessageId,

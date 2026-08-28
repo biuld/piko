@@ -7,13 +7,14 @@ use piko_protocol::{
 use serde::{Deserialize, Serialize};
 
 use crate::schema::{
-    CompactionRecordedV1, EventData, ExecutionStartedV1, MessageCommittedV1, RawEvent,
-    SessionForkedV1,
+    CompactionRecordedV1, EventData, ExecutionStartedV1, RawEvent, SessionForkedV1,
 };
 use crate::{
     AccountingProjection, DurableCommit, ModelContinuity, Result, StoreError, StoredAgent,
-    StoredExecution, StoredMessage, StoredTreeEntry,
+    StoredExecution, StoredMessage, StoredModelStep, StoredTreeEntry,
 };
+
+mod transcript;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SessionAggregate {
@@ -33,6 +34,8 @@ pub struct SessionAggregate {
     pub agents: BTreeMap<String, StoredAgent>,
     pub queued_inputs: Vec<DurableAgentInput>,
     pub executions: BTreeMap<String, StoredExecution>,
+    #[serde(default)]
+    pub model_steps: BTreeMap<String, StoredModelStep>,
     pub inbox: BTreeMap<String, AgentInboxItem>,
     pub compactions: BTreeMap<String, CompactionRecordedV1>,
     pub world_state: Option<serde_json::Value>,
@@ -182,6 +185,7 @@ impl SessionAggregate {
                 report,
                 finished_at,
             } => self.apply_execution_finished(execution_id, report, finished_at)?,
+            EventData::ModelStepCommitted(data) => self.apply_model_step(revision, raw, data)?,
             EventData::InboxReportCommitted { item } => self.apply_inbox_committed(item)?,
             EventData::InboxReportConsumed {
                 report_id,
@@ -373,6 +377,7 @@ impl SessionAggregate {
             StoredExecution {
                 started,
                 message_head: None,
+                model_step_ids: Vec::new(),
                 report: None,
                 finished_at: None,
             },
@@ -431,80 +436,6 @@ impl SessionAggregate {
             return Err(StoreError::InvalidEvent("invalid inbox consumption".into()));
         }
         item.consumed_at = Some(consumed_at);
-        Ok(())
-    }
-
-    fn apply_message(
-        &mut self,
-        revision: u64,
-        raw: &RawEvent,
-        data: MessageCommittedV1,
-    ) -> Result<()> {
-        if self.messages.contains_key(&data.message_id) {
-            return Err(StoreError::IdempotencyConflict(data.message_id));
-        }
-        if let Some(parent) = &data.agent_parent_message_id {
-            let parent = self.messages.get(parent).ok_or_else(|| {
-                StoreError::InvalidEvent(format!("unknown agent message parent {parent}"))
-            })?;
-            if parent.data.agent_instance_id != data.agent_instance_id {
-                return Err(StoreError::InvalidEvent(
-                    "agent message parent belongs to another agent".into(),
-                ));
-            }
-        }
-        if let Some(execution_id) = &data.execution_id
-            && let Some(execution) = self.executions.get(execution_id)
-        {
-            if execution.started.agent_instance_id != data.agent_instance_id {
-                return Err(StoreError::InvalidEvent(
-                    "execution message belongs to another agent".into(),
-                ));
-            }
-            let expected_parent = execution
-                .message_head
-                .as_ref()
-                .or(execution.started.base_message_id.as_ref());
-            if data.agent_parent_message_id.as_ref() != expected_parent {
-                return Err(StoreError::InvalidEvent(
-                    "execution message does not extend its admitted base".into(),
-                ));
-            }
-            let expected_tree_parent = execution
-                .message_head
-                .as_ref()
-                .or(execution.started.tree_base_entry_id.as_ref());
-            if data.tree_parent_entry_id.as_ref() != expected_tree_parent {
-                return Err(StoreError::InvalidEvent(
-                    "execution message does not extend its admitted tree base".into(),
-                ));
-            }
-        }
-        if let Some(parent) = &data.tree_parent_entry_id
-            && !self.messages.contains_key(parent)
-            && !self.tree_entries.contains_key(parent)
-        {
-            return Err(StoreError::InvalidEvent(format!(
-                "unknown tree parent {parent}"
-            )));
-        }
-        let message_id = data.message_id.clone();
-        let execution_id = data.execution_id.clone();
-        self.agent_heads
-            .insert(data.agent_instance_id.clone(), message_id.clone());
-        self.messages.insert(
-            message_id.clone(),
-            StoredMessage {
-                revision,
-                event_id: raw.event_id.clone(),
-                data,
-            },
-        );
-        if let Some(execution_id) = execution_id
-            && let Some(execution) = self.executions.get_mut(&execution_id)
-        {
-            execution.message_head = Some(message_id);
-        }
         Ok(())
     }
 }

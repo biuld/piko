@@ -66,6 +66,9 @@ pub struct ExecutionIdentity {
     /// Interaction Turn this Execution is bound to. `None` for child agent
     /// Executions spawned by multi-agent tools.
     pub source_turn_id: Option<String>,
+    /// Logical agent attempt. Multiple concrete executions must not be
+    /// conflated with this identity.
+    pub run_id: String,
     pub execution_id: String,
     pub agent_instance_id: String,
     pub agent_id: String,

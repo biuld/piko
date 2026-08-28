@@ -180,9 +180,39 @@ async fn turn_writes_durable_trajectory_records() {
         }) if agent_instance_id == &root_agent_instance_id
     )));
 
-    // Durable optional events landed in the session journal. Model-step
-    // records are covered at the llmd layer (`captures_actual_model_step_*`);
-    // the scripted gateway here replaces the real model executor.
+    // The required model-step relations landed in the session journal, while
+    // trajectory records remain optional diagnostics for the same execution.
+    let durable = store.load_projection().unwrap();
+    let execution = durable
+        .agent_executions
+        .values()
+        .next()
+        .expect("root run projection");
+    assert!(!execution.run_id.is_empty());
+    assert_ne!(execution.execution_id, execution.run_id);
+    assert_eq!(execution.model_steps.len(), 2);
+    assert_eq!(
+        execution.model_steps[0].outcome,
+        piko_protocol::ModelStepOutcome::ToolCalls
+    );
+    assert_eq!(
+        execution.model_steps[1].outcome,
+        piko_protocol::ModelStepOutcome::Completed
+    );
+    let reliable_steps = events
+        .iter()
+        .filter_map(|event| match event {
+            ServerMessage::ModelStepCommitted(boundary) => Some(boundary),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reliable_steps.len(), 2);
+    assert_eq!(
+        reliable_steps[0].tool_call_message_ids.len(),
+        1,
+        "the tool declaration is part of the first atomic model step"
+    );
+
     let projection = wait_for_trajectory(
         &store,
         1,

@@ -54,6 +54,7 @@ impl AppState {
     pub fn apply_event(&mut self, event: Event) -> Vec<Effect> {
         match event {
             Event::TranscriptCommitted(committed) => self.apply_transcript_committed(committed),
+            Event::ModelStepCommitted(boundary) => self.apply_model_step_committed(boundary),
             Event::SessionEntryCommitted(committed) => {
                 self.apply_session_entry_committed(committed)
             }

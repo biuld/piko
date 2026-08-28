@@ -75,6 +75,136 @@ async fn recovery_marks_accepted_execution_interrupted() {
 }
 
 #[tokio::test]
+async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::RunStarted {
+                agent_instance_id: root.agent_instance_id.clone(),
+                run_id: "run-with-tool-call".into(),
+                internal_execution_id: "exec-with-tool-call".into(),
+                request_id: "request-with-tool-call".into(),
+                source_turn_id: Some("turn-with-tool-call".into()),
+                detached_recipient_agent_instance_id: None,
+                prompt_assembly_version: 1,
+                prompt_digest: "prompt-with-tool-call".into(),
+                started_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+    let model_step = piko_protocol::execution::ModelStepCommit {
+                session_id: "session-1".into(),
+                source_turn_id: Some("turn-with-tool-call".into()),
+                run_id: "run-with-tool-call".into(),
+                execution_id: "exec-with-tool-call".into(),
+                agent_instance_id: root.agent_instance_id.clone(),
+                model_step_id: "step-with-tool-call".into(),
+                step_index: 1,
+                started_at: 2,
+                finished_at: 3,
+                outcome: piko_protocol::ModelStepOutcome::ToolCalls,
+                assistant: piko_protocol::execution::MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-with-tool-call".into()),
+                    execution_id: "exec-with-tool-call".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "assistant-with-tool-call".into(),
+                    parent_message_id: None,
+                    tree_parent_entry_id: None,
+                    message: piko_protocol::Message::Assistant {
+                        content: vec![piko_protocol::ContentBlock::Text {
+                            text: "I will inspect the project".into(),
+                        }],
+                        checkpoint: None,
+                        provider: "test".into(),
+                        model: "model".into(),
+                        usage: None,
+                        stop_reason: Some("tool_calls".into()),
+                        error_message: None,
+                        timestamp: Some(3),
+                    },
+                    committed_at: 3,
+                },
+                tool_calls: vec![piko_protocol::execution::MessageCommit {
+                    session_id: "session-1".into(),
+                    source_turn_id: Some("turn-with-tool-call".into()),
+                    execution_id: "exec-with-tool-call".into(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    message_id: "tool-call-message".into(),
+                    parent_message_id: Some("assistant-with-tool-call".into()),
+                    tree_parent_entry_id: None,
+                    message: piko_protocol::Message::ToolCall {
+                        id: "call-with-tool-call".into(),
+                        name: "read".into(),
+                        arguments: serde_json::json!({"path": "README.md"}),
+                        model: None,
+                        provider: None,
+                        timestamp: Some(3),
+                    },
+                    committed_at: 3,
+                }],
+            };
+    store
+        .commit_model_step(model_step.clone(), "main")
+        .unwrap();
+    store
+        .commit_model_step(model_step.clone(), "main")
+        .expect("an exact model-step retry is idempotent");
+    let mut conflicting = model_step;
+    let piko_protocol::Message::Assistant { content, .. } =
+        &mut conflicting.assistant.message
+    else {
+        unreachable!("fixture assistant message")
+    };
+    content.push(piko_protocol::ContentBlock::Text {
+        text: "conflicting retry".into(),
+    });
+    assert_eq!(
+        store.commit_model_step(conflicting, "main"),
+        Err(piko_protocol::CommitError::IdempotencyConflict)
+    );
+
+    assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
+    let recovered = store
+        .load_agent("session-1", &root.agent_instance_id)
+        .unwrap();
+    assert_eq!(recovered.transcript.len(), 4);
+    assert!(matches!(
+        &recovered.transcript[2].message,
+        piko_protocol::Message::ToolResult {
+            tool_call_id,
+            tool_name: Some(tool_name),
+            is_error: Some(true),
+            ..
+        } if tool_call_id == "call-with-tool-call" && tool_name == "read"
+    ));
+    assert_eq!(
+        recovered.transcript[2].parent_id.as_deref(),
+        Some("tool-call-message")
+    );
+    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-with-tool-call");
+    assert_eq!(recovered.transcript[3].id, marker_id);
+    assert_eq!(
+        recovered.transcript[3].parent_id.as_deref(),
+        Some(recovered.transcript[2].id.as_str())
+    );
+
+    let projection = store.load_projection().unwrap();
+    let execution = projection
+        .agent_executions
+        .get("run-with-tool-call")
+        .unwrap();
+    assert_eq!(execution.model_steps.len(), 1);
+    assert_eq!(execution.model_steps[0].model_step_id, "step-with-tool-call");
+}
+
+#[tokio::test]
 async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
     let temp = tempdir().unwrap();
     let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)

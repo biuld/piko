@@ -320,7 +320,8 @@ fn tool_call_span(
     tracing::info_span!(
         "tool.call",
         session_id = %identity.session_id,
-        run_id = %identity.execution_id,
+        run_id = %identity.run_id,
+        execution_id = %identity.execution_id,
         agent_instance_id = %identity.agent_instance_id,
         step_id = format!("step_{model_step_index}"),
         tool = %tc.name,

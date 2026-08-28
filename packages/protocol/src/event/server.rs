@@ -22,6 +22,9 @@ pub enum ServerMessage {
     SessionCleared(SessionClearedEvent),
     /// User interaction lifecycle; not part of the message realtime delta.
     Interaction(InteractionEvent),
+    /// Authoritative model-step boundary after its transcript facts are
+    /// durable. Message bodies arrive as `TranscriptCommitted` events.
+    ModelStepCommitted(crate::execution::ModelStepBoundary),
     /// Full agent projection keyed by agent_instance_id / execution_id as entity identity.
     AgentChanged(AgentInfo),
     TurnLifecycle(TurnEvent),
@@ -125,6 +128,8 @@ pub enum ToolExecutionEvent {
         tool_name: String,
         result: serde_json::Value,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_message_id: Option<MessageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_turn_id: Option<TurnId>,
     },

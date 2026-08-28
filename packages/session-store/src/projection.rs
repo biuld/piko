@@ -1,7 +1,7 @@
 use piko_protocol::{AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec};
 use serde::{Deserialize, Serialize};
 
-use crate::{ExecutionStartedV1, MessageCommittedV1, TreeEntryRecordedV1};
+use crate::{ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1, TreeEntryRecordedV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredMessage {
@@ -30,8 +30,17 @@ pub struct StoredAgent {
 pub struct StoredExecution {
     pub started: ExecutionStartedV1,
     pub message_head: Option<String>,
+    #[serde(default)]
+    pub model_step_ids: Vec<String>,
     pub report: Option<AgentRunReport>,
     pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StoredModelStep {
+    pub revision: u64,
+    pub event_id: String,
+    pub data: ModelStepCommittedV1,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

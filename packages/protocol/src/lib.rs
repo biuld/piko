@@ -31,7 +31,8 @@ pub use execution::{
     CancelExecutionRequest, CancelReason, CancelReceipt, CommitAck, CommitError,
     ConversationContext, ExecutionConfig, ExecutionId, ExecutionInputReceipt, ExecutionOutcome,
     ExecutionReceipt, ExecutionSnapshot, ExecutionStatus, InputDisposition,
-    MessageCommit as ExecutionMessageCommit, StartExecutionRequest, SteerExecutionRequest,
+    MessageCommit as ExecutionMessageCommit, ModelStepBoundary, ModelStepCommit, ModelStepOutcome,
+    StartExecutionRequest, SteerExecutionRequest,
 };
 pub use messages::*;
 pub use model::*;

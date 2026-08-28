@@ -268,6 +268,7 @@ mod usage_tests {
             started_at,
             finished_at,
             report: None,
+            model_steps: Vec::new(),
         }
     }
 

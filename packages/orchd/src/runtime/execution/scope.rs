@@ -136,12 +136,26 @@ mod tests {
                 revision: 1,
             })
         }
+
+        async fn commit_model_step(
+            &self,
+            commit: piko_protocol::execution::ModelStepCommit,
+        ) -> Result<CommitAck, CommitError> {
+            Ok(CommitAck {
+                session_id: commit.session_id,
+                execution_id: commit.execution_id,
+                agent_instance_id: commit.agent_instance_id,
+                message_id: Some(commit.assistant.message_id),
+                revision: 1,
+            })
+        }
     }
 
     fn handle(execution_id: &str, generation: u64) -> ExecutionHandle {
         let identity = ExecutionIdentity {
             session_id: "session".into(),
             source_turn_id: None,
+            run_id: "run".into(),
             execution_id: execution_id.into(),
             agent_instance_id: "agent".into(),
             agent_id: "main".into(),

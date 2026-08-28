@@ -33,7 +33,15 @@ pub struct LocalStepOutput {
 
 pub struct StepDispatchResult {
     pub step: CompletedStep,
+    pub termination: StepTermination,
     pub local_output: LocalStepOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepTermination {
+    Completed,
+    Failed(String),
+    Cancelled,
 }
 
 pub struct StepDispatch {

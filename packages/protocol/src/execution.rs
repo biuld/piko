@@ -1,6 +1,6 @@
 //! Single-agent Execution DTOs.
 //!
-//! Target model: Session → Turn → Execution → Model Step → Tool.
+//! Target model: Session → Turn → Run → Execution → Model Step → Tool.
 //! These types are the public contract for the Execution path.
 
 use serde::{Deserialize, Serialize};
@@ -217,6 +217,84 @@ pub struct MessageCommit {
     pub tree_parent_entry_id: Option<MessageId>,
     pub message: Message,
     pub committed_at: i64,
+}
+
+/// Result of the model side of one Execution step. Tool execution starts only
+/// after a `ToolCalls` step has been durably acknowledged.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelStepOutcome {
+    Completed,
+    ToolCalls,
+    Failed,
+    Cancelled,
+}
+
+/// Atomic durable commit for one model request/response boundary.
+///
+/// The nested message commits carry the message bodies. The host persists
+/// them together with one required model-step relation so replay never has to
+/// infer a step from adjacent transcript messages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStepCommit {
+    pub session_id: SessionId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
+    pub run_id: String,
+    pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
+    pub model_step_id: String,
+    pub step_index: u32,
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub outcome: ModelStepOutcome,
+    pub assistant: MessageCommit,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<MessageCommit>,
+}
+
+/// Durable/reliable identity of a committed model step. Message bodies are
+/// fetched through the ordinary transcript projection by these IDs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStepBoundary {
+    pub session_id: SessionId,
+    pub source_turn_id: Option<TurnId>,
+    pub run_id: String,
+    pub execution_id: ExecutionId,
+    pub agent_instance_id: crate::AgentInstanceId,
+    pub model_step_id: String,
+    pub step_index: u32,
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub outcome: ModelStepOutcome,
+    pub assistant_message_id: MessageId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_call_message_ids: Vec<MessageId>,
+}
+
+impl ModelStepCommit {
+    pub fn boundary(&self) -> ModelStepBoundary {
+        ModelStepBoundary {
+            session_id: self.session_id.clone(),
+            source_turn_id: self.source_turn_id.clone(),
+            run_id: self.run_id.clone(),
+            execution_id: self.execution_id.clone(),
+            agent_instance_id: self.agent_instance_id.clone(),
+            model_step_id: self.model_step_id.clone(),
+            step_index: self.step_index,
+            started_at: self.started_at,
+            finished_at: self.finished_at,
+            outcome: self.outcome,
+            assistant_message_id: self.assistant.message_id.clone(),
+            tool_call_message_ids: self
+                .tool_calls
+                .iter()
+                .map(|commit| commit.message_id.clone())
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

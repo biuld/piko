@@ -40,12 +40,14 @@ impl AgentActor {
         queued_input_id: Option<String>,
         detached_recipient_agent_instance_id: Option<String>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
+        let run_id = request.request_id.clone();
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
         let run_span = tracing::info_span!(
             parent: self.pending_run_parent.take().unwrap_or_else(tracing::Span::none),
             "agent.run",
             session_id = %self.identity.session_id,
-            run_id = %execution_id,
+            run_id = %run_id,
+            execution_id = %execution_id,
             agent_instance_id = %self.identity.agent_instance_id,
             parent_agent_instance_id = tracing::field::Empty,
             agent_id = %self.identity.agent_spec_id,
@@ -63,7 +65,7 @@ impl AgentActor {
         self.publish_snapshot();
         let run_context = match self
             .execution
-            .prepare_run_context(&request, &self.spec, &execution_id)
+            .prepare_run_context(&request, &self.spec, &run_id)
             .instrument(run_span.clone())
             .await
         {
@@ -131,7 +133,7 @@ impl AgentActor {
             Some(queued_input_id) => AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id: self.identity.agent_instance_id.clone(),
                 queued_input_id,
-                run_id: execution_id.clone(),
+                run_id: run_id.clone(),
                 internal_execution_id: execution_id.clone(),
                 request_id: request.request_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
@@ -142,7 +144,7 @@ impl AgentActor {
             },
             None => AgentDurableCommand::RunStarted {
                 agent_instance_id: self.identity.agent_instance_id.clone(),
-                run_id: execution_id.clone(),
+                run_id: run_id.clone(),
                 internal_execution_id: execution_id.clone(),
                 request_id: request.request_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
@@ -167,7 +169,7 @@ impl AgentActor {
             Ok(startup) => startup,
             Err(failure) => {
                 return self
-                    .finish_failed_started_run(execution_id, "input commit failed", failure)
+                    .finish_failed_started_run(run_id, execution_id, "input commit failed", failure)
                     .await;
             }
         };
@@ -177,6 +179,7 @@ impl AgentActor {
             startup.rollback().await;
             return self
                 .finish_cancelled_started_run(
+                    run_id,
                     execution_id,
                     request.source_turn_id.clone(),
                     committed_input,
@@ -232,6 +235,7 @@ impl AgentActor {
 
     async fn finish_failed_started_run(
         &mut self,
+        run_id: String,
         execution_id: String,
         context: &str,
         failure: StartedRunFailure,
@@ -240,6 +244,7 @@ impl AgentActor {
             execution_id: execution_id.clone(),
         };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
+            run_id,
             outcome: piko_protocol::ExecutionOutcome::failed(format!(
                 "{context}: {}",
                 failure.error
@@ -253,6 +258,7 @@ impl AgentActor {
 
     async fn finish_cancelled_started_run(
         &mut self,
+        run_id: String,
         execution_id: String,
         source_turn_id: Option<String>,
         committed_input: piko_protocol::Message,
@@ -298,6 +304,7 @@ impl AgentActor {
             )),
         };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
+            run_id,
             outcome,
             transcript,
             head_message_id: Some(head_message_id),

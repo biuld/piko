@@ -202,6 +202,19 @@ impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
             revision: 1,
         })
     }
+
+    async fn commit_model_step(
+        &self,
+        commit: piko_protocol::execution::ModelStepCommit,
+    ) -> Result<CommitAck, CommitError> {
+        Ok(CommitAck {
+            session_id: commit.session_id,
+            execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
+            message_id: Some(commit.assistant.message_id),
+            revision: 1,
+        })
+    }
 }
 
 fn request() -> StartExecutionRequest {

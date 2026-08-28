@@ -14,6 +14,9 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-65: Authoritative agent lifecycle boundaries](D-65-authoritative-agent-lifecycle.md)
+  implements F-48: explicit Turn/Run/Execution/ModelStep ownership, atomic
+  model-step journal facts, and reliable client convergence.
 - [D-64: Two-tone composer with attachments](D-64-composer-two-tone.md)
   implements F-47: layered composer card, header pickers, attach chips
 - [D-63: Assistant turn chips](D-63-assistant-turn-chips.md)

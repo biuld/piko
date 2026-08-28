@@ -83,6 +83,17 @@ impl Timeline {
         outcome != piko_client_core::ApplyOutcome::Inconsistent
     }
 
+    pub fn apply_model_step_committed(
+        &mut self,
+        boundary: ModelStepBoundary,
+    ) -> piko_client_core::ApplyOutcome {
+        let outcome = self.projection.apply_model_step_committed(boundary);
+        if outcome == piko_client_core::ApplyOutcome::Applied {
+            self.mark_projection_applied();
+        }
+        outcome
+    }
+
     pub fn apply_session_entry(
         &mut self,
         entry: piko_protocol::SessionTreeEntry,

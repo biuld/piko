@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::utils::now_ms;
 
 impl ExecutionActor {
     pub fn new(
@@ -107,7 +108,8 @@ impl ExecutionActor {
             let step_span = tracing::info_span!(
                 "model.step",
                 session_id = %self.identity.session_id,
-                run_id = %self.identity.execution_id,
+                run_id = %self.identity.run_id,
+                execution_id = %self.identity.execution_id,
                 agent_instance_id = %self.identity.agent_instance_id,
                 step_id = tracing::field::Empty,
                 model = tracing::field::Empty,
@@ -123,8 +125,13 @@ impl ExecutionActor {
             let step_started = std::time::Instant::now();
             let iteration = async {
                 let step = self.run_model_step().await?;
-                self.commit_message(step.assistant_message, step.message_id.clone())
-                    .await?;
+                self.commit_model_step(&step).await?;
+                if step.cancelled {
+                    return Err(AgentApiError::Cancelled);
+                }
+                if let Some(error) = step.failure {
+                    return Err(AgentApiError::PersistenceFailed(error));
+                }
                 let respond_step_completed = step.respond_after_steer;
 
                 if !step.tool_calls.is_empty() {
@@ -181,69 +188,13 @@ impl ExecutionActor {
         }
     }
 
-    pub(super) fn transition(&mut self, status: ExecutionStatus) {
-        self.state.status = status;
-    }
-
-    pub(super) fn drain_controls_nonblocking(&mut self) -> Result<(), AgentApiError> {
-        while let Ok(command) = self.mailbox.try_recv() {
-            self.handle_command(command)?;
-        }
-        Ok(())
-    }
-
-    pub(super) async fn drain_controls_at_step_boundary(&mut self) -> Result<(), AgentApiError> {
-        self.drain_controls_nonblocking()?;
-        Ok(())
-    }
-
-    pub(super) fn handle_command(
-        &mut self,
-        command: ExecutionCommand,
-    ) -> Result<(), AgentApiError> {
-        match command {
-            ExecutionCommand::Steer { request, reply } => {
-                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                let receipt = ExecutionInputReceipt {
-                    request_id: request.request_id.clone(),
-                    session_id: self.identity.session_id.clone(),
-                    execution_id: self.identity.execution_id.clone(),
-                    message_id: request.message_id.clone(),
-                    disposition: InputDisposition::Queued,
-                };
-                self.state.steering.push_back(request);
-                command.complete(Ok(receipt));
-            }
-            ExecutionCommand::Cancel {
-                request_id,
-                reason: _,
-                reply,
-            } => {
-                let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                self.cancel.cancel();
-                command.complete(Ok(CancelReceipt {
-                    request_id,
-                    session_id: self.identity.session_id.clone(),
-                    execution_id: self.identity.execution_id.clone(),
-                    accepted: true,
-                }));
-            }
-            ExecutionCommand::Shutdown { reply } => {
-                self.cancel.cancel();
-                let _ = reply.send(());
-            }
-        }
-        Ok(())
-    }
-
     pub(super) async fn run_model_step(&mut self) -> Result<CompletedModelStep, AgentApiError> {
         self.state.model_step_index += 1;
         let step_count = self.state.model_step_index;
+        let step_id = format!("step_{step_count}");
+        let model_step_id = format!("{}:{step_id}", self.identity.execution_id);
         let respond_after_steer = std::mem::take(&mut self.state.respond_after_steer);
-        let message_id = runtime_assistant_message_id(
-            &self.identity.execution_id,
-            &format!("step_{step_count}"),
-        );
+        let message_id = runtime_assistant_message_id(&self.identity.execution_id, &step_id);
 
         let agent = self.request.agent_spec.clone();
 
@@ -291,7 +242,7 @@ impl ExecutionActor {
         let transcript = snapshot.messages().to_vec();
         let mut context_remaining = None;
         let span = tracing::Span::current();
-        span.record("step_id", format!("step_{step_count}"));
+        span.record("step_id", &step_id);
         span.record("model", &model.id);
         span.record("provider", &model.provider);
         span.record(
@@ -360,8 +311,8 @@ impl ExecutionActor {
             context: piko_llmd::gateway::InvocationContext {
                 session_id: self.identity.session_id.clone(),
                 agent_instance_id: self.identity.agent_instance_id.clone(),
-                run_id: self.identity.execution_id.clone(),
-                step_id: format!("step_{step_count}"),
+                run_id: self.identity.run_id.clone(),
+                step_id,
                 step_message_id: message_id.clone(),
             },
         };
@@ -385,8 +336,9 @@ impl ExecutionActor {
             self.identity.agent_id.clone(),
         );
         let source_turn_id = self.identity.source_turn_id.clone().unwrap_or_default();
+        let model_step_started_at = now_ms();
 
-        let result = match self
+        let step = match self
             .services
             .model_executor()
             .start(request, self.cancel.clone())
@@ -400,9 +352,9 @@ impl ExecutionActor {
                     model.clone(),
                     llm.events,
                 );
-                Ok(dispatch
+                dispatch
                     .dispatch_step(self.ports.ports().realtime.clone())
-                    .await)
+                    .await
             }
             Err(error) => {
                 if self.cancel.is_cancelled() {
@@ -415,21 +367,31 @@ impl ExecutionActor {
                     model.clone(),
                     error.to_string(),
                 );
-                let result = dispatch
+                dispatch
                     .dispatch_step(self.ports.ports().realtime.clone())
-                    .await;
-                Err((error.to_string(), result))
+                    .await
             }
         };
 
-        match result {
-            Ok(step) => {
+        match step.termination {
+            crate::runtime::step::StepTermination::Completed => {
                 if respond_after_steer && !step.step.tool_calls.is_empty() {
                     // A respond-only step must answer in text; executing
                     // tools would bury the steer again (F-35 / ADR-021).
                     return Err(AgentApiError::InputRejected);
                 }
                 Ok(CompletedModelStep {
+                    model_step_id,
+                    step_index: step_count,
+                    started_at: model_step_started_at,
+                    finished_at: now_ms(),
+                    outcome: if step.step.tool_calls.is_empty() {
+                        ModelStepOutcome::Completed
+                    } else {
+                        ModelStepOutcome::ToolCalls
+                    },
+                    failure: None,
+                    cancelled: false,
                     assistant_message: step.step.assistant_message,
                     tool_calls: step.step.tool_calls,
                     routes,
@@ -439,13 +401,47 @@ impl ExecutionActor {
                     respond_after_steer,
                 })
             }
-            Err((error, step)) => {
+            crate::runtime::step::StepTermination::Failed(error) => {
                 if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
                     return Err(AgentApiError::PersistenceFailed(error));
                 }
-                self.commit_message(step.step.assistant_message, message_id)
-                    .await?;
-                Err(AgentApiError::PersistenceFailed(error))
+                Ok(CompletedModelStep {
+                    model_step_id,
+                    step_index: step_count,
+                    started_at: model_step_started_at,
+                    finished_at: now_ms(),
+                    outcome: ModelStepOutcome::Failed,
+                    failure: Some(error),
+                    cancelled: false,
+                    assistant_message: step.step.assistant_message,
+                    tool_calls: Vec::new(),
+                    routes,
+                    message_id,
+                    model,
+                    context_remaining,
+                    respond_after_steer,
+                })
+            }
+            crate::runtime::step::StepTermination::Cancelled => {
+                if !matches!(&step.step.assistant_message, Message::Assistant { .. }) {
+                    return Err(AgentApiError::Cancelled);
+                }
+                Ok(CompletedModelStep {
+                    model_step_id,
+                    step_index: step_count,
+                    started_at: model_step_started_at,
+                    finished_at: now_ms(),
+                    outcome: ModelStepOutcome::Cancelled,
+                    failure: None,
+                    cancelled: true,
+                    assistant_message: step.step.assistant_message,
+                    tool_calls: Vec::new(),
+                    routes,
+                    message_id,
+                    model,
+                    context_remaining,
+                    respond_after_steer,
+                })
             }
         }
     }

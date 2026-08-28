@@ -198,22 +198,22 @@ impl HostApp {
         Ok(turn_succeeded)
     }
 
-    /// Trajectory run identity for terminal/error records: the orchd
-    /// execution id, derived as `stable("exec", [session, agent, request_id])`
-    /// with the root-turn request id equal to the hostd operation id.
+    /// Trajectory identity for terminal/error records. The operation is the
+    /// logical Run; its concrete Execution is the stable runtime instance
+    /// derived from the session, agent, and operation.
     fn trajectory_identity(&self, address: &AgentOperationAddress) -> TrajectoryIdentity {
         TrajectoryIdentity {
             session_id: address.session_id.clone(),
             agent_instance_id: address.agent_instance_id.clone(),
-            run_id: piko_orchd_api::stable_internal_id(
+            run_id: address.operation_id.clone(),
+            execution_id: Some(piko_orchd_api::stable_internal_id(
                 "exec",
                 &[
                     &address.session_id,
                     &address.agent_instance_id,
                     &address.operation_id,
                 ],
-            ),
-            execution_id: None,
+            )),
             source_turn_id: Some(address.operation_id.clone()),
         }
     }

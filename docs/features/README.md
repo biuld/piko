@@ -62,3 +62,4 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-45 | timeline-conversation-blocks | Hug user bubbles, collapsible thinking/tool cards, selectable Copy/Quote | implemented (D-62; thinking/tool cards superseded by F-46) | piko product direction after F-44 canvas review |
 | F-46 | assistant-turn-chips | One bubble per assistant turn: chronological activity chips (thinking/tool) between text segments; chip-detail overlay | design (D-63) | chat-reaction visual model, user decision 2026-08-23 |
 | F-47 | composer-attachments | Two-tone composer: offset header with model/thinking pickers, bottom attach chips for files/images | design (D-64) | user direction 2026-08-23 |
+| F-48 | authoritative-agent-lifecycle | Turn → Run → Execution → ModelStep boundaries, atomic model-step journal facts, reliable thought/tool convergence, and recovery identity | implemented (D-65/ADR-025/V-60) | piko runtime/journal review |

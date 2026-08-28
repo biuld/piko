@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use piko_llmd::gateway::InferenceEvent;
+use piko_llmd::gateway::{ErrorClass, FinishReason, InferenceError, InferenceEvent};
 use piko_orchd_api::RealtimeDeltaSink;
 use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use tokio_stream::iter;
@@ -11,7 +11,7 @@ use crate::domain::model::step::ModelSpec;
 use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{ContentBlock, Message, PersistEvent};
 
-use super::StepDispatch;
+use super::{StepDispatch, StepTermination};
 use crate::runtime::events::identity::{AgentDispatchContext, DispatchIdentity, StepEventConsumer};
 
 #[derive(Default)]
@@ -287,4 +287,94 @@ async fn agent_dispatch_invokes_registered_consumers() {
         seen.values(),
         vec!["content", "reasoning", "done", "finished", "committed"]
     );
+}
+
+#[tokio::test]
+async fn stream_error_is_preserved_as_failed_step_termination() {
+    let error = InferenceError::new(ErrorClass::Upstream, "test", "stream", "connection lost");
+    let events = iter(vec![
+        InferenceEvent::reasoning("partial thought"),
+        InferenceEvent::Error(error),
+    ]);
+    let mut dispatch = StepDispatch::from_step_stream(
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "exec_1".into(),
+            "main".into(),
+        ),
+        "assistant_1".into(),
+        "turn_1".into(),
+        ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "test".into(),
+        },
+        Box::pin(events),
+    );
+
+    let result = dispatch.dispatch_step(None).await;
+
+    assert!(matches!(
+        result.termination,
+        StepTermination::Failed(ref message) if message.contains("connection lost")
+    ));
+    assert!(matches!(
+        result.step.assistant_message,
+        Message::Assistant { error_message: Some(message), .. }
+            if message.contains("connection lost")
+    ));
+}
+
+#[tokio::test]
+async fn cancelled_finish_is_preserved_as_cancelled_step_termination() {
+    let events = iter(vec![InferenceEvent::Completed(FinishReason::Cancelled)]);
+    let mut dispatch = StepDispatch::from_step_stream(
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "exec_1".into(),
+            "main".into(),
+        ),
+        "assistant_1".into(),
+        "turn_1".into(),
+        ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "test".into(),
+        },
+        Box::pin(events),
+    );
+
+    let result = dispatch.dispatch_step(None).await;
+
+    assert_eq!(result.termination, StepTermination::Cancelled);
+}
+
+#[tokio::test]
+async fn stream_eof_without_terminal_event_fails_closed() {
+    let mut dispatch = StepDispatch::from_step_stream(
+        DispatchIdentity::new(
+            "session_1".into(),
+            "root".into(),
+            "exec_1".into(),
+            "main".into(),
+        ),
+        "assistant_1".into(),
+        "turn_1".into(),
+        ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "test".into(),
+        },
+        Box::pin(tokio_stream::empty()),
+    );
+
+    let result = dispatch.dispatch_step(None).await;
+
+    assert!(matches!(
+        result.termination,
+        StepTermination::Failed(ref message)
+            if message.contains("model stream ended without a terminal event")
+    ));
 }

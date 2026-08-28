@@ -290,6 +290,57 @@ fn realtime_thinking_lifecycle_closes_on_non_thinking_and_message_end() {
 }
 
 #[test]
+fn reliable_model_step_boundary_closes_thought_without_message_end() {
+    let mut tl = AgentTimeline::new();
+    let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some("s".into()),
+        Some("root".into()),
+        "assistant-1",
+        Some(0),
+        &RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: "still thinking".into(),
+        },
+    )
+    .pop()
+    .unwrap();
+    assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    let boundary = piko_protocol::ModelStepBoundary {
+        session_id: "s".into(),
+        source_turn_id: Some("turn-1".into()),
+        run_id: "run-1".into(),
+        execution_id: "execution-1".into(),
+        agent_instance_id: "root".into(),
+        model_step_id: "step-1".into(),
+        step_index: 1,
+        started_at: 10,
+        finished_at: 42,
+        outcome: piko_protocol::ModelStepOutcome::Completed,
+        assistant_message_id: "assistant-1".into(),
+        tool_call_message_ids: Vec::new(),
+    };
+    assert_eq!(
+        tl.apply_model_step_committed(boundary.clone()),
+        ApplyOutcome::Applied
+    );
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.active_thinking_index, None);
+    assert_eq!(tl.model_steps().len(), 1);
+    assert_eq!(
+        tl.apply_model_step_committed(boundary.clone()),
+        ApplyOutcome::Ignored
+    );
+    let mut conflicting = boundary;
+    conflicting.finished_at = 43;
+    assert_eq!(
+        tl.apply_model_step_committed(conflicting),
+        ApplyOutcome::Inconsistent
+    );
+}
+
+#[test]
 fn stream_item_tool_upsert_starts_tool() {
     let mut tl = AgentTimeline::new();
     let patch = piko_protocol::StreamItemPatch {

@@ -121,62 +121,36 @@ impl HostApp {
                         message_id,
                         ..
                     } => {
-                        let (committed, turn_diff) = {
-                            let mut state = self.state.lock().await;
-                            let store = self.session_store_factory.open(session_dir);
-                            let committed = record_committed_message(
-                                &mut state,
-                                Some(store.as_ref()),
+                        self.emit_committed_message(
+                            session_id,
+                            session_dir,
+                            &event.agent_instance_id,
+                            &message_id,
+                            tx,
+                        )
+                        .await?;
+                    }
+                    piko_protocol::agent_runtime::SessionEvent::ModelStepCommitted { boundary } => {
+                        if boundary.session_id != session_id
+                            || boundary.agent_instance_id != event.agent_instance_id
+                        {
+                            return Err(ProtocolError::ObservationFailed(
+                                "model-step boundary identity mismatch".into(),
+                            ));
+                        }
+                        let mut message_ids = vec![boundary.assistant_message_id.clone()];
+                        message_ids.extend(boundary.tool_call_message_ids.iter().cloned());
+                        for message_id in message_ids {
+                            self.emit_committed_message(
                                 session_id,
+                                session_dir,
                                 &event.agent_instance_id,
                                 &message_id,
+                                tx,
                             )
                             .await?;
-                            let turn_diff = committed.as_ref().and_then(|committed| {
-                                crate::domain::sessions::file_change_from_message(
-                                    &committed.message,
-                                )?;
-                                Some(
-                                    state
-                                        .turn_diff(session_id, &committed.source_turn_id)
-                                        .unwrap_or(piko_protocol::TurnDiffEvent {
-                                            session_id: session_id.to_string(),
-                                            turn_id: committed.source_turn_id.clone(),
-                                            files: Vec::new(),
-                                            unified_diff: String::new(),
-                                        }),
-                                )
-                            });
-                            (committed, turn_diff)
-                        };
-                        let committed = committed.ok_or_else(|| {
-                            ProtocolError::ObservationFailed(format!(
-                                "committed projection {message_id} missing for agent {}",
-                                event.agent_instance_id
-                            ))
-                        })?;
-                        // F-27: message commit atomically persisted the todo
-                        // replacement; publish the matching live projection.
-                        let todo_list = {
-                            let mut state = self.state.lock().await;
-                            state
-                                .session_mut(session_id)
-                                .ok()
-                                .and_then(|s| s.take_pending_todo_projection())
-                        };
-                        send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
-                        if let Some(list) = todo_list {
-                            send_event(
-                                tx,
-                                ServerMessage::TodoListUpdated(
-                                    crate::domain::todos::todo_list_updated_event(list),
-                                ),
-                            )
-                            .await;
                         }
-                        if let Some(turn_diff) = turn_diff {
-                            send_event(tx, ServerMessage::TurnDiff(turn_diff)).await;
-                        }
+                        send_event(tx, ServerMessage::ModelStepCommitted(boundary)).await;
                     }
                     piko_protocol::agent_runtime::SessionEvent::AgentChanged { agent } => {
                         self.state
@@ -261,6 +235,68 @@ impl HostApp {
                 Ok(Some(cursor))
             }
         }
+    }
+
+    async fn emit_committed_message(
+        &self,
+        session_id: &str,
+        session_dir: &std::path::Path,
+        agent_instance_id: &str,
+        message_id: &str,
+        tx: &ClientEventSender,
+    ) -> Result<(), ProtocolError> {
+        let (committed, turn_diff) = {
+            let mut state = self.state.lock().await;
+            let store = self.session_store_factory.open(session_dir);
+            let committed = record_committed_message(
+                &mut state,
+                Some(store.as_ref()),
+                session_id,
+                agent_instance_id,
+                message_id,
+            )
+            .await?;
+            let turn_diff = committed.as_ref().and_then(|committed| {
+                crate::domain::sessions::file_change_from_message(&committed.message)?;
+                Some(
+                    state
+                        .turn_diff(session_id, &committed.source_turn_id)
+                        .unwrap_or(piko_protocol::TurnDiffEvent {
+                            session_id: session_id.to_string(),
+                            turn_id: committed.source_turn_id.clone(),
+                            files: Vec::new(),
+                            unified_diff: String::new(),
+                        }),
+                )
+            });
+            (committed, turn_diff)
+        };
+        let committed = committed.ok_or_else(|| {
+            ProtocolError::ObservationFailed(format!(
+                "committed projection {message_id} missing for agent {agent_instance_id}"
+            ))
+        })?;
+        // F-27: message commit atomically persisted the todo replacement;
+        // publish the matching live projection.
+        let todo_list = {
+            let mut state = self.state.lock().await;
+            state
+                .session_mut(session_id)
+                .ok()
+                .and_then(|s| s.take_pending_todo_projection())
+        };
+        send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
+        if let Some(list) = todo_list {
+            send_event(
+                tx,
+                ServerMessage::TodoListUpdated(crate::domain::todos::todo_list_updated_event(list)),
+            )
+            .await;
+        }
+        if let Some(turn_diff) = turn_diff {
+            send_event(tx, ServerMessage::TurnDiff(turn_diff)).await;
+        }
+        Ok(())
     }
 
     /// Recover an operation observation and rebuild host projection from the

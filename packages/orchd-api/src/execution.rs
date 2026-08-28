@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
+use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
 
 use crate::AgentApiError;
 
@@ -21,6 +21,11 @@ pub trait PromptAssemblyPort: Send + Sync {
 #[async_trait]
 pub trait ExecutionCommitPort: Send + Sync {
     async fn commit_message(&self, commit: MessageCommit) -> Result<CommitAck, CommitError>;
+
+    /// Atomically commit one assistant response and its ordered tool
+    /// declarations. The runtime must not execute those tools before this
+    /// acknowledgement succeeds.
+    async fn commit_model_step(&self, commit: ModelStepCommit) -> Result<CommitAck, CommitError>;
 }
 
 /// Approval requests addressed by session + execution identity.

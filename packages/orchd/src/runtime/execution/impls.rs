@@ -60,6 +60,7 @@ impl AgentExecutionRuntime {
         let identity = ExecutionIdentity {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
+            run_id: request.request_id.clone(),
             execution_id: request.execution_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),

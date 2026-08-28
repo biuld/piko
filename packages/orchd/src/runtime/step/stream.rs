@@ -2,7 +2,7 @@ use futures_util::StreamExt;
 use piko_llmd::gateway::{ErrorClass, InferenceError, InferenceEvent};
 
 use super::source::{StepDispatchInput, StepFailureInput};
-use super::{CompletedStep, LocalStepOutput, StepDispatchResult};
+use super::{CompletedStep, LocalStepOutput, StepDispatchResult, StepTermination};
 use crate::runtime::events::collector::{
     SharedAssistantMessageCollector, SharedPersistCollector, SharedRealtimeCollector,
 };
@@ -26,14 +26,46 @@ pub(crate) async fn dispatch_step_stream(
         consumer.on_step_started(&ctx).await;
     }
 
+    let mut termination = None;
     while let Some(event) = input.events.next().await {
         for consumer in consumers.iter_mut() {
             consumer.on_gateway_event(&ctx, &event).await;
         }
 
-        if matches!(event, InferenceEvent::Completed(_)) {
-            break;
+        match event {
+            InferenceEvent::Completed(piko_llmd::gateway::FinishReason::Failed { message }) => {
+                termination = Some(StepTermination::Failed(message));
+                break;
+            }
+            InferenceEvent::Completed(piko_llmd::gateway::FinishReason::Cancelled) => {
+                termination = Some(StepTermination::Cancelled);
+                break;
+            }
+            InferenceEvent::Completed(_) => {
+                termination = Some(StepTermination::Completed);
+                break;
+            }
+            InferenceEvent::Error(error) => {
+                termination = Some(StepTermination::Failed(error.to_string()));
+                break;
+            }
+            _ => {}
         }
+    }
+
+    if termination.is_none() {
+        let error = InferenceError::new(
+            ErrorClass::Upstream,
+            &input.model.provider,
+            "stream",
+            "model stream ended without a terminal event",
+        );
+        for consumer in consumers.iter_mut() {
+            consumer
+                .on_gateway_event(&ctx, &InferenceEvent::Error(error.clone()))
+                .await;
+        }
+        termination = Some(StepTermination::Failed(error.to_string()));
     }
 
     for consumer in consumers.iter_mut() {
@@ -54,6 +86,7 @@ pub(crate) async fn dispatch_step_stream(
             assistant_message,
             tool_calls,
         },
+        termination: termination.expect("step stream termination assigned above"),
         local_output: LocalStepOutput {
             realtime: realtime_collector.take(),
             persist: persist_collector.take(),
@@ -105,6 +138,7 @@ pub(crate) async fn dispatch_step_failure(
             assistant_message,
             tool_calls,
         },
+        termination: StepTermination::Failed(input.error_message.clone()),
         local_output: LocalStepOutput {
             realtime: realtime_collector.take(),
             persist: persist_collector.take(),

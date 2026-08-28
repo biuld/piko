@@ -7,7 +7,8 @@ use piko_orchd_api::telemetry::ModelStepTelemetry;
 use piko_orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
 use piko_protocol::execution::ExecutionInputReceipt;
 use piko_protocol::execution::{
-    ExecutionOutcome, ExecutionStatus, StartExecutionRequest, SteerExecutionRequest,
+    ExecutionOutcome, ExecutionStatus, ModelStepOutcome, StartExecutionRequest,
+    SteerExecutionRequest,
 };
 use piko_protocol::{Message, Usage};
 use tokio_util::sync::CancellationToken;
@@ -50,10 +51,18 @@ pub struct ExecutionActor {
     routes: HashMap<String, CatalogRoute>,
 }
 
+mod control;
 mod run;
 mod tools;
 
 struct CompletedModelStep {
+    model_step_id: String,
+    step_index: u32,
+    started_at: i64,
+    finished_at: i64,
+    outcome: ModelStepOutcome,
+    failure: Option<String>,
+    cancelled: bool,
     assistant_message: Message,
     tool_calls: Vec<ToolCallItem>,
     routes: HashMap<String, CatalogRoute>,

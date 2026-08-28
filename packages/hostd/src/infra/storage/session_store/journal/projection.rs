@@ -93,6 +93,28 @@ impl SessionStore {
                                 == started.detached_recipient_agent_instance_id.as_deref()
                     })
                 });
+                let model_steps = stored
+                    .model_step_ids
+                    .iter()
+                    .filter_map(|model_step_id| aggregate.model_steps.get(model_step_id))
+                    .map(|stored_step| {
+                        let data = &stored_step.data;
+                        piko_protocol::ModelStepBoundary {
+                            session_id: session_id.clone(),
+                            source_turn_id: data.source_turn_id.clone(),
+                            run_id: data.run_id.clone(),
+                            execution_id: data.execution_id.clone(),
+                            agent_instance_id: data.agent_instance_id.clone(),
+                            model_step_id: data.model_step_id.clone(),
+                            step_index: data.step_index,
+                            started_at: data.started_at,
+                            finished_at: data.finished_at,
+                            outcome: data.outcome,
+                            assistant_message_id: data.assistant_message_id.clone(),
+                            tool_call_message_ids: data.tool_call_message_ids.clone(),
+                        }
+                    })
+                    .collect();
                 (
                     started.run_id.clone(),
                     ExecutionProjection {
@@ -114,6 +136,7 @@ impl SessionStore {
                         started_at: started.started_at,
                         finished_at: stored.finished_at,
                         report: stored.report.clone(),
+                        model_steps,
                     },
                 )
             })

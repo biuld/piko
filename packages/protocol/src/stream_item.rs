@@ -266,6 +266,7 @@ impl StreamItemPatch {
                 tool_name,
                 result,
                 is_error,
+                parent_message_id,
                 source_turn_id,
                 ..
             } => {
@@ -283,6 +284,7 @@ impl StreamItemPatch {
                         "toolName": tool_name,
                         "result": result,
                         "status": status,
+                        "parentMessageId": parent_message_id,
                         "turnId": source_turn_id,
                     })),
                 }]

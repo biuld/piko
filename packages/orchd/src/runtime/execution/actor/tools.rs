@@ -1,4 +1,5 @@
 use super::*;
+use piko_protocol::execution::{MessageCommit, ModelStepCommit};
 use piko_protocol::{
     TrajectoryChildRunRecord, TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
     TrajectorySystemNotificationRecord, TrajectoryToolCallRecord, TrajectoryToolCallStatus,
@@ -12,18 +13,6 @@ impl ExecutionActor {
         parent_message_id: &str,
         context_remaining: Option<u64>,
     ) -> Result<(), AgentApiError> {
-        // Tool calls belong to the assistant message that produced the whole
-        // step, regardless of how their executions are scheduled. Commit every
-        // declaration first so the durable transcript retains the provider
-        // message shape: Assistant -> all ToolCalls -> all ToolResults.
-        for tc in tool_calls {
-            self.commit_message(
-                tool_batch::tool_call_message(tc),
-                tool_batch::tool_call_message_id(parent_message_id, tc.tool_call_index),
-            )
-            .await?;
-        }
-
         // Batch dispatch groups consecutive calls by their effective execution
         // mode (F-06 / D-06): parallel calls in a group overlap under a shared
         // cap, sequential calls run exclusively, and results commit in
@@ -56,7 +45,8 @@ impl ExecutionActor {
             let batch_span = tracing::info_span!(
                 "tool.batch",
                 session_id = %self.identity.session_id,
-                run_id = %self.identity.execution_id,
+                run_id = %self.identity.run_id,
+                execution_id = %self.identity.execution_id,
                 agent_instance_id = %self.identity.agent_instance_id,
                 step_id = format!("step_{model_step_index}"),
                 mode = tool_batch::mode_str(&group.mode),
@@ -182,8 +172,8 @@ impl ExecutionActor {
         TrajectoryIdentity {
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            run_id: self.identity.execution_id.clone(),
-            execution_id: None,
+            run_id: self.identity.run_id.clone(),
+            execution_id: Some(self.identity.execution_id.clone()),
             source_turn_id: self.identity.source_turn_id.clone(),
         }
     }
@@ -266,6 +256,90 @@ impl ExecutionActor {
         }
     }
 
+    pub(super) async fn commit_model_step(
+        &mut self,
+        step: &CompletedModelStep,
+    ) -> Result<(), AgentApiError> {
+        if !matches!(&step.assistant_message, Message::Assistant { .. }) {
+            return Err(AgentApiError::PersistenceFailed(
+                "model step did not produce an assistant message".into(),
+            ));
+        }
+
+        let committed_at = step.finished_at;
+        let assistant = MessageCommit {
+            session_id: self.identity.session_id.clone(),
+            source_turn_id: self.identity.source_turn_id.clone(),
+            execution_id: self.identity.execution_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            message_id: step.message_id.clone(),
+            parent_message_id: self.state.head_message_id.clone(),
+            tree_parent_entry_id: None,
+            message: step.assistant_message.clone(),
+            committed_at,
+        };
+        let mut parent_message_id = Some(step.message_id.clone());
+        let tool_calls: Vec<MessageCommit> = step
+            .tool_calls
+            .iter()
+            .map(|tool_call| {
+                let message_id =
+                    tool_batch::tool_call_message_id(&step.message_id, tool_call.tool_call_index);
+                let commit = MessageCommit {
+                    session_id: self.identity.session_id.clone(),
+                    source_turn_id: self.identity.source_turn_id.clone(),
+                    execution_id: self.identity.execution_id.clone(),
+                    agent_instance_id: self.identity.agent_instance_id.clone(),
+                    message_id,
+                    parent_message_id: parent_message_id.clone(),
+                    tree_parent_entry_id: None,
+                    message: tool_batch::tool_call_message(tool_call),
+                    committed_at,
+                };
+                parent_message_id = Some(commit.message_id.clone());
+                commit
+            })
+            .collect();
+        let commit = ModelStepCommit {
+            session_id: self.identity.session_id.clone(),
+            source_turn_id: self.identity.source_turn_id.clone(),
+            run_id: self.identity.run_id.clone(),
+            execution_id: self.identity.execution_id.clone(),
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            model_step_id: step.model_step_id.clone(),
+            step_index: step.step_index,
+            started_at: step.started_at,
+            finished_at: step.finished_at,
+            outcome: step.outcome,
+            assistant,
+            tool_calls: tool_calls.clone(),
+        };
+        self.ports
+            .ports()
+            .commit
+            .commit_model_step(commit)
+            .await
+            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+
+        if let Message::Assistant {
+            usage: Some(usage), ..
+        } = &step.assistant_message
+        {
+            self.state.usage.accumulate(usage);
+        }
+        self.state.head_message_id = Some(step.message_id.clone());
+        self.state
+            .transcript
+            .push_message(step.assistant_message.clone());
+        for tool_call in &tool_calls {
+            self.state.head_message_id = Some(tool_call.message_id.clone());
+            self.state
+                .transcript
+                .push_message(tool_call.message.clone());
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn transcript_messages(&self) -> Vec<Message> {
         self.state.transcript.to_vec()
@@ -276,12 +350,12 @@ impl ExecutionActor {
         message: Message,
         message_id: String,
     ) -> Result<(), AgentApiError> {
-        if let Message::Assistant {
-            usage: Some(usage), ..
-        } = &message
-        {
-            self.state.usage.accumulate(usage);
-        }
+        let usage = match &message {
+            Message::Assistant {
+                usage: Some(usage), ..
+            } => Some(usage.clone()),
+            _ => None,
+        };
         let committed = MessageCommitScope::new(
             &self.identity,
             self.state.head_message_id.clone(),
@@ -291,6 +365,9 @@ impl ExecutionActor {
         .commit(&self.ports.ports().commit)
         .await?;
         committed.apply(&mut self.state);
+        if let Some(usage) = usage {
+            self.state.usage.accumulate(&usage);
+        }
         Ok(())
     }
 

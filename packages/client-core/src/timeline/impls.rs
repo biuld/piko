@@ -14,6 +14,24 @@ impl AgentTimeline {
         self.committed_records.len()
     }
 
+    pub fn model_steps(&self) -> &HashMap<String, ModelStepBoundary> {
+        &self.model_steps
+    }
+
+    pub fn apply_model_step_committed(&mut self, boundary: ModelStepBoundary) -> ApplyOutcome {
+        if let Some(existing) = self.model_steps.get(&boundary.model_step_id) {
+            return if existing == &boundary {
+                ApplyOutcome::Ignored
+            } else {
+                ApplyOutcome::Inconsistent
+            };
+        }
+        self.close_draft_thinking(&boundary.assistant_message_id);
+        self.model_steps
+            .insert(boundary.model_step_id.clone(), boundary);
+        ApplyOutcome::Applied
+    }
+
     pub fn draft_count(&self) -> usize {
         self.draft_ids.len()
     }
@@ -501,6 +519,7 @@ impl AgentTimeline {
     pub fn clear(&mut self) {
         self.items.clear();
         self.committed_records.clear();
+        self.model_steps.clear();
         self.draft_ids.clear();
         self.tool_ids.clear();
         self.session_entry_ids.clear();

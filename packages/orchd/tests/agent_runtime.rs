@@ -197,6 +197,23 @@ impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
             revision: attempt,
         })
     }
+
+    async fn commit_model_step(
+        &self,
+        commit: piko_protocol::execution::ModelStepCommit,
+    ) -> Result<piko_protocol::CommitAck, CommitError> {
+        let attempt = self.attempt.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt == self.fail_at {
+            return Err(CommitError::Unavailable);
+        }
+        Ok(piko_protocol::CommitAck {
+            session_id: commit.session_id,
+            execution_id: commit.execution_id,
+            agent_instance_id: commit.agent_instance_id,
+            message_id: Some(commit.assistant.message_id),
+            revision: attempt,
+        })
+    }
 }
 
 impl CollectingAgentCommitPort {

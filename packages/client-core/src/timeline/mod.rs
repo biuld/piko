@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use piko_protocol::agent_runtime::RealtimeDelta;
+use piko_protocol::execution::ModelStepBoundary;
 use piko_protocol::messages::{ContentBlock, Message, UpstreamAction};
 use piko_protocol::{MessageId, SessionTreeEntry, StreamItemKind, StreamItemOp};
 
@@ -172,6 +173,7 @@ pub struct SessionEntryItem {
 pub struct AgentTimeline {
     items: Vec<TimelineItem>,
     committed_records: HashMap<MessageId, CommittedItem>,
+    model_steps: HashMap<String, ModelStepBoundary>,
     draft_ids: HashMap<MessageId, usize>,
     tool_ids: HashMap<String, usize>,
     session_entry_ids: HashMap<String, usize>,
