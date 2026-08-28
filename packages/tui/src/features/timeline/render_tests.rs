@@ -3,8 +3,8 @@
 use super::component_lines;
 use crate::app::ToolStatus;
 use crate::features::timeline::{
-    AssistantMessageComponent, ComponentId, ContentBlock, Timeline, TimelineComponent,
-    TimelineEntry, ToolEntry,
+    AssistantMessageComponent, ComponentId, ContentBlock, ModelStepDividerComponent, Timeline,
+    TimelineComponent, TimelineEntry, ToolEntry,
 };
 use crate::theme::Theme;
 use piko_protocol::agent_runtime::RealtimeDelta;
@@ -47,6 +47,20 @@ fn assistant_with_ts(text: &str, ts: i64) -> TimelineComponent {
         error_message: None,
         timestamp: Some(ts),
     })
+}
+
+#[test]
+fn model_step_divider_renders_as_one_muted_full_width_rule() {
+    let theme = Theme::dark();
+    let component = TimelineComponent::ModelStepDivider(ModelStepDividerComponent {
+        id: ComponentId::ModelStepId("step-2".into()),
+        step_index: 2,
+    });
+    let lines = component_lines(&component, true, false, &theme, 12);
+
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].to_string(), "────────────");
+    assert_eq!(lines[0].spans[0].style.fg, Some(theme.border_muted));
 }
 
 #[test]

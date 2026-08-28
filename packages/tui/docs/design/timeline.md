@@ -51,6 +51,7 @@ TimelineController
         |
         +--> TimelineDocument
         |       +--> message components
+        |       +--> model-step dividers
         |       +--> id indexes
         |       +--> live assistant pointer
         |
@@ -167,12 +168,21 @@ pub enum TimelineComponent {
 `TimelineComponent` is a Timeline-internal message unit. It should not be
 confused with reusable TUI components under the shared component layer.
 
+`ModelStepDivider` is a non-interactive presentation component. TUI retains
+the ordered `ModelStepBoundary` notifications separately from the canonical
+client-core projection, because client-core indexes those facts by id and does
+not promise iteration order. During a projection rebuild, the divider is
+inserted before the first visible component owned by each model step after the
+first. Tool-call message ids are translated to provider tool-call ids so a
+tool-only step still has an anchor.
+
 Component ids are stable within the active rendered branch:
 
 ```rust
 pub enum ComponentId {
     MessageId(String),
     ToolCallId(String),
+    ModelStepId(String),
     SessionEntryId(String),
     Local(u64),
 }

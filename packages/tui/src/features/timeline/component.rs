@@ -18,6 +18,7 @@ pub enum TimelineKind {
     Assistant,
     Thought,
     Tool,
+    ModelStepDivider,
     SessionFact,
     Summary,
     CustomMessage,
@@ -29,6 +30,7 @@ pub enum ComponentId {
     MessageId(String),
     Thought(ThoughtKey),
     ToolCallId(String),
+    ModelStepId(String),
     EntryId(String),
     Local(u64),
 }
@@ -39,6 +41,7 @@ pub enum TimelineComponent {
     Assistant(AssistantMessageComponent),
     Thought(ThoughtComponent),
     Tool(ToolEntry),
+    ModelStepDivider(ModelStepDividerComponent),
     SessionFact(SessionFactComponent),
     Summary(SummaryComponent),
     CustomMessage(CustomMessageComponent),
@@ -53,6 +56,7 @@ impl TimelineComponent {
             Self::Assistant(_) => TimelineKind::Assistant,
             Self::Thought(_) => TimelineKind::Thought,
             Self::Tool(_) => TimelineKind::Tool,
+            Self::ModelStepDivider(_) => TimelineKind::ModelStepDivider,
             Self::SessionFact(_) => TimelineKind::SessionFact,
             Self::Summary(_) => TimelineKind::Summary,
             Self::CustomMessage(_) => TimelineKind::CustomMessage,
@@ -68,6 +72,7 @@ impl TimelineComponent {
             Self::Assistant(component) => &component.id,
             Self::Thought(component) => &component.id,
             Self::Tool(component) => &component.component_id,
+            Self::ModelStepDivider(component) => &component.id,
             Self::SessionFact(component) => &component.id,
             Self::Summary(component) => &component.id,
             Self::CustomMessage(component) => &component.id,
@@ -95,6 +100,13 @@ pub struct ThoughtComponent {
     pub key: ThoughtKey,
     pub text: String,
     pub phase: ThoughtPhase,
+}
+
+/// Non-interactive rule between two visible model steps.
+#[derive(Clone)]
+pub struct ModelStepDividerComponent {
+    pub id: ComponentId,
+    pub step_index: u32,
 }
 
 #[derive(Clone)]

@@ -110,6 +110,32 @@ fn assistant(text: &str) -> Message {
     }
 }
 
+fn model_step(
+    model_step_id: &str,
+    step_index: u32,
+    assistant_message_id: &str,
+    tool_call_message_ids: Vec<String>,
+) -> Event {
+    Event::ModelStepCommitted(piko_protocol::ModelStepBoundary {
+        session_id: "session-1".into(),
+        source_turn_id: Some("work-1".into()),
+        run_id: "run-1".into(),
+        execution_id: "execution-1".into(),
+        agent_instance_id: "task-1".into(),
+        model_step_id: model_step_id.into(),
+        step_index,
+        started_at: i64::from(step_index) * 10,
+        finished_at: i64::from(step_index) * 10 + 1,
+        outcome: if tool_call_message_ids.is_empty() {
+            piko_protocol::ModelStepOutcome::Completed
+        } else {
+            piko_protocol::ModelStepOutcome::ToolCalls
+        },
+        assistant_message_id: assistant_message_id.into(),
+        tool_call_message_ids,
+    })
+}
+
 mod command_more_tests;
 mod command_tests;
 mod completion_tests;
@@ -117,6 +143,7 @@ mod delete_scope_tests;
 mod diff_tests;
 mod foreground_tests;
 mod modal_tests;
+mod model_step_tests;
 mod pointer_more_tests;
 mod pointer_tests;
 mod pointer_todo_tests;

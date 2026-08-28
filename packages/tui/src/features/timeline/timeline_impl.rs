@@ -13,6 +13,8 @@ impl Timeline {
             next_hit_id: 1,
             layout_epoch: 0,
             projection: piko_client_core::AgentTimeline::new(),
+            tool_message_ids: HashMap::new(),
+            model_step_boundaries: Vec::new(),
             next_local_id: 1,
             line_cache: std::cell::RefCell::new(super::line_cache::LineCache::default()),
             selection: std::cell::RefCell::new(super::selection::TimelineSelection::default()),
@@ -32,7 +34,7 @@ impl Timeline {
         self.flush_projection();
     }
 
-    fn mark_projection_applied(&mut self) {
+    pub(super) fn mark_projection_applied(&mut self) {
         if self.defer_projection_sync {
             self.projection_dirty = true;
         } else {
@@ -71,27 +73,26 @@ impl Timeline {
     }
 
     pub fn apply_committed(&mut self, event: TranscriptCommittedEvent) -> bool {
+        let tool_call_id = match &event.message {
+            piko_protocol::Message::ToolCall { id, .. } => Some(id.clone()),
+            _ => None,
+        };
+        let message_id = event.message_id.clone();
         let outcome = self.projection.apply_committed_checked(
             event.message_id,
             event.transcript_seq,
             event.message,
             event.source_turn_id,
         );
+        if outcome != piko_client_core::ApplyOutcome::Inconsistent
+            && let Some(tool_call_id) = tool_call_id
+        {
+            self.tool_message_ids.insert(message_id, tool_call_id);
+        }
         if outcome == piko_client_core::ApplyOutcome::Applied {
             self.mark_projection_applied();
         }
         outcome != piko_client_core::ApplyOutcome::Inconsistent
-    }
-
-    pub fn apply_model_step_committed(
-        &mut self,
-        boundary: ModelStepBoundary,
-    ) -> piko_client_core::ApplyOutcome {
-        let outcome = self.projection.apply_model_step_committed(boundary);
-        if outcome == piko_client_core::ApplyOutcome::Applied {
-            self.mark_projection_applied();
-        }
-        outcome
     }
 
     pub fn apply_session_entry(
@@ -189,6 +190,7 @@ impl Timeline {
         self.components.clear();
         self.tool_calls.clear();
         self.hit_ids.clear();
+        self.clear_model_step_state();
         self.thought_hit_ids.clear();
         self.thought_starts.clear();
         // `next_hit_id` stays monotonic so ids are never reused after a clear.
@@ -352,6 +354,8 @@ impl Timeline {
         }
 
         let mut last_component_by_turn = HashMap::new();
+        let mut seen_model_steps = std::collections::HashSet::new();
+        let model_step_lookup = self.model_step_lookup();
         for item in self.projection.items() {
             let source_turn_id = match item {
                 CoreItem::Committed(committed) => Some(committed.source_turn_id.clone()),
@@ -393,6 +397,14 @@ impl Timeline {
                         .collect()
                 }
             };
+            if !components.is_empty()
+                && let Some((model_step_id, step_index)) = model_step_lookup.for_item(item)
+                && seen_model_steps.insert(model_step_id.clone())
+                && seen_model_steps.len() > 1
+            {
+                self.components
+                    .push_back(Self::model_step_divider(model_step_id, step_index));
+            }
             for component in components {
                 let component = match component {
                     TimelineComponent::Thought(mut thought) => {
@@ -462,6 +474,7 @@ impl Timeline {
         while self.components.len() > MAX_COMPONENTS {
             self.components.pop_front();
         }
+        self.discard_leading_model_step_dividers();
         self.hit_ids
             .retain(|tool_call_id, _| self.tool_calls.iter().any(|tool| &tool.id == tool_call_id));
         let thought_keys: std::collections::HashSet<ThoughtKey> = self

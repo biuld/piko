@@ -24,8 +24,9 @@ use crate::{
 };
 
 use super::{
-    AssistantMessageComponent, ContentBlock, SummaryKind, ThoughtComponent, ThoughtPhase, Timeline,
-    TimelineComponent, ToolEntry, UpstreamInfo, UserMessageComponent,
+    AssistantMessageComponent, ContentBlock, ModelStepDividerComponent, SummaryKind,
+    ThoughtComponent, ThoughtPhase, Timeline, TimelineComponent, ToolEntry, UpstreamInfo,
+    UserMessageComponent,
     layout::TimelineRenderPlan,
     render_diff::render_tool_body,
     tool_format::{BadgeTone, BodyLine, TitleBadge, ToolBody, ToolPresentation, present_tool},
@@ -166,6 +167,9 @@ pub(super) fn component_lines_at(
             now,
         ),
         TimelineComponent::Tool(tool) => tool_lines(tool, hovered, theme, width),
+        TimelineComponent::ModelStepDivider(component) => {
+            model_step_divider_lines(component, theme, width)
+        }
         TimelineComponent::SessionFact(component) => notice_lines(
             component.label,
             theme.accent_alt,
@@ -184,6 +188,21 @@ pub(super) fn component_lines_at(
         }
         TimelineComponent::Error(component) => error_lines(component, theme, width),
     }
+}
+
+fn model_step_divider_lines(
+    _component: &ModelStepDividerComponent,
+    theme: &Theme,
+    width: u16,
+) -> Vec<Line<'static>> {
+    if width == 0 {
+        return Vec::new();
+    }
+    vec![filled_line(
+        "─".repeat(usize::from(width)),
+        Style::default().fg(theme.border_muted),
+        width,
+    )]
 }
 
 fn thought_lines(

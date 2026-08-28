@@ -17,6 +17,7 @@ mod layout;
 mod layout_tests;
 mod line_cache;
 mod markdown;
+mod model_step;
 mod projection;
 mod render;
 mod render_diff;
@@ -33,8 +34,9 @@ mod timeline_test_api;
 pub use component::TimelineKind;
 pub use component::{
     AssistantMessageComponent, ComponentId, ContentBlock, CustomMessageComponent, ErrorComponent,
-    SessionFactComponent, SummaryComponent, SummaryKind, ThoughtComponent, ThoughtKey,
-    ThoughtPhase, TimelineComponent, TimelineEntry, ToolEntry, UpstreamInfo, UserMessageComponent,
+    ModelStepDividerComponent, SessionFactComponent, SummaryComponent, SummaryKind,
+    ThoughtComponent, ThoughtKey, ThoughtPhase, TimelineComponent, TimelineEntry, ToolEntry,
+    UpstreamInfo, UserMessageComponent,
 };
 pub(crate) use layout::TimelineRenderPlan;
 pub(crate) use selection::SelectionPoint;
@@ -55,6 +57,13 @@ pub struct Timeline {
     /// Stable hit identity for tool calls: tool call id → local hit id. Kept
     /// across projection rebuilds so pointer hits never target the wrong tool.
     hit_ids: HashMap<String, u64>,
+    /// Message id → provider tool-call id, retained so model-step boundaries
+    /// can anchor a divider even though client-core exposes tool items by call
+    /// id rather than by their committed message id.
+    tool_message_ids: HashMap<String, String>,
+    /// Ordered boundaries received from hostd. client-core keeps the same
+    /// facts keyed by id; the TUI also needs arrival order for presentation.
+    model_step_boundaries: Vec<ModelStepBoundary>,
     /// Stable hit identity for semantic thought rows.
     thought_hit_ids: HashMap<ThoughtKey, u64>,
     /// TUI-local monotonic start times for live thought rows.

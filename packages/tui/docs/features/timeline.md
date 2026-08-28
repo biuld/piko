@@ -37,6 +37,10 @@ but it does not create a temporary duplicate prompt in Timeline.
 - User prompts: submitted blocks, no role label; only after server accept.
 - Assistant output: no role heading; thinking quieter than answer text; may
   stream then finalize in place.
+- Consecutive model steps are separated by one muted, non-interactive
+  horizontal divider. The first visible model step has no leading divider;
+  thinking and tool components remain on the side of the boundary where they
+  were committed.
 - Optional protocol `timestamp` on user/assistant: show local time when present
   (layout per parent stream principles, not specified here).
 - Tools: separate cards with status-aware presentation; expand for typed detail.

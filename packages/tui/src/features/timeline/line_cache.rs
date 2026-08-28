@@ -115,6 +115,10 @@ fn component_fingerprint(component: &TimelineComponent) -> u64 {
             tool.upstream.hash(&mut hasher);
             tool.expanded.hash(&mut hasher);
         }
+        TimelineComponent::ModelStepDivider(component) => {
+            8u8.hash(&mut hasher);
+            component.step_index.hash(&mut hasher);
+        }
         TimelineComponent::SessionFact(component) => {
             3u8.hash(&mut hasher);
             component.label.hash(&mut hasher);
