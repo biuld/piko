@@ -199,7 +199,7 @@ fn model_step_divider_lines(
         return Vec::new();
     }
     vec![filled_line(
-        "─".repeat(usize::from(width)),
+        "-".repeat(usize::from(width)),
         Style::default().fg(theme.border_muted),
         width,
     )]

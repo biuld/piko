@@ -59,7 +59,7 @@ fn model_step_divider_renders_as_one_muted_full_width_rule() {
     let lines = component_lines(&component, true, false, &theme, 12);
 
     assert_eq!(lines.len(), 1);
-    assert_eq!(lines[0].to_string(), "────────────");
+    assert_eq!(lines[0].to_string(), "------------");
     assert_eq!(lines[0].spans[0].style.fg, Some(theme.border_muted));
 }
 
