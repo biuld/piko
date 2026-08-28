@@ -56,8 +56,11 @@ fn clicked_element(app: &AppState, prepared: &PreparedFrame, x: u16, y: u16) -> 
         mouse(MouseEventKind::Up(MouseButton::Left), x, y),
     );
     match actions.as_slice() {
-        [Action::Timeline(TimelineAction::SelectionFinish { activate_tool, .. })] => {
-            activate_tool.map(HitId::TimelineTool)
+        [Action::Timeline(TimelineAction::SelectionFinish { activation, .. })] => {
+            activation.map(|activation| match activation {
+                crate::app::command::TimelineActivation::Tool(id) => HitId::TimelineTool(id),
+                crate::app::command::TimelineActivation::Thought(id) => HitId::TimelineThought(id),
+            })
         }
         other => panic!("expected one Timeline selection finish, got {other:?}"),
     }

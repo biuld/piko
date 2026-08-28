@@ -8,6 +8,8 @@ impl Timeline {
             thinking_visible: true,
             tool_calls: Vec::new(),
             hit_ids: HashMap::new(),
+            thought_hit_ids: HashMap::new(),
+            thought_starts: HashMap::new(),
             next_hit_id: 1,
             layout_epoch: 0,
             projection: piko_client_core::AgentTimeline::new(),
@@ -176,6 +178,8 @@ impl Timeline {
         self.components.clear();
         self.tool_calls.clear();
         self.hit_ids.clear();
+        self.thought_hit_ids.clear();
+        self.thought_starts.clear();
         // `next_hit_id` stays monotonic so ids are never reused after a clear.
         self.viewport.jump_latest();
         self.projection.clear();
@@ -225,6 +229,34 @@ impl Timeline {
         let was_at_latest = self.viewport.is_at_latest();
         self.components.clear();
         self.tool_calls.clear();
+        let now = std::time::Instant::now();
+        let closed_thoughts: std::collections::HashSet<ThoughtKey> = self
+            .projection
+            .items()
+            .iter()
+            .filter_map(|item| {
+                let CoreItem::RealtimeDraft(draft) = item else {
+                    return None;
+                };
+                Some(
+                    draft
+                        .content_segments
+                        .iter()
+                        .filter(|segment| {
+                            segment.kind == piko_client_core::RealtimeContentKind::Thinking
+                                && !segment.text.is_empty()
+                                && (draft.ended
+                                    || draft.active_thinking_index != Some(segment.content_index))
+                        })
+                        .map(|segment| ThoughtKey {
+                            message_id: draft.message_id.clone(),
+                            segment_index: segment.content_index,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .flatten()
+            .collect();
 
         // Intern hit ids for every projected tool before rebuilding components
         // (the projection borrow must end before mutating self).
@@ -330,26 +362,7 @@ impl Timeline {
                         }
                         super::projection::components_from_draft(draft, &slices)
                     } else {
-                        // Streaming draft has no committed timestamp yet.
-                        vec![TimelineComponent::Assistant(AssistantMessageComponent {
-                            id: ComponentId::MessageId(draft.message_id.clone()),
-                            blocks: draft
-                                .content_segments
-                                .iter()
-                                .filter(|segment| !segment.text.is_empty())
-                                .map(|segment| match segment.kind {
-                                    piko_client_core::RealtimeContentKind::Text => {
-                                        ContentBlock::Text(segment.text.clone())
-                                    }
-                                    piko_client_core::RealtimeContentKind::Thinking => {
-                                        ContentBlock::Thinking(segment.text.clone())
-                                    }
-                                })
-                                .collect(),
-                            stop_reason: None,
-                            error_message: None,
-                            timestamp: None,
-                        })]
+                        super::projection::components_from_draft(draft, &[])
                     }
                 }
                 CoreItem::Tool(tool) => {
@@ -370,6 +383,29 @@ impl Timeline {
                 }
             };
             for component in components {
+                let component = match component {
+                    TimelineComponent::Thought(mut thought) => {
+                        let key = thought.key.clone();
+                        if closed_thoughts.contains(&key) {
+                            let started = self.thought_starts.entry(key).or_insert(now);
+                            thought.phase = ThoughtPhase::Completed {
+                                duration_ms: Some(
+                                    now.saturating_duration_since(*started)
+                                        .as_millis()
+                                        .try_into()
+                                        .unwrap_or(u64::MAX),
+                                ),
+                            };
+                        } else if matches!(thought.phase, ThoughtPhase::Streaming { .. }) {
+                            let started = self.thought_starts.entry(key).or_insert(now);
+                            thought.phase = ThoughtPhase::Streaming {
+                                observed_at: *started,
+                            };
+                        }
+                        TimelineComponent::Thought(thought)
+                    }
+                    other => other,
+                };
                 if let TimelineComponent::Tool(tool) = &component
                     && !self.tool_calls.iter().any(|t| t.id == tool.id)
                 {
@@ -380,6 +416,17 @@ impl Timeline {
                     last_component_by_turn.insert(turn_id.clone(), self.components.len() - 1);
                 }
             }
+        }
+        let thought_keys: Vec<ThoughtKey> = self
+            .components
+            .iter()
+            .filter_map(|component| match component {
+                TimelineComponent::Thought(thought) => Some(thought.key.clone()),
+                _ => None,
+            })
+            .collect();
+        for key in thought_keys {
+            self.intern_thought_key(key);
         }
         for error in local_errors {
             let insertion_index = match &error {
@@ -406,79 +453,23 @@ impl Timeline {
         }
         self.hit_ids
             .retain(|tool_call_id, _| self.tool_calls.iter().any(|tool| &tool.id == tool_call_id));
+        let thought_keys: std::collections::HashSet<ThoughtKey> = self
+            .components
+            .iter()
+            .filter_map(|component| match component {
+                TimelineComponent::Thought(thought) => Some(thought.key.clone()),
+                _ => None,
+            })
+            .collect();
+        self.thought_hit_ids
+            .retain(|key, _| thought_keys.contains(key));
+        self.thought_starts
+            .retain(|key, _| thought_keys.contains(key));
         if was_at_latest {
             self.viewport.jump_latest();
         } else {
             self.viewport.mark_appended();
         }
         self.bump_layout_epoch();
-    }
-
-    #[cfg(test)]
-    pub fn push_session_fact(&mut self, entry_id: String, label: &'static str, text: String) {
-        self.push_component(TimelineComponent::SessionFact(SessionFactComponent {
-            id: ComponentId::EntryId(entry_id),
-            label,
-            text,
-        }));
-    }
-
-    #[cfg(test)]
-    pub fn tool_call_count(&self) -> usize {
-        self.components
-            .iter()
-            .filter(|component| matches!(component, TimelineComponent::Tool(_)))
-            .count()
-    }
-
-    #[cfg(test)]
-    pub fn tool_expanded(&self, tool_call_id: &str) -> Option<bool> {
-        self.components
-            .iter()
-            .find_map(|component| match component {
-                TimelineComponent::Tool(tool) if tool.id == tool_call_id => Some(tool.expanded),
-                _ => None,
-            })
-    }
-
-    #[cfg(test)]
-    pub fn component_kinds(&self) -> Vec<TimelineKind> {
-        self.components
-            .iter()
-            .map(TimelineComponent::kind)
-            .collect()
-    }
-
-    #[cfg(test)]
-    pub fn message_ids(&self) -> Vec<String> {
-        self.components
-            .iter()
-            .filter_map(|component| match component.id() {
-                ComponentId::MessageId(id) => Some(id.clone()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    #[cfg(test)]
-    pub fn assistant_text(&self, message_id: &str) -> Option<String> {
-        self.components.iter().find_map(|component| {
-            let TimelineComponent::Assistant(assistant) = component else {
-                return None;
-            };
-            if assistant.id != ComponentId::MessageId(message_id.to_string()) {
-                return None;
-            }
-            Some(
-                assistant
-                    .blocks
-                    .iter()
-                    .filter_map(|block| match block {
-                        ContentBlock::Text(text) => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect(),
-            )
-        })
     }
 }

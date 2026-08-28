@@ -120,6 +120,7 @@ mod tests {
         let content = MessageContent::Blocks(vec![ContentBlock::Thinking {
             thinking: "hidden".into(),
             thinking_signature: None,
+            duration_ms: None,
         }]);
         assert!(validate_user_content(&content).is_err());
     }

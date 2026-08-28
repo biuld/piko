@@ -118,6 +118,15 @@ pub struct RealtimeDraft {
     /// by `(kind, content_index)`; subsequent chunks mutate it in place.
     pub content_segments: Vec<RealtimeContentSegment>,
     pub live_order: u64,
+    /// The currently open thinking segment, if the latest realtime content is
+    /// still thinking. A non-thinking delta closes the previous segment even
+    /// when its text content index is reused.
+    pub active_thinking_index: Option<u32>,
+    /// Realtime message lifecycle has reached its terminal frame. The
+    /// committed message still supersedes this draft when it arrives.
+    pub ended: bool,
+    pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

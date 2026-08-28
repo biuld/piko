@@ -108,7 +108,7 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
     assert!(matches!(
         actions.as_slice(),
         [Action::Timeline(TimelineAction::SelectionFinish {
-            activate_tool: Some(id), ..
+            activation: Some(crate::app::command::TimelineActivation::Tool(id)), ..
         })] if *id == hit_id
     ));
 

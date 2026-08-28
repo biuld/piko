@@ -2,8 +2,14 @@ use super::*;
 
 impl Timeline {
     pub(super) fn push_component(&mut self, component: TimelineComponent) {
-        if let TimelineComponent::Tool(tool) = &component {
-            self.intern_tool_id(&tool.id);
+        match &component {
+            TimelineComponent::Tool(tool) => {
+                self.intern_tool_id(&tool.id);
+            }
+            TimelineComponent::Thought(thought) => {
+                self.intern_thought_key(thought.key.clone());
+            }
+            _ => {}
         }
         let is_at_bottom = self.viewport.is_at_latest();
         self.components.push_back(component);
@@ -36,6 +42,34 @@ impl Timeline {
                 self.next_hit_id = self.next_hit_id.saturating_add(1);
                 id
             })
+    }
+
+    pub(super) fn intern_thought_key(&mut self, key: ThoughtKey) -> u64 {
+        *self.thought_hit_ids.entry(key).or_insert_with(|| {
+            let id = self.next_hit_id;
+            self.next_hit_id = self.next_hit_id.saturating_add(1);
+            id
+        })
+    }
+
+    pub fn thought(&self, key: &ThoughtKey) -> Option<ThoughtComponent> {
+        self.components
+            .iter()
+            .find_map(|component| match component {
+                TimelineComponent::Thought(thought) if &thought.key == key => Some(thought.clone()),
+                _ => None,
+            })
+    }
+
+    pub fn thought_key_for_hit(&self, hit_id: u64) -> Option<ThoughtKey> {
+        self.thought_hit_ids
+            .iter()
+            .find_map(|(key, id)| (*id == hit_id).then(|| key.clone()))
+    }
+
+    #[allow(dead_code)]
+    pub fn thought_hit_id(&self, key: &ThoughtKey) -> Option<u64> {
+        self.thought_hit_ids.get(key).copied()
     }
 
     pub(super) fn bump_layout_epoch(&mut self) {

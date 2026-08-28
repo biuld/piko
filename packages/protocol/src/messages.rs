@@ -53,6 +53,10 @@ pub enum ContentBlock {
         thinking: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         thinking_signature: Option<String>,
+        /// Monotonic model-runtime duration for this ordered thinking run.
+        /// Legacy transcript blocks omit the field and decode as `None`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
     },
     #[serde(rename = "image")]
     Image {
@@ -452,10 +456,27 @@ mod tests {
         let block = ContentBlock::Thinking {
             thinking: "considering".into(),
             thinking_signature: Some("sig".into()),
+            duration_ms: Some(2400),
         };
         let json = serde_json::to_string(&block).unwrap();
         let parsed: ContentBlock = serde_json::from_str(&json).unwrap();
         assert_eq!(block, parsed);
+    }
+
+    #[test]
+    fn legacy_thinking_block_defaults_duration_to_none() {
+        let block: ContentBlock = serde_json::from_value(serde_json::json!({
+            "type": "thinking",
+            "thinking": "legacy",
+        }))
+        .unwrap();
+        assert!(matches!(
+            block,
+            ContentBlock::Thinking {
+                duration_ms: None,
+                ..
+            }
+        ));
     }
 
     #[test]

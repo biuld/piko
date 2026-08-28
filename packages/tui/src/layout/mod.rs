@@ -53,10 +53,11 @@ impl PreparedFrame {
     /// untouched.
     pub(crate) fn refresh_timeline(&mut self, app: &AppState) {
         if self.timeline.is_some()
-            && self
-                .timeline
-                .as_ref()
-                .is_some_and(|plan| plan.epoch == app.timeline().layout_epoch())
+            && self.timeline.as_ref().is_some_and(|plan| {
+                plan.epoch == app.timeline().layout_epoch()
+                    && plan.spinner_frame == app.spinner_frame
+                    && plan.rendered_at == app.last_tick
+            })
         {
             return;
         }
@@ -72,14 +73,16 @@ impl PreparedFrame {
             self.timeline = None;
             return;
         }
-        let hovered_tool = app
+        let hovered = app
             .hovered
-            .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten())
-            .and_then(|element| match element {
-                HitId::TimelineTool(hit_id) => Some(hit_id),
-                _ => None,
-            });
-        self.timeline = Some(app.timeline().render_plan(area, &app.theme, hovered_tool));
+            .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten());
+        self.timeline = Some(app.timeline().render_plan_at(
+            area,
+            &app.theme,
+            hovered,
+            app.spinner_frame,
+            app.last_tick,
+        ));
     }
 }
 
@@ -99,6 +102,9 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
         }
         Some(SurfaceSizing::Centered(CenteredSizePolicy::NotificationContent)) => {
             Some(notifications_centered_size(app, body))
+        }
+        Some(SurfaceSizing::Centered(CenteredSizePolicy::ThoughtContent)) => {
+            Some(thought_centered_size(body))
         }
         _ => None,
     };
@@ -202,6 +208,16 @@ fn settings_centered_size(_app: &AppState, body: ratatui::layout::Rect) -> (u16,
     (width, height)
 }
 
+fn thought_centered_size(body: ratatui::layout::Rect) -> (u16, u16) {
+    let width = cells_from_percent(body.width, 82)
+        .clamp(48, 120)
+        .min(body.width);
+    let height = cells_from_percent(body.height, 72)
+        .max(10)
+        .min(body.height.saturating_sub(2));
+    (width, height)
+}
+
 /// Feature-declared content-row budget for Select / ComposerBand only.
 fn select_band_budget(app: &AppState, surface: SurfaceId) -> Option<SelectBandBudget> {
     if !matches!(
@@ -256,21 +272,25 @@ pub fn compose_frame(app: &AppState, terminal: ratatui::layout::Rect) -> Product
 pub fn prepare_frame(app: &AppState, terminal: ratatui::layout::Rect) -> PreparedFrame {
     let product = compose_frame(app, terminal);
     let plane_is_blocked = product.modal_surface.is_some();
-    let hovered_tool = (!plane_is_blocked)
+    let hovered = (!plane_is_blocked)
         .then_some(app.hovered)
         .flatten()
-        .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten())
-        .and_then(|element| match element {
-            HitId::TimelineTool(hit_id) => Some(hit_id),
-            _ => None,
-        });
+        .and_then(|(region, element)| (region == Region::Stream).then_some(element).flatten());
     let timeline = product
         .plan
         .rects
         .get(&Region::Stream)
         .copied()
         .filter(|_| !product.modal_surface.is_some_and(SurfaceId::covers_body))
-        .map(|area| app.timeline().render_plan(area, &app.theme, hovered_tool));
+        .map(|area| {
+            app.timeline().render_plan_at(
+                area,
+                &app.theme,
+                hovered,
+                app.spinner_frame,
+                app.last_tick,
+            )
+        });
     let hit_map = build_surface_hitmap_for_frame(app, &product);
     PreparedFrame {
         product,
@@ -417,6 +437,11 @@ fn build_surface_hitmap_for_frame(
         Region::Surface(SurfaceId::AuthSelector) => stamp(app.auth_selector.hit_regions(rect)),
         Region::Surface(SurfaceId::Mcp) => stamp(app.mcp.hit_regions(rect)),
         Region::Surface(SurfaceId::Processes) => stamp(app.processes.hit_regions(rect)),
+        Region::Surface(SurfaceId::ThoughtInspector) => app
+            .thought_inspector
+            .as_ref()
+            .map(|inspector| stamp(inspector.hit_regions(rect)))
+            .unwrap_or_default(),
     })
 }
 

@@ -4,8 +4,8 @@ use crate::app::{
     AppMode, AppState, SurfaceId,
     command::{
         Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
-        SessionAction, SlashAction, SurfaceAction, TimelineAction, ToolInteractionAction,
-        TreeAction,
+        SessionAction, SlashAction, SurfaceAction, ThoughtInspectorAction, TimelineAction,
+        ToolInteractionAction, TreeAction,
     },
     command_id,
     effect::Effect,
@@ -26,6 +26,7 @@ impl AppState {
             Action::App(action) => self.dispatch_app_action(action),
             Action::Editor(action) => self.dispatch_editor_action(action),
             Action::Timeline(action) => self.dispatch_timeline_action(action),
+            Action::ThoughtInspector(action) => self.dispatch_thought_inspector_action(action),
             Action::Surface(action) => self.dispatch_surface_action(action),
             Action::Session(action) => self.dispatch_session_action(action),
             Action::Model(action) => self.dispatch_model_action(action),

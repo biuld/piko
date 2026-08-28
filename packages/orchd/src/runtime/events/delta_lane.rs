@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use piko_llmd::gateway::{FinishReason, InferenceEvent};
+use std::time::Instant;
 
 use crate::domain::model::step::ModelSpec;
 use crate::domain::transcript::{ContentBlock, MessageUsage};
@@ -53,6 +54,7 @@ fn append_thinking_block(order: &mut Vec<ContentBlock>, text: &str) {
         order.push(ContentBlock::Thinking {
             thinking: text.to_string(),
             thinking_signature: None,
+            duration_ms: None,
         });
     }
 }
@@ -140,6 +142,11 @@ pub(crate) struct AssistantMessageState {
     /// Content blocks in arrival order (thinking/text interleaved with
     /// semantic blocks), so `build_message` preserves the true timeline order.
     order: Vec<ContentBlock>,
+    /// Current ordered thinking segment. The index is emitted on realtime
+    /// deltas; committed content derives the same ordinal from its blocks.
+    thinking_index: Option<u32>,
+    next_thinking_index: u32,
+    thinking_started_at: Option<Instant>,
 }
 
 impl AssistantMessageState {
@@ -153,23 +160,40 @@ impl AssistantMessageState {
             checkpoint: None,
             semantic_blocks: Vec::new(),
             order: Vec::new(),
+            thinking_index: None,
+            next_thinking_index: 0,
+            thinking_started_at: None,
         }
     }
 
     pub(crate) fn apply_gateway_event(&mut self, event: &InferenceEvent) {
+        self.apply_gateway_event_at(event, Instant::now());
+    }
+
+    /// Apply one gateway event with an explicit monotonic observation time.
+    /// Production callers use [`Self::apply_gateway_event`]; the timestamped
+    /// form keeps duration tests deterministic without using wall-clock time.
+    pub(crate) fn apply_gateway_event_at(&mut self, event: &InferenceEvent, now: Instant) {
         match event {
             InferenceEvent::Cursor(_) => {}
             InferenceEvent::TextDelta { delta, .. }
             | InferenceEvent::RefusalDelta { delta, .. } => {
+                self.close_thinking_run_at(now);
                 self.text.push_str(delta);
                 append_text_block(&mut self.order, delta);
             }
             InferenceEvent::ReasoningDelta { delta, .. } => {
+                if !delta.is_empty() && self.thinking_index.is_none() {
+                    self.thinking_index = Some(self.next_thinking_index);
+                    self.next_thinking_index = self.next_thinking_index.saturating_add(1);
+                    self.thinking_started_at = Some(now);
+                }
                 self.reasoning.push_str(delta);
                 append_thinking_block(&mut self.order, delta);
             }
             InferenceEvent::Usage(usage) => self.usage = Some(usage.clone()),
             InferenceEvent::Completed(status) => {
+                self.close_thinking_run_at(now);
                 if !matches!(status, FinishReason::Completed { .. }) {
                     self.checkpoint = None;
                 }
@@ -186,14 +210,16 @@ impl AssistantMessageState {
                 };
             }
             InferenceEvent::Error(error) => {
+                self.close_thinking_run_at(now);
                 tracing::error!("Stream error: {error}");
                 self.checkpoint = None;
                 self.stop_reason = "error".into();
                 self.error_message = Some(error.to_string());
             }
             InferenceEvent::Checkpoint(checkpoint) => self.checkpoint = Some(checkpoint.clone()),
-            InferenceEvent::ToolCallDelta { .. } => {}
+            InferenceEvent::ToolCallDelta { .. } => self.close_thinking_run_at(now),
             InferenceEvent::UpstreamActivity(activity) => {
+                self.close_thinking_run_at(now);
                 let block = ContentBlock::UpstreamToolActivity {
                     activity_id: activity.activity_id.clone(),
                     tool_name: activity.tool_name.clone(),
@@ -218,6 +244,7 @@ impl AssistantMessageState {
                 push_semantic(&mut self.semantic_blocks, &mut self.order, block);
             }
             InferenceEvent::ApprovalRequired(approval) => {
+                self.close_thinking_run_at(now);
                 let block = ContentBlock::UpstreamToolApproval {
                     approval_id: approval.approval_id.clone(),
                     tool_name: approval.tool_name.clone(),
@@ -226,6 +253,7 @@ impl AssistantMessageState {
                 push_semantic(&mut self.semantic_blocks, &mut self.order, block);
             }
             InferenceEvent::Source(source) => {
+                self.close_thinking_run_at(now);
                 let block = ContentBlock::Source {
                     source_id: source.source_id.clone(),
                     title: source.title.clone(),
@@ -234,6 +262,7 @@ impl AssistantMessageState {
                 push_semantic(&mut self.semantic_blocks, &mut self.order, block);
             }
             InferenceEvent::Citation(citation) => {
+                self.close_thinking_run_at(now);
                 let block = ContentBlock::Citation {
                     source_id: citation.source_id.clone(),
                     output_item_id: citation.output_item_id.0.clone(),
@@ -243,6 +272,7 @@ impl AssistantMessageState {
                 push_semantic(&mut self.semantic_blocks, &mut self.order, block);
             }
             InferenceEvent::Artifact(artifact) => {
+                self.close_thinking_run_at(now);
                 let block = ContentBlock::Artifact {
                     artifact_id: artifact.artifact_id.clone(),
                     media_type: artifact.media_type.clone(),
@@ -254,17 +284,67 @@ impl AssistantMessageState {
         }
     }
 
+    pub(crate) fn current_thinking_index(&self) -> Option<u32> {
+        self.thinking_index
+    }
+
+    pub(crate) fn close_thinking_run(&mut self) {
+        self.close_thinking_run_at(Instant::now());
+    }
+
+    fn close_thinking_run_at(&mut self, now: Instant) {
+        let Some(started_at) = self.thinking_started_at.take() else {
+            self.thinking_index = None;
+            return;
+        };
+        let duration_ms = now
+            .saturating_duration_since(started_at)
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        if let Some(ContentBlock::Thinking {
+            duration_ms: stored,
+            ..
+        }) = self
+            .order
+            .iter_mut()
+            .rev()
+            .find(|block| matches!(block, ContentBlock::Thinking { .. }))
+        {
+            *stored = Some(duration_ms);
+        }
+        self.thinking_index = None;
+    }
+
     pub(crate) fn build_message(&self, model: &ModelSpec) -> Message {
         // Preserve arrival order of thinking/text/semantic blocks so the
         // committed timeline interleaves an upstream tool card between the
         // text runs (text-before → card → text-after).
         let mut blocks = self.order.clone();
+        if let Some(started_at) = self.thinking_started_at {
+            let duration_ms = Instant::now()
+                .saturating_duration_since(started_at)
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
+            if let Some(ContentBlock::Thinking {
+                duration_ms: stored,
+                ..
+            }) = blocks
+                .iter_mut()
+                .rev()
+                .find(|block| matches!(block, ContentBlock::Thinking { .. }))
+            {
+                *stored = Some(duration_ms);
+            }
+        }
         if blocks.is_empty() {
             blocks = self.semantic_blocks.clone();
             if !self.reasoning.is_empty() {
                 blocks.push(ContentBlock::Thinking {
                     thinking: self.reasoning.clone(),
                     thinking_signature: None,
+                    duration_ms: None,
                 });
             }
             if !self.text.is_empty() {
@@ -342,8 +422,8 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
                     ctx.message_id.clone(),
                     RealtimeDelta::Thinking {
                         // Thought and text are distinct stream item kinds, so
-                        // each kind owns its own segment-zero namespace.
-                        content_index: 0,
+                        // each kind owns its own segment namespace.
+                        content_index: self.state.current_thinking_index().unwrap_or(0),
                         delta: delta.clone(),
                     },
                 ));
@@ -382,6 +462,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
+        self.state.close_thinking_run();
         let assistant_message = self
             .state
             .build_message(ctx.model.expect("step dispatch model missing"));
@@ -473,6 +554,113 @@ mod tests {
             message,
             Message::Assistant {
                 checkpoint: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn thinking_runs_record_monotonic_durations_and_ordered_indices() {
+        let start = Instant::now();
+        let mut state = AssistantMessageState::new();
+        state.apply_gateway_event_at(
+            &InferenceEvent::ReasoningDelta {
+                item_id: OutputItemId("reasoning-1".into()),
+                delta: "first".into(),
+            },
+            start,
+        );
+        state.apply_gateway_event_at(
+            &InferenceEvent::ReasoningDelta {
+                item_id: OutputItemId("reasoning-1".into()),
+                delta: " thought".into(),
+            },
+            start + std::time::Duration::from_millis(100),
+        );
+        assert_eq!(state.current_thinking_index(), Some(0));
+        state.apply_gateway_event_at(
+            &InferenceEvent::TextDelta {
+                item_id: OutputItemId("text-1".into()),
+                delta: "answer".into(),
+            },
+            start + std::time::Duration::from_millis(250),
+        );
+        assert_eq!(state.current_thinking_index(), None);
+        state.apply_gateway_event_at(
+            &InferenceEvent::ReasoningDelta {
+                item_id: OutputItemId("reasoning-2".into()),
+                delta: "second".into(),
+            },
+            start + std::time::Duration::from_millis(500),
+        );
+        assert_eq!(state.current_thinking_index(), Some(1));
+        state.apply_gateway_event_at(
+            &InferenceEvent::ToolCallDelta {
+                call_id: piko_llmd::gateway::ToolCallId("call-1".into()),
+                name: "search".into(),
+                arguments_delta: "{}".into(),
+            },
+            start + std::time::Duration::from_millis(900),
+        );
+        state.apply_gateway_event_at(
+            &InferenceEvent::Completed(FinishReason::Completed {
+                reason: "stop".into(),
+            }),
+            start + std::time::Duration::from_millis(1000),
+        );
+
+        let Message::Assistant { content, .. } = state.build_message(&ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "openai".into(),
+        }) else {
+            panic!("expected assistant message");
+        };
+        assert!(matches!(
+            &content[0],
+            ContentBlock::Thinking {
+                thinking,
+                duration_ms: Some(250),
+                ..
+            } if thinking == "first thought"
+        ));
+        assert!(matches!(&content[1], ContentBlock::Text { text } if text == "answer"));
+        assert!(matches!(
+            &content[2],
+            ContentBlock::Thinking {
+                thinking,
+                duration_ms: Some(400),
+                ..
+            } if thinking == "second"
+        ));
+    }
+
+    #[test]
+    fn cancellation_finalizes_an_open_thinking_run() {
+        let start = Instant::now();
+        let mut state = AssistantMessageState::new();
+        state.apply_gateway_event_at(
+            &InferenceEvent::ReasoningDelta {
+                item_id: OutputItemId("reasoning-1".into()),
+                delta: "cancelled thought".into(),
+            },
+            start,
+        );
+        state.apply_gateway_event_at(
+            &InferenceEvent::Completed(FinishReason::Cancelled),
+            start + std::time::Duration::from_millis(123),
+        );
+        let Message::Assistant { content, .. } = state.build_message(&ModelSpec {
+            id: "gpt-test".into(),
+            name: "GPT Test".into(),
+            provider: "openai".into(),
+        }) else {
+            panic!("expected assistant message");
+        };
+        assert!(matches!(
+            &content[0],
+            ContentBlock::Thinking {
+                duration_ms: Some(123),
                 ..
             }
         ));

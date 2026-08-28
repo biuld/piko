@@ -14,6 +14,7 @@ pub mod processes;
 pub mod session_list;
 pub mod settings;
 pub mod thinking;
+pub mod thought_inspector;
 pub mod timeline;
 pub mod todos;
 pub mod tool_interaction;

@@ -13,6 +13,7 @@ pub enum Action {
     App(AppAction),
     Editor(EditorAction),
     Timeline(TimelineAction),
+    ThoughtInspector(ThoughtInspectorAction),
     Surface(SurfaceAction),
     Session(SessionAction),
     Model(ModelAction),
@@ -103,13 +104,27 @@ pub enum TimelineAction {
     JumpLatest,
     /// Toggle one tool block by its stable interned hit id.
     ToggleTool(u64),
+    /// Open the thought resolved from its stable Timeline hit id.
+    OpenThought(u64),
     SelectionStart(crate::features::timeline::SelectionPoint),
     SelectionUpdate(crate::features::timeline::SelectionPoint),
     SelectionFinish {
         point: crate::features::timeline::SelectionPoint,
-        activate_tool: Option<u64>,
+        activation: Option<TimelineActivation>,
     },
     CopySelection,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TimelineActivation {
+    Tool(u64),
+    Thought(u64),
+}
+
+#[derive(Debug)]
+pub enum ThoughtInspectorAction {
+    ScrollUp(usize),
+    ScrollDown(usize),
 }
 
 #[derive(Debug)]
@@ -235,6 +250,12 @@ impl From<EditorAction> for Action {
 impl From<TimelineAction> for Action {
     fn from(action: TimelineAction) -> Self {
         Self::Timeline(action)
+    }
+}
+
+impl From<ThoughtInspectorAction> for Action {
+    fn from(action: ThoughtInspectorAction) -> Self {
+        Self::ThoughtInspector(action)
     }
 }
 

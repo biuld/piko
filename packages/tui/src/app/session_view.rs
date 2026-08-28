@@ -33,6 +33,7 @@ impl AppState {
         self.last_turn_id = None;
         self.last_turn_diff = None;
         self.timelines.clear();
+        self.thought_inspector = None;
         self.agent_panel.begin_loading();
         self.approvals.clear();
         self.interactions.clear();
@@ -56,6 +57,7 @@ impl AppState {
         self.last_turn_id = None;
         self.last_turn_diff = None;
         self.timelines.clear();
+        self.thought_inspector = None;
         self.agent_panel.begin_loading();
         if self.session.shell_ready {
             self.agent_panel.mark_hydrated();

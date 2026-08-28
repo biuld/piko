@@ -264,6 +264,11 @@ Updates:
 The current `[thinking]` prefix should be treated as a compatibility bridge,
 not the target representation.
 
+Thinking presentation is further specialized by the
+[Timeline Thought Inspector design](timeline-thought-inspector.md): ordered
+thinking runs project as first-class, fixed-height `ThoughtComponent` rows
+rather than wrapping inside the assistant body.
+
 ### ToolExecutionComponent
 
 Represents one tool call (`ToolEntry` in code).

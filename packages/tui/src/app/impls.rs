@@ -55,6 +55,7 @@ impl AppState {
             sessions: SessionList::new(),
             models: ModelSelector::new(),
             thinking: ThinkingSelector::new(),
+            thought_inspector: None,
             pending_model: None,
             settings: SettingsPanel::new(),
             tree: TreePanel::new(),
@@ -103,6 +104,46 @@ impl AppState {
 
     pub fn timeline_mut(&mut self) -> &mut Timeline {
         self.timelines.active_mut()
+    }
+
+    pub(crate) fn reconcile_thought_inspector(&mut self) {
+        let Some(key) = self
+            .thought_inspector
+            .as_ref()
+            .map(|inspector| inspector.key().clone())
+        else {
+            if self.mode().is_surface(SurfaceId::ThoughtInspector) {
+                self.pop_focus();
+            }
+            return;
+        };
+        let present = self.timeline().thinking_visible && self.timeline().thought(&key).is_some();
+        if !present && self.mode().is_surface(SurfaceId::ThoughtInspector) {
+            self.thought_inspector = None;
+            self.pop_focus();
+        }
+    }
+
+    pub(crate) fn advance_thought_inspector(&mut self, now: Instant) {
+        if !self.mode().is_surface(SurfaceId::ThoughtInspector) {
+            return;
+        }
+        let Some(key) = self
+            .thought_inspector
+            .as_ref()
+            .map(|inspector| inspector.key().clone())
+        else {
+            self.reconcile_thought_inspector();
+            return;
+        };
+        let thought = self.timeline().thought(&key);
+        if let Some(thought) = thought {
+            if let Some(inspector) = self.thought_inspector.as_mut() {
+                inspector.advance_reveal_to(&thought, now);
+            }
+        } else {
+            self.reconcile_thought_inspector();
+        }
     }
 
     pub fn active_text_box(&mut self) -> Option<&mut TextBox> {
@@ -282,6 +323,7 @@ impl AppState {
         self.focus_manager.clear_to_chat();
         self.clear_all_filters();
         self.agent_panel.focus = false;
+        self.thought_inspector = None;
     }
 
     pub(crate) fn clear_filter_for_mode(&mut self, mode: AppMode) {

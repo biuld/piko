@@ -3,7 +3,8 @@ use std::time::Instant;
 use crate::{
     app::command::{
         Action, AppAction, ApprovalAction, EditorAction, ModelAction, NotificationAction,
-        SessionAction, SurfaceAction, TimelineAction, ToolInteractionAction, TreeAction,
+        SessionAction, SurfaceAction, ThoughtInspectorAction, TimelineAction,
+        ToolInteractionAction, TreeAction,
     },
     app::{AppMode, AppState, SurfaceId},
     input::binding::{BindingContext, BindingRegistry, Resolution, TextSink, active_scope_stack},
@@ -59,6 +60,7 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         EditorCursorWordRight => EditorAction::CursorWordRight.into(),
         EditorCursorLineStart => EditorAction::CursorLineStart.into(),
         EditorCursorLineEnd => EditorAction::CursorLineEnd.into(),
+        TextDeleteBackward if surface == Some(SurfaceId::ThoughtInspector) => return None,
         TextDeleteBackward => match text_sink {
             Some(TextSink::Surface) => SurfaceAction::FilterBackspace.into(),
             _ => EditorAction::DeleteBackward.into(),
@@ -70,15 +72,25 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         TextDeleteToLineEnd => EditorAction::DeleteToLineEnd.into(),
         TimelinePageUp | NotificationPageUp => match surface {
             Some(SurfaceId::Notifications) => NotificationAction::ScrollUp(10).into(),
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollUp(10).into(),
             _ => TimelineAction::ScrollUp(8).into(),
         },
         TimelinePageDown | NotificationPageDown => match surface {
             Some(SurfaceId::Notifications) => NotificationAction::ScrollDown(10).into(),
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollDown(10).into(),
             _ => TimelineAction::ScrollDown(8).into(),
         },
-        TimelineUp => TimelineAction::ScrollUp(1).into(),
-        TimelineDown => TimelineAction::ScrollDown(1).into(),
+        TimelineUp => match surface {
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollUp(1).into(),
+            _ => TimelineAction::ScrollUp(1).into(),
+        },
+        TimelineDown => match surface {
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollDown(1).into(),
+            _ => TimelineAction::ScrollDown(1).into(),
+        },
+        TimelineJumpLatest if surface == Some(SurfaceId::ThoughtInspector) => return None,
         TimelineJumpLatest => TimelineAction::JumpLatest.into(),
+        TimelineCopySelection if surface == Some(SurfaceId::ThoughtInspector) => return None,
         TimelineCopySelection => TimelineAction::CopySelection.into(),
         UiCancel => cancel_action(app),
         UiConfirm => match surface {
@@ -86,14 +98,27 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
             Some(_) => SurfaceAction::Confirm.into(),
             None => return None,
         },
-        SelectionPrevious => selection_action(app, true),
-        SelectionNext => selection_action(app, false),
+        SelectionPrevious => match surface {
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollUp(1).into(),
+            _ => selection_action(app, true),
+        },
+        SelectionNext => match surface {
+            Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollDown(1).into(),
+            _ => selection_action(app, false),
+        },
         SelectionPagePrevious | SelectionPageNext => match surface {
             Some(SurfaceId::Notifications) => {
                 if matches!(command, SelectionPagePrevious) {
                     NotificationAction::ScrollUp(10).into()
                 } else {
                     NotificationAction::ScrollDown(10).into()
+                }
+            }
+            Some(SurfaceId::ThoughtInspector) => {
+                if matches!(command, SelectionPagePrevious) {
+                    ThoughtInspectorAction::ScrollUp(10).into()
+                } else {
+                    ThoughtInspectorAction::ScrollDown(10).into()
                 }
             }
             Some(_) => {

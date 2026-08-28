@@ -41,6 +41,7 @@ pub fn blocks_tokens(blocks: &[ContentBlock]) -> u64 {
             ContentBlock::Thinking {
                 thinking,
                 thinking_signature,
+                ..
             } => text_tokens(thinking)
                 .saturating_add(thinking_signature.as_deref().map(text_tokens).unwrap_or(0)),
             // Base64 tokenization varies. One token per encoded byte plus

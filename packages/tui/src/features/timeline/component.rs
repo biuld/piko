@@ -16,6 +16,7 @@ pub enum TimelineEntry {
 pub enum TimelineKind {
     User,
     Assistant,
+    Thought,
     Tool,
     SessionFact,
     Summary,
@@ -26,6 +27,7 @@ pub enum TimelineKind {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ComponentId {
     MessageId(String),
+    Thought(ThoughtKey),
     ToolCallId(String),
     EntryId(String),
     Local(u64),
@@ -35,6 +37,7 @@ pub enum ComponentId {
 pub enum TimelineComponent {
     User(UserMessageComponent),
     Assistant(AssistantMessageComponent),
+    Thought(ThoughtComponent),
     Tool(ToolEntry),
     SessionFact(SessionFactComponent),
     Summary(SummaryComponent),
@@ -48,6 +51,7 @@ impl TimelineComponent {
         match self {
             Self::User(_) => TimelineKind::User,
             Self::Assistant(_) => TimelineKind::Assistant,
+            Self::Thought(_) => TimelineKind::Thought,
             Self::Tool(_) => TimelineKind::Tool,
             Self::SessionFact(_) => TimelineKind::SessionFact,
             Self::Summary(_) => TimelineKind::Summary,
@@ -62,6 +66,7 @@ impl TimelineComponent {
         match self {
             Self::User(component) => &component.id,
             Self::Assistant(component) => &component.id,
+            Self::Thought(component) => &component.id,
             Self::Tool(component) => &component.component_id,
             Self::SessionFact(component) => &component.id,
             Self::Summary(component) => &component.id,
@@ -69,6 +74,27 @@ impl TimelineComponent {
             Self::Error(component) => &component.id,
         }
     }
+}
+
+/// Stable semantic identity of one ordered thinking run within a message.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ThoughtKey {
+    pub message_id: String,
+    pub segment_index: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ThoughtPhase {
+    Streaming { observed_at: std::time::Instant },
+    Completed { duration_ms: Option<u64> },
+}
+
+#[derive(Clone, Debug)]
+pub struct ThoughtComponent {
+    pub id: ComponentId,
+    pub key: ThoughtKey,
+    pub text: String,
+    pub phase: ThoughtPhase,
 }
 
 #[derive(Clone)]

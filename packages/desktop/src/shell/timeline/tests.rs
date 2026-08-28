@@ -40,6 +40,7 @@ fn thinking_block(text: &str) -> ContentBlock {
     ContentBlock::Thinking {
         thinking: text.to_string(),
         thinking_signature: None,
+        duration_ms: None,
     }
 }
 

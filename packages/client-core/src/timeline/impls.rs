@@ -166,27 +166,47 @@ impl AgentTimeline {
         };
         if let TimelineItem::RealtimeDraft(draft) = &mut self.items[draft_idx] {
             match delta {
+                RealtimeDelta::MessageEnded {
+                    stop_reason,
+                    error_message,
+                } => {
+                    draft.active_thinking_index = None;
+                    draft.ended = true;
+                    draft.stop_reason = stop_reason.clone();
+                    draft.error_message = error_message.clone();
+                }
                 RealtimeDelta::Text {
                     delta,
                     content_index,
-                } => update_content_segment(
-                    &mut draft.content_segments,
-                    RealtimeContentKind::Text,
-                    *content_index,
-                    StreamItemOp::AppendChunk,
-                    Some(delta),
-                ),
+                } => {
+                    draft.active_thinking_index = None;
+                    update_content_segment(
+                        &mut draft.content_segments,
+                        RealtimeContentKind::Text,
+                        *content_index,
+                        StreamItemOp::AppendChunk,
+                        Some(delta),
+                    );
+                }
                 RealtimeDelta::Thinking {
                     delta,
                     content_index,
-                } => update_content_segment(
-                    &mut draft.content_segments,
-                    RealtimeContentKind::Thinking,
-                    *content_index,
-                    StreamItemOp::AppendChunk,
-                    Some(delta),
-                ),
-                _ => {}
+                } => {
+                    draft.active_thinking_index = Some(*content_index);
+                    update_content_segment(
+                        &mut draft.content_segments,
+                        RealtimeContentKind::Thinking,
+                        *content_index,
+                        StreamItemOp::AppendChunk,
+                        Some(delta),
+                    );
+                }
+                RealtimeDelta::ToolCall { .. }
+                | RealtimeDelta::UpstreamActivity { .. }
+                | RealtimeDelta::UpstreamApproval { .. } => {
+                    draft.active_thinking_index = None;
+                }
+                RealtimeDelta::MessageStarted { .. } => {}
             }
         }
         if let Some((tool_call_id, chunk, content_index)) = tool_arg_chunk {
@@ -246,6 +266,15 @@ impl AgentTimeline {
                     } else {
                         RealtimeContentKind::Text
                     };
+                    if kind == RealtimeContentKind::Thinking {
+                        draft.active_thinking_index = patch
+                            .text
+                            .as_deref()
+                            .filter(|text| !text.is_empty())
+                            .map(|_| patch.content_index.unwrap_or(0));
+                    } else {
+                        draft.active_thinking_index = None;
+                    }
                     if full_upsert {
                         replace_kind_content(
                             &mut draft.content_segments,
@@ -266,6 +295,7 @@ impl AgentTimeline {
                     }
                 }
                 StreamItemKind::ToolCall => {
+                    self.close_draft_thinking(&parent);
                     if full_upsert
                         && let Some(&idx) = self.tool_ids.get(&patch.item_id)
                         && let TimelineItem::Tool(tool) = &mut self.items[idx]
@@ -304,6 +334,7 @@ impl AgentTimeline {
             let Some(fields) = patch.fields.as_ref() else {
                 return ApplyOutcome::Inconsistent;
             };
+            self.close_draft_thinking(&parent);
             let status = fields.get("status").and_then(|v| v.as_str());
             match status {
                 Some("running") => self.apply_tool_started_with_turn(
@@ -419,6 +450,9 @@ impl AgentTimeline {
                 summary,
                 action,
             };
+            if let Some(parent) = parent.as_deref() {
+                self.close_draft_thinking(parent);
+            }
             match status {
                 "approval" | "running" => {
                     self.apply_tool_started_with_turn(
@@ -484,6 +518,10 @@ impl AgentTimeline {
                 last_delta_seq: delta_seq,
                 content_segments: Vec::new(),
                 live_order,
+                active_thinking_index: None,
+                ended: false,
+                stop_reason: None,
+                error_message: None,
             }));
             self.draft_ids
                 .insert(message_id.to_string(), self.items.len() - 1);
@@ -513,6 +551,15 @@ impl AgentTimeline {
         };
         if let TimelineItem::RealtimeDraft(draft) = &mut self.items[idx] {
             draft.last_delta_seq = draft.last_delta_seq.max(delta_seq);
+        }
+    }
+
+    fn close_draft_thinking(&mut self, message_id: &str) {
+        let Some(&idx) = self.draft_ids.get(message_id) else {
+            return;
+        };
+        if let TimelineItem::RealtimeDraft(draft) = &mut self.items[idx] {
+            draft.active_thinking_index = None;
         }
     }
 

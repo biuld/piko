@@ -28,6 +28,7 @@ pub enum SurfaceId {
     Settings,
     Usage,
     Notifications,
+    ThoughtInspector,
     Mcp,
     Processes,
     Diagnostics,
@@ -71,6 +72,7 @@ pub enum CenteredSizePolicy {
     SettingsViewport,
     UsageContent,
     NotificationContent,
+    ThoughtContent,
 }
 
 /// Keyboard routing family. Surface-specific commands remain with the feature,
@@ -175,6 +177,12 @@ impl SurfaceId {
             Self::Notifications => SurfaceSpec {
                 sizing: Sizing::Centered(Centered::NotificationContent),
                 input: Input::NotificationList,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::ThoughtInspector => SurfaceSpec {
+                sizing: Sizing::Centered(Centered::ThoughtContent),
+                input: Input::ReadOnlyViewport,
                 guidance: Guidance::None,
                 outside_click: Outside::Dismiss,
             },

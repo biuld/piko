@@ -84,6 +84,10 @@ impl AppState {
 
     pub(super) fn close_surface(&mut self) {
         match self.mode() {
+            AppMode::Surface(SurfaceId::ThoughtInspector) => {
+                self.thought_inspector = None;
+                self.pop_focus();
+            }
             AppMode::Surface(SurfaceId::SummaryPrompt) => {
                 self.summary_prompt = None;
                 self.pop_focus();
@@ -234,6 +238,7 @@ impl AppState {
             Some(SurfaceId::Settings) => self.apply_selected_setting(),
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
             Some(SurfaceId::Processes) => self.confirm_process_stop(),
+            Some(SurfaceId::ThoughtInspector) => Vec::new(),
             Some(
                 SurfaceId::Usage
                 | SurfaceId::Notifications

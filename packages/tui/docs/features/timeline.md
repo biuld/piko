@@ -108,6 +108,9 @@ Thinking content:
 - Assistant thinking is visually separate from normal assistant text.
 - Thinking may be shown, hidden, or condensed depending on Timeline
   presentation settings.
+- Visible thinking uses a fixed one-row live/completed summary and opens its
+  complete content in the centered
+  [Timeline Thought Inspector](timeline-thought-inspector.md).
 
 ## Configuration
 
@@ -134,7 +137,9 @@ Timeline key bindings use the existing timeline action namespace:
 - Timeline does not own session persistence or branch selection.
 - Timeline does not decide whether a turn is running; active turn status belongs
   in surrounding status surfaces.
-- Timeline does not create floating UI.
+- Timeline does not create ad hoc floating UI. Thought detail is mounted
+  through the shared modal surface system defined by the
+  [Timeline Thought Inspector](timeline-thought-inspector.md).
 - Timeline does not expose custom extension renderers in the first version.
 - Timeline does not provide horizontal scrolling for long code lines.
 - Timeline does not require image-capable tool output in the first version.

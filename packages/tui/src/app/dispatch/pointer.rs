@@ -124,6 +124,13 @@ impl AppState {
             Region::Surface(SurfaceId::Processes) => {
                 self.processes.pointer_event(component_hit, gesture)
             }
+            Region::Surface(SurfaceId::ThoughtInspector) => {
+                if let Some(inspector) = self.thought_inspector.as_mut() {
+                    inspector.pointer_event(component_hit, gesture)
+                } else {
+                    Vec::new()
+                }
+            }
             Region::Surface(SurfaceId::Diagnostics) => {
                 self.diagnostics.pointer_event(component_hit, gesture)
             }

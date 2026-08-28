@@ -336,7 +336,11 @@ fn streaming_chunks_render_as_coalesced_ordered_blocks() {
                 .collect()
         })
         .collect();
-    assert_eq!(rendered, [" thinking now", "", " hello world"]);
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].trim().starts_with("✓ thought in "));
+    assert!(rendered[0].trim().ends_with("s"));
+    assert_eq!(&rendered[1], "");
+    assert_eq!(&rendered[2], " hello world");
 }
 
 #[test]

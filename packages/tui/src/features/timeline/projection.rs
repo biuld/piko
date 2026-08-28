@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use super::*;
 
 /// Split a committed protocol message into timeline components. Assistant
@@ -31,27 +33,22 @@ pub(super) fn components_from_message(
             // first-class upstream `ToolItem`s.
             let mut out = Vec::new();
             let mut pending: Vec<piko_protocol::ContentBlock> = Vec::new();
+            let mut thinking_index = 0u32;
             // One card per upstream activity/approval id: in_progress and
             // completed lifecycle blocks share the same id.
             let mut emitted: std::collections::HashSet<&str> = std::collections::HashSet::new();
-            let flush = |out: &mut Vec<TimelineComponent>,
-                         pending: &mut Vec<piko_protocol::ContentBlock>| {
-                if pending.is_empty() {
-                    return;
-                }
-                out.push(TimelineComponent::Assistant(AssistantMessageComponent {
-                    id: ComponentId::MessageId(id.clone()),
-                    blocks: pending.iter().cloned().map(ContentBlock::from).collect(),
-                    stop_reason: stop_reason.clone(),
-                    error_message: error_message.clone(),
-                    timestamp: *timestamp,
-                }));
-                pending.clear();
-            };
             for block in content {
                 match block {
                     piko_protocol::ContentBlock::UpstreamToolActivity { activity_id, .. } => {
-                        flush(&mut out, &mut pending);
+                        flush_committed_blocks(
+                            &mut out,
+                            &mut pending,
+                            &id,
+                            stop_reason,
+                            error_message,
+                            *timestamp,
+                            &mut thinking_index,
+                        );
                         if emitted.insert(activity_id.as_str())
                             && let Some(tool) = upstream_tools.get(activity_id)
                         {
@@ -59,7 +56,15 @@ pub(super) fn components_from_message(
                         }
                     }
                     piko_protocol::ContentBlock::UpstreamToolApproval { approval_id, .. } => {
-                        flush(&mut out, &mut pending);
+                        flush_committed_blocks(
+                            &mut out,
+                            &mut pending,
+                            &id,
+                            stop_reason,
+                            error_message,
+                            *timestamp,
+                            &mut thinking_index,
+                        );
                         if emitted.insert(approval_id.as_str())
                             && let Some(tool) = upstream_tools.get(approval_id)
                         {
@@ -69,10 +74,79 @@ pub(super) fn components_from_message(
                     other => pending.push(other.clone()),
                 }
             }
-            flush(&mut out, &mut pending);
+            flush_committed_blocks(
+                &mut out,
+                &mut pending,
+                &id,
+                stop_reason,
+                error_message,
+                *timestamp,
+                &mut thinking_index,
+            );
             out
         }
         _ => Vec::new(),
+    }
+}
+
+fn flush_committed_blocks(
+    out: &mut Vec<TimelineComponent>,
+    pending: &mut Vec<piko_protocol::ContentBlock>,
+    message_id: &str,
+    stop_reason: &Option<String>,
+    error_message: &Option<String>,
+    timestamp: Option<i64>,
+    thinking_index: &mut u32,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let blocks = std::mem::take(pending);
+    let mut assistant_blocks = Vec::new();
+    for block in blocks {
+        let piko_protocol::ContentBlock::Thinking {
+            thinking,
+            duration_ms,
+            ..
+        } = block
+        else {
+            assistant_blocks.push(block);
+            continue;
+        };
+        if !assistant_blocks.is_empty() {
+            out.push(TimelineComponent::Assistant(AssistantMessageComponent {
+                id: ComponentId::MessageId(message_id.to_string()),
+                blocks: assistant_blocks.drain(..).map(ContentBlock::from).collect(),
+                stop_reason: stop_reason.clone(),
+                error_message: error_message.clone(),
+                timestamp,
+            }));
+        }
+        if !thinking.trim().is_empty() {
+            let key = ThoughtKey {
+                message_id: message_id.to_string(),
+                segment_index: *thinking_index,
+            };
+            out.push(TimelineComponent::Thought(ThoughtComponent {
+                id: ComponentId::Thought(key.clone()),
+                key,
+                text: thinking,
+                phase: ThoughtPhase::Completed { duration_ms },
+            }));
+        }
+        *thinking_index = (*thinking_index).saturating_add(1);
+    }
+    if !assistant_blocks.is_empty() {
+        out.push(TimelineComponent::Assistant(AssistantMessageComponent {
+            id: ComponentId::MessageId(message_id.to_string()),
+            blocks: assistant_blocks
+                .into_iter()
+                .map(ContentBlock::from)
+                .collect(),
+            stop_reason: stop_reason.clone(),
+            error_message: error_message.clone(),
+            timestamp,
+        }));
     }
 }
 
@@ -130,11 +204,19 @@ pub(super) fn components_from_draft(
     draft: &piko_client_core::RealtimeDraft,
     slices: &[DraftSlice],
 ) -> Vec<TimelineComponent> {
-    let blocks: Vec<(piko_client_core::RealtimeContentKind, String)> = draft
+    let has_text_segment = draft
+        .content_segments
+        .iter()
+        .any(|segment| segment.kind == piko_client_core::RealtimeContentKind::Text);
+    let blocks: Vec<DraftBlock> = draft
         .content_segments
         .iter()
         .filter(|segment| !segment.text.is_empty())
-        .map(|segment| (segment.kind, segment.text.clone()))
+        .map(|segment| DraftBlock {
+            kind: segment.kind,
+            content_index: segment.content_index,
+            text: segment.text.clone(),
+        })
         .collect();
     let mut out = Vec::new();
     let mut text_lo = 0usize;
@@ -148,7 +230,12 @@ pub(super) fn components_from_draft(
             slice.thinking_before,
         );
         if !before.is_empty() {
-            out.push(assistant_component(&draft.message_id, before));
+            out.extend(live_components(
+                &draft.message_id,
+                before,
+                draft.stop_reason.clone(),
+                draft.error_message.clone(),
+            ));
         }
         out.push(TimelineComponent::Tool(slice.tool.clone()));
         text_lo = slice.text_before;
@@ -162,17 +249,87 @@ pub(super) fn components_from_draft(
         draft.thinking().chars().count(),
     );
     if !tail.is_empty() {
-        out.push(assistant_component(&draft.message_id, tail));
+        out.extend(live_components(
+            &draft.message_id,
+            tail,
+            draft.stop_reason.clone(),
+            draft.error_message.clone(),
+        ));
+    }
+    if out.is_empty() && has_text_segment {
+        out.push(assistant_component(
+            &draft.message_id,
+            vec![ContentBlock::Text(String::new())],
+            draft.stop_reason.clone(),
+            draft.error_message.clone(),
+        ));
     }
     out
 }
 
-fn assistant_component(message_id: &str, blocks: Vec<ContentBlock>) -> TimelineComponent {
+#[derive(Clone)]
+struct DraftBlock {
+    kind: piko_client_core::RealtimeContentKind,
+    content_index: u32,
+    text: String,
+}
+
+fn live_components(
+    message_id: &str,
+    blocks: Vec<DraftBlock>,
+    stop_reason: Option<String>,
+    error_message: Option<String>,
+) -> Vec<TimelineComponent> {
+    let mut out = Vec::new();
+    let mut assistant_blocks = Vec::new();
+    for block in blocks {
+        if block.kind == piko_client_core::RealtimeContentKind::Thinking {
+            if !assistant_blocks.is_empty() {
+                out.push(assistant_component(
+                    message_id,
+                    std::mem::take(&mut assistant_blocks),
+                    stop_reason.clone(),
+                    error_message.clone(),
+                ));
+            }
+            let key = ThoughtKey {
+                message_id: message_id.to_string(),
+                segment_index: block.content_index,
+            };
+            out.push(TimelineComponent::Thought(ThoughtComponent {
+                id: ComponentId::Thought(key.clone()),
+                key,
+                text: block.text,
+                phase: ThoughtPhase::Streaming {
+                    observed_at: Instant::now(),
+                },
+            }));
+        } else {
+            assistant_blocks.push(ContentBlock::Text(block.text));
+        }
+    }
+    if !assistant_blocks.is_empty() {
+        out.push(assistant_component(
+            message_id,
+            assistant_blocks,
+            stop_reason,
+            error_message,
+        ));
+    }
+    out
+}
+
+fn assistant_component(
+    message_id: &str,
+    blocks: Vec<ContentBlock>,
+    stop_reason: Option<String>,
+    error_message: Option<String>,
+) -> TimelineComponent {
     TimelineComponent::Assistant(AssistantMessageComponent {
         id: ComponentId::MessageId(message_id.to_string()),
         blocks,
-        stop_reason: None,
-        error_message: None,
+        stop_reason,
+        error_message,
         timestamp: None,
     })
 }
@@ -181,18 +338,18 @@ fn assistant_component(message_id: &str, blocks: Vec<ContentBlock>) -> TimelineC
 /// text stream and `[think_lo..think_hi)` in the thinking stream, preserving
 /// the original segment order.
 fn clip_blocks(
-    blocks: &[(piko_client_core::RealtimeContentKind, String)],
+    blocks: &[DraftBlock],
     text_lo: usize,
     text_hi: usize,
     think_lo: usize,
     think_hi: usize,
-) -> Vec<ContentBlock> {
+) -> Vec<DraftBlock> {
     let mut out = Vec::new();
     let mut text_pos = 0usize;
     let mut think_pos = 0usize;
-    for (kind, text) in blocks {
-        let len = text.chars().count();
-        let (seg_start, seg_end, lo, hi) = match kind {
+    for block in blocks {
+        let len = block.text.chars().count();
+        let (seg_start, seg_end, lo, hi) = match block.kind {
             piko_client_core::RealtimeContentKind::Text => {
                 (text_pos, text_pos + len, text_lo, text_hi)
             }
@@ -203,14 +360,13 @@ fn clip_blocks(
         let take_start = seg_start.max(lo);
         let take_end = seg_end.min(hi);
         if take_end > take_start {
-            let slice = char_slice(text, take_start - seg_start, take_end - seg_start);
-            let block = match kind {
-                piko_client_core::RealtimeContentKind::Text => ContentBlock::Text(slice),
-                piko_client_core::RealtimeContentKind::Thinking => ContentBlock::Thinking(slice),
-            };
-            out.push(block);
+            out.push(DraftBlock {
+                kind: block.kind,
+                content_index: block.content_index,
+                text: char_slice(&block.text, take_start - seg_start, take_end - seg_start),
+            });
         }
-        if matches!(kind, piko_client_core::RealtimeContentKind::Text) {
+        if matches!(block.kind, piko_client_core::RealtimeContentKind::Text) {
             text_pos = seg_end;
         } else {
             think_pos = seg_end;
@@ -297,158 +453,5 @@ pub(super) fn map_tool_status(status: piko_client_core::ToolStatus) -> crate::ap
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn assistant_bubble_strips_upstream_blocks() {
-        let message = piko_protocol::Message::Assistant {
-            content: vec![
-                piko_protocol::ContentBlock::Text {
-                    text: "checking".into(),
-                },
-                piko_protocol::ContentBlock::UpstreamToolActivity {
-                    activity_id: "act-1".into(),
-                    tool_name: "web_search".into(),
-                    kind: "search".into(),
-                    status: piko_protocol::messages::UpstreamActivityStatus::InProgress,
-                    arguments: Some(serde_json::json!({ "type": "search", "query": "深圳天气" })),
-                    action: Some(piko_protocol::messages::UpstreamAction::Search {
-                        queries: vec!["深圳天气".into()],
-                    }),
-                },
-                piko_protocol::ContentBlock::UpstreamToolApproval {
-                    approval_id: "appr-1".into(),
-                    tool_name: "web_search".into(),
-                    summary: "needs consent".into(),
-                },
-            ],
-            checkpoint: None,
-            provider: "test".into(),
-            model: "test".into(),
-            usage: None,
-            stop_reason: Some("stop".into()),
-            error_message: None,
-            timestamp: None,
-        };
-
-        let components =
-            components_from_message("a-1".into(), &message, &HashMap::new(), &HashMap::new());
-
-        assert_eq!(components.len(), 1, "no tool cards from TUI");
-        let TimelineComponent::Assistant(assistant) = &components[0] else {
-            panic!("expected an assistant bubble");
-        };
-        assert_eq!(assistant.blocks.len(), 1);
-        assert!(matches!(&assistant.blocks[0], ContentBlock::Text(t) if t == "checking"));
-    }
-
-    #[test]
-    fn upstream_cards_interleave_with_text_runs() {
-        let message = piko_protocol::Message::Assistant {
-            content: vec![
-                piko_protocol::ContentBlock::Text {
-                    text: "before".into(),
-                },
-                piko_protocol::ContentBlock::UpstreamToolActivity {
-                    activity_id: "ws_1".into(),
-                    tool_name: "web_search".into(),
-                    kind: "search".into(),
-                    status: piko_protocol::messages::UpstreamActivityStatus::Completed,
-                    arguments: Some(serde_json::json!({ "query": "深圳天气" })),
-                    action: Some(piko_protocol::messages::UpstreamAction::Search {
-                        queries: vec!["深圳天气".into()],
-                    }),
-                },
-                piko_protocol::ContentBlock::Text {
-                    text: "after".into(),
-                },
-            ],
-            checkpoint: None,
-            provider: "test".into(),
-            model: "test".into(),
-            usage: None,
-            stop_reason: Some("stop".into()),
-            error_message: None,
-            timestamp: None,
-        };
-        let mut card = ToolEntry::new(
-            "ws_1".into(),
-            "web_search".into(),
-            crate::app::ToolStatus::Completed,
-            r#"{"query":"深圳天气"}"#.into(),
-            None,
-            None,
-        );
-        card.upstream = Some(Box::new(UpstreamInfo {
-            kind: "search".into(),
-            summary: None,
-            action: None,
-        }));
-        let mut upstream_tools = HashMap::new();
-        upstream_tools.insert("ws_1".into(), card);
-
-        let components =
-            components_from_message("a-1".into(), &message, &HashMap::new(), &upstream_tools);
-        assert_eq!(components.len(), 3, "text → card → text");
-        assert!(matches!(components[0], TimelineComponent::Assistant(_)));
-        assert!(matches!(components[1], TimelineComponent::Tool(_)));
-        assert!(matches!(components[2], TimelineComponent::Assistant(_)));
-        if let TimelineComponent::Assistant(trailing) = &components[2] {
-            assert!(matches!(&trailing.blocks[0], ContentBlock::Text(t) if t == "after"));
-        }
-    }
-
-    #[test]
-    fn live_draft_splits_around_upstream_card() {
-        use piko_client_core::RealtimeContentKind;
-        use piko_client_core::RealtimeContentSegment;
-
-        let draft = piko_client_core::RealtimeDraft {
-            message_id: "msg-1".into(),
-            last_delta_seq: 3,
-            content_segments: vec![
-                RealtimeContentSegment {
-                    kind: RealtimeContentKind::Thinking,
-                    content_index: 0,
-                    text: "think".into(),
-                },
-                RealtimeContentSegment {
-                    kind: RealtimeContentKind::Text,
-                    content_index: 0,
-                    text: "beforeafter".into(),
-                },
-            ],
-            live_order: 0,
-        };
-        let card = ToolEntry::new(
-            "ws_1".into(),
-            "web_search".into(),
-            crate::app::ToolStatus::Completed,
-            r#"{"query":"深圳天气"}"#.into(),
-            None,
-            Some("msg-1".into()),
-        );
-        let slice = DraftSlice {
-            tool: card,
-            text_before: "before".chars().count(),
-            thinking_before: "think".chars().count(),
-        };
-        let components = components_from_draft(&draft, &[slice]);
-        assert_eq!(components.len(), 3, "text → card → text");
-        // Before bubble keeps thinking then the text prefix.
-        if let TimelineComponent::Assistant(before) = &components[0] {
-            assert_eq!(before.blocks.len(), 2);
-            assert!(matches!(&before.blocks[0], ContentBlock::Thinking(t) if t == "think"));
-            assert!(matches!(&before.blocks[1], ContentBlock::Text(t) if t == "before"));
-        } else {
-            panic!("expected before bubble");
-        }
-        assert!(matches!(&components[1], TimelineComponent::Tool(t) if t.id == "ws_1"));
-        if let TimelineComponent::Assistant(after) = &components[2] {
-            assert!(matches!(&after.blocks[0], ContentBlock::Text(t) if t == "after"));
-        } else {
-            panic!("expected after bubble");
-        }
-    }
-}
+#[path = "projection_tests.rs"]
+mod tests;

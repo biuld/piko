@@ -34,6 +34,7 @@ impl StepEventConsumer for AssistantPersistCollectingConsumer {
     }
 
     async fn on_step_finished(&mut self, ctx: &AgentDispatchContext<'_>) {
+        self.state.close_thinking_run();
         let assistant_message = self
             .state
             .build_message(ctx.model.expect("step dispatch model missing"));

@@ -200,6 +200,96 @@ fn realtime_segments_coalesce_chunks_and_keep_first_seen_kind_order() {
 }
 
 #[test]
+fn realtime_thinking_lifecycle_closes_on_non_thinking_and_message_end() {
+    let mut tl = AgentTimeline::new();
+    let apply = |tl: &mut AgentTimeline, seq: u64, delta: RealtimeDelta| {
+        let patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+            Some("s".into()),
+            Some("root".into()),
+            "msg",
+            Some(seq),
+            &delta,
+        )
+        .pop()
+        .expect("realtime patch");
+        assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+    };
+
+    apply(
+        &mut tl,
+        0,
+        RealtimeDelta::MessageStarted {
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    );
+    apply(
+        &mut tl,
+        1,
+        RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: "first".into(),
+        },
+    );
+    apply(
+        &mut tl,
+        2,
+        RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: " thought".into(),
+        },
+    );
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.active_thinking_index, Some(0));
+
+    apply(
+        &mut tl,
+        3,
+        RealtimeDelta::Text {
+            content_index: 0,
+            delta: "answer".into(),
+        },
+    );
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.active_thinking_index, None);
+
+    apply(
+        &mut tl,
+        4,
+        RealtimeDelta::Thinking {
+            content_index: 1,
+            delta: "second".into(),
+        },
+    );
+    apply(
+        &mut tl,
+        5,
+        RealtimeDelta::MessageEnded {
+            stop_reason: Some("stop".into()),
+            error_message: None,
+        },
+    );
+
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert!(draft.ended);
+    assert_eq!(draft.active_thinking_index, None);
+    assert_eq!(
+        draft
+            .content_segments
+            .iter()
+            .filter(|segment| segment.kind == RealtimeContentKind::Thinking)
+            .map(|segment| segment.content_index)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+}
+
+#[test]
 fn stream_item_tool_upsert_starts_tool() {
     let mut tl = AgentTimeline::new();
     let patch = piko_protocol::StreamItemPatch {
@@ -227,6 +317,46 @@ fn stream_item_tool_upsert_starts_tool() {
     };
     assert_eq!(tool.tool_name, "read");
     assert_eq!(tool.status, ToolStatus::Running);
+}
+
+#[test]
+fn tool_upsert_closes_the_active_thinking_segment() {
+    let mut tl = AgentTimeline::new();
+    let thinking = piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some("s".into()),
+        Some("root".into()),
+        "msg",
+        Some(1),
+        &RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: "thinking".into(),
+        },
+    )
+    .pop()
+    .expect("thinking patch");
+    assert_eq!(tl.apply_stream_item(&thinking), ApplyOutcome::Applied);
+
+    let tool = piko_protocol::StreamItemPatch {
+        session_id: Some("s".into()),
+        agent_instance_id: Some("root".into()),
+        item_id: "call-1".into(),
+        item_kind: piko_protocol::StreamItemKind::ToolCall,
+        op: piko_protocol::StreamItemOp::Upsert,
+        text: None,
+        content_index: None,
+        delta_seq: None,
+        fields: Some(serde_json::json!({
+            "toolName": "read",
+            "args": {},
+            "status": "running",
+            "parentMessageId": "msg",
+        })),
+    };
+    assert_eq!(tl.apply_stream_item(&tool), ApplyOutcome::Applied);
+    let TimelineItem::RealtimeDraft(draft) = &tl.items()[0] else {
+        panic!("expected draft");
+    };
+    assert_eq!(draft.active_thinking_index, None);
 }
 
 #[test]

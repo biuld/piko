@@ -262,7 +262,7 @@ fn assistant_streaming_updates_one_component() {
 
     assert_eq!(
         app.timeline().component_kinds(),
-        vec![TimelineKind::Assistant]
+        vec![TimelineKind::Assistant, TimelineKind::Thought]
     );
 }
 

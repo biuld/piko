@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 
 use crate::app::{
     AppState, HitId,
-    command::{Action, PointerAction, PointerTarget, TimelineAction},
+    command::{Action, PointerAction, PointerTarget, TimelineAction, TimelineActivation},
 };
 use crate::features::timeline::{SelectionPoint, WHEEL_STEP};
 use crate::layout::PreparedFrame;
@@ -149,15 +149,13 @@ fn stream_selection_action(
         row: top.saturating_add(usize::from(y - plan.content_area.y)),
         col: x - plan.content_area.x,
     };
-    let activate_tool = plan.resolve(x, y, top).and_then(|(id, _)| match id {
-        HitId::TimelineTool(id) => Some(id),
+    let activation = plan.resolve(x, y, top).and_then(|(id, _)| match id {
+        HitId::TimelineTool(id) => Some(TimelineActivation::Tool(id)),
+        HitId::TimelineThought(id) => Some(TimelineActivation::Thought(id)),
         _ => None,
     });
     let action = if finish {
-        TimelineAction::SelectionFinish {
-            point,
-            activate_tool,
-        }
+        TimelineAction::SelectionFinish { point, activation }
     } else if drag {
         TimelineAction::SelectionUpdate(point)
     } else {

@@ -18,6 +18,7 @@ use crate::{
         notifications::NotificationPanelCtx,
         session_list::SessionListCtx,
         thinking::ThinkingCtx,
+        thought_inspector::ThoughtInspectorCtx,
         tree::TreeCtx,
         usage::{UsageCtx, UsagePanel},
     },
@@ -101,13 +102,16 @@ fn paint_regions(
             app.timeline()
                 .render_prepared(frame, area, &app.theme, welcome, plan);
         } else {
-            app.timeline().render_with_state(
-                frame,
+            let interaction = interaction_state(app, Region::Stream);
+            let plan = app.timeline().render_plan_at(
                 area,
                 &app.theme,
-                interaction_state(app, Region::Stream),
-                welcome,
+                interaction.hovered,
+                app.spinner_frame,
+                app.last_tick,
             );
+            app.timeline()
+                .render_prepared(frame, area, &app.theme, welcome, plan);
         }
     }
     if let Some(area) = rects.get(&Region::DockBoundary).copied() {
@@ -373,6 +377,16 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
         }
         SurfaceId::Mcp => render_panel(&app.mcp, frame, area, &app.theme, interaction),
         SurfaceId::Processes => render_panel(&app.processes, frame, area, &app.theme, interaction),
+        SurfaceId::ThoughtInspector => {
+            let ctx = ThoughtInspectorCtx {
+                timeline: app.timeline(),
+                theme: &app.theme,
+                now: app.last_tick,
+            };
+            if let Some(inspector) = app.thought_inspector.as_ref() {
+                render_panel(inspector, frame, area, &ctx, interaction);
+            }
+        }
     }
 }
 

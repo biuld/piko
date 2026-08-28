@@ -9,11 +9,13 @@ use super::{AppState, SurfaceId, effect, pending};
 
 impl AppState {
     pub fn update(&mut self, msg: effect::Msg) -> Vec<effect::Effect> {
-        match msg {
+        let is_tick = matches!(&msg, effect::Msg::Tick);
+        let effects = match msg {
             effect::Msg::Action(action) => self.dispatch(action),
             effect::Msg::HostLine(line) => self.handle_host_line(line),
             effect::Msg::Tick => {
-                self.last_tick = std::time::Instant::now();
+                let now = std::time::Instant::now();
+                self.last_tick = now;
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 let text = self.editor.text();
                 self.editor
@@ -22,7 +24,14 @@ impl AppState {
                 self.timeline_mut().viewport.apply_metrics();
                 Vec::new()
             }
+        };
+        if !is_tick {
+            self.reconcile_thought_inspector();
+        } else {
+            self.advance_thought_inspector(self.last_tick);
+            self.reconcile_thought_inspector();
         }
+        effects
     }
 
     pub fn begin_host_batch(&mut self) {

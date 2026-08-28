@@ -1,10 +1,15 @@
 use ratatui::layout::Rect;
 
-use super::{Timeline, TimelineEntry, ToolEntry};
-use crate::{
-    app::{HitId, ToolStatus},
-    theme::Theme,
+use super::{
+    ComponentId, ThoughtComponent, ThoughtKey, ThoughtPhase, Timeline, TimelineComponent,
+    TimelineEntry, ToolEntry,
 };
+use crate::{
+    app::{HitId, ToolStatus, command::Action},
+    theme::Theme,
+    ui::interaction::{ComponentHit, PointerComponent, PointerGesture},
+};
+use std::time::Instant;
 
 fn tool(id: &str, result: &str) -> ToolEntry {
     ToolEntry::new(
@@ -90,4 +95,66 @@ fn non_tool_and_banner_rows_resolve_to_stream_default() {
         None,
         "banner row must never resolve to a tool"
     );
+}
+
+#[test]
+fn thought_hit_is_stable_and_resolves_the_whole_summary_row() {
+    let theme = Theme::dark();
+    let mut timeline = Timeline::new();
+    let key = ThoughtKey {
+        message_id: "message-1".into(),
+        segment_index: 0,
+    };
+    timeline.push_component(TimelineComponent::Thought(ThoughtComponent {
+        id: ComponentId::Thought(key.clone()),
+        key: key.clone(),
+        text: "long thought".into(),
+        phase: ThoughtPhase::Completed {
+            duration_ms: Some(1200),
+        },
+    }));
+    let hit_id = timeline.thought_hit_id(&key).expect("thought hit id");
+    let area = Rect::new(0, 0, 40, 8);
+    let plan = timeline.render_plan_at(area, &theme, None, 0, Instant::now());
+    let (resolved, rect) = plan
+        .resolve(
+            plan.content_area.x,
+            plan.content_area.y,
+            timeline.viewport.top_offset(),
+        )
+        .expect("thought row should resolve");
+    assert_eq!(resolved, HitId::TimelineThought(hit_id));
+    assert_eq!(rect.height, 1);
+
+    let actions = timeline.pointer_event(
+        ComponentHit {
+            element: Some(HitId::TimelineThought(hit_id)),
+            rect,
+            x: rect.x,
+            y: rect.y,
+        },
+        PointerGesture::Activate,
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::Timeline(crate::app::command::TimelineAction::OpenThought(id))]
+            if *id == hit_id
+    ));
+
+    timeline.clear();
+    let next_key = ThoughtKey {
+        message_id: "message-2".into(),
+        segment_index: 0,
+    };
+    timeline.push_component(TimelineComponent::Thought(ThoughtComponent {
+        id: ComponentId::Thought(next_key.clone()),
+        key: next_key.clone(),
+        text: "new thought".into(),
+        phase: ThoughtPhase::Completed { duration_ms: None },
+    }));
+    let next_hit = timeline
+        .thought_hit_id(&next_key)
+        .expect("new thought hit id");
+    assert_ne!(next_hit, hit_id, "clearing must not reuse thought hit ids");
+    assert_eq!(timeline.thought_key_for_hit(hit_id), None);
 }

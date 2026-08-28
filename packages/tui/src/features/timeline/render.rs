@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use piko_tui_layout::InteractionState;
 use ratatui::{
     Frame,
@@ -22,8 +24,8 @@ use crate::{
 };
 
 use super::{
-    AssistantMessageComponent, ContentBlock, SummaryKind, Timeline, TimelineComponent, ToolEntry,
-    UpstreamInfo, UserMessageComponent,
+    AssistantMessageComponent, ContentBlock, SummaryKind, ThoughtComponent, ThoughtPhase, Timeline,
+    TimelineComponent, ToolEntry, UpstreamInfo, UserMessageComponent,
     layout::TimelineRenderPlan,
     render_diff::render_tool_body,
     tool_format::{BadgeTone, BodyLine, TitleBadge, ToolBody, ToolPresentation, present_tool},
@@ -36,6 +38,7 @@ use body::{
 };
 
 impl Timeline {
+    #[allow(dead_code)]
     pub fn render_with_state(
         &self,
         frame: &mut Frame<'_>,
@@ -44,11 +47,7 @@ impl Timeline {
         interaction: InteractionState<HitId>,
         welcome: WelcomeView<'_>,
     ) {
-        let hovered_tool = match interaction.hovered {
-            Some(HitId::TimelineTool(hit_id)) => Some(hit_id),
-            _ => None,
-        };
-        let plan = self.render_plan(area, theme, hovered_tool);
+        let plan = self.render_plan_at(area, theme, interaction.hovered, 0, Instant::now());
         self.render_prepared(frame, area, theme, welcome, plan);
     }
 
@@ -132,11 +131,40 @@ pub(super) fn component_lines(
     theme: &Theme,
     width: u16,
 ) -> Vec<Line<'static>> {
+    component_lines_at(
+        component,
+        thinking_visible,
+        hovered,
+        theme,
+        width,
+        0,
+        Instant::now(),
+    )
+}
+
+pub(super) fn component_lines_at(
+    component: &TimelineComponent,
+    thinking_visible: bool,
+    hovered: bool,
+    theme: &Theme,
+    width: u16,
+    spinner_frame: usize,
+    now: Instant,
+) -> Vec<Line<'static>> {
     match component {
         TimelineComponent::User(component) => user_lines(component, theme, width),
         TimelineComponent::Assistant(component) => {
             assistant_lines(component, thinking_visible, theme, width)
         }
+        TimelineComponent::Thought(component) => thought_lines(
+            component,
+            thinking_visible,
+            hovered,
+            theme,
+            width,
+            spinner_frame,
+            now,
+        ),
         TimelineComponent::Tool(tool) => tool_lines(tool, hovered, theme, width),
         TimelineComponent::SessionFact(component) => notice_lines(
             component.label,
@@ -156,6 +184,53 @@ pub(super) fn component_lines(
         }
         TimelineComponent::Error(component) => error_lines(component, theme, width),
     }
+}
+
+fn thought_lines(
+    component: &ThoughtComponent,
+    thinking_visible: bool,
+    hovered: bool,
+    theme: &Theme,
+    width: u16,
+    spinner_frame: usize,
+    now: Instant,
+) -> Vec<Line<'static>> {
+    if !thinking_visible || width == 0 {
+        return Vec::new();
+    }
+    let style = Style::default()
+        .fg(if hovered {
+            theme.accent
+        } else {
+            theme.thinking_text
+        })
+        .add_modifier(Modifier::ITALIC)
+        .add_modifier(if hovered {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        });
+    let label = match component.phase {
+        ThoughtPhase::Streaming { observed_at } => format!(
+            "{} thinking... ({})",
+            super::THOUGHT_SPINNER[spinner_frame % super::THOUGHT_SPINNER.len()],
+            super::format_duration_ms(super::elapsed_ms(observed_at, now)),
+        ),
+        ThoughtPhase::Completed { duration_ms } => duration_ms
+            .map(|duration| {
+                format!(
+                    "{SUCCESS_GLYPH} thought in {}",
+                    super::format_duration_ms(duration)
+                )
+            })
+            .unwrap_or_else(|| format!("{SUCCESS_GLYPH} thought")),
+    };
+    let content_width = width.saturating_sub(1);
+    vec![filled_line(
+        format!(" {}", truncate_cols(&label, usize::from(content_width))),
+        style,
+        width,
+    )]
 }
 
 fn user_lines(component: &UserMessageComponent, theme: &Theme, width: u16) -> Vec<Line<'static>> {
@@ -301,6 +376,9 @@ mod more_tests;
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "thought_tests.rs"]
+mod thought_tests;
 #[cfg(test)]
 #[path = "render_upstream_tests.rs"]
 mod upstream_tests;

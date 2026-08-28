@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use piko_tui_layout::{ContentHitPlan, ViewportPlan, row_owners};
 use ratatui::{layout::Rect, text::Line};
 
@@ -11,6 +13,8 @@ use super::{Timeline, TimelineComponent};
 pub(crate) enum RowOwner {
     /// Tool title row, keyed by the interned tool identity.
     Tool(u64),
+    /// One-row thought summary, keyed by its interned semantic identity.
+    Thought(u64),
 }
 
 pub(crate) struct TimelineRenderPlan {
@@ -29,6 +33,8 @@ pub(crate) struct TimelineRenderPlan {
     /// `Timeline::layout_epoch` at plan time; mismatch triggers a recompute
     /// before an event is routed against this plan.
     pub epoch: u64,
+    pub spinner_frame: usize,
+    pub rendered_at: Instant,
 }
 
 impl TimelineRenderPlan {
@@ -38,17 +44,38 @@ impl TimelineRenderPlan {
     /// banner row, scrollbar gutter, out-of-range content).
     pub(crate) fn resolve(&self, x: u16, y: u16, top_offset: usize) -> Option<(HitId, Rect)> {
         let resolved = self.content_hits.resolve(top_offset, x, y)?;
-        let RowOwner::Tool(id) = resolved.owner;
-        Some((HitId::TimelineTool(id), resolved.rect))
+        let hit = match resolved.owner {
+            RowOwner::Tool(id) => HitId::TimelineTool(id),
+            RowOwner::Thought(id) => HitId::TimelineThought(id),
+        };
+        Some((hit, resolved.rect))
     }
 }
 
 impl Timeline {
+    #[cfg(test)]
     pub(crate) fn render_plan(
         &self,
         area: Rect,
         theme: &Theme,
         hovered_tool: Option<u64>,
+    ) -> TimelineRenderPlan {
+        self.render_plan_at(
+            area,
+            theme,
+            hovered_tool.map(HitId::TimelineTool),
+            0,
+            Instant::now(),
+        )
+    }
+
+    pub(crate) fn render_plan_at(
+        &self,
+        area: Rect,
+        theme: &Theme,
+        hovered: Option<HitId>,
+        spinner_frame: usize,
+        now: Instant,
     ) -> TimelineRenderPlan {
         let content_band = Rect {
             x: area.x,
@@ -68,23 +95,43 @@ impl Timeline {
         // Content-space tool title rows (pad · title · … so title is start+1).
         // Hit identity is the interned tool id, not the component slot.
         let mut tool_title_rows: Vec<(usize, u64)> = Vec::new();
+        let mut thought_rows: Vec<(usize, u64)> = Vec::new();
         let mut seen_ids = Vec::with_capacity(self.components.len());
         let mut cache = self.line_cache.borrow_mut();
         for component in self.components.iter() {
             seen_ids.push(component.id().clone());
-            let hovered = match component {
+            let component_hovered = match component {
                 TimelineComponent::Tool(tool) => {
-                    hovered_tool == self.hit_ids.get(&tool.id).copied()
+                    hovered == self.hit_ids.get(&tool.id).copied().map(HitId::TimelineTool)
+                }
+                TimelineComponent::Thought(thought) => {
+                    self.thought_hit_ids
+                        .get(&thought.key)
+                        .copied()
+                        .map(HitId::TimelineThought)
+                        == hovered
                 }
                 _ => false,
             };
-            let body = cache.lines_for(
-                component,
-                self.thinking_visible,
-                hovered,
-                theme,
-                content_area.width,
-            );
+            let body = if matches!(component, TimelineComponent::Thought(_)) {
+                super::render::component_lines_at(
+                    component,
+                    self.thinking_visible,
+                    component_hovered,
+                    theme,
+                    content_area.width,
+                    spinner_frame,
+                    now,
+                )
+            } else {
+                cache.lines_for(
+                    component,
+                    self.thinking_visible,
+                    component_hovered,
+                    theme,
+                    content_area.width,
+                )
+            };
             if body.is_empty() {
                 continue;
             }
@@ -100,6 +147,11 @@ impl Timeline {
                 let title_row = start.saturating_add(super::render::TOOL_TITLE_ROW_OFFSET);
                 tool_title_rows.push((title_row, hit_id));
             }
+            if let TimelineComponent::Thought(thought) = component
+                && let Some(hit_id) = self.thought_hit_ids.get(&thought.key).copied()
+            {
+                thought_rows.push((start, hit_id));
+            }
         }
         cache.retain_ids(&seen_ids);
         drop(cache);
@@ -111,6 +163,11 @@ impl Timeline {
         for (title_row, hit_id) in tool_title_rows {
             if title_row < owners.len() {
                 owners[title_row] = Some(RowOwner::Tool(hit_id));
+            }
+        }
+        for (row, hit_id) in thought_rows {
+            if row < owners.len() {
+                owners[row] = Some(RowOwner::Thought(hit_id));
             }
         }
 
@@ -147,6 +204,8 @@ impl Timeline {
             content_hits,
             viewport,
             epoch: self.layout_epoch,
+            spinner_frame,
+            rendered_at: now,
         }
     }
 

@@ -98,6 +98,12 @@ fn component_fingerprint(component: &TimelineComponent) -> u64 {
             component.error_message.hash(&mut hasher);
             component.timestamp.hash(&mut hasher);
         }
+        TimelineComponent::Thought(component) => {
+            7u8.hash(&mut hasher);
+            component.key.hash(&mut hasher);
+            component.text.hash(&mut hasher);
+            component.phase.hash(&mut hasher);
+        }
         TimelineComponent::Tool(tool) => {
             2u8.hash(&mut hasher);
             tool.id.hash(&mut hasher);

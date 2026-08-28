@@ -1,6 +1,22 @@
 use super::*;
 
 impl AppState {
+    pub(super) fn open_thought(&mut self, hit_id: u64) {
+        if !self.timeline().thinking_visible {
+            return;
+        }
+        let Some(key) = self.timeline().thought_key_for_hit(hit_id) else {
+            return;
+        };
+        let Some(thought) = self.timeline().thought(&key) else {
+            return;
+        };
+        self.thought_inspector
+            .get_or_insert_with(crate::features::thought_inspector::ThoughtInspectorState::new)
+            .open(&thought, self.last_tick);
+        self.push_surface(SurfaceId::ThoughtInspector);
+    }
+
     pub(super) fn dispatch_editor_action(&mut self, action: EditorAction) -> Vec<Effect> {
         let mut effects = Vec::new();
         match action {
@@ -131,20 +147,45 @@ impl AppState {
             TimelineAction::ScrollDown(n) => self.timeline_mut().scroll_down(n),
             TimelineAction::JumpLatest => self.timeline_mut().jump_latest(),
             TimelineAction::ToggleTool(index) => self.timeline_mut().toggle_tool(index),
+            TimelineAction::OpenThought(hit_id) => self.open_thought(hit_id),
             TimelineAction::SelectionStart(point) => self.timeline_mut().start_selection(point),
             TimelineAction::SelectionUpdate(point) => self.timeline_mut().update_selection(point),
-            TimelineAction::SelectionFinish {
-                point,
-                activate_tool,
-            } => {
+            TimelineAction::SelectionFinish { point, activation } => {
                 let dragged = self.timeline_mut().finish_selection(point);
-                if !dragged && let Some(tool) = activate_tool {
-                    self.timeline_mut().toggle_tool(tool);
+                if !dragged {
+                    match activation {
+                        Some(crate::app::command::TimelineActivation::Tool(hit_id)) => {
+                            self.timeline_mut().toggle_tool(hit_id);
+                        }
+                        Some(crate::app::command::TimelineActivation::Thought(hit_id)) => {
+                            self.open_thought(hit_id);
+                        }
+                        None => {}
+                    }
                 }
             }
             TimelineAction::CopySelection => {
                 if let Some(text) = self.timeline().selected_text() {
                     return vec![Effect::copy_text(text, "timeline copied")];
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    pub(super) fn dispatch_thought_inspector_action(
+        &mut self,
+        action: ThoughtInspectorAction,
+    ) -> Vec<Effect> {
+        match action {
+            ThoughtInspectorAction::ScrollUp(amount) => {
+                if let Some(inspector) = self.thought_inspector.as_mut() {
+                    inspector.scroll_up(amount);
+                }
+            }
+            ThoughtInspectorAction::ScrollDown(amount) => {
+                if let Some(inspector) = self.thought_inspector.as_mut() {
+                    inspector.scroll_down(amount);
                 }
             }
         }
