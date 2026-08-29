@@ -1,0 +1,18 @@
+[package]
+name = "piko-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cross-process integration tests for piko clients and daemons"
+
+[dependencies]
+async-trait = "0.1"
+piko-comms = { path = "../comms" }
+piko-hostd = { path = "../hostd" }
+piko-llmd = { path = "../llmd" }
+piko-protocol = { path = "../protocol" }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tempfile = "3"

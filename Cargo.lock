@@ -5027,6 +5027,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "piko-e2e"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "piko-comms",
+ "piko-hostd",
+ "piko-llmd",
+ "piko-protocol",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+]
+
+[[package]]
 name = "piko-hostd"
 version = "0.1.0"
 dependencies = [

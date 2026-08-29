@@ -17,6 +17,7 @@ const ALLOWED_ADAPTERS: &[&str] = &[
     "packages/hostd/tests/support/mod.rs",
     "packages/hostd/tests/support/mock_session.rs",
     "packages/orchd/src/runtime/step/tests.rs",
+    "packages/e2e/src/bin/piko-e2e-hostd.rs",
 ];
 
 #[test]

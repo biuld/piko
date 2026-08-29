@@ -232,7 +232,7 @@ impl ConfigObserver for TuiSettingsObserver {
 impl HostServer {
     pub(crate) async fn apply_config_update(
         &self,
-        _command_id: &str,
+        command_id: &str,
         command: Command,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let Command::ConfigUpdate { patch, .. } = command else {
@@ -271,6 +271,19 @@ impl HostServer {
             let mut obs_events = observer
                 .on_change(self, &old_settings, &new_settings)
                 .await?;
+            // Config observers may emit a client-facing response (currently
+            // the opaque TUI namespace observer). Preserve the command
+            // correlation established at the JSONL boundary.
+            for event in &mut obs_events {
+                if let ServerMessage::CommandResponse {
+                    command_id: response_id,
+                    ..
+                } = event
+                    && response_id == "config_update"
+                {
+                    *response_id = command_id.to_string();
+                }
+            }
             events.append(&mut obs_events);
         }
 

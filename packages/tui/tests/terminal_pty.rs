@@ -170,7 +170,7 @@ impl PtyHarness {
     }
 
     fn finish(&mut self) {
-        self.send(b"\x11");
+        self.send(b"\x04");
         let status = self.child.wait().expect("wait for TUI");
         assert!(status.success(), "TUI exited unsuccessfully: {status}");
         for _ in 0..5 {

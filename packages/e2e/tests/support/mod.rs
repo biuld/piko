@@ -1,0 +1,380 @@
+#![allow(dead_code)]
+
+use std::{
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
+    process::{Child, ChildStdin, Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+use piko_comms::{ThreadBridgeReceiver, contracts::TuiHostBridge, thread_bridge};
+use piko_protocol::{
+    Command as HostCommand, CommandResult, ServerMessage, SessionSnapshot, TurnEvent,
+};
+use serde_json::Value;
+
+pub static E2E_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    E2E_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+enum HostLine {
+    Message(Box<ServerMessage>),
+    DecodeError(String),
+    Closed,
+}
+
+pub struct HostdHarness {
+    child: Child,
+    stdin: ChildStdin,
+    rx: ThreadBridgeReceiver<TuiHostBridge, HostLine>,
+    backlog: Vec<ServerMessage>,
+    root: tempfile::TempDir,
+    mode: String,
+    release_path: PathBuf,
+    gateway_log_path: PathBuf,
+}
+
+impl HostdHarness {
+    pub fn launch(mode: &str) -> Self {
+        let root = tempfile::tempdir().expect("create e2e root");
+        let cwd = root.path().join("workspace");
+        let session_dir = root.path().join("sessions");
+        let piko_home = root.path().join("piko-home");
+        std::fs::create_dir_all(&cwd).expect("create e2e workspace");
+        std::fs::create_dir_all(&session_dir).expect("create e2e session root");
+        std::fs::create_dir_all(&piko_home).expect("create e2e piko home");
+        let release_path = root.path().join("release");
+        let trace_path = root.path().join("trace.jsonl");
+        let gateway_log_path = root.path().join("gateway.jsonl");
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("canonicalize source root");
+        let (child, stdin, rx) = Self::spawn_process(
+            mode,
+            &root,
+            &release_path,
+            &trace_path,
+            &gateway_log_path,
+            &source_root,
+            &session_dir,
+            &piko_home,
+        );
+
+        Self {
+            child,
+            stdin,
+            rx,
+            backlog: Vec::new(),
+            root,
+            mode: mode.into(),
+            release_path,
+            gateway_log_path,
+        }
+    }
+
+    #[allow(clippy::disallowed_methods, clippy::too_many_arguments)]
+    fn spawn_process(
+        mode: &str,
+        root: &tempfile::TempDir,
+        release_path: &Path,
+        trace_path: &Path,
+        gateway_log_path: &Path,
+        source_root: &Path,
+        session_dir: &Path,
+        piko_home: &Path,
+    ) -> (
+        Child,
+        ChildStdin,
+        ThreadBridgeReceiver<TuiHostBridge, HostLine>,
+    ) {
+        let cwd = root.path().join("workspace");
+        let helper_binary = std::env::var_os("CARGO_BIN_EXE_piko_e2e_hostd")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| source_root.join("target/debug/piko-e2e-hostd"));
+        let mut command = if helper_binary.is_file() {
+            Command::new(helper_binary)
+        } else {
+            let helper_manifest = source_root.join("packages/e2e/Cargo.toml");
+            let mut command = Command::new("cargo");
+            command
+                .args(["run", "--quiet", "--manifest-path"])
+                .arg(helper_manifest)
+                .args(["--bin", "piko-e2e-hostd"]);
+            command
+        };
+        command
+            .current_dir(&cwd)
+            .env("PIKO_TUI_E2E_MODE", mode)
+            .env("PIKO_TUI_E2E_RELEASE", release_path)
+            .env("PIKO_TUI_PTY_LOG", trace_path)
+            .env("PIKO_TUI_E2E_GATEWAY_LOG", gateway_log_path)
+            .env("PIKO_SESSION_DIR", session_dir)
+            .env("PIKO_DEV_SOURCE_ROOT", source_root)
+            .env("PIKO_HOME", piko_home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+
+        let mut child = command.spawn().expect("spawn scripted hostd");
+        let stdin = child.stdin.take().expect("hostd stdin");
+        let stdout = child.stdout.take().expect("hostd stdout");
+        let (tx, rx) = thread_bridge::<TuiHostBridge, HostLine>();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let line = match line {
+                    Ok(line) => line,
+                    Err(error) => {
+                        let _ = tx.send(HostLine::DecodeError(error.to_string()));
+                        break;
+                    }
+                };
+                match serde_json::from_str::<ServerMessage>(&line) {
+                    Ok(message) => {
+                        if tx.send(HostLine::Message(Box::new(message))).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx.send(HostLine::DecodeError(format!("{error}: {line}")));
+                        break;
+                    }
+                }
+            }
+            let _ = tx.send(HostLine::Closed);
+        });
+        (child, stdin, rx)
+    }
+
+    pub fn restart(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.backlog.clear();
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("canonicalize source root");
+        let session_dir = self.root.path().join("sessions");
+        let piko_home = self.root.path().join("piko-home");
+        let trace_path = self.root.path().join("trace.jsonl");
+        let (child, stdin, rx) = Self::spawn_process(
+            &self.mode,
+            &self.root,
+            &self.release_path,
+            &trace_path,
+            &self.gateway_log_path,
+            &source_root,
+            &session_dir,
+            &piko_home,
+        );
+        self.child = child;
+        self.stdin = stdin;
+        self.rx = rx;
+    }
+
+    pub fn workspace(&self) -> PathBuf {
+        self.root.path().join("workspace")
+    }
+
+    pub fn send(&mut self, command: HostCommand) {
+        let encoded = serde_json::to_string(&command).expect("encode host command");
+        writeln!(self.stdin, "{encoded}").expect("write host command");
+        self.stdin.flush().expect("flush host command");
+    }
+
+    pub fn wait_for(
+        &mut self,
+        label: &str,
+        predicate: impl Fn(&ServerMessage) -> bool,
+    ) -> ServerMessage {
+        if let Some(index) = self.backlog.iter().position(&predicate) {
+            return self.backlog.remove(index);
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or_else(|| panic!("timed out waiting for {label}"));
+            match self.rx.try_recv() {
+                Ok(HostLine::Message(message)) if predicate(message.as_ref()) => {
+                    return *message;
+                }
+                Ok(HostLine::Message(message)) => self.backlog.push(*message),
+                Ok(HostLine::DecodeError(error)) => panic!("hostd emitted invalid JSON: {error}"),
+                Ok(HostLine::Closed) => panic!("hostd closed while waiting for {label}"),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if remaining > Duration::ZERO {
+                        thread::sleep(Duration::from_millis(10).min(remaining));
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("hostd reader closed while waiting for {label}")
+                }
+            }
+        }
+    }
+
+    pub fn command_result(&mut self, command_id: &str) -> CommandResult {
+        let message = self.wait_for("command response", |message| {
+            matches!(
+                message,
+                ServerMessage::CommandResponse { command_id: id, .. } if id == command_id
+            )
+        });
+        match message {
+            ServerMessage::CommandResponse {
+                result: Ok(result), ..
+            } => result,
+            ServerMessage::CommandResponse {
+                result: Err(error), ..
+            } => {
+                panic!("command {command_id} failed: {error}")
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn command_error(&mut self, command_id: &str) -> String {
+        let message = self.wait_for("command response", |message| {
+            matches!(
+                message,
+                ServerMessage::CommandResponse { command_id: id, .. } if id == command_id
+            )
+        });
+        match message {
+            ServerMessage::CommandResponse {
+                result: Err(error), ..
+            } => error,
+            ServerMessage::CommandResponse {
+                result: Ok(result), ..
+            } => panic!("command {command_id} unexpectedly succeeded: {result:?}"),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn create_session(&mut self, command_id: &str) -> String {
+        self.send(HostCommand::SessionCreate {
+            command_id: command_id.into(),
+            cwd: self.workspace().display().to_string(),
+        });
+        let session_id = match self.command_result(command_id) {
+            CommandResult::SessionCreated { session_id, .. } => session_id,
+            other => panic!("expected session creation, got {other:?}"),
+        };
+        self.wait_for("initial session reconciliation", |message| {
+            matches!(
+                message,
+                ServerMessage::SessionReconciled(event) if event.session_id == session_id
+            )
+        });
+        session_id
+    }
+
+    pub fn snapshot(&mut self, session_id: &str, command_id: &str) -> SessionSnapshot {
+        self.send(HostCommand::StateSnapshot {
+            command_id: command_id.into(),
+            session_id: session_id.into(),
+        });
+        self.command_result(command_id);
+        match self.wait_for("session reconciliation", |message| {
+            matches!(
+                message,
+                ServerMessage::SessionReconciled(event) if event.session_id == session_id
+            )
+        }) {
+            ServerMessage::SessionReconciled(event) => event.snapshot,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn wait_completed(&mut self, session_id: &str) -> TurnEvent {
+        match self.wait_for("turn completion", |message| {
+            matches!(
+                message,
+                ServerMessage::TurnLifecycle(TurnEvent::Completed { session_id: id, .. })
+                    if id == session_id
+            )
+        }) {
+            ServerMessage::TurnLifecycle(event) => event,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn release(&self) {
+        std::fs::write(&self.release_path, b"release").expect("release scripted gateway");
+    }
+
+    pub fn trace(&self) -> Vec<Value> {
+        let path = self.root.path().join("trace.jsonl");
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    pub fn wait_for_gateway(&self, text: &str, step: u64) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let trace = self.gateway_trace();
+            if has_gateway_request(&trace, text, step) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for gateway request {text:?} at step {step}: {trace:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    pub fn wait_for_gateway_step(&self, step: u64) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let trace = self.gateway_trace();
+            if trace.iter().any(|record| {
+                record["kind"].as_str() == Some("gateway")
+                    && record["value"]["step"].as_u64().unwrap_or_default() >= step
+            }) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for gateway step {step}: {trace:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    pub fn gateway_trace(&self) -> Vec<Value> {
+        std::fs::read_to_string(&self.gateway_log_path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+}
+
+impl Drop for HostdHarness {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+pub fn root_agent_id(session_id: &str) -> String {
+    format!("agent_{session_id}_root")
+}
+
+pub fn has_gateway_request(trace: &[Value], text: &str, step: u64) -> bool {
+    trace.iter().any(|record| {
+        record["kind"].as_str() == Some("gateway")
+            && record["value"]["step"].as_u64().unwrap_or_default() >= step
+            && record["value"]["user_messages"].to_string().contains(text)
+    })
+}
