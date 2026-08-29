@@ -1,7 +1,10 @@
-use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
-use piko_protocol::{Message, SessionTreeEntry};
+use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
+use piko_protocol::{
+    AgentInput, AgentInputDelivery, AgentInputDisposition, AgentInputDispositionChange,
+    AgentInputOrigin, Message, SessionTreeEntry,
+};
 use piko_session_store::{
-    EventData, MessageCommittedV1, ModelStepCommittedV1, TreeEntryRecordedV1, UsageAttribution,
+    AgentInputAdmittedV1, EventData, MessageCommittedV1, TreeEntryRecordedV1, UsageAttribution,
     UsageRecordedV1,
 };
 
@@ -9,6 +12,9 @@ use crate::api::MessageEntry;
 use crate::ports::storage_types::SessionStorageError;
 
 use super::SessionStore;
+
+#[path = "model_step.rs"]
+mod model_step;
 
 impl SessionStore {
     pub fn commit_message(
@@ -19,10 +25,41 @@ impl SessionStore {
         self.with_io(|| self.commit_message_under_lock(commit, agent_spec_id))
     }
 
+    pub fn commit_steer(
+        &self,
+        commit: MessageCommit,
+        agent_spec_id: &str,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.with_io(|| self.commit_steer_under_lock(commit, agent_spec_id, change))
+    }
+
     pub(crate) fn commit_message_under_lock(
         &self,
         commit: MessageCommit,
         agent_spec_id: &str,
+    ) -> Result<CommitAck, CommitError> {
+        self.commit_message_under_lock_with_steer(commit, agent_spec_id, None)
+    }
+
+    /// Commit the user-visible steer message and its causal input transition
+    /// in one journal commit. The transition is deliberately coupled here,
+    /// rather than inferred from transcript order, so a crash cannot leave a
+    /// steer looking delivered while its AgentInput remains pending.
+    pub(crate) fn commit_steer_under_lock(
+        &self,
+        commit: MessageCommit,
+        agent_spec_id: &str,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.commit_message_under_lock_with_steer(commit, agent_spec_id, Some(change))
+    }
+
+    fn commit_message_under_lock_with_steer(
+        &self,
+        commit: MessageCommit,
+        agent_spec_id: &str,
+        steer_change: Option<AgentInputDispositionChange>,
     ) -> Result<CommitAck, CommitError> {
         let aggregate = self.aggregate().map_err(Self::commit_error)?;
         if aggregate.session_id.as_deref() != Some(commit.session_id.as_str()) {
@@ -56,6 +93,11 @@ impl SessionStore {
                 && existing.data.source_turn_id == commit.source_turn_id
                 && existing.data.message == commit.message
             {
+                if let Some(change) = steer_change.as_ref()
+                    && !steer_transition_matches(&aggregate, change)
+                {
+                    return Err(CommitError::IdempotencyConflict);
+                }
                 return Ok(CommitAck {
                     session_id: commit.session_id,
                     execution_id: commit.execution_id,
@@ -65,6 +107,9 @@ impl SessionStore {
                 });
             }
             return Err(CommitError::IdempotencyConflict);
+        }
+        if let Some(change) = steer_change.as_ref() {
+            validate_steer_commit(&aggregate, &commit, change)?;
         }
         let transcript_seq = aggregate
             .messages
@@ -82,7 +127,71 @@ impl SessionStore {
             transcript_seq,
             message: commit.message.clone(),
         });
-        let mut events = vec![EventData::MessageCommitted(MessageCommittedV1 {
+        let mut events = Vec::with_capacity(6);
+        if let Some(change) = steer_change.as_ref() {
+            events.push(EventData::AgentInputDispositionChangedV1(
+                piko_session_store::AgentInputDispositionChangedV1 {
+                    agent_instance_id: change.agent_instance_id.clone(),
+                    input_id: change.input_id.clone(),
+                    disposition: change.disposition,
+                    root_input_id: change.root_input_id.clone(),
+                    run_id: change.run_id.clone(),
+                    bound_run_id: change.bound_run_id.clone(),
+                    model_step_id: change.model_step_id.clone(),
+                    changed_at: change.changed_at,
+                },
+            ));
+        }
+        let starting_input = aggregate
+            .executions
+            .get(&commit.execution_id)
+            .filter(|_execution| {
+                !aggregate.messages.values().any(|message| {
+                    message.data.execution_id.as_deref() == Some(commit.execution_id.as_str())
+                        && matches!(&message.data.message, Message::User { .. })
+                })
+            })
+            .filter(|_| matches!(&commit.message, Message::User { .. }));
+        if let Some(execution) = starting_input {
+            let request_id = execution.started.request_id.clone();
+            if !aggregate
+                .agent_inputs
+                .values()
+                .any(|input| input.input.request_id == request_id)
+            {
+                let (content, origin) = match &commit.message {
+                    Message::User { content, .. } => (
+                        content.clone(),
+                        if execution.started.source_turn_id.is_some() {
+                            AgentInputOrigin::User
+                        } else {
+                            AgentInputOrigin::System
+                        },
+                    ),
+                    _ => unreachable!("starting input is filtered to user messages"),
+                };
+                events.push(EventData::AgentInputAdmittedV1(AgentInputAdmittedV1 {
+                    input: AgentInput {
+                        input_id: request_id.clone(),
+                        request_id: request_id.clone(),
+                        session_id: commit.session_id.clone(),
+                        agent_instance_id: commit.agent_instance_id.clone(),
+                        origin,
+                        delivery: AgentInputDelivery::StartWhenIdle,
+                        content,
+                        submitted_at: commit.committed_at,
+                        user_turn_id: execution.started.source_turn_id.clone(),
+                        caller_agent_instance_id: None,
+                    },
+                    disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+                    root_input_id: Some(request_id),
+                    run_id: Some(execution.started.run_id.clone()),
+                    bound_run_id: None,
+                    admitted_at: commit.committed_at,
+                }));
+            }
+        }
+        events.push(EventData::MessageCommitted(MessageCommittedV1 {
             message_id: commit.message_id.clone(),
             agent_instance_id: commit.agent_instance_id.clone(),
             agent_parent_message_id: commit.parent_message_id.clone(),
@@ -91,7 +200,7 @@ impl SessionStore {
             source_turn_id: commit.source_turn_id.clone(),
             committed_at: commit.committed_at,
             message: commit.message.clone(),
-        })];
+        }));
         events.push(tree_entry_event(&entry).map_err(Self::commit_error)?);
         if aggregate
             .root
@@ -142,14 +251,26 @@ impl SessionStore {
                 todo_list: (!list.items.is_empty()).then_some(list),
             });
         }
-        let commit_id = piko_orchd_api::stable_internal_id(
-            "message-commit",
-            &[
-                &commit.session_id,
-                &commit.agent_instance_id,
-                &commit.message_id,
-            ],
-        );
+        let commit_id = if let Some(change) = steer_change.as_ref() {
+            piko_orchd_api::stable_internal_id(
+                "steer-commit",
+                &[
+                    &commit.session_id,
+                    &commit.agent_instance_id,
+                    &change.input_id,
+                    &commit.message_id,
+                ],
+            )
+        } else {
+            piko_orchd_api::stable_internal_id(
+                "message-commit",
+                &[
+                    &commit.session_id,
+                    &commit.agent_instance_id,
+                    &commit.message_id,
+                ],
+            )
+        };
         let revision = self
             .commit_events(&commit_id, commit.committed_at, events)
             .map_err(Self::commit_error)?;
@@ -161,300 +282,85 @@ impl SessionStore {
             revision,
         })
     }
-
-    pub fn commit_model_step(
-        &self,
-        commit: ModelStepCommit,
-        agent_spec_id: &str,
-    ) -> Result<CommitAck, CommitError> {
-        self.with_io(|| self.commit_model_step_under_lock(commit, agent_spec_id))
-    }
-
-    pub(crate) fn commit_model_step_under_lock(
-        &self,
-        commit: ModelStepCommit,
-        agent_spec_id: &str,
-    ) -> Result<CommitAck, CommitError> {
-        let aggregate = self.aggregate().map_err(Self::commit_error)?;
-        if aggregate.session_id.as_deref() != Some(commit.session_id.as_str()) {
-            return Err(CommitError::IdentityMismatch);
-        }
-        let agent = aggregate
-            .agents
-            .get(&commit.agent_instance_id)
-            .ok_or(CommitError::IdentityMismatch)?;
-        if agent.identity.agent_spec_id != agent_spec_id {
-            return Err(CommitError::IdentityMismatch);
-        }
-        let execution = aggregate
-            .executions
-            .get(&commit.execution_id)
-            .ok_or(CommitError::IdentityMismatch)?;
-        if execution.finished_at.is_some() {
-            return Err(CommitError::IdentityMismatch);
-        }
-        if execution.started.run_id != commit.run_id
-            || execution.started.agent_instance_id != commit.agent_instance_id
-            || execution.started.source_turn_id != commit.source_turn_id
-        {
-            return Err(CommitError::IdentityMismatch);
-        }
-        let boundary = commit.boundary();
-        let event_data = ModelStepCommittedV1 {
-            model_step_id: boundary.model_step_id.clone(),
-            step_index: boundary.step_index,
-            run_id: boundary.run_id.clone(),
-            execution_id: boundary.execution_id.clone(),
-            agent_instance_id: boundary.agent_instance_id.clone(),
-            source_turn_id: boundary.source_turn_id.clone(),
-            assistant_message_id: boundary.assistant_message_id.clone(),
-            tool_call_message_ids: boundary.tool_call_message_ids.clone(),
-            outcome: boundary.outcome,
-            started_at: boundary.started_at,
-            finished_at: boundary.finished_at,
-        };
-        if let Some(existing) = aggregate.model_steps.get(&commit.model_step_id) {
-            if existing.data == event_data && step_messages_match_existing(&aggregate, &commit) {
-                return Ok(CommitAck {
-                    session_id: commit.session_id,
-                    execution_id: commit.execution_id,
-                    agent_instance_id: commit.agent_instance_id,
-                    message_id: Some(commit.assistant.message_id),
-                    revision: existing.revision,
-                });
-            }
-            return Err(CommitError::IdempotencyConflict);
-        }
-
-        let expected_parent = execution
-            .message_head
-            .as_ref()
-            .or(execution.started.base_message_id.as_ref())
-            .cloned();
-        if commit.assistant.parent_message_id != expected_parent {
-            return Err(CommitError::IdentityMismatch);
-        }
-        validate_step_message(&commit.assistant, &commit, true)?;
-        let mut message_ids = vec![commit.assistant.message_id.clone()];
-        message_ids.extend(
-            commit
-                .tool_calls
-                .iter()
-                .map(|message| message.message_id.clone()),
-        );
-        if message_ids
-            .iter()
-            .any(|id| aggregate.messages.contains_key(id))
-            || message_ids
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                != message_ids.len()
-        {
-            return Err(CommitError::IdempotencyConflict);
-        }
-        for (index, tool_call) in commit.tool_calls.iter().enumerate() {
-            validate_step_message(tool_call, &commit, false)?;
-            let expected_parent = message_ids[index].clone();
-            if tool_call.parent_message_id.as_deref() != Some(expected_parent.as_str()) {
-                return Err(CommitError::IdentityMismatch);
-            }
-        }
-        let expected_index = execution.model_step_ids.len() as u32 + 1;
-        if commit.step_index != expected_index {
-            return Err(CommitError::IdentityMismatch);
-        }
-        let has_tools = !commit.tool_calls.is_empty();
-        if (commit.outcome == piko_protocol::ModelStepOutcome::ToolCalls) != has_tools {
-            return Err(CommitError::IdentityMismatch);
-        }
-
-        let mut events = Vec::with_capacity(3 + commit.tool_calls.len() * 2);
-        let mut parent_message_id = expected_parent;
-        let mut tree_parent_entry_id = execution
-            .message_head
-            .as_ref()
-            .or(execution.started.tree_base_entry_id.as_ref())
-            .or(aggregate.selected_tree_entry_id.as_ref())
-            .cloned();
-        let mut transcript_seq = aggregate
-            .messages
-            .values()
-            .filter(|message| message.data.agent_instance_id == commit.agent_instance_id)
-            .count() as u64;
-
-        append_step_message(
-            &mut events,
-            &commit,
-            &commit.assistant,
-            agent_spec_id,
-            &mut parent_message_id,
-            &mut tree_parent_entry_id,
-            &mut transcript_seq,
-        )?;
-        if let Message::Assistant {
-            provider,
-            model,
-            usage: Some(usage),
-            ..
-        } = &commit.assistant.message
-        {
-            events.push(EventData::UsageRecorded(UsageRecordedV1 {
-                usage_id: piko_orchd_api::stable_internal_id(
-                    "usage",
-                    &[&commit.session_id, &commit.model_step_id],
-                ),
-                attribution: UsageAttribution {
-                    session_id: commit.session_id.clone(),
-                    agent_instance_id: commit.agent_instance_id.clone(),
-                    turn_id: commit.source_turn_id.clone(),
-                    execution_id: commit.execution_id.clone(),
-                    model_step_id: commit.model_step_id.clone(),
-                },
-                provider: provider.clone(),
-                model_id: model.clone(),
-                api_surface: None,
-                pricing_policy_id: None,
-                pricing_revision: None,
-                usage: usage.clone(),
-                incurred: true,
-            }));
-        }
-        for tool_call in &commit.tool_calls {
-            append_step_message(
-                &mut events,
-                &commit,
-                tool_call,
-                agent_spec_id,
-                &mut parent_message_id,
-                &mut tree_parent_entry_id,
-                &mut transcript_seq,
-            )?;
-        }
-        if aggregate
-            .root
-            .as_ref()
-            .is_some_and(|root| root.agent_instance_id == commit.agent_instance_id)
-        {
-            let selected = message_ids.last().cloned();
-            events.push(EventData::BranchSelected {
-                selected_tree_entry_id: selected.clone(),
-                root_base_message_id: selected,
-            });
-        }
-        events.push(EventData::ModelStepCommitted(event_data));
-        let commit_id = piko_orchd_api::stable_internal_id(
-            "model-step-commit",
-            &[
-                &commit.session_id,
-                &commit.execution_id,
-                &commit.model_step_id,
-            ],
-        );
-        let revision = self
-            .commit_events(&commit_id, commit.finished_at, events)
-            .map_err(Self::commit_error)?;
-        Ok(CommitAck {
-            session_id: commit.session_id,
-            execution_id: commit.execution_id,
-            agent_instance_id: commit.agent_instance_id,
-            message_id: Some(boundary.assistant_message_id),
-            revision,
-        })
-    }
 }
 
-fn step_messages_match_existing(
+fn validate_steer_commit(
     aggregate: &piko_session_store::SessionAggregate,
-    step: &ModelStepCommit,
-) -> bool {
-    let mut proposed = std::iter::once(&step.assistant).chain(step.tool_calls.iter());
-    let message_ids = std::iter::once(step.assistant.message_id.as_str()).chain(
-        step.tool_calls
-            .iter()
-            .map(|message| message.message_id.as_str()),
-    );
-    message_ids
-        .zip(&mut proposed)
-        .all(|(message_id, proposed)| {
-            aggregate.messages.get(message_id).is_some_and(|stored| {
-                stored.data.agent_instance_id == proposed.agent_instance_id
-                    && stored.data.agent_parent_message_id == proposed.parent_message_id
-                    && proposed.tree_parent_entry_id.as_ref().is_none_or(|parent| {
-                        stored.data.tree_parent_entry_id.as_ref() == Some(parent)
-                    })
-                    && stored.data.execution_id.as_deref() == Some(proposed.execution_id.as_str())
-                    && stored.data.source_turn_id == proposed.source_turn_id
-                    && stored.data.committed_at == proposed.committed_at
-                    && stored.data.message == proposed.message
-            })
-        })
-}
-
-fn validate_step_message(
     message: &MessageCommit,
-    step: &ModelStepCommit,
-    assistant: bool,
+    change: &AgentInputDispositionChange,
 ) -> Result<(), CommitError> {
-    if message.session_id != step.session_id
-        || message.source_turn_id != step.source_turn_id
-        || message.execution_id != step.execution_id
-        || message.agent_instance_id != step.agent_instance_id
+    if change.disposition != AgentInputDisposition::AppliedToStep
+        || message.agent_instance_id != change.agent_instance_id
+        || !matches!(&message.message, Message::User { .. })
     {
         return Err(CommitError::IdentityMismatch);
     }
-    let valid_role = if assistant {
-        matches!(&message.message, Message::Assistant { .. })
-    } else {
-        matches!(&message.message, Message::ToolCall { .. })
-    };
-    if !valid_role {
+    let execution = aggregate
+        .executions
+        .get(&message.execution_id)
+        .ok_or(CommitError::IdentityMismatch)?;
+    if execution.finished_at.is_some()
+        || execution.started.agent_instance_id != message.agent_instance_id
+        || execution.started.source_turn_id != message.source_turn_id
+        || execution.started.run_id != change.run_id.as_deref().unwrap_or_default()
+        || change.bound_run_id.as_deref() != Some(execution.started.run_id.as_str())
+    {
+        return Err(CommitError::IdentityMismatch);
+    }
+    let root_input_id = change
+        .root_input_id
+        .as_deref()
+        .ok_or(CommitError::IdentityMismatch)?;
+    let root = aggregate
+        .agent_inputs
+        .get(root_input_id)
+        .ok_or(CommitError::IdentityMismatch)?;
+    if root.input.agent_instance_id != message.agent_instance_id
+        || root.disposition != AgentInputDisposition::AppliedAsRoot
+        || root.root_input_id.as_deref() != Some(root_input_id)
+        || root.run_id.as_deref() != Some(execution.started.run_id.as_str())
+    {
+        return Err(CommitError::IdentityMismatch);
+    }
+    let input = aggregate
+        .agent_inputs
+        .get(&change.input_id)
+        .ok_or(CommitError::IdentityMismatch)?;
+    if input.input.agent_instance_id != message.agent_instance_id
+        || input.disposition != AgentInputDisposition::PendingSteer
+        || input.root_input_id.as_deref() != Some(root_input_id)
+        || input.bound_run_id.as_deref() != Some(execution.started.run_id.as_str())
+    {
+        return Err(CommitError::IdentityMismatch);
+    }
+    let expected_step_id = format!(
+        "{}:step_{}",
+        execution.started.execution_id,
+        execution.model_step_ids.len().saturating_add(1)
+    );
+    if change.model_step_id.as_deref() != Some(expected_step_id.as_str())
+        || message.parent_message_id != execution.message_head
+    {
         return Err(CommitError::IdentityMismatch);
     }
     Ok(())
 }
 
-fn append_step_message(
-    events: &mut Vec<EventData>,
-    step: &ModelStepCommit,
-    message: &MessageCommit,
-    agent_spec_id: &str,
-    parent_message_id: &mut Option<String>,
-    tree_parent_entry_id: &mut Option<String>,
-    transcript_seq: &mut u64,
-) -> Result<(), CommitError> {
-    if message.parent_message_id != *parent_message_id {
-        return Err(CommitError::IdentityMismatch);
-    }
-    let tree_parent = message
-        .tree_parent_entry_id
-        .clone()
-        .or_else(|| tree_parent_entry_id.clone());
-    *transcript_seq = (*transcript_seq).saturating_add(1);
-    let entry = SessionTreeEntry::Message(MessageEntry {
-        id: message.message_id.clone(),
-        parent_id: tree_parent.clone(),
-        timestamp: message.committed_at.to_string(),
-        agent_id: agent_spec_id.to_string(),
-        agent_instance_id: step.agent_instance_id.clone(),
-        source_turn_id: step.source_turn_id.clone().unwrap_or_default(),
-        transcript_seq: *transcript_seq,
-        message: message.message.clone(),
-    });
-    events.push(EventData::MessageCommitted(MessageCommittedV1 {
-        message_id: message.message_id.clone(),
-        agent_instance_id: step.agent_instance_id.clone(),
-        agent_parent_message_id: message.parent_message_id.clone(),
-        tree_parent_entry_id: tree_parent.clone(),
-        execution_id: Some(step.execution_id.clone()),
-        source_turn_id: step.source_turn_id.clone(),
-        committed_at: message.committed_at,
-        message: message.message.clone(),
-    }));
-    events.push(tree_entry_event(&entry).map_err(SessionStore::commit_error)?);
-    *parent_message_id = Some(message.message_id.clone());
-    *tree_parent_entry_id = Some(message.message_id.clone());
-    Ok(())
+fn steer_transition_matches(
+    aggregate: &piko_session_store::SessionAggregate,
+    change: &AgentInputDispositionChange,
+) -> bool {
+    aggregate
+        .agent_inputs
+        .get(&change.input_id)
+        .is_some_and(|input| {
+            input.input.agent_instance_id == change.agent_instance_id
+                && input.disposition == AgentInputDisposition::AppliedToStep
+                && input.root_input_id == change.root_input_id
+                && input.run_id == change.run_id
+                && input.bound_run_id == change.bound_run_id
+                && input.model_step_id == change.model_step_id
+        })
 }
 
 pub(crate) fn tree_entry_event(entry: &SessionTreeEntry) -> Result<EventData, SessionStorageError> {

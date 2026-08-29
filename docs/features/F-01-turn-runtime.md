@@ -5,7 +5,7 @@
 > Source evidence: codex-rs `core/src/session/{session,turn,turn_context,input_queue,user_message_admission}.rs`,
 > `core/src/state/{service,session,turn}.rs`, `core/src/tasks/{regular,lifecycle,compact,review,user_shell}.rs`,
 > `core/src/context/turn_aborted.rs`
-> Refined by: [F-51](F-51-agent-control-plane.md) for canonical AgentInput, optional Turn/Run relation, and host projection
+> Refined by: [F-51](F-51-agent-control-plane.md) for Agent/Input/ModelStep primitive facts and derived Run/Execution/UserTurn/queue/foreground projections
 
 ## Summary
 
@@ -13,6 +13,9 @@ A user submission that starts future work becomes a **Turn** related to one
 Agent Run; detached agent/system work has a Run without a Turn, and steer joins
 an existing Run. Work has a durable lifecycle from admission, through model
 steps and tool execution, to a terminal outcome.
+Under F-51, this Turn is a host product view derived from the user-origin
+AgentInput and its optional AgentRun; it is not an independent lifecycle
+authority.
 The runtime guarantees that everything a user or agent observes is committed
 before it is visible, that transcripts are deterministic and replayable, that
 concurrent input is admitted through an explicit contract (start, steer, queue,

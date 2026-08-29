@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use piko_orchd_api::{AgentApiError, ExecutionCommitPort};
-use piko_protocol::{Message, execution::MessageCommit};
+use piko_protocol::{AgentInputDispositionChange, Message, execution::MessageCommit};
 
 use crate::runtime::execution::{ExecutionIdentity, state::ExecutionState};
 
@@ -43,6 +43,20 @@ impl MessageCommitScope {
         port: &Arc<dyn ExecutionCommitPort>,
     ) -> Result<CommittedMessage, AgentApiError> {
         port.commit_message(self.commit.clone())
+            .await
+            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
+        Ok(CommittedMessage {
+            message_id: self.commit.message_id,
+            message: self.commit.message,
+        })
+    }
+
+    pub async fn commit_steer(
+        self,
+        port: &Arc<dyn ExecutionCommitPort>,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommittedMessage, AgentApiError> {
+        port.commit_steer(self.commit.clone(), change)
             .await
             .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
         Ok(CommittedMessage {

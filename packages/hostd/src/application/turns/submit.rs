@@ -327,7 +327,7 @@ impl HostApp {
         let status = self.state.lock().await.apply_turn_input_disposition(
             &session_id,
             &turn_id,
-            run.receipt.disposition.clone(),
+            run.receipt.disposition,
         )?;
         send_event(
             tx,

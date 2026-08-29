@@ -9,18 +9,19 @@
 
 ## Summary
 
-piko gives every agent operation an explicit lifecycle spine:
+piko implemented explicit correlation across these runtime scopes:
 
 ```text
 AgentInstance → Run → Execution → ModelStep → Thought / ToolCall
 Turn 0..1 ── source relation ── Run
 ```
 
-`hostd` owns the durable, user-visible state. A Turn is an optional host
-interaction boundary, a Run is the logical agent attempt, an Execution is the
-concrete runtime instance, and a ModelStep is one model request/response
-boundary. F-51/ADR-027 supersede the earlier assumption that every Run has a
-Turn; the remaining lifecycle and atomic ModelStep contract is unchanged.
+`hostd` owns the durable, user-visible state. F-51/ADR-027 now separate
+AgentInstance, AgentInput, ModelStep, and causal facts from derived Run,
+Execution, and Turn scopes.
+F-48's distinct correlation IDs and atomic ModelStep contract remain
+implemented; the diagram above is historical correlation, not the canonical
+domain hierarchy.
 Thought segments are presentation-level content inside a ModelStep. A tool
 call ends the current ModelStep and is persisted as a separate transcript
 fact. Realtime deltas remain transient observations and never become journal
@@ -57,7 +58,7 @@ which makes recovery and diagnostics ambiguous.
 
 ## In scope
 
-- Explicit identity and ownership for Turn, Run, Execution, and ModelStep.
+- Explicit correlation identity for Turn, Run, Execution, and ModelStep.
 - A required journal `model_step_committed` fact that references existing
   message facts instead of duplicating their content.
 - One atomic durable commit for an assistant response plus its ordered tool
@@ -83,9 +84,9 @@ which makes recovery and diagnostics ambiguous.
 
 | Boundary | Meaning | Durable authority |
 |---|---|---|
-| Turn | Optional host interaction and user-visible lifecycle | host turn lifecycle plus journal attribution |
-| Run | One logical agent attempt, including Turn-less child-agent attempts | `run_id` on execution facts and trajectory identity |
-| Execution | One concrete runtime instance that can be admitted, interrupted, and recovered | `execution_started` / `execution_finished` |
+| Turn | Derived user-interaction view and compatibility correlation | AgentInput and causal-work projection under F-51 |
+| Run | One logical unit of Agent work, including Turn-less child work | Derived from AgentInput, execution, and terminal facts under F-51; legacy `run_id` correlations remain |
+| Execution | Operational runtime attempt that can be interrupted and recovered | `execution_started` / `execution_finished` correlation facts |
 | ModelStep | One model request/response, ending before local tool execution | required `model_step_committed` plus referenced messages |
 | Thought | Ordered reasoning segment inside a ModelStep | `ContentBlock::Thinking` in the committed assistant message |
 | ToolCall | Model-declared call and later result | committed `ToolCall` / `ToolResult` messages |

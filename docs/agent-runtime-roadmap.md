@@ -186,7 +186,7 @@ optional extensions and have no scheduled implementation.
 
 | Block | F-ID | Decomposed behavior |
 |---|---|---|
-| A Turn & Agent Runtime | F-01/F-51 | canonical AgentInput/Turn/Run/Execution lifecycle, admission/queueing, control, tasks, abort reconstruction |
+| A Agent Work Runtime | F-01/F-51 | Agent/Input/ModelStep primitive facts, derived Run/Execution/Turn/queue views, admission, control, tasks, abort reconstruction |
 | B Model Gateway | F-02/F-24/F-25/F-26 | providers, authentication, native protocols, protocol-neutral inference, streaming/retry, usage, model continuity, locally authoritative catalogs |
 | C Prompt Assembly | F-03 | fragments, AGENTS.md, skills, world-state/environment context |
 | D Context & Compaction | F-04/F-05 | transcript model, truncation, accounting, compaction |
@@ -208,20 +208,21 @@ optional extensions and have no scheduled implementation.
 2. **Reference behavior is selected, not inherited.** Deferred and rejected
    codex-rs behavior does not prevent a piko milestone from completing its
    committed scope.
-3. **Keep hostd authoritative.** User-visible state such as sessions, turns,
-   approvals, and usage ledgers remains in hostd; orchd owns transient agent
-   execution.
+3. **Keep hostd authoritative.** User-visible facts and projections such as
+   sessions, Turn views, approvals, and usage ledgers remain in hostd; orchd
+   owns transient agent execution.
 4. **Activate deferred work only with a consumer.** Plugins/hooks,
    elicitation, session paging/prewarm, and role prompt/model layers remain
    unscheduled until a concrete piko journey needs them.
 
 ## 6. Current next steps
 
-1. **Agent work lifecycle and control plane (F-51 / D-68, ADR-027)** —
+1. **Agent work primitive refactor and control plane (F-51 / D-68, ADR-027)** —
    proposed; Slice 1 agent interrupt implemented. Next: canonical durable
-   AgentInput/Turn/Run facts, Run-bound steer and follow-up admission, one
-   host-authored AgentWorkSnapshot, then TUI/desktop removal of local queue and
-   process-local steer authority.
+   AgentInput and causal-root facts, derived Run/Execution/Turn/queue views,
+   root-bound steer and follow-up admission, one host-authored
+   AgentWorkSnapshot, then TUI/desktop
+   removal of local queue and process-local steer authority.
 2. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
    redesign of F-08/F-12/F-17 command behavior: full-shell unified exec,
    host-owned authorization, enforced sandbox-first attempts, constrained

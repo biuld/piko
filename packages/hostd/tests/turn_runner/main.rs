@@ -65,10 +65,13 @@ impl AgentRunRunner for RecoveringAgentRunRunner {
                 agent_instance_id: root_agent_instance_id.clone(),
             },
             receipt: piko_protocol::AgentInputReceipt {
+                input_id: input.operation_id.clone(),
                 request_id: input.operation_id,
                 session_id: input.session_id,
                 agent_instance_id: root_agent_instance_id,
                 disposition: piko_protocol::InputDisposition::Accepted,
+                run_id: None,
+                queued_position: None,
             },
             process: test_agent_run_process(started, completion),
         })

@@ -21,6 +21,9 @@ impl SessionStore {
         &self,
         aggregate: &SessionAggregate,
     ) -> Result<SessionProjection, SessionStorageError> {
+        let mut normalized = aggregate.clone();
+        normalized.rebuild_work_projection();
+        let aggregate = &normalized;
         let session_id = aggregate
             .session_id
             .clone()
@@ -172,6 +175,7 @@ impl SessionStore {
             agent_inbox: aggregate.inbox.values().cloned().collect(),
             agent_executions,
             agent_input_queue: aggregate.queued_inputs.clone(),
+            agent_work: aggregate.agent_work_snapshots(),
             last_model: aggregate
                 .model_continuity
                 .as_ref()

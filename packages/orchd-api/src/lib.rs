@@ -41,13 +41,14 @@ pub use tools::{
 
 // Re-export Execution DTOs used by the new API surface.
 pub use piko_protocol::execution::{
-    CancelReceipt, CommitAck, CommitError, ExecutionId, ExecutionOutcome, ExecutionStatus,
-    InputDisposition, MessageCommit as ExecutionMessageCommit,
+    AgentInputDisposition, CancelReceipt, CommitAck, CommitError, ExecutionId, ExecutionOutcome,
+    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,
-    AgentInboxSnapshot, AgentInputDelivery, AgentInputReceipt, AgentInstanceId,
-    AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
+    AgentInboxSnapshot, AgentInput, AgentInputCancelReceipt, AgentInputDelivery,
+    AgentInputDispositionChange, AgentInputReceipt, AgentInstanceId, AgentInstanceIdentity,
+    AgentInstanceLifecycle, AgentInterruptReceipt, AgentLifecycleReceipt, AgentLifecycleRequest,
     AgentRunReport, AgentSnapshot, AgentSpecId, ConsumeAgentInboxReceipt, ConsumeAgentInboxRequest,
     CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
 };

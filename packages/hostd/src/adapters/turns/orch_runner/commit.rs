@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_orchd_api::{ExecutionCommitPort, RealtimeDeltaSink};
+use piko_protocol::AgentInputDispositionChange;
 use piko_protocol::MessageRole;
 use piko_protocol::agent_runtime::{RealtimeDeltaEnvelope, SessionEvent, SessionEventEnvelope};
 use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
@@ -106,6 +107,45 @@ impl ExecutionCommitPort for ExecutionCommitRouter {
         }
         Ok(ack)
     }
+
+    async fn commit_steer(
+        &self,
+        commit: MessageCommit,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        let role = MessageRole::User;
+        let ack = self.durable.commit_steer(commit.clone(), change).await?;
+        let hub = self
+            .routes
+            .hub_for(&self.session_id, &commit.agent_instance_id);
+        if let Some(hub) = hub {
+            let agent_id = self
+                .store
+                .load_projection()
+                .ok()
+                .and_then(|projection| {
+                    projection
+                        .agents
+                        .get(&commit.agent_instance_id)
+                        .map(|agent| agent.identity.agent_spec_id.clone())
+                })
+                .unwrap_or_else(|| "unknown".into());
+            let _ = hub
+                .publish_event(SessionEventEnvelope {
+                    agent_instance_id: commit.agent_instance_id,
+                    agent_id,
+                    cursor: hub.cursor(),
+                    event: SessionEvent::MessageCommitted {
+                        transcript_seq: ack.revision,
+                        message_id: commit.message_id,
+                        source_turn_id: commit.source_turn_id.unwrap_or_default(),
+                        role,
+                    },
+                })
+                .await;
+        }
+        Ok(ack)
+    }
 }
 
 /// Stable per-Session realtime port with the same Agent routing semantics as
@@ -169,6 +209,26 @@ impl ExecutionCommitPort for RepositoryExecutionCommitPort {
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .ok_or(CommitError::IdentityMismatch)?;
                 store.commit_model_step_under_lock(commit, &agent_spec_id)
+            })
+            .await
+    }
+
+    async fn commit_steer(
+        &self,
+        commit: MessageCommit,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.store
+            .run_durable(move |store| {
+                let projection = store
+                    .load_projection()
+                    .map_err(|error| CommitError::Failed(error.to_string()))?;
+                let agent_spec_id = projection
+                    .agents
+                    .get(&commit.agent_instance_id)
+                    .map(|agent| agent.identity.agent_spec_id.clone())
+                    .ok_or(CommitError::IdentityMismatch)?;
+                store.commit_steer_under_lock(commit, &agent_spec_id, change)
             })
             .await
     }

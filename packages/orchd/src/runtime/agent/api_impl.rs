@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "api_queries.rs"]
+mod queries;
+
 #[async_trait]
 impl AgentRuntimeApi for AgentRuntime {
     async fn attach_agent_session(
@@ -188,7 +191,12 @@ impl AgentRuntimeApi for AgentRuntime {
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
-            .try_send(AgentCommand::Input { request, reply })
+            .try_send(AgentCommand::Input {
+                request,
+                input_id: None,
+                submitted_at: None,
+                reply,
+            })
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
                 mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
@@ -196,6 +204,63 @@ impl AgentRuntimeApi for AgentRuntime {
         received
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
+    }
+
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        let scope = self.scope(&input.session_id).await?;
+        scope
+            .authorize_input(
+                input.caller_agent_instance_id.as_deref(),
+                &input.agent_instance_id,
+            )
+            .await?;
+        let handle = scope
+            .agent(&input.agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let input_id = input.input_id.clone();
+        let submitted_at = input.submitted_at;
+        let delivery = input.delivery;
+        let request = input.to_request();
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
+        handle
+            .command_tx
+            .try_send(AgentCommand::Input {
+                request,
+                input_id: Some(input_id.clone()),
+                submitted_at: Some(submitted_at),
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
+                mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
+            })?;
+        let mut receipt = received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)??;
+        receipt.disposition = match (delivery, receipt.disposition) {
+            (_, piko_protocol::InputDisposition::Accepted) => {
+                piko_protocol::InputDisposition::AppliedAsRoot
+            }
+            (
+                piko_protocol::AgentInputDelivery::FollowUp,
+                piko_protocol::InputDisposition::Queued,
+            ) => piko_protocol::InputDisposition::PendingFollowUp,
+            (
+                piko_protocol::AgentInputDelivery::Auto
+                | piko_protocol::AgentInputDelivery::SteerActive,
+                piko_protocol::InputDisposition::Queued,
+            ) => piko_protocol::InputDisposition::PendingSteer,
+            (_, piko_protocol::InputDisposition::Queued) => {
+                piko_protocol::InputDisposition::PendingFollowUp
+            }
+            (_, disposition) => disposition,
+        };
+        receipt.input_id = input_id;
+        Ok(receipt)
     }
 
     async fn run_agent(
@@ -368,39 +433,16 @@ impl AgentRuntimeApi for AgentRuntime {
         session_id: String,
         agent_instance_id: String,
     ) -> Result<Option<AgentSnapshot>, AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        Ok(scope
-            .agent(&agent_instance_id)
+        self.agent_snapshot_impl(session_id, agent_instance_id)
             .await
-            .map(|handle| handle.snapshot_rx.borrow().clone()))
     }
 
     async fn list_agents(&self, session_id: String) -> Result<Vec<AgentSnapshot>, AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        let mut snapshots = scope.snapshots().await;
-        let parents = snapshots
-            .iter()
-            .map(|snapshot| {
-                (
-                    snapshot.identity.agent_instance_id.clone(),
-                    snapshot.identity.parent_agent_instance_id.clone(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        snapshots.sort_by(|left, right| {
-            agent_depth(&parents, &left.identity.agent_instance_id)
-                .cmp(&agent_depth(&parents, &right.identity.agent_instance_id))
-                .then_with(|| {
-                    left.identity
-                        .agent_instance_id
-                        .cmp(&right.identity.agent_instance_id)
-                })
-        });
-        Ok(snapshots)
+        self.list_agents_impl(session_id).await
     }
 
     async fn list_agent_specs(&self) -> Result<Vec<piko_protocol::AgentSpec>, AgentApiError> {
-        Ok(self.execution.services().list_agent_specs().await)
+        self.list_agent_specs_impl().await
     }
 
     async fn agent_inbox(
@@ -408,84 +450,20 @@ impl AgentRuntimeApi for AgentRuntime {
         session_id: String,
         agent_instance_id: String,
     ) -> Result<AgentInboxSnapshot, AgentApiError> {
-        let scope = self.scope(&session_id).await?;
-        let handle = scope
-            .agent(&agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
-        handle
-            .command_tx
-            .send(AgentCommand::Inbox { reply })
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
-        received
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)
+        self.agent_inbox_impl(session_id, agent_instance_id).await
     }
 
     async fn consume_agent_inbox_item(
         &self,
         request: piko_protocol::ConsumeAgentInboxRequest,
     ) -> Result<piko_protocol::ConsumeAgentInboxReceipt, AgentApiError> {
-        let scope = self.scope(&request.session_id).await?;
-        let handle = scope
-            .agent(&request.agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
-        handle
-            .command_tx
-            .send(AgentCommand::ConsumeInbox { request, reply })
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
-        received
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?
+        self.consume_agent_inbox_item_impl(request).await
     }
 
     async fn wait_agent_mailbox(
         &self,
         request: MailboxWaitRequest,
     ) -> Result<MailboxWaitSummary, AgentApiError> {
-        let scope = self.scope(&request.session_id).await?;
-        if let Some(caller) = &request.caller_agent_instance_id {
-            scope
-                .agent(caller)
-                .await
-                .ok_or(AgentApiError::AgentNotFound)?;
-        }
-        let mut receiver = scope.mailbox_events().subscribe();
-        let timeout = tokio::time::Duration::from_millis(request.timeout_ms);
-        let event = tokio::time::timeout(timeout, async {
-            loop {
-                match receiver.recv().await {
-                    Ok(event) => {
-                        if request
-                            .agent_instance_id
-                            .as_deref()
-                            .is_some_and(|filter| event.agent_instance_id() != filter)
-                        {
-                            continue;
-                        }
-                        return Some(event);
-                    }
-                    // Lagged events are skipped: waiting continues on the next
-                    // update rather than failing or replaying.
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
-                }
-            }
-        })
-        .await
-        .unwrap_or(None);
-
-        let timed_out = event.is_none();
-        let agents = self.list_agents(request.session_id).await?;
-        Ok(MailboxWaitSummary {
-            timed_out,
-            event,
-            agents,
-        })
+        self.wait_agent_mailbox_impl(request).await
     }
 }

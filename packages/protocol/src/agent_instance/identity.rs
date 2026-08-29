@@ -37,11 +37,11 @@ pub enum AgentActivity {
 /// [`AgentActivity`] — not a separate orchd-owned state machine. Maps to ACP
 /// v2-style session readiness semantics (`idle` / `running` / `requires_action`).
 ///
-/// **Sole mapping tables** for client projection:
+/// Compatibility mapping tables for the pre-F-51 client projection:
 /// - [`Self::from_activity`] — host/runtime [`AgentActivity`] → foreground names
 /// - [`Self::project`] — full priority projection (blocked / turn / activity)
 ///
-/// Clients must call these helpers rather than inventing parallel tables.
+/// New client work surfaces must use [`Self::project_work`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentForeground {
@@ -76,7 +76,7 @@ impl AgentForeground {
         }
     }
 
-    /// Shared client foreground projection (F-22 / D-34).
+    /// Compatibility foreground projection (F-22 / D-34).
     ///
     /// Priority (highest first):
     /// 1. `blocked_on_user` (pending approval or interaction for this agent)
@@ -85,8 +85,8 @@ impl AgentForeground {
     /// 3. Host [`AgentActivity`] via [`from_activity`](Self::from_activity)
     /// 4. [`Idle`](Self::Idle)
     ///
-    /// TUI and client-core must use this function so Queued / Running /
-    /// RequiresAction / Cancelling stay aligned.
+    /// Retained for clients that still consume Turn/Activity projections;
+    /// F-51 clients use [`Self::project_work`] instead.
     pub fn project(
         blocked_on_user: bool,
         turn_status: Option<crate::TurnStatus>,
@@ -108,12 +108,41 @@ impl AgentForeground {
         }
         activity.map(Self::from_activity).unwrap_or(Self::Idle)
     }
+
+    /// Project the canonical Agent work view using the shared priority:
+    /// requires-action > cancelling > running > queued > idle.
+    pub fn project_work(
+        active_run: Option<&crate::ActiveRunSnapshot>,
+        pending_action: Option<&crate::PendingActionSummary>,
+        has_queued_input: bool,
+    ) -> Self {
+        if pending_action.is_some() {
+            return Self::RequiresAction;
+        }
+        if let Some(run) = active_run {
+            return match run.state {
+                crate::AgentRunViewState::RequiresAction => Self::RequiresAction,
+                crate::AgentRunViewState::Cancelling => Self::Cancelling,
+                crate::AgentRunViewState::Starting | crate::AgentRunViewState::Running => {
+                    Self::Running
+                }
+                crate::AgentRunViewState::Completed
+                | crate::AgentRunViewState::Failed
+                | crate::AgentRunViewState::Cancelled => Self::Idle,
+            };
+        }
+        if has_queued_input {
+            Self::Queued
+        } else {
+            Self::Idle
+        }
+    }
 }
 
 #[cfg(test)]
 mod foreground_tests {
     use super::*;
-    use crate::TurnStatus;
+    use crate::{ActiveRunSnapshot, AgentRunViewState, PendingActionSummary, TurnStatus};
 
     #[test]
     fn from_activity_is_sole_activity_table() {
@@ -180,6 +209,58 @@ mod foreground_tests {
         assert_eq!(
             AgentForeground::project(false, None, None),
             AgentForeground::Idle
+        );
+    }
+
+    #[test]
+    fn project_work_treats_terminal_runs_as_idle() {
+        let mut run = ActiveRunSnapshot {
+            run_id: "run".into(),
+            root_input_id: "input".into(),
+            user_turn_id: None,
+            state: AgentRunViewState::Completed,
+            active_model_step_id: None,
+            started_at: 1,
+        };
+        assert_eq!(
+            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::Idle
+        );
+        run.state = AgentRunViewState::Failed;
+        assert_eq!(
+            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::Idle
+        );
+        run.state = AgentRunViewState::Cancelled;
+        assert_eq!(
+            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::Idle
+        );
+    }
+
+    #[test]
+    fn project_work_prioritizes_action_and_cancellation() {
+        let mut run = ActiveRunSnapshot {
+            run_id: "run".into(),
+            root_input_id: "input".into(),
+            user_turn_id: None,
+            state: AgentRunViewState::Running,
+            active_model_step_id: None,
+            started_at: 1,
+        };
+        let action = PendingActionSummary {
+            action_id: "action".into(),
+            kind: "approval".into(),
+            summary: None,
+        };
+        assert_eq!(
+            AgentForeground::project_work(Some(&run), Some(&action), true),
+            AgentForeground::RequiresAction
+        );
+        run.state = AgentRunViewState::Cancelling;
+        assert_eq!(
+            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::Cancelling
         );
     }
 }

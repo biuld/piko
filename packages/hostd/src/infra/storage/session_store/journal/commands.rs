@@ -1,9 +1,16 @@
 use async_trait::async_trait;
 use piko_orchd_api::AgentCommitPort;
-use piko_protocol::{AgentCommitAck, AgentDurableCommand, AgentInboxItem, CommitError};
-use piko_session_store::{EventData, ExecutionStartedV1};
+use piko_protocol::{
+    AgentCommitAck, AgentDurableCommand, AgentInboxItem, AgentInputDisposition, CommitError,
+};
+use piko_session_store::EventData;
 
 use super::SessionStore;
+
+#[path = "commands_inputs.rs"]
+mod inputs;
+#[path = "commands_queue.rs"]
+mod queue;
 
 #[async_trait]
 impl AgentCommitPort for SessionStore {
@@ -90,6 +97,12 @@ impl SessionStore {
                     }],
                 )
             }
+            AgentDurableCommand::AgentInputAdmitted { admission } => {
+                inputs::admit(&aggregate, session_id, admission)?
+            }
+            AgentDurableCommand::AgentInputDispositionChanged { change } => {
+                inputs::change_disposition(&aggregate, session_id, change)?
+            }
             AgentDurableCommand::RunStarted {
                 agent_instance_id,
                 run_id,
@@ -100,140 +113,43 @@ impl SessionStore {
                 prompt_assembly_version,
                 prompt_digest,
                 started_at,
-            } => {
-                if let Some(existing) = aggregate
-                    .executions
-                    .values()
-                    .find(|execution| execution.started.run_id == run_id)
-                {
-                    if existing.started.execution_id == internal_execution_id
-                        && existing.started.agent_instance_id == agent_instance_id
-                        && existing.started.request_id == request_id
-                        && existing.started.source_turn_id == source_turn_id
-                        && existing.started.detached_recipient_agent_instance_id
-                            == detached_recipient_agent_instance_id
-                        && existing.started.prompt_assembly_version == prompt_assembly_version
-                        && existing.started.prompt_digest == prompt_digest
-                    {
-                        return Ok(agent_ack(
-                            session_id,
-                            &agent_instance_id,
-                            aggregate.revision,
-                        ));
-                    }
-                    return Err(CommitError::IdempotencyConflict);
-                }
-                (
-                    stable("execution-start", &[session_id, &run_id]),
-                    agent_instance_id.clone(),
+                input,
+            } => inputs::start_run(
+                &aggregate,
+                session_id,
+                AgentDurableCommand::RunStarted {
+                    agent_instance_id,
+                    run_id,
+                    internal_execution_id,
+                    request_id,
+                    source_turn_id,
+                    detached_recipient_agent_instance_id,
+                    prompt_assembly_version,
+                    prompt_digest,
                     started_at,
-                    vec![EventData::ExecutionStarted(ExecutionStartedV1 {
-                        run_id,
-                        execution_id: internal_execution_id,
-                        request_id,
-                        admitted_revision: aggregate.revision,
-                        base_message_id: admitted_base(&aggregate, &agent_instance_id),
-                        tree_base_entry_id: admitted_tree_base(&aggregate, &agent_instance_id),
-                        agent_instance_id,
-                        source_turn_id,
-                        detached_recipient_agent_instance_id,
-                        prompt_assembly_version,
-                        prompt_digest,
-                        started_at,
-                    })],
-                )
-            }
+                    input,
+                },
+            )?,
             AgentDurableCommand::RunTerminal {
                 run_id,
                 report,
                 finished_at,
-            } => {
-                let execution = aggregate
-                    .executions
-                    .values()
-                    .find(|execution| execution.started.run_id == run_id)
-                    .ok_or(CommitError::IdentityMismatch)?;
-                if execution.report.as_ref() == Some(&report)
-                    && execution.finished_at == Some(finished_at)
-                {
-                    return Ok(agent_ack(
-                        session_id,
-                        &report.agent_instance_id,
-                        aggregate.revision,
-                    ));
-                }
-                if execution.report.is_some() {
-                    return Err(CommitError::IdempotencyConflict);
-                }
-                (
-                    stable("execution-finish", &[session_id, &run_id]),
-                    report.agent_instance_id.clone(),
-                    finished_at,
-                    vec![EventData::ExecutionFinished {
-                        execution_id: execution.started.execution_id.clone(),
-                        report,
-                        finished_at,
-                    }],
-                )
-            }
+            } => queue::finish_run(&aggregate, session_id, run_id, report, finished_at)?,
             AgentDurableCommand::InputQueued {
                 agent_instance_id,
                 queued_input,
-            } => {
-                if let Some(existing) = aggregate
-                    .queued_inputs
-                    .iter()
-                    .find(|input| input.queued_input_id == queued_input.queued_input_id)
-                {
-                    if existing == &queued_input {
-                        return Ok(agent_ack(
-                            session_id,
-                            &agent_instance_id,
-                            aggregate.revision,
-                        ));
-                    }
-                    return Err(CommitError::IdempotencyConflict);
-                }
-                let now = chrono::Utc::now().timestamp_millis();
-                (
-                    stable("input-queued", &[session_id, &queued_input.queued_input_id]),
-                    agent_instance_id,
-                    now,
-                    vec![EventData::AgentInputQueued {
-                        input: queued_input,
-                    }],
-                )
-            }
+            } => queue::enqueue(&aggregate, session_id, agent_instance_id, queued_input)?,
             AgentDurableCommand::QueuedInputCancelled {
                 agent_instance_id,
                 queued_input_id,
                 cancelled_at,
-            } => {
-                let Some(input) = aggregate
-                    .queued_inputs
-                    .iter()
-                    .find(|input| input.queued_input_id == queued_input_id)
-                else {
-                    return Ok(agent_ack(
-                        session_id,
-                        &agent_instance_id,
-                        aggregate.revision,
-                    ));
-                };
-                if input.request.agent_instance_id != agent_instance_id {
-                    return Err(CommitError::IdentityMismatch);
-                }
-                (
-                    stable("input-cancel", &[session_id, &queued_input_id]),
-                    agent_instance_id,
-                    cancelled_at,
-                    vec![EventData::AgentInputDequeued {
-                        queued_input_id,
-                        reason: "cancelled".into(),
-                        dequeued_at: cancelled_at,
-                    }],
-                )
-            }
+            } => queue::cancel(
+                &aggregate,
+                session_id,
+                agent_instance_id,
+                queued_input_id,
+                cancelled_at,
+            )?,
             AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id,
                 queued_input_id,
@@ -245,64 +161,20 @@ impl SessionStore {
                 prompt_assembly_version,
                 prompt_digest,
                 started_at,
-            } => {
-                if let Some(existing) = aggregate
-                    .executions
-                    .values()
-                    .find(|execution| execution.started.run_id == run_id)
-                {
-                    if existing.started.execution_id == internal_execution_id
-                        && existing.started.agent_instance_id == agent_instance_id
-                        && existing.started.request_id == request_id
-                        && existing.started.source_turn_id == source_turn_id
-                        && existing.started.detached_recipient_agent_instance_id
-                            == detached_recipient_agent_instance_id
-                        && existing.started.prompt_assembly_version == prompt_assembly_version
-                        && existing.started.prompt_digest == prompt_digest
-                    {
-                        return Ok(agent_ack(
-                            session_id,
-                            &agent_instance_id,
-                            aggregate.revision,
-                        ));
-                    }
-                    return Err(CommitError::IdempotencyConflict);
-                }
-                let queued = aggregate
-                    .queued_inputs
-                    .iter()
-                    .find(|input| input.queued_input_id == queued_input_id)
-                    .ok_or(CommitError::IdentityMismatch)?;
-                if queued.request.agent_instance_id != agent_instance_id {
-                    return Err(CommitError::IdentityMismatch);
-                }
-                (
-                    stable("queued-execution-start", &[session_id, &run_id]),
-                    agent_instance_id.clone(),
-                    started_at,
-                    vec![
-                        EventData::AgentInputDequeued {
-                            queued_input_id,
-                            reason: "started".into(),
-                            dequeued_at: started_at,
-                        },
-                        EventData::ExecutionStarted(ExecutionStartedV1 {
-                            run_id,
-                            execution_id: internal_execution_id,
-                            request_id,
-                            admitted_revision: aggregate.revision,
-                            base_message_id: admitted_base(&aggregate, &agent_instance_id),
-                            tree_base_entry_id: admitted_tree_base(&aggregate, &agent_instance_id),
-                            agent_instance_id,
-                            source_turn_id,
-                            detached_recipient_agent_instance_id,
-                            prompt_assembly_version,
-                            prompt_digest,
-                            started_at,
-                        }),
-                    ],
-                )
-            }
+            } => queue::start_queued(
+                &aggregate,
+                session_id,
+                agent_instance_id,
+                queued_input_id,
+                run_id,
+                internal_execution_id,
+                request_id,
+                source_turn_id,
+                detached_recipient_agent_instance_id,
+                prompt_assembly_version,
+                prompt_digest,
+                started_at,
+            )?,
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id,
                 report,
@@ -376,6 +248,13 @@ impl SessionStore {
                 )
             }
         };
+        if events.is_empty() {
+            return Ok(agent_ack(
+                session_id,
+                &agent_instance_id,
+                aggregate.revision,
+            ));
+        }
         let revision = self
             .commit_events(&commit_id, committed_at, events)
             .map_err(Self::commit_error)?;
@@ -385,6 +264,19 @@ impl SessionStore {
 
 fn stable(kind: &str, parts: &[&str]) -> String {
     piko_orchd_api::stable_internal_id(kind, parts)
+}
+
+fn canonical_disposition(disposition: AgentInputDisposition) -> Option<AgentInputDisposition> {
+    match disposition {
+        AgentInputDisposition::Accepted => Some(AgentInputDisposition::AppliedAsRoot),
+        AgentInputDisposition::Queued => Some(AgentInputDisposition::PendingFollowUp),
+        AgentInputDisposition::PendingFollowUp
+        | AgentInputDisposition::PendingSteer
+        | AgentInputDisposition::AppliedAsRoot
+        | AgentInputDisposition::AppliedToStep
+        | AgentInputDisposition::Cancelled => Some(disposition),
+        AgentInputDisposition::Duplicate | AgentInputDisposition::Overload => None,
+    }
 }
 
 fn admitted_base(

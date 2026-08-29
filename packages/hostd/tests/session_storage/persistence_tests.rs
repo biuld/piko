@@ -78,6 +78,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
                 started_at: 1,
+                input: None,
             },
         )
         .await

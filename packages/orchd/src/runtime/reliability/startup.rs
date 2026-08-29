@@ -86,9 +86,12 @@ impl InputCommittedStartup {
 fn agent_receipt(prepared: &PreparedExecution) -> AgentInputReceipt {
     let receipt = prepared.receipt();
     AgentInputReceipt {
-        request_id: receipt.request_id,
+        input_id: receipt.request_id.clone(),
+        request_id: receipt.request_id.clone(),
         session_id: receipt.session_id,
         agent_instance_id: receipt.agent_instance_id,
         disposition: InputDisposition::Accepted,
+        run_id: Some(receipt.request_id),
+        queued_position: None,
     }
 }

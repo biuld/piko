@@ -30,8 +30,11 @@ impl AgentActor {
     pub(super) async fn start_execution(
         &mut self,
         request: SendAgentInputRequest,
+        input_id: Option<String>,
+        submitted_at: Option<i64>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
-        self.start_execution_from(request, None, None).await
+        self.start_execution_from(request, None, None, input_id, submitted_at)
+            .await
     }
 
     pub(super) async fn start_execution_from(
@@ -39,9 +42,15 @@ impl AgentActor {
         request: SendAgentInputRequest,
         queued_input_id: Option<String>,
         detached_recipient_agent_instance_id: Option<String>,
+        input_id: Option<String>,
+        submitted_at: Option<i64>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         let run_id = request.request_id.clone();
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
+        let canonical_input_id = input_id
+            .clone()
+            .or_else(|| queued_input_id.clone())
+            .unwrap_or_else(|| request.request_id.clone());
         let run_span = tracing::info_span!(
             parent: self.pending_run_parent.take().unwrap_or_else(tracing::Span::none),
             "agent.run",
@@ -57,12 +66,13 @@ impl AgentActor {
         if let Some(parent_agent_instance_id) = request.caller_agent_instance_id.as_deref() {
             run_span.record("parent_agent_instance_id", parent_agent_instance_id);
         }
-        self.run_state = AgentRunState::Starting {
-            execution_id: execution_id.clone(),
-        };
+        let started_at = chrono::Utc::now().timestamp_millis();
+        let input_submitted_at = submitted_at.unwrap_or(started_at);
+        let mut canonical_input =
+            piko_protocol::AgentInput::from_request(&request, input_submitted_at);
+        canonical_input.input_id = canonical_input_id.clone();
         let (cancellation_generation, startup_cancel) = self.run_cancellation.begin();
         self.current_run_cancellation_generation = Some(cancellation_generation);
-        self.publish_snapshot();
         let run_context = match self
             .execution
             .prepare_run_context(&request, &self.spec, &run_id)
@@ -110,6 +120,7 @@ impl AgentActor {
                         agent_id: self.identity.agent_spec_id.clone(),
                         ..Default::default()
                     },
+                    root_input_id: Some(canonical_input_id.clone()),
                 },
                 run_context.routes,
                 run_span,
@@ -151,7 +162,8 @@ impl AgentActor {
                 detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
                 prompt_assembly_version,
                 prompt_digest,
-                started_at: chrono::Utc::now().timestamp_millis(),
+                started_at,
+                input: Some(canonical_input),
             },
         };
         let startup = match RunStartupScope::new(prepared)
@@ -165,16 +177,26 @@ impl AgentActor {
                 return Err(error);
             }
         };
+        // The actor becomes observable as Starting only after the durable
+        // execution admission has acknowledged. Preparation and cancellation
+        // remain local, so a failed admission cannot publish a phantom run.
+        self.run_state = AgentRunState::Starting {
+            execution_id: execution_id.clone(),
+        };
+        self.publish_snapshot();
         let startup = match startup.commit_input().await {
             Ok(startup) => startup,
             Err(failure) => {
+                let mut failure = failure;
+                failure.receipt.input_id = canonical_input_id.clone();
                 return self
                     .finish_failed_started_run(run_id, execution_id, "input commit failed", failure)
                     .await;
             }
         };
         if startup_cancel.is_cancelled() {
-            let receipt = startup.receipt();
+            let mut receipt = startup.receipt();
+            receipt.input_id = canonical_input_id.clone();
             let (committed_input, input_message_id) = startup.committed_input();
             startup.rollback().await;
             return self
@@ -226,10 +248,13 @@ impl AgentActor {
         });
 
         Ok(AgentInputReceipt {
+            input_id: canonical_input_id,
             request_id: receipt.request_id,
             session_id: receipt.session_id,
             agent_instance_id: self.identity.agent_instance_id.clone(),
             disposition: InputDisposition::Accepted,
+            run_id: Some(run_id),
+            queued_position: None,
         })
     }
 

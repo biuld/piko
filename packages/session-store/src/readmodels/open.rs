@@ -35,7 +35,11 @@ pub(crate) fn load_or_rebuild(
     } else {
         None
     };
-    if let Some((aggregate, trajectory)) = fast {
+    if let Some((mut aggregate, trajectory)) = fast {
+        // `agent_work` is an in-memory shadow and is intentionally omitted
+        // from the published JSON. Rebuild it before exposing an opened
+        // session so fast-path loads have the same value as journal replay.
+        aggregate.rebuild_work_projection();
         if normalize_segment_boundary(path, aggregate.revision)? {
             recovery.repaired = true;
         }
@@ -59,7 +63,8 @@ pub(crate) fn load_or_rebuild(
             "journal identity/generation mismatch".into(),
         ));
     }
-    let (aggregate, trajectory, checksum) = rebuild_from_commits(path, identity, &commits)?;
+    let (mut aggregate, trajectory, checksum) = rebuild_from_commits(path, identity, &commits)?;
+    aggregate.rebuild_work_projection();
     if aggregate.revision > 0
         && (aggregate.session_id.as_deref() != Some(identity.session_id.as_str())
             || aggregate.cwd.as_deref() != Some(identity.cwd.as_str()))

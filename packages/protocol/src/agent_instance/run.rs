@@ -104,10 +104,34 @@ pub struct SteerAgentRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInputReceipt {
+    #[serde(default)]
+    pub input_id: AgentInputId,
     pub request_id: String,
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
     pub disposition: crate::InputDisposition,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued_position: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInterruptReceipt {
+    pub session_id: String,
+    pub agent_instance_id: AgentInstanceId,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputCancelReceipt {
+    pub input_id: AgentInputId,
+    pub request_id: String,
+    pub session_id: String,
+    pub agent_instance_id: AgentInstanceId,
+    pub accepted: bool,
 }
 
 /// Durable follow-up input owned by one AgentInstance.
@@ -116,6 +140,10 @@ pub struct AgentInputReceipt {
 pub struct DurableAgentInput {
     pub queued_input_id: String,
     pub request: SendAgentInputRequest,
+    /// Canonical submission time when this compatibility queue row was
+    /// created from an AgentInput. Legacy queue rows omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detached_recipient_agent_instance_id: Option<AgentInstanceId>,
 }

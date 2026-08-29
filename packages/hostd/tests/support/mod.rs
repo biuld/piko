@@ -87,10 +87,13 @@ pub fn successful_turn_run(
     piko_hostd::ports::AgentRunHandle {
         address,
         receipt: piko_protocol::AgentInputReceipt {
+            input_id: turn_id.clone(),
             request_id: turn_id,
             session_id,
             agent_instance_id: root_agent_instance_id.clone(),
             disposition: piko_protocol::InputDisposition::Accepted,
+            run_id: None,
+            queued_position: None,
         },
         process: test_agent_run_process(started, completion),
     }

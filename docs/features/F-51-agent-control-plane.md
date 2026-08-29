@@ -8,282 +8,257 @@
 
 ## Summary
 
-piko has one mental model for work sent to an AgentInstance. Every start,
-steer, follow-up, queue entry, cancellation, Run, Execution, and ModelStep is
-part of that model regardless of whether the initiator is a user, another
-agent, or the system. A Turn is the optional user-interaction envelope for a
-Run, not the parent of all agent work. The append-only host journal is the sole
-durable authority; clients render host-authored projections and never combine
-independent lifecycle guesses.
+piko presents and controls all work sent to an AgentInstance through one
+host-authoritative, two-layer model. AgentInstance, AgentInput, ModelStep, and
+their causal lifecycle facts form the primitive layer. Run, Execution, Turn,
+Queue, and AgentForeground are derived scopes or views rather than competing
+lifecycle authorities.
+
+This feature is a model refactor. It replaces fragmented Turn, queue, steer,
+and runtime activity ownership while preserving compatible product commands
+during migration.
 
 ## Problem
 
-The existing implementation has the right concepts but not one operational
-model:
+The current system cannot answer one simple question from one authority: what
+is this agent doing, and what will it do next?
 
-- the documented `Turn → Run → Execution` hierarchy conflicts with detached
-  child Runs that intentionally have no Turn;
-- hostd projects active Turns, orchd projects Agent activity, and clients merge
-  them to guess whether an AgentInstance is working;
-- follow-ups are durably queued through the Agent runtime, but the host queue
-  event does not project them and the TUI keeps a process-local shadow queue;
-- steer is accepted through a separate path, temporarily tracked in host
-  memory, and restricted to host-owned Turns even when a detached Agent Run is
-  active;
-- cancellation can name a Turn, AgentInstance, queued input, Run, or Execution,
-  but those identities do not yet enter through one control boundary;
-- accepted input between admission and application is not represented by one
-  durable, queryable lifecycle.
+- hostd owns an active-Turn state machine, while detached child Runs have no
+  Turn;
+- orchd exposes Agent activity and execution state, but accepted steers and
+  follow-ups do not share one durable lifecycle;
+- the runtime queue is durable in part, while clients also keep local queue
+  state;
+- Run and Execution usually identify the same lifetime, yet the documented
+  hierarchy encourages two authoritative state machines;
+- control behavior changes depending on whether work happened to originate
+  from a user Turn.
 
-Without a shared model, storage cannot answer what is active or queued,
-clients cannot display one authoritative state, and product interactions
-accidentally depend on how the Run was started.
+Storage, display, recovery, and interaction therefore derive different answers
+from overlapping state.
 
-## Canonical mental model
+## Product mental model
 
 ```text
+Primitive facts
 Session
-└── AgentInstance                              long-lived addressable actor
-    ├── active Run?                            current logical work
-    │   ├── starting AgentInput                creates the Run
-    │   ├── applied/pending steer AgentInputs  join the same Run
-    │   └── Execution 1..N                     concrete attempts
-    │       └── ModelStep 1..N
-    │           └── Thought / ToolCall
-    └── queued AgentInput 0..N                  future Runs, durable FIFO
+└── AgentInstance
+    ├── AgentInput 0..N
+    └── ModelStep 0..N
+        └── Message / Thought / ToolCall / ToolResult
 
-Turn 0..1 ── source relation ── Run
+Derived scopes
+Run                = root input + causal inputs/steps/actions + outcome
+Execution          = runtime processing interval for that work
+UserTurnView       = user input + correlated conversation/work facts
+Queue              = ordered inputs whose work has not started
+AgentForeground    = projection of active work/queue/pending action
 ```
 
-### Entity meanings
+### Primitive meanings
 
-| Entity | Meaning | Identity and lifetime |
+| Primitive | Product meaning | Independent reason to exist |
 |---|---|---|
-| Session | Durable collaboration and history boundary | Owns the journal and AgentInstance tree |
-| AgentInstance | Long-lived addressable actor with lifecycle, inbox, one active Run, and one input queue | Survives many Runs |
-| AgentInput | Immutable, idempotent request to start, steer, or queue work | Exists from durable admission to applied/cancelled terminal state |
-| Turn | User-visible interaction envelope | Optional one-to-one source relation to a Run; absent for detached agent/system work |
-| Run | Logical processing of one starting AgentInput plus zero or more steers | Always belongs to one AgentInstance; may reference one Turn |
-| Execution | Concrete attempt to realize a Run | One Run has one or more attempts over retry/recovery |
-| ModelStep | One model request/response boundary inside one Execution | Ordered within its Execution |
-| ToolCall | Model-declared action from one ModelStep | Result commits separately but remains attributed to the same step/run |
+| AgentInstance | Long-lived addressable collaborator | Receives controls and serializes work across many Runs |
+| AgentInput | Immutable, idempotent request to start, steer, or follow up | Can be accepted, pending, applied, or cancelled before any derived scope exists |
+| ModelStep | One model request/response boundary | Atomically relates assistant output and tool declarations for recovery |
+| Causal lifecycle facts | Immutable relations and outcomes | Preserve root, application, interruption, and terminal truth without another mutable aggregate |
 
-### Independent state axes
+### Derived scopes and views
 
-- **Agent lifecycle**: open, closed, terminated, unavailable.
-- **Agent foreground**: idle, queued, running, requires action, cancelling.
-- **Input state**: queued, pending steer, applied, cancelled.
-- **Turn state**: queued, running, waiting for action, cancelling, terminal.
-- **Run state**: admitted, running, waiting for action, cancelling, terminal.
-- **Execution state**: accepted, running, succeeded, failed, cancelled,
-  interrupted.
-- **ModelStep state**: running, completed, failed, cancelled.
+- A Run groups facts sharing one root AgentInput. It is the logical-work view
+  used for history, control resolution, and diagnostics, but not an
+  independently authoritative state machine.
+- Execution groups runtime start/finish and recovery facts for that work. It
+  may retain a stable diagnostic ID without owning product state.
+- A UserTurnView has stable product identity when useful. Before work starts it
+  reflects the starting AgentInput; afterward it reflects correlated work.
+- The queue is not independently edited. Queueing and dequeueing change the
+  state of a stable AgentInput.
+- AgentForeground is computed by the host and supplied to all clients.
 
-These axes are correlated by stable IDs; none is inferred by renaming another
-axis. Agent foreground is a host-authored projection of the underlying facts,
-not another state machine.
-
-## User journeys
-
-1. A user sends to an idle viewed agent. One durable AgentInput is admitted, a
-   Turn and Run start, an Execution performs ordered ModelSteps, and all
-   clients observe one correlated lifecycle.
-2. A user steers any running viewed agent, including a detached child. The
-   steer is durably accepted against the current Run, appears as pending, and
-   later records the ModelStep boundary at which it was applied. It creates no
-   Turn or Run.
-3. A user queues a follow-up for a busy agent. A new queued Turn and one durable
-   AgentInput appear in the host projection. When the current Run terminals,
-   the input leaves the queue and starts its Run exactly once.
-4. A user cancels a queued follow-up from another client or after restart. The
-   host cancels it by stable input identity, terminals the related queued Turn,
-   and every client converges without local queue bookkeeping.
-5. A user presses Esc while viewing a running AgentInstance. The current Run
-   is interrupted whether or not it has a Turn; any related Turn preserves its
-   own cancelling/terminal lifecycle.
-6. A crash occurs after a steer or follow-up was accepted. Recovery determines
-   from the journal whether the input remains pending, was applied, or was
-   cancelled and never guesses from transcript adjacency.
+Derived does not mean transient or absent from storage. Existing Run,
+Execution, and Turn records may remain as materialized projections,
+compatibility indexes, and runtime caches. Their state must converge from the
+primitive facts rather than become a second authority.
 
 ## Input admission
 
-Every input carries a stable request ID, target AgentInstance, content,
-origin, delivery intent, and optional source Turn. Delivery behavior is:
+Every input has a stable input ID, idempotency request ID, target
+AgentInstance, origin, content, submission order, and delivery intent.
 
-| Delivery | Agent idle | Agent running |
+| Delivery intent | Agent idle | Agent running |
 |---|---|---|
-| Start when idle | Start a Run | Reject |
-| Steer active | Reject | Attach durably to the active Run |
-| Follow up | Start a Run | Queue durably for a future Run |
-| Auto | Start a Run | Steer the active Run |
+| Start | Start one AgentRun | Reject |
+| Steer | Reject | Bind to and join the active AgentRun |
+| Follow up | Start one AgentRun | Remain pending for a future AgentRun |
+| Auto | Start one AgentRun | Bind to and join the active AgentRun |
 
-Admission returns an authoritative disposition and stable identity. The same
-request retried with identical content is a duplicate; conflicting reuse is
-rejected. Agent lifecycle and queue limits are evaluated before acceptance.
+Admission returns an authoritative disposition and stable IDs. Retrying the
+same request with identical content is idempotent; conflicting reuse is
+rejected. Acceptance is durable before success is reported.
 
-User product commands choose explicit delivery. `Auto` remains useful for
-agent/system callers but must not hide whether a user requested steer or
-follow-up.
+## Lifecycle behavior
 
-## Steer behavior
+### AgentInput
 
-- Steer targets the AgentInstance's active Run, not an active Turn.
-- Acceptance is linearized against the active Run identity. A terminal race
-  rejects without retargeting a later Run.
-- Accepted steer becomes durable before success is returned.
-- Pending steers retain submission order and are applied at deterministic
-  ModelStep boundaries.
-- Application records the owning Run and consuming ModelStep. Once applied, a
-  steer cannot be dequeued or cancelled as pending input.
-- A detached Run and a Turn-backed Run have identical steer semantics.
+An accepted AgentInput is in exactly one effective disposition:
 
-## Follow-up queue behavior
+- pending follow-up;
+- pending steer bound to one active AgentRun;
+- applied to start one AgentRun;
+- applied to one ModelStep as steer;
+- cancelled before application.
 
-- The queue belongs to one AgentInstance and is durable FIFO.
-- A queue row has a stable input ID, origin, content preview, submission time,
-  delivery intent, and optional Turn/recipient relation.
-- Transition from queued input to Run start is atomic and exactly once.
-- Cancelling a row is idempotent and addresses the input, not its display
-  position.
-- A user-origin follow-up has a queued Turn immediately, so its visible
-  lifecycle survives restart before the Run starts.
-- Queue capacity and overload are explicit admission outcomes.
-- Host projections expose the complete queue needed by clients; clients keep
-  no authoritative shadow stack.
+The transition from pending follow-up to Run start is ordered and exactly
+once. A pending steer cannot retarget a later Run after a terminal race.
 
-## Cancellation and control
+### Derived Run
 
-The control plane distinguishes intent:
+A Run is derived from one root AgentInput and every input, ModelStep, tool,
+pending-action, interruption, and outcome fact causally attached to that root.
+At most one causal root is active per AgentInstance. A later follow-up becomes
+a new root rather than extending terminal work.
 
-| Intent | Stable target | Effect |
+### ModelStep
+
+ModelSteps remain ordered within a Run. Each committed step atomically relates
+the assistant message and tool declarations needed for reliable observation
+and recovery. Tool results may commit later while retaining Run and step
+correlation.
+
+## User journeys
+
+1. A user submits to an idle agent. The host admits one AgentInput; it starts
+   one AgentRun. The UI shows a UserTurnView derived from those facts.
+2. A user steers a running detached child. The input is durably bound to the
+   current AgentRun and later records the ModelStep that consumed it. No Turn
+   or new Run is created.
+3. A user submits a follow-up to a busy agent. The input appears immediately in
+   the host projection. Its UserTurnView is queued because the input is
+   pending, not because another Turn state machine was advanced.
+4. A user cancels a queued follow-up after restart or from another client. The
+   stable AgentInput becomes cancelled and every projection converges.
+5. A user presses Esc while viewing active work. The current AgentRun is
+   interrupted whether or not it has a UserTurnView.
+6. A crash occurs after input acceptance. Replay determines whether the input
+   is pending, applied, or cancelled without transcript adjacency or client
+   memory.
+
+## Steer and queue behavior
+
+- Steer acceptance is linearized against the active causal root represented by
+  the current AgentRun view.
+- Pending steers retain admission order and apply at deterministic ModelStep
+  boundaries.
+- Follow-ups are ordered pending AgentInputs owned by the AgentInstance.
+- Queue cancellation addresses input identity, never a display position.
+- A Run terminal does not cancel later follow-ups.
+- Capacity and lifecycle rejection are explicit admission outcomes.
+- Clients retain no authoritative shadow queue or pending-steer counter.
+
+## Control contract
+
+| Intent | Canonical target | Effect |
 |---|---|---|
-| Interrupt current work | AgentInstance | Cancel the active Run/Execution; keep the agent reusable |
-| Cancel queued work | AgentInput | Remove exactly one pending follow-up; terminal related Turn if present |
-| Cancel exact Turn | Turn | Compatibility/product operation resolved through the same service |
-| Close/reopen agent | AgentInstance | Change future-input admission, not history |
+| Submit work | AgentInstance + AgentInput | Start, steer, or follow up according to explicit delivery |
+| Interrupt current work | AgentInstance | Cancel the active AgentRun while keeping the agent reusable |
+| Cancel pending work | AgentInput | Cancel exactly one unapplied input |
+| Cancel displayed Turn | UserTurnView | Resolve to its pending input or active Run, then use the same controls |
+| Close/reopen agent | AgentInstance | Change future admission, not historical work |
 
-Cancellation acknowledgement and terminal outcome are separate. Idle races
-are benign unaccepted results. A Run terminal never implicitly cancels later
-queued inputs.
+Acknowledgement and terminal outcome are separate. An idle interrupt race is
+a benign unaccepted result and can never affect a later Run.
 
 ## Storage and recovery contract
 
-The journal records enough facts to reconstruct without private runtime state:
+The journal stores enough primitive facts to reconstruct:
 
-- AgentInput admission and immutable payload identity;
-- queued, applied, and cancelled input transitions;
-- durable Turn start/status/terminal facts;
-- Run admission/start/terminal and its optional Turn relation;
-- every Execution attempt and terminal result;
+- immutable AgentInput admission and disposition changes;
+- the causal root established by a starting input and its terminal outcome;
+- which causal root accepted a steer and which ModelStep applied it;
 - required ModelStep/message/tool relations;
-- pending action and inbox facts owned by their existing features.
+- existing Agent lifecycle and pending-action facts.
 
-Realtime deltas may be lost. Query/read-model paths recover Agent work,
-queues, Turns, Runs, Executions, and ModelSteps entirely from durable facts.
+Run, Execution, UserTurnView, queue membership/order, and AgentForeground are
+materialized from those facts. Existing records remain usable for runtime
+recovery and trajectory correlation, but this feature adds no independent
+derived-scope lifecycle or multi-attempt requirement.
+
+Realtime deltas may be lost. Query/read-model paths recover the same current
+work and queue state entirely from the journal-backed read models.
 
 ## Display and interaction contract
 
-Clients receive one host-authored per-agent work projection containing:
-
-- Agent lifecycle and derived foreground;
-- active Run and optional Turn relation;
-- current Execution/ModelStep status needed for presentation;
-- pending steers and queued follow-ups;
-- pending approval/interaction ownership;
-- stable IDs for interrupt and queued-input cancellation.
-
-TUI and desktop use the same projection. They may keep ephemeral editor drafts,
-selection, animation, and optimistic command correlation, but never own queue
-membership or lifecycle truth.
+Clients receive one host-authored per-agent projection containing Agent
+lifecycle, foreground, active Run, pending steers, pending follow-ups, pending
+action, and stable control IDs. User Turn views are supplied by the host from
+the same facts.
 
 For the viewed AgentInstance:
 
-- idle Enter starts a user Turn/Run;
-- running Enter steers the active Run, detached or Turn-backed;
-- Alt+Enter submits a follow-up, starting immediately when idle or queueing
+- idle Enter starts work;
+- running Enter steers the active Run, detached or user-origin;
+- Alt+Enter follows up, starting immediately when idle or remaining pending
   when busy;
-- Esc interrupts current work;
-- dequeue cancels a stable queued input from the authoritative projection.
+- Esc interrupts active work;
+- dequeue cancels a selected AgentInput.
+
+Clients may own editor drafts, selection, animation, and command optimism, but
+not lifecycle or queue truth.
 
 ## In scope
 
-- Canonical entity/cardinality/state definitions.
-- Durable AgentInput lifecycle for start, steer, and follow-up.
-- Durable Turn lifecycle and Run/Execution correlation.
-- Agent-addressed admission, steer, interrupt, and queued-input cancellation.
-- One host-authored work/queue projection shared by clients.
-- Compatibility mapping for existing client and multi-agent tool commands.
-- Recovery, idempotency, race, and multi-client behavior.
+- AgentInstance, AgentInput, ModelStep, and causal lifecycle facts as the
+  primitive layer.
+- Run, Execution, UserTurnView, Queue, and AgentForeground as reproducible
+  derived scopes.
+- Durable input admission for start, steer, and follow-up.
+- One derived logical Run view and causal-root-bound steering.
+- Derived UserTurnView, queue, and AgentForeground projections.
+- Agent-addressed admission/interruption and input-addressed cancellation.
+- Compatibility mapping for existing client and multi-agent commands.
+- Recovery, idempotency, races, and multi-client convergence.
 
 ## Out of scope
 
+- Full-Run retry/resume and multiple ExecutionAttempts per Run.
+- Exposing ExecutionAttempt as a product control handle.
 - Changing model-provider streaming protocols.
-- Persisting token deltas, animations, hover state, or editor drafts.
-- A global scheduler across Sessions.
-- Queue reordering or priority policy in this slice.
-- Exposing Execution IDs as required product control handles.
-- Replacing trajectory diagnostics; trajectory consumes the same identities but
-  remains observational.
+- Persisting token deltas, animations, hover state, or drafts.
+- A global scheduler, queue priority, or queue reordering.
+- Replacing trajectory diagnostics.
 
 ## Acceptance criteria
 
 ### Slice 1: agent interrupt
 
 - [x] A viewed detached child can be interrupted by AgentInstance identity.
-- [x] A Turn-backed interrupt preserves host Turn terminal authority.
+- [x] A user-origin Run interrupt preserves host-visible terminal behavior.
 - [x] Idle interrupt races return `accepted: false`.
 
 Verification: [V-64](../verification/V-64-agent-control-plane.md)
 
-### Canonical lifecycle and storage
+### Primitive lifecycle and storage
 
-- [ ] Normative docs and protocol use the optional `Turn ↔ Run` relation and
-      never require a Turn for detached work.
+- [ ] Normative docs and protocol separate AgentInstance/AgentInput/ModelStep
+      primitive facts from derived Run/Execution/Turn scopes.
 - [ ] Accepted start, steer, and follow-up inputs have durable identities and
-      replayable state transitions.
-- [ ] Turn, Run, Execution attempt, and ModelStep identities remain distinct
-      and queryable after restart.
-- [ ] A crash after input acceptance cannot lose or duplicate a pending steer
-      or follow-up.
+      replayable dispositions.
+- [ ] Every derived Run resolves to one root input; every accepted steer is
+      durably bound to that causal root before acknowledgement.
+- [ ] A crash after input acceptance cannot lose or duplicate pending input.
+- [ ] No independently authoritative Run, Turn, queue, foreground, or
+      Execution state is required to reconstruct product lifecycle.
 
 ### Projection and interaction
 
-- [ ] Session reconciliation restores active work, pending steers, and the full
-      per-agent follow-up queue from host read models.
-- [ ] TUI and desktop derive foreground and controls from the same host
-      projection without local queue authority.
-- [ ] Steer works for detached and Turn-backed active Runs and cannot retarget
-      a newer Run after a race.
+- [ ] Session reconciliation restores active work, pending steers, follow-ups,
+      and UserTurnViews from host read models.
+- [ ] TUI and desktop consume the same foreground and controls without local
+      queue authority.
+- [ ] Detached and user-origin Runs have identical steer and interrupt
+      behavior.
 - [ ] Queued input cancellation works after restart and from a second client.
-- [ ] Concurrent control of one AgentInstance is linearized and other agents
-      remain unaffected.
-
-## Product decisions
-
-| Question | Decision | Rationale |
-|---|---|---|
-| Is Turn the root of all work? | No; it is an optional user-interaction relation to a Run | Detached agent/system work is real work without a user Turn |
-| What is the admission unit? | Durable AgentInput | Start, steer, queue, idempotency, and cancellation need one identity |
-| What owns a queue? | AgentInstance | Admission is serialized per addressable actor |
-| Does steer create a Turn or Run? | No | It joins the active Run at a deterministic step boundary |
-| When is an input accepted? | After its durable admission fact commits | Accepted work must survive process loss |
-| Who owns visible truth? | hostd journal and read models | Keeps all clients convergent and respects the host/orch split |
-| Who owns runtime transitions? | orchd Agent runtime | The actor serializes admission and operates Executions |
-| Do clients control Executions directly? | No | Agent/Input/Turn are stable product handles; Execution is an attempt |
-
-## Open questions
-
-1. Queue priority/reordering remains deferred; the initial authoritative queue
-   is FIFO.
-2. Whether a failed Execution retry remains in the same Run is fixed as
-   one-to-many by the model; concrete automatic retry policy remains
-   feature-owned.
-
-## Reference evidence
-
-- `packages/orchd-api/src/agent.rs`
-- `packages/orchd/src/runtime/agent/actor/`
-- `packages/session-store/src/schema.rs` and `aggregate.rs`
-- `packages/hostd/src/domain/sessions/queues.rs`
-- `packages/tui/src/app/submit.rs`
-- [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md)
+- [ ] Concurrent controls for one AgentInstance are linearized and cannot
+      affect a later Run accidentally.

@@ -93,7 +93,9 @@ impl ProjectingAgentCommitPort {
                 }
                 AgentDurableCommand::InputQueued { .. }
                 | AgentDurableCommand::QueuedInputCancelled { .. }
-                | AgentDurableCommand::QueuedInputStarted { .. } => None,
+                | AgentDurableCommand::QueuedInputStarted { .. }
+                | AgentDurableCommand::AgentInputAdmitted { .. }
+                | AgentDurableCommand::AgentInputDispositionChanged { .. } => None,
                 AgentDurableCommand::SetLifecycle {
                     agent_instance_id,
                     lifecycle,
@@ -173,6 +175,12 @@ impl AgentCommitPort for EphemeralAgentCommitPort {
     ) -> Result<AgentCommitAck, CommitError> {
         let agent_instance_id = match command {
             AgentDurableCommand::Create { identity, .. } => identity.agent_instance_id,
+            AgentDurableCommand::AgentInputAdmitted { admission } => {
+                admission.input.agent_instance_id
+            }
+            AgentDurableCommand::AgentInputDispositionChanged { change } => {
+                change.agent_instance_id
+            }
             AgentDurableCommand::SetLifecycle {
                 agent_instance_id, ..
             }

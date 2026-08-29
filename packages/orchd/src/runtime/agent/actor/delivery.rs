@@ -76,6 +76,8 @@ impl AgentActor {
                         .durable
                         .detached_recipient_agent_instance_id
                         .clone(),
+                    None,
+                    follow_up.durable.submitted_at,
                 )
                 .await
             {

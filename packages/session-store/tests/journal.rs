@@ -247,6 +247,51 @@ fn model_step_boundary_rejects_messages_from_an_earlier_revision() {
 }
 
 #[test]
+fn admitted_applied_to_step_is_rejected_without_panicking() {
+    let temp = tempdir().unwrap();
+    let opened = SessionStore::create(&temp.path().join("session"), new_session("s1")).unwrap();
+    let input = piko_protocol::AgentInput {
+        input_id: "input-step-admission".into(),
+        request_id: "request-step-admission".into(),
+        session_id: "s1".into(),
+        agent_instance_id: "root".into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::SteerActive,
+        content: MessageContent::String("invalid admission".into()),
+        submitted_at: 2,
+        user_turn_id: Some("turn-1".into()),
+        caller_agent_instance_id: None,
+    };
+    let error = opened
+        .store
+        .append(
+            1,
+            commit(
+                "invalid-step-admission",
+                2,
+                event(
+                    "invalid-step-admission-event",
+                    EventData::AgentInputAdmittedV1(piko_session_store::AgentInputAdmittedV1 {
+                        input,
+                        disposition: piko_protocol::AgentInputDisposition::AppliedToStep,
+                        root_input_id: Some("root-input".into()),
+                        run_id: Some("run-1".into()),
+                        bound_run_id: Some("run-1".into()),
+                        admitted_at: 2,
+                    }),
+                ),
+            ),
+        )
+        .expect_err("applied_to_step is a transition, not an admission");
+    assert!(matches!(
+        error,
+        piko_session_store::StoreError::InvalidEvent(message)
+            if message.contains("applied_to_step")
+    ));
+    assert_eq!(opened.store.aggregate().revision, 1);
+}
+
+#[test]
 fn append_reopen_and_idempotent_retry_converge() {
     let temp = tempdir().unwrap();
     let opened = SessionStore::create(&temp.path().join("session"), new_session("s1")).unwrap();

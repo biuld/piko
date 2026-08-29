@@ -39,6 +39,7 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
                         prompt_resources: None,
                         active_tool_names: None,
                     },
+                    submitted_at: None,
                     detached_recipient_agent_instance_id: None,
                 },
             },

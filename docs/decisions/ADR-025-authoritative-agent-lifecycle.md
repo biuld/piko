@@ -2,7 +2,7 @@
 
 > Status: accepted
 > Date: 2026-08-29
-> Superseded in part by: [ADR-027](ADR-027-agent-work-lifecycle.md) for the universal `Turn → Run` parent relation
+> Superseded in part by: [ADR-027](ADR-027-agent-work-lifecycle.md) for the core-domain hierarchy and lifecycle authority
 
 ## Context
 
@@ -14,9 +14,9 @@ outlive the actual model response. The existing `run_id` and `execution_id`
 fields also usually contain the same value even though they represent
 different boundaries.
 
-## Decision
+## Historical decision
 
-Use the following authority hierarchy:
+This ADR originally used the following authority hierarchy:
 
 ```text
 Turn → Run → Execution → ModelStep → Thought / ToolCall
@@ -40,6 +40,10 @@ Run and Execution IDs are carried separately end-to-end. Root runs use their
 Turn/operation ID as `run_id`; the concrete Execution ID remains independently
 derived from the request and agent. Existing journals remain readable.
 
+ADR-027 subsequently separates AgentInstance, AgentInput, ModelStep, and causal
+facts from the derived Run, Execution, and Turn scopes. The atomic ModelStep
+commit and distinct correlation-ID requirements in this ADR remain accepted.
+
 ## Consequences
 
 - Recovery can distinguish a completed model response from unresolved tool
@@ -52,5 +56,5 @@ derived from the request and agent. Existing journals remain readable.
   trajectory remains useful for optional diagnostics only.
 - A legacy message committed without a ModelStep relation can still be read;
   new model responses must use the relation.
-- Explicit durable Turn lifecycle facts remain a future extension if queued
-  Turns need independent recovery before an Execution exists.
+- Queued user interaction is recovered from AgentInput facts; it does not
+  require an independent durable Turn lifecycle.

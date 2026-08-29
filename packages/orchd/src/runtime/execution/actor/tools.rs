@@ -379,8 +379,38 @@ impl ExecutionActor {
             content: steering.content.clone(),
             timestamp: Some(steering.submitted_at),
         };
-        self.commit_message(message, steering.message_id.clone())
-            .await?;
+        let next_step_index = self.state.model_step_index.saturating_add(1);
+        let input_id = steering
+            .input_id
+            .as_deref()
+            .unwrap_or(steering.request_id.as_str());
+        let change = piko_protocol::AgentInputDispositionChange {
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            input_id: input_id.to_string(),
+            disposition: piko_protocol::AgentInputDisposition::AppliedToStep,
+            root_input_id: Some(
+                self.request
+                    .root_input_id
+                    .clone()
+                    .unwrap_or_else(|| self.request.request_id.clone()),
+            ),
+            run_id: Some(self.identity.run_id.clone()),
+            bound_run_id: Some(self.identity.run_id.clone()),
+            model_step_id: Some(format!(
+                "{}:step_{next_step_index}",
+                self.identity.execution_id
+            )),
+            changed_at: now_ms(),
+        };
+        MessageCommitScope::new(
+            &self.identity,
+            self.state.head_message_id.clone(),
+            steering.message_id.clone(),
+            message,
+        )
+        .commit_steer(&self.ports.ports().commit, change)
+        .await
+        .map(|committed| committed.apply(&mut self.state))?;
         let steer_summary = match &steering.content {
             piko_protocol::MessageContent::String(text) => text.clone(),
             piko_protocol::MessageContent::Blocks(blocks) => blocks

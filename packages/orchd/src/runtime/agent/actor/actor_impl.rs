@@ -79,11 +79,16 @@ impl AgentActor {
         self.advance_next_follow_up().await;
         while let Some(command) = self.mailbox.recv().await {
             match command {
-                AgentCommand::Input { request, reply } => {
+                AgentCommand::Input {
+                    request,
+                    input_id,
+                    submitted_at,
+                    reply,
+                } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self
-                        .handle_input(request)
+                        .handle_input(request, input_id, submitted_at)
                         .await
                         .map(|accepted| accepted.receipt);
                     command.complete(result);
@@ -101,6 +106,8 @@ impl AgentActor {
                     match self
                         .enqueue_follow_up(
                             request,
+                            None,
+                            None,
                             Some(QueuedCompletion::Waiter {
                                 started: started_tx,
                                 report: report_tx,
@@ -125,7 +132,7 @@ impl AgentActor {
                     self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    match self.handle_input(request).await {
+                    match self.handle_input(request, None, None).await {
                         Ok(accepted) => {
                             let (started_tx, started_rx) =
                                 piko_comms::reply::<AgentRunStarted, _>();
@@ -156,6 +163,8 @@ impl AgentActor {
                     let result = self
                         .enqueue_follow_up(
                             request,
+                            None,
+                            None,
                             Some(QueuedCompletion::Detached(recipient)),
                             parent,
                         )
@@ -192,6 +201,8 @@ impl AgentActor {
                                 request,
                                 None,
                                 Some(recipient.agent_instance_id.clone()),
+                                None,
+                                None,
                             )
                             .await
                             .map(|receipt| AcceptedAgentInput {
@@ -206,7 +217,7 @@ impl AgentActor {
                         }
                         result
                     } else {
-                        self.handle_input(request).await
+                        self.handle_input(request, None, None).await
                     };
                     if let Ok(accepted) = &result {
                         self.register_detached_report(
@@ -305,6 +316,8 @@ impl AgentActor {
     pub(super) async fn enqueue_follow_up(
         &mut self,
         request: SendAgentInputRequest,
+        input_id: Option<String>,
+        submitted_at: Option<i64>,
         completion: Option<QueuedCompletion>,
         parent: tracing::Span,
     ) -> Result<AgentInputReceipt, (AgentApiError, Option<QueuedCompletion>)> {
@@ -316,10 +329,12 @@ impl AgentActor {
             _ => None,
         };
         let durable = piko_protocol::DurableAgentInput {
-            queued_input_id: request.request_id.clone(),
+            queued_input_id: input_id.unwrap_or_else(|| request.request_id.clone()),
             request: request.clone(),
+            submitted_at,
             detached_recipient_agent_instance_id,
         };
+        let queued_input_id = durable.queued_input_id.clone();
         if let Err(error) = self
             .commit
             .commit_agent_command(
@@ -346,10 +361,13 @@ impl AgentActor {
             request_id: request.request_id.clone(),
         });
         Ok(AgentInputReceipt {
+            input_id: queued_input_id,
             request_id: request.request_id,
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             disposition: InputDisposition::Queued,
+            run_id: None,
+            queued_position: Some(self.follow_ups.len().saturating_sub(1) as u32),
         })
     }
 

@@ -168,7 +168,7 @@ impl OrchAgentRunRunner {
             }
         };
         let receipt = runtime_handle.receipt.clone();
-        let disposition = receipt.disposition.clone();
+        let disposition = receipt.disposition;
         let address = AgentOperationAddress {
             session_id: input.session_id.clone(),
             operation_id: input.operation_id.clone(),

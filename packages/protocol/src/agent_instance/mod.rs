@@ -9,8 +9,10 @@ mod mailbox;
 mod run;
 #[cfg(test)]
 mod tests;
+mod work;
 
 pub use durable::*;
 pub use identity::*;
 pub use mailbox::*;
 pub use run::*;
+pub use work::*;

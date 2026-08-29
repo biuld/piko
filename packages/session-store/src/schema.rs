@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec,
-    DurableAgentInput, Message, ModelStepOutcome, TodoList, Usage,
+    AgentInboxItem, AgentInput, AgentInputDisposition, AgentInstanceIdentity,
+    AgentInstanceLifecycle, AgentRunReport, AgentSpec, DurableAgentInput, Message,
+    ModelStepOutcome, TodoList, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -105,6 +106,8 @@ impl RawEvent {
                 | "session_metadata_changed"
                 | "agent_created"
                 | "agent_lifecycle_changed"
+                | "agent_input_admitted_v1"
+                | "agent_input_disposition_changed_v1"
                 | "agent_input_queued"
                 | "agent_input_dequeued"
                 | "execution_started"
@@ -181,6 +184,8 @@ pub enum EventData {
         lifecycle: AgentInstanceLifecycle,
         changed_at: i64,
     },
+    AgentInputAdmittedV1(AgentInputAdmittedV1),
+    AgentInputDispositionChangedV1(AgentInputDispositionChangedV1),
     AgentInputQueued {
         input: DurableAgentInput,
     },
@@ -235,6 +240,8 @@ impl EventData {
             Self::SessionMetadataChanged { .. } => "session_metadata_changed",
             Self::AgentCreated { .. } => "agent_created",
             Self::AgentLifecycleChanged { .. } => "agent_lifecycle_changed",
+            Self::AgentInputAdmittedV1(_) => "agent_input_admitted_v1",
+            Self::AgentInputDispositionChangedV1(_) => "agent_input_disposition_changed_v1",
             Self::AgentInputQueued { .. } => "agent_input_queued",
             Self::AgentInputDequeued { .. } => "agent_input_dequeued",
             Self::ExecutionStarted(_) => "execution_started",
@@ -315,6 +322,39 @@ pub struct ExecutionStartedV1 {
     pub prompt_assembly_version: u32,
     pub prompt_digest: String,
     pub started_at: i64,
+}
+
+/// Durable admission fact for one immutable AgentInput.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputAdmittedV1 {
+    pub input: AgentInput,
+    pub disposition: AgentInputDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_input_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_run_id: Option<String>,
+    pub admitted_at: i64,
+}
+
+/// Durable state transition for an already admitted AgentInput.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputDispositionChangedV1 {
+    pub agent_instance_id: String,
+    pub input_id: String,
+    pub disposition: AgentInputDisposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_input_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_step_id: Option<String>,
+    pub changed_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

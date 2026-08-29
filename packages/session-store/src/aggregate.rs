@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec,
-    DurableAgentInput, TodoList,
+    AgentInboxItem, AgentInputDisposition, AgentInstanceIdentity, AgentInstanceLifecycle,
+    AgentRunReport, AgentSpec, DurableAgentInput, TodoList,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ use crate::schema::{
 };
 use crate::{
     AccountingProjection, DurableCommit, ModelContinuity, Result, StoreError, StoredAgent,
-    StoredExecution, StoredMessage, StoredModelStep, StoredTreeEntry,
+    StoredAgentInput, StoredExecution, StoredMessage, StoredModelStep, StoredTreeEntry,
 };
 
 mod transcript;
@@ -32,6 +32,21 @@ pub struct SessionAggregate {
     pub tree_entries: BTreeMap<String, StoredTreeEntry>,
     pub agent_heads: BTreeMap<String, String>,
     pub agents: BTreeMap<String, StoredAgent>,
+    /// Canonical primitive input facts, keyed by durable input identity.
+    #[serde(default)]
+    pub agent_inputs: BTreeMap<String, StoredAgentInput>,
+    /// In-memory shadow of the per-agent work view. It is rebuilt from the
+    /// primitive facts and existing execution facts, but is not serialized
+    /// until pending-action and active-step facts are part of the projection.
+    #[serde(skip)]
+    pub agent_work: BTreeMap<String, piko_protocol::AgentWorkSnapshot>,
+    /// Derived indexes rebuilt from `agent_inputs` and execution facts.
+    #[serde(default)]
+    pub active_root_by_agent: BTreeMap<String, String>,
+    #[serde(default)]
+    pub pending_inputs_by_agent: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub input_by_request: BTreeMap<String, String>,
     pub queued_inputs: Vec<DurableAgentInput>,
     pub executions: BTreeMap<String, StoredExecution>,
     #[serde(default)]
@@ -65,6 +80,7 @@ impl SessionAggregate {
     }
 
     fn apply_in_place(&mut self, commit: &DurableCommit) -> Result<()> {
+        self.rebuild_agent_input_indexes();
         crate::schema::validate_extensions("commit", &commit.extensions)?;
         if commit.revision != self.revision + 1 {
             return Err(StoreError::InvalidEvent(format!(
@@ -83,6 +99,7 @@ impl SessionAggregate {
         self.updated_at = self.updated_at.max(commit.committed_at);
         self.commit_ids
             .insert(commit.commit_id.clone(), commit.revision);
+        self.rebuild_agent_input_indexes();
         Ok(())
     }
 
@@ -164,20 +181,55 @@ impl SessionAggregate {
                 agent.lifecycle = lifecycle;
                 agent.changed_at = changed_at;
             }
+            EventData::AgentInputAdmittedV1(data) => {
+                self.apply_agent_input_admitted(revision, raw, data)?
+            }
+            EventData::AgentInputDispositionChangedV1(data) => {
+                self.apply_agent_input_disposition_changed(data)?
+            }
             EventData::AgentInputQueued { input } => self.apply_input_queued(input)?,
             EventData::AgentInputDequeued {
-                queued_input_id, ..
+                queued_input_id,
+                reason,
+                ..
             } => {
-                let Some(index) = self
+                let index = self
                     .queued_inputs
                     .iter()
-                    .position(|input| input.queued_input_id == queued_input_id)
-                else {
+                    .position(|input| input.queued_input_id == queued_input_id);
+                if let Some(index) = index {
+                    self.queued_inputs.remove(index);
+                } else if !self.agent_inputs.contains_key(&queued_input_id) {
                     return Err(StoreError::InvalidEvent(format!(
                         "unknown queued input {queued_input_id}"
                     )));
-                };
-                self.queued_inputs.remove(index);
+                }
+                if let Some(input) = self.agent_inputs.get_mut(&queued_input_id) {
+                    let disposition = if reason == "started" {
+                        AgentInputDisposition::AppliedAsRoot
+                    } else {
+                        AgentInputDisposition::Cancelled
+                    };
+                    let already_applied = reason == "started"
+                        && input.disposition == AgentInputDisposition::AppliedAsRoot;
+                    let already_cancelled = reason != "started"
+                        && input.disposition == AgentInputDisposition::Cancelled;
+                    if !(already_applied || already_cancelled) {
+                        if !matches!(
+                            input.disposition,
+                            AgentInputDisposition::PendingFollowUp
+                                | AgentInputDisposition::PendingSteer
+                        ) {
+                            return Err(StoreError::InvalidEvent(format!(
+                                "queued input {queued_input_id} is not pending"
+                            )));
+                        }
+                        input.disposition = disposition;
+                        if reason == "started" {
+                            input.root_input_id = Some(queued_input_id.clone());
+                        }
+                    }
+                }
             }
             EventData::ExecutionStarted(started) => self.apply_execution_started(started)?,
             EventData::ExecutionFinished {
@@ -341,24 +393,6 @@ impl SessionAggregate {
         Ok(())
     }
 
-    fn apply_input_queued(&mut self, input: DurableAgentInput) -> Result<()> {
-        self.agent(&input.request.agent_instance_id)?;
-        if Some(input.request.session_id.as_str()) != self.session_id.as_deref() {
-            return Err(StoreError::InvalidEvent(
-                "input belongs to another session".into(),
-            ));
-        }
-        if self
-            .queued_inputs
-            .iter()
-            .any(|existing| existing.queued_input_id == input.queued_input_id)
-        {
-            return Err(StoreError::InvalidEvent("duplicate queued input".into()));
-        }
-        self.queued_inputs.push(input);
-        Ok(())
-    }
-
     fn apply_execution_started(&mut self, started: ExecutionStartedV1) -> Result<()> {
         self.agent(&started.agent_instance_id)?;
         if self.executions.contains_key(&started.execution_id) {
@@ -372,8 +406,10 @@ impl SessionAggregate {
                 "agent already has an active execution".into(),
             ));
         }
+        let execution_id = started.execution_id.clone();
+        let started_for_input = started.clone();
         self.executions.insert(
-            started.execution_id.clone(),
+            execution_id,
             StoredExecution {
                 started,
                 message_head: None,
@@ -382,6 +418,7 @@ impl SessionAggregate {
                 finished_at: None,
             },
         );
+        self.apply_execution_started_with_input(&started_for_input)?;
         Ok(())
     }
 

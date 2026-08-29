@@ -14,9 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
-- [D-68: Agent work lifecycle and control plane](D-68-agent-control-plane.md)
-  implements F-51: durable AgentInput admission, optional Turn/Run relation,
-  authoritative steer/follow-up projection, and unified Agent controls
+- [D-68: Two-layer Agent work model and control plane](D-68-agent-control-plane.md)
+  implements F-51: Agent/Input/ModelStep primitive facts, derived
+  Run/Execution/Turn/queue projections, in-place storage evolution, durable
+  steer/follow-up admission, and unified Agent controls
   (proposed; Slice 1 interrupt implemented in V-64).
 - [D-67: Configurable agent-tree limits](D-67-configurable-agent-tree-limits.md)
   implements F-50: settings-backed per-session AgentInstance count and
@@ -25,8 +26,9 @@ decisions that affect multiple features or package boundaries belong in
   implements F-49: explicit supervisor/worker AgentSpec modes, worker tool
   filtering, and authoritative runtime child-creation checks (accepted; V-63).
 - [D-65: Authoritative agent lifecycle boundaries](D-65-authoritative-agent-lifecycle.md)
-  implements F-48: explicit Turn/Run/Execution/ModelStep ownership, atomic
-  model-step journal facts, and reliable client convergence.
+  implements F-48: atomic ModelStep journal facts, distinct runtime
+  correlation IDs, and reliable client convergence; its core hierarchy is
+  superseded by ADR-027.
 - [D-64: Two-tone composer with attachments](D-64-composer-two-tone.md)
   implements F-47: layered composer card, header pickers, attach chips
 - [D-63: Assistant turn chips](D-63-assistant-turn-chips.md)

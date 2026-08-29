@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use piko_protocol::AgentInputDispositionChange;
 use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
 
 use crate::AgentApiError;
@@ -21,6 +22,19 @@ pub trait PromptAssemblyPort: Send + Sync {
 #[async_trait]
 pub trait ExecutionCommitPort: Send + Sync {
     async fn commit_message(&self, commit: MessageCommit) -> Result<CommitAck, CommitError>;
+
+    /// Atomically persist a steer message and the disposition transition that
+    /// applies its input to the reserved next model step. Implementations
+    /// that do not own the session journal retain the compatibility fallback;
+    /// hostd overrides this so a steer can never become visible as delivered
+    /// without its causal input fact.
+    async fn commit_steer(
+        &self,
+        message: MessageCommit,
+        _change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.commit_message(message).await
+    }
 
     /// Atomically commit one assistant response and its ordered tool
     /// declarations. The runtime must not execute those tools before this

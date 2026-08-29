@@ -87,10 +87,13 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
         })
         .expect("serialize SendAgentInputRequest"),
         serde_json::to_value(AgentInputReceipt {
+            input_id: "input-1".into(),
             request_id: "input-1".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             disposition: crate::InputDisposition::Accepted,
+            run_id: None,
+            queued_position: None,
         })
         .expect("serialize AgentInputReceipt"),
         serde_json::to_value(AgentCancelReceipt {

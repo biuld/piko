@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
-use piko_protocol::{AgentRunReport, ContentBlock, Message};
-use piko_session_store::{EventData, MessageCommittedV1, StoredExecution};
+use piko_protocol::{AgentInputDisposition, AgentRunReport, ContentBlock, Message};
+use piko_session_store::{
+    AgentInputDispositionChangedV1, EventData, MessageCommittedV1, StoredExecution,
+};
 
 use crate::api::{MessageEntry, SessionTreeEntry};
 use crate::ports::storage_types::SessionStorageError;
@@ -42,7 +44,31 @@ impl SessionStore {
                     .filter(|message| message.data.agent_instance_id == started.agent_instance_id)
                     .count() as u64;
                 let unresolved = unresolved_tool_calls(&aggregate, &execution)?;
-                let mut events = Vec::with_capacity(4 + unresolved.len() * 2);
+                let pending_steers = aggregate
+                    .agent_inputs
+                    .values()
+                    .filter(|input| {
+                        input.input.agent_instance_id == started.agent_instance_id
+                            && input.disposition == AgentInputDisposition::PendingSteer
+                            && input.bound_run_id.as_deref() == Some(started.run_id.as_str())
+                    })
+                    .collect::<Vec<_>>();
+                let mut events =
+                    Vec::with_capacity(4 + unresolved.len() * 2 + pending_steers.len());
+                for input in pending_steers {
+                    events.push(EventData::AgentInputDispositionChangedV1(
+                        AgentInputDispositionChangedV1 {
+                            agent_instance_id: started.agent_instance_id.clone(),
+                            input_id: input.input.input_id.clone(),
+                            disposition: AgentInputDisposition::Cancelled,
+                            root_input_id: input.root_input_id.clone(),
+                            run_id: input.run_id.clone(),
+                            bound_run_id: input.bound_run_id.clone(),
+                            model_step_id: None,
+                            changed_at: now,
+                        },
+                    ));
+                }
                 for (tool_call_message_id, tool_call_id, tool_name) in unresolved {
                     let result_id = piko_orchd_api::stable_internal_id(
                         "recovery-tool-result",

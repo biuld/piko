@@ -128,6 +128,46 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
     assert_eq!(prompts.requests.lock().await.len(), 2);
 }
 
+#[tokio::test]
+async fn canonical_submission_preserves_distinct_root_input_identity() {
+    let (runtime, commits, model) = attached_runtime().await;
+    model.push_text("completed").await;
+    let input = piko_protocol::AgentInput {
+        input_id: "input-distinct-root".into(),
+        request_id: "request-distinct-root".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: "root".into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: AgentInputDelivery::StartWhenIdle,
+        content: MessageContent::String("start with a distinct identity".into()),
+        submitted_at: 10,
+        user_turn_id: Some("turn-distinct-root".into()),
+        caller_agent_instance_id: None,
+    };
+
+    let receipt = runtime
+        .submit_agent_input(input.clone())
+        .await
+        .expect("canonical input should start a run");
+    assert_eq!(receipt.input_id, input.input_id);
+    wait_until_idle(&runtime).await;
+
+    let commands = commits.commands.lock().await;
+    let started = commands.iter().find_map(|command| match command {
+        piko_protocol::AgentDurableCommand::RunStarted {
+            input: Some(started),
+            ..
+        } => Some(started),
+        _ => None,
+    });
+    let started = started.expect("run start should carry the canonical input");
+    assert_eq!(started.input_id, input.input_id);
+    assert_eq!(started.request_id, input.request_id);
+    assert_eq!(started.agent_instance_id, input.agent_instance_id);
+    assert_eq!(started.content, input.content);
+    assert_eq!(started.submitted_at, input.submitted_at);
+}
+
 #[path = "behavior/follow_up.rs"]
 mod follow_up;
 #[path = "behavior/lifecycle.rs"]

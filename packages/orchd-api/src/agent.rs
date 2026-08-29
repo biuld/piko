@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_protocol::{
-    AgentCancelReceipt, AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
-    AgentLifecycleReceipt, AgentLifecycleRequest, AgentSnapshot, CommitError, CreateAgentReceipt,
-    CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
+    AgentCancelReceipt, AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInput,
+    AgentInputCancelReceipt, AgentInputReceipt, AgentInterruptReceipt, AgentLifecycleReceipt,
+    AgentLifecycleRequest, AgentSnapshot, CommitError, CreateAgentReceipt, CreateAgentRequest,
+    SendAgentInputRequest, SteerAgentRequest,
 };
 
 use crate::{AgentApiError, SessionExecutionPorts};
@@ -114,6 +115,50 @@ pub trait AgentRuntimeApi: Send + Sync {
         request: SendAgentInputRequest,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
+    /// Canonical AgentInput admission entry point. The compatibility request
+    /// adapter is retained until all callers provide primitive proposals.
+    async fn submit_agent_input(
+        &self,
+        input: AgentInput,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        let input_id = input.input_id.clone();
+        let delivery = input.delivery;
+        let mut receipt = self.send_agent_input(input.to_request()).await?;
+        // Compatibility implementations historically used request_id as the
+        // input identity. The concrete orchd implementation overrides this
+        // method and preserves distinct IDs; this mapping keeps older trait
+        // adapters truthful for the initial equal-ID migration case.
+        if input_id != receipt.request_id {
+            return Err(AgentApiError::IdempotencyConflict);
+        }
+        receipt.input_id = input_id;
+        receipt.disposition = match (delivery, receipt.disposition) {
+            (_, piko_protocol::InputDisposition::Duplicate)
+            | (_, piko_protocol::InputDisposition::Overload)
+            | (_, piko_protocol::InputDisposition::PendingFollowUp)
+            | (_, piko_protocol::InputDisposition::PendingSteer)
+            | (_, piko_protocol::InputDisposition::AppliedAsRoot)
+            | (_, piko_protocol::InputDisposition::AppliedToStep)
+            | (_, piko_protocol::InputDisposition::Cancelled) => receipt.disposition,
+            (
+                piko_protocol::AgentInputDelivery::FollowUp,
+                piko_protocol::InputDisposition::Queued,
+            ) => piko_protocol::InputDisposition::PendingFollowUp,
+            (
+                piko_protocol::AgentInputDelivery::Auto
+                | piko_protocol::AgentInputDelivery::SteerActive,
+                piko_protocol::InputDisposition::Queued,
+            ) => piko_protocol::InputDisposition::PendingSteer,
+            (_, piko_protocol::InputDisposition::Queued) => {
+                piko_protocol::InputDisposition::PendingFollowUp
+            }
+            (_, piko_protocol::InputDisposition::Accepted) => {
+                piko_protocol::InputDisposition::AppliedAsRoot
+            }
+        };
+        Ok(receipt)
+    }
+
     /// Accept one Agent input and return its durable receipt plus start and
     /// completion signals without exposing the backing Execution identity.
     async fn run_agent(
@@ -140,12 +185,53 @@ pub trait AgentRuntimeApi: Send + Sync {
         agent_instance_id: String,
     ) -> Result<AgentCancelReceipt, AgentApiError>;
 
+    /// Agent-addressed interrupt that does not require a host Turn.
+    async fn interrupt_agent(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+    ) -> Result<AgentInterruptReceipt, AgentApiError> {
+        let receipt = self
+            .cancel_agent_run(session_id.clone(), agent_instance_id.clone())
+            .await?;
+        Ok(AgentInterruptReceipt {
+            session_id,
+            agent_instance_id,
+            accepted: receipt.accepted,
+        })
+    }
+
     async fn cancel_agent_input(
         &self,
         session_id: String,
         agent_instance_id: String,
         request_id: String,
     ) -> Result<AgentCancelReceipt, AgentApiError>;
+
+    /// Canonical input-ID cancellation adapter. Older runtimes used the
+    /// request ID as their queue identity, so the compatibility method is
+    /// used until the actor stores distinct input IDs end to end.
+    async fn cancel_agent_input_id(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<AgentInputCancelReceipt, AgentApiError> {
+        let receipt = self
+            .cancel_agent_input(
+                session_id.clone(),
+                agent_instance_id.clone(),
+                input_id.clone(),
+            )
+            .await?;
+        Ok(AgentInputCancelReceipt {
+            input_id,
+            request_id: receipt.request_id,
+            session_id,
+            agent_instance_id,
+            accepted: receipt.accepted,
+        })
+    }
 
     async fn close_agent(
         &self,

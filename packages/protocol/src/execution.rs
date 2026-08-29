@@ -1,7 +1,8 @@
 //! Single-agent Execution DTOs.
 //!
-//! Target model: Session → Turn → Run → Execution → Model Step → Tool.
-//! These types are the public contract for the Execution path.
+//! These types describe the operational Execution projection of a causal
+//! AgentInput/Run and its ModelStep boundaries. The primitive input and work
+//! contracts live under [`crate::agent_instance`].
 
 use serde::{Deserialize, Serialize};
 
@@ -122,6 +123,10 @@ pub struct StartExecutionRequest {
     pub input: MessageContent,
     pub context: ConversationContext,
     pub config: ExecutionConfig,
+    /// Canonical AgentInput identity for the root of this execution. Older
+    /// callers omit it and use `request_id` as the compatible fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_input_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,6 +145,10 @@ pub struct ExecutionReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct SteerExecutionRequest {
     pub request_id: RequestId,
+    /// Durable AgentInput identity. Compatibility callers may omit it while
+    /// request_id remains the input identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_id: Option<String>,
     pub session_id: SessionId,
     pub execution_id: ExecutionId,
     pub message_id: MessageId,
@@ -147,14 +156,23 @@ pub struct SteerExecutionRequest {
     pub submitted_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum InputDisposition {
     Accepted,
     Queued,
     Duplicate,
     Overload,
+    PendingFollowUp,
+    PendingSteer,
+    AppliedAsRoot,
+    AppliedToStep,
+    Cancelled,
 }
+
+/// Canonical name for the AgentInput disposition state. The compatibility
+/// enum remains the wire type used by existing Execution callers.
+pub type AgentInputDisposition = InputDisposition;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -376,6 +394,7 @@ mod tests {
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),
             config: ExecutionConfig::default(),
+            root_input_id: None,
         })
         .unwrap();
         assert!(value.get("taskId").is_none());

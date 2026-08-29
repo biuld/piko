@@ -283,6 +283,12 @@ impl AgentCommitPort for CollectingAgentCommitPort {
         }
         let agent_instance_id = match &command {
             AgentDurableCommand::Create { identity, .. } => identity.agent_instance_id.clone(),
+            AgentDurableCommand::AgentInputAdmitted { admission } => {
+                admission.input.agent_instance_id.clone()
+            }
+            AgentDurableCommand::AgentInputDispositionChanged { change } => {
+                change.agent_instance_id.clone()
+            }
             AgentDurableCommand::SetLifecycle {
                 agent_instance_id, ..
             }

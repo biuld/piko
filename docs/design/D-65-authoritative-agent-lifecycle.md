@@ -6,10 +6,10 @@
 
 ## Goal
 
-Make the Run → Execution → ModelStep spine and optional source Turn relation
-explicit across the runtime, host journal, reliable observation stream, and
-client projection. F-51/D-68/ADR-027 supersede this design's original
-assumption that every Run has a Turn.
+Make the Run/Execution correlation and ModelStep boundary explicit across the
+runtime, host journal, reliable observation stream, and client projection.
+F-51/D-68/ADR-027 supersede this design's original core hierarchy: Turn is a
+derived product view and Execution remains an operational runtime scope.
 The vertical slice must make a completed model step an atomic durable relation
 between existing transcript messages and must leave realtime thought rendering
 as an ephemeral projection.
@@ -111,14 +111,13 @@ draft because all updates are keyed by agent and assistant message identity.
 The `ToolExecutionEvent::Ended` DTO also carries `parent_message_id`, so
 legacy stream-item conversion cannot detach a tool result from its model step.
 
-### Turn/Run/Execution projection
+### Historical Turn/Run/Execution projection
 
-The host's existing Turn lifecycle remains the user-visible Turn authority.
-Execution start/finish journal facts provide durable Run/Execution state and
-the `source_turn_id` relation. Session-store and host projections expose the
-model-step records under their Execution; no new client-owned persistence is
-introduced. Explicit durable Turn start/terminal facts remain a follow-up if
-queued Turns need independent restart semantics.
+The implemented host Turn and execution paths remain compatible historical
+inputs. Under ADR-027, UserTurn and Run state are projected from AgentInput,
+ModelStep, causal, and outcome facts, while execution start/finish remains
+operational correlation and recovery data. Session-store and host projections
+still expose ModelStep records without introducing client-owned persistence.
 
 ## Package impact
 

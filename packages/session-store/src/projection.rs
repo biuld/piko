@@ -1,4 +1,7 @@
-use piko_protocol::{AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec};
+use piko_protocol::{
+    AgentInput, AgentInputDisposition, AgentInstanceIdentity, AgentInstanceLifecycle,
+    AgentRunReport, AgentSpec,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1, TreeEntryRecordedV1};
@@ -34,6 +37,39 @@ pub struct StoredExecution {
     pub model_step_ids: Vec<String>,
     pub report: Option<AgentRunReport>,
     pub finished_at: Option<i64>,
+}
+
+/// Write-time projection of the primitive AgentInput admission fact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StoredAgentInput {
+    pub input: AgentInput,
+    /// Immutable admission proposal fields retained separately from the
+    /// current disposition/correlation projection. A duplicate request must
+    /// remain idempotent after the input has advanced or been cancelled.
+    #[serde(default = "default_admission_disposition")]
+    pub admission_disposition: AgentInputDisposition,
+    #[serde(default)]
+    pub admission_root_input_id: Option<String>,
+    #[serde(default)]
+    pub admission_run_id: Option<String>,
+    #[serde(default)]
+    pub admission_bound_run_id: Option<String>,
+    pub disposition: AgentInputDisposition,
+    pub admission_revision: u64,
+    pub admission_event_id: String,
+    pub admitted_at: i64,
+    #[serde(default)]
+    pub root_input_id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub bound_run_id: Option<String>,
+    #[serde(default)]
+    pub model_step_id: Option<String>,
+}
+
+fn default_admission_disposition() -> AgentInputDisposition {
+    AgentInputDisposition::PendingFollowUp
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

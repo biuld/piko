@@ -42,11 +42,14 @@ impl SessionStore {
     }
 
     pub fn aggregate(&self) -> SessionAggregate {
-        self.inner
+        let mut aggregate = self
+            .inner
             .aggregate
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
+            .clone();
+        aggregate.rebuild_work_projection();
+        aggregate
     }
 
     pub(crate) fn commit_at(&self, revision: u64) -> Result<DurableCommit> {

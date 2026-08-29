@@ -36,6 +36,11 @@ pub enum AgentDurableCommand {
         agent_instance_id: AgentInstanceId,
         lifecycle: AgentInstanceLifecycle,
     },
+    /// Canonical durable admission fact. Rejected proposals never produce
+    /// this command; the host commit port is the admission boundary.
+    AgentInputAdmitted { admission: AgentInputAdmission },
+    /// Canonical durable disposition transition for an admitted input.
+    AgentInputDispositionChanged { change: AgentInputDispositionChange },
     RunStarted {
         agent_instance_id: AgentInstanceId,
         run_id: String,
@@ -50,6 +55,11 @@ pub enum AgentDurableCommand {
         #[serde(default)]
         prompt_digest: String,
         started_at: i64,
+        /// Canonical root input for new callers. `None` keeps old journal and
+        /// test callers source-compatible while the host upcasts them from
+        /// existing execution/message facts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<AgentInput>,
     },
     RunTerminal {
         run_id: String,

@@ -358,6 +358,7 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
             agent_id: "main".into(),
             ..Default::default()
         },
+        root_input_id: None,
     }
 }
 

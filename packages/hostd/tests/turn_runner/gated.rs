@@ -87,10 +87,13 @@ impl AgentRunRunner for GatedAgentRunRunner {
         Ok(AgentRunHandle {
             address,
             receipt: piko_protocol::AgentInputReceipt {
+                input_id: operation_id.clone(),
                 request_id: operation_id,
                 session_id: input.session_id,
                 agent_instance_id: input.agent_instance_id,
                 disposition,
+                run_id: None,
+                queued_position: None,
             },
             process: test_agent_run_process(started, completion),
         })

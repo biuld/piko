@@ -17,6 +17,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-interrupted".into(),
                 started_at: 1,
+                input: None,
             },
         )
         .await
@@ -40,6 +41,18 @@ async fn recovery_marks_accepted_execution_interrupted() {
             "main",
         )
         .unwrap();
+
+    let legacy_work = store
+        .agent_work_snapshot(&root.agent_instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        legacy_work
+            .active_run
+            .as_ref()
+            .map(|run| run.root_input_id.as_str()),
+        Some("request-interrupted")
+    );
 
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 0);
@@ -74,6 +87,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
     ));
 }
 
+
 #[tokio::test]
 async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step() {
     let temp = tempdir().unwrap();
@@ -93,6 +107,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-with-tool-call".into(),
                 started_at: 1,
+                input: None,
             },
         )
         .await
@@ -239,6 +254,7 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-detached".into(),
                 started_at: 2,
+                input: None,
             },
         )
         .await
@@ -311,6 +327,7 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
         prompt_assembly_version: 1,
         prompt_digest: "prompt-idempotent".into(),
         started_at: 1,
+        input: None,
     };
     for _ in 0..2 {
         store
@@ -367,6 +384,7 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
             prompt_resources: None,
             active_tool_names: None,
         },
+        submitted_at: None,
         detached_recipient_agent_instance_id: None,
     };
     store
@@ -427,6 +445,7 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
             prompt_resources: None,
             active_tool_names: None,
         },
+        submitted_at: None,
         detached_recipient_agent_instance_id: None,
     };
     store

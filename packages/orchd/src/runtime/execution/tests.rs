@@ -257,6 +257,7 @@ fn request() -> StartExecutionRequest {
             agent_id: "main".into(),
             ..Default::default()
         },
+        root_input_id: None,
     }
 }
 

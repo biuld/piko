@@ -406,6 +406,7 @@ mod tests {
                     prompt_assembly_version: 1,
                     prompt_digest: "prompt-recovered".into(),
                     started_at: 2,
+                    input: None,
                 },
             )
             .await

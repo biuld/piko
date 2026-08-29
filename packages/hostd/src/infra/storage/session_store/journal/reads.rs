@@ -102,6 +102,16 @@ impl SessionStore {
             .collect())
     }
 
+    pub fn agent_work_snapshot(
+        &self,
+        agent_instance_id: &str,
+    ) -> Result<Option<piko_protocol::AgentWorkSnapshot>, SessionStorageError> {
+        Ok(self
+            .aggregate()?
+            .agent_work_snapshots()
+            .remove(agent_instance_id))
+    }
+
     pub fn pending_detached_deliveries(
         &self,
         source_agent_instance_id: &str,

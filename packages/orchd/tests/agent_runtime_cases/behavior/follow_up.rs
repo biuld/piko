@@ -95,6 +95,72 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
 }
 
 #[tokio::test]
+async fn canonical_follow_up_retry_preserves_distinct_input_identity() {
+    let (runtime, _commits, model) = attached_runtime().await;
+    model
+        .push_response(faux_provider::CannedResponse::waiting_for_cancel())
+        .await;
+    runtime
+        .send_agent_input(SendAgentInputRequest {
+            request_id: "canonical-follow-up-active".into(),
+            session_id: "session-1".into(),
+            agent_instance_id: "root".into(),
+            caller_agent_instance_id: None,
+            source_turn_id: None,
+            message_id: "canonical-follow-up-active-message".into(),
+            content: MessageContent::String("active".into()),
+            delivery: AgentInputDelivery::StartWhenIdle,
+            prompt_resources: None,
+            active_tool_names: None,
+        })
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        if model.call_count().await == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    let input = piko_protocol::AgentInput {
+        input_id: "canonical-follow-up-input".into(),
+        request_id: "canonical-follow-up-request".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: "root".into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: AgentInputDelivery::FollowUp,
+        content: MessageContent::String("retry this follow-up".into()),
+        submitted_at: 10,
+        user_turn_id: Some("canonical-follow-up-turn".into()),
+        caller_agent_instance_id: None,
+    };
+    let first = runtime.submit_agent_input(input.clone()).await.unwrap();
+    assert_eq!(
+        first.disposition,
+        piko_protocol::InputDisposition::PendingFollowUp
+    );
+    assert_eq!(first.input_id, input.input_id);
+
+    let retry = runtime.submit_agent_input(input).await.unwrap();
+    assert_eq!(retry.disposition, piko_protocol::InputDisposition::Duplicate);
+    assert_eq!(retry.input_id, "canonical-follow-up-input");
+
+    let cancelled = runtime
+        .cancel_agent_input_id(
+            "session-1".into(),
+            "root".into(),
+            "canonical-follow-up-input".into(),
+        )
+        .await
+        .unwrap();
+    assert!(cancelled.accepted);
+    runtime
+        .cancel_agent_run("session-1".into(), "root".into())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn queued_follow_up_can_be_cancelled_before_it_starts() {
     let (runtime, commits, model) = attached_runtime().await;
     model
@@ -161,4 +227,3 @@ async fn queued_follow_up_can_be_cancelled_before_it_starts() {
         .unwrap();
     assert_eq!(model.call_count().await, 1);
 }
-
