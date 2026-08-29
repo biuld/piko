@@ -68,7 +68,7 @@ fn workflow_host(app: &AppState) -> Rect {
 }
 
 #[test]
-fn release_only_terminal_events_activate_timeline_and_todos() {
+fn release_only_terminal_events_activate_timeline() {
     let mut app = app();
     app.session.id = Some("session-1".into());
     app.timeline_mut().push(TimelineEntry::Tool(ToolEntry::new(
@@ -79,19 +79,6 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
         Some("done".into()),
         None,
     )));
-    app.agent_panel.active_agent_instance_id = Some("agent-1".into());
-    app.todo_lists.upsert(TodoList {
-        agent_instance_id: "agent-1".into(),
-        items: vec![TodoItem {
-            id: "1".into(),
-            status: TodoStatus::Pending,
-            content: "pending item".into(),
-            detail: None,
-        }],
-        updated_at: 1,
-        revision: 1,
-    });
-
     let terminal = Rect::new(0, 0, 80, 24);
     let stream = compose_frame(&app, terminal).plan.rects[&Region::Stream];
     let (hit_id, tool) = app
@@ -111,26 +98,6 @@ fn release_only_terminal_events_activate_timeline_and_todos() {
             activation: Some(crate::app::command::TimelineActivation::Tool(id)), ..
         })] if *id == hit_id
     ));
-
-    let todo = build_surface_hitmap(&app, terminal)
-        .hits
-        .into_iter()
-        .find(|hit| hit.element == Some(HitId::TodosToggle))
-        .expect("todo hitzone");
-    let actions = route_pointer(
-        &mut app,
-        terminal,
-        mouse(
-            MouseEventKind::Up(MouseButton::Left),
-            todo.rect.x,
-            todo.rect.y,
-        ),
-    );
-    assert!(actions.is_empty());
-    assert!(
-        !app.todo_lists.is_collapsed(),
-        "release-only activate expands the collapsed default"
-    );
 }
 
 #[test]

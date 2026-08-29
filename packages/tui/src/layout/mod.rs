@@ -100,6 +100,9 @@ pub fn plane_metrics(app: &AppState, body: ratatui::layout::Rect) -> PlaneMetric
         Some(SurfaceSizing::Centered(CenteredSizePolicy::UsageContent)) => {
             Some(usage_centered_size(app, body))
         }
+        Some(SurfaceSizing::Centered(CenteredSizePolicy::TodoContent)) => {
+            Some(todo_centered_size(app, body))
+        }
         Some(SurfaceSizing::Centered(CenteredSizePolicy::NotificationContent)) => {
             Some(notifications_centered_size(app, body))
         }
@@ -129,9 +132,6 @@ fn collect_dock_offers(
     body: ratatui::layout::Rect,
     modal_open: bool,
 ) -> Vec<DockBandOffer> {
-    // Todos strip: offer when projection path has a non-empty viewed list.
-    let todos_offer = todos_band_offer(app);
-
     // Suggest forced inactive while any product modal is open.
     let suggest = has_visible_suggestions(app) && !modal_open;
     let suggest_offer = if suggest {
@@ -149,20 +149,10 @@ fn collect_dock_offers(
 
     vec![
         DockBandOffer::active(BandId::Boundary, DOCK_BOUNDARY_HEIGHT, DOCK_BOUNDARY_HEIGHT),
-        todos_offer,
         suggest_offer,
         DockBandOffer::active(BandId::Guidance, GUIDANCE_HEIGHT, GUIDANCE_HEIGHT),
         composer_offer,
     ]
-}
-
-fn todos_band_offer(app: &AppState) -> DockBandOffer {
-    // When the todos feature module lands full projection, this calls into it.
-    // Until then (or when empty / feature off / no viewed agent), height 0.
-    if let Some(offer) = crate::features::todos::dock_band_offer(app) {
-        return offer;
-    }
-    DockBandOffer::inactive(BandId::Todos)
 }
 
 /// Centered size for the per-AgentInstance usage dialog.
@@ -177,6 +167,24 @@ fn usage_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16
         .min(body.width);
     let height = content_rows
         .saturating_add(5)
+        .min(body.height.saturating_sub(2));
+    (width, height)
+}
+
+fn todo_centered_size(app: &AppState, body: ratatui::layout::Rect) -> (u16, u16) {
+    let rows = app
+        .todo_lists
+        .viewed_list(
+            app.agent_panel.active_agent_instance_id.as_deref(),
+            app.todo_feature_enabled(),
+        )
+        .map_or(1, |list| list.items.len().saturating_add(1)) as u16;
+    let width = cells_from_percent(body.width, 72)
+        .clamp(44, 96)
+        .min(body.width);
+    let height = rows
+        .saturating_add(4)
+        .clamp(7, 20)
         .min(body.height.saturating_sub(2));
     (width, height)
 }
@@ -335,19 +343,6 @@ fn build_surface_hitmap_for_frame(
             }]
         }
         Region::DockBoundary => Vec::new(),
-        // Only the summary header toggles disclosure; rows remain read-only.
-        Region::Todos => vec![
-            HitRegion {
-                region: Region::Todos,
-                rect,
-                element: None,
-            },
-            HitRegion {
-                region: Region::Todos,
-                rect: ratatui::layout::Rect::new(rect.x, rect.y, rect.width, rect.height.min(1)),
-                element: Some(HitId::TodosToggle),
-            },
-        ],
         Region::Suggest => app
             .editor
             .auto_complete
@@ -407,6 +402,15 @@ fn build_surface_hitmap_for_frame(
                 crate::features::usage::UsageCtx<'_>,
             >>::hit_regions(
                 &crate::features::usage::UsagePanel, rect
+            ))
+        }
+        Region::Surface(SurfaceId::Todos) => {
+            stamp(<crate::features::todos::TodoPanel as SurfacePanel<
+                SurfaceId,
+                HitId,
+                crate::features::todos::TodoCtx<'_>,
+            >>::hit_regions(
+                &crate::features::todos::TodoPanel, rect
             ))
         }
         Region::Surface(SurfaceId::Notifications) => {

@@ -8,7 +8,6 @@ use crate::navigation::Region;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum BandId {
     Boundary,
-    Todos,
     Suggest,
     Guidance,
     Composer,
@@ -28,8 +27,6 @@ pub enum Residency {
 pub enum ShrinkClass {
     /// Suggest / command palette / @ browser — shrink first.
     Transient,
-    /// Todos strip — keep min (header) while active.
-    Durable,
     /// Composer — shrink toward editor min after ephemeral classes.
     Anchor,
     /// Single-row resident boundary / guidance — preserved unless pathological.
@@ -51,7 +48,6 @@ impl BandId {
     pub fn region(self) -> Region {
         match self {
             BandId::Boundary => Region::DockBoundary,
-            BandId::Todos => Region::Todos,
             BandId::Suggest => Region::Suggest,
             BandId::Guidance => Region::Guidance,
             BandId::Composer => Region::Composer,

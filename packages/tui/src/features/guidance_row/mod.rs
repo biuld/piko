@@ -227,7 +227,7 @@ pub(crate) fn pane_hints(app: &AppState, surface: SurfaceId) -> PaneHints {
             tip: navigation_hint(app, "select", "cancel"),
             footer: None,
         },
-        SurfaceId::Usage | SurfaceId::Diagnostics => PaneHints {
+        SurfaceId::Usage | SurfaceId::Todos | SurfaceId::Diagnostics => PaneHints {
             tip: None,
             footer: navigation_hint(app, "scroll", "close"),
         },

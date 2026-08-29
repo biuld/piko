@@ -28,10 +28,6 @@ impl AutoCompleteProvider for FileBrowserProvider {
     ) -> Vec<CompletionRow> {
         Vec::new()
     }
-
-    fn label(&self) -> &'static str {
-        "file browser"
-    }
 }
 
 pub fn query(text: &str, cursor: usize) -> Option<FileQuery> {

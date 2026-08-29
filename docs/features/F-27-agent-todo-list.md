@@ -5,6 +5,13 @@
 > Source evidence: piko product direction (long-horizon goal compression);
 > orchd `todo` tool family (baseline write path only)
 
+## Amendment (2026-08-29): explicit Todo overlay
+
+The TUI no longer keeps Todo in the Dock Stack. The viewed agent's current
+list is opened explicitly with `/todo` in a centered, read-only overlay. The
+Dock Stack remains visually quiet and does not change height when todo state
+changes. This amendment supersedes earlier dock-strip language in this PRD.
+
 ## Amendment (2026-08-10): missing-status default
 
 Models occasionally emit a `todo_write` item without `status`. Rejecting the
@@ -17,7 +24,7 @@ the failing item index, the offending field, and the accepted values.
 
 | Layer | Term | Notes |
 |-------|------|--------|
-| **Product / docs / UI** | **todo list** (prose); strip may say **Todos** | Long-horizon goal compression for one agent. One concept. |
+| **Product / docs / UI** | **todo list** (prose); overlay may say **Todos** | Long-horizon goal compression for one agent. One concept. |
 | **One item** | **todo** / **todo item** | Not “task” / “task item” (avoids F-01 background task and multi-agent “task” wording). |
 | **Domain / protocol (new)** | `TodoList`, `TodoItem`, `TodoListUpdated` | Host projection and snapshot types. |
 | **Tool family** | feature `todo`; tools `todo_write` / `todo_read`; args `todos` | Same concept as the product todo list; model-facing ids stay as-is. |
@@ -32,8 +39,8 @@ the write/read API for that same list—not a second domain.
 Each **AgentInstance** owns a structured **todo list**: a lossy, agent-curated
 compression of long-horizon goals and progress. Agents update it through
 `todo_write` / `todo_read`; users always see the **current** list for the
-viewed agent in a **dock-resident strip** (not only as historical tool cards,
-and not in BottomBar chrome). The list is host-authoritative user-visible
+viewed agent through an explicit **`/todo` overlay** (not only as historical
+tool cards, and not in BottomBar chrome). The list is host-authoritative user-visible
 state so it survives reconnect and can grow richer item fields without
 redesigning the shell.
 
@@ -45,7 +52,7 @@ redesigning the shell.
 2. **State is not client-visible as state.** Today `todo_write` / `todo_read`
    keep list data in orchd keyed by agent, but clients only see **tool
    transcript events**. There is no projected “current todo list” for the
-   viewed agent, so the UI cannot pin a live strip independent of scroll.
+   viewed agent, so the UI cannot present live state independent of history.
 3. **Wrong surface if forced into chrome.** BottomBar is a single-line session
    meter (model, cwd, context, cost). A multi-item todo list does not belong
    there. Forcing the latest `todo_write` card open in Timeline still **scrolls
@@ -57,15 +64,15 @@ redesigning the shell.
 ## User journeys
 
 1. User starts long-horizon work. The agent writes an initial todo list. A
-   **dock strip** above the composer shows the current items for the **viewed**
+   user opens `/todo`; the overlay shows current items for the **viewed**
    agent (progress + active item at a glance). Timeline still records the tool
    call as history (collapsed by default).
-2. The agent marks items completed / in progress via tools. The strip updates
-   **in place** without the user scrolling to the latest tool card.
-3. User switches viewed agent (F4 / `/agents`). The strip shows **that**
+2. The agent marks items completed / in progress via tools. The open overlay
+   updates **in place** without the user scrolling to the latest tool card.
+3. User switches viewed agent (F4 / `/agents`). `/todo` shows **that**
    agent’s list (or empty). Parent and child lists never mix.
 4. User reconnects or resumes the session. Snapshot restores each agent’s
-   current list; the strip matches pre-disconnect state for the viewed agent.
+   current list; the overlay matches pre-disconnect state for the viewed agent.
 5. (Later) Items carry richer metadata; the strip stays a scannable summary
    while expanded detail (dock expand or dedicated surface) can show more.
 
@@ -81,8 +88,7 @@ redesigning the shell.
   live events so any client can render without replaying tools.
 - **Core prompt injection:** non-empty list rendered into the frozen run prompt
   plus drive instruction to complete remaining items (anti-drift).
-- **TUI dock-resident** todo strip for the viewed agent when the list is
-  non-empty (plane: between notice/suggest and composer, height budgeted).
+- **TUI `/todo` overlay** for the viewed agent's current list.
 - Timeline: tool cards remain audit history; they are **not** the live todo
   surface (no requirement to force-expand checklist bodies once the strip
   exists).
@@ -92,7 +98,7 @@ redesigning the shell.
 
 - BottomBar full list or multi-line checklist in chrome.
 - Session-global single list shared by all agents (explicitly **agent-level**).
-- User-editable dock (drag reorder, click-complete) unless a later PRD adds
+- User-editable overlay (drag reorder, click-complete) unless a later PRD adds
   host commands; v1 is **read-only projection** of agent-maintained state.
 - Cross-session boards, external issue trackers, or human-only lists
   disconnected from the agent.
@@ -109,7 +115,7 @@ redesigning the shell.
 | Owner | AgentInstance (same identity users switch in the agent surface) |
 | Writer | Agent tools (and any future host command that intentionally mutates) |
 | Reader | Agents via tools; clients via host projection |
-| Empty | No dock strip (or single muted empty only if product later wants it) |
+| Empty | `/todo` opens with an explicit empty message |
 | Non-empty | Dock strip visible for the **viewed** agent |
 
 ### Item model and serde (normative)
@@ -248,46 +254,41 @@ make the model aware of that agent’s current todo list:
   accepted values, so the model can correct and retry in the same turn.
 - `todo_read`: returns the current list for the calling agent.
 - Disabled feature `todo`: tools absent / fail closed per F-18; no list
-  fragment; no dock strip.
+  fragment; `/todo` shows an empty state.
 
 ### Client projection
 
 - Session snapshot includes each agent’s current `TodoList`.
 - Live updates emit when a list changes so clients do not wait for full
   snapshot.
-- Viewed-agent switch rebinds the strip without refetching the whole session
+- Viewed-agent switch rebinds the overlay without refetching the whole session
   if snapshot already holds all agents’ lists.
 
-### TUI dock strip (product)
+### TUI Todo overlay (product)
 
 ```text
 STREAM     conversation (todo tool cards = history)
-DOCK       Notice? · Todos? (viewed agent, non-empty) · Suggest? · Composer
+DOCK       blank reserved row · Suggest? · Guidance · Composer
+MODAL      /todo (viewed agent, explicit)
 CHROME     BottomBar (unchanged duties)
 ```
 
-- **When:** non-empty list for the viewed agent.
+- **When:** user invokes `/todo`; it also opens for empty state.
 - **What:** scannable todo summary (counts + items or compact active focus);
   exact row layout is presentation, not this PRD’s glyph catalog.
-- **Not:** BottomBar item; not a modal by default.
-- **Interaction (v1):** read-only; the strip is **collapsed to a one-line
-  summary by default** and expands on a header click. When items overflow the
-  granted strip height, the wheel scrolls the item window (clamped both ends)
-  instead of hard-capping the tail.
+- **Not:** BottomBar item; not a Dock Stack band.
+- **Interaction (v1):** read-only, dismissible, and internally scrollable.
 
-**TUI presentation contract** (placement, strip vs Timeline, height budget,
+**TUI presentation contract** (placement, overlay vs Timeline, viewport,
 status language family, acceptance): package docs
 [todo-list feature](../../packages/tui/docs/features/todo-list.md) and
-[todo-list design](../../packages/tui/docs/design/todo-list.md). **Dock Stack** (TUI infrastructure for non-resident plane bands) is a
-**prerequisite**:
-[dock-coexistence](../../packages/tui/docs/features/dock-coexistence.md).
-The todo strip is a stack **provider** (offer/grant), not ad-hoc layout.
+[todo-list design](../../packages/tui/docs/design/todo-list.md).
 This feature owns product/serde/persist/prompt; the TUI docs own client surfaces.
 
 ### Timeline
 
 - `todo_write` / `todo_read` remain normal tool projections (audit).
-- Live truth is the dock strip + host projection, not “last expanded card.”
+- Live truth is the Todo overlay + host projection, not “last expanded card.”
 
 ### Lifecycle
 
@@ -355,12 +356,12 @@ dock placement.
 
 1. **Persistence file layout:** field on agent instance record vs map on
    `session.json` (D-39 chooses a default; may refine).
-2. **Strip density:** one-line summary by default + expand on header click;
-   long lists scroll within the budgeted strip (TUI feature/design docs).
-3. **Parent visibility:** should a parent’s strip optionally summarize children
+2. **Overlay density:** long lists scroll within the centered viewport (TUI
+   feature/design docs).
+3. **Parent visibility:** should a parent’s overlay optionally summarize children
    lists? Deferred; default is viewed agent only.
-4. **Human edit commands:** `/todo` or dock click-complete — later PRD if
-   needed.
+4. **Human editing:** `/todo` is read-only; editing requires a later host-backed
+   command contract.
 5. **Exact drive-instruction copy** and block placement relative to agent
    base instructions (D-39 template; product may tune wording).
 

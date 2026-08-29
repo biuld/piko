@@ -65,7 +65,25 @@ fn local_slash_commands_exist_before_host_catalog_arrives() {
     assert!(
         app.command_catalog
             .iter()
+            .any(|entry| entry.slash == "/todo")
+    );
+    assert!(
+        app.command_catalog
+            .iter()
             .all(|entry| entry.slash != "/status")
+    );
+}
+
+#[test]
+fn todo_opens_centered_overlay_without_host_effects() {
+    let mut app = app();
+
+    let effects = app.try_slash_command("/todo").expect("known slash");
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.focus_manager.active_mode(),
+        AppMode::Surface(SurfaceId::Todos)
     );
 }
 

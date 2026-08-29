@@ -57,8 +57,6 @@ pub enum HitId {
     Composer,
     /// The transient notice row (click → dismiss).
     Notice,
-    /// The Todos summary header (click → collapse / expand the dock strip).
-    TodosToggle,
     /// Copy one notification's complete original message.
     NotificationCopy(u64),
     /// One completion suggestion row (click → accept it).
@@ -181,7 +179,7 @@ pub struct AppState {
     // notifications
     pub notifications: NotificationCenter,
 
-    /// Host-projected todo lists by agent instance id (F-27 dock strip).
+    /// Host-projected todo lists by agent instance id (F-27 `/todo` overlay).
     pub todo_lists: TodoListsState,
 
     // tui config (from hostd settings under `tui` namespace)

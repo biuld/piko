@@ -15,6 +15,7 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
+            Some(SurfaceId::Todos) => self.todo_lists.scroll_down(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self
                     .usage_scroll
@@ -37,6 +38,7 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
+            Some(SurfaceId::Todos) => self.todo_lists.scroll_up(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self.usage_scroll.saturating_sub(1);
             }
@@ -241,6 +243,7 @@ impl AppState {
             Some(SurfaceId::ThoughtInspector) => Vec::new(),
             Some(
                 SurfaceId::Usage
+                | SurfaceId::Todos
                 | SurfaceId::Notifications
                 | SurfaceId::Mcp
                 | SurfaceId::Diagnostics

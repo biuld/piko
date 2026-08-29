@@ -18,7 +18,7 @@ owning their state; Guidance Row only resolves and paints one projection.
 
 ```text
 Stream
-Todos?
+blank boundary row
 Suggest?
 Guidance Row    resident · exactly one row
 Composer        resident, or Select/Dock ComposerBand replacement
@@ -69,4 +69,3 @@ No setting or binding is added in v1.
 - Projecting CoverBody or Centered footer hints into the row.
 - Combining hint state with `NotificationCenter`.
 - Showing more than one notice or hint at once.
-

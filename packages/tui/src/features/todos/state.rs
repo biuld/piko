@@ -9,8 +9,6 @@ use piko_protocol::TodoList;
 #[derive(Clone, Debug)]
 pub struct TodoListsState {
     by_agent: HashMap<String, TodoList>,
-    /// Strip starts collapsed (one summary header row) until the user expands.
-    collapsed: bool,
     /// Item window offset into the viewed list (0 = top).
     scroll: Cell<usize>,
     /// Max scroll for the last painted grant; set by paint so wheel events
@@ -22,7 +20,6 @@ impl Default for TodoListsState {
     fn default() -> Self {
         Self {
             by_agent: HashMap::new(),
-            collapsed: true,
             scroll: Cell::new(0),
             max_scroll: Cell::new(0),
         }
@@ -32,7 +29,6 @@ impl Default for TodoListsState {
 impl TodoListsState {
     pub fn clear(&mut self) {
         self.by_agent.clear();
-        self.collapsed = true;
         self.scroll.set(0);
         self.max_scroll.set(0);
     }
@@ -66,23 +62,6 @@ impl TodoListsState {
         self.by_agent.get(id).filter(|list| !list.items.is_empty())
     }
 
-    /// Whether the live dock strip is showing only its summary header.
-    pub fn is_collapsed(&self) -> bool {
-        self.collapsed
-    }
-
-    /// Toggle transient strip presentation without touching projected todos.
-    pub fn toggle_collapsed(&mut self) {
-        self.collapsed = !self.collapsed;
-        if self.collapsed {
-            self.scroll.set(0);
-            self.max_scroll.set(0);
-        } else {
-            // Expanding always starts at the top of the list.
-            self.scroll.set(0);
-        }
-    }
-
     /// Wheel-scroll the item window up by `amount` rows.
     pub fn scroll_up(&self, amount: usize) {
         self.scroll.set(self.scroll.get().saturating_sub(amount));
@@ -108,6 +87,11 @@ impl TodoListsState {
     pub fn set_max_scroll(&self, max: usize) {
         self.max_scroll.set(max);
         self.scroll.set(self.scroll.get().min(max));
+    }
+
+    pub fn reset_scroll(&self) {
+        self.scroll.set(0);
+        self.max_scroll.set(0);
     }
 
     #[allow(dead_code)]

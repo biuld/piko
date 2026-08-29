@@ -57,7 +57,4 @@ impl AutoCompleteProvider for SlashCommandProvider {
             })
             .collect()
     }
-    fn label(&self) -> &'static str {
-        "slash commands"
-    }
 }

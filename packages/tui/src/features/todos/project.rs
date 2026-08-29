@@ -1,6 +1,6 @@
 //! Pure strip projection: TodoList → header / rows / scroll hint (no ratatui).
 
-use crate::features::dock_stack::TODOS_MAX_ITEM_ROWS;
+use super::TODO_MAX_ITEM_ROWS;
 use crate::ui::components::feedback::{
     DISCLOSURE_COLLAPSED, DISCLOSURE_EXPANDED, SCROLL_DOWN_GLYPH, SCROLL_UP_GLYPH, SUCCESS_GLYPH,
 };
@@ -20,22 +20,6 @@ pub struct TodoStripRow {
     pub mark: &'static str,
     pub content: String,
     pub status: TodoStatus,
-}
-
-/// Preferred dock height: header + item rows + optional scroll hint row plus
-/// one Dock Stack separator row.
-pub fn strip_height_offer(list: &TodoList, collapsed: bool) -> u16 {
-    let n = list.items.len() as u16;
-    if n == 0 {
-        return 0;
-    }
-    if collapsed {
-        return crate::features::dock_stack::TODOS_MIN_HEIGHT;
-    }
-    let max_items = TODOS_MAX_ITEM_ROWS;
-    let shown = n.min(max_items);
-    let hint_row = u16::from(n > max_items);
-    1 + shown + hint_row + 1
 }
 
 /// Project list into strip rows, truncating content to `width` and capping items.
@@ -69,7 +53,7 @@ pub fn project_strip(
     let header = truncate_line(&header, width);
 
     let max_item_rows = if collapsed { 0 } else { max_item_rows }
-        .min(TODOS_MAX_ITEM_ROWS as usize)
+        .min(TODO_MAX_ITEM_ROWS as usize)
         .max(if total > 0 && !collapsed { 1 } else { 0 }.min(total));
     let shown = total.min(max_item_rows);
     let scroll = if collapsed {
@@ -128,7 +112,7 @@ pub fn max_item_rows_for_grant(grant_height: u16, item_count: usize) -> usize {
     if after_header == 0 {
         return 0;
     }
-    let cap = TODOS_MAX_ITEM_ROWS as usize;
+    let cap = TODO_MAX_ITEM_ROWS as usize;
     if item_count as u16 <= after_header {
         return (item_count).min(cap);
     }

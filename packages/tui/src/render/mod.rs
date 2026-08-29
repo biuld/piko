@@ -2,13 +2,11 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Position, Rect},
+    layout::{Position, Rect},
     style::Style,
-    text::{Line, Span},
     widgets::{Block, Borders},
 };
 
-use crate::ui::components::pane::format_title_affixes;
 use crate::{
     app::{AppMode, AppState, HitId},
     features::{
@@ -19,6 +17,7 @@ use crate::{
         session_list::SessionListCtx,
         thinking::ThinkingCtx,
         thought_inspector::ThoughtInspectorCtx,
+        todos::{TodoCtx, TodoPanel},
         tree::TreeCtx,
         usage::{UsageCtx, UsagePanel},
     },
@@ -82,8 +81,6 @@ fn paint_regions(
     rects: &std::collections::HashMap<Region, Rect>,
     timeline_plan: &mut Option<crate::features::timeline::TimelineRenderPlan>,
 ) {
-    let has_suggest = rects.contains_key(&Region::Suggest);
-    let has_todos = rects.contains_key(&Region::Todos);
     if let Some(area) = rects.get(&Region::Stream).copied() {
         let welcome = crate::features::welcome::WelcomeView {
             version: env!("CARGO_PKG_VERSION"),
@@ -114,26 +111,8 @@ fn paint_regions(
                 .render_prepared(frame, area, &app.theme, welcome, plan);
         }
     }
-    if let Some(area) = rects.get(&Region::DockBoundary).copied() {
-        render_dock_separator(frame, area, app, has_suggest && !has_todos);
-    }
-    if let Some(area) = rects.get(&Region::Todos).copied() {
-        let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-        crate::features::todos::render_todos_strip(
-            frame,
-            content,
-            app,
-            &app.theme,
-            interaction_state(app, Region::Todos),
-        );
-        let separator = Rect::new(
-            area.x,
-            area.bottom().saturating_sub(1),
-            area.width,
-            u16::from(area.height > 0),
-        );
-        render_dock_separator(frame, separator, app, has_suggest);
-    }
+    // DockBoundary intentionally remains blank: it preserves one row of
+    // breathing room without adding another horizontal rule or metadata.
     if let Some(area) = rects.get(&Region::Suggest).copied() {
         app.editor.auto_complete.render(
             frame,
@@ -159,37 +138,6 @@ fn paint_regions(
             render_surface(frame, app, *area, surface);
         }
     }
-}
-
-fn render_dock_separator(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &AppState,
-    hosts_suggest_title: bool,
-) {
-    let mut block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(app.theme.border_muted));
-    if hosts_suggest_title {
-        block = block.title(
-            Line::from(Span::styled(
-                format!(" {} ", app.editor.auto_complete.boundary_title()),
-                Style::default().fg(app.theme.text),
-            ))
-            .alignment(Alignment::Left),
-        );
-        let affixes = format_title_affixes(&app.editor.auto_complete.boundary_affixes());
-        if !affixes.is_empty() {
-            block = block.title(
-                Line::from(Span::styled(
-                    format!(" {affixes} "),
-                    Style::default().fg(app.theme.dim),
-                ))
-                .alignment(Alignment::Right),
-            );
-        }
-    }
-    frame.render_widget(block, area);
 }
 
 fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
@@ -326,6 +274,15 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 hints: hints.footer.as_deref(),
             };
             render_panel(&UsagePanel, frame, area, &ctx, interaction);
+        }
+        SurfaceId::Todos => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
+            let ctx = TodoCtx {
+                app,
+                theme: &app.theme,
+                hints: hints.footer.as_deref(),
+            };
+            render_panel(&TodoPanel, frame, area, &ctx, interaction);
         }
         SurfaceId::Notifications => {
             let hints = crate::features::guidance_row::pane_hints(app, surface);

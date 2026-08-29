@@ -16,12 +16,12 @@ Dock Stack. Filter typing lives in the editor — the pane uses
 **Slash suggestions are the command palette** (no separate palette surface).
 Suggest is a **Dock Stack** ephemeral band (`BandId::Suggest`, shrink class
 **transient**): this feature builds a [DockBandOffer](./dock-coexistence.md);
-the stack may grant less than preferred when Todos/Guidance/Composer compete.
+the stack may grant less than preferred when Guidance/Composer compete.
 Paint must respect granted height (fewer list rows), not assume preferred.
 
 ### Slash Suggestions Layout
 ```
-─ slash commands ───────────────────── [1/15] ─
+(blank reserved row)
 ❯ /resume             List and open hostd sessions
   /model              Select model and compatible thinking
   /resume             List and open sessions
@@ -31,7 +31,7 @@ Tab cycle | Enter execute
 
 ### File Browser Layout
 ```
-─ file browser ──────────────────────── [2/4] ─
+(blank reserved row)
   @packages/tui/src/main.rs       file (1.2 KB)
 ❯ @src/main.rs                    file (4.5 KB)
   @src/theme.rs                   file (8.1 KB)
@@ -40,12 +40,9 @@ Tab cycle | Enter execute
 ```
 
 - **Height**: content rows (capped) + bottom border. The preceding DockBoundary
-  or Todos separator supplies the top rule. Interaction hints project through
-  the resident Guidance Row.
-- **Title**: provider label and selection counter project into the immediately
-  preceding shared separator (DockBoundary or Todos bottom separator).
-- **Borders**: Suggest never paints a duplicate top border; adjacent component
-  chrome collapses into one visual rule.
+  is a blank breathing row. Interaction hints project through Guidance Row.
+- **Metadata**: no provider label or selection counter is painted.
+- **Borders**: Suggest paints no top border.
 - **Alignment**: table columns — left labels (commands or paths), right details.
 
 ## Behavior / interactions

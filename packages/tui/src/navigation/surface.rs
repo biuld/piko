@@ -26,6 +26,7 @@ pub enum SurfaceId {
     Models,
     Thinking,
     Settings,
+    Todos,
     Usage,
     Notifications,
     ThoughtInspector,
@@ -71,6 +72,7 @@ pub enum SurfaceSizing {
 pub enum CenteredSizePolicy {
     SettingsViewport,
     UsageContent,
+    TodoContent,
     NotificationContent,
     ThoughtContent,
 }
@@ -170,6 +172,12 @@ impl SurfaceId {
             },
             Self::Usage => SurfaceSpec {
                 sizing: Sizing::Centered(Centered::UsageContent),
+                input: Input::ReadOnlyViewport,
+                guidance: Guidance::None,
+                outside_click: Outside::Dismiss,
+            },
+            Self::Todos => SurfaceSpec {
+                sizing: Sizing::Centered(Centered::TodoContent),
                 input: Input::ReadOnlyViewport,
                 guidance: Guidance::None,
                 outside_click: Outside::Dismiss,

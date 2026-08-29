@@ -230,6 +230,13 @@ impl AppState {
                 }
                 self.status = "no active session for /usage".to_string();
             }
+            SurfaceAction::OpenTodos => {
+                self.todo_lists.reset_scroll();
+                self.push_surface(SurfaceId::Todos);
+                self.status = "todos".to_string();
+            }
+            SurfaceAction::TodoScrollUp(amount) => self.todo_lists.scroll_up(amount),
+            SurfaceAction::TodoScrollDown(amount) => self.todo_lists.scroll_down(amount),
             SurfaceAction::OpenNotifications => {
                 self.notifications.open_modal();
                 self.push_surface(SurfaceId::Notifications);

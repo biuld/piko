@@ -21,18 +21,12 @@ pub const GUIDANCE_HEIGHT: u16 = 1;
 /// Resident boundary between the scrollable Stream and the Dock Stack.
 pub const DOCK_BOUNDARY_HEIGHT: u16 = 1;
 
-/// Todos header plus its Dock Stack-owned bottom separator.
-pub const TODOS_MIN_HEIGHT: u16 = 2;
-
-/// Max item rows painted in the Todos strip (not counting header / overflow).
-pub const TODOS_MAX_ITEM_ROWS: u16 = 6;
-
-/// v1 registry: Boundary → Todos → Suggest → Guidance → Composer.
+/// Dock registry: reserved boundary row → Suggest → Guidance → Composer.
 pub fn registry() -> &'static [BandSpec] {
     &REGISTRY
 }
 
-const REGISTRY: [BandSpec; 5] = [
+const REGISTRY: [BandSpec; 4] = [
     BandSpec {
         id: BandId::Boundary,
         order: 0,
@@ -40,26 +34,20 @@ const REGISTRY: [BandSpec; 5] = [
         shrink: ShrinkClass::Protect,
     },
     BandSpec {
-        id: BandId::Todos,
-        order: 1,
-        residency: Residency::Ephemeral,
-        shrink: ShrinkClass::Durable,
-    },
-    BandSpec {
         id: BandId::Suggest,
-        order: 2,
+        order: 1,
         residency: Residency::Ephemeral,
         shrink: ShrinkClass::Transient,
     },
     BandSpec {
         id: BandId::Guidance,
-        order: 3,
+        order: 2,
         residency: Residency::Anchor,
         shrink: ShrinkClass::Protect,
     },
     BandSpec {
         id: BandId::Composer,
-        order: 4,
+        order: 3,
         residency: Residency::Anchor,
         shrink: ShrinkClass::Anchor,
     },

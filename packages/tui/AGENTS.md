@@ -5,19 +5,19 @@
 ```
 piko-tui-layout  →  shell split, flex plane, modal z-stack, FocusManager<T>
 piko-tui         →  Region / SurfaceId / AppMode, declare trees, paint, route keys
-                 →  features/dock_stack — plane ephemeral-band offers/grants
+                 →  features/dock_stack — plane completion-band offers/grants
 ```
 
 ```
 Terminal
   → split_shell (BottomBar chrome: agent · model · cwd · ctx · cost)
-  → plane      Stream | dock_stack grants (Todos? Suggest? Guidance) | Composer
+  → plane      Stream | blank boundary | Suggest? | Guidance | Composer
   → modals     Browse CoverBody | Select/Dock ComposerBand | Modal Centered
   → solve → paint chrome → plane (unless CoverBody) → layers
 ```
 
 **Dock Stack** (`features/dock-coexistence` docs, `features/dock_stack` code):
-standalone infrastructure for optional plane bands (Todos, `/` palette / `@`
+standalone infrastructure for optional plane bands (`/` palette / `@`
 in Suggest) plus resident Guidance and Composer anchors. Providers offer
 preferred height; the stack solves joint budget and grants rects. Not
 `SurfaceIntent::Dock` (modal band) and not `ui::dock_line` (one-row paint
@@ -30,7 +30,6 @@ helper).
 │ STREAM            (plane, grow)       │  conversation only
 ├──────────────────────────────────────┤
 │ DOCK              (plane, bottom)     │
-│  Todos?           viewed agent todo list when non-empty (F-27)
 │  Suggest?                             │
 │  Guidance         notice or active interaction hint
 │  Composer                             │
@@ -101,13 +100,13 @@ Engine: `packages/tui-layout/docs/`. Product: `packages/tui/docs/`.
 | `features/component-feedback.md` | Shared component state language |
 | `features/themes.md` | Semantic color tokens |
 | `features/<surface>.md` | **Behavior contract** (what/when/interactions)—not per-projection layout designs |
-| `features/dock-coexistence.md` | **Dock Stack** — infrastructure: band registry, offer/grant, coexistence (**Todos prerequisite**) |
+| `features/dock-coexistence.md` | **Dock Stack** — infrastructure: reserved blank row, band registry, offer/grant, coexistence |
 | `features/guidance-row.md` | Resident row above Composer: Notice / active Hint arbitration |
-| `features/todo-list.md` | Dock **Todos** strip + Timeline history split (agent todo list / F-27) |
+| `features/todo-list.md` | `/todo` **Todos** overlay + Timeline history split (agent todo list / F-27) |
 | `design/<topic>.md` | Modules, data flow, algorithms, reusable primitives |
 | `design/dock-coexistence.md` | `features/dock_stack` module, types, solver, migration |
 | `design/guidance-row.md` | Guidance resolver, ComposerBand composition, hit-testing |
-| `design/todo-list.md` | Todos strip as a **band provider** under Dock Stack |
+| `design/todo-list.md` | Todos as a centered, read-only overlay |
 
 Do **not** document layout design for every projected kind (user/assistant/
 each tool body). Family-wide rules → `ui-ux.md`; concrete typesetting → code

@@ -44,11 +44,7 @@ pub fn solve(input: DockSolveInput) -> DockSolveOutput {
     let mut sum: u16 = working.iter().map(|(_, _, _, h)| *h).sum();
 
     // Shrink by class order while over budget.
-    for class in [
-        ShrinkClass::Transient,
-        ShrinkClass::Durable,
-        ShrinkClass::Anchor,
-    ] {
+    for class in [ShrinkClass::Transient, ShrinkClass::Anchor] {
         shrink_class(&mut working, &mut sum, dock_max, class);
     }
     // Protect never shrinks below min while active — already at preferred==min.
@@ -107,11 +103,7 @@ fn emergency_fit(
     dock_max: u16,
 ) {
     // First drive every non-protect band to min.
-    for class in [
-        ShrinkClass::Transient,
-        ShrinkClass::Durable,
-        ShrinkClass::Anchor,
-    ] {
+    for class in [ShrinkClass::Transient, ShrinkClass::Anchor] {
         shrink_class(working, sum, dock_max, class);
     }
     // Only if still over: drop protect to 0 (body too small for guidance+composer).

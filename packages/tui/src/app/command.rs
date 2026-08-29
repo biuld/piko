@@ -130,6 +130,9 @@ pub enum ThoughtInspectorAction {
 #[derive(Debug)]
 pub enum SurfaceAction {
     OpenSettings,
+    OpenTodos,
+    TodoScrollUp(usize),
+    TodoScrollDown(usize),
     OpenUsage,
     OpenNotifications,
     OpenTree,
@@ -320,6 +323,7 @@ impl From<SlashAction> for Action {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalCommandId {
     Settings,
+    Todos,
     Tree,
     Usage,
     Notifications,
@@ -376,6 +380,12 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
         LocalCommandId::Settings,
         "Settings",
         "Open hostd-backed runtime settings",
+    ),
+    (
+        "/todo",
+        LocalCommandId::Todos,
+        "Todos",
+        "Show the viewed agent's current todo list",
     ),
     (
         "/usage",
@@ -462,6 +472,7 @@ pub fn action_for_local_command(id: LocalCommandId) -> Action {
         LocalCommandId::Agents => SurfaceAction::OpenAgents.into(),
         LocalCommandId::Tree => SurfaceAction::OpenTree.into(),
         LocalCommandId::Settings => SurfaceAction::OpenSettings.into(),
+        LocalCommandId::Todos => SurfaceAction::OpenTodos.into(),
         LocalCommandId::Usage => SurfaceAction::OpenUsage.into(),
         LocalCommandId::Notifications => SurfaceAction::OpenNotifications.into(),
         LocalCommandId::Diff => SlashAction::RequestDiff.into(),

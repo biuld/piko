@@ -163,14 +163,7 @@ impl AppState {
                 }
             }
             Region::Guidance => self.notifications.pointer_event(component_hit, gesture),
-            Region::Todos
-                if gesture == PointerGesture::Activate
-                    && component_hit.element == Some(HitId::TodosToggle) =>
-            {
-                self.todo_lists.toggle_collapsed();
-                Vec::new()
-            }
-            Region::Todos
+            Region::Surface(SurfaceId::Todos)
                 if matches!(
                     gesture,
                     PointerGesture::ScrollUp | PointerGesture::ScrollDown
@@ -187,7 +180,7 @@ impl AppState {
                 }
                 Vec::new()
             }
-            Region::DockBoundary | Region::Todos => Vec::new(),
+            Region::DockBoundary => Vec::new(),
             Region::Suggest => self
                 .editor
                 .auto_complete

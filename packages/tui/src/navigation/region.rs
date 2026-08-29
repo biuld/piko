@@ -8,10 +8,8 @@ pub enum Region {
     // ── Plane (workspace) ────────────────────────────────────────────────
     /// Conversation / stream viewport (primary reading surface).
     Stream,
-    /// Resident separator between Stream and the Dock Stack.
+    /// Reserved blank row between Stream and the Dock Stack.
     DockBoundary,
-    /// Viewed-agent todo strip (Dock Stack durable band; height 0 when empty).
-    Todos,
     /// Completion list above the composer.
     Suggest,
     /// Resident notice / contextual-hint projection above the composer.

@@ -133,7 +133,9 @@ Typing `@` followed by characters activates the **File Browser** auto-completion
 
 ### Completion UI
 
-Suggestions appear in workspace `Region::Suggest` (directly above the Editor), with Minimal pane chrome. The header uses the provider label (`slash commands` / `file browser`); selection counter is a title affix. Column outputs (command descriptions or file sizes) align consistently.
+Suggestions appear in workspace `Region::Suggest` (directly above the Editor),
+with bottom-only Minimal pane chrome. There is no provider header or selection
+counter. Column outputs (command descriptions or file sizes) align consistently.
 
 ### Completion navigation and acceptance
 

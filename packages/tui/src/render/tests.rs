@@ -89,7 +89,7 @@ fn idle_guidance_row_paints_composer_hints_above_composer() {
 }
 
 #[test]
-fn dock_stack_paints_muted_boundary_below_stream() {
+fn dock_stack_reserves_blank_row_below_stream() {
     let app = app();
     let area = Rect::new(0, 0, 80, 24);
     let composed = compose_frame(&app, area);
@@ -100,81 +100,36 @@ fn dock_stack_paints_muted_boundary_below_stream() {
 
     assert_eq!(stream.bottom(), boundary.y);
     assert_eq!(boundary.height, 1);
-    assert_eq!(buffer[(boundary.x, boundary.y)].symbol(), "─");
-    assert_eq!(buffer[(boundary.x, boundary.y)].fg, app.theme.border_muted);
+    assert_eq!(buffer[(boundary.x, boundary.y)].symbol(), " ");
 }
 
 #[test]
-fn todos_paints_muted_separator_before_guidance() {
+fn todo_is_absent_from_dock_and_renders_in_overlay() {
     let mut app = app();
     add_todo(&mut app);
+    app.push_surface(SurfaceId::Todos);
 
     let area = Rect::new(0, 0, 80, 24);
     let composed = compose_frame(&app, area);
-    let todos = composed.plan.rects[&Region::Todos];
-    let guidance = composed.plan.rects[&Region::Guidance];
-    let terminal = draw(&app, area);
-    let buffer = terminal.backend().buffer();
-    let separator_y = todos.bottom() - 1;
-
-    assert_eq!(separator_y + 1, guidance.y);
-    assert_eq!(buffer[(todos.x, separator_y)].symbol(), "─");
-    assert_eq!(buffer[(todos.x, separator_y)].fg, app.theme.border_muted);
-}
-
-#[test]
-fn todos_header_hitzone_paints_accent_text_without_background() {
-    let mut app = app();
-    add_todo(&mut app);
-    app.todo_lists.toggle_collapsed(); // expand so item rows are painted
-    app.hovered = Some((Region::Todos, Some(HitId::TodosToggle)));
-
-    let area = Rect::new(0, 0, 80, 24);
-    let todos = compose_frame(&app, area).plan.rects[&Region::Todos];
-    let terminal = draw(&app, area);
-    let buffer = terminal.backend().buffer();
-
-    assert_eq!(buffer[(todos.x, todos.y)].fg, app.theme.accent);
-    assert_ne!(buffer[(todos.x, todos.y)].bg, app.theme.bg_hover);
-    assert_ne!(
-        buffer[(todos.x, todos.y + 1)].fg,
-        app.theme.accent,
-        "item rows must not inherit the header hitzone hover"
-    );
-}
-
-#[test]
-fn todos_separator_hosts_following_suggest_title_without_double_rule() {
-    let mut app = app();
-    add_todo(&mut app);
-    app.editor.insert_char('/');
-    app.refresh_suggestions();
-
-    let area = Rect::new(0, 0, 80, 30);
-    let composed = compose_frame(&app, area);
-    let todos = composed.plan.rects[&Region::Todos];
-    let suggest = composed.plan.rects[&Region::Suggest];
-    let terminal = draw(&app, area);
-    let buffer = terminal.backend().buffer();
-    let separator_y = todos.bottom() - 1;
-    let separator_text = (todos.x..todos.right())
-        .map(|x| buffer[(x, separator_y)].symbol())
-        .collect::<String>();
-    let first_suggest_row = (suggest.x..suggest.right())
-        .map(|x| buffer[(x, suggest.y)].symbol())
-        .collect::<String>();
-
-    assert_eq!(todos.bottom(), suggest.y);
     assert!(
-        separator_text.contains("slash commands"),
-        "{separator_text}"
+        !composed
+            .plan
+            .rects
+            .keys()
+            .any(|region| matches!(region, Region::Surface(SurfaceId::Todos)))
     );
-    assert!(first_suggest_row.contains("/resume"), "{first_suggest_row}");
-    assert!(!first_suggest_row.contains("slash commands"));
+    let todos = composed.plan.layers[0].rects[&Region::Surface(SurfaceId::Todos)];
+    let terminal = draw(&app, area);
+    let buffer = terminal.backend().buffer();
+    let text = (todos.y..todos.bottom())
+        .flat_map(|y| (todos.x..todos.right()).map(move |x| buffer[(x, y)].symbol()))
+        .collect::<String>();
+    assert!(text.contains("Todos"), "{text}");
+    assert!(text.contains("keep dock components distinct"), "{text}");
 }
 
 #[test]
-fn topmost_suggest_shares_dock_boundary_title_without_a_second_top_rule() {
+fn suggest_keeps_the_reserved_boundary_row_blank() {
     let mut app = app();
     app.editor.insert_char('/');
     app.refresh_suggestions();
@@ -192,9 +147,8 @@ fn topmost_suggest_shares_dock_boundary_title_without_a_second_top_rule() {
         .collect::<String>();
 
     assert_eq!(boundary.bottom(), suggest.y);
-    assert!(boundary_text.contains("slash commands"), "{boundary_text}");
+    assert!(boundary_text.trim().is_empty(), "{boundary_text}");
     assert!(first_suggest_row.contains("/resume"), "{first_suggest_row}");
-    assert!(!first_suggest_row.contains("slash commands"));
 }
 
 #[test]

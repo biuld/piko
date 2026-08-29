@@ -133,7 +133,7 @@ Workspace + shell chrome (not A–E slots):
 │ STREAM            conversation / tools (plane, grow)         │
 ├──────────────────────────────────────────────────────────────┤
 │ DOCK (plane bottom stack)                                    │
-│   Todos?          viewed agent todo list when non-empty (F-27) │
+│   (blank row)      reserved breathing space                  │
 │   Suggest?        / command palette or @ file browser        │
 │   Guidance        resident notice / active interaction hint  │
 │   Composer        editor                                     │
@@ -141,10 +141,10 @@ Workspace + shell chrome (not A–E slots):
 │ CHROME            agent · model · cwd · context · cost       │
 └──────────────────────────────────────────────────────────────┘
 
-These dock bands **may all be visible together**. Coordination is a standalone
+These dock bands coexist through a standalone
 TUI infrastructure feature — **Dock Stack**
 ([dock-coexistence.md](./dock-coexistence.md)): band registry, offer/grant,
-joint height solver. Product bands (Todos, Suggest, Guidance) do not own plane
+joint height solver. Product bands (Suggest, Guidance) do not own plane
 stacking. Suggest is not a separate “command palette” modal — `/` paints in
 `Region::Suggest`. `SurfaceIntent::Dock` (approval / tool workflow) is a
 **ComposerBand modal**, not a Dock Stack band.
@@ -275,7 +275,7 @@ What each surface **must**, **should**, and **must not** show.
 - Assistant final text (and progressive draft while streaming)
 - Tool executions as separate cards: tool name, run status, scannable summary
   on the title; typed body when expanded. Live **agent todo list** is not
-  Timeline-owned product chrome (see F-27 dock strip).
+  Timeline-owned product chrome (see F-27 `/todo` overlay).
 - Session-level notices and errors that belong in the transcript
 - Clear visual difference: user / assistant / tool / notice / error
 
@@ -343,31 +343,32 @@ Detail ownership: agent panel / agent-directed chat feature docs.
 
 - Model/cost/context (those belong in BottomBar or selectors)
 - Approval or workflow questions (those replace the composer zone)
-- Full agent todo list (dock strip / F-27, not the editor body)
+- Full agent todo list (`/todo` overlay / F-27, not the editor body)
 
 Detail ownership: [editor.md](./editor.md), [auto-completion.md](./auto-completion.md).
 
-### Todos (agent todo list strip)
+### Todos (agent todo list overlay)
 
-Product name: **todo list** (see F-27 terminology). Dock chrome may label
+Product name: **todo list** (see F-27 terminology). Overlay chrome may label
 **Todos**. Avoid product **task list** (collides with F-01 / multi-agent
 “task”).
 
-**Must show** (when F-27 is implemented and the viewed agent’s list is non-empty)
+**Must show** (when `/todo` is open)
 
 - Current todo list for the **viewed** AgentInstance only
-- Enough structure to see progress and the active item(s) without scrolling
-  Timeline
+- Enough structure to see progress and the active item(s) without scanning
+  Timeline; an explicit empty state when no current list exists
 
 **Should show**
 
-- Compact counts (done / total) when the full list is capped by height budget
+- Compact counts (done / total) and internal scrolling for long lists
 
 **Must not show**
 
 - Another agent’s list while that agent is not viewed
 - Invented items not present in host projection
 - Placement in BottomBar as a multi-line checklist
+- A permanent Dock Stack band
 
 Detail ownership: TUI [todo-list.md](./todo-list.md) +
 [design/todo-list.md](../design/todo-list.md); product

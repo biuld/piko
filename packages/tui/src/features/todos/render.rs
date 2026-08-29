@@ -1,4 +1,4 @@
-//! Ratatui paint for the Todos dock strip within a granted rect.
+//! Ratatui paint for the centered Todos overlay content.
 
 use ratatui::{
     layout::Rect,
@@ -12,57 +12,39 @@ use piko_protocol::{TodoList, TodoStatus};
 use super::project::{max_item_rows_for_grant, project_strip};
 use crate::theme::Theme;
 
-pub fn paint_strip(
+pub fn paint_overlay(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
     list: &TodoList,
-    collapsed: bool,
     scroll: usize,
     theme: &Theme,
-    header_hovered: bool,
 ) {
     if area.height == 0 || area.width == 0 {
         return;
     }
     let max_items = max_item_rows_for_grant(area.height, list.items.len());
-    let view = project_strip(list, area.width, max_items, collapsed, scroll);
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let header_style = Style::default()
-        .fg(if header_hovered {
-            theme.accent
-        } else {
-            theme.text
-        })
-        .add_modifier(Modifier::BOLD);
-    lines.push(Line::from(Span::styled(view.header, header_style)));
-
+    let mut view = project_strip(list, area.width, max_items, false, scroll);
+    view.header = view.header.trim_start_matches("▾ ").to_string();
+    let mut lines = vec![Line::from(Span::styled(
+        view.header,
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+    ))];
     for row in view.rows {
-        let (mark_style, content_style) = status_styles(row.status, theme);
-        let mut spans = vec![
+        let (mark_style, mut content_style) = status_styles(row.status, theme);
+        if row.status == TodoStatus::Completed {
+            content_style = content_style.add_modifier(Modifier::CROSSED_OUT);
+        }
+        lines.push(Line::from(vec![
             Span::styled(format!("{} ", row.mark), mark_style),
             Span::styled(row.content, content_style),
-        ];
-        // Strikethrough content only for completed.
-        if row.status == TodoStatus::Completed {
-            spans[1] = Span::styled(
-                spans[1].content.to_string(),
-                content_style.add_modifier(Modifier::CROSSED_OUT),
-            );
-        }
-        lines.push(Line::from(spans));
+        ]));
     }
-
-    if let Some(hint) = view.scroll_hint
-        && (lines.len() as u16) < area.height
-    {
+    if let Some(hint) = view.scroll_hint {
         lines.push(Line::from(Span::styled(
             hint,
             Style::default().fg(theme.dim),
         )));
     }
-
-    // Never paint more rows than granted.
     lines.truncate(area.height as usize);
     frame.render_widget(Paragraph::new(lines), area);
 }

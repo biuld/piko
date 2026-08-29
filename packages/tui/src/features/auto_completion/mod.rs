@@ -16,7 +16,7 @@ use crate::ui::components::selectable_list::{
     ColumnCell, SelectableItem, SelectableList, SelectablePanelBody, paint_index_hover,
     paint_selectable_panel, selectable_row_regions,
 };
-use crate::ui::components::{NO_MATCHES, pane::PaneSpec, pane::PaneTitleAffix};
+use crate::ui::components::{NO_MATCHES, pane::PaneSpec};
 use crate::ui::interaction::{ComponentHit, PointerComponent, PointerGesture};
 
 pub mod file_browser;
@@ -154,18 +154,6 @@ impl AutoComplete {
         self.list.clear();
         self.active_provider_idx = None;
         self.active_file_query = None;
-    }
-
-    pub(crate) fn boundary_title(&self) -> &'static str {
-        self.active_provider_idx
-            .map(|idx| self.providers[idx].label())
-            .unwrap_or("suggestions")
-    }
-
-    pub(crate) fn boundary_affixes(&self) -> Vec<PaneTitleAffix> {
-        let total = self.list.len();
-        let selected_one = usize::from(total > 0).saturating_mul(self.list.selected + 1);
-        vec![PaneTitleAffix::selection(selected_one, total)]
     }
 
     fn pane_spec(&self) -> PaneSpec<'static> {

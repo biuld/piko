@@ -11,7 +11,7 @@ NotificationCenter ───────┐
 AutoComplete / Surface ───┼→ Guidance projection → Region::Guidance → dock_line
 Composer fallback ────────┘
 
-Dock Stack: Todos? → Suggest? → Guidance(1) → Composer
+Dock Stack: blank boundary → Suggest? → Guidance(1) → Composer
 ```
 
 `features::guidance_row` owns content resolution and paint. Dock Stack owns

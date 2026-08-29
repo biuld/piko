@@ -306,7 +306,7 @@ module** (see [ui-ux](../features/ui-ux.md) stream projection principles).
 
 Behavior anchors: upsert by tool call id (preserve `expanded`); snapshot
 rebuild starts collapsed; hit region is title row; token chip prefers usage
-when present. Live todo list is the dock strip (see
+when present. Live todo list is the `/todo` overlay (see
 [todo-list.md](./todo-list.md)); Timeline `todo_*` cards are history only and
 should not force-paint checklist bodies once that strip is live.
 

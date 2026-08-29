@@ -8,7 +8,7 @@ We refactor the auto-completion logic into a trait-based provider architecture u
 
 This design establishes:
 1. **Generic Item Representation (`CompletionRow`)**: Sub-feature agnostic shape representing rendering columns and replacement action.
-2. **Provider Trait (`AutoCompleteProvider`)**: Encapsulates data fetching, filtering, custom key actions, and titles.
+2. **Provider Trait (`AutoCompleteProvider`)**: Encapsulates trigger detection and candidate retrieval/filtering.
 3. **AutoComplete Controller**: Manages active state, selection index, provider switching, and delegates rendering.
 
 ```
@@ -93,8 +93,6 @@ pub trait AutoCompleteProvider {
         cursor: usize,
     ) -> Vec<CompletionRow>;
 
-    /// Title displayed in the Suggestions block header.
-    fn title(&self, selected: usize, total: usize) -> String;
 }
 ```
 
@@ -128,15 +126,10 @@ use the declared `piko-comms` TUI file-search thread-bridge contracts.
 
 ### Dock boundary chrome
 
-When Suggest is the first optional Dock Stack band, `Region::DockBoundary`
-paints the provider label and selection affix. `Region::Suggest` then uses a
-bottom-only `PaneSpec`, so its first row is content rather than a duplicate top
-rule. If Todos precedes Suggest, Suggest retains its normal Minimal top/bottom
-chrome because the shared boundary is no longer adjacent.
-
-Height offers mirror paint: shared-boundary Suggest reserves content + bottom;
-non-shared Suggest reserves top + content + bottom. Pointer row projection uses
-the same chrome mode as rendering.
+`Region::DockBoundary` remains blank even while Suggest is active.
+`Region::Suggest` uses a bottom-only `PaneSpec`, so its first row is candidate
+content. No provider label, selection affix, or top rule is painted. Height
+offers therefore reserve candidate content plus the bottom border only.
 In `AutoComplete::render()`, we dynamically compute the maximum width of each column (except the last one) across all items in `self.items`.
 Rows are rendered with ratatui's `Table` widget, using a small marker column for the selected row and provider-defined cells for the completion columns. This allows multi-column layouts like:
 ```

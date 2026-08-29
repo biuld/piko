@@ -93,7 +93,7 @@ Tool details (**behavior** only; per-tool layout is code + [ui-ux](./ui-ux.md)
 stream principles):
 
 - Collapsed by default; expand shows typed detail (not raw wire JSON).
-  Live agent **todo list** is the dock strip ([todo-list.md](./todo-list.md) /
+  Live agent **todo list** is the `/todo` overlay ([todo-list.md](./todo-list.md) /
   F-27), not a force-expanded Timeline card. `todo_*` tools remain audit
   history; once the strip ships, checklist bodies need not stay open when
   collapsed.

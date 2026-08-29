@@ -15,7 +15,4 @@ pub trait AutoCompleteProvider {
         text: &str,
         cursor: usize,
     ) -> Vec<CompletionRow>;
-
-    /// Short left title for [`Pane`] chrome (selection counter is a title affix).
-    fn label(&self) -> &'static str;
 }

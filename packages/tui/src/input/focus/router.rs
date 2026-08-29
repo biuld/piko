@@ -73,11 +73,13 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         TimelinePageUp | NotificationPageUp => match surface {
             Some(SurfaceId::Notifications) => NotificationAction::ScrollUp(10).into(),
             Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollUp(10).into(),
+            Some(SurfaceId::Todos) => SurfaceAction::TodoScrollUp(10).into(),
             _ => TimelineAction::ScrollUp(8).into(),
         },
         TimelinePageDown | NotificationPageDown => match surface {
             Some(SurfaceId::Notifications) => NotificationAction::ScrollDown(10).into(),
             Some(SurfaceId::ThoughtInspector) => ThoughtInspectorAction::ScrollDown(10).into(),
+            Some(SurfaceId::Todos) => SurfaceAction::TodoScrollDown(10).into(),
             _ => TimelineAction::ScrollDown(8).into(),
         },
         TimelineUp => match surface {
@@ -119,6 +121,13 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
                     ThoughtInspectorAction::ScrollUp(10).into()
                 } else {
                     ThoughtInspectorAction::ScrollDown(10).into()
+                }
+            }
+            Some(SurfaceId::Todos) => {
+                if matches!(command, SelectionPagePrevious) {
+                    SurfaceAction::TodoScrollUp(10).into()
+                } else {
+                    SurfaceAction::TodoScrollDown(10).into()
                 }
             }
             Some(_) => {

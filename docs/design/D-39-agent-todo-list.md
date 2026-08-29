@@ -1,4 +1,4 @@
-# D-39: Agent todo list projection and dock strip
+# D-39: Agent todo list projection and TUI overlay
 
 > Status: draft  
 > Feature: [F-27](../features/F-27-agent-todo-list.md)
@@ -13,7 +13,7 @@ background tasks and multi-agent wording).
 ## Goal
 
 Make each AgentInstance’s **todo list** **host-authoritative product state**,
-project it to clients, and render a **TUI dock strip** for the viewed agent.
+project it to clients, and render a **TUI `/todo` overlay** for the viewed agent.
 Todo tools remain the agent write path; Timeline tool cards remain history only.
 
 ## Constraints
@@ -51,7 +51,7 @@ Agent tool todo_write/read
  protocol DTOs (TodoList / TodoItem per agent_instance_id)
         │
         ▼
- clients (TUI dock strip for viewed agent; other clients optional)
+ clients (TUI overlay for viewed agent; other clients optional)
 ```
 
 ### Why not orchd-only forever?
@@ -190,35 +190,28 @@ follows the agent.
 Normative client presentation lives in package docs (keep this section as a
 cross-crate pointer + slice ordering only):
 
-- **Prerequisite (Dock Stack infrastructure):**
-  [dock-coexistence feature](../../packages/tui/docs/features/dock-coexistence.md) /
-  [design](../../packages/tui/docs/design/dock-coexistence.md) — standalone TUI
-  feature: band registry, offer/grant solver for non-resident plane bands.
-  Todos is a **provider**, not a private `compose_plane` fixed height.
+- Dock Stack explicitly excludes Todo; its reserved boundary row remains
+  unchanged by todo state.
 - Feature: [packages/tui/docs/features/todo-list.md](../../packages/tui/docs/features/todo-list.md)
 - Design: [packages/tui/docs/design/todo-list.md](../../packages/tui/docs/design/todo-list.md)
 
-### Plane (summary)
+### Surface (summary)
 
 ```text
-Stream (grow)
-Notice? (1)
-Todos? (N, budgeted — e.g. min(items+1, cap))
-Suggest?
-Composer
+/todo command → SurfaceId::Todos → centered read-only overlay
 ```
 
-Compose order: after Notice, before Suggest (attention > todos > completions >
-editor). Empty → height 0. Details, caps, and module sketch → TUI design doc.
+The plane has no Todo region, offer, or grant. The overlay opens even when the
+viewed agent has no list and presents an explicit empty state.
 
 ### State (summary)
 
 - Subscribe to snapshot + `TodoListUpdated` (names TBD).
-- Bind strip to **viewed** `agent_instance_id`.
+- Bind overlay to **viewed** `agent_instance_id`.
 
 ### Presentation (summary)
 
-- Shared checklist language with timeline `todo_*` presenters; strip is live
+- Shared checklist language with timeline `todo_*` presenters; overlay is live
   truth, cards are history.
 - Cap + overflow; remove force-open checklist bodies once strip ships.
 
@@ -236,7 +229,7 @@ editor). Empty → height 0. Details, caps, and module sketch → TUI design doc
 | **B** | Host durable store + snapshot; orch publish/seed; write returns normalized todos |
 | **C** | Live `TodoListUpdated` |
 | **D** | Prompt fragment `todo.list` + drive instruction (feature on) |
-| **E** | TUI dock strip + plane budget; viewed-agent binding |
+| **E** | TUI `/todo` overlay; viewed-agent binding |
 | **F** | Drop timeline force-body; tests; feature-off behavior |
 | **G** (follow-on) | Richer item fields + strip density rules |
 

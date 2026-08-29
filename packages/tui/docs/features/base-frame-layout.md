@@ -3,7 +3,7 @@
 ```text
 frame
   → split_shell (BottomBar: agent · model · cwd · context · cost)
-  → plane = Stream ▾ Dock Stack grants (Todos? Suggest? Guidance) ▾ Composer
+  → plane = Stream ▾ blank boundary ▾ Suggest? ▾ Guidance ▾ Composer
        Dock Stack = features/dock_stack (offer/grant; see dock-coexistence)
        Suggest = / command palette or @ file browser (not a separate modal)
   → modals by SurfaceIntent
