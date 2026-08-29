@@ -14,6 +14,12 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-67: Configurable agent-tree limits](D-67-configurable-agent-tree-limits.md)
+  implements F-50: settings-backed per-session AgentInstance count and
+  tree-depth admission limits (accepted; V-62).
+- [D-66: Agent delegation modes](D-66-agent-delegation-modes.md)
+  implements F-49: explicit supervisor/worker AgentSpec modes, worker tool
+  filtering, and authoritative runtime child-creation checks (accepted; V-63).
 - [D-65: Authoritative agent lifecycle boundaries](D-65-authoritative-agent-lifecycle.md)
   implements F-48: explicit Turn/Run/Execution/ModelStep ownership, atomic
   model-step journal facts, and reliable client convergence.

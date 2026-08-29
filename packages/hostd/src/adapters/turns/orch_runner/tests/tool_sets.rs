@@ -8,6 +8,7 @@ fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
         provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "Main".into(),
         role: "root".into(),
+        kind: piko_protocol::AgentKind::Supervisor,
         description: None,
         base_instructions: "hi".into(),
         model: None,
@@ -28,6 +29,27 @@ fn ensure_root_tool_sets_adds_user_interaction_and_multi_agent() {
 }
 
 #[test]
+fn ensure_root_tool_sets_does_not_grant_delegation_to_worker() {
+    let mut spec = AgentSpec {
+        id: "scout".into(),
+        version: "1".into(),
+        provenance: piko_protocol::PromptSource::new("test", "scout"),
+        name: "Scout".into(),
+        role: "researcher".into(),
+        kind: piko_protocol::AgentKind::Worker,
+        description: None,
+        base_instructions: "research".into(),
+        model: None,
+        thinking_level: None,
+        tool_set_ids: vec!["todo".into(), "workspace".into()],
+        active_tool_names: None,
+    };
+    ensure_root_tool_sets(&mut spec);
+    assert!(spec.tool_set_ids.iter().any(|id| id == "user_interaction"));
+    assert!(!spec.tool_set_ids.iter().any(|id| id == "multi_agent"));
+}
+
+#[test]
 fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback() {
     let root_agent_spec = AgentSpec {
         id: "main".into(),
@@ -35,6 +57,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
         provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "Main".into(),
         role: "root".into(),
+        kind: piko_protocol::AgentKind::Supervisor,
         description: None,
         base_instructions: "stable root prompt".into(),
         model: None,
@@ -56,6 +79,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
             provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "Main".into(),
             role: "root".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: "raw toml".into(),
             model: None,
@@ -72,6 +96,7 @@ fn resolve_recovered_agent_spec_prefers_durable_snapshot_then_registry_fallback(
             provenance: piko_protocol::PromptSource::new("test", "coder"),
             name: "Coder".into(),
             role: "worker".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: "code".into(),
             model: None,

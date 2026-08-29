@@ -19,7 +19,8 @@ impl ToolRegistry for ToolRegistryImpl {
             catalog
                 .iter()
                 .filter(|e| {
-                    feature_enabled(features.as_ref(), e.feature.as_deref())
+                    tool_allowed_for_agent(e, context.agent_kind)
+                        && feature_enabled(features.as_ref(), e.feature.as_deref())
                         && active.contains(&e.public_name)
                 })
                 .map(|e| e.tool_def.clone())
@@ -28,6 +29,7 @@ impl ToolRegistry for ToolRegistryImpl {
             catalog
                 .iter()
                 .filter(|e| feature_enabled(features.as_ref(), e.feature.as_deref()))
+                .filter(|e| tool_allowed_for_agent(e, context.agent_kind))
                 .map(|e| e.tool_def.clone())
                 .collect()
         };
@@ -42,6 +44,9 @@ impl ToolRegistry for ToolRegistryImpl {
                 continue;
             }
             if !feature_enabled(features.as_ref(), entry.feature.as_deref()) {
+                continue;
+            }
+            if !tool_allowed_for_agent(entry, context.agent_kind) {
                 continue;
             }
             routes.insert(
@@ -70,6 +75,23 @@ impl ToolRegistry for ToolRegistryImpl {
         let call_id = call.id.clone();
         let call_name = call.name.clone();
         let call_args = call.arguments.clone();
+
+        // A route may outlive the catalog snapshot that produced it. Repeat
+        // the capability check at execution time so a stale delegation route
+        // cannot be used by a worker agent.
+        if !tool_def_allowed_for_agent(&route.tool_def, context.agent_kind) {
+            return ToolExecutionRecord {
+                result: ToolExecResult {
+                    ok: false,
+                    value: None,
+                    error: Some(ToolExecError {
+                        code: "agent_cannot_spawn_children".into(),
+                        message: "agent cannot spawn child agents".into(),
+                        retryable: Some(false),
+                    }),
+                },
+            };
+        }
 
         // Compute ordering metadata
         let tool_entity_id = context.tool_entity_id.clone().unwrap_or_else(|| {
@@ -262,6 +284,7 @@ impl ToolRegistry for ToolRegistryImpl {
             cancellation: context.cancellation.clone(),
             agent_id: context.agent_id.clone(),
             agent_role: context.agent_role.clone(),
+            agent_kind: context.agent_kind,
             tool_set_ids: context.tool_set_ids.clone(),
             turn_index: context.turn_index,
             event_seq: context.event_seq,

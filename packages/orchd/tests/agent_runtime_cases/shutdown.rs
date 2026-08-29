@@ -14,6 +14,7 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
         cancellation: Some(cancellation.clone()),
         agent_id: "main".into(),
         agent_role: None,
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         tool_set_ids: Vec::new(),
         turn_index: None,
         event_seq: None,

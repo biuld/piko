@@ -2,6 +2,8 @@
 
 > Status: accepted (implemented for orchd tool surface slices A–C)
 > Implements: [F-21](../features/F-21-multi-agent-tool-surface.md)
+> Extended by: [D-66](D-66-agent-delegation-modes.md) for supervisor/worker
+> capability filtering and runtime child-creation enforcement
 > Decisions: [ADR-002](../decisions/ADR-002-codex-modeling-reference.md) (codex is
 > modeling reference only); product decisions live in F-21
 

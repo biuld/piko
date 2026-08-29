@@ -283,7 +283,8 @@ impl ToolProvider for MultiAgentToolProvider {
     }
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
-        let result = match call.name.as_str() {
+        let result = if context.agent_kind.can_spawn_subagents() {
+            match call.name.as_str() {
             "list_agent_specs" => self.list_agent_specs_value().await,
             "spawn_agent" => self.spawn(&call, &context, false).await,
             "spawn_agent_detached" => self.spawn(&call, &context, true).await,
@@ -395,6 +396,11 @@ impl ToolProvider for MultiAgentToolProvider {
             _ => Err(ToolFail::from_agent(
                 piko_orchd_api::AgentApiError::InputRejected,
             )),
+            }
+        } else {
+            Err(ToolFail::from_agent(
+                piko_orchd_api::AgentApiError::AgentCannotSpawnChildren,
+            ))
         };
 
         match result {

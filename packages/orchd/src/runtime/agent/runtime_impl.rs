@@ -7,6 +7,7 @@ impl AgentRuntime {
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
             context_tools: Arc::new(crate::adapters::tools::ContextToolsProvider::new()),
+            agent_limits: AgentTreeLimits::default(),
         }
     }
 
@@ -29,12 +30,14 @@ impl AgentRuntime {
     pub(super) fn from_execution_runtime(
         execution: Arc<AgentExecutionRuntime>,
         context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
+        agent_limits: AgentTreeLimits,
     ) -> Self {
         Self {
             execution,
             sessions: RwLock::new(HashMap::new()),
             accepting: AtomicBool::new(true),
             context_tools,
+            agent_limits,
         }
     }
 
@@ -56,6 +59,7 @@ impl AgentRuntime {
         config: piko_protocol::config::OrchdConfig,
         telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Arc<Self> {
+        let agent_limits = AgentTreeLimits::from_runtime_config(&config.runtime);
         let execution =
             AgentExecutionRuntime::bootstrap_with_telemetry(model_executor, config, telemetry)
                 .await;
@@ -63,6 +67,7 @@ impl AgentRuntime {
         let runtime = Arc::new(Self::from_execution_runtime(
             Arc::clone(&execution),
             Arc::new(context_tools_provider.clone()),
+            agent_limits,
         ));
         let multi_agent_provider = crate::adapters::tools::MultiAgentToolProvider::new(
             runtime.clone() as Arc<dyn AgentRuntimeApi>,
@@ -231,6 +236,7 @@ impl AgentRuntime {
         let run_cancellation = Arc::new(RunCancellation::new());
         let handle = AgentHandle {
             generation,
+            agent_kind: spec.kind,
             command_tx: command_tx.clone(),
             snapshot_rx,
             run_cancellation: Arc::clone(&run_cancellation),

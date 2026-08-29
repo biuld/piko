@@ -71,6 +71,54 @@ fn safety_defaults_are_documented_in_installed_settings() {
 }
 
 #[test]
+fn agent_runtime_defaults_are_documented_in_installed_settings() {
+    let settings = installed_settings_fixture();
+    assert!(settings.contains("[agent-runtime]"));
+    assert!(settings.contains("max-agents = 32"));
+    assert!(settings.contains("max-depth = 8"));
+}
+
+#[test]
+fn agent_runtime_settings_merge_field_by_field() {
+    let merged = merge(
+        HostSettings {
+            agent_runtime: Some(AgentRuntimeSettings {
+                max_agents: Some(12),
+                max_depth: Some(4),
+            }),
+            ..HostSettings::default()
+        },
+        HostSettings {
+            agent_runtime: Some(AgentRuntimeSettings {
+                max_agents: Some(6),
+                max_depth: None,
+            }),
+            ..HostSettings::default()
+        },
+    );
+    let limits = merged
+        .agent_runtime
+        .expect("agent runtime settings present");
+    assert_eq!(limits.max_agents, Some(6));
+    assert_eq!(limits.max_depth, Some(4));
+}
+
+#[test]
+fn agent_runtime_settings_deserialize_and_map_to_protocol() {
+    let settings: HostSettings = toml::from_str(
+        r#"
+[agent-runtime]
+max-agents = 5
+max-depth = 2
+"#,
+    )
+    .unwrap();
+    let agent_runtime = settings.agent_runtime.expect("agent runtime section");
+    assert_eq!(agent_runtime.to_runtime_config().max_agents, Some(5));
+    assert_eq!(agent_runtime.to_runtime_config().max_depth, Some(2));
+}
+
+#[test]
 fn permissions_defaults_are_documented_in_installed_settings() {
     let settings = installed_settings_fixture();
     assert!(settings.contains("[permissions]"));

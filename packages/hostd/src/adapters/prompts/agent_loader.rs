@@ -76,6 +76,7 @@ struct TomlAgentSpec {
     id: Option<String>,
     name: String,
     role: String,
+    kind: Option<piko_protocol::AgentKind>,
     description: Option<String>,
     instructions: String,
     model: Option<String>,
@@ -86,19 +87,30 @@ struct TomlAgentSpec {
 
 impl TomlAgentSpec {
     fn into_agent_spec(self, fallback_id: &str) -> AgentSpec {
+        let kind = self.kind.unwrap_or_default();
+        let tool_set_ids = self
+            .tool_set_ids
+            .unwrap_or_else(|| vec!["todo".into(), "workspace".into()]);
+        if matches!(kind, piko_protocol::AgentKind::Worker)
+            && tool_set_ids.iter().any(|id| id == "multi_agent")
+        {
+            tracing::warn!(
+                agent_id = fallback_id,
+                "worker agent declares multi_agent; delegation tools will be hidden"
+            );
+        }
         AgentSpec {
             id: self.id.unwrap_or_else(|| fallback_id.to_string()),
             version: "1".into(),
             provenance: piko_protocol::PromptSource::new("unclassified-agent", fallback_id),
             name: self.name,
             role: self.role,
+            kind,
             description: self.description,
             base_instructions: self.instructions,
             model: self.model,
             thinking_level: self.thinking_level,
-            tool_set_ids: self
-                .tool_set_ids
-                .unwrap_or_else(|| vec!["todo".into(), "workspace".into()]),
+            tool_set_ids,
             active_tool_names: self.active_tool_names,
         }
     }
@@ -172,6 +184,10 @@ mod tests {
         assert!(!agents.contains_key("subagent"));
         assert_eq!(agents["main"].name, "Main");
         assert_eq!(agents["general"].name, "General");
+        assert_eq!(agents["main"].kind, piko_protocol::AgentKind::Supervisor);
+        assert_eq!(agents["general"].kind, piko_protocol::AgentKind::Supervisor);
+        assert_eq!(agents["coder"].kind, piko_protocol::AgentKind::Supervisor);
+        assert_eq!(agents["scout"].kind, piko_protocol::AgentKind::Worker);
     }
 
     #[test]
@@ -186,7 +202,7 @@ mod tests {
                 "multi_agent".to_string(),
             ]
         );
-        for worker in ["general", "coder", "scout"] {
+        for worker in ["general", "coder"] {
             assert_eq!(
                 agents[worker].tool_set_ids,
                 vec![
@@ -197,6 +213,10 @@ mod tests {
                 "{worker} tool_set_ids"
             );
         }
+        assert_eq!(
+            agents["scout"].tool_set_ids,
+            vec!["todo".to_string(), "workspace".to_string()]
+        );
     }
 
     #[test]
@@ -241,5 +261,22 @@ active_tool_names = ["read"]
             Some(piko_protocol::model::ThinkingLevel::Medium)
         );
         assert_eq!(spec.active_tool_names, Some(vec!["read".to_string()]));
+        assert_eq!(spec.kind, piko_protocol::AgentKind::Worker);
+    }
+
+    #[test]
+    fn parses_explicit_supervisor_kind() {
+        let spec = parse_agent_toml(
+            "planner",
+            r#"
+name = "Planner"
+role = "planner"
+kind = "supervisor"
+instructions = "Plan carefully."
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(spec.kind, piko_protocol::AgentKind::Supervisor);
     }
 }

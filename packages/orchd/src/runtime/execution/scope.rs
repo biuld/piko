@@ -160,6 +160,7 @@ mod tests {
             agent_instance_id: "agent".into(),
             agent_id: "main".into(),
             agent_role: None,
+            agent_kind: piko_protocol::AgentKind::Supervisor,
         };
         let (command_tx, _) = piko_comms::mailbox::<piko_comms::contracts::ExecutionCommands, _>();
         let (_, terminal_rx) = piko_comms::reply::<piko_comms::contracts::ExecutionTerminal, _>();

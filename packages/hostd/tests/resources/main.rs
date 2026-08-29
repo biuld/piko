@@ -44,6 +44,7 @@ fn prompt_request(tool_catalog: Vec<ToolDef>) -> PromptAssemblyRequest {
             provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "Main".into(),
             role: "root".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: "Stable agent identity".into(),
             model: None,

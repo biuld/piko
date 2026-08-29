@@ -25,6 +25,10 @@ Example generated description:
 
 This gives the LLM the delegated-task template IDs at tool-call time. `main` is the fixed root-turn template and is not advertised as a delegated-task option. Each tool call that spawns an agent creates a distinct runtime task instance with its own `task_id`.
 
+### Delegation modes
+
+The model-facing catalog is extended by [F-49](../../../../docs/features/F-49-agent-delegation-modes.md): each template declares `kind = "supervisor"` or `kind = "worker"`. Both kinds may be spawn targets, but only supervisors may create child agents. Worker agents do not receive the delegation tool surface, and the runtime enforces the same boundary even if a stale spec still lists `multi_agent`.
+
 ## 3. TUI View (`tui` & `protocol`)
 
 Session **runtime agents** are the primary UX: `/agents` (and F4) open the

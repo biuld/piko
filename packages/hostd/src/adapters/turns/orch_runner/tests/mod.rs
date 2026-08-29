@@ -185,6 +185,7 @@ fn create_command() -> AgentDurableCommand {
             provenance: piko_protocol::PromptSource::new("test", "worker"),
             name: "Worker".into(),
             role: "worker".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: "work".into(),
             model: None,

@@ -312,6 +312,7 @@ pub(super) async fn discover_batch_routes(
         .tool_registry()
         .discover_tools(&ToolDiscoveryContext {
             agent_id: "main".into(),
+            agent_kind: piko_protocol::AgentKind::Supervisor,
             agent_instance_id: Some("agent-batch".into()),
             tool_set_ids: vec!["timing".into()],
             active_tool_names: None,
@@ -333,6 +334,7 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
             provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "main".into(),
             role: "test".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: String::new(),
             model: None,

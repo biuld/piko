@@ -65,6 +65,7 @@ impl AgentExecutionRuntime {
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
             agent_role,
+            agent_kind: request.agent_spec.kind,
         };
 
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -232,6 +233,7 @@ impl AgentExecutionRuntime {
             .tool_registry()
             .discover_tools(&ToolDiscoveryContext {
                 agent_id: agent_spec.id.clone(),
+                agent_kind: agent_spec.kind,
                 agent_instance_id: Some(request.agent_instance_id.clone()),
                 tool_set_ids: agent_spec.tool_set_ids.clone(),
                 active_tool_names,

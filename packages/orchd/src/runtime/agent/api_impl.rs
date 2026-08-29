@@ -34,6 +34,7 @@ impl AgentRuntimeApi for AgentRuntime {
             session_id.clone(),
             root.agent_instance_id.clone(),
             Arc::clone(&config.ports.agents),
+            self.agent_limits,
         ));
 
         config
@@ -111,13 +112,9 @@ impl AgentRuntimeApi for AgentRuntime {
         if let Some(receipt) = scope.create_receipt(&request).await? {
             return Ok(receipt);
         }
-        if scope
-            .agent(&request.parent_agent_instance_id)
-            .await
-            .is_none()
-        {
-            return Err(AgentApiError::AgentNotFound);
-        }
+        scope
+            .authorize_child_creation(&request.parent_agent_instance_id)
+            .await?;
         let agent_instance_id = request
             .requested_agent_instance_id
             .clone()

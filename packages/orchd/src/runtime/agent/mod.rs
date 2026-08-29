@@ -2,7 +2,7 @@ mod actor;
 mod mailbox;
 mod scope;
 
-pub use scope::SessionAgentScope;
+pub use scope::{AgentTreeLimits, SessionAgentScope};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,6 +37,7 @@ pub struct AgentRuntime {
     sessions: RwLock<HashMap<String, Arc<SessionAgentScope>>>,
     accepting: AtomicBool,
     context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
+    agent_limits: AgentTreeLimits,
 }
 
 mod api_impl;

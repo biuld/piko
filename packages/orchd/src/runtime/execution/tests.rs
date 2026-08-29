@@ -8,6 +8,9 @@ use piko_protocol::execution::{CommitAck, CommitError, StartExecutionRequest};
 use super::*;
 use crate::domain::transcript::TranscriptSnapshot;
 
+#[path = "tests_prepare.rs"]
+mod prepare;
+
 #[test]
 fn context_budget_rejects_fixed_prompt_overhead_before_dispatch() {
     let prompt = piko_protocol::SemanticRunPrompt {
@@ -230,6 +233,7 @@ fn request() -> StartExecutionRequest {
             provenance: piko_protocol::PromptSource::new("test", "main"),
             name: "main".into(),
             role: "test".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: None,
             base_instructions: String::new(),
             model: None,
@@ -459,46 +463,4 @@ async fn aborting_task_that_owns_prepared_execution_releases_reservation() {
         tokio::task::yield_now().await;
     }
     panic!("aborting PreparedExecution owner leaked its reservation");
-}
-
-#[tokio::test]
-async fn prepare_failure_leaves_no_second_reservation_and_can_retry() {
-    let runtime = AgentExecutionRuntime::new(Arc::new(NoopGateway));
-    runtime
-        .attach_session(
-            "session".into(),
-            SessionExecutionPorts::new(Arc::new(NoopCommit)),
-        )
-        .await
-        .unwrap();
-    let first = runtime
-        .prepare_execution(
-            request_with("first", "message-first"),
-            HashMap::new(),
-            tracing::Span::none(),
-        )
-        .await
-        .unwrap();
-    assert!(matches!(
-        runtime
-            .prepare_execution(
-                request_with("second", "message-second"),
-                HashMap::new(),
-                tracing::Span::none()
-            )
-            .await,
-        Err(AgentApiError::ExecutionAlreadyActive)
-    ));
-    let scope = runtime.scope("session").await.unwrap();
-    assert!(scope.get_execution("second").await.is_none());
-    first.rollback().await;
-    let retry = runtime
-        .prepare_execution(
-            request_with("second", "message-second"),
-            HashMap::new(),
-            tracing::Span::none(),
-        )
-        .await
-        .unwrap();
-    retry.rollback().await;
 }

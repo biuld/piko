@@ -63,3 +63,5 @@ based on the [codex-rs Agent Core Digest](../codex-agent-core-digest.md).
 | F-46 | assistant-turn-chips | One bubble per assistant turn: chronological activity chips (thinking/tool) between text segments; chip-detail overlay | design (D-63) | chat-reaction visual model, user decision 2026-08-23 |
 | F-47 | composer-attachments | Two-tone composer: offset header with model/thinking pickers, bottom attach chips for files/images | design (D-64) | user direction 2026-08-23 |
 | F-48 | authoritative-agent-lifecycle | Turn → Run → Execution → ModelStep boundaries, atomic model-step journal facts, reliable thought/tool convergence, and recovery identity | implemented (D-65/ADR-025/V-60) | piko runtime/journal review |
+| F-49 | agent-delegation-modes | Explicit supervisor/worker AgentSpec modes; capability-aware delegation tools and runtime child-creation guard | implemented (D-66/V-63) | piko product direction; F-10/F-19/F-21 |
+| F-50 | configurable-agent-tree-limits | Settings-backed per-session AgentInstance count and tree-depth limits | implemented (D-67/V-62) | piko runtime admission guards; F-10/F-49 |

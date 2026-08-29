@@ -108,6 +108,7 @@ impl ToolRegistryImpl {
         let tool_set_ids = self.tool_sets.read().await.keys().cloned().collect();
         let context = ToolDiscoveryContext {
             agent_id: String::new(),
+            agent_kind: piko_protocol::AgentKind::Supervisor,
             agent_instance_id: None,
             tool_set_ids,
             active_tool_names: None,
@@ -161,6 +162,7 @@ impl ToolRegistryImpl {
                 let tools = p
                     .discover(ToolDiscoveryContext {
                         agent_id: ctx.agent_id.clone(),
+                        agent_kind: ctx.agent_kind,
                         agent_instance_id: ctx.agent_instance_id.clone(),
                         tool_set_ids: vec![],
                         active_tool_names: None,

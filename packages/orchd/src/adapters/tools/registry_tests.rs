@@ -13,8 +13,10 @@ use crate::ports::approval_gateway::ApprovalGateway;
 use piko_orchd_api::tools::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use piko_orchd_api::{ToolExecResult, is_approval_accepted};
 use piko_protocol::messages::ToolCall;
-use piko_protocol::tools::{ToolProviderSource, ToolSet, ToolSetToolRef};
+use piko_protocol::tools::{ToolCapability, ToolProviderSource, ToolSet, ToolSetToolRef};
 
+#[path = "registry_delegation_tests.rs"]
+mod delegation;
 mod model_surface;
 mod policy_denials;
 
@@ -58,6 +60,7 @@ fn context() -> ToolExecutionContext {
         cancellation: None,
         agent_id: "root".into(),
         agent_role: None,
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         tool_set_ids: vec![],
         turn_index: None,
         event_seq: None,
@@ -158,6 +161,12 @@ fn catalog_tool(name: &str, executor_kind: &str) -> ToolDef {
     }
 }
 
+fn delegation_catalog_tool(name: &str) -> ToolDef {
+    let mut tool = catalog_tool(name, "native");
+    tool.capabilities = Some(vec![ToolCapability::Delegation]);
+    tool
+}
+
 struct CatalogProvider;
 
 #[async_trait]
@@ -178,7 +187,7 @@ impl ToolProvider for CatalogProvider {
             catalog_tool("environment", "native"),
             catalog_tool("get_context_remaining", "native"),
             catalog_tool("todo_write", "native"),
-            catalog_tool("spawn_agent", "native"),
+            delegation_catalog_tool("spawn_agent"),
             catalog_tool("ask_user", "native"),
             // MCP tools have server-defined names and an mcp executor kind.
             catalog_tool("server_defined_tool", "mcp"),
@@ -197,6 +206,7 @@ impl ToolProvider for CatalogProvider {
 fn discovery_context(active_tool_names: Option<Vec<String>>) -> ToolDiscoveryContext {
     ToolDiscoveryContext {
         agent_id: "main".into(),
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         agent_instance_id: Some("agent_session_root".into()),
         tool_set_ids: vec!["workspace".into()],
         active_tool_names,

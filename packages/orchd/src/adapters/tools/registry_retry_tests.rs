@@ -94,6 +94,7 @@ fn context() -> ToolExecutionContext {
         cancellation: None,
         agent_id: "root".into(),
         agent_role: None,
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         tool_set_ids: vec![],
         turn_index: None,
         event_seq: None,

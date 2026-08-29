@@ -25,7 +25,10 @@ use crate::ports::approval_gateway::ApprovalGateway;
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 use crate::runtime::utils::runtime_tool_entity_id;
 
-use super::catalog::{CatalogEntry, add_entry, merge_policy, tool_ref_policy};
+use super::catalog::{
+    CatalogEntry, add_entry, merge_policy, tool_allowed_for_agent, tool_def_allowed_for_agent,
+    tool_ref_policy,
+};
 
 /// One atomic caller-tool contribution. Implementations stay with their
 /// owning subsystem; the registry publishes the provider and sets together.

@@ -20,6 +20,110 @@ async fn cross_session_or_missing_parent_is_rejected_before_commit() {
 }
 
 #[tokio::test]
+async fn configured_agent_count_limit_applies_to_new_children() {
+    let (runtime, commits, _model) = attached_bootstrapped_runtime_with_limits(2, 8).await;
+    runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-count-first".into(),
+            session_id: "session-limits".into(),
+            parent_agent_instance_id: "root".into(),
+            agent_spec_id: "main".into(),
+            requested_agent_instance_id: Some("count-child".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect("first child is within the configured count");
+
+    let error = runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-count-second".into(),
+            session_id: "session-limits".into(),
+            parent_agent_instance_id: "root".into(),
+            agent_spec_id: "main".into(),
+            requested_agent_instance_id: Some("count-child-2".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect_err("the configured total includes the root");
+    assert_eq!(error, piko_orchd_api::AgentApiError::AgentCountLimitExceeded);
+    assert_eq!(commits.commands.lock().await.len(), 2, "root + one child");
+}
+
+#[tokio::test]
+async fn configured_agent_depth_limit_applies_to_new_children() {
+    let (runtime, commits, _model) = attached_bootstrapped_runtime_with_limits(8, 2).await;
+    runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-depth-first".into(),
+            session_id: "session-limits".into(),
+            parent_agent_instance_id: "root".into(),
+            agent_spec_id: "main".into(),
+            requested_agent_instance_id: Some("depth-child".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect("first child is within the configured depth");
+
+    let error = runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-depth-second".into(),
+            session_id: "session-limits".into(),
+            parent_agent_instance_id: "depth-child".into(),
+            agent_spec_id: "main".into(),
+            requested_agent_instance_id: Some("depth-grandchild".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect_err("the configured depth includes the root");
+    assert_eq!(error, piko_orchd_api::AgentApiError::AgentDepthLimitExceeded);
+    assert_eq!(commits.commands.lock().await.len(), 2, "root + one child");
+}
+
+#[tokio::test]
+async fn worker_agent_cannot_create_children_but_can_be_spawned() {
+    let (runtime, commits, _model) = attached_runtime().await;
+    let mut scout = test_agent();
+    scout.id = "scout".into();
+    scout.name = "Scout".into();
+    scout.kind = piko_protocol::AgentKind::Worker;
+    runtime.register_agent(scout).await;
+
+    runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-worker".into(),
+            session_id: "session-1".into(),
+            parent_agent_instance_id: "root".into(),
+            agent_spec_id: "scout".into(),
+            requested_agent_instance_id: Some("scout-child".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect("supervisors may spawn worker agents");
+
+    let error = runtime
+        .create_agent(CreateAgentRequest {
+            request_id: "create-from-worker".into(),
+            session_id: "session-1".into(),
+            parent_agent_instance_id: "scout-child".into(),
+            agent_spec_id: "main".into(),
+            requested_agent_instance_id: Some("grandchild".into()),
+            origin_tool_call_id: None,
+        })
+        .await
+        .expect_err("worker agents cannot create children");
+    assert_eq!(
+        error,
+        piko_orchd_api::AgentApiError::AgentCannotSpawnChildren
+    );
+    assert_eq!(commits.commands.lock().await.len(), 2, "root + worker child");
+    assert!(matches!(
+        commits.commands.lock().await.last(),
+        Some(AgentDurableCommand::Create { spec, .. })
+            if spec.id == "scout" && spec.kind == piko_protocol::AgentKind::Worker
+    ));
+}
+
+#[tokio::test]
 async fn create_and_input_requests_are_idempotent() {
     let (runtime, commits, model) = attached_runtime().await;
     let create = CreateAgentRequest {
@@ -177,4 +281,3 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
         .unwrap();
     assert_eq!(gateway_prompt_text(&model.requests().await[0]), "test");
 }
-

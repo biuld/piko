@@ -6,6 +6,27 @@ use super::messages::Message;
 
 // ---- Agent types ----
 
+/// Delegation capability for an AgentInstance.
+///
+/// This is intentionally separate from `AgentSpec::role`: roles select
+/// permission policy while kinds select whether the agent may grow the agent
+/// tree.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentKind {
+    Supervisor,
+    #[default]
+    /// `leaf` remains accepted when decoding older configuration or snapshots.
+    #[serde(alias = "leaf")]
+    Worker,
+}
+
+impl AgentKind {
+    pub fn can_spawn_subagents(self) -> bool {
+        matches!(self, Self::Supervisor)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentStatus {
@@ -26,6 +47,11 @@ pub struct AgentSpec {
     pub provenance: crate::PromptSource,
     pub name: String,
     pub role: String,
+    /// Delegation capability. A missing field in a durable legacy snapshot is
+    /// treated as supervisor for compatibility; new host TOML defaults to
+    /// worker before this DTO is constructed.
+    #[serde(default = "legacy_agent_kind")]
+    pub kind: AgentKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub base_instructions: String,
@@ -39,6 +65,10 @@ pub struct AgentSpec {
     pub tool_set_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "activeToolNames")]
     pub active_tool_names: Option<Vec<String>>,
+}
+
+fn legacy_agent_kind() -> AgentKind {
+    AgentKind::Supervisor
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -70,7 +100,7 @@ impl HostSessionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentSpec;
+    use super::{AgentKind, AgentSpec};
 
     #[test]
     fn agent_spec_uses_base_instructions() {
@@ -85,8 +115,33 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(spec.base_instructions, "durable prompt");
+        assert_eq!(spec.kind, AgentKind::Supervisor);
 
         let serialized = serde_json::to_value(spec).unwrap();
         assert_eq!(serialized["baseInstructions"], "durable prompt");
+        assert_eq!(serialized["kind"], "supervisor");
+    }
+
+    #[test]
+    fn agent_kind_round_trips_and_exposes_spawn_capability() {
+        let spec: AgentSpec = serde_json::from_value(serde_json::json!({
+            "id": "scout",
+            "version": "1",
+            "provenance": {"kind": "built-in-agent", "locator": "agents/scout"},
+            "name": "Scout",
+            "role": "researcher",
+            "kind": "worker",
+            "baseInstructions": "research",
+            "toolSetIds": []
+        }))
+        .unwrap();
+        assert_eq!(spec.kind, AgentKind::Worker);
+        assert!(!spec.kind.can_spawn_subagents());
+        assert!(AgentKind::Supervisor.can_spawn_subagents());
+
+        let mut legacy = serde_json::to_value(&spec).unwrap();
+        legacy["kind"] = serde_json::json!("leaf");
+        let legacy: AgentSpec = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.kind, AgentKind::Worker);
     }
 }

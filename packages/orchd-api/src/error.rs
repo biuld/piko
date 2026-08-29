@@ -14,6 +14,8 @@ pub enum AgentApiError {
     AgentParentMismatch,
     #[error("agent operation is not authorized for the caller")]
     AgentUnauthorized,
+    #[error("agent cannot spawn child agents")]
+    AgentCannotSpawnChildren,
     #[error("session agent count limit exceeded")]
     AgentCountLimitExceeded,
     #[error("agent tree depth limit exceeded")]

@@ -97,6 +97,7 @@ async fn v2_consolidated_surface_has_no_redundant_tools() {
     let tools = provider
         .discover(piko_orchd_api::ToolDiscoveryContext {
             agent_id: "main".into(),
+            agent_kind: piko_protocol::AgentKind::Supervisor,
             agent_instance_id: Some("root".into()),
             tool_set_ids: Vec::new(),
             active_tool_names: None,
@@ -224,4 +225,3 @@ async fn f21_message_agent_steer_idle_fails_closed() {
 }
 
 // ---- F-20 inter-agent completion fragments ----
-

@@ -137,6 +137,7 @@ mod tests {
                 provenance: PromptSource::new("test", "main"),
                 name: "Main".into(),
                 role: "root".into(),
+                kind: piko_protocol::AgentKind::Supervisor,
                 description: None,
                 base_instructions: marker.into(),
                 model: None,

@@ -17,6 +17,12 @@ fn in_memory_settings_apply_defaults_and_overrides() {
         manager.get_compaction_settings(),
         (true, 16384, 20000, 16384)
     );
+    let agent_runtime = manager
+        .settings()
+        .agent_runtime
+        .expect("agent runtime defaults");
+    assert_eq!(agent_runtime.max_agents, Some(32));
+    assert_eq!(agent_runtime.max_depth, Some(8));
 }
 
 #[test]
@@ -136,6 +142,10 @@ fn host_namespace_excludes_frontend_blobs() {
 fn host_namespace_includes_catalogued_startup_settings() {
     let settings = HostSettings {
         transport: Some("stdio".into()),
+        agent_runtime: Some(piko_hostd::domain::config::AgentRuntimeSettings {
+            max_agents: Some(5),
+            max_depth: Some(2),
+        }),
         mcp: Some(piko_hostd::domain::config::McpSettings {
             connect_timeout_ms: Some(4_000),
             approval_templates: Default::default(),
@@ -145,6 +155,8 @@ fn host_namespace_includes_catalogued_startup_settings() {
 
     let host = settings.namespace_value("host");
     assert_eq!(host["transport"], "stdio");
+    assert_eq!(host["agent-runtime"]["max-agents"], 5);
+    assert_eq!(host["agent-runtime"]["max-depth"], 2);
     assert_eq!(host["mcp"]["connect-timeout-ms"], 4_000);
 }
 

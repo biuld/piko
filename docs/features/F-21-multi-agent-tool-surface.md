@@ -3,6 +3,8 @@
 > Status: implemented (slice A/B/C — orchd tool surface)
 > Priority: P0
 > Design: [D-33](../design/D-33-multi-agent-tool-surface.md)
+> Delegation boundary: extended by [F-49](F-49-agent-delegation-modes.md) /
+> [D-66](../design/D-66-agent-delegation-modes.md)
 > Source evidence: codex-rs `multi_agents*` / `multi_agents_v2/*` (collaboration
 > verbs only); digest Block I; piko F-10/D-10 (runtime + v2 tools), F-19
 > (roles), F-20 (completion fragments); product incident: model calls

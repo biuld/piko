@@ -57,6 +57,8 @@ pub struct HostSettings {
     pub permissions: Option<PermissionsSettings>,
     pub features: Option<FeaturesSettings>,
     pub execution: Option<ExecutionSettings>,
+    /// Agent-tree resource limits forwarded to orchd at runner bootstrap.
+    pub agent_runtime: Option<AgentRuntimeSettings>,
 
     // ---- Observability ----
     pub observability: Option<ObservabilitySettings>,
@@ -157,6 +159,7 @@ impl HostSettings {
             "permissions": self.permissions,
             "features": self.features,
             "execution": self.execution,
+            "agent-runtime": self.agent_runtime,
             "observability": self.observability,
             "trajectory": self.trajectory,
             "active-tool-names": self.active_tool_names,
@@ -165,6 +168,31 @@ impl HostSettings {
             "mcp": self.mcp,
             "prompt": self.prompt,
         })
+    }
+}
+
+/// Runtime limits for one session's AgentInstance tree.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct AgentRuntimeSettings {
+    /// Maximum AgentInstances in a session tree, including its root.
+    /// Defaults to 32 when unset.
+    pub max_agents: Option<u32>,
+    /// Maximum tree levels, including the root level. Defaults to 8 when
+    /// unset.
+    pub max_depth: Option<u32>,
+}
+
+impl AgentRuntimeSettings {
+    /// Convert the host-owned settings section to the protocol DTO consumed
+    /// by orchd. The optional shape preserves older config payloads; orchd
+    /// applies the same defaults when a field is absent.
+    pub fn to_runtime_config(&self) -> piko_protocol::runtime::OrchestratorRuntimeConfig {
+        piko_protocol::runtime::OrchestratorRuntimeConfig {
+            max_concurrent_agents: None,
+            max_agents: self.max_agents,
+            max_depth: self.max_depth,
+        }
     }
 }
 

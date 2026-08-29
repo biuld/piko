@@ -12,11 +12,45 @@ use super::mailbox::{AgentCommand, AgentHandle};
 use crate::runtime::tasks::TaskRegistry;
 use piko_protocol::{CreateAgentReceipt, CreateAgentRequest};
 
+/// Limits applied when creating new children in one session agent tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentTreeLimits {
+    max_agents: usize,
+    max_depth: usize,
+}
+
+impl Default for AgentTreeLimits {
+    fn default() -> Self {
+        Self {
+            max_agents: piko_protocol::runtime::DEFAULT_MAX_AGENTS as usize,
+            max_depth: piko_protocol::runtime::DEFAULT_MAX_DEPTH as usize,
+        }
+    }
+}
+
+impl AgentTreeLimits {
+    pub(crate) fn from_runtime_config(
+        config: &piko_protocol::runtime::OrchestratorRuntimeConfig,
+    ) -> Self {
+        Self {
+            max_agents: config
+                .max_agents
+                .unwrap_or(piko_protocol::runtime::DEFAULT_MAX_AGENTS)
+                .max(1) as usize,
+            max_depth: config
+                .max_depth
+                .unwrap_or(piko_protocol::runtime::DEFAULT_MAX_DEPTH)
+                .max(1) as usize,
+        }
+    }
+}
+
 pub struct SessionAgentScope {
     session_id: String,
     root_agent_instance_id: String,
     commit: std::sync::Arc<dyn AgentCommitPort>,
     agents: Mutex<HashMap<String, AgentHandle>>,
+    limits: AgentTreeLimits,
     create_requests: Mutex<HashMap<String, (CreateAgentRequest, CreateAgentReceipt)>>,
     create_lock: Mutex<()>,
     generation: AtomicU64,
@@ -29,6 +63,7 @@ impl SessionAgentScope {
         session_id: String,
         root_agent_instance_id: String,
         commit: std::sync::Arc<dyn AgentCommitPort>,
+        limits: AgentTreeLimits,
     ) -> Self {
         Self {
             tasks: TaskRegistry::new(),
@@ -36,6 +71,7 @@ impl SessionAgentScope {
             root_agent_instance_id,
             commit,
             agents: Mutex::new(HashMap::new()),
+            limits,
             create_requests: Mutex::new(HashMap::new()),
             create_lock: Mutex::new(()),
             generation: AtomicU64::new(0),
@@ -86,6 +122,15 @@ impl SessionAgentScope {
         self.agents.lock().await.get(agent_instance_id).cloned()
     }
 
+    pub async fn authorize_child_creation(&self, parent_id: &str) -> Result<(), AgentApiError> {
+        let agents = self.agents.lock().await;
+        let parent = agents.get(parent_id).ok_or(AgentApiError::AgentNotFound)?;
+        if !parent.agent_kind.can_spawn_subagents() {
+            return Err(AgentApiError::AgentCannotSpawnChildren);
+        }
+        Ok(())
+    }
+
     pub async fn lock_create(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.create_lock.lock().await
     }
@@ -118,17 +163,15 @@ impl SessionAgentScope {
     }
 
     pub async fn validate_new_child(&self, parent_id: &str) -> Result<(), AgentApiError> {
-        const MAX_AGENTS: usize = 32;
-        const MAX_DEPTH: usize = 8;
         let agents = self.agents.lock().await;
-        if agents.len() >= MAX_AGENTS {
+        if agents.len() >= self.limits.max_agents {
             return Err(AgentApiError::AgentCountLimitExceeded);
         }
         let mut current = Some(parent_id.to_string());
         let mut depth = 0;
         while let Some(id) = current {
             depth += 1;
-            if depth >= MAX_DEPTH {
+            if depth >= self.limits.max_depth {
                 return Err(AgentApiError::AgentDepthLimitExceeded);
             }
             current = agents.get(&id).and_then(|handle| {
@@ -211,5 +254,29 @@ impl SessionAgentScope {
                 let _ = received.await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_limits_default_and_normalize_zero() {
+        let defaults = AgentTreeLimits::from_runtime_config(
+            &piko_protocol::runtime::OrchestratorRuntimeConfig::default(),
+        );
+        assert_eq!(defaults.max_agents, 32);
+        assert_eq!(defaults.max_depth, 8);
+
+        let zero = AgentTreeLimits::from_runtime_config(
+            &piko_protocol::runtime::OrchestratorRuntimeConfig {
+                max_concurrent_agents: None,
+                max_agents: Some(0),
+                max_depth: Some(0),
+            },
+        );
+        assert_eq!(zero.max_agents, 1);
+        assert_eq!(zero.max_depth, 1);
     }
 }

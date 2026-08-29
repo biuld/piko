@@ -152,7 +152,7 @@ pub(crate) async fn build_orch_turn_runner(
     );
     let thinking = settings.default_thinking_level.clone();
     let runner = Arc::new(
-        OrchAgentRunRunner::new_with_mcp(
+        OrchAgentRunRunner::new_with_mcp_and_runtime_settings(
             executor.clone(),
             &resolved.provider,
             &resolved.model.id,
@@ -168,6 +168,7 @@ pub(crate) async fn build_orch_turn_runner(
             settings.permissions.as_ref(),
             settings.features.as_ref(),
             settings.transcript.as_ref(),
+            settings.agent_runtime.as_ref(),
             crate::telemetry::handle(),
         )
         .await,

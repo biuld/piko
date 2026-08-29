@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use piko_protocol::agents::HostSessionContext;
+use piko_protocol::agents::{AgentKind, HostSessionContext};
 use piko_protocol::messages::ToolCall;
 use piko_protocol::tools::{ToolDef, ToolProviderSource};
 
@@ -32,6 +32,10 @@ pub struct ToolExecResult {
 pub struct ToolDiscoveryContext {
     #[serde(rename = "agentId")]
     pub agent_id: String,
+    /// Trusted AgentSpec delegation mode. Missing serialized context fails
+    /// closed to `Worker`.
+    #[serde(default)]
+    pub agent_kind: AgentKind,
     #[serde(skip_serializing_if = "Option::is_none", rename = "agentInstanceId")]
     pub agent_instance_id: Option<String>,
     #[serde(rename = "toolSetIds")]
@@ -56,6 +60,10 @@ pub struct ToolExecutionContext {
     /// sandbox policy); absent roles use the provider's session default.
     #[serde(rename = "agentRole", skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
+    /// Trusted AgentSpec delegation mode. Missing serialized context fails
+    /// closed to `Worker`.
+    #[serde(default)]
+    pub agent_kind: AgentKind,
     pub tool_set_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<u32>,

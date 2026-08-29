@@ -217,6 +217,7 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
         provenance: piko_protocol::PromptSource::new("test", id),
         name: id.into(),
         role: "test".into(),
+        kind: piko_protocol::AgentKind::Supervisor,
         description: None,
         base_instructions: "test".into(),
         model: None,

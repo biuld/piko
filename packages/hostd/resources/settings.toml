@@ -61,6 +61,12 @@ base-delay-ms = 2000
 max-delay-ms = 30000
 budget-ms = 60000
 
+[agent-runtime]
+# Maximum AgentInstances in one session tree, including the root agent.
+max-agents = 32
+# Maximum agent-tree levels, including the root level.
+max-depth = 8
+
 [approvals]
 # How long a pending tool approval waits for a user decision before it
 # expires and the tool call fails closed (seconds).

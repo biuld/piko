@@ -12,6 +12,7 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
         cancellation: None,
         agent_id: "main".into(),
         agent_role: None,
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         tool_set_ids: Vec::new(),
         turn_index: Some(1),
         event_seq: None,
@@ -197,6 +198,7 @@ fn v2_context() -> ToolExecutionContext {
         cancellation: None,
         agent_id: "main".into(),
         agent_role: None,
+        agent_kind: piko_protocol::AgentKind::Supervisor,
         tool_set_ids: Vec::new(),
         turn_index: Some(1),
         event_seq: None,
@@ -209,6 +211,21 @@ fn v2_context() -> ToolExecutionContext {
         source_turn_id: None,
         context_remaining: None,
     }
+}
+
+#[tokio::test]
+async fn worker_multi_agent_provider_rejects_direct_calls() {
+    let (runtime, _commits, _model) = attached_runtime().await;
+    let provider = MultiAgentToolProvider::new(Arc::new(runtime) as Arc<dyn AgentRuntimeApi>);
+    let mut context = v2_context();
+    context.agent_kind = piko_protocol::AgentKind::Worker;
+
+    let result = provider
+        .execute(v2_call("list_agent_specs", serde_json::json!({})), context)
+        .await;
+    assert!(!result.ok);
+    let error = result.error.expect("worker call must fail");
+    assert_eq!(error.code, "agent_cannot_spawn_children");
 }
 
 fn v2_call(name: &str, arguments: serde_json::Value) -> piko_protocol::ToolCall {

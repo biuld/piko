@@ -34,6 +34,10 @@ pub(crate) fn default_settings() -> HostSettings {
         safety: Some(SafetySettings {
             auto_approve_workspace_writes: Some(true),
         }),
+        agent_runtime: Some(AgentRuntimeSettings {
+            max_agents: Some(piko_protocol::runtime::DEFAULT_MAX_AGENTS),
+            max_depth: Some(piko_protocol::runtime::DEFAULT_MAX_DEPTH),
+        }),
         ..HostSettings::default()
     }
 }
@@ -55,6 +59,7 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         permissions: merge_permissions(base.permissions, overrides.permissions),
         features: merge_features(base.features, overrides.features),
         execution: merge_execution(base.execution, overrides.execution),
+        agent_runtime: merge_agent_runtime(base.agent_runtime, overrides.agent_runtime),
         observability: merge_observability(base.observability, overrides.observability),
         trajectory: overrides.trajectory.or(base.trajectory),
         session_dir: overrides.session_dir.or(base.session_dir),
@@ -247,6 +252,19 @@ pub(crate) fn merge_execution(
     match (base, overrides) {
         (Some(base), Some(overrides)) => Some(ExecutionSettings {
             shell: overrides.shell.or(base.shell),
+        }),
+        (base, overrides) => overrides.or(base),
+    }
+}
+
+pub(crate) fn merge_agent_runtime(
+    base: Option<AgentRuntimeSettings>,
+    overrides: Option<AgentRuntimeSettings>,
+) -> Option<AgentRuntimeSettings> {
+    match (base, overrides) {
+        (Some(base), Some(overrides)) => Some(AgentRuntimeSettings {
+            max_agents: overrides.max_agents.or(base.max_agents),
+            max_depth: overrides.max_depth.or(base.max_depth),
         }),
         (base, overrides) => overrides.or(base),
     }

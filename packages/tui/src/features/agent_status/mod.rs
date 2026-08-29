@@ -367,14 +367,17 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
         }
 
         let mut s = String::new();
-        for anc_id in ancestor_ids.iter().rev() {
+        // The nearest parent owns this row's connector. Only ancestors above
+        // it contribute gutter columns, and every tree column is three cells
+        // wide so gutters stay aligned with the connector below them.
+        for anc_id in ancestor_ids.iter().skip(1).rev() {
             let continues = agents[i + 1..]
                 .iter()
                 .any(|a| a.parent_agent_instance_id.as_deref() == Some(anc_id));
             if continues {
-                s.push_str("│ ");
+                s.push_str("│  ");
             } else {
-                s.push_str("  ");
+                s.push_str("   ");
             }
         }
 
@@ -394,89 +397,4 @@ fn build_tree_prefixes(agents: &[AgentEntry]) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::theme::Theme;
-    use crate::ui::components::feedback::loading_line;
-
-    #[test]
-    fn loading_until_hydrated_never_uses_fake_main_label() {
-        let state = AgentPanelState::default();
-        assert!(state.is_loading());
-
-        let line = loading_line(0, &Theme::dark());
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("loading"));
-        assert!(!text.contains("main"));
-        assert!(!text.contains("Main"));
-    }
-
-    #[test]
-    fn prepare_for_switch_selects_active_agent() {
-        let mut state = AgentPanelState::default();
-        state.mark_hydrated();
-        state.list = SelectableList::new(vec![
-            AgentEntry {
-                agent_id: "main".into(),
-                agent_instance_id: "a-root".into(),
-                name: "main".into(),
-                parent_agent_instance_id: None,
-                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                activity: piko_protocol::AgentActivity::Idle,
-                unread_report_count: 0,
-                status: piko_protocol::AgentStatus::Idle,
-            },
-            AgentEntry {
-                agent_id: "coder".into(),
-                agent_instance_id: "a-child".into(),
-                name: "coder".into(),
-                parent_agent_instance_id: Some("a-root".into()),
-                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                activity: piko_protocol::AgentActivity::Idle,
-                unread_report_count: 0,
-                status: piko_protocol::AgentStatus::Idle,
-            },
-        ]);
-        state.active_agent_instance_id = Some("a-child".into());
-        state.list.selected = 0;
-        state.prepare_for_switch();
-        assert_eq!(state.list.selected, 1);
-        assert_eq!(
-            state.selected_agent().map(|a| a.agent_instance_id.as_str()),
-            Some("a-child")
-        );
-    }
-
-    #[test]
-    fn filter_select_next_stays_in_matches() {
-        let mut state = AgentPanelState::default();
-        state.mark_hydrated();
-        state.list = SelectableList::new(vec![
-            AgentEntry {
-                agent_id: "main".into(),
-                agent_instance_id: "a1".into(),
-                name: "main".into(),
-                parent_agent_instance_id: None,
-                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                activity: piko_protocol::AgentActivity::Idle,
-                unread_report_count: 0,
-                status: piko_protocol::AgentStatus::Idle,
-            },
-            AgentEntry {
-                agent_id: "coder".into(),
-                agent_instance_id: "a2".into(),
-                name: "coder".into(),
-                parent_agent_instance_id: None,
-                lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-                activity: piko_protocol::AgentActivity::Idle,
-                unread_report_count: 0,
-                status: piko_protocol::AgentStatus::Idle,
-            },
-        ]);
-        state.filter = "cod".into();
-        state.reset_selection();
-        assert_eq!(state.list.selected, 1);
-        state.select_next();
-        assert_eq!(state.list.selected, 1);
-    }
-}
+mod tests;

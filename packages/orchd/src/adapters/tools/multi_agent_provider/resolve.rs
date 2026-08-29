@@ -40,6 +40,7 @@ impl ToolFail {
         let code = match error {
             AgentApiError::AgentNotFound => "agent_not_found",
             AgentApiError::AgentSpecNotFound => "agent_spec_not_found",
+            AgentApiError::AgentCannotSpawnChildren => "agent_cannot_spawn_children",
             AgentApiError::InputRejected => "invalid_argument",
             AgentApiError::Cancelled => "cancelled",
             _ => "agent_runtime_error",
@@ -120,6 +121,7 @@ pub(super) fn catalog_value(specs: &[AgentSpec]) -> serde_json::Value {
                 "id": spec.id,
                 "name": spec.name,
                 "role": spec.role,
+                "kind": spec.kind,
             });
             if let Some(description) = &spec.description
                 && !description.is_empty()
@@ -250,17 +252,17 @@ pub(super) fn multi_agent_tools() -> Vec<ToolDef> {
     vec![
         tool(
             "list_agent_specs",
-            "List spawnable agent templates (AgentSpec registry). Use each entry's id as agent_spec_id when calling spawn_agent or spawn_agent_detached. This is not the live agent tree; for live instances call list_agents.",
+            "List spawnable agent templates (AgentSpec registry). Each entry includes kind: supervisor instances may create children, while worker instances cannot delegate. Use each entry's id as agent_spec_id when calling spawn_agent or spawn_agent_detached. This is not the live agent tree; for live instances call list_agents.",
             serde_json::json!({ "type": "object", "properties": {} }),
         ),
         tool(
             "spawn_agent",
-            "Create a child AgentInstance and wait for its first execution report. agent_spec_id comes from list_agent_specs (e.g. coder, scout, general). Omit agent_spec_id to use the default template when available (general). Not an agent_instance_id.",
+            "Create a child AgentInstance and wait for its first execution report. The child may use either a supervisor or worker template; only the calling supervisor can create children. agent_spec_id comes from list_agent_specs (e.g. coder, scout, general). Omit agent_spec_id to use the default template when available (general). Not an agent_instance_id.",
             spawn_schema(),
         ),
         tool(
             "spawn_agent_detached",
-            "Create a child AgentInstance that continues independently and reports to the caller inbox. Same agent_spec_id rules as spawn_agent; returns immediately with status accepted instead of waiting for a report.",
+            "Create a child AgentInstance that continues independently and reports to the caller inbox. The child may use either a supervisor or worker template; only the calling supervisor can create children. Same agent_spec_id rules as spawn_agent; returns immediately with status accepted instead of waiting for a report.",
             spawn_schema(),
         ),
         tool(
@@ -341,6 +343,7 @@ mod tests {
             provenance: PromptSource::new("test", id),
             name: id.into(),
             role: "test".into(),
+            kind: piko_protocol::AgentKind::Supervisor,
             description: Some(format!("{id} desc")),
             base_instructions: "hi".into(),
             model: None,
@@ -410,5 +413,6 @@ mod tests {
         assert_eq!(value["default_spawn_spec_id"], "general");
         assert_eq!(value["specs"].as_array().unwrap().len(), 2);
         assert_eq!(value["specs"][0]["id"], "coder");
+        assert_eq!(value["specs"][0]["kind"], "supervisor");
     }
 }

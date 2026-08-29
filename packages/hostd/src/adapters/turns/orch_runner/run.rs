@@ -13,12 +13,13 @@ pub(super) fn root_agent_spec(cwd: impl AsRef<std::path::Path>) -> AgentSpec {
 /// Ensure root mandatory packs when a custom project agent omits them.
 ///
 /// TOML remains the source of truth; this only adds missing
-/// `user_interaction` / `multi_agent` for the live root turn.
+/// `user_interaction` and, for supervisors, `multi_agent` for the live root
+/// turn.
 pub(super) fn ensure_root_tool_sets(spec: &mut AgentSpec) {
     if !spec.tool_set_ids.iter().any(|id| id == "user_interaction") {
         spec.tool_set_ids.push("user_interaction".into());
     }
-    if !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
+    if spec.kind.can_spawn_subagents() && !spec.tool_set_ids.iter().any(|id| id == "multi_agent") {
         spec.tool_set_ids.push("multi_agent".into());
     }
 }

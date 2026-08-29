@@ -1,5 +1,6 @@
 name = "General"
 role = "generalist"
+kind = "supervisor"
 description = "General-purpose coding agent."
 instructions = "You are Piko, a general-purpose coding agent."
 tool_set_ids = ["todo", "workspace", "multi_agent"]

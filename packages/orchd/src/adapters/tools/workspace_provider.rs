@@ -192,6 +192,7 @@ mod tests {
             cancellation: None,
             agent_id: "main".into(),
             agent_role: role.map(str::to_string),
+            agent_kind: piko_protocol::AgentKind::Supervisor,
             tool_set_ids: vec![],
             turn_index: None,
             event_seq: None,

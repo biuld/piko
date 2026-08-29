@@ -3,9 +3,10 @@
 use std::collections::HashSet;
 
 use crate::domain::tools::definition::{
-    ToolApprovalPolicy, ToolApprovalRequirement, ToolDef, ToolExecutionMode, ToolPolicy,
-    ToolSensitivity, ToolSetPolicy, ToolSetToolRef,
+    ToolApprovalPolicy, ToolApprovalRequirement, ToolCapability, ToolDef, ToolExecutionMode,
+    ToolPolicy, ToolSensitivity, ToolSetPolicy, ToolSetToolRef,
 };
+use piko_protocol::agents::AgentKind;
 
 #[derive(Debug, Clone)]
 pub(super) struct CatalogEntry {
@@ -46,6 +47,24 @@ pub(super) fn add_entry(
         execution_mode,
         max_concurrent_calls,
     });
+}
+
+/// Return whether a catalog entry may be exposed to this agent kind.
+///
+/// Delegation is capability-based rather than tied to a literal tool-set id,
+/// so custom sets that reference the multi-agent provider are covered too.
+pub(super) fn tool_allowed_for_agent(entry: &CatalogEntry, kind: AgentKind) -> bool {
+    tool_def_allowed_for_agent(&entry.tool_def, kind)
+}
+
+/// Return whether a tool definition may be executed by this agent kind.
+pub(super) fn tool_def_allowed_for_agent(tool_def: &ToolDef, kind: AgentKind) -> bool {
+    kind.can_spawn_subagents()
+        || !tool_def.capabilities.as_ref().is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| matches!(capability, ToolCapability::Delegation))
+        })
 }
 
 /// Resolve the effective execution mode for a catalog entry.

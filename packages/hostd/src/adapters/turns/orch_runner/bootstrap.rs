@@ -1,8 +1,8 @@
 use piko_llmd::gateway::InferenceGateway;
 
 use crate::domain::config::{
-    ApprovalSettings, ExecutionSettings, FeaturesSettings, GuardianSettings, McpServerConfig,
-    SafetySettings, TranscriptSettings,
+    AgentRuntimeSettings, ApprovalSettings, ExecutionSettings, FeaturesSettings, GuardianSettings,
+    McpServerConfig, SafetySettings, TranscriptSettings,
 };
 use crate::domain::permissions::ResolvedPermissions;
 
@@ -52,6 +52,48 @@ impl OrchAgentRunRunner {
         permissions_settings: Option<&crate::domain::config::PermissionsSettings>,
         features_settings: Option<&FeaturesSettings>,
         transcript: Option<&TranscriptSettings>,
+        runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
+    ) -> Self {
+        Self::new_with_mcp_and_runtime_settings(
+            model_executor,
+            provider,
+            model_id,
+            thinking_level,
+            context_window,
+            max_output_tokens,
+            mcp_configs,
+            mcp_settings,
+            execution_settings,
+            approval_settings,
+            guardian_settings,
+            safety_settings,
+            permissions_settings,
+            features_settings,
+            transcript,
+            None,
+            runtime_telemetry,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_with_mcp_and_runtime_settings(
+        model_executor: Arc<dyn InferenceGateway>,
+        provider: &str,
+        model_id: &str,
+        thinking_level: Option<piko_protocol::model::ThinkingLevel>,
+        context_window: u64,
+        max_output_tokens: u64,
+        mcp_configs: &[McpServerConfig],
+        mcp_settings: Option<&crate::domain::config::McpSettings>,
+        execution_settings: Option<&ExecutionSettings>,
+        approval_settings: Option<&ApprovalSettings>,
+        guardian_settings: Option<&GuardianSettings>,
+        safety_settings: Option<&SafetySettings>,
+        permissions_settings: Option<&crate::domain::config::PermissionsSettings>,
+        features_settings: Option<&FeaturesSettings>,
+        transcript: Option<&TranscriptSettings>,
+        agent_runtime_settings: Option<&AgentRuntimeSettings>,
         runtime_telemetry: Arc<dyn piko_orchd_api::telemetry::RuntimeTelemetry>,
     ) -> Self {
         use piko_protocol::config::{ModelRef, OrchdConfig, SandboxConfig};
@@ -141,7 +183,9 @@ impl OrchAgentRunRunner {
                 max_output_tokens,
             },
             default_settings,
-            runtime: Default::default(),
+            runtime: agent_runtime_settings
+                .map(AgentRuntimeSettings::to_runtime_config)
+                .unwrap_or_default(),
             sandbox,
             transcript_max_tool_output_tokens: transcript
                 .and_then(|settings| settings.max_tool_output_tokens)

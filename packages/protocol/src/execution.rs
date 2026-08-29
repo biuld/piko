@@ -355,6 +355,7 @@ mod tests {
                 provenance: crate::PromptSource::new("test", "main"),
                 name: "main".into(),
                 role: "test".into(),
+                kind: crate::AgentKind::Supervisor,
                 description: None,
                 base_instructions: "test".into(),
                 model: None,

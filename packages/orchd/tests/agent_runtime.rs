@@ -323,6 +323,7 @@ fn test_agent() -> AgentSpec {
         provenance: piko_protocol::PromptSource::new("test", "main"),
         name: "main".into(),
         role: "test".into(),
+        kind: piko_protocol::AgentKind::Supervisor,
         description: None,
         base_instructions: "test".into(),
         model: Some("faux-1".into()),
@@ -386,10 +387,52 @@ async fn attached_runtime() -> (
     (runtime, agents, model)
 }
 
+async fn attached_bootstrapped_runtime_with_limits(
+    max_agents: u32,
+    max_depth: u32,
+) -> (
+    Arc<AgentRuntime>,
+    Arc<CollectingAgentCommitPort>,
+    Arc<FauxProvider>,
+) {
+    let model = Arc::new(FauxProvider::new());
+    let mut config = test_orchd_config();
+    config.runtime.max_agents = Some(max_agents);
+    config.runtime.max_depth = Some(max_depth);
+    let runtime = AgentRuntime::bootstrap(
+        model.clone() as Arc<dyn piko_llmd::gateway::InferenceGateway>,
+        config,
+    )
+    .await;
+    let agents = Arc::new(CollectingAgentCommitPort::default());
+    let executions = Arc::new(CollectingExecutionCommitPort::new());
+    runtime
+        .attach_agent_session(SessionAgentConfig {
+            session_id: "session-limits".into(),
+            root: AgentInstanceIdentity {
+                session_id: "session-limits".into(),
+                agent_instance_id: "root".into(),
+                agent_spec_id: "main".into(),
+                parent_agent_instance_id: None,
+            },
+            recovered_agents: Vec::new(),
+            ports: SessionAgentPorts {
+                agents: agents.clone() as Arc<dyn AgentCommitPort>,
+                executions: SessionExecutionPorts::new(
+                    executions as Arc<dyn piko_orchd_api::ExecutionCommitPort>,
+                ),
+            },
+        })
+        .await
+        .expect("attach limited agent session");
+    (runtime, agents, model)
+}
+
 include!("agent_runtime_cases/atomicity.rs");
 include!("agent_runtime_cases/behavior.rs");
 include!("agent_runtime_cases/context/mod.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");
+include!("agent_runtime_cases/recovery_delegation.rs");
 include!("agent_runtime_cases/shutdown.rs");
 include!("agent_runtime_cases/tool_sets.rs");

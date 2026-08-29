@@ -83,6 +83,7 @@ fn runner_settings_changed(old: &HostSettings, new: &HostSettings) -> bool {
         || new.permissions != old.permissions
         || new.features != old.features
         || new.execution != old.execution
+        || new.agent_runtime != old.agent_runtime
         || new.mcp_servers != old.mcp_servers
         || new.mcp != old.mcp
         || new.transcript != old.transcript
@@ -332,6 +333,13 @@ mod tests {
             auto_approve_workspace_writes: Some(false),
         });
         assert!(runner_settings_changed(&old, &runtime));
+
+        let mut agent_limits = old.clone();
+        agent_limits.agent_runtime = Some(crate::domain::config::AgentRuntimeSettings {
+            max_agents: Some(4),
+            max_depth: Some(2),
+        });
+        assert!(runner_settings_changed(&old, &agent_limits));
 
         let mut host_only = old.clone();
         host_only.observability = Some(crate::domain::config::ObservabilitySettings {

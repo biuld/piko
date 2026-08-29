@@ -36,7 +36,7 @@ use crate::adapters::tools::registry::{CatalogRoute, ToolRegistry};
 use crate::ports::model_gateway::InferenceGateway;
 use crate::ports::tool_provider::ToolDiscoveryContext;
 use crate::runtime::reliability::TerminalSelector;
-use piko_protocol::agents::AgentSpec;
+use piko_protocol::agents::{AgentKind, AgentSpec};
 use piko_sandbox::exec::process::ProcessManager;
 
 pub(crate) struct PreparedRunContext {
@@ -75,6 +75,8 @@ pub struct ExecutionIdentity {
     /// F-19: role of the executing agent from the registered `AgentSpec`.
     /// `None` when the spec is not registered (inherits session policy).
     pub agent_role: Option<String>,
+    /// Delegation capability captured from the immutable AgentSpec snapshot.
+    pub agent_kind: AgentKind,
 }
 
 fn truncate(text: &str, max: usize) -> String {

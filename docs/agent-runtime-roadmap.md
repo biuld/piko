@@ -155,6 +155,8 @@ Status: **complete for committed scope**.
 | F-10 | `followup_task`, `interrupt_agent`, `list_agents`, `wait_agent` | D-10/V-10 |
 | F-19 | permission-profile selection by agent role | D-22/V-22 |
 | F-20 | detached-child completion fragment on the parent's next run | D-25/V-25 |
+| F-49 | explicit supervisor/worker delegation modes and runtime child-creation guard | implemented — F-49/D-66/V-63 |
+| F-50 | settings-backed per-session AgentInstance count and tree-depth limits | implemented — F-50/D-67/V-62 |
 
 Role-specific prompt/model layers remain optional and consumer-triggered.
 

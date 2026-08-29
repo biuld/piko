@@ -85,6 +85,7 @@ pub enum AgentCommand {
 #[derive(Clone)]
 pub struct AgentHandle {
     pub generation: u64,
+    pub agent_kind: piko_protocol::AgentKind,
     pub command_tx: MailboxSender<AgentCommands, AgentCommand>,
     pub snapshot_rx: LatestReceiver<AgentSnapshotContract, AgentSnapshot>,
     pub(crate) run_cancellation: std::sync::Arc<RunCancellation>,
