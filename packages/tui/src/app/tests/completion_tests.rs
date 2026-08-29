@@ -36,6 +36,19 @@ fn pasted_absolute_image_path_is_loaded_as_an_attachment_effect() {
 }
 
 #[test]
+fn pasted_escaped_space_absolute_image_path_is_unescaped() {
+    let mut app = app();
+    let effects =
+        app.dispatch(EditorAction::InsertPaste("/Users/test/My\\ Image.png".into()).into());
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::ReadImageFile { path, expected_draft: None }]
+            if path == &std::path::PathBuf::from("/Users/test/My Image.png")
+    ));
+}
+
+#[test]
 fn finder_drag_key_sequence_replaces_path_with_image_placeholder() {
     let mut app = app();
     let path = "/Users/test/Finder_Drag.PNG";

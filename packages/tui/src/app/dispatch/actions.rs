@@ -456,10 +456,29 @@ fn local_image_path_from_paste(text: &str) -> Option<std::path::PathBuf> {
                 .and_then(|value| value.strip_suffix('\''))
         })
         .unwrap_or(value);
-    let path = std::path::PathBuf::from(value);
+    let path = std::path::PathBuf::from(shell_unescape(value).into_owned());
     if !path.is_absolute() {
         return None;
     }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp").then_some(path)
+}
+
+fn shell_unescape(value: &str) -> std::borrow::Cow<'_, str> {
+    if !value.as_bytes().contains(&b'\\') {
+        return value.into();
+    }
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some(next) => out.push(next),
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out.into()
 }

@@ -52,8 +52,13 @@ pub struct PaneAreas {
 /// Prepare Pane chrome geometry without painting.
 pub fn prepare_pane(area: Rect, spec: &PaneSpec<'_>) -> Option<PanePlan> {
     let frame = Block::default().borders(spec.borders).inner(area);
-    let inner = inset_xy(frame, spec.padding);
-    if inner.width == 0 || inner.height == 0 {
+    if frame.width == 0 || frame.height == 0 {
+        return None;
+    }
+    let pad = spec.padding;
+    let zone_x = frame.x.saturating_add(pad.horizontal);
+    let zone_w = frame.width.saturating_sub(pad.horizontal.saturating_mul(2));
+    if zone_w == 0 {
         return None;
     }
 
@@ -64,59 +69,33 @@ pub fn prepare_pane(area: Rect, spec: &PaneSpec<'_>) -> Option<PanePlan> {
     let show_rule = show_search && spec.search_rule;
     let show_tip = spec.tip.is_some_and(|tip| !tip.is_empty());
     let footer_h = footer_height(spec.footer);
-    let chrome = u16::from(show_search)
-        .saturating_add(u16::from(show_rule))
-        .saturating_add(u16::from(show_tip))
-        .saturating_add(footer_h);
 
-    if inner.height <= chrome {
-        let (content, footer) = if footer_h > 0 && inner.height > footer_h {
-            (
-                Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h),
-                Some(Rect::new(
-                    inner.x,
-                    inner.y.saturating_add(inner.height - footer_h),
-                    inner.width,
-                    footer_h,
-                )),
-            )
-        } else {
-            (inner, None)
-        };
-        return Some(PanePlan {
-            outer: area,
-            frame,
-            title,
-            search: None,
-            search_rule: None,
-            content,
-            tip: None,
-            footer,
-            clip: content,
-            affix_hits,
-        });
-    }
+    // Content starts below the top padding.
+    let content_top = frame.y.saturating_add(pad.vertical);
+    // Footer anchors to the frame bottom (flush to the border). The vertical
+    // padding doubles as the separator between content/tip and the footer;
+    // without a footer it leaves a breathing row.
+    let footer_top = frame
+        .y
+        .saturating_add(frame.height.saturating_sub(footer_h));
+    let gap_top = footer_top.saturating_sub(pad.vertical);
+    let tip_top = gap_top.saturating_sub(u16::from(show_tip));
 
-    let mut y = inner.y;
+    let mut y = content_top;
     let search = show_search.then(|| {
-        let rect = Rect::new(inner.x, y, inner.width, 1);
+        let rect = Rect::new(zone_x, y, zone_w, 1);
         y = y.saturating_add(1);
         rect
     });
     let search_rule = show_rule.then(|| {
-        let rect = Rect::new(inner.x, y, inner.width, 1);
+        let rect = Rect::new(zone_x, y, zone_w, 1);
         y = y.saturating_add(1);
         rect
     });
-    let content_height = inner.height.saturating_sub(chrome);
-    let content = Rect::new(inner.x, y, inner.width, content_height);
-    y = y.saturating_add(content_height);
-    let tip = show_tip.then(|| {
-        let rect = Rect::new(inner.x, y, inner.width, 1);
-        y = y.saturating_add(1);
-        rect
-    });
-    let footer = (footer_h > 0).then_some(Rect::new(inner.x, y, inner.width, footer_h));
+    let content_height = tip_top.saturating_sub(y);
+    let content = Rect::new(zone_x, y, zone_w, content_height);
+    let tip = show_tip.then_some(Rect::new(zone_x, tip_top, zone_w, 1));
+    let footer = (footer_h > 0).then_some(Rect::new(zone_x, footer_top, zone_w, footer_h));
     Some(PanePlan {
         outer: area,
         frame,
