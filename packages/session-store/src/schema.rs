@@ -2,8 +2,7 @@ use std::collections::BTreeMap;
 
 use piko_protocol::{
     AgentInboxItem, AgentInput, AgentInputDisposition, AgentInstanceIdentity,
-    AgentInstanceLifecycle, AgentRunReport, AgentSpec, DurableAgentInput, Message,
-    ModelStepOutcome, TodoList, Usage,
+    AgentInstanceLifecycle, AgentRunReport, AgentSpec, Message, ModelStepOutcome, TodoList, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -108,8 +107,7 @@ impl RawEvent {
                 | "agent_lifecycle_changed"
                 | "agent_input_admitted_v1"
                 | "agent_input_disposition_changed_v1"
-                | "agent_input_queued"
-                | "agent_input_dequeued"
+                | "agent_input_applied_v1"
                 | "execution_started"
                 | "execution_finished"
                 | "model_step_committed"
@@ -186,14 +184,7 @@ pub enum EventData {
     },
     AgentInputAdmittedV1(AgentInputAdmittedV1),
     AgentInputDispositionChangedV1(AgentInputDispositionChangedV1),
-    AgentInputQueued {
-        input: DurableAgentInput,
-    },
-    AgentInputDequeued {
-        queued_input_id: String,
-        reason: String,
-        dequeued_at: i64,
-    },
+    AgentInputAppliedV1(AgentInputAppliedV1),
     ExecutionStarted(ExecutionStartedV1),
     ExecutionFinished {
         execution_id: String,
@@ -242,8 +233,7 @@ impl EventData {
             Self::AgentLifecycleChanged { .. } => "agent_lifecycle_changed",
             Self::AgentInputAdmittedV1(_) => "agent_input_admitted_v1",
             Self::AgentInputDispositionChangedV1(_) => "agent_input_disposition_changed_v1",
-            Self::AgentInputQueued { .. } => "agent_input_queued",
-            Self::AgentInputDequeued { .. } => "agent_input_dequeued",
+            Self::AgentInputAppliedV1(_) => "agent_input_applied_v1",
             Self::ExecutionStarted(_) => "execution_started",
             Self::ExecutionFinished { .. } => "execution_finished",
             Self::ModelStepCommitted(_) => "model_step_committed",
@@ -355,6 +345,21 @@ pub struct AgentInputDispositionChangedV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_step_id: Option<String>,
     pub changed_at: i64,
+}
+
+/// Transcript application of an AgentInput. The user payload is resolved
+/// from the admitted input and is never copied into this event.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputAppliedV1 {
+    pub input_id: String,
+    pub message_id: String,
+    pub agent_instance_id: String,
+    pub agent_parent_message_id: Option<String>,
+    pub tree_parent_entry_id: Option<String>,
+    pub execution_id: String,
+    pub source_turn_id: Option<String>,
+    pub committed_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

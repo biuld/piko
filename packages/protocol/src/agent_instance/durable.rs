@@ -55,41 +55,13 @@ pub enum AgentDurableCommand {
         #[serde(default)]
         prompt_digest: String,
         started_at: i64,
-        /// Canonical root input for new callers. `None` keeps old journal and
-        /// test callers source-compatible while the host upcasts them from
-        /// existing execution/message facts.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        input: Option<AgentInput>,
+        /// Canonical root input admitted atomically with the runtime start.
+        input: AgentInput,
     },
     RunTerminal {
         run_id: String,
         report: AgentRunReport,
         finished_at: i64,
-    },
-    InputQueued {
-        agent_instance_id: AgentInstanceId,
-        queued_input: DurableAgentInput,
-    },
-    QueuedInputCancelled {
-        agent_instance_id: AgentInstanceId,
-        queued_input_id: String,
-        cancelled_at: i64,
-    },
-    QueuedInputStarted {
-        agent_instance_id: AgentInstanceId,
-        queued_input_id: String,
-        run_id: String,
-        internal_execution_id: ExecutionId,
-        request_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source_turn_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        detached_recipient_agent_instance_id: Option<AgentInstanceId>,
-        #[serde(default)]
-        prompt_assembly_version: u32,
-        #[serde(default)]
-        prompt_digest: String,
-        started_at: i64,
     },
     CommitReport {
         recipient_agent_instance_id: AgentInstanceId,

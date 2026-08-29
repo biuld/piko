@@ -4,11 +4,10 @@ use std::collections::BTreeMap;
 
 use piko_protocol::{
     ActiveRunSnapshot, AgentInputDisposition, AgentInputSummary, AgentRunViewState,
-    AgentWorkSnapshot, DurableAgentInput,
+    AgentWorkSnapshot,
 };
 
 use crate::aggregate::SessionAggregate;
-use crate::aggregate_work_compat::legacy_agent_input;
 use crate::projection::StoredAgentInput;
 
 impl SessionAggregate {
@@ -57,10 +56,6 @@ impl SessionAggregate {
             active_model_step_id: None,
             started_at: execution.started.started_at,
         });
-        let canonical_input_ids = stored_inputs
-            .iter()
-            .map(|input| input.input.input_id.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
         let mut pending_steers = Vec::new();
         let mut queued_inputs = Vec::new();
         for input in stored_inputs {
@@ -70,12 +65,6 @@ impl SessionAggregate {
                 AgentInputDisposition::PendingFollowUp => queued_inputs.push(summary),
                 _ => {}
             }
-        }
-        for queued in self.queued_inputs.iter().filter(|queued| {
-            queued.request.agent_instance_id == agent_instance_id
-                && !canonical_input_ids.contains(queued.queued_input_id.as_str())
-        }) {
-            queued_inputs.push(legacy_input_summary(queued));
         }
         pending_steers.sort_by_key(|input| (input.admission_revision, input.input_id.clone()));
         queued_inputs.sort_by_key(|input| (input.admission_revision, input.input_id.clone()));
@@ -111,20 +100,5 @@ fn input_summary(input: &StoredAgentInput) -> AgentInputSummary {
         delivery: input.input.delivery,
         user_turn_id: input.input.user_turn_id.clone(),
         disposition: input.disposition,
-    }
-}
-
-fn legacy_input_summary(input: &DurableAgentInput) -> AgentInputSummary {
-    let input = legacy_agent_input(input);
-    let preview = input.preview();
-    AgentInputSummary {
-        input_id: input.input_id,
-        origin: input.origin,
-        preview,
-        admission_revision: 0,
-        submitted_at: input.submitted_at,
-        delivery: input.delivery,
-        user_turn_id: input.user_turn_id,
-        disposition: AgentInputDisposition::PendingFollowUp,
     }
 }

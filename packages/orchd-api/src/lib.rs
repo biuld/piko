@@ -41,8 +41,9 @@ pub use tools::{
 
 // Re-export Execution DTOs used by the new API surface.
 pub use piko_protocol::execution::{
-    AgentInputDisposition, CancelReceipt, CommitAck, CommitError, ExecutionId, ExecutionOutcome,
-    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
+    AgentInputAdmissionOutcome, AgentInputDisposition, CancelReceipt, CommitAck, CommitError,
+    ExecutionId, ExecutionOutcome, ExecutionStatus, InputDisposition,
+    MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,

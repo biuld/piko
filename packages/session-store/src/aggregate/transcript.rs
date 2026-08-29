@@ -3,10 +3,64 @@ use std::collections::BTreeSet;
 use piko_protocol::{Message, ModelStepOutcome};
 
 use super::SessionAggregate;
-use crate::schema::{MessageCommittedV1, ModelStepCommittedV1, RawEvent};
+use crate::schema::{AgentInputAppliedV1, MessageCommittedV1, ModelStepCommittedV1, RawEvent};
 use crate::{Result, StoreError, StoredMessage, StoredModelStep};
 
 impl SessionAggregate {
+    pub(super) fn apply_agent_input(
+        &mut self,
+        revision: u64,
+        raw: &RawEvent,
+        data: AgentInputAppliedV1,
+    ) -> Result<()> {
+        let input = self.agent_inputs.get(&data.input_id).ok_or_else(|| {
+            StoreError::InvalidEvent(format!("unknown applied input {}", data.input_id))
+        })?;
+        if input.input.agent_instance_id != data.agent_instance_id {
+            return Err(StoreError::InvalidEvent(
+                "applied input belongs to another agent".into(),
+            ));
+        }
+        if input.applied_message_id.as_deref() == Some(data.message_id.as_str()) {
+            return Ok(());
+        }
+        if input.applied_message_id.is_some() {
+            return Err(StoreError::IdempotencyConflict(data.input_id));
+        }
+        if !matches!(
+            input.disposition,
+            piko_protocol::AgentInputDisposition::AppliedAsRoot
+                | piko_protocol::AgentInputDisposition::AppliedToStep
+        ) {
+            return Err(StoreError::InvalidEvent(
+                "input must be applied before entering the transcript".into(),
+            ));
+        }
+        let content = input.input.content.clone();
+        self.apply_message(
+            revision,
+            raw,
+            MessageCommittedV1 {
+                message_id: data.message_id.clone(),
+                agent_instance_id: data.agent_instance_id,
+                agent_parent_message_id: data.agent_parent_message_id,
+                tree_parent_entry_id: data.tree_parent_entry_id,
+                execution_id: Some(data.execution_id),
+                source_turn_id: data.source_turn_id,
+                committed_at: data.committed_at,
+                message: Message::User {
+                    content,
+                    timestamp: Some(data.committed_at),
+                },
+            },
+        )?;
+        self.agent_inputs
+            .get_mut(&data.input_id)
+            .expect("input validated above")
+            .applied_message_id = Some(data.message_id);
+        Ok(())
+    }
+
     pub(super) fn apply_model_step(
         &mut self,
         revision: u64,

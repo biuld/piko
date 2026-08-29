@@ -24,6 +24,8 @@ pub struct TrajectoryProjection {
     pub runs: BTreeMap<String, TrajectoryRunProjection>,
     #[serde(default)]
     pub execution_to_run: HashMap<String, String>,
+    #[serde(default)]
+    pub input_contents: HashMap<String, piko_protocol::MessageContent>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -149,6 +151,41 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             run.execution_id = Some(started.execution_id);
             run.source_turn_id = started.source_turn_id;
             run.started_at = Some(started.started_at);
+        }
+        "agent_input_admitted_v1" => {
+            let Ok(EventData::AgentInputAdmittedV1(admitted)) =
+                serde_json::from_value::<EventData>(payload.clone())
+            else {
+                return;
+            };
+            decoded
+                .input_contents
+                .insert(admitted.input.input_id, admitted.input.content);
+        }
+        "agent_input_applied_v1" => {
+            let Ok(EventData::AgentInputAppliedV1(applied)) =
+                serde_json::from_value::<EventData>(payload.clone())
+            else {
+                return;
+            };
+            let Some(content) = decoded.input_contents.get(&applied.input_id).cloned() else {
+                return;
+            };
+            let Some(run_id) = decoded.execution_to_run.get(&applied.execution_id).cloned() else {
+                return;
+            };
+            decoded
+                .runs
+                .entry(run_id)
+                .or_default()
+                .messages
+                .push(TrajectoryMessage {
+                    message_id: Some(applied.message_id),
+                    message: piko_protocol::Message::User {
+                        content,
+                        timestamp: Some(applied.committed_at),
+                    },
+                });
         }
         "execution_finished" => {
             let Ok(EventData::ExecutionFinished {

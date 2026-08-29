@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{
-    AgentInboxItem, AgentInputDisposition, AgentInstanceIdentity, AgentInstanceLifecycle,
-    AgentRunReport, AgentSpec, DurableAgentInput, TodoList,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec,
+    TodoList,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +47,6 @@ pub struct SessionAggregate {
     pub pending_inputs_by_agent: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub input_by_request: BTreeMap<String, String>,
-    pub queued_inputs: Vec<DurableAgentInput>,
     pub executions: BTreeMap<String, StoredExecution>,
     #[serde(default)]
     pub model_steps: BTreeMap<String, StoredModelStep>,
@@ -187,50 +186,7 @@ impl SessionAggregate {
             EventData::AgentInputDispositionChangedV1(data) => {
                 self.apply_agent_input_disposition_changed(data)?
             }
-            EventData::AgentInputQueued { input } => self.apply_input_queued(input)?,
-            EventData::AgentInputDequeued {
-                queued_input_id,
-                reason,
-                ..
-            } => {
-                let index = self
-                    .queued_inputs
-                    .iter()
-                    .position(|input| input.queued_input_id == queued_input_id);
-                if let Some(index) = index {
-                    self.queued_inputs.remove(index);
-                } else if !self.agent_inputs.contains_key(&queued_input_id) {
-                    return Err(StoreError::InvalidEvent(format!(
-                        "unknown queued input {queued_input_id}"
-                    )));
-                }
-                if let Some(input) = self.agent_inputs.get_mut(&queued_input_id) {
-                    let disposition = if reason == "started" {
-                        AgentInputDisposition::AppliedAsRoot
-                    } else {
-                        AgentInputDisposition::Cancelled
-                    };
-                    let already_applied = reason == "started"
-                        && input.disposition == AgentInputDisposition::AppliedAsRoot;
-                    let already_cancelled = reason != "started"
-                        && input.disposition == AgentInputDisposition::Cancelled;
-                    if !(already_applied || already_cancelled) {
-                        if !matches!(
-                            input.disposition,
-                            AgentInputDisposition::PendingFollowUp
-                                | AgentInputDisposition::PendingSteer
-                        ) {
-                            return Err(StoreError::InvalidEvent(format!(
-                                "queued input {queued_input_id} is not pending"
-                            )));
-                        }
-                        input.disposition = disposition;
-                        if reason == "started" {
-                            input.root_input_id = Some(queued_input_id.clone());
-                        }
-                    }
-                }
-            }
+            EventData::AgentInputAppliedV1(data) => self.apply_agent_input(revision, raw, data)?,
             EventData::ExecutionStarted(started) => self.apply_execution_started(started)?,
             EventData::ExecutionFinished {
                 execution_id,

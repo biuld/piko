@@ -4,28 +4,34 @@ impl AgentActor {
     pub(super) async fn handle_input(
         &mut self,
         request: SendAgentInputRequest,
-        input_id: Option<String>,
-        submitted_at: Option<i64>,
+        canonical_input: Option<piko_protocol::AgentInput>,
     ) -> Result<AcceptedAgentInput, AgentApiError> {
-        if let Some((existing, accepted)) = self.input_requests.get(&request.request_id) {
-            if existing != &request
-                || input_id
-                    .as_deref()
-                    .is_some_and(|input_id| accepted.receipt.input_id != input_id)
+        let explicit_input = canonical_input.is_some();
+        let proposed_input = if let Some(input) = canonical_input {
+            input
+        } else if let Some((_, existing, _)) = self.input_requests.get(&request.request_id) {
+            existing.clone()
+        } else {
+            piko_protocol::AgentInput::from_request(&request, now_ms())
+        };
+        if let Some((existing_request, existing_input, accepted)) =
+            self.input_requests.get(&request.request_id)
+        {
+            if existing_request != &request || (explicit_input && existing_input != &proposed_input)
             {
                 return Err(AgentApiError::IdempotencyConflict);
             }
-            let mut duplicate = accepted.clone();
-            duplicate.receipt.disposition = InputDisposition::Duplicate;
-            return Ok(duplicate);
+            if let Some(accepted) = accepted {
+                let mut duplicate = accepted.clone();
+                duplicate.receipt.disposition = InputDisposition::Duplicate;
+                return Ok(duplicate);
+            }
         }
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
         if self.completed_executions.contains_key(&execution_id) {
             return Ok(AcceptedAgentInput {
                 receipt: AgentInputReceipt {
-                    input_id: input_id
-                        .clone()
-                        .unwrap_or_else(|| request.request_id.clone()),
+                    input_id: proposed_input.input_id.clone(),
                     request_id: request.request_id,
                     session_id: self.identity.session_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -37,12 +43,12 @@ impl AgentActor {
             });
         }
         let result = self
-            .handle_input_once(request.clone(), input_id, submitted_at)
+            .handle_input_once(request.clone(), proposed_input.clone())
             .await;
-        if let Ok(accepted) = &result {
-            self.input_requests
-                .insert(request.request_id.clone(), (request, accepted.clone()));
-        }
+        self.input_requests.insert(
+            request.request_id.clone(),
+            (request, proposed_input, result.as_ref().ok().cloned()),
+        );
         result
     }
 
@@ -89,8 +95,7 @@ impl AgentActor {
     async fn handle_input_once(
         &mut self,
         request: SendAgentInputRequest,
-        input_id: Option<String>,
-        submitted_at: Option<i64>,
+        canonical_input: piko_protocol::AgentInput,
     ) -> Result<AcceptedAgentInput, AgentApiError> {
         if self.lifecycle == AgentInstanceLifecycle::Closed {
             return Err(AgentApiError::AgentClosed);
@@ -111,7 +116,7 @@ impl AgentActor {
                 | AgentInputDelivery::FollowUp,
             ) => {
                 let execution_id = internal_execution_id(&self.identity, &request.request_id);
-                self.start_execution(request, input_id, submitted_at)
+                self.start_execution(request, canonical_input)
                     .await
                     .map(|receipt| AcceptedAgentInput {
                         receipt,
@@ -125,8 +130,7 @@ impl AgentActor {
                 let execution_id = internal_execution_id(&self.identity, &request.request_id);
                 self.enqueue_follow_up(
                     request,
-                    input_id,
-                    submitted_at,
+                    Some(canonical_input),
                     None,
                     tracing::Span::current(),
                 )
@@ -140,33 +144,19 @@ impl AgentActor {
             (Some(execution_id), AgentInputDelivery::Auto | AgentInputDelivery::SteerActive) => {
                 let execution_id = execution_id.to_string();
                 let (root_input_id, active_run_id) = self
-                    .input_requests
-                    .values()
-                    .find(|(_, accepted)| accepted.internal_execution_id == execution_id)
-                    .map(|(request, accepted)| {
-                        (
-                            accepted.receipt.input_id.clone(),
-                            accepted
-                                .receipt
-                                .run_id
-                                .clone()
-                                .unwrap_or_else(|| request.request_id.clone()),
-                        )
-                    })
+                    .run_state
+                    .active_root()
+                    .map(|(input_id, run_id)| (input_id.to_string(), run_id.to_string()))
                     .ok_or(AgentApiError::InvalidState)?;
-                let input_id = input_id.unwrap_or_else(|| request.request_id.clone());
-                let submitted_at =
-                    submitted_at.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-                let mut canonical_input =
-                    piko_protocol::AgentInput::from_request(&request, submitted_at);
-                canonical_input.input_id = input_id.clone();
+                let input_id = canonical_input.input_id.clone();
+                let submitted_at = canonical_input.submitted_at;
                 self.commit
                     .commit_agent_command(
                         &self.identity.session_id,
                         AgentDurableCommand::AgentInputAdmitted {
                             admission: piko_protocol::AgentInputAdmission {
                                 input: canonical_input,
-                                disposition: InputDisposition::PendingSteer,
+                                disposition: piko_protocol::AgentInputDisposition::PendingSteer,
                                 root_input_id: Some(root_input_id.clone()),
                                 run_id: None,
                                 bound_run_id: Some(active_run_id.clone()),
@@ -190,11 +180,8 @@ impl AgentActor {
                     .await;
                 let receipt = match receipt {
                     Ok(receipt) => receipt,
-                    // Admission is already durable. Keep the input pending
-                    // when the live mailbox cannot accept it so a retry can
-                    // re-deliver the same canonical proposal. Cancelling here
-                    // would make a later idempotent admission unable to retry
-                    // delivery.
+                    // Do not cancel after durable admit; the caller retries
+                    // delivery with the same cached proposal.
                     Err(error) => return Err(error),
                 };
                 Ok(AcceptedAgentInput {

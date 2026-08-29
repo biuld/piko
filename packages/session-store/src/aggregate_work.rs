@@ -1,6 +1,6 @@
 //! AgentInput reducers and the derived work indexes/snapshot.
 
-use piko_protocol::{AgentInputDisposition, DurableAgentInput};
+use piko_protocol::AgentInputDisposition;
 
 use crate::aggregate::SessionAggregate;
 use crate::schema::{
@@ -89,11 +89,6 @@ impl SessionAggregate {
                     "an admitted input cannot start applied_to_step".into(),
                 ));
             }
-            _ => {
-                return Err(StoreError::InvalidEvent(
-                    "unsupported admitted input disposition".into(),
-                ));
-            }
         };
         if let Some(existing) = self.agent_inputs.get(&input.input_id) {
             return if existing.input == input
@@ -127,10 +122,8 @@ impl SessionAggregate {
             ));
         }
         let input_id = input.input_id.clone();
-        let queued = disposition == AgentInputDisposition::PendingFollowUp;
-        let request = input.to_request();
         self.agent_inputs.insert(
-            input_id.clone(),
+            input_id,
             StoredAgentInput {
                 input,
                 admission_disposition: disposition,
@@ -145,24 +138,9 @@ impl SessionAggregate {
                 run_id: data.run_id,
                 bound_run_id: data.bound_run_id,
                 model_step_id: None,
+                applied_message_id: None,
             },
         );
-        if queued
-            && !self
-                .queued_inputs
-                .iter()
-                .any(|queued| queued.queued_input_id == input_id)
-        {
-            self.queued_inputs.push(DurableAgentInput {
-                queued_input_id: input_id.clone(),
-                request,
-                submitted_at: self
-                    .agent_inputs
-                    .get(&input_id)
-                    .map(|input| input.input.submitted_at),
-                detached_recipient_agent_instance_id: None,
-            });
-        }
         Ok(())
     }
 
@@ -306,10 +284,6 @@ impl SessionAggregate {
         input.run_id = run_id;
         input.bound_run_id = bound_run_id;
         input.model_step_id = model_step_id;
-        if disposition != AgentInputDisposition::PendingFollowUp {
-            self.queued_inputs
-                .retain(|queued| queued.queued_input_id != data.input_id);
-        }
         Ok(())
     }
 
@@ -358,18 +332,7 @@ impl SessionAggregate {
 pub(crate) fn canonical_disposition(
     disposition: AgentInputDisposition,
 ) -> Result<AgentInputDisposition> {
-    match disposition {
-        AgentInputDisposition::Accepted => Ok(AgentInputDisposition::AppliedAsRoot),
-        AgentInputDisposition::Queued => Ok(AgentInputDisposition::PendingFollowUp),
-        AgentInputDisposition::PendingFollowUp
-        | AgentInputDisposition::PendingSteer
-        | AgentInputDisposition::AppliedAsRoot
-        | AgentInputDisposition::AppliedToStep
-        | AgentInputDisposition::Cancelled => Ok(disposition),
-        AgentInputDisposition::Duplicate | AgentInputDisposition::Overload => Err(
-            StoreError::InvalidEvent("duplicate or overload is not a durable disposition".into()),
-        ),
-    }
+    Ok(disposition)
 }
 
 fn valid_disposition_transition(from: AgentInputDisposition, to: AgentInputDisposition) -> bool {

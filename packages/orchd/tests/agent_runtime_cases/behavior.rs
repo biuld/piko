@@ -143,6 +143,7 @@ async fn canonical_submission_preserves_distinct_root_input_identity() {
         submitted_at: 10,
         user_turn_id: Some("turn-distinct-root".into()),
         caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     };
 
     let receipt = runtime
@@ -155,7 +156,7 @@ async fn canonical_submission_preserves_distinct_root_input_identity() {
     let commands = commits.commands.lock().await;
     let started = commands.iter().find_map(|command| match command {
         piko_protocol::AgentDurableCommand::RunStarted {
-            input: Some(started),
+            input: started,
             ..
         } => Some(started),
         _ => None,

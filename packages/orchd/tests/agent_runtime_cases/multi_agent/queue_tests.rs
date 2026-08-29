@@ -72,9 +72,10 @@ async fn v2_message_agent_queue_while_busy_and_commits_input() {
     let commands = commits.commands.lock().await;
     assert!(commands.iter().any(|command| matches!(
         command,
-        AgentDurableCommand::InputQueued { queued_input, .. }
-            if queued_input.request.agent_instance_id == child
-                && queued_input.request.request_id.starts_with("message:")
+        AgentDurableCommand::AgentInputAdmitted { admission }
+            if admission.input.agent_instance_id == child
+                && admission.input.request_id.starts_with("message:")
+                && admission.disposition == piko_protocol::AgentInputDisposition::PendingFollowUp
     )));
     drop(commands);
 
@@ -253,4 +254,3 @@ async fn v2_wait_agent_times_out_and_consumes_nothing() {
         .unwrap();
     assert!(inbox.items.is_empty());
 }
-

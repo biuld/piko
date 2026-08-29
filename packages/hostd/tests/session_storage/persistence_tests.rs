@@ -78,7 +78,19 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
                 started_at: 1,
-                input: None,
+                input: piko_protocol::AgentInput {
+                    input_id: "request-interrupted".into(),
+                    request_id: "request-interrupted".into(),
+                    session_id: session_id.clone(),
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    origin: piko_protocol::AgentInputOrigin::User,
+                    delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+                    content: piko_protocol::MessageContent::String("hello".into()),
+                    submitted_at: 1,
+                    user_turn_id: Some("turn-interrupted".into()),
+                    caller_agent_instance_id: None,
+                    detached_recipient_agent_instance_id: None,
+                },
             },
         )
         .await

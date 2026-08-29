@@ -174,7 +174,7 @@ impl SessionStore {
             agents,
             agent_inbox: aggregate.inbox.values().cloned().collect(),
             agent_executions,
-            agent_input_queue: aggregate.queued_inputs.clone(),
+            agent_input_queue: aggregate.pending_follow_ups(None),
             agent_work: aggregate.agent_work_snapshots(),
             last_model: aggregate
                 .model_continuity

@@ -1,10 +1,9 @@
 use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
 use piko_protocol::{
-    AgentInput, AgentInputDelivery, AgentInputDisposition, AgentInputDispositionChange,
-    AgentInputOrigin, Message, SessionTreeEntry,
+    AgentInputDisposition, AgentInputDispositionChange, Message, SessionTreeEntry,
 };
 use piko_session_store::{
-    AgentInputAdmittedV1, EventData, MessageCommittedV1, TreeEntryRecordedV1, UsageAttribution,
+    AgentInputAppliedV1, EventData, MessageCommittedV1, TreeEntryRecordedV1, UsageAttribution,
     UsageRecordedV1,
 };
 
@@ -142,66 +141,58 @@ impl SessionStore {
                 },
             ));
         }
-        let starting_input = aggregate
-            .executions
-            .get(&commit.execution_id)
-            .filter(|_execution| {
-                !aggregate.messages.values().any(|message| {
-                    message.data.execution_id.as_deref() == Some(commit.execution_id.as_str())
-                        && matches!(&message.data.message, Message::User { .. })
+        let applied_input_id = if matches!(&commit.message, Message::User { .. }) {
+            steer_change
+                .as_ref()
+                .map(|change| change.input_id.clone())
+                .or_else(|| {
+                    aggregate
+                        .executions
+                        .get(&commit.execution_id)
+                        .and_then(|execution| {
+                            aggregate
+                                .input_by_request
+                                .get(&execution.started.request_id)
+                                .cloned()
+                        })
                 })
-            })
-            .filter(|_| matches!(&commit.message, Message::User { .. }));
-        if let Some(execution) = starting_input {
-            let request_id = execution.started.request_id.clone();
-            if !aggregate
+        } else {
+            None
+        };
+        if let (Message::User { content, .. }, Some(input_id)) = (&commit.message, applied_input_id)
+        {
+            let input = aggregate
                 .agent_inputs
-                .values()
-                .any(|input| input.input.request_id == request_id)
+                .get(&input_id)
+                .ok_or(CommitError::IdentityMismatch)?;
+            if input.input.agent_instance_id != commit.agent_instance_id
+                || input.input.content != *content
             {
-                let (content, origin) = match &commit.message {
-                    Message::User { content, .. } => (
-                        content.clone(),
-                        if execution.started.source_turn_id.is_some() {
-                            AgentInputOrigin::User
-                        } else {
-                            AgentInputOrigin::System
-                        },
-                    ),
-                    _ => unreachable!("starting input is filtered to user messages"),
-                };
-                events.push(EventData::AgentInputAdmittedV1(AgentInputAdmittedV1 {
-                    input: AgentInput {
-                        input_id: request_id.clone(),
-                        request_id: request_id.clone(),
-                        session_id: commit.session_id.clone(),
-                        agent_instance_id: commit.agent_instance_id.clone(),
-                        origin,
-                        delivery: AgentInputDelivery::StartWhenIdle,
-                        content,
-                        submitted_at: commit.committed_at,
-                        user_turn_id: execution.started.source_turn_id.clone(),
-                        caller_agent_instance_id: None,
-                    },
-                    disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
-                    root_input_id: Some(request_id),
-                    run_id: Some(execution.started.run_id.clone()),
-                    bound_run_id: None,
-                    admitted_at: commit.committed_at,
-                }));
+                return Err(CommitError::IdentityMismatch);
             }
+            events.push(EventData::AgentInputAppliedV1(AgentInputAppliedV1 {
+                input_id,
+                message_id: commit.message_id.clone(),
+                agent_instance_id: commit.agent_instance_id.clone(),
+                agent_parent_message_id: commit.parent_message_id.clone(),
+                tree_parent_entry_id,
+                execution_id: commit.execution_id.clone(),
+                source_turn_id: commit.source_turn_id.clone(),
+                committed_at: commit.committed_at,
+            }));
+        } else {
+            events.push(EventData::MessageCommitted(MessageCommittedV1 {
+                message_id: commit.message_id.clone(),
+                agent_instance_id: commit.agent_instance_id.clone(),
+                agent_parent_message_id: commit.parent_message_id.clone(),
+                tree_parent_entry_id,
+                execution_id: Some(commit.execution_id.clone()),
+                source_turn_id: commit.source_turn_id.clone(),
+                committed_at: commit.committed_at,
+                message: commit.message.clone(),
+            }));
+            events.push(tree_entry_event(&entry).map_err(Self::commit_error)?);
         }
-        events.push(EventData::MessageCommitted(MessageCommittedV1 {
-            message_id: commit.message_id.clone(),
-            agent_instance_id: commit.agent_instance_id.clone(),
-            agent_parent_message_id: commit.parent_message_id.clone(),
-            tree_parent_entry_id,
-            execution_id: Some(commit.execution_id.clone()),
-            source_turn_id: commit.source_turn_id.clone(),
-            committed_at: commit.committed_at,
-            message: commit.message.clone(),
-        }));
-        events.push(tree_entry_event(&entry).map_err(Self::commit_error)?);
         if aggregate
             .root
             .as_ref()

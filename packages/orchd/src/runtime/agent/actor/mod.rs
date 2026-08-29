@@ -41,7 +41,14 @@ pub struct AgentActor {
     head_message_id: Option<String>,
     inbox: Vec<AgentInboxItem>,
     follow_ups: VecDeque<QueuedRuntimeInput>,
-    input_requests: HashMap<String, (SendAgentInputRequest, AcceptedAgentInput)>,
+    input_requests: HashMap<
+        String,
+        (
+            SendAgentInputRequest,
+            piko_protocol::AgentInput,
+            Option<AcceptedAgentInput>,
+        ),
+    >,
     run_state: AgentRunState,
     latest_report: Option<AgentRunReport>,
     completed_executions: HashMap<String, AgentRunReport>,
@@ -66,7 +73,8 @@ pub struct AgentActor {
 }
 
 struct QueuedRuntimeInput {
-    durable: piko_protocol::DurableAgentInput,
+    input: piko_protocol::AgentInput,
+    request: SendAgentInputRequest,
     completion: Option<QueuedCompletion>,
     /// Parent span captured when the follow-up was queued.
     parent: tracing::Span,
@@ -88,8 +96,16 @@ struct AcceptedAgentInput {
 
 enum AgentRunState {
     Idle,
-    Starting { execution_id: String },
-    Running { execution_id: String },
+    Starting {
+        execution_id: String,
+        root_input_id: String,
+        run_id: String,
+    },
+    Running {
+        execution_id: String,
+        root_input_id: String,
+        run_id: String,
+    },
     Finalizing(TerminalCommitScope),
 }
 
@@ -108,13 +124,31 @@ impl AgentRunState {
     fn execution_id(&self) -> Option<&str> {
         match self {
             Self::Idle => None,
-            Self::Starting { execution_id } | Self::Running { execution_id } => Some(execution_id),
+            Self::Starting { execution_id, .. } | Self::Running { execution_id, .. } => {
+                Some(execution_id)
+            }
             Self::Finalizing(terminal) => Some(terminal.execution_id()),
         }
     }
 
     fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
+    }
+
+    fn active_root(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Starting {
+                root_input_id,
+                run_id,
+                ..
+            }
+            | Self::Running {
+                root_input_id,
+                run_id,
+                ..
+            } => Some((root_input_id, run_id)),
+            Self::Idle | Self::Finalizing(_) => None,
+        }
     }
 }
 

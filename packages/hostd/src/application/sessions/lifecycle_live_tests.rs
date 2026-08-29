@@ -23,24 +23,28 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
     store
         .commit_agent_command(
             &session_id,
-            AgentDurableCommand::InputQueued {
-                agent_instance_id: root.agent_instance_id.clone(),
-                queued_input: piko_protocol::DurableAgentInput {
-                    queued_input_id: "turn-queued".into(),
-                    request: piko_protocol::SendAgentInputRequest {
-                        request_id: "turn-queued".into(),
-                        session_id: session_id.clone(),
-                        agent_instance_id: root.agent_instance_id,
-                        caller_agent_instance_id: None,
-                        source_turn_id: Some("turn-queued".into()),
-                        message_id: "message-queued".into(),
-                        content: piko_protocol::MessageContent::String("follow up".into()),
-                        delivery: piko_protocol::AgentInputDelivery::FollowUp,
-                        prompt_resources: None,
-                        active_tool_names: None,
-                    },
-                    submitted_at: None,
-                    detached_recipient_agent_instance_id: None,
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: piko_protocol::AgentInputAdmission {
+                    input: piko_protocol::AgentInput::from_request(
+                        &piko_protocol::SendAgentInputRequest {
+                            request_id: "turn-queued".into(),
+                            session_id: session_id.clone(),
+                            agent_instance_id: root.agent_instance_id,
+                            caller_agent_instance_id: None,
+                            source_turn_id: Some("turn-queued".into()),
+                            message_id: "message-queued".into(),
+                            content: piko_protocol::MessageContent::String("follow up".into()),
+                            delivery: piko_protocol::AgentInputDelivery::FollowUp,
+                            prompt_resources: None,
+                            active_tool_names: None,
+                        },
+                        2,
+                    ),
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                    root_input_id: None,
+                    run_id: None,
+                    bound_run_id: None,
+                    admitted_at: 2,
                 },
             },
         )

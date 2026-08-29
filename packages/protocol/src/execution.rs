@@ -163,16 +163,23 @@ pub enum InputDisposition {
     Queued,
     Duplicate,
     Overload,
+}
+
+/// Immediate result of submitting an AgentInput to an AgentInstance.
+///
+/// Admission outcomes are receipts, not durable lifecycle states.
+pub type AgentInputAdmissionOutcome = InputDisposition;
+
+/// Durable lifecycle state of an admitted AgentInput.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentInputDisposition {
     PendingFollowUp,
     PendingSteer,
     AppliedAsRoot,
     AppliedToStep,
     Cancelled,
 }
-
-/// Canonical name for the AgentInput disposition state. The compatibility
-/// enum remains the wire type used by existing Execution callers.
-pub type AgentInputDisposition = InputDisposition;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

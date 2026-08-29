@@ -193,8 +193,7 @@ impl AgentRuntimeApi for AgentRuntime {
             .command_tx
             .try_send(AgentCommand::Input {
                 request,
-                input_id: None,
-                submitted_at: None,
+                canonical_input: None,
                 reply,
             })
             .map_err(|error| match error {
@@ -222,16 +221,13 @@ impl AgentRuntimeApi for AgentRuntime {
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
         let input_id = input.input_id.clone();
-        let submitted_at = input.submitted_at;
-        let delivery = input.delivery;
         let request = input.to_request();
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .try_send(AgentCommand::Input {
                 request,
-                input_id: Some(input_id.clone()),
-                submitted_at: Some(submitted_at),
+                canonical_input: Some(input),
                 reply,
             })
             .map_err(|error| match error {
@@ -241,24 +237,6 @@ impl AgentRuntimeApi for AgentRuntime {
         let mut receipt = received
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)??;
-        receipt.disposition = match (delivery, receipt.disposition) {
-            (_, piko_protocol::InputDisposition::Accepted) => {
-                piko_protocol::InputDisposition::AppliedAsRoot
-            }
-            (
-                piko_protocol::AgentInputDelivery::FollowUp,
-                piko_protocol::InputDisposition::Queued,
-            ) => piko_protocol::InputDisposition::PendingFollowUp,
-            (
-                piko_protocol::AgentInputDelivery::Auto
-                | piko_protocol::AgentInputDelivery::SteerActive,
-                piko_protocol::InputDisposition::Queued,
-            ) => piko_protocol::InputDisposition::PendingSteer,
-            (_, piko_protocol::InputDisposition::Queued) => {
-                piko_protocol::InputDisposition::PendingFollowUp
-            }
-            (_, disposition) => disposition,
-        };
         receipt.input_id = input_id;
         Ok(receipt)
     }

@@ -143,11 +143,10 @@ pub(super) fn start_run(
     else {
         unreachable!("root run helper called for another command")
     };
-    if let Some(input) = input.as_ref()
-        && (input.session_id != session_id
-            || input.agent_instance_id != agent_instance_id
-            || input.request_id != request_id
-            || input.input_id.is_empty())
+    if input.session_id != session_id
+        || input.agent_instance_id != agent_instance_id
+        || input.request_id != request_id
+        || input.input_id.is_empty()
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -164,12 +163,10 @@ pub(super) fn start_run(
                 == detached_recipient_agent_instance_id
             && existing.started.prompt_assembly_version == prompt_assembly_version
             && existing.started.prompt_digest == prompt_digest
-            && input.as_ref().is_none_or(|input| {
-                aggregate
-                    .agent_inputs
-                    .get(&input.input_id)
-                    .is_some_and(|stored| stored.input == *input)
-            })
+            && aggregate
+                .agent_inputs
+                .get(&input.input_id)
+                .is_some_and(|stored| stored.input == input)
         {
             return Ok((String::new(), agent_instance_id, 0, Vec::new()));
         }
@@ -191,41 +188,39 @@ pub(super) fn start_run(
         started_at,
     });
     let mut events = Vec::with_capacity(2);
-    if let Some(input) = input {
-        match aggregate.agent_inputs.get(&input.input_id) {
-            None => events.push(EventData::AgentInputAdmittedV1(
-                piko_session_store::AgentInputAdmittedV1 {
-                    input,
+    match aggregate.agent_inputs.get(&input.input_id) {
+        None => events.push(EventData::AgentInputAdmittedV1(
+            piko_session_store::AgentInputAdmittedV1 {
+                input,
+                disposition: AgentInputDisposition::AppliedAsRoot,
+                root_input_id: None,
+                run_id: Some(committed_run_id.clone()),
+                bound_run_id: None,
+                admitted_at: started_at,
+            },
+        )),
+        Some(existing)
+            if existing.input == input
+                && existing.disposition == AgentInputDisposition::AppliedAsRoot => {}
+        Some(existing)
+            if existing.input == input
+                && existing.disposition == AgentInputDisposition::PendingFollowUp =>
+        {
+            let input_id = input.input_id.clone();
+            events.push(EventData::AgentInputDispositionChangedV1(
+                piko_session_store::AgentInputDispositionChangedV1 {
+                    agent_instance_id: agent_instance_id.clone(),
+                    input_id: input_id.clone(),
                     disposition: AgentInputDisposition::AppliedAsRoot,
-                    root_input_id: None,
+                    root_input_id: Some(input_id),
                     run_id: Some(committed_run_id.clone()),
                     bound_run_id: None,
-                    admitted_at: started_at,
+                    model_step_id: None,
+                    changed_at: started_at,
                 },
-            )),
-            Some(existing)
-                if existing.input == input
-                    && existing.disposition == AgentInputDisposition::AppliedAsRoot => {}
-            Some(existing)
-                if existing.input == input
-                    && existing.disposition == AgentInputDisposition::PendingFollowUp =>
-            {
-                let input_id = input.input_id.clone();
-                events.push(EventData::AgentInputDispositionChangedV1(
-                    piko_session_store::AgentInputDispositionChangedV1 {
-                        agent_instance_id: agent_instance_id.clone(),
-                        input_id: input_id.clone(),
-                        disposition: AgentInputDisposition::AppliedAsRoot,
-                        root_input_id: Some(input_id),
-                        run_id: Some(committed_run_id.clone()),
-                        bound_run_id: None,
-                        model_step_id: None,
-                        changed_at: started_at,
-                    },
-                ));
-            }
-            Some(_) => return Err(CommitError::IdempotencyConflict),
+            ));
         }
+        Some(_) => return Err(CommitError::IdempotencyConflict),
     }
     events.push(execution_event);
     Ok((

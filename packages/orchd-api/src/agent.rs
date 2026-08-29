@@ -47,7 +47,7 @@ pub struct AgentRecoveryState {
     pub inbox: Vec<piko_protocol::AgentInboxItem>,
     pub latest_report: Option<piko_protocol::AgentRunReport>,
     pub execution_reports: Vec<RecoveredExecutionReport>,
-    pub queued_inputs: Vec<piko_protocol::DurableAgentInput>,
+    pub queued_inputs: Vec<piko_protocol::AgentInput>,
     pub pending_detached_deliveries: Vec<RecoveredDetachedDelivery>,
 }
 
@@ -122,7 +122,6 @@ pub trait AgentRuntimeApi: Send + Sync {
         input: AgentInput,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         let input_id = input.input_id.clone();
-        let delivery = input.delivery;
         let mut receipt = self.send_agent_input(input.to_request()).await?;
         // Compatibility implementations historically used request_id as the
         // input identity. The concrete orchd implementation overrides this
@@ -132,30 +131,6 @@ pub trait AgentRuntimeApi: Send + Sync {
             return Err(AgentApiError::IdempotencyConflict);
         }
         receipt.input_id = input_id;
-        receipt.disposition = match (delivery, receipt.disposition) {
-            (_, piko_protocol::InputDisposition::Duplicate)
-            | (_, piko_protocol::InputDisposition::Overload)
-            | (_, piko_protocol::InputDisposition::PendingFollowUp)
-            | (_, piko_protocol::InputDisposition::PendingSteer)
-            | (_, piko_protocol::InputDisposition::AppliedAsRoot)
-            | (_, piko_protocol::InputDisposition::AppliedToStep)
-            | (_, piko_protocol::InputDisposition::Cancelled) => receipt.disposition,
-            (
-                piko_protocol::AgentInputDelivery::FollowUp,
-                piko_protocol::InputDisposition::Queued,
-            ) => piko_protocol::InputDisposition::PendingFollowUp,
-            (
-                piko_protocol::AgentInputDelivery::Auto
-                | piko_protocol::AgentInputDelivery::SteerActive,
-                piko_protocol::InputDisposition::Queued,
-            ) => piko_protocol::InputDisposition::PendingSteer,
-            (_, piko_protocol::InputDisposition::Queued) => {
-                piko_protocol::InputDisposition::PendingFollowUp
-            }
-            (_, piko_protocol::InputDisposition::Accepted) => {
-                piko_protocol::InputDisposition::AppliedAsRoot
-            }
-        };
         Ok(receipt)
     }
 

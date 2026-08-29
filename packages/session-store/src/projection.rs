@@ -66,6 +66,8 @@ pub struct StoredAgentInput {
     pub bound_run_id: Option<String>,
     #[serde(default)]
     pub model_step_id: Option<String>,
+    #[serde(default)]
+    pub applied_message_id: Option<String>,
 }
 
 fn default_admission_disposition() -> AgentInputDisposition {

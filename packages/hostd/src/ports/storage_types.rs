@@ -30,10 +30,7 @@ pub struct SessionProjection {
     pub agents: BTreeMap<String, AgentProjection>,
     pub agent_inbox: Vec<AgentInboxItem>,
     pub agent_executions: BTreeMap<String, ExecutionProjection>,
-    pub agent_input_queue: Vec<piko_protocol::DurableAgentInput>,
-    /// In-memory shadow of the canonical per-Agent work projection. It is not
-    /// yet a client protocol contract; legacy queue/execution fields stay
-    /// available to compatibility consumers during the control-plane cutover.
+    pub agent_input_queue: Vec<piko_protocol::AgentInput>,
     pub agent_work: BTreeMap<String, AgentWorkSnapshot>,
     /// Session-scoped model continuity record: the provider+model that
     /// executed the most recent turn. Derives the durable `ModelChange`

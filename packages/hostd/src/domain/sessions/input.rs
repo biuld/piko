@@ -28,20 +28,6 @@ impl HostState {
             piko_protocol::InputDisposition::Overload => {
                 turn.status = crate::api::TurnStatus::Failed;
             }
-            piko_protocol::InputDisposition::PendingFollowUp => {
-                turn.status = crate::api::TurnStatus::Queued;
-            }
-            piko_protocol::InputDisposition::PendingSteer
-            | piko_protocol::InputDisposition::AppliedAsRoot
-            | piko_protocol::InputDisposition::AppliedToStep => {
-                turn.status = crate::api::TurnStatus::Running;
-                state
-                    .active_turns
-                    .insert(turn.agent_instance_id.clone(), turn_id.to_string());
-            }
-            piko_protocol::InputDisposition::Cancelled => {
-                turn.status = crate::api::TurnStatus::Cancelled;
-            }
         }
         Ok(turn.status)
     }

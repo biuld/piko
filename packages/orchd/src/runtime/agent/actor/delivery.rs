@@ -20,27 +20,36 @@ impl AgentActor {
 
     pub(super) async fn cancel_input(
         &mut self,
-        request_id: String,
+        input_id: String,
     ) -> Result<AgentCancelReceipt, AgentApiError> {
         let Some(index) = self
             .follow_ups
             .iter()
-            .position(|input| input.durable.queued_input_id == request_id)
+            .position(|queued| queued.input.input_id == input_id)
         else {
             return Ok(AgentCancelReceipt {
-                request_id,
+                request_id: input_id,
                 session_id: self.identity.session_id.clone(),
                 agent_instance_id: self.identity.agent_instance_id.clone(),
                 accepted: false,
             });
         };
+        let queued = &self.follow_ups[index];
+        let request_id = queued.request.request_id.clone();
         self.commit
             .commit_agent_command(
                 &self.identity.session_id,
-                AgentDurableCommand::QueuedInputCancelled {
-                    agent_instance_id: self.identity.agent_instance_id.clone(),
-                    queued_input_id: request_id.clone(),
-                    cancelled_at: now_ms(),
+                AgentDurableCommand::AgentInputDispositionChanged {
+                    change: piko_protocol::AgentInputDispositionChange {
+                        agent_instance_id: self.identity.agent_instance_id.clone(),
+                        input_id: input_id.clone(),
+                        disposition: piko_protocol::AgentInputDisposition::Cancelled,
+                        root_input_id: None,
+                        run_id: None,
+                        bound_run_id: None,
+                        model_step_id: None,
+                        changed_at: now_ms(),
+                    },
                 },
             )
             .await
@@ -66,26 +75,18 @@ impl AgentActor {
             return;
         }
         if let Some(follow_up) = self.follow_ups.pop_front() {
-            let queued_id = follow_up.durable.queued_input_id.clone();
             self.pending_run_parent = Some(follow_up.parent.clone());
             match self
                 .start_execution_from(
-                    follow_up.durable.request.clone(),
-                    Some(queued_id),
-                    follow_up
-                        .durable
-                        .detached_recipient_agent_instance_id
-                        .clone(),
-                    None,
-                    follow_up.durable.submitted_at,
+                    follow_up.request.clone(),
+                    follow_up.input.detached_recipient_agent_instance_id.clone(),
+                    Some(follow_up.input.clone()),
                 )
                 .await
             {
                 Ok(_) => {
-                    let execution_id = internal_execution_id(
-                        &self.identity,
-                        &follow_up.durable.request.request_id,
-                    );
+                    let execution_id =
+                        internal_execution_id(&self.identity, &follow_up.request.request_id);
                     match follow_up.completion {
                         Some(QueuedCompletion::Waiter { started, report }) => {
                             let _ = started.send(());

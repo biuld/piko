@@ -30,26 +30,23 @@ impl AgentActor {
     pub(super) async fn start_execution(
         &mut self,
         request: SendAgentInputRequest,
-        input_id: Option<String>,
-        submitted_at: Option<i64>,
+        canonical_input: piko_protocol::AgentInput,
     ) -> Result<AgentInputReceipt, AgentApiError> {
-        self.start_execution_from(request, None, None, input_id, submitted_at)
+        self.start_execution_from(request, None, Some(canonical_input))
             .await
     }
 
     pub(super) async fn start_execution_from(
         &mut self,
         request: SendAgentInputRequest,
-        queued_input_id: Option<String>,
         detached_recipient_agent_instance_id: Option<String>,
-        input_id: Option<String>,
-        submitted_at: Option<i64>,
+        canonical_input: Option<piko_protocol::AgentInput>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         let run_id = request.request_id.clone();
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
-        let canonical_input_id = input_id
-            .clone()
-            .or_else(|| queued_input_id.clone())
+        let canonical_input_id = canonical_input
+            .as_ref()
+            .map(|input| input.input_id.clone())
             .unwrap_or_else(|| request.request_id.clone());
         let run_span = tracing::info_span!(
             parent: self.pending_run_parent.take().unwrap_or_else(tracing::Span::none),
@@ -67,10 +64,11 @@ impl AgentActor {
             run_span.record("parent_agent_instance_id", parent_agent_instance_id);
         }
         let started_at = chrono::Utc::now().timestamp_millis();
-        let input_submitted_at = submitted_at.unwrap_or(started_at);
-        let mut canonical_input =
-            piko_protocol::AgentInput::from_request(&request, input_submitted_at);
-        canonical_input.input_id = canonical_input_id.clone();
+        let canonical_input = canonical_input.unwrap_or_else(|| {
+            let mut input = piko_protocol::AgentInput::from_request(&request, started_at);
+            input.input_id = canonical_input_id.clone();
+            input
+        });
         let (cancellation_generation, startup_cancel) = self.run_cancellation.begin();
         self.current_run_cancellation_generation = Some(cancellation_generation);
         let run_context = match self
@@ -140,31 +138,17 @@ impl AgentActor {
             self.finish_run_cancellation();
             return Err(AgentApiError::Cancelled);
         }
-        let durable_start = match queued_input_id {
-            Some(queued_input_id) => AgentDurableCommand::QueuedInputStarted {
-                agent_instance_id: self.identity.agent_instance_id.clone(),
-                queued_input_id,
-                run_id: run_id.clone(),
-                internal_execution_id: execution_id.clone(),
-                request_id: request.request_id.clone(),
-                source_turn_id: request.source_turn_id.clone(),
-                detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
-                prompt_assembly_version,
-                prompt_digest: prompt_digest.clone(),
-                started_at: chrono::Utc::now().timestamp_millis(),
-            },
-            None => AgentDurableCommand::RunStarted {
-                agent_instance_id: self.identity.agent_instance_id.clone(),
-                run_id: run_id.clone(),
-                internal_execution_id: execution_id.clone(),
-                request_id: request.request_id.clone(),
-                source_turn_id: request.source_turn_id.clone(),
-                detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
-                prompt_assembly_version,
-                prompt_digest,
-                started_at,
-                input: Some(canonical_input),
-            },
+        let durable_start = AgentDurableCommand::RunStarted {
+            agent_instance_id: self.identity.agent_instance_id.clone(),
+            run_id: run_id.clone(),
+            internal_execution_id: execution_id.clone(),
+            request_id: request.request_id.clone(),
+            source_turn_id: request.source_turn_id.clone(),
+            detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
+            prompt_assembly_version,
+            prompt_digest,
+            started_at,
+            input: canonical_input,
         };
         let startup = match RunStartupScope::new(prepared)
             .commit_start(&self.commit, &self.identity.session_id, durable_start)
@@ -182,6 +166,8 @@ impl AgentActor {
         // remain local, so a failed admission cannot publish a phantom run.
         self.run_state = AgentRunState::Starting {
             execution_id: execution_id.clone(),
+            root_input_id: canonical_input_id.clone(),
+            run_id: run_id.clone(),
         };
         self.publish_snapshot();
         let startup = match startup.commit_input().await {
@@ -213,6 +199,8 @@ impl AgentActor {
         let receipt = startup.activate().await;
         self.run_state = AgentRunState::Running {
             execution_id: execution_id.clone(),
+            root_input_id: canonical_input_id.clone(),
+            run_id: run_id.clone(),
         };
         self.publish_snapshot();
         if startup_cancel.is_cancelled() {
@@ -267,6 +255,8 @@ impl AgentActor {
     ) -> Result<AgentInputReceipt, AgentApiError> {
         self.run_state = AgentRunState::Running {
             execution_id: execution_id.clone(),
+            root_input_id: failure.receipt.input_id.clone(),
+            run_id: run_id.clone(),
         };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
             run_id,
@@ -292,6 +282,8 @@ impl AgentActor {
     ) -> Result<AgentInputReceipt, AgentApiError> {
         self.run_state = AgentRunState::Running {
             execution_id: execution_id.clone(),
+            root_input_id: receipt.input_id.clone(),
+            run_id: run_id.clone(),
         };
         let mut transcript = self.transcript.clone();
         transcript.push(committed_input);

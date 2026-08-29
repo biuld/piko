@@ -7,7 +7,7 @@ mod accounting;
 mod aggregate;
 mod aggregate_queries;
 mod aggregate_work;
-mod aggregate_work_compat;
+mod aggregate_work_indexes;
 mod aggregate_work_projection;
 mod error;
 mod journal;
@@ -37,9 +37,10 @@ pub use readmodels::{
     query_current, query_trajectory,
 };
 pub use schema::{
-    AgentInputAdmittedV1, AgentInputDispositionChangedV1, CompactionRecordedV1, Compatibility,
-    EventData, ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1, RawEvent,
-    SessionForkedV1, TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1, UsageRecordedV1,
+    AgentInputAdmittedV1, AgentInputAppliedV1, AgentInputDispositionChangedV1,
+    CompactionRecordedV1, Compatibility, EventData, ExecutionStartedV1, MessageCommittedV1,
+    ModelStepCommittedV1, RawEvent, SessionForkedV1, TreeEntryRecordedV1, UsageAttribution,
+    UsageCorrectedV1, UsageRecordedV1,
 };
 pub const SCHEMA_VERSION: u32 = 4;
 /// Event-decoder capability within schema-v4. It advances independently from

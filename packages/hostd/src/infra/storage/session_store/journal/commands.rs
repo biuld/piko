@@ -135,46 +135,6 @@ impl SessionStore {
                 report,
                 finished_at,
             } => queue::finish_run(&aggregate, session_id, run_id, report, finished_at)?,
-            AgentDurableCommand::InputQueued {
-                agent_instance_id,
-                queued_input,
-            } => queue::enqueue(&aggregate, session_id, agent_instance_id, queued_input)?,
-            AgentDurableCommand::QueuedInputCancelled {
-                agent_instance_id,
-                queued_input_id,
-                cancelled_at,
-            } => queue::cancel(
-                &aggregate,
-                session_id,
-                agent_instance_id,
-                queued_input_id,
-                cancelled_at,
-            )?,
-            AgentDurableCommand::QueuedInputStarted {
-                agent_instance_id,
-                queued_input_id,
-                run_id,
-                internal_execution_id,
-                request_id,
-                source_turn_id,
-                detached_recipient_agent_instance_id,
-                prompt_assembly_version,
-                prompt_digest,
-                started_at,
-            } => queue::start_queued(
-                &aggregate,
-                session_id,
-                agent_instance_id,
-                queued_input_id,
-                run_id,
-                internal_execution_id,
-                request_id,
-                source_turn_id,
-                detached_recipient_agent_instance_id,
-                prompt_assembly_version,
-                prompt_digest,
-                started_at,
-            )?,
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id,
                 report,
@@ -267,16 +227,7 @@ fn stable(kind: &str, parts: &[&str]) -> String {
 }
 
 fn canonical_disposition(disposition: AgentInputDisposition) -> Option<AgentInputDisposition> {
-    match disposition {
-        AgentInputDisposition::Accepted => Some(AgentInputDisposition::AppliedAsRoot),
-        AgentInputDisposition::Queued => Some(AgentInputDisposition::PendingFollowUp),
-        AgentInputDisposition::PendingFollowUp
-        | AgentInputDisposition::PendingSteer
-        | AgentInputDisposition::AppliedAsRoot
-        | AgentInputDisposition::AppliedToStep
-        | AgentInputDisposition::Cancelled => Some(disposition),
-        AgentInputDisposition::Duplicate | AgentInputDisposition::Overload => None,
-    }
+    Some(disposition)
 }
 
 fn admitted_base(

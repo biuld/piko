@@ -6,9 +6,9 @@ use piko_protocol::{
     AgentInstanceIdentity, ContentBlock, Message, MessageContent, ModelStepOutcome, Usage,
 };
 use piko_session_store::{
-    CompactionRecordedV1, EventData, ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1,
-    NewSession, OpenOptions, ProposedCommit, RawEvent, SessionStore, StoreError, UsageAttribution,
-    UsageCorrectedV1, UsageQuery, UsageRecordedV1,
+    AgentInputAppliedV1, CompactionRecordedV1, EventData, ExecutionStartedV1, MessageCommittedV1,
+    ModelStepCommittedV1, NewSession, OpenOptions, ProposedCommit, RawEvent, SessionStore,
+    StoreError, UsageAttribution, UsageCorrectedV1, UsageQuery, UsageRecordedV1,
 };
 use tempfile::tempdir;
 
@@ -261,6 +261,7 @@ fn admitted_applied_to_step_is_rejected_without_panicking() {
         submitted_at: 2,
         user_turn_id: Some("turn-1".into()),
         caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     };
     let error = opened
         .store
@@ -289,6 +290,102 @@ fn admitted_applied_to_step_is_rejected_without_panicking() {
             if message.contains("applied_to_step")
     ));
     assert_eq!(opened.store.aggregate().revision, 1);
+}
+
+#[test]
+fn applied_agent_input_is_the_single_durable_user_payload_authority() {
+    let temp = tempdir().unwrap();
+    let opened = SessionStore::create(&temp.path().join("session"), new_session("s1")).unwrap();
+    let input = piko_protocol::AgentInput {
+        input_id: "input-1".into(),
+        request_id: "request-1".into(),
+        session_id: "s1".into(),
+        agent_instance_id: "root".into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+        content: MessageContent::String("only-payload-copy".into()),
+        submitted_at: 2,
+        user_turn_id: Some("turn-1".into()),
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
+    };
+    let admitted = event(
+        "input-admitted",
+        EventData::AgentInputAdmittedV1(piko_session_store::AgentInputAdmittedV1 {
+            input,
+            disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+            root_input_id: Some("input-1".into()),
+            run_id: Some("run-1".into()),
+            bound_run_id: None,
+            admitted_at: 2,
+        }),
+    );
+    let started = event(
+        "execution-started",
+        EventData::ExecutionStarted(ExecutionStartedV1 {
+            run_id: "run-1".into(),
+            execution_id: "execution-1".into(),
+            request_id: "request-1".into(),
+            agent_instance_id: "root".into(),
+            admitted_revision: 1,
+            base_message_id: None,
+            tree_base_entry_id: None,
+            source_turn_id: Some("turn-1".into()),
+            detached_recipient_agent_instance_id: None,
+            prompt_assembly_version: 1,
+            prompt_digest: "digest".into(),
+            started_at: 2,
+        }),
+    );
+    let applied = event(
+        "input-applied",
+        EventData::AgentInputAppliedV1(AgentInputAppliedV1 {
+            input_id: "input-1".into(),
+            message_id: "message-1".into(),
+            agent_instance_id: "root".into(),
+            agent_parent_message_id: None,
+            tree_parent_entry_id: None,
+            execution_id: "execution-1".into(),
+            source_turn_id: Some("turn-1".into()),
+            committed_at: 3,
+        }),
+    );
+    let durable_json = format!(
+        "{}{}{}",
+        serde_json::to_string(&admitted).unwrap(),
+        serde_json::to_string(&started).unwrap(),
+        serde_json::to_string(&applied).unwrap()
+    );
+    assert_eq!(durable_json.matches("only-payload-copy").count(), 1);
+
+    opened
+        .store
+        .append(
+            1,
+            ProposedCommit {
+                commit_id: "start".into(),
+                committed_at: 2,
+                causation_id: None,
+                correlation_id: Some("turn-1".into()),
+                events: vec![admitted, started],
+                extensions: BTreeMap::new(),
+            },
+        )
+        .unwrap();
+    opened.store.append(2, commit("apply", 3, applied)).unwrap();
+    let aggregate = opened.store.aggregate();
+    let message = &aggregate.messages["message-1"].data.message;
+    assert!(matches!(
+        message,
+        Message::User { content: MessageContent::String(text), .. }
+            if text == "only-payload-copy"
+    ));
+    assert_eq!(
+        aggregate.agent_inputs["input-1"]
+            .applied_message_id
+            .as_deref(),
+        Some("message-1")
+    );
 }
 
 #[test]

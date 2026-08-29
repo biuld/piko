@@ -17,7 +17,13 @@ async fn recovery_marks_accepted_execution_interrupted() {
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-interrupted".into(),
                 started_at: 1,
-                input: None,
+                input: root_input(
+                    &root.agent_instance_id,
+                    "request-interrupted",
+                    None,
+                    "interrupted input",
+                    1,
+                ),
             },
         )
         .await
@@ -107,7 +113,13 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-with-tool-call".into(),
                 started_at: 1,
-                input: None,
+                input: root_input(
+                    &root.agent_instance_id,
+                    "request-with-tool-call",
+                    Some("turn-with-tool-call"),
+                    "tool input",
+                    1,
+                ),
             },
         )
         .await
@@ -254,7 +266,16 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-detached".into(),
                 started_at: 2,
-                input: None,
+                input: piko_protocol::AgentInput {
+                    detached_recipient_agent_instance_id: Some(root.agent_instance_id.clone()),
+                    ..root_input(
+                        &child.agent_instance_id,
+                        "request-detached",
+                        None,
+                        "detached input",
+                        2,
+                    )
+                },
             },
         )
         .await
@@ -327,7 +348,13 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
         prompt_assembly_version: 1,
         prompt_digest: "prompt-idempotent".into(),
         started_at: 1,
-        input: None,
+        input: root_input(
+            &root.agent_instance_id,
+            "request-idempotent",
+            None,
+            "idempotent input",
+            1,
+        ),
     };
     for _ in 0..2 {
         store
@@ -370,44 +397,45 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
     let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
         .unwrap();
     let root = store.ensure_root_agent("main").unwrap();
-    let queued = piko_protocol::DurableAgentInput {
-        queued_input_id: "queued-1".into(),
-        request: piko_protocol::SendAgentInputRequest {
-            request_id: "queued-1".into(),
-            session_id: "session-1".into(),
-            agent_instance_id: root.agent_instance_id.clone(),
-            caller_agent_instance_id: None,
-            source_turn_id: None,
-            message_id: "message-queued".into(),
-            content: MessageContent::String("follow up".into()),
-            delivery: piko_protocol::AgentInputDelivery::FollowUp,
-            prompt_resources: None,
-            active_tool_names: None,
-        },
-        submitted_at: None,
+    let queued = piko_protocol::AgentInput {
+        input_id: "queued-1".into(),
+        request_id: "queued-1".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: root.agent_instance_id.clone(),
+        origin: piko_protocol::AgentInputOrigin::System,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        content: MessageContent::String("follow up".into()),
+        submitted_at: 2,
+        user_turn_id: None,
+        caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::InputQueued {
-                agent_instance_id: root.agent_instance_id.clone(),
-                queued_input: queued.clone(),
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: piko_protocol::AgentInputAdmission {
+                    input: queued.clone(),
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                    root_input_id: None,
+                    run_id: None,
+                    bound_run_id: None,
+                    admitted_at: 2,
+                },
             },
         )
         .await
         .unwrap();
     assert_eq!(
         store.agent_queued_inputs(&root.agent_instance_id).unwrap(),
-        vec![queued]
+        vec![queued.clone()]
     );
 
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::QueuedInputStarted {
+            AgentDurableCommand::RunStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                queued_input_id: "queued-1".into(),
                 run_id: "run-queued".into(),
                 internal_execution_id: "exec-queued".into(),
                 request_id: "queued-1".into(),
@@ -416,6 +444,7 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                 prompt_assembly_version: 1,
                 prompt_digest: "prompt-queued".into(),
                 started_at: 2,
+                input: queued,
             },
         )
         .await
@@ -431,29 +460,31 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         "exec-queued"
     );
 
-    let cancelled = piko_protocol::DurableAgentInput {
-        queued_input_id: "queued-cancelled".into(),
-        request: piko_protocol::SendAgentInputRequest {
-            request_id: "queued-cancelled".into(),
-            session_id: "session-1".into(),
-            agent_instance_id: root.agent_instance_id.clone(),
-            caller_agent_instance_id: None,
-            source_turn_id: Some("turn-queued-cancelled".into()),
-            message_id: "message-queued-cancelled".into(),
-            content: MessageContent::String("cancel me".into()),
-            delivery: piko_protocol::AgentInputDelivery::FollowUp,
-            prompt_resources: None,
-            active_tool_names: None,
-        },
-        submitted_at: None,
+    let cancelled = piko_protocol::AgentInput {
+        input_id: "queued-cancelled".into(),
+        request_id: "queued-cancelled".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: root.agent_instance_id.clone(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        content: MessageContent::String("cancel me".into()),
+        submitted_at: 3,
+        user_turn_id: Some("turn-queued-cancelled".into()),
+        caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::InputQueued {
-                agent_instance_id: root.agent_instance_id.clone(),
-                queued_input: cancelled,
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: piko_protocol::AgentInputAdmission {
+                    input: cancelled,
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                    root_input_id: None,
+                    run_id: None,
+                    bound_run_id: None,
+                    admitted_at: 3,
+                },
             },
         )
         .await
@@ -461,13 +492,44 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::QueuedInputCancelled {
-                agent_instance_id: root.agent_instance_id.clone(),
-                queued_input_id: "queued-cancelled".into(),
-                cancelled_at: 3,
+            AgentDurableCommand::AgentInputDispositionChanged {
+                change: piko_protocol::AgentInputDispositionChange {
+                    agent_instance_id: root.agent_instance_id.clone(),
+                    input_id: "queued-cancelled".into(),
+                    disposition: piko_protocol::AgentInputDisposition::Cancelled,
+                    root_input_id: None,
+                    run_id: None,
+                    bound_run_id: None,
+                    model_step_id: None,
+                    changed_at: 3,
+                },
             },
         )
         .await
         .unwrap();
     assert!(store.agent_queued_inputs(&root.agent_instance_id).unwrap().is_empty());
+}
+fn root_input(
+    agent_instance_id: &str,
+    request_id: &str,
+    source_turn_id: Option<&str>,
+    content: &str,
+    submitted_at: i64,
+) -> piko_protocol::AgentInput {
+    piko_protocol::AgentInput {
+        input_id: request_id.into(),
+        request_id: request_id.into(),
+        session_id: "session-1".into(),
+        agent_instance_id: agent_instance_id.into(),
+        origin: source_turn_id.map_or(
+            piko_protocol::AgentInputOrigin::System,
+            |_| piko_protocol::AgentInputOrigin::User,
+        ),
+        delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+        content: piko_protocol::MessageContent::String(content.into()),
+        submitted_at,
+        user_turn_id: source_turn_id.map(str::to_string),
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
+    }
 }

@@ -37,6 +37,10 @@ pub struct AgentInput {
     pub user_turn_id: Option<TurnId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_agent_instance_id: Option<AgentInstanceId>,
+    /// Recipient of the eventual detached completion, when this input was
+    /// submitted as background Agent-to-Agent work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached_recipient_agent_instance_id: Option<AgentInstanceId>,
 }
 
 impl AgentInput {
@@ -61,10 +65,12 @@ impl AgentInput {
             submitted_at,
             user_turn_id: request.source_turn_id.clone(),
             caller_agent_instance_id: request.caller_agent_instance_id.clone(),
+            detached_recipient_agent_instance_id: None,
         }
     }
 
-    /// Convert a primitive input to the compatibility runtime request.
+    /// Live runtime request for this primitive. Prompt resources stay off
+    /// the durable fact.
     pub fn to_request(&self) -> crate::SendAgentInputRequest {
         crate::SendAgentInputRequest {
             request_id: self.request_id.clone(),

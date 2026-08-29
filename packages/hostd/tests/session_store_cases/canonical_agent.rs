@@ -15,6 +15,7 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
         submitted_at: 10,
         user_turn_id: Some("turn-follow-up".into()),
         caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     };
     let admission = piko_protocol::AgentInputAdmission {
         input: input.clone(),
@@ -36,7 +37,7 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
             "session-1",
             AgentDurableCommand::AgentInputAdmitted {
                 admission: piko_protocol::AgentInputAdmission {
-                    input,
+                    input: input.clone(),
                     disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
                     root_input_id: None,
                     run_id: None,
@@ -88,7 +89,7 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
                 started_at: 21,
-                input: None,
+                input,
             },
         )
         .await
@@ -147,7 +148,7 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
                 prompt_assembly_version: 1,
                 prompt_digest: "digest-root".into(),
                 started_at: 10,
-                input: Some(input.clone()),
+                input: input.clone(),
             },
         )
         .await
@@ -196,7 +197,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
                 started_at: 10,
-                input: Some(piko_protocol::AgentInput::from_request(&root_request, 10)),
+                input: piko_protocol::AgentInput::from_request(&root_request, 10),
             },
         )
         .await
@@ -233,22 +234,53 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         prompt_resources: None,
         active_tool_names: None,
     };
-    store
+    let steer_admission = piko_protocol::AgentInputAdmission {
+        input: piko_protocol::AgentInput::from_request(&steer_request, 20),
+        disposition: piko_protocol::AgentInputDisposition::PendingSteer,
+        root_input_id: Some(root_request.request_id.clone()),
+        run_id: None,
+        bound_run_id: Some("run-steer".into()),
+        admitted_at: 20,
+    };
+    let first_steer = store
         .commit_agent_command(
             "session-1",
             AgentDurableCommand::AgentInputAdmitted {
-                admission: piko_protocol::AgentInputAdmission {
-                    input: piko_protocol::AgentInput::from_request(&steer_request, 20),
-                    disposition: piko_protocol::AgentInputDisposition::PendingSteer,
-                    root_input_id: Some(root_request.request_id.clone()),
-                    run_id: None,
-                    bound_run_id: Some("run-steer".into()),
-                    admitted_at: 20,
-                },
+                admission: steer_admission.clone(),
             },
         )
         .await
         .unwrap();
+    let retry_steer = store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: steer_admission,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_steer.revision, retry_steer.revision);
+    let shifted_steer = store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: piko_protocol::AgentInputAdmission {
+                    input: piko_protocol::AgentInput::from_request(&steer_request, 21),
+                    disposition: piko_protocol::AgentInputDisposition::PendingSteer,
+                    root_input_id: Some(root_request.request_id.clone()),
+                    run_id: None,
+                    bound_run_id: Some("run-steer".into()),
+                    admitted_at: 21,
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        shifted_steer,
+        piko_protocol::CommitError::IdempotencyConflict
+    );
 
     store
         .commit_steer(
@@ -331,81 +363,4 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         projection.agent_executions["run-steer"].model_steps[0].model_step_id,
         "execution-steer:step_1"
     );
-}
-
-#[tokio::test]
-async fn late_compatibility_queue_event_does_not_resurrect_cancelled_input() {
-    let temp = tempdir().unwrap();
-    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
-        .unwrap();
-    let root = store.ensure_root_agent("main").unwrap();
-    let input = piko_protocol::AgentInput {
-        input_id: "cancelled-input".into(),
-        request_id: "cancelled-request".into(),
-        session_id: "session-1".into(),
-        agent_instance_id: root.agent_instance_id.clone(),
-        origin: piko_protocol::AgentInputOrigin::User,
-        delivery: piko_protocol::AgentInputDelivery::FollowUp,
-        content: piko_protocol::MessageContent::String("cancel before queue replay".into()),
-        submitted_at: 10,
-        user_turn_id: Some("turn-cancelled-input".into()),
-        caller_agent_instance_id: None,
-    };
-    store
-        .commit_agent_command(
-            "session-1",
-            AgentDurableCommand::AgentInputAdmitted {
-                admission: piko_protocol::AgentInputAdmission {
-                    input: input.clone(),
-                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
-                    root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
-                    admitted_at: 10,
-                },
-            },
-        )
-        .await
-        .unwrap();
-    store
-        .commit_agent_command(
-            "session-1",
-            AgentDurableCommand::AgentInputDispositionChanged {
-                change: piko_protocol::AgentInputDispositionChange {
-                    agent_instance_id: root.agent_instance_id.clone(),
-                    input_id: input.input_id.clone(),
-                    disposition: piko_protocol::AgentInputDisposition::Cancelled,
-                    root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
-                    model_step_id: None,
-                    changed_at: 11,
-                },
-            },
-        )
-        .await
-        .unwrap();
-
-    store
-        .commit_agent_command(
-            "session-1",
-            AgentDurableCommand::InputQueued {
-                agent_instance_id: root.agent_instance_id.clone(),
-                queued_input: piko_protocol::DurableAgentInput {
-                    queued_input_id: input.input_id.clone(),
-                    request: input.to_request(),
-                    submitted_at: Some(input.submitted_at),
-                    detached_recipient_agent_instance_id: None,
-                },
-            },
-        )
-        .await
-        .unwrap();
-
-    assert!(store.agent_queued_inputs(&root.agent_instance_id).unwrap().is_empty());
-    let work = store
-        .agent_work_snapshot(&root.agent_instance_id)
-        .unwrap()
-        .unwrap();
-    assert!(work.queued_inputs.is_empty());
 }

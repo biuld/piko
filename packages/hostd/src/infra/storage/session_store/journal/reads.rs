@@ -93,13 +93,10 @@ impl SessionStore {
     pub fn agent_queued_inputs(
         &self,
         agent_instance_id: &str,
-    ) -> Result<Vec<piko_protocol::DurableAgentInput>, SessionStorageError> {
+    ) -> Result<Vec<piko_protocol::AgentInput>, SessionStorageError> {
         Ok(self
             .aggregate()?
-            .queued_inputs
-            .into_iter()
-            .filter(|input| input.request.agent_instance_id == agent_instance_id)
-            .collect())
+            .pending_follow_ups(Some(agent_instance_id)))
     }
 
     pub fn agent_work_snapshot(

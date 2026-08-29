@@ -21,17 +21,17 @@ impl HostApp {
             let store = session_store_factory.open(path);
             let projection = store.load_projection().await.map_err(storage_error)?;
             for queued in projection.agent_input_queue {
-                let Some(turn_id) = queued.request.source_turn_id.as_deref() else {
+                let Some(turn_id) = queued.user_turn_id.as_deref() else {
                     continue;
                 };
-                let message = match &queued.request.content {
+                let message = match &queued.content {
                     piko_protocol::MessageContent::String(text) => text.as_str(),
                     piko_protocol::MessageContent::Blocks(_) => "",
                 };
                 state.restore_turn(
                     &session_id,
                     turn_id,
-                    &queued.request.agent_instance_id,
+                    &queued.agent_instance_id,
                     message,
                     crate::api::TurnStatus::Queued,
                 )?;
@@ -406,7 +406,19 @@ mod tests {
                     prompt_assembly_version: 1,
                     prompt_digest: "prompt-recovered".into(),
                     started_at: 2,
-                    input: None,
+                    input: piko_protocol::AgentInput {
+                        input_id: "request-recovered".into(),
+                        request_id: "request-recovered".into(),
+                        session_id: session_id.clone(),
+                        agent_instance_id: root.agent_instance_id.clone(),
+                        origin: piko_protocol::AgentInputOrigin::User,
+                        delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+                        content: piko_protocol::MessageContent::String("recover me".into()),
+                        submitted_at: 2,
+                        user_turn_id: Some(turn_id.clone()),
+                        caller_agent_instance_id: None,
+                        detached_recipient_agent_instance_id: None,
+                    },
                 },
             )
             .await

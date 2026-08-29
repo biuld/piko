@@ -258,8 +258,11 @@ impl AgentCommitPort for CollectingAgentCommitPort {
         {
             return Err(CommitError::Unavailable);
         }
-        if matches!(&command, AgentDurableCommand::QueuedInputStarted { .. })
-            && Self::consume_failure(&self.fail_queued_starts)
+        if matches!(
+            &command,
+            AgentDurableCommand::RunStarted { input, .. }
+                if input.delivery == AgentInputDelivery::FollowUp
+        ) && Self::consume_failure(&self.fail_queued_starts)
         {
             return Err(CommitError::Unavailable);
         }
@@ -297,15 +300,6 @@ impl AgentCommitPort for CollectingAgentCommitPort {
             } => agent_instance_id.clone(),
             AgentDurableCommand::RunTerminal { report, .. } => report.agent_instance_id.clone(),
             AgentDurableCommand::RunStarted {
-                agent_instance_id, ..
-            } => agent_instance_id.clone(),
-            AgentDurableCommand::InputQueued {
-                agent_instance_id, ..
-            }
-            | AgentDurableCommand::QueuedInputCancelled {
-                agent_instance_id, ..
-            }
-            | AgentDurableCommand::QueuedInputStarted {
                 agent_instance_id, ..
             } => agent_instance_id.clone(),
             AgentDurableCommand::CommitReport {

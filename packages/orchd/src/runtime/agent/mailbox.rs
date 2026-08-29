@@ -19,12 +19,9 @@ pub struct DetachedReportTarget {
 pub enum AgentCommand {
     Input {
         request: SendAgentInputRequest,
-        /// `Some` for the canonical AgentInput API; compatibility callers
-        /// continue to derive the durable identity from request_id.
-        input_id: Option<String>,
-        /// Canonical submission time. Compatibility callers let the actor
-        /// assign admission time.
-        submitted_at: Option<i64>,
+        /// Full canonical proposal when submitted through the primitive API.
+        /// Runtime-only prompt/tool context remains on `request`.
+        canonical_input: Option<piko_protocol::AgentInput>,
         reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
     },
     Run {

@@ -295,21 +295,17 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
                 inbox: Vec::new(),
                 latest_report: None,
                 execution_reports: Vec::new(),
-                queued_inputs: vec![piko_protocol::DurableAgentInput {
-                    queued_input_id: "queued-recovery".into(),
-                    request: SendAgentInputRequest {
-                        request_id: "queued-recovery".into(),
-                        session_id: "session-queued-recovery".into(),
-                        agent_instance_id: "root".into(),
-                        caller_agent_instance_id: None,
-                        source_turn_id: None,
-                        message_id: "message-queued-recovery".into(),
-                        content: MessageContent::String("continue".into()),
-                        delivery: AgentInputDelivery::FollowUp,
-                    prompt_resources: None,
-                        active_tool_names: None,
-                    },
-                    submitted_at: None,
+                queued_inputs: vec![piko_protocol::AgentInput {
+                    input_id: "queued-recovery".into(),
+                    request_id: "queued-recovery".into(),
+                    session_id: "session-queued-recovery".into(),
+                    agent_instance_id: "root".into(),
+                    origin: piko_protocol::AgentInputOrigin::System,
+                    delivery: AgentInputDelivery::FollowUp,
+                    content: MessageContent::String("continue".into()),
+                    submitted_at: 1,
+                    user_turn_id: None,
+                    caller_agent_instance_id: None,
                     detached_recipient_agent_instance_id: None,
                 }],
                 pending_detached_deliveries: Vec::new(),
@@ -337,8 +333,8 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
         {
             assert!(agents.commands.lock().await.iter().any(|command| matches!(
                 command,
-                AgentDurableCommand::QueuedInputStarted { queued_input_id, .. }
-                    if queued_input_id == "queued-recovery"
+                AgentDurableCommand::RunStarted { input, .. }
+                    if input.input_id == "queued-recovery"
             )));
             return;
         }
