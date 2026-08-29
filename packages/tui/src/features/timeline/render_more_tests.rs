@@ -229,18 +229,24 @@ fn read_tool_title_carries_path_and_body_has_gutter() {
     );
     tool.expanded = true;
     let lines = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 60);
-    let joined: String = lines
+    let joined = lines
         .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
         joined.contains("read") && joined.contains("Cargo.toml"),
         "title should include path: {joined}"
     );
+    assert!(joined.contains("[package]"), "code body expected: {joined}");
     assert!(
-        joined.contains('│') || joined.contains("[package]"),
-        "code body expected: {joined}"
+        !joined.contains('│'),
+        "gutter should use whitespace, not a copied separator: {joined}"
     );
     assert!(
         !joined.contains(r#"{"path""#),
@@ -335,9 +341,14 @@ fn tool_block_renders_readable_fields_not_raw_json() {
 
     tool.expanded = true;
     let expanded = component_lines(&TimelineComponent::Tool(tool), true, false, &theme, 60);
-    let expanded_text: String = expanded
+    let expanded_text = expanded
         .iter()
-        .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert!(

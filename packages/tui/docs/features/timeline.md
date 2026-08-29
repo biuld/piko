@@ -49,8 +49,11 @@ but it does not create a temporary duplicate prompt in Timeline.
   compaction and branch summaries use summary components; displayable custom
   messages use a custom component. Label, session-info, leaf, and non-display
   custom metadata do not enter Timeline.
-- Fenced code: readable; syntax color when language is known; no decorative
-  code frame as the default.
+- Fenced code: editor-style numbered gutter, a two-cell content inset, and a
+  recessed code surface; syntax color when language is known. The gutter uses
+  alignment and color rather than a selectable separator glyph. Long lines
+  soft-wrap under a blank continuation gutter rather than introducing horizontal
+  scrolling.
 
 When live events update an existing assistant message or tool execution, the
 existing visible item changes in place. The Timeline should not append duplicate
@@ -97,6 +100,11 @@ stream principles):
   F-27), not a force-expanded Timeline card. `todo_*` tools remain audit
   history; once the strip ships, checklist bodies need not stay open when
   collapsed.
+- Workspace `read` / `write` bodies and `edit` diffs use an editor-style line
+  gutter. Read/write listings keep a two-cell inset between the gutter and
+  source without painting a separator glyph. File-backed bodies infer syntax
+  from the path and highlight known languages; unknown or oversized input
+  remains readable plain text.
 - Title is scannable (name + short summary); status/exit/duration/tokens may
   appear as chrome. Prefer real result `usage` for tokens when present;
   otherwise a payload-size heuristic is fine. Call/parent ids are not chrome.

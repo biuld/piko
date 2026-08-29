@@ -12,6 +12,7 @@ fn read_uses_title_meta_and_code_view() {
     match presented.body {
         ToolBody::Code(code) => {
             assert_eq!(code.start_line, 10);
+            assert_eq!(code.language.as_deref(), Some("rs"));
             assert!(code.lines.iter().any(|l| l.contains("fn main")));
         }
         other => panic!("expected code view, got {other:?}"),

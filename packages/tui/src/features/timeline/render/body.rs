@@ -85,15 +85,15 @@ pub(super) fn present_assistant_markdown(
     width: u16,
     reserve: usize,
 ) -> Vec<Line<'static>> {
-    let parsed = parse_markdown(text, theme);
-    if parsed.is_empty() {
-        return vec![Line::from(Span::from(" "))];
-    }
     let lead = 1usize;
     let left_max = usize::from(width)
         .saturating_sub(lead)
         .saturating_sub(reserve)
         .max(1);
+    let parsed = parse_markdown(text, theme, left_max);
+    if parsed.is_empty() {
+        return vec![Line::from(Span::from(" "))];
+    }
     let mut out = Vec::new();
     for mut line in parsed {
         if line.spans.is_empty() {

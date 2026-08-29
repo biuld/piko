@@ -12,7 +12,10 @@ use syntect::{
 };
 use two_face::theme::EmbeddedThemeName;
 
-use crate::theme::Theme;
+use crate::{
+    theme::Theme,
+    ui::line_layout::{pad_spans, paint_cols, wrap_spans},
+};
 
 const MAX_HIGHLIGHT_BYTES: usize = 512 * 1024;
 const MAX_HIGHLIGHT_LINES: usize = 10_000;
@@ -114,4 +117,119 @@ pub(super) fn highlight_code_to_lines(
     language
         .and_then(|language| highlighted_lines(code, language, theme))
         .unwrap_or_else(|| plain_lines(code))
+}
+
+/// Return the extension token used by syntect for a workspace path.
+pub(super) fn language_from_path(path: &str) -> Option<&str> {
+    std::path::Path::new(path).extension()?.to_str()
+}
+
+/// Highlight one independent source row, applying caller-owned foreground and
+/// background semantics when syntax is unknown.
+pub(super) fn code_line_spans(
+    text: &str,
+    language: Option<&str>,
+    theme: &Theme,
+    plain_foreground: Color,
+    background: Color,
+) -> Vec<Span<'static>> {
+    let fallback = Style::default().fg(plain_foreground).bg(background);
+    let mut spans = highlight_code_to_lines(text, language, theme)
+        .into_iter()
+        .next()
+        .map(|line| line.spans)
+        .unwrap_or_default();
+    if spans.is_empty() {
+        return vec![Span::styled(String::new(), fallback)];
+    }
+    for span in &mut spans {
+        if span.style.fg.is_none() {
+            span.style = span.style.fg(plain_foreground);
+        }
+        span.style = span.style.bg(background);
+    }
+    spans
+}
+
+/// Paint a source listing shared by Markdown fences and workspace tool bodies.
+///
+/// Every source row owns a stable line-number gutter. Soft-wrapped continuation
+/// rows retain a blank gutter so code never slides underneath the line numbers.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn code_listing_lines(
+    code: &str,
+    language: Option<&str>,
+    start_line: usize,
+    theme: &Theme,
+    background: Color,
+    plain_foreground: Color,
+    gutter_foreground: Color,
+    width: u16,
+    leading_space: bool,
+) -> Vec<Line<'static>> {
+    let source = highlight_code_to_lines(code, language, theme);
+    let gutter_width = start_line
+        .saturating_add(source.len().saturating_sub(1))
+        .max(1)
+        .to_string()
+        .len();
+    let gutter_style = Style::default().fg(gutter_foreground).bg(background);
+    let body_fallback = Style::default().fg(plain_foreground).bg(background);
+    let lead = usize::from(leading_space);
+    // Keep a two-cell content inset after the line-number gutter. The gutter
+    // uses alignment, color, and whitespace instead of a selectable separator
+    // glyph, matching code editors without polluting copied source listings.
+    let prefix_width = lead + gutter_width + 2;
+    let body_width = usize::from(width).saturating_sub(prefix_width).max(1);
+    let mut output = Vec::new();
+
+    for (index, line) in source.into_iter().enumerate() {
+        let mut spans = line.spans;
+        if spans.is_empty() {
+            spans.push(Span::styled(String::new(), body_fallback));
+        } else {
+            for span in &mut spans {
+                if span.style.fg.is_none() {
+                    span.style = span.style.fg(plain_foreground);
+                }
+                span.style = span.style.bg(background);
+            }
+        }
+        let wrapped = wrap_spans(spans, body_width);
+        let wrapped = if wrapped.is_empty() {
+            vec![Line::from(Span::styled(String::new(), body_fallback))]
+        } else {
+            wrapped
+        };
+
+        for (visual_index, row) in wrapped.into_iter().enumerate() {
+            let number = if visual_index == 0 {
+                start_line.saturating_add(index).to_string()
+            } else {
+                String::new()
+            };
+            let mut row_spans = Vec::new();
+            if leading_space {
+                row_spans.push(Span::styled(" ", gutter_style));
+            }
+            row_spans.push(Span::styled(
+                format!("{number:>gutter_width$}"),
+                gutter_style,
+            ));
+            row_spans.push(Span::styled("  ", gutter_style));
+            row_spans.extend(row.spans);
+            let used = row_spans
+                .iter()
+                .map(|span| paint_cols(span.content.as_ref()))
+                .sum::<usize>();
+            if used > usize::from(width) {
+                // `body_width` is at least one for ultra-narrow terminals; the
+                // final painter remains bounded even when chrome alone is wider.
+                output.push(Line::from(row_spans));
+            } else {
+                output.push(pad_spans(row_spans, body_fallback, width));
+            }
+        }
+    }
+    output
 }

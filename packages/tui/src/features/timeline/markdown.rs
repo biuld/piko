@@ -5,7 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// Parse a markdown string into styled Ratatui Lines using pulldown-cmark.
-pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
+pub fn parse_markdown(text: &str, theme: &Theme, width: usize) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
@@ -187,10 +187,16 @@ pub fn parse_markdown(text: &str, theme: &Theme) -> Vec<Line<'static>> {
                 }
                 TagEnd::CodeBlock => {
                     in_code_block = false;
-                    lines.extend(super::highlight::highlight_code_to_lines(
+                    lines.extend(super::highlight::code_listing_lines(
                         &code_block_buf,
                         code_block_lang.take().as_deref(),
+                        1,
                         theme,
+                        theme.md_code_bg,
+                        theme.md_code,
+                        theme.diff_gutter_fg,
+                        width.min(usize::from(u16::MAX)) as u16,
+                        false,
                     ));
                 }
                 TagEnd::List(_) => {

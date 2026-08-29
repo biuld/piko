@@ -6,6 +6,10 @@ use super::diff::{extract_file_change, present_edit_diff};
 use super::model::{BodyLine, CodeView, ToolBody, ToolPresentation};
 use super::util::{MAX_BODY_LINES, body_lines, str_field};
 
+fn code_language(path: &str) -> Option<String> {
+    super::super::highlight::language_from_path(path).map(str::to_string)
+}
+
 pub(super) fn present_read(
     args: Option<&Value>,
     result: Option<&Value>,
@@ -65,6 +69,7 @@ pub(super) fn present_read(
                 ToolBody::Code(CodeView {
                     start_line: offset.max(1),
                     lines: view_lines,
+                    language: code_language(path),
                     footer,
                 }),
             );
@@ -80,6 +85,7 @@ pub(super) fn present_read(
             ToolBody::Code(CodeView {
                 start_line: offset.max(1),
                 lines: body_lines(raw),
+                language: code_language(path),
                 footer: None,
             }),
         );
@@ -135,6 +141,7 @@ pub(super) fn present_write(
                 ToolBody::Code(CodeView {
                     start_line: 1,
                     lines: view_lines,
+                    language: code_language(path),
                     footer: Some(format!("  created · {n} lines")),
                 }),
             );
@@ -169,6 +176,7 @@ pub(super) fn present_write(
         ToolBody::Code(CodeView {
             start_line: 1,
             lines: view_lines,
+            language: code_language(path),
             footer: None,
         }),
     )

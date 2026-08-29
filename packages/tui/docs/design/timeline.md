@@ -303,6 +303,10 @@ Updates:
 Presentation pipeline: `features/timeline/tool_format/` turns args/result into
 a presentation model and paint. **Per-tool layout recipes stay in that
 module** (see [ui-ux](../features/ui-ux.md) stream projection principles).
+Workspace presenters retain the source path or inferred language in their
+typed code model. Markdown fences and workspace code bodies share the Timeline
+syntax-highlighting and numbered-listing painter; edit keeps its diff-specific
+sign/background semantics while using the same file-language inference.
 
 Behavior anchors: upsert by tool call id (preserve `expanded`); snapshot
 rebuild starts collapsed; hit region is title row; token chip prefers usage

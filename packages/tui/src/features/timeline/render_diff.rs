@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::theme::Theme;
-use crate::ui::line_layout::{filled_line, prefixed_wrap};
+use crate::ui::line_layout::{filled_line, pad_spans, paint_cols, prefixed_wrap, wrap_spans};
 
 use super::tool_format::{BodyLine, CodeView, DiffRow, DiffView, LineKind, ToolBody};
 
@@ -35,15 +35,17 @@ fn render_diff_view(
     width: u16,
 ) -> Vec<Line<'static>> {
     let gutter_w = diff.gutter_width();
+    let language = super::highlight::language_from_path(&diff.path);
     diff.rows
         .iter()
-        .flat_map(|row| render_diff_row(row, gutter_w, theme, card_bg, width))
+        .flat_map(|row| render_diff_row(row, gutter_w, language, theme, card_bg, width))
         .collect()
 }
 
 fn render_diff_row(
     row: &DiffRow,
     gutter_w: usize,
+    language: Option<&str>,
     theme: &Theme,
     card_bg: Color,
     width: u16,
@@ -97,17 +99,49 @@ fn render_diff_row(
     let body = Style::default().fg(text_fg).bg(row_bg);
     let sign_style = Style::default().fg(text_fg).bg(row_bg);
 
-    prefixed_wrap(
-        vec![
-            Span::styled(" ", gutter),
-            Span::styled(num, gutter),
-            Span::styled(format!(" {sign} "), sign_style),
-        ],
-        text,
-        body,
-        body,
-        width,
-    )
+    let prefix = vec![
+        Span::styled(" ", gutter),
+        Span::styled(num, gutter),
+        Span::styled(format!(" {sign} "), sign_style),
+    ];
+    let spans = super::highlight::code_line_spans(text, language, theme, text_fg, row_bg);
+    prefixed_styled_wrap(prefix, spans, body, width)
+}
+
+/// Styled counterpart of `prefixed_wrap`, used when syntax highlighting has
+/// already split the code body into token spans.
+fn prefixed_styled_wrap(
+    prefix: Vec<Span<'static>>,
+    spans: Vec<Span<'static>>,
+    fill: Style,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let prefix_width = prefix
+        .iter()
+        .map(|span| paint_cols(span.content.as_ref()))
+        .sum::<usize>();
+    if prefix_width.saturating_add(1) >= usize::from(width) {
+        return vec![pad_spans(prefix, fill, width)];
+    }
+    let body_width = usize::from(width).saturating_sub(prefix_width);
+    let rows = wrap_spans(spans, body_width);
+    let rows = if rows.is_empty() {
+        vec![Line::default()]
+    } else {
+        rows
+    };
+    rows.into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let mut output = if index == 0 {
+                prefix.clone()
+            } else {
+                vec![Span::styled(" ".repeat(prefix_width), fill)]
+            };
+            output.extend(row.spans);
+            pad_spans(output, fill, width)
+        })
+        .collect()
 }
 
 fn render_code_view(
@@ -116,25 +150,17 @@ fn render_code_view(
     card_bg: Color,
     width: u16,
 ) -> Vec<Line<'static>> {
-    let gutter_w = code.gutter_width();
-    let gutter = Style::default().fg(theme.diff_gutter_fg).bg(card_bg);
-    let body = Style::default().fg(theme.tool_output).bg(card_bg);
-    let mut lines = Vec::new();
-    for (i, text) in code.lines.iter().enumerate() {
-        let no = code.start_line.saturating_add(i);
-        let num = format!("{no:>gutter_w$}");
-        lines.extend(prefixed_wrap(
-            vec![
-                Span::styled(" ", gutter),
-                Span::styled(num, gutter),
-                Span::styled(" │ ", gutter),
-            ],
-            text,
-            body,
-            body,
-            width,
-        ));
-    }
+    let mut lines = super::highlight::code_listing_lines(
+        &code.lines.join("\n"),
+        code.language.as_deref(),
+        code.start_line,
+        theme,
+        card_bg,
+        theme.tool_output,
+        theme.diff_gutter_fg,
+        width,
+        true,
+    );
     if let Some(footer) = &code.footer {
         lines.extend(prefixed_wrap(
             Vec::new(),

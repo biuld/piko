@@ -111,6 +111,8 @@ pub enum ToolBody {
 pub struct CodeView {
     pub start_line: usize,
     pub lines: Vec<String>,
+    /// Syntax token inferred from the workspace path (usually an extension).
+    pub language: Option<String>,
     pub footer: Option<String>,
 }
 
@@ -124,7 +126,7 @@ impl CodeView {
             .enumerate()
             .map(|(i, text)| {
                 let no = self.start_line.saturating_add(i);
-                format!("{no:>w$} │ {text}")
+                format!("{no:>w$}  {text}")
             })
             .collect();
         if let Some(footer) = &self.footer {

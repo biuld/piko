@@ -286,7 +286,8 @@ What each surface **must**, **should**, and **must not** show.
 - Message local time when protocol `timestamp` is present
 - Compact token/size signal on tools when estimable (prefer real usage fields
   when present; otherwise payload-size heuristic)
-- Syntax-colored fenced code when language is known
+- Editor-style fenced code with a numbered gutter and syntax color when the
+  language is known
 - Per-agent conversation when an agent is selected (no cross-agent mix)
 
 **Must not show**
