@@ -59,6 +59,19 @@ pub fn route_normalized_pointer_with_hitmap(
 ) -> Vec<Action> {
     let (x, y) = (event.column, event.row);
     let target = resolve_target(app, prepared, x, y);
+    // A press that began outside the Stream must retain ownership until its
+    // release. In particular, dismissing a modal on Down can expose a
+    // Timeline row before Up arrives; letting the Stream selection path handle
+    // that Up would activate the newly exposed row through the modal barrier.
+    if app.pointer_left_down {
+        match event.kind {
+            PointerKind::Drag(crossterm::event::MouseButton::Left) => return Vec::new(),
+            PointerKind::Up(crossterm::event::MouseButton::Left) => {
+                return vec![PointerAction::LeftUp(target).into()];
+            }
+            _ => {}
+        }
+    }
     if app.timeline().selection_in_progress() {
         match event.kind {
             PointerKind::Drag(crossterm::event::MouseButton::Left) => {

@@ -16,7 +16,7 @@ use crate::app::{
 };
 use crate::features::approval::PendingApproval;
 use crate::features::notifications::NotificationLevel;
-use crate::features::timeline::{TimelineEntry, ToolEntry};
+use crate::features::timeline::{ThoughtKey, TimelineEntry, ToolEntry};
 use crate::features::tool_interaction::ToolInteractionPanel;
 use crate::input::pointer::route_pointer;
 use crate::layout::build_surface_hitmap;
@@ -169,6 +169,66 @@ fn hover_outside_modal_does_not_expose_lower_layer_target() {
 
     assert!(actions.is_empty());
     assert_eq!(app.hovered, None);
+}
+
+#[test]
+fn dismissing_thought_overlay_does_not_reopen_it_on_release() {
+    let mut app = app();
+    app.session.id = Some("session-1".into());
+    app.apply_event(super::realtime(
+        "message-1",
+        0,
+        piko_protocol::agent_runtime::RealtimeDelta::MessageStarted {
+            role: piko_protocol::MessageRole::Assistant,
+        },
+    ));
+    app.apply_event(super::realtime(
+        "message-1",
+        1,
+        piko_protocol::agent_runtime::RealtimeDelta::Thinking {
+            content_index: 0,
+            delta: "thought".into(),
+        },
+    ));
+
+    let key = ThoughtKey {
+        message_id: "message-1".into(),
+        segment_index: 0,
+    };
+    let hit_id = app.timeline().thought_hit_id(&key).expect("thought hit id");
+    let terminal = Rect::new(0, 0, 80, 24);
+    let frame = crate::layout::prepare_frame(&app, terminal);
+    let plan = frame.timeline.as_ref().expect("timeline plan");
+    let (x, y) = (plan.content_area.x, plan.content_area.y);
+    assert!(matches!(
+        plan.resolve(x, y, app.timeline().viewport.top_offset()),
+        Some((HitId::TimelineThought(id), _)) if id == hit_id
+    ));
+
+    let _ = app.dispatch(TimelineAction::OpenThought(hit_id).into());
+    assert_eq!(app.modal_surface(), Some(SurfaceId::ThoughtInspector));
+
+    let down = route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Down(MouseButton::Left), x, y),
+    );
+    assert!(matches!(
+        down.as_slice(),
+        [Action::Surface(SurfaceAction::Close)]
+    ));
+    for action in down {
+        let _ = app.dispatch(action);
+    }
+    assert_eq!(app.modal_surface(), None);
+
+    let up = route_pointer(
+        &mut app,
+        terminal,
+        mouse(MouseEventKind::Up(MouseButton::Left), x, y),
+    );
+    assert!(up.is_empty());
+    assert_eq!(app.modal_surface(), None);
 }
 
 fn push_workflow(app: &mut AppState) {
