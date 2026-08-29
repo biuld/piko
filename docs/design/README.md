@@ -14,11 +14,11 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
-- [D-68: Two-layer Agent work model and control plane](D-68-agent-control-plane.md)
-  implements F-51: Agent/Input/ModelStep primitive facts, derived
-  Run/Execution/Turn/queue projections, in-place storage evolution, durable
-  steer/follow-up admission, and unified Agent controls
-  (proposed; Slice 1 interrupt implemented in V-64).
+- [D-68: AgentInput work model and control plane](D-68-agent-control-plane.md)
+  implements F-51: Session/Agent/ModelStep invariants, AgentInput as stimulus
+  and root-work identity, durable steer/follow-up admission, TUI cutover, and
+  deletion of leftover Turn/Run/Execution types (proposed; Slice 1 interrupt
+  implemented in V-64; desktop out of scope).
 - [D-67: Configurable agent-tree limits](D-67-configurable-agent-tree-limits.md)
   implements F-50: settings-backed per-session AgentInstance count and
   tree-depth admission limits (accepted; V-62).

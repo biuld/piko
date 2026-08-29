@@ -35,4 +35,4 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-024](ADR-024-tui-layout-primitives.md) | Use typed prepared layout plans and shared top-origin viewport/content geometry | accepted |
 | [ADR-025](ADR-025-authoritative-agent-lifecycle.md) | Persist ModelStep boundaries atomically with distinct runtime correlation IDs | accepted; core-domain hierarchy superseded by ADR-027 |
 | [ADR-026](ADR-026-agent-delegation-boundary.md) | Separate supervisor/worker delegation capability from agent roles and tool declarations | accepted |
-| [ADR-027](ADR-027-agent-work-lifecycle.md) | Separate Agent/Input/ModelStep primitive facts from derived Run/Execution/Turn scopes | proposed |
+| [ADR-027](ADR-027-agent-work-lifecycle.md) | Session/Agent/ModelStep invariants; AgentInput as stimulus and root-work identity; delete Turn/Run/Execution leftovers | proposed |

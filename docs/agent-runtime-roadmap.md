@@ -186,7 +186,7 @@ optional extensions and have no scheduled implementation.
 
 | Block | F-ID | Decomposed behavior |
 |---|---|---|
-| A Agent Work Runtime | F-01/F-51 | Agent/Input/ModelStep primitive facts, derived Run/Execution/Turn/queue views, admission, control, tasks, abort reconstruction |
+| A Agent Work Runtime | F-01/F-51 | Session/Agent/ModelStep invariants, AgentInput stimulus and root-work identity, admission, control, tasks, abort reconstruction |
 | B Model Gateway | F-02/F-24/F-25/F-26 | providers, authentication, native protocols, protocol-neutral inference, streaming/retry, usage, model continuity, locally authoritative catalogs |
 | C Prompt Assembly | F-03 | fragments, AGENTS.md, skills, world-state/environment context |
 | D Context & Compaction | F-04/F-05 | transcript model, truncation, accounting, compaction |
@@ -218,11 +218,12 @@ optional extensions and have no scheduled implementation.
 ## 6. Current next steps
 
 1. **Agent work primitive refactor and control plane (F-51 / D-68, ADR-027)** —
-   proposed; Slice 1 agent interrupt implemented. Next: canonical durable
-   AgentInput and causal-root facts, derived Run/Execution/Turn/queue views,
-   root-bound steer and follow-up admission, one host-authored
-   AgentWorkSnapshot, then TUI/desktop
-   removal of local queue and process-local steer authority.
+   proposed; Slice 1 agent interrupt implemented. Remaining slices are a
+   direct cutover: AgentInput as stimulus and root-work identity, published
+   `AgentWorkSnapshot`, one `AgentWorkControl`, TUI on that projection, and
+   deletion of leftover Turn/Run/Execution types, IDs, maps, and commands
+   (`ChatSubmit` / `QueueSteer` / `TurnCancel`, `TurnRecord`, `steer_queue`,
+   orchd send/steer shims, TUI local queues). Desktop is out of scope.
 2. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
    redesign of F-08/F-12/F-17 command behavior: full-shell unified exec,
    host-owned authorization, enforced sandbox-first attempts, constrained

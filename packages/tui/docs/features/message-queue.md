@@ -1,19 +1,17 @@
 # Composer Queue and Steer
 
-> Status: implemented baseline; authoritative queue/projection superseded by F-51
+> Status: superseded by F-51/D-68 (direct TUI cutover; old commands deleted)
 > Package: `piko-tui`
-> Host/runtime: [F-01](../../../../docs/features/F-01-turn-runtime.md) admission,
-> `ChatSubmit` / `ChatSubmitMessage` (FollowUp), `QueueSteer` /
-> `QueueSteerMessage` (SteerActive)
+> Host/runtime: [F-51](../../../../docs/features/F-51-agent-control-plane.md)
+> `AgentInputSubmit` (FollowUp / Steer), `cancel_input`, `AgentInterrupt`
 
 ## Overview
 
-The current Composer can start a turn, inject a steer into the viewed agent's
-host-owned running Turn, or durably queue a follow-up for after that Turn. The
-TUI maps those intents onto existing host commands. It currently maintains a
-local correlation stack for queue presentation; F-51 replaces that baseline
-with the host-authored Agent work projection and enables steer for detached
-Runs.
+The Composer starts work, steers the viewed agent's active root (including
+detached work), or queues a follow-up. The TUI maps those intents onto
+`AgentInputSubmit` and reads queue/steer state only from `AgentWorkSnapshot`.
+It does not keep a local follow-up stack and does not send `ChatSubmit`,
+`QueueSteer`, or `TurnCancel`.
 
 ## Layout
 
@@ -27,7 +25,7 @@ Enter steer · Alt+Enter queue · Alt+↑ dequeue
 ```
 
 Idle Composer keeps `/ commands · @ files · Enter send`. When the viewed agent
-has a local follow-up waiting, Guidance mentions `Alt+↑ dequeue`.
+has a host pending follow-up, Guidance mentions `Alt+↑ dequeue`.
 
 ## Behavior / interactions
 
@@ -35,49 +33,45 @@ has a local follow-up waiting, Guidance mentions `Alt+↑ dequeue`.
 
 | Viewed agent | Command | Outcome |
 |---|---|---|
-| Idle | `ChatSubmit[Message]` | Start a turn |
-| Running | `QueueSteer[Message]` | Inject into the active turn at the next model-step boundary |
+| Idle | `AgentInputSubmit` FollowUp | Apply as root AgentInput; start work |
+| Running | `AgentInputSubmit` Steer | Bind to the active root; apply at the next ModelStep |
 
 Slash commands are still intercepted before either path.
 
 ### Follow-up (Alt+Enter)
 
-Always `ChatSubmit` (host FollowUp): idle starts a turn; running enqueues a
-durable follow-up for the viewed agent.
-
-The TUI records each follow-up locally (structured content and display text, then `turn_id` from
-`TurnLifecycle::Queued`) so dequeue can restore it. A `Queued` event must not
-replace that agent's running turn in `active_turns`.
+Always `AgentInputSubmit` FollowUp: idle applies a root AgentInput; running
+admits a durable pending follow-up for the viewed agent. The TUI reconciles
+the receipt by input ID against `AgentWorkSnapshot`.
 
 ### Steer (Ctrl+Enter)
 
-Always `QueueSteer`. If the viewed agent is not running, fail closed: keep the
-draft, show an error, send nothing. Hostd also fail-closes when there is no
-running turn or orchd rejects the inject; it does not keep a never-drained
-steer display queue.
+Always `AgentInputSubmit` Steer. If the viewed agent has no active root, fail
+closed: keep the draft, show an error, send nothing. hostd also fail-closes
+when there is no active root or orchd rejects the bind.
 
 ### Dequeue (Alt+↑)
 
-Pops the last follow-up sent from this TUI for the viewed agent.
+Cancels the selected pending AgentInput for the viewed agent (last admitted
+follow-up in the snapshot).
 
-- Composer empty: restore the text and image references.
+- Composer empty: restore the text and image references, then `cancel_input`.
 - Composer not empty: leave the follow-up queued and report that the composer
   is occupied.
-- If the host has assigned a `turn_id`, send `TurnCancel` for that queued
-  turn. If `Queued` has not arrived yet, cancel as soon as it does.
+- Identity is the host input ID, never a display index or `TurnCancel`.
 
-Dequeue does not unwind a steer already handed to the running turn.
+Dequeue does not unwind a steer already applied to a ModelStep.
 
 ### Presentation
 
 - Guidance while the viewed agent is running: `Enter steer · Alt+Enter queue`,
   plus `N steer` / `N queued` when those stacks are non-empty.
-- Guidance while a local follow-up is waiting: `Alt+↑ dequeue` and the count.
+- Guidance while a host pending follow-up is waiting: `Alt+↑ dequeue` and the count.
 - `/agents` detail repeats the counts. BottomBar does not.
 - Status line: `submitted`, `queued`, `steered`, or a fail-closed reason.
   Successful queue/steer do not push a notice (that would hide Guidance).
-- Session switch / clear drops the local follow-up stack (host queue remains
-  authoritative for later resume).
+- Session switch / clear drops only editor optimism; host `AgentWorkSnapshot`
+  remains authoritative on resume.
 
 ## Configuration
 
@@ -91,6 +85,5 @@ Dequeue does not unwind a steer already handed to the running turn.
 ## Non-goals
 
 - A dedicated queue panel or reordering UI.
-- Dequeue of host-only follow-ups this process did not submit.
-- Changing orchd admission or adding a new wire command.
-- Pre-queueing a follow-up while idle without starting a turn.
+- Reordering the host follow-up list.
+- Pre-queueing a follow-up while idle without starting a Run.

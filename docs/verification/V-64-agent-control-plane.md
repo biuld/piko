@@ -16,7 +16,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 The tests cover wire compatibility, host Turn-backed cancellation authority,
 detached forwarding, benign idle races, viewed-agent TUI routing, and separation
 of agent-running interruption from the still-legacy host-Turn steer delivery.
-They verify only F-51 Slice 1; later slices replace that steer/queue split.
+They verify only F-51 Slice 1. Later slices delete leftover Turn/Run/Execution
+types and the Turn-gated steer/queue split rather than wrapping them;
+desktop is not part of the remaining cutover.
 
 ## Result
 

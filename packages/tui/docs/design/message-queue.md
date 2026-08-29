@@ -1,53 +1,43 @@
 # Design: Composer Queue and Steer
 
-> Status: implemented baseline; superseded in part by F-51/D-68
+> Status: implemented baseline; superseded by F-51/D-68 (old commands and
+> local follow-up stack are deleted; TUI consumes `AgentWorkSnapshot`)
 > PRD: [../features/message-queue.md](../features/message-queue.md)
 
 ## Goal
 
-Give the Composer first-class start / steer / queue / dequeue. Text uses the
-scoped command registry; multimodal input uses `ChatSubmitMessage` and
-`QueueSteerMessage` with the same host-owned admission semantics.
+Give the Composer first-class start / steer / queue / dequeue. Under F-51 the
+TUI sends one `AgentInputSubmit` with FollowUp or Steer delivery; dequeue
+cancels a host AgentInput ID. The `ChatSubmit` / `QueueSteer` / `TurnCancel`
+commands and the local follow-up stack are removed.
 
 ## Mapping
 
 ```text
-Enter          idle  → ChatSubmit
-Enter          run   → QueueSteer
-Alt+Enter      any   → ChatSubmit
-Ctrl+Enter     run   → QueueSteer
+Enter          idle  → AgentInputSubmit FollowUp
+Enter          run   → AgentInputSubmit Steer
+Alt+Enter      any   → AgentInputSubmit FollowUp
+Ctrl+Enter     run   → AgentInputSubmit Steer
 Ctrl+Enter     idle  → reject (keep draft)
-Alt+↑                → pop local follow-up + TurnCancel if turn_id known
+Alt+↑                → cancel selected pending AgentInput
 ```
 
-`AppState::viewed_agent_is_busy()` is true when the viewed agent's
-`active_turns` status is `Running`, `WaitingForApproval`, or `Cancelling`.
-This is the legacy host-Turn steer gate. F-51 replaces it with the canonical
-active Run from `AgentWorkSnapshot`, including detached work.
+`viewed_agent_is_busy()` is true when `AgentWorkSnapshot` for the viewed
+AgentInstance has active work (including detached work) or a cancelling /
+requires-action foreground. It does not read host `active_turns`.
 
-## Local follow-up stack
+## Queue source
 
-`SessionUiState::follow_ups: Vec<FollowUpUi>`
-
-```text
-FollowUpUi { agent_instance_id, text, content, turn_id: Option<String>, cancel_when_queued }
-```
-
-1. Follow-up `ChatSubmit` pushes `{ text, turn_id: None }`.
-2. `TurnEvent::Queued` for that agent fills the oldest unmatched `turn_id`.
-   If `cancel_when_queued`, emit `TurnCancel` and drop the row.
-3. `Started` / `Cancelled` / `Failed` / `Completed` for that `turn_id` drop
-   the row (it left the queue or died).
-4. `Queued` must not overwrite a `Running` entry in `active_turns`.
-
-Dequeue pops the last row for the viewed agent. Occupied composer aborts
-without mutating the stack.
+The TUI does not keep `SessionUiState::follow_ups` or overlay local counts onto
+host `QueueEvent`. Pending follow-ups, pending steers, and dequeue targets
+come from `AgentWorkSnapshot`. Dequeue cancels the selected input ID. Occupied
+composer aborts without mutating host state.
 
 ## Presentation
 
-`AppState::queue_summary()` overlays `follow_ups.len()` onto host
-`QueueEvent` counts (hostd currently reports follow-up as 0). Guidance and
-the `/agents` detail read that summary. BottomBar stays name-only.
+`AppState::queue_summary()` reads pending follow-up and steer counts from
+`AgentWorkSnapshot`. Guidance and the `/agents` detail read that summary.
+BottomBar stays name-only.
 
 ## Files
 

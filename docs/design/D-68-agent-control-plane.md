@@ -1,22 +1,22 @@
-# D-68: Two-layer Agent work model and control plane
+# D-68: AgentInput work model and control plane
 
-> Status: proposed (Slice 1 agent interrupt implemented)
+> Status: proposed (Slice 1 agent interrupt implemented; remaining slices
+> delete leftover Turn/Run/Execution types)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
 ## Goal
 
-Separate Agent work into primitive facts and derived scopes. AgentInstance,
-AgentInput, ModelStep, and causal lifecycle facts form the lower layer. Run,
-Execution, Turn, Queue, and Foreground remain stable upper-layer views. hostd
-persists facts and materializes views; orchd serializes admission and operates
-live work without making private actor state durable authority.
+Keep Session, AgentInstance, and ModelStep as the invariant grains. Put
+AgentInput between Agent and ModelStep as the stimulus. When an input is
+applied as root, that `input_id` is the identity of the current work. hostd
+persists facts and publishes `AgentWorkSnapshot`; orchd serializes admission
+and operates live work without making private actor state durable authority.
 
-The migration evolves existing commands, journal-backed execution projections,
-process-local host Turn state, maps, and read models in place. Derived does not
-mean physically deleted. Existing structures become caches, indexes,
-compatibility state, or materialized views whose values converge from
-lower-layer facts. No full schema or runtime rewrite is required.
+Turn, Run, and Execution are not product scopes. Remaining slices delete
+their types, IDs, maps, commands, and projections. Schema-v4 stays; this is
+not a journal-format rewrite. The only client in this design is the TUI.
+`piko-desktop` is out of scope.
 
 ## Design constraints
 
@@ -25,39 +25,51 @@ lower-layer facts. No full schema or runtime rewrite is required.
   write-time projections.
 - hostd owns durable user-visible state; orchd owns live Agent execution.
 - `piko-protocol` carries DTOs only and remains a shared leaf.
-- One AgentInstance admits commands serially and has at most one active Run.
+- One AgentInstance admits commands serially and has at most one active root
+  AgentInput.
 - A successful admission response follows its durable commit.
-- Existing Execution records and IDs remain readable and usable for runtime
-  correlation; no multi-attempt product model is introduced.
-- Existing host `TurnRecord` state, session-store execution maps, and
-  `active_agent_runs` runtime maps remain during and after the migration where
-  useful; the change is their authority and update path, not mandatory
-  removal.
+- Work identity is `root_input_id`. Do not keep `turn_id`, `run_id`, or
+  `execution_id` as protocol or product handles. orchd may key an internal
+  actor by `root_input_id`.
+- Processing start/finish and interruption are facts on the root AgentInput,
+  not an Execution aggregate. No multi-attempt product model.
+- Old product types and compatibility paths are removed, not retained as
+  adapters: `ChatSubmit` / `ChatSubmitMessage`, `QueueSteer` /
+  `QueueSteerMessage`, `TurnCancel`, host `TurnRecord` / `steer_queue`, TUI
+  local follow-up stacks, orchd `send_agent_input` / `steer_agent` /
+  request-id cancel shims, `UserTurnView`, `RunId`, `ExecutionId`,
+  `StoredExecution` as a product aggregate, and `active_agent_runs`.
+- There is no dual-write period and no unpublished shadow `AgentWorkSnapshot`.
+  The snapshot is the published current-state projection the TUI consumes.
+- Desktop is out of scope. Protocol and host changes are not constrained by
+  `piko-desktop` continuing to compile against the deleted commands.
 - Realtime streams remain lossy and reconcilable from host read models.
 
 ## Current-state decomposition
 
 | Existing concept | Keep as | Required change |
 |---|---|---|
-| AgentInstance actor and snapshot | Primitive/runtime owner | Add stable root-input identity to the host projection |
-| `AgentInputQueued` runtime record | Partial AgentInput fact | Generalize to start, steer, and follow-up admission/disposition |
-| host `TurnRecord` / active Turns | Existing process-local product projection | Update from input/execution facts instead of an independent lifecycle path |
-| orchd Run identity | Stable derived correlation | Map it immutably to the root input; keep the existing ID and call sites |
-| Execution actor / session-store `StoredExecution` | Existing operational and durable projection | Keep correlation/recovery facts; do not create a parallel product lifecycle |
+| AgentInstance actor and snapshot | Primitive/runtime owner | Active work is the current root AgentInput |
+| `AgentInputQueued` runtime record | Partial AgentInput fact | Start, steer, and follow-up admission/disposition; delete the old queue type |
+| host `TurnRecord` / `UserTurnView` / `turn_id` | Delete | User-origin rows are AgentInputs; TUI groups them for display |
+| orchd `run_id` / `active_agent_runs` | Delete | Key live work by `root_input_id` |
+| Execution actor / `StoredExecution` / `execution_id` | Delete as product | Internal actor keyed by root input; start/finish/interrupt facts on that root |
 | `ModelStepCommittedV1` | Core primitive fact | Retain atomic relation and connect applied steer inputs |
-| host `steer_queue` | Process-local compatibility state | Replace with durable pending AgentInputs bound to a Run |
-| runtime/TUI follow-up queues | Existing caches/projections | Reconcile from host-stored pending AgentInputs; remove only redundant ownership |
-| Agent activity / foreground | Partial projection | Materialize once from primitive facts and pending action |
+| host `steer_queue` | Delete | Durable pending AgentInputs bound to the active root |
+| TUI `follow_ups` / local queue overlay | Delete | TUI reads pending AgentInputs from `AgentWorkSnapshot` |
+| `ChatSubmit` / `QueueSteer` / `TurnCancel` | Delete | `AgentInputSubmit`, `cancel_agent_input`, `AgentInterrupt` |
+| orchd `send_agent_input` / `steer_agent` shims | Delete | `submit_agent_input` is the only admission entry |
+| Agent activity / foreground | Partial projection | Materialize once from primitive facts and pending action; publish it |
 
 Slice 1 added `AgentInterrupt` and already proves that control can address an
-AgentInstance even when no host Turn exists. Later slices move admission and
-projection onto the same boundary.
+AgentInstance even when no host Turn exists. Later slices put admission and
+projection on that same boundary and delete Turn/Run/Execution leftovers.
 
 ## Canonical data model
 
 ### AgentInput
 
-The protocol and host domain gain one immutable admission DTO:
+The protocol and host domain use one immutable admission DTO:
 
 ```rust
 AgentInput {
@@ -69,15 +81,12 @@ AgentInput {
     delivery: AgentInputDelivery,
     content: MessageContent,
     submitted_at: i64,
-    user_turn_id: Option<TurnId>,
     caller_agent_instance_id: Option<AgentInstanceId>,
 }
 ```
 
 `input_id` is the durable control identity. `request_id` provides caller
-idempotency. They may initially contain the same generated value but are not
-the same concept. `user_turn_id` is correlation metadata for a derived product
-view, not a parent aggregate.
+idempotency. They are not the same concept. There is no `user_turn_id`.
 
 The stored input has one effective disposition:
 
@@ -93,34 +102,25 @@ A rejected admission writes no AgentInput. Duplicate `request_id` plus the
 same normalized proposal returns its original receipt; conflicting reuse
 returns an idempotency conflict.
 
-### Derived Run and existing Run storage
+When disposition is `applied_as_root`, this input is the work identity. Every
+later fact in that work carries `root_input_id = input_id`.
 
-```rust
-RunProjection {
-    run_id: RunId,
-    session_id: SessionId,
-    agent_instance_id: AgentInstanceId,
-    root_input_id: AgentInputId,
-    started_at: i64,
-    terminal: Option<AgentRunTerminal>,
-}
-```
+### Active work (derived, no extra ID)
 
-This is a projection shape, not a new canonical `AgentRunRecord`. D-68 does
-not require adding an `agent_runs` aggregate or replacing the existing
-`active_agent_runs` runtime map. Existing Run IDs and maps remain. For current
-schema-v4 events, `ExecutionStartedV1.request_id` resolves the starting
-AgentInput, so the immutable `run_id → root input` relation needs no new
-execution-event field.
+Active work is the causal closure of one unfinished root AgentInput: steers,
+ModelSteps, tools, pending actions, interruption, and outcome that share that
+`root_input_id`. At most one root may be non-terminal per AgentInstance.
 
-Run status is derived from input application, existing execution start/finish,
-pending action, interrupt, ModelStep, and tool facts. If presentation needs a
-normalized enum, the read-model projector computes it. No generic
-`run_status_changed` event is appended solely for display.
+Status is derived from input application, processing start/finish on that
+root, pending action, interrupt, ModelStep, and tool facts. If presentation
+needs a normalized enum, the read-model projector computes it. No generic
+status-changed event is appended solely for display.
 
-A Run view has exactly one root AgentInput. A steer records the causal root it
-was bound to at acceptance and the ModelStep that later consumed it. At most
-one root may project as active for an AgentInstance.
+A steer records the `root_input_id` captured at acceptance and the ModelStep
+that later consumed it.
+
+Do not add `RunProjection`, `AgentRunRecord`, `UserTurnView`, or an
+`executions: root → Vec<attempt>` aggregate.
 
 ### ModelStep
 
@@ -132,42 +132,8 @@ step. The later ModelStep commit uses the same ID. This prevents a crash after
 request dispatch from making an applied steer pending again.
 
 No separate durable `model_step_started` fact is required for product state.
-Live step progress comes from realtime runtime observation; after a crash, the
-absence of a committed step is handled by the Run/Execution interruption
-policy.
-
-### UserTurnView
-
-`turn_id` remains a stable product correlation for existing navigation,
-usage, compatibility commands, and message grouping. It does not own status.
-
-```text
-if starting input is pending_follow_up  => queued
-if starting input is cancelled         => cancelled
-if linked Run is active                 => running/requires_action/cancelling
-if linked Run is terminal               => same terminal class
-```
-
-User-origin immediate starts allocate a `turn_id` with their input proposal.
-User-origin follow-ups allocate it at admission so the queued interaction is
-visible before a Run exists. Agent/system inputs normally omit it. Existing
-host Turn mutation paths remain adapters during migration, then reduce to
-projection maintenance or disappear.
-
-### Derived Execution
-
-Existing `execution_started`, `execution_finished`, `execution_id`,
-session-store `StoredExecution`, host `ExecutionProjection`, and actors remain
-because they support orchestration, recovery, trajectory, and correlation.
-The Execution view is already materialized from these facts and currently has
-a one-to-one operational relation with Run.
-
-D-68 does not add an `executions: run_id → Vec<attempt>` aggregate, attempt
-ordinal, retry policy, or client state. Provider-request retry remains inside
-a ModelStep. Process recovery follows the existing interrupted outcome. A
-future full-Run retry/resume PRD may introduce multiple attempts if it defines
-observable semantics that cannot be represented by the existing primitive
-facts and projections.
+Live step progress comes from realtime runtime observation; after a crash, an
+applied root without a terminal fact is closed by interruption recovery.
 
 ## Durable event model
 
@@ -183,43 +149,39 @@ Continue using:
 ```text
 message_committed
 model_step_committed_v1
-execution_started / execution_finished       operational compatibility facts
 pending_action facts                          existing feature authority
 agent lifecycle facts                         existing feature authority
+root processing start / finish / interrupt    facts on the root AgentInput
 ```
 
-Existing execution start/finish facts continue to supply processing boundaries
-for the derived Run and Execution views. `ExecutionStartedV1.request_id`
-resolves the root AgentInput; do not version that event merely to add a second
-root field, and do not add parallel Run lifecycle events. The exact split
-between admission and initial disposition may be one atomic event payload or
-adjacent facts in one append. The semantic commit must make the immutable
-input and its initial disposition visible together.
+Do not keep `execution_started` / `execution_finished` as the product
+processing boundary, and do not add parallel Run or Turn lifecycle events.
+`request_id` on an input remains caller idempotency; `root_input_id` is work
+identity. The semantic commit must make the immutable input and its initial
+disposition visible together.
 
 Do not add:
 
-- independent `turn_status_changed` facts;
+- independent `turn_status_changed` / `run_status_changed` facts;
 - an independently mutable queue record;
 - generic foreground transitions;
-- a second Run-shaped Execution state machine;
-- a new authoritative `AgentRunRecord`/`agent_runs` aggregate;
-- `model_step_started` solely to persist transient streaming state.
+- `AgentRunRecord`, `agent_runs`, `StoredExecution` as a product aggregate;
+- `model_step_started` solely to persist transient streaming state;
+- compatibility aliases for deleted submit/steer/cancel commands;
+- `turn_id`, `run_id`, or `execution_id` fields on new or rewritten DTOs.
 
 ### Fact relationships and validation
 
 - every input references an existing Session and AgentInstance;
 - one request ID maps to one normalized immutable input proposal;
-- root application records the existing/derived Run correlation and makes the
-  input its causal root;
+- `applied_as_root` makes the input its own `root_input_id`;
 - `pending_steer` captures the exact active `root_input_id` at admission;
 - `applied_to_step` references the captured root and a reserved next
   ModelStepId; a later committed step with that ID must agree;
 - cancelled inputs have no application fact;
-- an execution start's `request_id` resolves an admitted root input for the
-  same AgentInstance;
 - only one root projects as non-terminal per AgentInstance;
-- execution terminal facts for a root are idempotent and cannot imply
-  conflicting derived Run outcomes;
+- terminal/interrupt facts for a root are idempotent and cannot imply
+  conflicting derived outcomes;
 - queue order is journal admission order, not client wall-clock time.
 
 ### Semantic commit groups
@@ -227,22 +189,22 @@ Do not add:
 Immediate start:
 
 ```text
-agent_input_admitted(initial = applied_as_root, request_id, run_id)
-+ existing execution_started(request_id, run_id) fact
+agent_input_admitted(initial = applied_as_root)
++ processing-started fact on that root
 + starting user message
 ```
 
 Follow-up while busy:
 
 ```text
-agent_input_admitted(initial = pending_follow_up, bound_after_run_id)
+agent_input_admitted(initial = pending_follow_up)
 ```
 
 Queue advancement:
 
 ```text
-agent_input_disposition_changed(applied_as_root, request_id, run_id)
-+ existing execution_started(request_id, run_id) fact
+agent_input_disposition_changed(applied_as_root)
++ processing-started fact on that root
 ```
 
 Steer acceptance:
@@ -262,36 +224,26 @@ steer message commit
 ```
 
 If the process fails between application and the ModelStep commit, replay sees
-an applied input and unfinished derived Run/Execution views. Existing
-interruption recovery closes those views; it never redelivers that input.
+an applied input and unfinished active work. Interruption recovery closes that
+root; it never redelivers that input.
 
-Interrupt and terminal facts continue through the existing host-owned
-execution/Turn compatibility ports while their projections are unified.
 Reliable publication follows append success.
 
 ## Aggregate and projections
 
-### Session aggregate and existing indexes
-
-The canonical aggregate adds AgentInput facts and the minimum indexes needed
-to join them to existing storage:
+### Session aggregate and indexes
 
 ```text
 agent_inputs: input_id → StoredAgentInput
-model_steps: step_id → StoredModelStep             existing
-executions: existing storage with request_id → root-input correlation
-turns: existing process-local TurnRecord projected/reconciled from the facts
+model_steps: step_id → StoredModelStep
 
 active_root_by_agent: agent_id → root_input_id     derived index
 pending_inputs_by_agent: agent_id → ordered input_id[]  derived index
 input_by_request: request_id → input_id             derived index
 ```
 
-Do not add a parallel `agent_runs` map. Existing `StoredExecution` storage,
-Run-keyed runtime maps, and process-local host `TurnRecord` state remain in
-place. Reducers/projectors enrich them with root-input correlation and ensure
-their derived status agrees with lower-layer facts. This reuses current
-recovery and query paths instead of forcing a storage rewrite.
+Do not add `agent_runs`, `executions`, or `turns` maps. Trajectory and prompt
+assembly rekey to `root_input_id`.
 
 Indexes are rebuilt deterministically from event order. They accelerate
 validation and projection; maps and indexes are not separate authorities.
@@ -305,26 +257,22 @@ AgentWorkSnapshot {
     agent_instance_id: AgentInstanceId,
     lifecycle: AgentLifecycle,
     foreground: AgentForeground,
-    active_run: Option<ActiveRunSnapshot>,
+    active_work: Option<ActiveWorkSnapshot>,
     pending_steers: Vec<AgentInputSummary>,
     queued_inputs: Vec<AgentInputSummary>,
     pending_action: Option<PendingActionSummary>,
 }
 
-ActiveRunSnapshot {
-    run_id: RunId,
+ActiveWorkSnapshot {
     root_input_id: AgentInputId,
-    user_turn_id: Option<TurnId>,
-    state: AgentRunViewState,
+    state: AgentWorkViewState,
     active_model_step_id: Option<ModelStepId>,
     started_at: i64,
 }
 ```
 
-Run and Execution IDs remain stable projection/correlation IDs. Clients do not
-need an Execution ID to choose a product control. `AgentInputSummary` exposes input ID,
-origin, preview, admission order/time, delivery, optional Turn correlation,
-and disposition.
+`AgentInputSummary` exposes input ID, origin, preview, admission order/time,
+delivery, and disposition.
 
 The host derives foreground with one shared priority:
 
@@ -332,14 +280,10 @@ The host derives foreground with one shared priority:
 requires_action > cancelling > running > queued > idle
 ```
 
-`UserTurnView` rows are projected from user-origin inputs and their linked
-Runs. Existing `active_turns` and queue events remain compatibility views until
-all clients consume `AgentWorkSnapshot`.
-
-During the compatibility slices, `AgentWorkSnapshot` is an internal shadow
-projection for replay and equivalence tests. It must not be treated as a
-complete client contract while `pending_action` and active ModelStep facts are
-not yet projected; the client cutover belongs to Slice 5.
+`AgentWorkSnapshot` is the published per-AgentInstance contract written into
+`readmodels/current.json`. It is not a private shadow. `pending_action` and
+active ModelStep identity are part of that contract. The TUI does not keep
+`active_turns`, `QueueEvent`, or `UserTurnView` as control surfaces.
 
 ## Runtime admission boundary
 
@@ -349,7 +293,6 @@ not yet projected; the client cutover belongs to Slice 5.
 submit_agent_input(input) -> AgentInputReceipt {
     input_id,
     disposition,
-    run_id: Option<RunId>,
     queued_position: Option<u32>,
 }
 
@@ -358,19 +301,23 @@ cancel_agent_input(session_id, agent_instance_id, input_id)
     -> AgentInputCancelReceipt
 ```
 
+`send_agent_input`, `steer_agent`, `run_agent`, and request-id
+`cancel_agent_input` are removed. Receipts do not carry `run_id` or
+`execution_id`. `input_id` is durable control identity; `request_id` is
+caller idempotency.
+
 The AgentActor is the serialization point:
 
-1. capture lifecycle, active root input, and existing Run correlation;
+1. capture lifecycle and active root input;
 2. evaluate delivery and capacity;
 3. construct the complete durable transition proposal;
 4. commit through a host-owned admission port;
 5. mutate private actor state after acknowledgement;
 6. return the receipt and publish a refreshed snapshot.
 
-For steer, the actor captures `target_root_input_id` plus the existing Run
-correlation. Delivery rejects if that root is no longer active; it never
-substitutes the next root. Follow-up advancement commits input application
-with the existing execution-start path before model work launches.
+For steer, the actor captures `target_root_input_id`. Delivery rejects if that
+root is no longer active; it never substitutes the next root. Follow-up
+advancement commits `applied_as_root` before model work launches.
 
 This ordering intentionally makes host persistence part of admission. If the
 commit fails, the runtime has not accepted the input.
@@ -384,134 +331,138 @@ AgentWorkControl {
     submit(input),
     interrupt_current(session_id, agent_instance_id),
     cancel_input(session_id, agent_instance_id, input_id),
-    cancel_user_turn(session_id, turn_id),
 }
 ```
 
-`cancel_user_turn` is a resolver, not a separate cancellation engine:
+Wire replacement (delete the old commands; do not keep them as adapters):
 
-- a pending view resolves to its AgentInput and calls `cancel_input`;
-- an active view resolves to its AgentInstance/current Run and calls
-  `interrupt_current`;
-- a terminal view returns an idempotent no-op result.
-
-Compatibility mappings:
-
-| Existing surface | Canonical operation |
+| Deleted surface | Canonical operation |
 |---|---|
-| `ChatSubmit[Message]` | user AgentInput with `FollowUp` delivery and Turn correlation |
-| `QueueSteer[Message]` | user AgentInput with `Steer` delivery |
-| queued `TurnCancel` | resolve UserTurnView → `cancel_input` |
-| running `TurnCancel` | resolve UserTurnView → `interrupt_current` |
-| `AgentInterrupt` | `interrupt_current` |
-| `message_agent when=queue` | agent AgentInput with `FollowUp`, no Turn |
-| `message_agent when=steer` | agent AgentInput with `Steer`, no Turn |
-| `interrupt_agent` tool | runtime-local policy then same interrupt operation |
+| `ChatSubmit` / `ChatSubmitMessage` | `AgentInputSubmit` with `FollowUp` delivery |
+| `QueueSteer` / `QueueSteerMessage` | `AgentInputSubmit` with `Steer` delivery |
+| queued `TurnCancel` | `cancel_input` on the pending AgentInput |
+| running `TurnCancel` | `interrupt_current` on the AgentInstance |
+| `AgentInterrupt` | keep; `interrupt_current` |
+| `message_agent when=queue` | agent AgentInput with `FollowUp` |
+| `message_agent when=steer` | agent AgentInput with `Steer` |
+| `interrupt_agent` tool | runtime-local policy then the same interrupt operation |
 
-Protocol handlers remain adapters. After migration, a single
-`AgentInputSubmit` command may replace duplicated submit/steer commands, but
-wire cleanup is not required to establish one authority.
+Protocol handlers dispatch into `AgentWorkControl`. There is no remaining
+submit/steer/cancel command family beside the canonical operations.
 
-## Client migration
+## Client cutover (TUI only)
 
-TUI, desktop, and client-core consume the host projection:
+`piko-tui` consumes `AgentWorkSnapshot` from hostd. `piko-desktop` is not
+updated by this design.
 
-- composer routing checks active Run/foreground instead of active Turn;
-- Enter steers any active Run;
+- composer routing checks active work/foreground instead of `active_turns`;
+- Enter steers any active root, including detached work;
 - Alt+Enter submits a follow-up and reconciles by input ID;
 - Esc interrupts the viewed AgentInstance;
-- dequeue selects an authoritative input ID;
-- queue counts, previews, and pending steers come from `AgentWorkSnapshot`;
-- Turn rows render `UserTurnView` derived by hostd.
+- dequeue cancels an authoritative input ID (`cancel_input`);
+- queue counts, previews, and pending steers come only from
+  `AgentWorkSnapshot`;
+- timeline rows are user-origin AgentInputs grouped by root; no `UserTurnView`;
+- delete `SessionUiState::follow_ups` and any local overlay onto host queue
+  counts.
 
-Clients may show a command as submitting before its receipt. Rejection or the
+The TUI may show a command as submitting before its receipt. Rejection or the
 next authoritative snapshot removes that optimism. Restart, agent switching,
-and multiple clients never depend on local queue history.
+and a second TUI never depend on local queue history.
 
 ## Races and recovery
 
-- **Steer versus Run terminal:** serialization chooses one. A committed steer
-  remains bound to that Run and is consumed or explicitly cancelled; a later
-  Run cannot inherit it.
+- **Steer versus root terminal:** serialization chooses one. A committed steer
+  remains bound to that root and is consumed or explicitly cancelled; a later
+  root cannot inherit it.
 - **Follow-up versus terminal:** the input either starts immediately or is
-  admitted pending and then advanced. Both paths create one input and one Run.
+  admitted pending and then advanced. Both paths create one input; a start
+  creates one root.
 - **Cancel versus queue advancement:** both address one input ID; exactly one
   transition wins.
 - **Interrupt versus terminal:** terminal-first returns `accepted: false`;
-  interrupt-first records intent for that Run and cannot affect its successor.
+  interrupt-first records intent for that root and cannot affect its
+  successor.
 - **Host crash after acceptance:** journal replay restores pending input,
-  active Run, Turn views, queue, and foreground.
-- **orchd crash after admission:** attach reconstructs pending input and Run
-  identity from the host projection; unfinished operational execution follows
-  the existing interrupted policy.
+  active root, queue, and foreground.
+- **orchd crash after admission:** attach reconstructs pending input and
+  active root from the host projection; unfinished work follows interruption
+  recovery on that root.
 - **Projection failure:** the journal remains authoritative and write-time read
   models rebuild through existing CQRS recovery.
 
 ## Refactor sequence
 
+Each slice compiles. Later slices replace the old surface rather than wrapping
+it. Do not land a dual-write or leave a deleted type behind as an adapter.
+
 ### Slice 1 — Agent interrupt (implemented)
 
-Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance, and
-hostd preserves compatibility Turn terminal behavior for user-origin work.
+Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 
-### Slice 2 — Enrich existing commits with primitive facts
+### Slice 2 — Primitive facts and published work projection
 
-- Add AgentInput facts, root-input correlation, reducers, and invariants.
-- Append input facts in the same commits that already write queue, Turn, and
-  execution records; do not introduce an AgentRun aggregate.
-- Build `AgentWorkSnapshot` and compare it against existing projections in
-  tests and optional diagnostics.
-- Interpret existing queue and execution facts as legacy projection inputs
-  during replay; do not rewrite journal segments or synthesize a second full
-  aggregate.
+- AgentInput facts, `root_input_id` correlation, reducers, and invariants are
+  the admission/storage path.
+- Publish `AgentWorkSnapshot` in `readmodels/current.json` with `active_work`
+  keyed by `root_input_id`, plus `pending_action` and active ModelStep. It is
+  not a shadow.
+- Do not add Run, Turn, or Execution aggregates.
+- Stop treating leftover Turn/queue/execution records as product lifecycle.
 
-### Slice 3 — Canonical runtime admission
+### Slice 3 — Canonical runtime admission only
 
-- Route start, steer, and follow-up through one AgentActor admission path.
+- Route start, steer, and follow-up through `submit_agent_input` only.
+- Delete `send_agent_input`, `steer_agent`, `run_agent`, and request-id cancel
+  shims.
+- Receipts and actor maps use `input_id` / `root_input_id`, not `run_id` or
+  `execution_id`.
 - Commit acceptance before actor mutation and response.
 - Bind pending steers to root input and persist their application.
 - Advance follow-ups from host-recoverable pending inputs.
 
-### Slice 4 — Host control plane and derived Turn views
+### Slice 4 — Host control plane; delete Turn/Run/Execution command authority
 
-- Introduce `AgentWorkControl` and move command semantics out of dispatch.
-- Make Run/Execution/UserTurnView/foreground/queue read models converge from
-  primitive and existing compatibility facts.
-- Route existing Turn lifecycle updates through the common projector rather
-  than deleting Turn records.
-- Retain compatibility DTOs and verify equivalent results.
+- Introduce `AgentWorkControl` as the only application use case behind
+  dispatch.
+- Replace `ChatSubmit` / `ChatSubmitMessage`, `QueueSteer` /
+  `QueueSteerMessage`, and `TurnCancel` with `AgentInputSubmit`,
+  `cancel_input`, and `interrupt_current`.
+- Project queue, foreground, and active work from AgentInput and ModelStep
+  facts.
+- Delete process-local `TurnRecord`, `steer_queue`, `UserTurnView`, Run maps,
+  and `StoredExecution` product storage.
+- Rekey trajectory / prompt assembly / usage grain to `root_input_id`.
 
-### Slice 5 — Client cutover and authority removal
+### Slice 5 — TUI cutover
 
-- Move TUI and desktop to `AgentWorkSnapshot`.
-- Remove local queue and process-local pending-steer authority.
-- Remove only obsolete host Turn mutation paths after no caller depends on
-  them; retaining materialized Turn records is valid.
-- Keep legacy read support for existing schema-v4 journals.
+- Move the TUI to `AgentWorkSnapshot`.
+- Delete local follow-up stacks, `active_turns`, and Turn-gated composer
+  routing.
+- Group timeline rows from user-origin AgentInputs and their root.
+- Do not update `piko-desktop`.
 
-### Slice 6 — Recovery and convergence closure
+### Slice 6 — Recovery and leftover cleanup
 
-- Run crash-point, race, restart, and two-client matrices.
-- Remove shadow comparisons and superseded compatibility projections where
-  safe.
+- Run crash-point, race, restart, and two-TUI-client matrices.
+- Confirm Turn, Run, and Execution types, IDs, commands, and maps are gone
+  from protocol, host, orchd API, session-store, client-core, and TUI
+  product surfaces. Internal orchd actors may remain if keyed only by
+  `root_input_id`.
 - Update F-51 and verification evidence to implemented.
-
-Each slice must compile and preserve current behavior. A compatibility adapter
-may be deleted only after the canonical path has durable replay and client
-reconciliation coverage.
 
 ## Package impact
 
 | Package | Change |
 |---|---|
-| `piko-protocol` | AgentInput/receipt/disposition DTOs, causal-root fields, AgentWorkSnapshot, compatibility mappings |
-| `piko-session-store` | AgentInput facts, root correlations, reducer invariants, in-place enrichment of existing execution/Turn projections |
-| `piko-orchd-api` | Canonical admission/control and host commit ports |
-| `piko-orchd` | AgentActor serialization, root-bound steer, existing Run/Execution cache enrichment, host-recoverable follow-up advancement |
-| `piko-hostd` | AgentWorkControl, journal commits, UserTurnView/work projections, compatibility adapters |
-| `piko-client-core` | Shared reduction and consumption of AgentWorkSnapshot |
-| `piko-tui` | Projection-driven routing, queue, steer, interrupt, and Turn presentation |
-| `piko-desktop` | Same projection and controls; no independent lifecycle model |
+| `piko-protocol` | AgentInput/receipt/disposition DTOs, `AgentWorkSnapshot`, `AgentInputSubmit`; delete ChatSubmit/QueueSteer/TurnCancel and `turn_id` / `run_id` / `execution_id` product fields |
+| `piko-session-store` | AgentInput facts, root indexes, published work projection; delete Turn/Run/Execution aggregates |
+| `piko-orchd-api` | Canonical admission/control; delete send/steer/run shims and Run/Execution receipts |
+| `piko-orchd` | AgentActor serialization, root-bound steer, follow-up advancement; internal actor keyed by root input |
+| `piko-hostd` | AgentWorkControl, journal commits, work projections; delete Turn lifecycle, Run maps, `steer_queue` |
+| `piko-client-core` | Consume `AgentWorkSnapshot`; delete Turn/queue reduction |
+| `piko-tui` | Projection-driven routing, queue, steer, interrupt; timeline grouped by root AgentInput |
+| `piko-desktop` | Out of scope |
 
 No `island-rs` lifecycle changes are required. Reusable presentation controls
 may live there later, while piko retains domain IDs and intent mapping.
@@ -519,17 +470,18 @@ may live there later, while piko retains domain IDs and intent mapping.
 ## Verification
 
 - Event/reducer transition tables for AgentInput and causal-root relations,
-  including invalid references, idempotency conflict, replay, and legacy
-  interpretation.
-- Property tests that UserTurnView, queue, active Run, and foreground are pure
+  including invalid references, idempotency conflict, and replay.
+- Compile-time absence of deleted commands, Turn/Run/Execution product types
+  and IDs, host `steer_queue`, orchd send/steer shims, and TUI local
+  follow-up authority.
+- Property tests that queue, active work, and foreground are pure
   deterministic projections of one aggregate.
 - Crash-point tests before and after each admission/application/start/terminal
   commit.
 - AgentActor races for steer-terminal, follow-up-terminal, cancel-advance, and
   interrupt-successor isolation.
-- Shadow-projection tests during dual-write migration.
-- Host tests proving compatibility commands call one control service.
-- Fresh-client and two-client reconciliation without local queue history.
+- Host tests proving TUI commands call only `AgentWorkControl`.
+- Fresh-TUI and two-TUI reconciliation without local queue history.
 - Cross-process E2E for detached steer/interrupt and queued cancellation after
   restart.
 - `cargo fmt --all`, workspace tests, and workspace clippy with warnings
@@ -537,16 +489,21 @@ may live there later, while piko retains domain IDs and intent mapping.
 
 ## Alternatives considered
 
-- **Add durable Turn and Execution state machines first:** rejected because it
-  hardens concepts whose product state is derivable from input and Run.
-- **Use Agent activity alone:** rejected because it lacks stable input, Run,
+- **Add durable Turn and Execution state machines first:** rejected because
+  product state is derivable from AgentInput and ModelStep.
+- **Keep Run as a derived identity with its own `run_id`:** rejected. The
+  work identity is the root `input_id`; a second ID recreates the old
+  hierarchy.
+- **Keep Execution for actor/recovery correlation:** rejected as a product
+  scope. An internal actor keyed by `root_input_id` is enough; start/finish
+  facts attach to that root.
+- **Keep UserTurnView for user-origin rows:** rejected. Those rows are
+  AgentInputs; the TUI can group them without a host Turn type.
+- **Use Agent activity alone:** rejected because it lacks stable input,
   queue, idempotency, and race identity.
 - **Keep steer ephemeral:** rejected because acknowledged input can disappear
   before the next ModelStep.
 - **Keep queues client-local:** rejected because restart and multiple clients
   cannot converge.
-- **Replace existing Run/Execution/Turn storage:** rejected because derived
-  scopes can remain materialized in current records and maps; changing their
-  authority does not justify a full rewrite.
-- **Big-bang wire/schema replacement:** rejected because behavior can remain
-  available through compatibility adapters while authority moves safely.
+- **Dual-write with compatibility adapters:** rejected.
+- **Update desktop in the same cutover:** rejected as out of scope.

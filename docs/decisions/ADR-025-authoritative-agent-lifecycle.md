@@ -40,9 +40,10 @@ Run and Execution IDs are carried separately end-to-end. Root runs use their
 Turn/operation ID as `run_id`; the concrete Execution ID remains independently
 derived from the request and agent. Existing journals remain readable.
 
-ADR-027 subsequently separates AgentInstance, AgentInput, ModelStep, and causal
-facts from the derived Run, Execution, and Turn scopes. The atomic ModelStep
-commit and distinct correlation-ID requirements in this ADR remain accepted.
+ADR-027 subsequently makes Session, AgentInstance, and ModelStep the invariant
+grains, with AgentInput as stimulus and root-work identity. Turn, Run, and
+Execution leftover identities are removed by F-51. The atomic ModelStep
+commit requirement in this ADR remains accepted.
 
 ## Consequences
 

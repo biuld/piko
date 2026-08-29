@@ -5,17 +5,16 @@
 > Source evidence: codex-rs `core/src/session/{session,turn,turn_context,input_queue,user_message_admission}.rs`,
 > `core/src/state/{service,session,turn}.rs`, `core/src/tasks/{regular,lifecycle,compact,review,user_shell}.rs`,
 > `core/src/context/turn_aborted.rs`
-> Refined by: [F-51](F-51-agent-control-plane.md) for Agent/Input/ModelStep primitive facts and derived Run/Execution/UserTurn/queue/foreground projections
+> Refined by: [F-51](F-51-agent-control-plane.md) for Session/Agent/ModelStep invariants and AgentInput as stimulus and root-work identity
 
 ## Summary
 
-A user submission that starts future work becomes a **Turn** related to one
-Agent Run; detached agent/system work has a Run without a Turn, and steer joins
-an existing Run. Work has a durable lifecycle from admission, through model
-steps and tool execution, to a terminal outcome.
-Under F-51, this Turn is a host product view derived from the user-origin
-AgentInput and its optional AgentRun; it is not an independent lifecycle
-authority.
+A user submission that starts future work becomes a root **AgentInput**;
+detached agent/system work is also a root AgentInput, and steer joins that
+root. Work has a durable lifecycle from admission, through model steps and
+tool execution, to a terminal outcome.
+Under F-51, Turn/Run/Execution are leftover names for the same root-input
+work and are removed; they are not independent lifecycle authorities.
 The runtime guarantees that everything a user or agent observes is committed
 before it is visible, that transcripts are deterministic and replayable, that
 concurrent input is admitted through an explicit contract (start, steer, queue,
@@ -115,12 +114,11 @@ substantial turn runtime, but three behaviors are underspecified or missing:
 
 ### Turn lifecycle
 
-A Turn is created when a user input requests a new Run and covers that one Run.
-Child agents spawned by multi-agent tools execute Runs that are *not* bound to
-an interaction Turn; their messages carry no source Turn and their reports
-deliver to the parent. A steer is another AgentInput applied to the existing
-Run and does not create a Turn or Run. F-51 defines the canonical AgentInput,
-Turn, Run, and queue relationship.
+A root AgentInput is created when user, agent, or system input starts work.
+Child agents spawned by multi-agent tools also start from a root AgentInput;
+their reports deliver to the parent. A steer is another AgentInput bound to
+the existing root and does not create a new root. F-51 deletes leftover
+Turn/Run/Execution identities for this same lifetime.
 
 State transitions observable to clients:
 

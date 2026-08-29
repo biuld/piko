@@ -566,7 +566,7 @@ Each slash entry **must** expose:
 | `mcp.status` | `/mcp` | ComposerBand with per-server state, counts, and errors |
 | `model.set` / `thinking.set` | (via the combined selector or future slash) | BottomBar + settings reflect new defaults |
 
-Background/internal wire commands (`ChatSubmit`, `TurnCancel`,
+Background/internal wire commands (`AgentInputSubmit`, `AgentInterrupt`,
 `ApprovalRespond`, `StateSnapshot`, `AgentList`/`Subscribe`, `ConfigGet`,
 `ModelList`, `CommandCatalogGet`, …) are **not** slash rows. They power
 surfaces above; the user meets them as chat, Esc cancel, approval panels, and
@@ -582,7 +582,7 @@ not new protocol variants.
 |------------|------------|--------|---------------|
 | Context / cost | Session/turn usage projection | BottomBar still placeholder when data exists | Project into BottomBar (no new command) |
 | Turn diff | `TurnDiffGet` + push `TurnDiff` | **Landed:** `/diff` + cache last push/result | Local presentation command |
-| Queue steer | `QueueSteer` | **Landed:** Enter while running, Ctrl+Enter | Fail closed when idle; Alt+Enter remains FollowUp |
+| Queue steer | `AgentInputSubmit` Steer | Enter while work is active, Ctrl+Enter | Fail closed when idle; Alt+Enter remains FollowUp |
 | `model.set` / `thinking.set` in catalog | Catalog advertised | Combined selector uses another path | Keep the selector; optional slash args later; no second set API |
 
 ### When to add a **new** host wire command

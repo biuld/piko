@@ -474,30 +474,20 @@ profile selects Shift+Enter on enhanced paths and Ctrl+J on baseline paths.
 
 ## Protocol Boundary
 
-For text-only prompts, the app can continue to send:
+The app sends one structured command for text and image prompts:
 
 ```rust
-Command::ChatSubmit {
+Command::AgentInputSubmit {
     session_id,
-    target_agent_instance_id,
-    text,
-    ...
-}
-```
-
-For image references, the app sends the structured message command:
-
-```rust
-Command::ChatSubmitMessage {
-    session_id,
-    target_agent_instance_id,
+    agent_instance_id,
+    delivery, // FollowUp | Steer
     content: MessageContent,
     ...
 }
 ```
 
-The equivalent `QueueSteerMessage` command carries structured content into a
-running turn. Existing text-only commands remain wire compatible.
+`ChatSubmit`, `ChatSubmitMessage`, `QueueSteer`, and `QueueSteerMessage` are
+deleted.
 
 ## Test Plan
 

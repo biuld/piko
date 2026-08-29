@@ -16,12 +16,12 @@ AgentInstance → Run → Execution → ModelStep → Thought / ToolCall
 Turn 0..1 ── source relation ── Run
 ```
 
-`hostd` owns the durable, user-visible state. F-51/ADR-027 now separate
-AgentInstance, AgentInput, ModelStep, and causal facts from derived Run,
-Execution, and Turn scopes.
-F-48's distinct correlation IDs and atomic ModelStep contract remain
-implemented; the diagram above is historical correlation, not the canonical
-domain hierarchy.
+`hostd` owns the durable, user-visible state. F-51/ADR-027 now use Session,
+AgentInstance, and ModelStep as invariant grains, with AgentInput as the
+stimulus and root-work identity. Turn, Run, and Execution are leftover
+scopes to delete.
+F-48's atomic ModelStep contract remains implemented; the diagram above is
+historical correlation, not the canonical domain hierarchy.
 Thought segments are presentation-level content inside a ModelStep. A tool
 call ends the current ModelStep and is persisted as a separate transcript
 fact. Realtime deltas remain transient observations and never become journal
@@ -84,17 +84,15 @@ which makes recovery and diagnostics ambiguous.
 
 | Boundary | Meaning | Durable authority |
 |---|---|---|
-| Turn | Derived user-interaction view and compatibility correlation | AgentInput and causal-work projection under F-51 |
-| Run | One logical unit of Agent work, including Turn-less child work | Derived from AgentInput, execution, and terminal facts under F-51; legacy `run_id` correlations remain |
-| Execution | Operational runtime attempt that can be interrupted and recovered | `execution_started` / `execution_finished` correlation facts |
+| Turn / Run / Execution | Leftover identities for one root AgentInput's work | Removed by F-51 remaining slices; do not add new fields |
+| AgentInput | Stimulus; work identity when `applied_as_root` | journal AgentInput facts under F-51 |
 | ModelStep | One model request/response, ending before local tool execution | required `model_step_committed` plus referenced messages |
 | Thought | Ordered reasoning segment inside a ModelStep | `ContentBlock::Thinking` in the committed assistant message |
 | ToolCall | Model-declared call and later result | committed `ToolCall` / `ToolResult` messages |
 
-The same value may be used for two IDs by a caller only when their semantic
-boundaries genuinely coincide; the protocol and journal must still preserve
-both fields. New root Runs use the Turn ID as their logical Run ID, while the
-concrete Execution ID is independently derived from the request and agent.
+F-51 remaining slices delete `turn_id`, `run_id`, and `execution_id` as
+product handles. New work keys by `root_input_id`. ModelStep IDs stay
+independent.
 
 ### ModelStep lifecycle
 

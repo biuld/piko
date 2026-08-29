@@ -8,8 +8,9 @@
 
 Make the Run/Execution correlation and ModelStep boundary explicit across the
 runtime, host journal, reliable observation stream, and client projection.
-F-51/D-68/ADR-027 supersede this design's original core hierarchy: Turn is a
-derived product view and Execution remains an operational runtime scope.
+F-51/D-68/ADR-027 supersede this design's original core hierarchy: work
+identity is the root AgentInput; Turn, Run, and Execution leftovers are
+deleted.
 The vertical slice must make a completed model step an atomic durable relation
 between existing transcript messages and must leave realtime thought rendering
 as an ephemeral projection.

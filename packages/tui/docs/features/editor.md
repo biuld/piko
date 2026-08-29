@@ -66,17 +66,18 @@ newline key inserts a line break.
 trimmed from text. An image-only message is valid; empty text without an image
 does nothing.
 
-When the viewed agent is idle, Enter starts a turn (`ChatSubmit`). When that
-agent is running, Enter steers the active turn (`QueueSteer`). **Alt+Enter**
-always queues a follow-up (`ChatSubmit` / FollowUp). **Ctrl+Enter** steers only
-and fails closed if the agent is idle. **Alt+↑** restores the last follow-up
-this TUI queued. Details: [message-queue.md](./message-queue.md).
+When the viewed agent is idle, Enter starts work (`AgentInputSubmit` FollowUp).
+When that agent has active work, Enter steers it (`AgentInputSubmit` Steer).
+**Alt+Enter** always follows up. **Ctrl+Enter** steers only and fails closed if
+the agent is idle. **Alt+↑** cancels the selected pending AgentInput and
+restores it to the composer. Details: [message-queue.md](./message-queue.md).
 
 The submitted draft remains recoverable until hostd accepts the command. A
 rejected submit restores the complete draft, including reference payloads, when
 the composer is empty; if the user has already started a new draft, the failed
 draft remains available through history without overwriting newer input. A
-rejected follow-up must also disappear from the local queue projection.
+rejected follow-up must also disappear from optimistic UI; host snapshot is
+truth.
 
 ### Slash command interception
 
