@@ -274,6 +274,14 @@ impl HostServer {
                     result: Ok(crate::api::CommandResult::Empty),
                 }])
             }
+            Command::AgentInterrupt {
+                session_id,
+                agent_instance_id,
+                ..
+            } => {
+                self.apply_agent_interrupt(command_id, session_id, agent_instance_id)
+                    .await
+            }
             Command::ApprovalRespond {
                 command_id,
                 session_id,

@@ -16,6 +16,52 @@ fn running_app() -> AppState {
 }
 
 #[test]
+fn interrupt_targets_viewed_agent_without_requiring_a_turn() {
+    let mut app = live_app();
+    app.agent_panel.active_agent_instance_id = Some("agent-child".into());
+
+    let effects = app.dispatch(EditorAction::Interrupt.into());
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::AgentInterrupt {
+            session_id,
+            agent_instance_id,
+            ..
+        })] if session_id == "session-1" && agent_instance_id == "agent-child"
+    ));
+}
+
+#[test]
+fn detached_runtime_activity_does_not_masquerade_as_a_host_turn_for_steer() {
+    let mut app = live_app();
+    app.agent_panel.active_agent_instance_id = Some("agent-child".into());
+    app.agent_panel
+        .upsert_agent(crate::features::agent_status::AgentEntry {
+            agent_id: "worker".into(),
+            agent_instance_id: "agent-child".into(),
+            name: "worker".into(),
+            parent_agent_instance_id: Some("agent-root".into()),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Running,
+            unread_report_count: 0,
+            status: piko_protocol::AgentStatus::Running,
+        });
+    app.editor.restore_text("next task");
+
+    let effects = app.dispatch(EditorAction::Submit.into());
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Send(piko_protocol::Command::ChatSubmit {
+            target_agent_instance_id,
+            text,
+            ..
+        })] if target_agent_instance_id == "agent-child" && text == "next task"
+    ));
+}
+
+#[test]
 fn running_guidance_names_steer_and_queue_keys() {
     use crate::features::guidance_row::{GuidanceContent, resolve};
 

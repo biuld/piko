@@ -5,18 +5,22 @@
 > Source evidence: piko runtime/journal review; extends [F-01](F-01-turn-runtime.md), [F-31](F-31-durable-session-journal.md), and [F-36](F-36-agent-run-trajectory.md)
 > Design: [D-65](../design/D-65-authoritative-agent-lifecycle.md)
 > Decision: [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md)
+> Refined by: [F-51](F-51-agent-control-plane.md) and [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md)
 
 ## Summary
 
-piko gives every agent operation an explicit lifecycle hierarchy:
+piko gives every agent operation an explicit lifecycle spine:
 
 ```text
-Turn → Run → Execution → ModelStep → Thought / ToolCall
+AgentInstance → Run → Execution → ModelStep → Thought / ToolCall
+Turn 0..1 ── source relation ── Run
 ```
 
-`hostd` owns the durable, user-visible state. A Turn is the host interaction
-boundary, a Run is the logical agent attempt, an Execution is the concrete
-runtime instance, and a ModelStep is one model request/response boundary.
+`hostd` owns the durable, user-visible state. A Turn is an optional host
+interaction boundary, a Run is the logical agent attempt, an Execution is the
+concrete runtime instance, and a ModelStep is one model request/response
+boundary. F-51/ADR-027 supersede the earlier assumption that every Run has a
+Turn; the remaining lifecycle and atomic ModelStep contract is unchanged.
 Thought segments are presentation-level content inside a ModelStep. A tool
 call ends the current ModelStep and is persisted as a separate transcript
 fact. Realtime deltas remain transient observations and never become journal
@@ -79,8 +83,8 @@ which makes recovery and diagnostics ambiguous.
 
 | Boundary | Meaning | Durable authority |
 |---|---|---|
-| Turn | Host interaction and user-visible lifecycle | host turn lifecycle plus journal attribution |
-| Run | One logical agent attempt, including child-agent attempts | `run_id` on execution facts and trajectory identity |
+| Turn | Optional host interaction and user-visible lifecycle | host turn lifecycle plus journal attribution |
+| Run | One logical agent attempt, including Turn-less child-agent attempts | `run_id` on execution facts and trajectory identity |
 | Execution | One concrete runtime instance that can be admitted, interrupted, and recovered | `execution_started` / `execution_finished` |
 | ModelStep | One model request/response, ending before local tool execution | required `model_step_committed` plus referenced messages |
 | Thought | Ordered reasoning segment inside a ModelStep | `ContentBlock::Thinking` in the committed assistant message |

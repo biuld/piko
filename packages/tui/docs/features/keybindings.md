@@ -194,10 +194,10 @@ has authority. They are not implemented as an extra pre-routing priority.
 | `Ctrl+P` | `editor.history.previous` | suggestions hidden |
 | `Ctrl+N` | `editor.history.next` | history browse active |
 | `Esc` | `ui.cancel` | suggestions visible |
-| `Esc` | `turn.interrupt` | turn running and suggestions hidden |
+| `Esc` | `turn.interrupt` | viewed agent running and suggestions hidden |
 | `Esc` | `workspace.idleEscape` | editor empty, idle, and suggestions hidden |
-| `Ctrl+C` | `turn.interrupt` | turn running |
-| `Ctrl+C` | `editor.clear` | no turn running |
+| `Ctrl+C` | `turn.interrupt` | viewed agent running |
+| `Ctrl+C` | `editor.clear` | viewed agent idle |
 | `Ctrl+C` | `timeline.copySelection` | Timeline selection active |
 | `Tab` | `completion.accept` | suggestions visible |
 | `Shift+Tab` | `selection.previous` | suggestions visible |

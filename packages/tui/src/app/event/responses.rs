@@ -9,6 +9,17 @@ impl AppState {
         let mut effects = Vec::new();
         match result {
             Ok(piko_protocol::CommandResult::Empty) => {}
+            Ok(piko_protocol::CommandResult::AgentInterrupted {
+                agent_instance_id,
+                accepted,
+                ..
+            }) => {
+                self.status = if accepted {
+                    format!("interrupt requested for {agent_instance_id}")
+                } else {
+                    format!("agent {agent_instance_id} is already idle")
+                };
+            }
             Ok(piko_protocol::CommandResult::AuthLoginStarted { provider, mode, .. }) => {
                 self.status = format!("starting {provider} {mode:?} login");
             }

@@ -2,6 +2,7 @@
 
 > Status: accepted
 > Date: 2026-08-29
+> Superseded in part by: [ADR-027](ADR-027-agent-work-lifecycle.md) for the universal `Turn → Run` parent relation
 
 ## Context
 

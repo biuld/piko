@@ -14,6 +14,10 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-68: Agent work lifecycle and control plane](D-68-agent-control-plane.md)
+  implements F-51: durable AgentInput admission, optional Turn/Run relation,
+  authoritative steer/follow-up projection, and unified Agent controls
+  (proposed; Slice 1 interrupt implemented in V-64).
 - [D-67: Configurable agent-tree limits](D-67-configurable-agent-tree-limits.md)
   implements F-50: settings-backed per-session AgentInstance count and
   tree-depth admission limits (accepted; V-62).

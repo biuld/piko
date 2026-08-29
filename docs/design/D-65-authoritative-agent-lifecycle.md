@@ -6,8 +6,10 @@
 
 ## Goal
 
-Make the Turn → Run → Execution → ModelStep hierarchy explicit across the
-runtime, host journal, reliable observation stream, and client projection.
+Make the Run → Execution → ModelStep spine and optional source Turn relation
+explicit across the runtime, host journal, reliable observation stream, and
+client projection. F-51/D-68/ADR-027 supersede this design's original
+assumption that every Run has a Turn.
 The vertical slice must make a completed model step an atomic durable relation
 between existing transcript messages and must leave realtime thought rendering
 as an ephemeral projection.

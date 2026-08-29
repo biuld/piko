@@ -83,6 +83,27 @@ impl AppState {
         )
     }
 
+    pub fn viewed_agent_is_running(&self) -> bool {
+        if self.viewed_agent_is_busy() {
+            return true;
+        }
+        let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.as_deref() else {
+            return false;
+        };
+        self.agent_panel
+            .agents()
+            .iter()
+            .find(|agent| agent.agent_instance_id == agent_instance_id)
+            .is_some_and(|agent| {
+                matches!(
+                    agent.activity,
+                    piko_protocol::AgentActivity::Running
+                        | piko_protocol::AgentActivity::WaitingForApproval
+                        | piko_protocol::AgentActivity::Cancelling
+                )
+            })
+    }
+
     pub fn queue_summary(&self) -> QueueStatus {
         let mut summary = self.queue_status.clone();
         let local = self.session.follow_ups.len() as u32;

@@ -201,6 +201,14 @@ pub enum Command {
         session_id: SessionId,
         turn_id: TurnId,
     },
+    /// Interrupt the current work of one AgentInstance without exposing its
+    /// short-lived Execution identity. Unlike `TurnCancel`, this also covers
+    /// detached child runs that have no source Turn.
+    AgentInterrupt {
+        command_id: CommandId,
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
+    },
     ApprovalRespond {
         command_id: CommandId,
         session_id: SessionId,
@@ -338,6 +346,7 @@ impl Command {
             | Self::ChatSubmit { command_id, .. }
             | Self::ChatSubmitMessage { command_id, .. }
             | Self::TurnCancel { command_id, .. }
+            | Self::AgentInterrupt { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }

@@ -73,6 +73,34 @@ fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
 }
 
 #[test]
+fn escape_interrupts_viewed_runtime_agent_without_a_host_turn() {
+    let mut app = app();
+    app.agent_panel.active_agent_instance_id = Some("agent-child".into());
+    app.agent_panel
+        .upsert_agent(crate::features::agent_status::AgentEntry {
+            agent_id: "worker".into(),
+            agent_instance_id: "agent-child".into(),
+            name: "worker".into(),
+            parent_agent_instance_id: Some("agent-root".into()),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            activity: piko_protocol::AgentActivity::Running,
+            unread_report_count: 0,
+            status: piko_protocol::AgentStatus::Running,
+        });
+
+    let action = InputRouter::route_key(
+        &app,
+        &BindingRegistry::default(),
+        key(KeyCode::Esc, KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        action,
+        Some(Action::Editor(EditorAction::Interrupt))
+    ));
+}
+
+#[test]
 fn shift_enter_inserts_a_newline() {
     let app = app();
     let keymap = BindingRegistry::default();

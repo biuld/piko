@@ -21,6 +21,7 @@ impl AppState {
         let mut effects = Vec::new();
         match action {
             EditorAction::Submit => effects.extend(self.submit()),
+            EditorAction::Interrupt => effects.extend(self.interrupt()),
             EditorAction::Cancel => effects.extend(self.cancel()),
             EditorAction::CancelSuggestions => self.editor.auto_complete.clear(),
             EditorAction::InsertChar(ch) => {

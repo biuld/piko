@@ -1,6 +1,6 @@
 # Design: Composer Queue and Steer
 
-> Status: implemented
+> Status: implemented baseline; superseded in part by F-51/D-68
 > PRD: [../features/message-queue.md](../features/message-queue.md)
 
 ## Goal
@@ -20,8 +20,10 @@ Ctrl+Enter     idle  → reject (keep draft)
 Alt+↑                → pop local follow-up + TurnCancel if turn_id known
 ```
 
-`AppState::viewed_agent_is_running()` is true when the viewed agent's
-`active_turns` status is `Running` (or `Cancelling`).
+`AppState::viewed_agent_is_busy()` is true when the viewed agent's
+`active_turns` status is `Running`, `WaitingForApproval`, or `Cancelling`.
+This is the legacy host-Turn steer gate. F-51 replaces it with the canonical
+active Run from `AgentWorkSnapshot`, including detached work.
 
 ## Local follow-up stack
 

@@ -5,11 +5,14 @@
 > Source evidence: codex-rs `core/src/session/{session,turn,turn_context,input_queue,user_message_admission}.rs`,
 > `core/src/state/{service,session,turn}.rs`, `core/src/tasks/{regular,lifecycle,compact,review,user_shell}.rs`,
 > `core/src/context/turn_aborted.rs`
+> Refined by: [F-51](F-51-agent-control-plane.md) for canonical AgentInput, optional Turn/Run relation, and host projection
 
 ## Summary
 
-A submitted message becomes a **turn**: one agent run with a durable lifecycle
-from admission, through model steps and tool execution, to a terminal outcome.
+A user submission that starts future work becomes a **Turn** related to one
+Agent Run; detached agent/system work has a Run without a Turn, and steer joins
+an existing Run. Work has a durable lifecycle from admission, through model
+steps and tool execution, to a terminal outcome.
 The runtime guarantees that everything a user or agent observes is committed
 before it is visible, that transcripts are deterministic and replayable, that
 concurrent input is admitted through an explicit contract (start, steer, queue,
@@ -109,10 +112,12 @@ substantial turn runtime, but three behaviors are underspecified or missing:
 
 ### Turn lifecycle
 
-A turn is created when a message is submitted to an agent and covers one run.
-Child agents spawned by multi-agent tools execute runs that are *not* bound to
-an interaction turn; their messages carry no source turn and their reports
-deliver to the parent.
+A Turn is created when a user input requests a new Run and covers that one Run.
+Child agents spawned by multi-agent tools execute Runs that are *not* bound to
+an interaction Turn; their messages carry no source Turn and their reports
+deliver to the parent. A steer is another AgentInput applied to the existing
+Run and does not create a Turn or Run. F-51 defines the canonical AgentInput,
+Turn, Run, and queue relationship.
 
 State transitions observable to clients:
 

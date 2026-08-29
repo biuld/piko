@@ -101,10 +101,16 @@ impl AgentRunRunner for CancellableAgentRunRunner {
             run.session_id == operation.session_id && run.turn_id == operation.operation_id
         })
     }
+
+    async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
+        self.active.lock().unwrap().as_ref().is_some_and(|run| {
+            run.session_id == session_id && run.agent_instance_id == agent_instance_id
+        })
+    }
 }
 
 #[tokio::test]
-async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
+async fn agent_interrupt_preserves_turn_terminal_authority() {
     let runner = Arc::new(CancellableAgentRunRunner::default());
     let server = HostServer::with_turn_runner(runner.clone());
     let created = server
@@ -126,7 +132,7 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
             })
             .await
     });
-    let turn_id = loop {
+    let _turn_id = loop {
         let refresh = server
             .handle_command(piko_hostd::api::Command::StateSnapshot {
                 command_id: "snapshot".into(),
@@ -148,12 +154,19 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
     };
 
     let cancel = server
-        .handle_command(piko_hostd::api::Command::TurnCancel {
-            command_id: "cancel".into(),
+        .handle_command(piko_hostd::api::Command::AgentInterrupt {
+            command_id: "interrupt".into(),
             session_id: session_id.clone(),
-            turn_id,
+            agent_instance_id: format!("agent_{session_id}_root"),
         })
         .await;
+    assert!(cancel.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::AgentInterrupted { accepted: true, .. }),
+            ..
+        }
+    )));
     assert!(cancel.iter().all(|event| !matches!(
         event,
         Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { .. })
@@ -164,6 +177,95 @@ async fn cancellation_acceptance_waits_for_durable_cancelled_report() {
     assert!(terminal.iter().any(|event| matches!(
         event,
         Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { .. })
+    )));
+}
+
+#[derive(Default)]
+struct RecordingInterruptRunner {
+    targets: std::sync::Mutex<Vec<(String, String)>>,
+    accepted: bool,
+}
+
+#[async_trait]
+impl AgentRunRunner for RecordingInterruptRunner {
+    async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
+        self.targets
+            .lock()
+            .unwrap()
+            .push((session_id.to_string(), agent_instance_id.to_string()));
+        self.accepted
+    }
+}
+
+#[tokio::test]
+async fn detached_agent_interrupt_is_forwarded_without_a_turn() {
+    let runner = Arc::new(RecordingInterruptRunner {
+        accepted: true,
+        ..Default::default()
+    });
+    let server = HostServer::with_turn_runner(runner.clone());
+    let created = server
+        .handle_command(piko_hostd::api::Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+
+    let response = server
+        .handle_command(piko_hostd::api::Command::AgentInterrupt {
+            command_id: "interrupt-child".into(),
+            session_id: session_id.clone(),
+            agent_instance_id: "agent-child".into(),
+        })
+        .await;
+
+    assert_eq!(
+        runner.targets.lock().unwrap().as_slice(),
+        &[(session_id.clone(), "agent-child".into())]
+    );
+    assert!(response.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::AgentInterrupted {
+                agent_instance_id,
+                accepted: true,
+                ..
+            }),
+            ..
+        } if agent_instance_id == "agent-child"
+    )));
+}
+
+#[tokio::test]
+async fn idle_agent_interrupt_is_a_benign_unaccepted_result() {
+    let runner = Arc::new(RecordingInterruptRunner::default());
+    let server = HostServer::with_turn_runner(runner);
+    let created = server
+        .handle_command(piko_hostd::api::Command::SessionCreate {
+            command_id: "create".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+
+    let response = server
+        .handle_command(piko_hostd::api::Command::AgentInterrupt {
+            command_id: "interrupt-idle".into(),
+            session_id,
+            agent_instance_id: "agent-idle".into(),
+        })
+        .await;
+
+    assert!(response.iter().any(|event| matches!(
+        event,
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::AgentInterrupted {
+                accepted: false,
+                ..
+            }),
+            ..
+        }
     )));
 }
 

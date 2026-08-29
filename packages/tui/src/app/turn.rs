@@ -6,6 +6,22 @@ use crate::{
 };
 
 impl AppState {
+    pub(crate) fn interrupt(&mut self) -> Vec<Effect> {
+        let (Some(session_id), Some(agent_instance_id)) = (
+            self.session.id.clone(),
+            self.agent_panel.active_agent_instance_id.clone(),
+        ) else {
+            self.status = "no agent selected".to_string();
+            return Vec::new();
+        };
+        self.status = "interrupt requested".to_string();
+        vec![Effect::send(Command::AgentInterrupt {
+            command_id: command_id(),
+            session_id,
+            agent_instance_id,
+        })]
+    }
+
     pub(crate) fn cancel(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
         let (Some(session_id), Some(turn_id)) = (

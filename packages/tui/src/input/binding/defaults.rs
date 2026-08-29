@@ -222,14 +222,14 @@ pub fn default_rules() -> Vec<BindingRule> {
             "esc",
             TurnInterrupt,
             Editor,
-            ["turn.running", "!suggest.visible"]
+            ["agent.running", "!suggest.visible"]
         ),
         rule!(
             "default-editor-interrupt-ctrl-c",
             "ctrl+c",
             TurnInterrupt,
             Editor,
-            ["turn.running", "!timeline.selectionActive"]
+            ["agent.running", "!timeline.selectionActive"]
         ),
         rule!(
             "default-timeline-copy-selection",
@@ -243,14 +243,14 @@ pub fn default_rules() -> Vec<BindingRule> {
             "ctrl+c",
             EditorClear,
             Editor,
-            ["!turn.running", "!timeline.selectionActive"]
+            ["!agent.running", "!timeline.selectionActive"]
         ),
         rule!(
             "default-workspace-idle-escape",
             "esc",
             WorkspaceIdleEscape,
             Workspace,
-            ["editor.empty", "!turn.running", "!suggest.visible"]
+            ["editor.empty", "!agent.running", "!suggest.visible"]
         ),
         rule!(
             "default-suggest-previous",

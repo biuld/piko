@@ -198,6 +198,14 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .unwrap_or(false)
     }
 
+    async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
+        self.agent_runtime
+            .cancel_agent_run(session_id.to_string(), agent_instance_id.to_string())
+            .await
+            .map(|receipt| receipt.accepted)
+            .unwrap_or(false)
+    }
+
     async fn cancel_queued_agent_run(
         &self,
         operation: &crate::ports::AgentOperationAddress,

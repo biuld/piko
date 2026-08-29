@@ -186,6 +186,12 @@ pub trait AgentRunRunner: Send + Sync {
         false
     }
 
+    /// Interrupt whichever Execution is currently active for an AgentInstance.
+    /// This is agent-addressed and intentionally does not require a host Turn.
+    async fn interrupt_agent(&self, _: &str, _: &str) -> bool {
+        false
+    }
+
     async fn has_active_session_run(&self, _: &str) -> bool {
         false
     }

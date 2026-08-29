@@ -11,6 +11,12 @@ use crate::session::SessionTreeEntry;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
     Empty,
+    AgentInterrupted {
+        session_id: SessionId,
+        agent_instance_id: crate::AgentInstanceId,
+        accepted: bool,
+        timestamp: i64,
+    },
     AuthLoginStarted {
         login_id: String,
         provider: String,

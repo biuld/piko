@@ -48,7 +48,7 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
     Some(match command {
         AppQuit => AppAction::Quit.into(),
         WorkspaceIdleEscape => AppAction::IdleEscape(Instant::now()).into(),
-        TurnInterrupt => EditorAction::Cancel.into(),
+        TurnInterrupt => EditorAction::Interrupt.into(),
         EditorSubmit => EditorAction::Submit.into(),
         EditorNewline => EditorAction::InsertNewline.into(),
         EditorClear => EditorAction::Cancel.into(),
@@ -188,7 +188,7 @@ fn cancel_action(app: &AppState) -> Action {
     } else if app.mode() != AppMode::Chat {
         SurfaceAction::Close.into()
     } else if app.active_turn_id().is_some() {
-        EditorAction::Cancel.into()
+        EditorAction::Interrupt.into()
     } else {
         // `ui.cancel` is not bound in the editor while it contains text.  A
         // custom rule can still target that scope, and its safest reducer

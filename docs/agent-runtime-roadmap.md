@@ -186,20 +186,20 @@ optional extensions and have no scheduled implementation.
 
 | Block | F-ID | Decomposed behavior |
 |---|---|---|
-| A Turn & Agent Runtime | F-01 | lifecycle, admission/queueing, tasks, abort reconstruction |
+| A Turn & Agent Runtime | F-01/F-51 | canonical AgentInput/Turn/Run/Execution lifecycle, admission/queueing, control, tasks, abort reconstruction |
 | B Model Gateway | F-02/F-24/F-25/F-26 | providers, authentication, native protocols, protocol-neutral inference, streaming/retry, usage, model continuity, locally authoritative catalogs |
 | C Prompt Assembly | F-03 | fragments, AGENTS.md, skills, world-state/environment context |
 | D Context & Compaction | F-04/F-05 | transcript model, truncation, accounting, compaction |
 | E Tool System | F-06 | registry/routing, batch dispatch, approvals hook |
 | F Approvals & Safety | F-07/F-11/F-12 | approvals, guardian, elicitation decision, safety assessment |
 | G Exec & Sandbox | F-08/F-23 | process lifecycle, full-shell unified exec, enforced containment, command authority/elevation |
-| H Persistence & Resume | F-31 | schema-v4 canonical journal, deterministic replay/accounting, fork/resume, recovery; paging/prewarm deferred |
-| I Multi-Agent | F-10/F-19/F-20/F-21 | agent tree, v2 tools, role permissions, completion fragments, model tool surface |
+| H Persistence & Resume | F-31/F-51 | schema-v4 canonical journal, durable Agent work/queue facts, deterministic replay/accounting, fork/resume, recovery; paging/prewarm deferred |
+| I Multi-Agent | F-10/F-19/F-20/F-21/F-51 | agent tree, v2 tools, role permissions, completion fragments, model tool surface, unified control semantics |
 | J Skills/Plugins/MCP | F-13/F-14 | skills, plugins, MCP, hooks |
 | K Realtime | F-16 | realtime and multimodal preparation (deferred) |
 | L Observability | F-15 | tracing, timing, usage, rollout/diff/debugging slices |
 | M Config & Permissions | F-17/F-18/F-19 | permission profiles, managed features, agent roles |
-| Client projection (product wire) | F-22 | hostd→client foreground state, stream items, usage used/size (ACP modeling ref) |
+| Client projection (product wire) | F-22/F-51 | hostd→client foreground/work/queue state, stream items, usage used/size (ACP modeling ref) |
 
 ## 5. Sequencing principles
 
@@ -217,12 +217,17 @@ optional extensions and have no scheduled implementation.
 
 ## 6. Current next steps
 
-1. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
+1. **Agent work lifecycle and control plane (F-51 / D-68, ADR-027)** —
+   proposed; Slice 1 agent interrupt implemented. Next: canonical durable
+   AgentInput/Turn/Run facts, Run-bound steer and follow-up admission, one
+   host-authored AgentWorkSnapshot, then TUI/desktop removal of local queue and
+   process-local steer authority.
+2. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
    redesign of F-08/F-12/F-17 command behavior: full-shell unified exec,
    host-owned authorization, enforced sandbox-first attempts, constrained
    additional permissions/elevation, and typed process results. Maintain the
    cross-platform differential fixtures in V-35 as sandbox backends evolve.
-2. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
+3. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
    **implemented** (docs status updated): usage `used`/`size` + silent model
    catalog bootstrap; dedicated `ServerMessage::Usage` after terminal turns
    (sole usage chrome path); sole stream transport `ServerMessage::StreamItem`
@@ -230,4 +235,4 @@ optional extensions and have no scheduled implementation.
    shared `AgentForeground::project` for TUI/client-core. Plan/System
    stream kinds deferred. Optional next: Slice 4 ACP adapter (product-gated;
    not a full ACP transport rewrite).
-3. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.
+4. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

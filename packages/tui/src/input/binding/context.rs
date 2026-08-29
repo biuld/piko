@@ -195,6 +195,7 @@ pub struct BindingContext {
     pub history_browsing: bool,
     pub suggest_visible: bool,
     pub turn_running: bool,
+    pub agent_running: bool,
     pub notice_visible: bool,
     pub terminal_enhanced: bool,
     pub text_input_active: bool,
@@ -210,6 +211,7 @@ impl BindingContext {
             history_browsing: app.editor.is_browsing_history(),
             suggest_visible: app.has_suggestions(),
             turn_running: app.viewed_agent_is_busy(),
+            agent_running: app.viewed_agent_is_running(),
             notice_visible: app
                 .notifications
                 .row_visible_for(
@@ -231,6 +233,7 @@ impl BindingContext {
             ContextAtom::HistoryBrowsing => self.history_browsing,
             ContextAtom::SuggestVisible => self.suggest_visible,
             ContextAtom::TurnRunning => self.turn_running,
+            ContextAtom::AgentRunning => self.agent_running,
             ContextAtom::NoticeVisible => self.notice_visible,
             ContextAtom::TerminalEnhancedKeyboard => self.terminal_enhanced,
             ContextAtom::TextInputActive => self.text_input_active,
@@ -246,6 +249,7 @@ pub enum ContextAtom {
     HistoryBrowsing,
     SuggestVisible,
     TurnRunning,
+    AgentRunning,
     NoticeVisible,
     TerminalEnhancedKeyboard,
     TextInputActive,
@@ -264,6 +268,7 @@ impl ContextAtom {
             "editor.historyBrowsing" => Self::HistoryBrowsing,
             "suggest.visible" => Self::SuggestVisible,
             "turn.running" => Self::TurnRunning,
+            "agent.running" => Self::AgentRunning,
             "notice.visible" => Self::NoticeVisible,
             "terminal.enhancedKeyboard" => Self::TerminalEnhancedKeyboard,
             "text.inputActive" => Self::TextInputActive,

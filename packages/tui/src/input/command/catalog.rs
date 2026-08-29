@@ -61,6 +61,10 @@ const fn running(context: &BindingContext) -> bool {
     context.turn_running
 }
 
+const fn agent_running(context: &BindingContext) -> bool {
+    context.agent_running
+}
+
 const fn idle_escape(context: &BindingContext) -> bool {
     context.editor_empty && !context.turn_running && !context.suggest_visible
 }
@@ -93,7 +97,7 @@ pub fn catalog() -> Vec<CommandSpec> {
     command_specs! {
         AppQuit, "Quit", "Exit piko", APP, PressOnly, enabled;
         WorkspaceIdleEscape, "Idle escape", "Open workspace tree after the idle escape gesture", WORKSPACE, PressOnly, idle_escape;
-        TurnInterrupt, "Interrupt turn", "Cancel the viewed running turn", EDITOR, PressOnly, running;
+        TurnInterrupt, "Interrupt agent", "Cancel the viewed agent's current work", EDITOR, PressOnly, agent_running;
         EditorSubmit, "Submit", "Submit the composer", EDITOR, PressOnly, enabled;
         EditorNewline, "New line", "Insert a composer newline", EDITOR, PressOnly, multiline;
         EditorClear, "Clear editor", "Clear the idle composer", EDITOR, PressOnly, not_running;

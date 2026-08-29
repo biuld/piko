@@ -57,6 +57,7 @@ pub enum PointerAction {
 #[derive(Debug)]
 pub enum EditorAction {
     Submit,
+    Interrupt,
     Cancel,
     CancelSuggestions,
     InsertChar(char),

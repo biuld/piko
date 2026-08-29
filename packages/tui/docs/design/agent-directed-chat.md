@@ -28,7 +28,9 @@ a Panel, Slot, overlay, focus target, setting, or key binding.
   AgentInstance.
 - Switching Agent selection after submission does not retarget the accepted
   Turn.
-- Esc cancels the active Turn for the AgentInstance currently shown.
+- Esc interrupts the current work for the AgentInstance currently shown. A
+  host-owned Turn retains its Turn cancellation lifecycle; detached child work
+  uses the agent-addressed control path defined by F-51/D-68.
 
 ## Wire contract
 
@@ -131,6 +133,12 @@ the immutable target and calls `AgentRunRunner::cancel_agent_run` with the full
 `AgentRuntimeApi::cancel_agent_input`, durably commits
 `AgentDurableCommand::QueuedInputCancelled`, and removes the matching
 `DurableAgentInput` without starting an Agent run.
+
+The viewed-agent Esc path instead sends `Command::AgentInterrupt` addressed by
+`session_id + agent_instance_id`. hostd preserves the preceding Turn lifecycle
+when one exists and otherwise forwards directly to
+`AgentRuntimeApi::cancel_agent_run`, covering detached child Executions with no
+source Turn.
 
 `Command::SessionCompact` includes an explicit `agent_instance_id`. Current
 `SessionTreeEntry` compaction is applied only to the root AgentInstance; hostd

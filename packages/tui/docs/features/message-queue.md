@@ -1,6 +1,6 @@
 # Composer Queue and Steer
 
-> Status: implemented
+> Status: implemented baseline; authoritative queue/projection superseded by F-51
 > Package: `piko-tui`
 > Host/runtime: [F-01](../../../../docs/features/F-01-turn-runtime.md) admission,
 > `ChatSubmit` / `ChatSubmitMessage` (FollowUp), `QueueSteer` /
@@ -8,9 +8,12 @@
 
 ## Overview
 
-The Composer can start a turn, inject a steer into the viewed agent's running
-turn, or durably queue a follow-up for after that turn. The TUI maps those
-intents onto existing host commands. It does not invent a second queue.
+The current Composer can start a turn, inject a steer into the viewed agent's
+host-owned running Turn, or durably queue a follow-up for after that Turn. The
+TUI maps those intents onto existing host commands. It currently maintains a
+local correlation stack for queue presentation; F-51 replaces that baseline
+with the host-authored Agent work projection and enables steer for detached
+Runs.
 
 ## Layout
 

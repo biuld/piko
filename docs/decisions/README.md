@@ -33,5 +33,6 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-022](ADR-022-desktop-client-reintroduction.md) | Reintroduce a first-party desktop client on island-rs with shared projections and transport | accepted |
 | [ADR-023](ADR-023-tui-normalized-input-and-bindings.md) | Normalize TUI input at one adapter boundary and keep scoped bindings host-owned | accepted |
 | [ADR-024](ADR-024-tui-layout-primitives.md) | Use typed prepared layout plans and shared top-origin viewport/content geometry | accepted |
-| [ADR-025](ADR-025-authoritative-agent-lifecycle.md) | Make Turn → Run → Execution → ModelStep explicit and persist model-step boundaries atomically | accepted |
+| [ADR-025](ADR-025-authoritative-agent-lifecycle.md) | Make Run/Execution/ModelStep explicit and persist model-step boundaries atomically | accepted; universal Turn parent relation superseded by ADR-027 |
 | [ADR-026](ADR-026-agent-delegation-boundary.md) | Separate supervisor/worker delegation capability from agent roles and tool declarations | accepted |
+| [ADR-027](ADR-027-agent-work-lifecycle.md) | Center Agent work on durable AgentInput and Run; make Turn an optional source relation | proposed |

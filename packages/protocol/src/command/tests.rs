@@ -36,6 +36,29 @@ fn text_and_multimodal_chat_commands_are_wire_compatible() {
 }
 
 #[test]
+fn agent_interrupt_round_trips() {
+    let command = Command::AgentInterrupt {
+        command_id: "interrupt-1".into(),
+        session_id: "session-1".into(),
+        agent_instance_id: "agent-child".into(),
+    };
+    let value = serde_json::to_value(&command).unwrap();
+    assert_eq!(value["type"], "agent_interrupt");
+    assert_eq!(value["agent_instance_id"], "agent-child");
+    assert_eq!(serde_json::from_value::<Command>(value).unwrap(), command);
+
+    let result = crate::CommandResult::AgentInterrupted {
+        session_id: "session-1".into(),
+        agent_instance_id: "agent-child".into(),
+        accepted: false,
+        timestamp: 42,
+    };
+    let value = serde_json::to_value(result).unwrap();
+    assert_eq!(value["type"], "agent_interrupted");
+    assert_eq!(value["accepted"], false);
+}
+
+#[test]
 fn oauth_login_defaults_to_browser_and_cancel_round_trips() {
     let parsed: Command = serde_json::from_value(serde_json::json!({
         "type": "auth_login_o_auth",
