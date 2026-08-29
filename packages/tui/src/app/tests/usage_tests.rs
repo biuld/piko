@@ -36,6 +36,7 @@ fn session_reconcile_projects_cumulative_usage() {
                 cwd: "/tmp/piko-test".into(),
                 seq: 0,
                 entries: Vec::new(),
+                model_steps: Vec::new(),
                 current_leaf_id: None,
                 selected_agent_instance_id: Some("agent_session-1_root".into()),
                 active_turns: Vec::new(),

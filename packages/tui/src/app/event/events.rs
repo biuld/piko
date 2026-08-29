@@ -12,8 +12,11 @@ impl AppState {
         let agent_instance_id = boundary.agent_instance_id.clone();
         let mut outcome = piko_client_core::ApplyOutcome::Ignored;
         self.with_agent_timeline(&agent_instance_id, |timeline| {
-            outcome = timeline.apply_model_step_committed(boundary);
+            outcome = timeline.apply_model_step_committed(boundary.clone());
         });
+        if outcome != piko_client_core::ApplyOutcome::Inconsistent {
+            self.timelines.remember_model_step(boundary);
+        }
         if outcome == piko_client_core::ApplyOutcome::Inconsistent
             && let Some(session_id) = self.session.id.clone()
         {

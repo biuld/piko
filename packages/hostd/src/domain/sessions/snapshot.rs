@@ -9,6 +9,7 @@ impl SessionState {
             cwd: self.cwd.clone(),
             seq: self.seq,
             entries: self.entries.clone(),
+            model_steps: Vec::new(),
             current_leaf_id: self.current_leaf_id.clone(),
             selected_agent_instance_id: self.active_agent_instance_id.clone(),
             // Pending approvals/interactions are process-local and filled by

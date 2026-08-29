@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use piko_protocol::SessionTreeEntry;
+use piko_protocol::{ModelStepBoundary, SessionTreeEntry};
 
 use super::Timeline;
 
@@ -13,6 +13,7 @@ pub struct TimelineStore {
     active: Timeline,
     inactive: HashMap<String, Timeline>,
     session_entries: Vec<(SessionTreeEntry, u64)>,
+    model_step_boundaries: Vec<ModelStepBoundary>,
 }
 
 impl TimelineStore {
@@ -21,6 +22,7 @@ impl TimelineStore {
             active: Timeline::new(),
             inactive: HashMap::new(),
             session_entries: Vec::new(),
+            model_step_boundaries: Vec::new(),
         }
     }
 
@@ -41,10 +43,29 @@ impl TimelineStore {
         &self.session_entries
     }
 
+    pub fn model_step_boundaries_for(&self, agent_instance_id: &str) -> Vec<ModelStepBoundary> {
+        self.model_step_boundaries
+            .iter()
+            .filter(|boundary| boundary.agent_instance_id == agent_instance_id)
+            .cloned()
+            .collect()
+    }
+
+    pub fn remember_model_step(&mut self, boundary: ModelStepBoundary) {
+        if self
+            .model_step_boundaries
+            .iter()
+            .all(|existing| existing.model_step_id != boundary.model_step_id)
+        {
+            self.model_step_boundaries.push(boundary);
+        }
+    }
+
     pub fn clear(&mut self) {
         self.active.clear();
         self.inactive.clear();
         self.session_entries.clear();
+        self.model_step_boundaries.clear();
     }
 
     pub fn begin_projection_batch(&mut self) {
@@ -64,8 +85,12 @@ impl TimelineStore {
     pub fn ensure_inactive(&mut self, agent_instance_id: impl Into<String>) {
         let agent_instance_id = agent_instance_id.into();
         if !self.inactive.contains_key(&agent_instance_id) {
-            let timeline =
-                Self::seeded_timeline(&self.session_entries, self.active.thinking_visible);
+            let timeline = Self::seeded_timeline(
+                &self.session_entries,
+                &self.model_step_boundaries,
+                &agent_instance_id,
+                self.active.thinking_visible,
+            );
             self.inactive.insert(agent_instance_id, timeline);
         }
     }
@@ -100,7 +125,12 @@ impl TimelineStore {
             return;
         }
         let next = self.inactive.remove(agent_instance_id).unwrap_or_else(|| {
-            Self::seeded_timeline(&self.session_entries, self.active.thinking_visible)
+            Self::seeded_timeline(
+                &self.session_entries,
+                &self.model_step_boundaries,
+                agent_instance_id,
+                self.active.thinking_visible,
+            )
         });
         let previous_timeline = std::mem::replace(&mut self.active, next);
         if let Some(previous) = previous {
@@ -132,11 +162,22 @@ impl TimelineStore {
         outcome
     }
 
-    fn seeded_timeline(entries: &[(SessionTreeEntry, u64)], thinking_visible: bool) -> Timeline {
+    fn seeded_timeline(
+        entries: &[(SessionTreeEntry, u64)],
+        model_step_boundaries: &[ModelStepBoundary],
+        agent_instance_id: &str,
+        thinking_visible: bool,
+    ) -> Timeline {
         let mut timeline = Timeline::new();
         timeline.thinking_visible = thinking_visible;
         for (entry, order) in entries {
             let _ = timeline.apply_session_entry(entry.clone(), *order);
+        }
+        for boundary in model_step_boundaries
+            .iter()
+            .filter(|boundary| boundary.agent_instance_id == agent_instance_id)
+        {
+            let _ = timeline.apply_model_step_committed(boundary.clone());
         }
         timeline
     }

@@ -201,6 +201,7 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 cwd: "/tmp/piko-test".into(),
                 seq: 0,
                 entries: Vec::new(),
+                model_steps: Vec::new(),
                 current_leaf_id: None,
                 selected_agent_instance_id: None,
                 active_turns: Vec::new(),

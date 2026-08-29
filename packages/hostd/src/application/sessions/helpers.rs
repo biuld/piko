@@ -69,13 +69,32 @@ impl HostApp {
         if let Some(live_agents) = runner.list_agent_instances(session_id).await {
             agents = live_agents;
         }
-        merge_agent_usage_runtime(
-            &mut snapshot,
-            &agents,
-            self.session_paths.lock().await.get(session_id).cloned(),
-            &self.session_store_factory,
-        )
-        .await;
+        let session_dir = self.session_paths.lock().await.get(session_id).cloned();
+        let projection = match session_dir {
+            Some(session_dir) => self
+                .session_store_factory
+                .open(&session_dir)
+                .load_projection()
+                .await
+                .ok(),
+            None => None,
+        };
+        if let Some(projection) = projection.as_ref() {
+            snapshot.model_steps = projection
+                .agent_executions
+                .values()
+                .flat_map(|execution| execution.model_steps.iter().cloned())
+                .collect();
+            snapshot.model_steps.sort_by(|left, right| {
+                left.started_at
+                    .cmp(&right.started_at)
+                    .then_with(|| left.finished_at.cmp(&right.finished_at))
+                    .then_with(|| left.execution_id.cmp(&right.execution_id))
+                    .then_with(|| left.step_index.cmp(&right.step_index))
+                    .then_with(|| left.model_step_id.cmp(&right.model_step_id))
+            });
+        }
+        merge_agent_usage_runtime(&mut snapshot, &agents, projection.as_ref());
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
@@ -152,11 +171,10 @@ impl HostApp {
     }
 }
 
-async fn merge_agent_usage_runtime(
+fn merge_agent_usage_runtime(
     snapshot: &mut SessionSnapshot,
     agents: &[AgentInfo],
-    session_dir: Option<std::path::PathBuf>,
-    store_factory: &std::sync::Arc<dyn crate::ports::SessionStoreFactory>,
+    projection: Option<&crate::ports::storage_types::SessionProjection>,
 ) {
     let mut row_by_instance = snapshot
         .agent_usage
@@ -176,9 +194,7 @@ async fn merge_agent_usage_runtime(
             });
     }
 
-    if let Some(session_dir) = session_dir
-        && let Ok(projection) = store_factory.open(&session_dir).load_projection().await
-    {
+    if let Some(projection) = projection {
         for row in row_by_instance.values_mut() {
             row.run_count = Some(0);
             row.active_duration_ms = Some(0);
@@ -186,7 +202,7 @@ async fn merge_agent_usage_runtime(
         merge_execution_stats(
             &mut row_by_instance,
             agents,
-            projection.agent_executions.into_values(),
+            projection.agent_executions.values().cloned(),
             now_ms(),
         );
     }

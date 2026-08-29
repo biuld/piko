@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         cwd: cwd.clone(),
                         seq: 0,
                         entries: Vec::new(),
+                        model_steps: Vec::new(),
                         current_leaf_id: None,
                         selected_agent_instance_id: Some("pty-agent".into()),
                         active_turns: Vec::new(),

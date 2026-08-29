@@ -71,6 +71,7 @@ pub fn session_snapshot(session_id: &str) -> SessionSnapshot {
         cwd: "/tmp/test".to_string(),
         seq: 1,
         entries: Vec::new(),
+        model_steps: Vec::new(),
         current_leaf_id: None,
         selected_agent_instance_id: Some("root".to_string()),
         active_turns: Vec::new(),

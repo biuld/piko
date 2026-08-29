@@ -128,6 +128,9 @@ pub struct SessionSnapshot {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
+    /// Durable model-step boundaries used to reconstruct presentation dividers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_steps: Vec<crate::execution::ModelStepBoundary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_leaf_id: Option<String>,
     /// Authoritative AgentInstance view selected for this Session.
@@ -215,6 +218,7 @@ mod usage_tests {
         }))
         .unwrap();
         assert!(snapshot.agent_usage.is_empty());
+        assert!(snapshot.model_steps.is_empty());
     }
 }
 

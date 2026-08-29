@@ -213,6 +213,29 @@ async fn turn_writes_durable_trajectory_records() {
         "the tool declaration is part of the first atomic model step"
     );
 
+    let refreshed = server
+        .handle_command(Command::StateSnapshot {
+            command_id: "snapshot-after-turn".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+    let snapshot = refreshed
+        .iter()
+        .find_map(|event| match event {
+            ServerMessage::SessionReconciled(reconciled) => Some(&reconciled.snapshot),
+            _ => None,
+        })
+        .expect("state snapshot response");
+    assert_eq!(snapshot.model_steps.len(), 2);
+    assert_eq!(
+        snapshot
+            .model_steps
+            .iter()
+            .map(|step| step.step_index)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+
     let projection = wait_for_trajectory(
         &store,
         1,

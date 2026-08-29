@@ -237,6 +237,10 @@ impl AppState {
                 for (entry, order) in session_entries {
                     let _ = self.timeline_mut().apply_session_entry(entry, order);
                 }
+                let model_steps = self.timelines.model_step_boundaries_for(&agent_instance_id);
+                for boundary in model_steps {
+                    let _ = self.timeline_mut().apply_model_step_committed(boundary);
+                }
                 let events = if snapshot.events.is_empty() {
                     replay
                 } else {
