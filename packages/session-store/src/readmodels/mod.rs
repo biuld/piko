@@ -124,7 +124,9 @@ pub(crate) fn load_current_if_current(
     if !trajectory_aligned {
         return Ok(None);
     }
-    Ok(Some((current.aggregate, trajectory.projection)))
+    let mut trajectory = trajectory.projection;
+    trajectory.refresh_counts();
+    Ok(Some((current.aggregate, trajectory)))
 }
 
 fn write_head(

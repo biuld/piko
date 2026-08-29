@@ -48,8 +48,34 @@ fn model_step_divider_waits_for_late_message_and_maps_tool_call_message_ids() {
             timestamp: None,
         },
     ));
+    app.apply_event(committed(
+        "assistant-1:tool_call:1",
+        3,
+        Message::ToolCall {
+            id: "call-2".into(),
+            name: "run".into(),
+            arguments: json!({ "cmd": "true" }),
+            model: None,
+            provider: None,
+            timestamp: None,
+        },
+    ));
+    app.apply_event(committed(
+        "assistant-1:tool_result:0",
+        4,
+        Message::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: Some("read".into()),
+            content: vec![piko_protocol::ContentBlock::Text {
+                text: "done".into(),
+            }],
+            details: None,
+            is_error: Some(false),
+            timestamp: None,
+        },
+    ));
 
-    app.apply_event(committed("assistant-2", 3, assistant("second")));
+    app.apply_event(committed("assistant-2", 5, assistant("second")));
     app.apply_event(model_step("step-2", 2, "assistant-2", Vec::new()));
 
     assert_eq!(
@@ -57,8 +83,10 @@ fn model_step_divider_waits_for_late_message_and_maps_tool_call_message_ids() {
         vec![
             TimelineKind::Assistant,
             TimelineKind::Tool,
+            TimelineKind::Tool,
             TimelineKind::ModelStepDivider,
             TimelineKind::Assistant,
         ]
     );
+    assert_eq!(app.timeline().tool_calls.len(), 2);
 }

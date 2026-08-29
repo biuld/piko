@@ -69,7 +69,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
             serde_json::to_value(&assembly).unwrap(),
         )
         .unwrap();
-    let step = TrajectoryModelStepRecord {
+    let step_start = TrajectoryModelStepRecord {
         identity: assembly.identity.clone(),
         step_id: "step-1".into(),
         provider: "test".into(),
@@ -77,8 +77,8 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         request: serde_json::json!({"input": "hi"}),
         options: serde_json::json!({}),
         started_at: 12,
-        finished_at: Some(13),
-        duration_ms: Some(1),
+        finished_at: None,
+        duration_ms: None,
         retries: Vec::new(),
         fallback: None,
         response: None,
@@ -87,16 +87,29 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
     };
     store
         .append_optional_event(
-            "t-step",
+            "t-step-start",
             3,
             TRAJECTORY_EVENT_MODEL_STEP,
-            serde_json::to_value(&step).unwrap(),
+            serde_json::to_value(&step_start).unwrap(),
+        )
+        .unwrap();
+    let step_finish = TrajectoryModelStepRecord {
+        finished_at: Some(13),
+        duration_ms: Some(1),
+        ..step_start
+    };
+    store
+        .append_optional_event(
+            "t-step-finish",
+            4,
+            TRAJECTORY_EVENT_MODEL_STEP,
+            serde_json::to_value(&step_finish).unwrap(),
         )
         .unwrap();
     store
         .commit_events(
             "ex-finish",
-            4,
+            5,
             vec![EventData::ExecutionFinished {
                 execution_id,
                 report: piko_protocol::AgentRunReport {
@@ -116,7 +129,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
     store
         .append_optional_event(
             "t-terminal",
-            5,
+            6,
             piko_protocol::TRAJECTORY_EVENT_TERMINAL,
             serde_json::to_value(TrajectoryTerminalRecord {
                 identity: assembly.identity.clone(),
@@ -154,13 +167,17 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         .await
         .unwrap();
     assert!(run.assembly.is_some());
-    assert_eq!(run.records.len(), 2);
+    assert_eq!(run.records.len(), 3);
     assert!(matches!(
         &run.records[0],
-        TrajectoryRecord::ModelStep(step) if step.step_id == "step-1"
+        TrajectoryRecord::ModelStep(step) if step.step_id == "step-1" && step.finished_at.is_none()
     ));
     assert!(matches!(
         &run.records[1],
+        TrajectoryRecord::ModelStep(step) if step.step_id == "step-1" && step.finished_at == Some(13)
+    ));
+    assert!(matches!(
+        &run.records[2],
         TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
             kind: TrajectoryTerminalKind::Completed,
             ..
@@ -194,7 +211,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
     store
         .append_optional_event(
             "t-step-2",
-            6,
+            7,
             TRAJECTORY_EVENT_MODEL_STEP,
             serde_json::to_value(&step2).unwrap(),
         )
@@ -204,7 +221,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         .await
         .unwrap();
     assert_eq!(run.summary.step_count, 2);
-    assert_eq!(run.records.len(), 3);
+    assert_eq!(run.records.len(), 4);
 }
 
 #[tokio::test]

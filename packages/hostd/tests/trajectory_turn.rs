@@ -298,7 +298,7 @@ async fn turn_writes_durable_trajectory_records() {
         .await
         .unwrap();
     assert_eq!(page.runs.len(), 1, "one run recorded");
-    assert_eq!(page.runs[0].tool_call_count, 2);
+    assert_eq!(page.runs[0].tool_call_count, 1, "one logical tool call");
     assert_eq!(
         page.runs[0].terminal,
         Some(piko_protocol::TrajectoryTerminalKind::Completed)
@@ -308,6 +308,7 @@ async fn turn_writes_durable_trajectory_records() {
         .await
         .unwrap();
     assert!(run.assembly.is_some());
+    assert_eq!(run.summary.tool_call_count, 1, "one logical tool call");
     let tool_records = run
         .records
         .iter()

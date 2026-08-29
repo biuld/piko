@@ -30,7 +30,8 @@ usage-carrying SSE stream, and asserts on the exported `llm.request` span.
 ## Result
 
 - One turn exports the full span tree with correct parentage:
-  `turn.run → agent.run → model.step → tool.batch → tool.call`.
+  `turn.run → agent.run → model.step`, with `model.step.commit` and
+  `tool.batch → tool.call` as sibling phases under `agent.run`.
 - Correlation attributes: `turn.run` carries `session_id`/`run_id`;
   `model.step` carries `model="test-model"`, `provider="test"`; spans carry
   `agent_instance_id`.
@@ -55,8 +56,11 @@ usage-carrying SSE stream, and asserts on the exported `llm.request` span.
 
 ## Invariants
 
-- Every turn produces exactly one root `turn.run` span; model steps and tool
-  calls nest under the agent run that issued them.
+- Every turn produces exactly one root `turn.run` span; model steps, model-step
+  commits, and tool calls nest under the agent run that issued them.
+- `model.step` duration ends when the model response has been assembled, before
+  durable model-step commit and local tool execution. `model.step.commit`
+  measures the atomic persistence phase separately.
 - `llm.request` is a child of its `model.step`; retry/fallback/usage/timing
   events land on the `llm.request` span even though the stream is consumed
   by a different layer.

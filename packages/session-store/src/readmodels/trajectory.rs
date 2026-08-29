@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use piko_protocol::{
@@ -38,9 +38,57 @@ pub struct TrajectoryRunProjection {
     pub assembly: Option<TrajectoryAssemblyRecord>,
     pub records: Vec<TrajectoryRecord>,
     pub messages: Vec<TrajectoryMessage>,
+    /// Number of distinct model steps represented by lifecycle records.
+    /// A normal step has both a start and a finish record.
     pub step_count: u32,
+    /// Number of distinct tool calls represented by lifecycle records.
     pub tool_call_count: u32,
     pub child_run_count: u32,
+}
+
+impl TrajectoryProjection {
+    /// Recompute counters when loading a projection written by an older
+    /// reducer. Lifecycle records remain in `records`, while the counters
+    /// describe logical model steps and tool calls.
+    pub(crate) fn refresh_counts(&mut self) {
+        for run in self.runs.values_mut() {
+            run.refresh_counts();
+        }
+    }
+}
+
+impl TrajectoryRunProjection {
+    /// Count one logical model step even though trajectory normally stores a
+    /// start and a finish record for it.
+    pub fn logical_step_count(&self) -> u32 {
+        let ids = self
+            .records
+            .iter()
+            .filter_map(|record| match record {
+                TrajectoryRecord::ModelStep(step) => Some(step.step_id.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        ids.len().try_into().unwrap_or(u32::MAX)
+    }
+
+    /// Count one logical tool call across all of its lifecycle status records.
+    pub fn logical_tool_call_count(&self) -> u32 {
+        let ids = self
+            .records
+            .iter()
+            .filter_map(|record| match record {
+                TrajectoryRecord::ToolCall(call) => Some(call.call_id.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        ids.len().try_into().unwrap_or(u32::MAX)
+    }
+
+    fn refresh_counts(&mut self) {
+        self.step_count = self.logical_step_count();
+        self.tool_call_count = self.logical_tool_call_count();
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -170,9 +218,9 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
                 .runs
                 .entry(record.identity.run_id.clone())
                 .or_default();
-            run.step_count += 1;
             run.records
                 .push(TrajectoryRecord::ModelStep(Box::new(record)));
+            run.refresh_counts();
         }
         TRAJECTORY_EVENT_TOOL_CALL => {
             let Ok(record) = serde_json::from_value::<TrajectoryToolCallRecord>(payload.clone())
@@ -183,8 +231,8 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
                 .runs
                 .entry(record.identity.run_id.clone())
                 .or_default();
-            run.tool_call_count += 1;
             run.records.push(TrajectoryRecord::ToolCall(record));
+            run.refresh_counts();
         }
         TRAJECTORY_EVENT_CHILD_RUN => {
             let Ok(record) = serde_json::from_value::<TrajectoryChildRunRecord>(payload.clone())

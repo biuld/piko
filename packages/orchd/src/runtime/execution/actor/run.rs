@@ -122,63 +122,78 @@ impl ExecutionActor {
                 context_window = tracing::field::Empty,
                 context_remaining = tracing::field::Empty,
             );
-            let step_started = std::time::Instant::now();
-            let iteration = async {
-                let step = self.run_model_step().await?;
-                self.commit_model_step(&step).await?;
-                if step.cancelled {
-                    return Err(AgentApiError::Cancelled);
-                }
-                if let Some(error) = step.failure {
-                    return Err(AgentApiError::PersistenceFailed(error));
-                }
-                let respond_step_completed = step.respond_after_steer;
-
-                if !step.tool_calls.is_empty() {
-                    if !self.request.config.allow_tool_calls {
-                        return Err(AgentApiError::InputRejected);
-                    }
-                    self.execute_and_commit_tools(
-                        &step.tool_calls,
-                        &step.routes,
-                        &step.message_id,
-                        step.context_remaining,
-                    )
-                    .await?;
-                    self.drain_controls_at_step_boundary().await?;
-                    if let Some(steering) = self.state.steering.pop_front() {
-                        self.commit_steering(&steering).await?;
-                    }
-                    return Ok((true, step.model));
-                }
-
-                self.drain_controls_at_step_boundary().await?;
-                if let Some(steering) = self.state.steering.pop_front() {
-                    self.commit_steering(&steering).await?;
-                    return Ok((true, step.model));
-                }
-
-                if respond_step_completed {
-                    // The steered message was answered; resume the turn's
-                    // normal tool loop (F-35 / ADR-021).
-                    return Ok((true, step.model));
-                }
-
-                Ok((false, step.model))
-            }
-            .instrument(step_span)
-            .await?;
-
-            let (more, model) = iteration;
+            let step = self.run_model_step().instrument(step_span).await?;
+            // Use the timestamps captured at the semantic model boundary, so
+            // request preparation and all post-response work stay out of the
+            // model-step metric.
+            let step_duration_ms = step.finished_at.saturating_sub(step.started_at).max(0) as u64;
+            let model = step.model.id.clone();
+            let provider = step.model.provider.clone();
+            let commit_span = tracing::info_span!(
+                "model.step.commit",
+                session_id = %self.identity.session_id,
+                run_id = %self.identity.run_id,
+                execution_id = %self.identity.execution_id,
+                agent_instance_id = %self.identity.agent_instance_id,
+                step_id = %step.model_step_id,
+                step_index = step.step_index,
+                tool_calls = step.tool_calls.len(),
+            );
+            let commit_result = self.commit_model_step(&step).instrument(commit_span).await;
+            let status = if commit_result.is_err() {
+                "error"
+            } else if step.cancelled {
+                "cancelled"
+            } else if step.failure.is_some() {
+                "error"
+            } else {
+                "ok"
+            };
             self.services
                 .telemetry()
                 .model_step_completed(ModelStepTelemetry {
-                    model: model.id,
-                    provider: model.provider,
-                    duration_ms: step_started.elapsed().as_millis() as u64,
-                    status: "ok",
+                    model,
+                    provider,
+                    duration_ms: step_duration_ms,
+                    status,
                 });
-            if more {
+            commit_result?;
+
+            if step.cancelled {
+                return Err(AgentApiError::Cancelled);
+            }
+            if let Some(error) = step.failure {
+                return Err(AgentApiError::PersistenceFailed(error));
+            }
+            let respond_step_completed = step.respond_after_steer;
+
+            if !step.tool_calls.is_empty() {
+                if !self.request.config.allow_tool_calls {
+                    return Err(AgentApiError::InputRejected);
+                }
+                self.execute_and_commit_tools(
+                    &step.tool_calls,
+                    &step.routes,
+                    &step.message_id,
+                    step.context_remaining,
+                )
+                .await?;
+                self.drain_controls_at_step_boundary().await?;
+                if let Some(steering) = self.state.steering.pop_front() {
+                    self.commit_steering(&steering).await?;
+                }
+                continue;
+            }
+
+            self.drain_controls_at_step_boundary().await?;
+            if let Some(steering) = self.state.steering.pop_front() {
+                self.commit_steering(&steering).await?;
+                continue;
+            }
+
+            if respond_step_completed {
+                // The steered message was answered; resume the turn's
+                // normal tool loop (F-35 / ADR-021).
                 continue;
             }
 

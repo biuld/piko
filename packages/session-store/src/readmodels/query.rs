@@ -33,7 +33,8 @@ pub fn query_current(path: &Path) -> Result<SessionAggregate> {
 }
 
 pub fn query_trajectory(path: &Path) -> Result<crate::TrajectoryProjection> {
-    if let Some(projection) = load_trajectory_if_published(path)? {
+    if let Some(mut projection) = load_trajectory_if_published(path)? {
+        projection.refresh_counts();
         return Ok(projection);
     }
     Ok(SessionStore::open(path, OpenOptions::default())?
