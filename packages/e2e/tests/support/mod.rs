@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::{HashMap, HashSet},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -9,9 +10,7 @@ use std::{
 };
 
 use piko_comms::{ThreadBridgeReceiver, contracts::TuiHostBridge, thread_bridge};
-use piko_protocol::{
-    Command as HostCommand, CommandResult, ServerMessage, SessionSnapshot, TurnEvent,
-};
+use piko_protocol::{Command as HostCommand, CommandResult, ServerMessage, SessionSnapshot};
 use serde_json::Value;
 
 pub static E2E_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -37,6 +36,12 @@ pub struct HostdHarness {
     mode: String,
     release_path: PathBuf,
     gateway_log_path: PathBuf,
+    latest_submitted: HashMap<String, String>,
+    input_sessions: HashMap<String, String>,
+    active_work: HashMap<(String, String), String>,
+    completed_work: HashSet<String>,
+    terminal_usage: HashSet<String>,
+    terminal_reconciled: HashSet<String>,
 }
 
 impl HostdHarness {
@@ -75,6 +80,12 @@ impl HostdHarness {
             mode: mode.into(),
             release_path,
             gateway_log_path,
+            latest_submitted: HashMap::new(),
+            input_sessions: HashMap::new(),
+            active_work: HashMap::new(),
+            completed_work: HashSet::new(),
+            terminal_usage: HashSet::new(),
+            terminal_reconciled: HashSet::new(),
         }
     }
 
@@ -203,10 +214,13 @@ impl HostdHarness {
                 .checked_duration_since(Instant::now())
                 .unwrap_or_else(|| panic!("timed out waiting for {label}"));
             match self.rx.try_recv() {
-                Ok(HostLine::Message(message)) if predicate(message.as_ref()) => {
-                    return *message;
+                Ok(HostLine::Message(message)) => {
+                    self.observe(message.as_ref());
+                    if predicate(message.as_ref()) {
+                        return *message;
+                    }
+                    self.backlog.push(*message);
                 }
-                Ok(HostLine::Message(message)) => self.backlog.push(*message),
                 Ok(HostLine::DecodeError(error)) => panic!("hostd emitted invalid JSON: {error}"),
                 Ok(HostLine::Closed) => panic!("hostd closed while waiting for {label}"),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -294,17 +308,116 @@ impl HostdHarness {
         }
     }
 
-    pub fn wait_completed(&mut self, session_id: &str) -> TurnEvent {
-        match self.wait_for("turn completion", |message| {
+    pub fn wait_started(&mut self, session_id: &str) -> String {
+        let expected = self
+            .latest_submitted
+            .get(session_id)
+            .cloned()
+            .expect("submitted input receipt before work start");
+        match self.wait_for("agent work start", |message| {
             matches!(
                 message,
-                ServerMessage::TurnLifecycle(TurnEvent::Completed { session_id: id, .. })
-                    if id == session_id
+                ServerMessage::SessionReconciled(event)
+                    if event.session_id == session_id
+                        && event.snapshot.agent_work.iter().any(|work| {
+                            work.active_work.as_ref().is_some_and(|active| {
+                                active.root_input_id == expected
+                            })
+                        })
             )
         }) {
-            ServerMessage::TurnLifecycle(event) => event,
+            ServerMessage::SessionReconciled(event) => event
+                .snapshot
+                .agent_work
+                .into_iter()
+                .find_map(|work| work.active_work.map(|active| active.root_input_id))
+                .expect("active work"),
             _ => unreachable!(),
         }
+    }
+
+    pub fn wait_completed(&mut self, session_id: &str) {
+        let expected = self
+            .active_work
+            .iter()
+            .find_map(|((session, _), input_id)| (session == session_id).then(|| input_id.clone()))
+            .or_else(|| self.latest_submitted.get(session_id).cloned())
+            .expect("submitted input receipt before work completion");
+        if !self
+            .active_work
+            .values()
+            .any(|input_id| input_id == &expected)
+            && !self.completed_work.contains(&expected)
+        {
+            self.wait_started(session_id);
+        }
+        while !self.terminal_reconciled.contains(&expected) {
+            self.wait_for("agent work completion", |message| match message {
+                ServerMessage::SessionReconciled(event) => event.session_id == session_id,
+                ServerMessage::Usage(piko_protocol::UsageEvent::Updated {
+                    session_id: id,
+                    turn_id: Some(_),
+                    ..
+                }) => id == session_id,
+                _ => false,
+            });
+        }
+    }
+
+    fn observe(&mut self, message: &ServerMessage) {
+        if let ServerMessage::CommandResponse {
+            result: Ok(CommandResult::AgentInputSubmitted { receipt, .. }),
+            ..
+        } = message
+        {
+            self.latest_submitted
+                .insert(receipt.session_id.clone(), receipt.input_id.clone());
+            self.input_sessions
+                .insert(receipt.input_id.clone(), receipt.session_id.clone());
+        }
+        if let ServerMessage::Usage(piko_protocol::UsageEvent::Updated {
+            turn_id: Some(root_input_id),
+            ..
+        }) = message
+        {
+            self.terminal_usage.insert(root_input_id.clone());
+        }
+        let ServerMessage::SessionReconciled(event) = message else {
+            return;
+        };
+        let next = event
+            .snapshot
+            .agent_work
+            .iter()
+            .filter_map(|work| {
+                work.active_work.as_ref().map(|active| {
+                    (
+                        (event.session_id.clone(), work.agent_instance_id.clone()),
+                        active.root_input_id.clone(),
+                    )
+                })
+            })
+            .collect::<HashMap<_, _>>();
+        let previous_keys = self
+            .active_work
+            .keys()
+            .filter(|(session, _)| session == &event.session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in previous_keys {
+            let previous = self.active_work.remove(&key).expect("active work key");
+            if next.get(&key) != Some(&previous) {
+                self.completed_work.insert(previous);
+            }
+        }
+        for input_id in &self.terminal_usage {
+            if self.input_sessions.get(input_id) == Some(&event.session_id)
+                && !next.values().any(|active| active == input_id)
+            {
+                self.terminal_reconciled.insert(input_id.clone());
+            }
+        }
+        self.active_work.extend(next);
     }
 
     pub fn release(&self) {
@@ -345,7 +458,10 @@ impl HostdHarness {
                 return;
             }
             if Instant::now() >= deadline {
-                panic!("timed out waiting for gateway step {step}: {trace:?}");
+                panic!(
+                    "timed out waiting for gateway step {step}: gateway={trace:?}; host={:?}",
+                    self.trace()
+                );
             }
             std::thread::sleep(Duration::from_millis(10));
         }

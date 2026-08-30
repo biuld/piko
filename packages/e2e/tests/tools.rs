@@ -5,7 +5,7 @@ use std::fs;
 
 use piko_protocol::{
     ApprovalDecision, Command, CommandResult, InteractionAnswer, InteractionEvent, Message,
-    ServerMessage, StreamItemKind, StreamItemOp, TodoStatus, TurnEvent, UserInteractionResponse,
+    ServerMessage, StreamItemKind, StreamItemOp, TodoStatus, UserInteractionResponse,
 };
 use support::{HostdHarness, root_agent_id, serial_guard};
 
@@ -23,17 +23,7 @@ fn submit(host: &mut HostdHarness, session_id: &str, agent_instance_id: &str, co
 }
 
 fn started_turn(host: &mut HostdHarness, session_id: &str) -> String {
-    let message = host.wait_for("turn started", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Started { session_id: id, .. })
-                if id == session_id
-        )
-    });
-    let ServerMessage::TurnLifecycle(TurnEvent::Started { turn_id, .. }) = message else {
-        unreachable!();
-    };
-    turn_id
+    host.wait_started(session_id)
 }
 
 #[test]

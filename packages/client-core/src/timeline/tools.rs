@@ -251,22 +251,6 @@ impl AgentTimeline {
         tool.partial_json = Some(tool.argument_segments.concat());
     }
 
-    pub fn finish_turn(&mut self, turn_id: &str, terminal: ToolStatus) {
-        debug_assert!(matches!(
-            terminal,
-            ToolStatus::Failed | ToolStatus::Cancelled
-        ));
-        for item in &mut self.items {
-            if let TimelineItem::Tool(tool) = item
-                && tool.status == ToolStatus::Running
-                && tool.source_turn_id.as_deref() == Some(turn_id)
-            {
-                tool.status = terminal;
-                seal_streamed_args(tool);
-            }
-        }
-    }
-
     fn committed_tool_args(&self, tool_call_id: &str) -> Option<serde_json::Value> {
         self.committed_records
             .values()

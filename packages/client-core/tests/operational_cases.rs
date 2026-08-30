@@ -6,7 +6,7 @@ use piko_client_core::{
 };
 use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{
-    ApprovalDecision, ApprovalEvent, ReconcileReason, ServerMessage, ToolExecutionEvent, TurnEvent,
+    ApprovalDecision, ApprovalEvent, ReconcileReason, ServerMessage, ToolExecutionEvent,
 };
 
 #[test]
@@ -178,26 +178,6 @@ fn queue_update_populates_projection() {
     assert_eq!(queue.steer_count, 1);
     assert_eq!(queue.follow_up_count, 2);
     assert_eq!(queue.next_turn_count, 2);
-}
-
-#[test]
-fn failed_turn_remains_actionable() {
-    let mut ids = SeqIds(0);
-    let state = drive_to_live(&mut ids, "s1");
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Failed {
-            session_id: "s1".into(),
-            turn_id: "t1".into(),
-            agent_instance_id: "root".into(),
-            error: "model failed".into(),
-            usage: Default::default(),
-            timestamp: 1,
-        }),
-        &mut ids,
-    );
-    let live = state.live_session.as_ref().unwrap();
-    assert_eq!(live.turn_failures[0].error, "model failed");
 }
 
 #[test]

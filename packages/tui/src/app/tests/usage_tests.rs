@@ -39,7 +39,6 @@ fn session_reconcile_projects_cumulative_usage() {
                 model_steps: Vec::new(),
                 current_leaf_id: None,
                 selected_agent_instance_id: Some("agent_session-1_root".into()),
-                active_turns: Vec::new(),
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
@@ -89,7 +88,7 @@ fn session_reconcile_projects_cumulative_usage() {
 }
 
 #[test]
-fn usage_event_sets_chrome_and_clears_active_turn() {
+fn usage_event_sets_chrome() {
     let mut app = live_app();
 
     let mut turn_usage = piko_protocol::messages::Usage::empty();
@@ -99,14 +98,6 @@ fn usage_event_sets_chrome_and_clears_active_turn() {
     turn_usage.total_tokens = 13_400;
     turn_usage.cost = test_cost(0.05);
 
-    // Turn terminal no longer rolls usage into chrome.
-    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Completed {
-        session_id: "session-1".into(),
-        turn_id: "turn-1".into(),
-        agent_instance_id: "agent-1".into(),
-        usage: turn_usage.clone(),
-        timestamp: 0,
-    }));
     assert!(app.session.last_context_tokens.is_none());
     assert!(app.session.cumulative_usage.is_none());
 

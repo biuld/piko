@@ -20,6 +20,6 @@ pub use storage_types::{
 pub use trajectory_registry::{NoopTrajectoryRegistry, TrajectoryRegistryPort};
 pub use transcript_estimator::TranscriptEstimator;
 pub use turn_runner::{
-    AgentRunCompletion, AgentRunFailure, AgentRunRunner, AgentWorkAddress, ErrorAgentRunRunner,
-    OperationRunCompletion, ResumeAgent, TurnEventStream,
+    AgentRunCompletion, AgentRunEventStream, AgentRunFailure, AgentRunRunner, AgentWorkAddress,
+    ErrorAgentRunRunner, OperationRunCompletion, ResumeAgent,
 };

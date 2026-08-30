@@ -1,7 +1,7 @@
 # F-51: Agent work lifecycle and control plane
 
-> Status: proposed (slices 1–5 and slice 6.1 landed. Remaining: Turn wire
-> leftovers, Execution product maps, grain rekeys, recovery; see D-68 Slice 6)
+> Status: proposed (slices 1–5 and slices 6.1–6.2 landed. Remaining: Execution
+> product maps, grain rekeys, recovery; see D-68 Slice 6)
 > Priority: P0
 > Source evidence: piko product/runtime review; consolidates [F-01](F-01-turn-runtime.md), [F-10](F-10-multi-agent.md), [F-22](F-22-client-agent-projection.md), [F-31](F-31-durable-session-journal.md), and [F-48](F-48-authoritative-agent-lifecycle.md)
 > Design: [D-68](../design/D-68-agent-control-plane.md)
@@ -266,7 +266,8 @@ Verification: [V-64](../verification/V-64-agent-control-plane.md)
 
 - [ ] Normative docs and protocol use Session, AgentInstance, AgentInput, and
       ModelStep. Turn, Run, and Execution are not product identities
-      (Slice 6: `TurnEvent` / `StoredExecution` still exist).
+      (Slice 6.3+: `StoredExecution` and `turn_id` / `execution_id` grains
+      remain).
 - [x] Accepted start, steer, and follow-up inputs have durable identities and
       replayable dispositions.
 - [x] Active work is the unfinished root AgentInput; every accepted steer is
@@ -281,9 +282,9 @@ Verification: [V-64](../verification/V-64-agent-control-plane.md)
 - [x] Session reconciliation restores active work, pending steers, and
       follow-ups from host read models keyed by AgentInput.
 - [x] The TUI consumes host foreground and controls without local queue
-      authority. `ChatSubmit`, `QueueSteer`, `TurnCancel`, and the local
-      follow-up stack are gone. `TurnEvent` / `execution_id` leftovers remain
-      (Slice 6).
+      authority. `ChatSubmit`, `QueueSteer`, `TurnCancel`, `TurnEvent`, and
+      the local follow-up stack are gone. `execution_id` leftovers remain
+      (Slice 6.3+).
 - [x] Detached and user-origin work have identical steer and interrupt
       behavior.
 - [ ] Queued input cancellation works after restart and from a second TUI

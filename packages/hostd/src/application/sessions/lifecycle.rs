@@ -17,7 +17,7 @@ impl HostApp {
         session_store_factory: &dyn SessionStoreFactory,
         live_turn_run: bool,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let interrupt_events = if live_turn_run {
+        let recovery_events = if live_turn_run {
             Vec::new()
         } else if let Some(path) = session_path {
             let store = session_store_factory.open(path);
@@ -39,51 +39,25 @@ impl HostApp {
                 if root_input_id.is_empty() {
                     continue;
                 }
-                incomplete.push((root_input_id, execution.agent_instance_id.clone()));
+                incomplete.push(root_input_id);
             }
             let mut reports = Vec::with_capacity(incomplete.len());
-            for (root_input_id, agent_instance_id) in incomplete {
+            for root_input_id in incomplete {
                 reports.push((
                     root_input_id.clone(),
-                    agent_instance_id,
                     store
                         .agent_report_for_turn(&root_input_id)
                         .await
                         .map_err(storage_error)?,
                 ));
             }
-            if reports.iter().any(|(_, _, report)| report.is_none()) {
+            if reports.iter().any(|(_, report)| report.is_none()) {
                 store
                     .interrupt_incomplete_agent_executions()
                     .await
                     .map_err(storage_error)?;
             }
-            let mut events = Vec::with_capacity(reports.len());
-            for (root_input_id, agent_instance_id, report) in reports {
-                let report = match report {
-                    Some(report) => Some(report),
-                    None => store
-                        .agent_report_for_turn(&root_input_id)
-                        .await
-                        .map_err(storage_error)?,
-                };
-                let event = match report {
-                    Some(report) => crate::domain::sessions::turn_terminal_from_report(
-                        &session_id,
-                        &root_input_id,
-                        &report,
-                    ),
-                    None => crate::domain::sessions::turn_failed(
-                        &session_id,
-                        &root_input_id,
-                        agent_instance_id,
-                        "work interrupted: session reopened without a live execution",
-                        piko_protocol::Usage::empty(),
-                    ),
-                };
-                events.extend(state.with_usage_projection(event, None));
-            }
-            events
+            Vec::new()
         } else {
             Vec::new()
         };
@@ -103,7 +77,7 @@ impl HostApp {
             session_id,
             snapshot,
             agents,
-            interrupt_events,
+            recovery_events,
         ))
     }
 
@@ -398,13 +372,19 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(events.iter().any(|event| matches!(
-            event,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Cancelled {
-                turn_id: cancelled,
-                ..
-            }) if cancelled == "request-recovered"
-        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ServerMessage::SessionReconciled(_)))
+        );
+        let report = store
+            .agent_report_for_turn("request-recovered")
+            .unwrap()
+            .expect("recovery report");
+        assert!(matches!(
+            report.outcome,
+            piko_protocol::ExecutionOutcome::Cancelled { .. }
+        ));
 
         let replay = HostApp::session_open_response(
             &mut state,
@@ -419,7 +399,15 @@ mod tests {
         assert!(
             replay
                 .iter()
-                .all(|event| !matches!(event, ServerMessage::TurnLifecycle(_)))
+                .any(|event| matches!(event, ServerMessage::SessionReconciled(_)))
+        );
+        assert_eq!(
+            store
+                .agent_report_for_turn("request-recovered")
+                .unwrap()
+                .expect("stable recovery report")
+                .report_id,
+            report.report_id
         );
     }
 }

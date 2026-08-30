@@ -27,7 +27,6 @@ pub enum ServerMessage {
     ModelStepCommitted(crate::execution::ModelStepBoundary),
     /// Full agent projection keyed by agent_instance_id / execution_id as entity identity.
     AgentChanged(AgentInfo),
-    TurnLifecycle(TurnEvent),
     AgentRunLifecycle(AgentRunEvent),
     TurnDiff(TurnDiffEvent),
     Approval(ApprovalEvent),

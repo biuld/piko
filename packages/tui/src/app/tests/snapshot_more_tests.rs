@@ -78,7 +78,6 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 model_steps: Vec::new(),
                 current_leaf_id: Some("msg-tool".into()),
                 selected_agent_instance_id: None,
-                active_turns: Vec::new(),
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
@@ -195,7 +194,6 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
                 model_steps: Vec::new(),
                 current_leaf_id: Some("child".into()),
                 selected_agent_instance_id: Some("task-child".into()),
-                active_turns: Vec::new(),
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
@@ -286,13 +284,6 @@ fn stale_session_events_do_not_mutate_live_view() {
         steer_preview: None,
         follow_up_preview: None,
     }));
-    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Started {
-        session_id: "session-2".into(),
-        turn_id: "foreign-turn".into(),
-        agent_instance_id: "foreign-agent".into(),
-        timestamp: 0,
-    }));
-
     assert_eq!(app.queue_status.steer_count, 0);
     assert!(app.session.agent_work.is_empty());
 }

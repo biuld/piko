@@ -200,9 +200,10 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            ServerMessage::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+            ServerMessage::SessionReconciled(reconciled)
+                if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
         )),
-        "turn is not stuck in WaitingForApproval"
+        "agent work is not stuck in WaitingForApproval"
     );
     assert!(
         events.iter().any(|event| {

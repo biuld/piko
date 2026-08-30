@@ -67,7 +67,6 @@ impl AppState {
             Event::CommandResponse { command_id, result } => {
                 self.apply_command_response(command_id, result)
             }
-            Event::TurnLifecycle(event) => self.apply_turn_lifecycle(event),
             Event::AgentRunLifecycle(_) => Vec::new(),
             Event::Approval(event) => self.apply_approval(event),
             Event::Queue(event) => self.apply_queue(event),

@@ -146,14 +146,10 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
             Event::SessionReconciled(reconciled)
                 if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
                     && reconciled.snapshot.pending_approvals.len() == 1
-                    && reconciled.snapshot.active_turns.is_empty()
+                    && reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
         )),
         "events={events:?}"
     );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-    )));
 }
 
 fn user_input(

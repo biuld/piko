@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use piko_protocol::session::SessionTreeEntry;
 use piko_protocol::{
     AgentInfo, AgentInstanceId, ApprovalId, CommandId, InteractionId, SessionId, SessionSnapshot,
-    TurnId,
 };
 
 use crate::branch::active_branch_entries;
@@ -89,13 +88,6 @@ pub struct PendingInteraction {
     pub response_in_flight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnFailure {
-    pub turn_id: TurnId,
-    pub agent_instance_id: AgentInstanceId,
-    pub error: String,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QueueProjection {
     pub steer_count: u32,
@@ -126,7 +118,6 @@ pub struct LiveSession {
     pub session_timeline_entries: Vec<(piko_protocol::SessionTreeEntry, u64)>,
     /// Authoritative work state keyed by AgentInstance identity.
     pub agent_work: HashMap<AgentInstanceId, piko_protocol::AgentWorkSnapshot>,
-    pub turn_failures: Vec<TurnFailure>,
     pub queue: QueueProjection,
     pub pending_approvals: Vec<PendingApproval>,
     pub pending_interactions: Vec<PendingInteraction>,
@@ -294,7 +285,6 @@ impl LiveSession {
             timelines,
             session_timeline_entries,
             agent_work,
-            turn_failures: Vec::new(),
             queue: QueueProjection::default(),
             pending_approvals,
             pending_interactions,

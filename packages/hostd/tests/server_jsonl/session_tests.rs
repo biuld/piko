@@ -37,20 +37,16 @@ async fn root_chat_reuses_session_sink_across_turns() {
                 panic!("turn {command_id} failed: {err}");
             }
         }
-        assert!(
-            turn_events.iter().any(|event| matches!(
-                event,
-                Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
-            )),
-            "turn {command_id} must emit TurnStarted for TUI spinner; events={turn_events:?}"
-        );
-        assert!(
-            turn_events.iter().any(|event| matches!(
-                event,
-                Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-            )),
-            "turn {command_id} should complete"
-        );
+        assert!(turn_events.iter().any(|event| matches!(
+            event,
+            Event::SessionReconciled(reconciled)
+                if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())
+        )));
+        assert!(turn_events.iter().any(|event| matches!(
+            event,
+            Event::SessionReconciled(reconciled)
+                if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
+        )));
     }
 
     let refresh = server
@@ -233,17 +229,13 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
             .expect("turn_started should arrive")
             .unwrap();
         let event = serde_json::from_str::<Event>(line.trim()).unwrap();
-        if matches!(
-            event,
-            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
-        ) {
+        if matches!(&event, Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some()))
+        {
             break event;
         }
     };
-    assert!(matches!(
-        event,
-        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
-    ));
+    assert!(matches!(event, Event::SessionReconciled(_)));
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
         command_id: "approval".into(),

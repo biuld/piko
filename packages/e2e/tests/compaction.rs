@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use piko_protocol::{Command, CommandResult, CompactMode, ServerMessage, TurnEvent};
+use piko_protocol::{Command, CommandResult, CompactMode, ServerMessage};
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 #[test]
@@ -21,13 +21,13 @@ fn summarize_compaction_uses_the_injected_gateway_and_rehydrates_the_tree() {
         host.command_result("submit"),
         CommandResult::AgentInputSubmitted { .. }
     ));
-    host.wait_for("initial completion", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Completed { session_id: id, .. })
-                if id == &session_id
-        )
-    });
+    host.wait_completed(&session_id);
+    let snapshot = host.snapshot(&session_id, "pre-compact-snapshot");
+    assert!(snapshot.entries.iter().any(|entry| matches!(
+        entry,
+        piko_protocol::SessionTreeEntry::Message(message)
+            if matches!(message.message, piko_protocol::Message::Assistant { .. })
+    )));
 
     host.send(Command::SessionCompact {
         command_id: "compact".into(),
@@ -43,8 +43,13 @@ fn summarize_compaction_uses_the_injected_gateway_and_rehydrates_the_tree() {
 
     let reconciled = host.wait_for("summarized reconciliation", |message| {
         matches!(
-            message,
-            ServerMessage::SessionReconciled(event) if event.session_id == session_id
+            message, ServerMessage::SessionReconciled(event)
+                if event.session_id == session_id
+                    && event.snapshot.entries.iter().any(|entry| matches!(
+                        entry,
+                        piko_protocol::SessionTreeEntry::Compaction(compaction)
+                            if compaction.summary == "history summary"
+                    ))
         )
     });
     let ServerMessage::SessionReconciled(event) = reconciled else {

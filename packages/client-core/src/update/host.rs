@@ -81,9 +81,6 @@ pub(super) fn handle_host(
                 }
             }
         }
-        ServerMessage::TurnLifecycle(event) => {
-            events::handle_turn_lifecycle(state, event);
-        }
         ServerMessage::Approval(event) => {
             events::handle_approval_event(state, event);
         }

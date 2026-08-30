@@ -206,7 +206,6 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 model_steps: Vec::new(),
                 current_leaf_id: None,
                 selected_agent_instance_id: None,
-                active_turns: Vec::new(),
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),

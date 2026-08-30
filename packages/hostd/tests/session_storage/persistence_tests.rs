@@ -130,7 +130,13 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
         })
         .expect("first reconciled snapshot");
     let marker_id = piko_protocol::turn_abort_marker_message_id("exec-interrupted");
-    assert!(reconciled.snapshot.active_turns.is_empty());
+    assert!(
+        reconciled
+            .snapshot
+            .agent_work
+            .iter()
+            .all(|work| work.active_work.is_none())
+    );
     assert!(reconciled.snapshot.entries.iter().any(|entry| {
         matches!(entry, SessionTreeEntry::Message(message) if message.id == marker_id)
     }));

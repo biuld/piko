@@ -8,7 +8,8 @@ use piko_orchd_api::SessionSubscription;
 
 use super::{NoopTrajectoryRegistry, TrajectoryRegistryPort};
 
-pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
+pub type AgentRunEventStream =
+    Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
 /// Identity of one admitted AgentInput as a work handle. `input_id` is the
 /// durable control identity (the root input id for a work root).

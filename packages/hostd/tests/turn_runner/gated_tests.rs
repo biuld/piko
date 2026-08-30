@@ -65,7 +65,10 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
             .expect("queued command stream should remain open");
         let queued = matches!(
             event,
-            Event::TurnLifecycle(piko_protocol::TurnEvent::Queued { .. })
+            Event::CommandResponse {
+                result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { ref receipt, .. }),
+                ..
+            } if receipt.disposition == piko_protocol::AgentInputDisposition::PendingFollowUp
         );
         second_events.push(event);
         if queued {
@@ -77,19 +80,10 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         event,
         Event::CommandResponse {
             command_id,
-            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { receipt, .. }),
         } if command_id == "submit-2"
+            && receipt.disposition == piko_protocol::AgentInputDisposition::PendingFollowUp
     )));
-    assert!(
-        second_events.iter().any(|event| matches!(
-            event,
-            Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
-                agent_instance_id,
-                ..
-            }) if agent_instance_id == &format!("agent_{session_id}_root")
-        )),
-        "second root chat must queue while prior turn is active; events={second_events:?}"
-    );
     assert_eq!(
         prompts.lock().unwrap().as_slice(),
         ["first"],
@@ -101,13 +95,11 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         second_events.push(event);
     }
     let first_events = first.await.expect("first turn join");
-    assert!(
-        first_events.iter().any(|event| matches!(
-            event,
-            Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-        )),
-        "first turn should complete; events={first_events:?}"
-    );
+    assert!(first_events.iter().any(|event| matches!(
+        event,
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
+    )));
 
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -127,10 +119,12 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
     );
     assert!(second_events.iter().any(|event| matches!(
         event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Started { .. })
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())
     )));
     assert!(second_events.iter().any(|event| matches!(
         event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
     )));
 }

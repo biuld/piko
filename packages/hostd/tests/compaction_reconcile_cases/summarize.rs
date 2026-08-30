@@ -42,15 +42,10 @@ piko_protocol::MessageContent::String("hello".into()),
     assert!(
         turn_events.iter().any(|event| matches!(
             event,
-            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
+            Event::SessionReconciled(reconciled)
+                if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
         )),
         "turn must complete before compact; events={turn_events:?}"
-    );
-    assert!(
-        turn_events
-            .iter()
-            .all(|event| !matches!(event, Event::SessionReconciled(_))),
-        "short transcript must not auto-compact during the turn"
     );
 
     let compact_events = server

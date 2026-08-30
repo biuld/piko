@@ -36,14 +36,9 @@ async fn root_chat_streams_started_before_runner_finishes() {
         } if command_id == "submit"
     ));
 
-    let mut started = events.recv().await.unwrap();
-    if matches!(started, Event::SessionReconciled(_)) {
-        started = events.recv().await.unwrap();
-    }
-    assert!(matches!(
-        started,
-        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
-    ));
+    let started = events.recv().await.unwrap();
+    assert!(matches!(started, Event::SessionReconciled(reconciled)
+        if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())));
 }
 
 #[tokio::test]
@@ -87,14 +82,9 @@ async fn approval_response_is_not_blocked_by_active_turn() {
             ..
         }
     ));
-    let mut started_event = events.recv().await.unwrap();
-    if matches!(started_event, Event::SessionReconciled(_)) {
-        started_event = events.recv().await.unwrap();
-    }
-    assert!(matches!(
-        started_event,
-        Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
-    ));
+    let started_event = events.recv().await.unwrap();
+    assert!(matches!(started_event, Event::SessionReconciled(reconciled)
+        if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
         .unwrap();
@@ -199,15 +189,13 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
     let completed_index = turn_events
         .iter()
         .position(|event| {
-            matches!(
-                event,
-                Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
-            )
+            matches!(event, Event::SessionReconciled(reconciled)
+                if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none()))
         })
         .unwrap();
     assert!(
         final_message_index < completed_index,
-        "completion barrier must project final transcript before TurnCompleted"
+        "completion barrier must project final transcript before terminal reconciliation"
     );
 
     let refresh = server

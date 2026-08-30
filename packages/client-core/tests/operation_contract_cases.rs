@@ -3,7 +3,7 @@ mod helpers;
 use helpers::*;
 use piko_client_core::ClientIntent;
 use piko_protocol::{
-    ApprovalDecision, ApprovalEvent, Command, InteractionEvent, ServerMessage, TurnEvent,
+    ApprovalDecision, ApprovalEvent, Command, InteractionEvent, ServerMessage,
     UserInteractionResponse, UserInteractionStatus,
 };
 
@@ -64,21 +64,9 @@ fn c8_submit_empty_text_rejected() {
 }
 
 #[test]
-fn c8_turn_lifecycle_tracking() {
+fn c8_active_work_drives_cancel() {
     let mut ids = SeqIds(0);
     let state = drive_to_live(&mut ids, "sess-1");
-
-    // Turn started
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Started {
-            session_id: "sess-1".into(),
-            turn_id: "turn-1".into(),
-            agent_instance_id: "root".into(),
-            timestamp: 1,
-        }),
-        &mut ids,
-    );
 
     let mut snapshot = session_snapshot("sess-1");
     snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
@@ -124,63 +112,34 @@ fn c8_turn_lifecycle_tracking() {
         _ => panic!("expected AgentInterrupt"),
     }
 
-    // Turn completed
+    let mut snapshot = session_snapshot("sess-1");
+    snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
+        agent_instance_id: "root".into(),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        foreground: piko_protocol::AgentForeground::Idle,
+        active_work: None,
+        pending_steers: Vec::new(),
+        queued_inputs: Vec::new(),
+        pending_action: None,
+    }];
     let (state, _) = host(
         state,
-        ServerMessage::TurnLifecycle(TurnEvent::Completed {
+        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
             session_id: "sess-1".into(),
-            turn_id: "turn-1".into(),
-            agent_instance_id: "root".into(),
-            usage: Default::default(),
-            timestamp: 2,
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "e1".into(),
+                seq: 3,
+            },
+            snapshot,
+            agents: vec![agent_info("sess-1", "root", None)],
         }),
         &mut ids,
     );
-
-    let session = state.live_session.as_ref().unwrap();
-    assert!(session.turn_failures.is_empty());
-}
-
-#[test]
-fn turn_completed_does_not_roll_usage_chrome() {
-    let mut ids = SeqIds(0);
-    let state = drive_to_live(&mut ids, "sess-1");
-
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Started {
-            session_id: "sess-1".into(),
-            turn_id: "turn-u".into(),
-            agent_instance_id: "root".into(),
-            timestamp: 1,
-        }),
-        &mut ids,
+    assert_eq!(
+        state.live_session.as_ref().unwrap().agent_work["root"].foreground,
+        piko_protocol::AgentForeground::Idle
     );
-
-    let usage = piko_protocol::messages::Usage {
-        input: 10_000,
-        output: 100,
-        cache_read: 3_000,
-        cache_write: 0,
-        total_tokens: 13_100,
-        units: Default::default(),
-        cost: test_cost(0.01),
-    };
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Completed {
-            session_id: "sess-1".into(),
-            turn_id: "turn-u".into(),
-            agent_instance_id: "root".into(),
-            usage: usage.clone(),
-            timestamp: 2,
-        }),
-        &mut ids,
-    );
-
-    let session = state.live_session.as_ref().unwrap();
-    assert_eq!(session.last_context_tokens, None);
-    assert_eq!(session.cumulative_usage, None);
 }
 
 #[test]
@@ -188,26 +147,7 @@ fn usage_updated_event_is_authoritative_for_chrome() {
     let mut ids = SeqIds(0);
     let state = drive_to_live(&mut ids, "sess-1");
 
-    // Terminal turn alone leaves chrome empty; Usage is the sole path.
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Completed {
-            session_id: "sess-1".into(),
-            turn_id: "turn-u".into(),
-            agent_instance_id: "root".into(),
-            usage: piko_protocol::messages::Usage {
-                input: 1_000,
-                output: 10,
-                cache_read: 0,
-                cache_write: 0,
-                total_tokens: 1_010,
-                units: Default::default(),
-                cost: Default::default(),
-            },
-            timestamp: 1,
-        }),
-        &mut ids,
-    );
+    // Usage is the sole path for usage chrome.
     assert_eq!(
         state.live_session.as_ref().unwrap().last_context_tokens,
         None

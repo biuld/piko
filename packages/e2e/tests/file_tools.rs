@@ -3,7 +3,7 @@ mod support;
 
 use std::fs;
 
-use piko_protocol::{ApprovalDecision, Command, CommandResult, Message, ServerMessage, TurnEvent};
+use piko_protocol::{ApprovalDecision, Command, CommandResult, Message, ServerMessage};
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 #[test]
@@ -25,16 +25,7 @@ fn workspace_edit_requires_approval_updates_the_file_and_records_diff() {
         host.command_result("submit"),
         CommandResult::AgentInputSubmitted { .. }
     ));
-    let turn_id = match host.wait_for("turn started", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Started { session_id: id, .. })
-                if id == &session_id
-        )
-    }) {
-        ServerMessage::TurnLifecycle(TurnEvent::Started { turn_id, .. }) => turn_id,
-        _ => unreachable!(),
-    };
+    let turn_id = host.wait_started(&session_id);
 
     let approval_id = match host.wait_for("edit approval", |message| {
         matches!(

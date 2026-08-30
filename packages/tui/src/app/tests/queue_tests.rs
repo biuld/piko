@@ -223,26 +223,6 @@ fn steer_while_idle_keeps_draft() {
 }
 
 #[test]
-fn queued_event_does_not_replace_running_work() {
-    let mut app = running_app();
-
-    app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
-        session_id: "session-1".into(),
-        turn_id: "turn-queued".into(),
-        agent_instance_id: "task-1".into(),
-        timestamp: 0,
-    }));
-
-    assert_eq!(
-        app.session.agent_work["task-1"]
-            .active_work
-            .as_ref()
-            .map(|work| work.root_input_id.as_str()),
-        Some("input-live")
-    );
-}
-
-#[test]
 fn dequeue_restores_preview_and_cancels_authoritative_input() {
     let mut app = running_app();
     app.session.agent_work.insert(

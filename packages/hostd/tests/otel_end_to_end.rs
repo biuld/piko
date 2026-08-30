@@ -166,10 +166,8 @@ async fn turn_records_metrics_and_logs_without_span_export() {
     .expect("turn should complete");
     assert!(events.iter().any(|event| matches!(
         event,
-        ServerMessage::TurnLifecycle(piko_protocol::TurnEvent::Completed {
-            agent_instance_id,
-            ..
-        }) if agent_instance_id == &root_agent_instance_id
+        ServerMessage::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
     )));
 
     // ---- turn metrics (spans are never exported) ----

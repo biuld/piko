@@ -3,9 +3,7 @@ mod support;
 
 use std::{fs, path::Path};
 
-use piko_protocol::{
-    Command, CommandResult, CompactMode, Message, ServerMessage, SessionSnapshot, TurnEvent,
-};
+use piko_protocol::{Command, CommandResult, CompactMode, Message, ServerMessage, SessionSnapshot};
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 fn complete_chat(host: &mut HostdHarness, session_id: &str, command_id: &str, text: &str) {
@@ -19,13 +17,7 @@ fn complete_chat(host: &mut HostdHarness, session_id: &str, command_id: &str, te
         host.command_result(command_id),
         CommandResult::AgentInputSubmitted { .. }
     ));
-    host.wait_for("completed chat", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Completed { session_id: id, .. })
-                if id == session_id
-        )
-    });
+    host.wait_completed(session_id);
 }
 
 fn user_entry(snapshot: &SessionSnapshot, text: &str) -> String {

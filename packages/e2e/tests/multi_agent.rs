@@ -1,7 +1,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use piko_protocol::{Command, CommandResult, Message, ServerMessage, TurnEvent};
+use piko_protocol::{Command, CommandResult, Message, ServerMessage};
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 #[test]
@@ -22,19 +22,7 @@ fn spawn_agent_round_trips_from_jsonl_hostd_through_orchd_and_back() {
         CommandResult::AgentInputSubmitted { .. }
     ));
 
-    let root_turn_id = match host.wait_for("root turn started", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Started {
-                session_id: id,
-                agent_instance_id,
-                ..
-            }) if id == &session_id && agent_instance_id == &root_agent
-        )
-    }) {
-        ServerMessage::TurnLifecycle(TurnEvent::Started { turn_id, .. }) => turn_id,
-        _ => unreachable!(),
-    };
+    let root_input_id = host.wait_started(&session_id);
 
     let call_id = match host.wait_for("spawn_agent tool call", |message| {
         matches!(
@@ -90,16 +78,8 @@ fn spawn_agent_round_trips_from_jsonl_hostd_through_orchd_and_back() {
     };
 
     host.wait_for_gateway("inspect this subtask", 2);
-    host.wait_for("root turn completion", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Completed {
-                session_id: id,
-                turn_id,
-                ..
-            }) if id == &session_id && turn_id == &root_turn_id
-        )
-    });
+    host.wait_completed(&session_id);
+    assert!(!root_input_id.is_empty());
 
     host.send(Command::AgentList {
         command_id: "agents".into(),

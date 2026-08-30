@@ -5,7 +5,7 @@ use piko_protocol::{
     TrajectorySystemNotificationRecord, TrajectoryTerminalKind, TrajectoryTerminalRecord,
 };
 
-use crate::api::{ProtocolError, ServerMessage};
+use crate::api::ProtocolError;
 use crate::application::host_app::HostApp;
 use crate::ports::{AgentRunFailure, AgentRunRunner};
 use crate::util::{ClientEventSender, send_event};
@@ -29,20 +29,6 @@ impl HostApp {
             .filter(|window| *window > 0)
     }
 
-    /// Emit a terminal turn event followed by a host usage projection when applicable.
-    pub(crate) async fn send_turn_terminal(&self, tx: &ClientEventSender, terminal: ServerMessage) {
-        let size = self.client_context_window_size().await;
-        let messages = {
-            let state = self.state.lock().await;
-            state.with_usage_projection(terminal, size)
-        };
-        for message in messages {
-            send_event(tx, message).await;
-        }
-    }
-}
-
-impl HostApp {
     /// Drive one admitted root AgentInput's session output stream to
     /// completion: apply realtime deltas and committed-message events,
     /// reconnecting on stream exhaustion, until the durable Agent work result
@@ -66,28 +52,14 @@ impl HostApp {
         {
             Ok(observation) => observation,
             Err(error) if error.to_string().to_ascii_lowercase().contains("cancel") => {
-                self.send_turn_terminal(
-                    tx,
-                    crate::domain::sessions::turn_cancelled(
-                        session_id,
-                        input_id,
-                        agent_instance_id,
-                        piko_protocol::Usage::empty(),
-                    ),
-                )
-                .await;
                 runner
                     .finish_agent_run(session_id, agent_instance_id, input_id)
                     .await;
+                self.publish_work_reconcile(session_id, tx).await?;
                 return Ok(false);
             }
             Err(error) => return Err(error),
         };
-        send_event(
-            tx,
-            crate::domain::sessions::turn_started(session_id, input_id, agent_instance_id),
-        )
-        .await;
         let completion_runner = Arc::clone(runner);
         let completion_sid = session_id.to_string();
         let completion_aid = agent_instance_id.to_string();
@@ -150,40 +122,27 @@ impl HostApp {
             .await;
         }
 
-        let complete_event = match &terminal {
-            Ok(report) => Some(crate::domain::sessions::turn_terminal_from_report(
-                session_id, input_id, report,
-            )),
-            Err(failure) => Some(crate::domain::sessions::turn_failed(
-                session_id,
-                input_id,
-                agent_instance_id,
-                failure.message.clone(),
-                piko_protocol::Usage::empty(),
-            )),
-        };
         let turn_succeeded = matches!(
-            (&complete_event, &terminal),
-            (
-                Some(ServerMessage::TurnLifecycle(
-                    crate::api::TurnEvent::Completed { .. }
-                )),
-                Ok(_)
-            )
+            &terminal,
+            Ok(report) if matches!(report.outcome, piko_protocol::ExecutionOutcome::Succeeded { .. })
         );
-        if let Some(complete_event) = complete_event {
-            tracing::info!(
-                session_id = %session_id,
-                input_id = %input_id,
-                "turn observation loop finished; emitting terminal"
-            );
-            self.send_turn_terminal(tx, complete_event).await;
-        } else {
-            tracing::info!(
-                session_id = %session_id,
-                input_id = %input_id,
-                "turn observation loop finished; turn already terminal"
-            );
+        if let Ok(report) = &terminal {
+            let status = match report.outcome {
+                piko_protocol::ExecutionOutcome::Succeeded { .. } => "completed",
+                piko_protocol::ExecutionOutcome::Failed { .. } => "failed",
+                piko_protocol::ExecutionOutcome::Cancelled { .. } => "cancelled",
+            };
+            crate::telemetry::handle().record_turn_usage(&report.usage, status);
+            let size = self.client_context_window_size().await;
+            if let Ok(usage) = self.state.lock().await.usage_updated_event(
+                session_id,
+                Some(agent_instance_id.to_string()),
+                Some(input_id.to_string()),
+                Some(&report.usage),
+                size,
+            ) {
+                send_event(tx, usage).await;
+            }
         }
 
         runner
@@ -191,6 +150,35 @@ impl HostApp {
             .await;
 
         Ok(turn_succeeded)
+    }
+
+    pub(super) async fn publish_work_reconcile(
+        &self,
+        session_id: &str,
+        tx: &ClientEventSender,
+    ) -> Result<(), ProtocolError> {
+        if let Some(session_dir) = self.session_paths.lock().await.get(session_id).cloned() {
+            let store = self.session_store_factory.open(&session_dir);
+            let mut state = self.state.lock().await;
+            crate::application::turns::projection::reconcile_committed_messages(
+                &mut state,
+                store.as_ref(),
+                session_id,
+            )
+            .await?;
+        }
+        let (snapshot, agents) = self.session_view(session_id).await?;
+        send_event(
+            tx,
+            crate::application::sessions::helpers::session_reconciled_message(
+                session_id.to_string(),
+                piko_protocol::ReconcileReason::ExplicitRefresh,
+                snapshot,
+                agents,
+            ),
+        )
+        .await;
+        Ok(())
     }
 
     /// Trajectory identity for terminal/error records. The work identity is the

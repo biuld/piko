@@ -142,7 +142,6 @@ fn snapshot_restores_model_step_dividers() {
                 model_steps: vec![first_step, second_step],
                 current_leaf_id: Some("assistant-2".into()),
                 selected_agent_instance_id: Some("task-1".into()),
-                active_turns: Vec::new(),
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),

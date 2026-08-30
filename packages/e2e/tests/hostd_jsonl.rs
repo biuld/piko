@@ -1,9 +1,7 @@
 #[path = "support/mod.rs"]
 mod support;
 
-use piko_protocol::{
-    Command, CommandResult, ContentBlock, Message, MessageContent, ServerMessage, TurnEvent,
-};
+use piko_protocol::{Command, CommandResult, ContentBlock, Message, MessageContent, ServerMessage};
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 #[test]
@@ -182,20 +180,7 @@ fn chat_persists_transcript_and_supports_rollout_diff_and_usage_queries() {
         host.command_result("submit"),
         CommandResult::AgentInputSubmitted { .. }
     ));
-    host.wait_for("turn started", |message| {
-        matches!(
-            message,
-            ServerMessage::TurnLifecycle(TurnEvent::Started { session_id: id, .. })
-                if id == &session_id
-        )
-    });
-    host.wait_for("user transcript", |message| {
-        matches!(
-            message,
-            ServerMessage::TranscriptCommitted(event)
-                if matches!(event.message, Message::User { .. })
-        )
-    });
+    let turn_id = host.wait_started(&session_id);
     host.wait_for("assistant transcript", |message| {
         matches!(
             message,
@@ -203,10 +188,7 @@ fn chat_persists_transcript_and_supports_rollout_diff_and_usage_queries() {
                 if matches!(event.message, Message::Assistant { .. })
         )
     });
-    let completed = host.wait_completed(&session_id);
-    let TurnEvent::Completed { turn_id, .. } = completed else {
-        panic!("expected completed turn");
-    };
+    host.wait_completed(&session_id);
     host.wait_for_gateway("hello from jsonl", 1);
 
     let snapshot = host.snapshot(&session_id, "snapshot");
@@ -278,14 +260,12 @@ fn multimodal_submit_preserves_structured_content_at_the_host_boundary() {
         host.command_result("submit-message"),
         CommandResult::AgentInputSubmitted { .. }
     ));
-    let user = host.wait_for("multimodal user transcript", |message| {
-        matches!(
-            message,
-            ServerMessage::TranscriptCommitted(event)
-                if matches!(&event.message, Message::User { content: MessageContent::Blocks(blocks), .. }
-                    if blocks.iter().any(|block| matches!(block, ContentBlock::Image { .. })))
-        )
-    });
-    assert!(matches!(user, ServerMessage::TranscriptCommitted(_)));
     host.wait_completed(&session_id);
+    let snapshot = host.snapshot(&session_id, "multimodal-snapshot");
+    assert!(snapshot.entries.iter().any(|entry| matches!(
+        entry,
+        piko_protocol::SessionTreeEntry::Message(message)
+            if matches!(&message.message, Message::User { content: MessageContent::Blocks(blocks), .. }
+                if blocks.iter().any(|block| matches!(block, ContentBlock::Image { .. })))
+    )));
 }

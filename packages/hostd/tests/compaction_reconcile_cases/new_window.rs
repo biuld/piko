@@ -53,7 +53,8 @@ piko_protocol::MessageContent::String(text.to_string()),
         assert!(
             events.iter().any(|event| matches!(
                 event,
-                Event::TurnLifecycle(piko_hostd::api::TurnEvent::Completed { .. })
+                Event::SessionReconciled(reconciled)
+                    if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
             )),
             "turn must complete; events={events:?}"
         );

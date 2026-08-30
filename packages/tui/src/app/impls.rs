@@ -268,7 +268,7 @@ impl AppState {
         if let Some(work) = self.session.agent_work.get(agent_instance_id) {
             return work.foreground;
         }
-        piko_protocol::AgentForeground::project(false, None, Some(activity))
+        piko_protocol::AgentForeground::from_activity(activity)
     }
 
     pub fn push_focus(&mut self, mode: AppMode) {

@@ -28,6 +28,31 @@ fn command_content(record: &Value) -> Option<&str> {
     .flatten()
 }
 
+fn completed_work_count(records: &[Value]) -> usize {
+    let mut active_input: Option<String> = None;
+    let mut completed = std::collections::HashSet::new();
+    for record in records {
+        let Some(piko_protocol::ServerMessage::SessionReconciled(event)) = server_message(record)
+        else {
+            continue;
+        };
+        let next = event
+            .snapshot
+            .agent_work
+            .iter()
+            .find(|work| work.agent_instance_id == "root")
+            .and_then(|work| work.active_work.as_ref())
+            .map(|work| work.root_input_id.clone());
+        if active_input != next
+            && let Some(previous) = active_input.take()
+        {
+            completed.insert(previous);
+        }
+        active_input = next;
+    }
+    completed.len()
+}
+
 const ROWS: u16 = 24;
 const COLS: u16 = 80;
 const EXIT_AFTER_MS: &str = "60000";
@@ -258,28 +283,21 @@ impl E2eHarness {
     }
 
     fn wait_for_started(&mut self) {
-        self.wait_for_trace("turn started", |records| {
-            records.iter().any(|record| {
-                matches!(
-                    server_message(record),
-                    Some(piko_protocol::ServerMessage::TurnLifecycle(
-                        piko_protocol::TurnEvent::Started { .. }
-                    ))
-                )
+        self.wait_for_trace("agent work started", |records| {
+            records.iter().any(|record| match server_message(record) {
+                Some(piko_protocol::ServerMessage::SessionReconciled(event)) => event
+                    .snapshot
+                    .agent_work
+                    .iter()
+                    .any(|work| work.active_work.is_some()),
+                _ => false,
             })
         });
     }
 
     fn has_completed_turn(&mut self) -> bool {
         self.drain_output();
-        read_records(&self.log_path).iter().any(|record| {
-            matches!(
-                server_message(record),
-                Some(piko_protocol::ServerMessage::TurnLifecycle(
-                    piko_protocol::TurnEvent::Completed { .. }
-                ))
-            )
-        })
+        completed_work_count(&read_records(&self.log_path)) > 0
     }
 
     fn dismiss_startup_notice(&mut self) {
@@ -292,14 +310,14 @@ impl E2eHarness {
     }
 
     fn wait_for_queued(&mut self) {
-        self.wait_for_trace("queued turn", |records| {
-            records.iter().any(|record| {
-                matches!(
-                    server_message(record),
-                    Some(piko_protocol::ServerMessage::TurnLifecycle(
-                        piko_protocol::TurnEvent::Queued { .. }
-                    ))
-                )
+        self.wait_for_trace("queued agent input", |records| {
+            records.iter().any(|record| match server_message(record) {
+                Some(piko_protocol::ServerMessage::SessionReconciled(event)) => event
+                    .snapshot
+                    .agent_work
+                    .iter()
+                    .any(|work| !work.queued_inputs.is_empty()),
+                _ => false,
             })
         });
     }
@@ -340,19 +358,8 @@ impl E2eHarness {
     }
 
     fn wait_for_completed(&mut self, count: usize) {
-        self.wait_for_trace("completed turns", |records| {
-            records
-                .iter()
-                .filter(|record| {
-                    matches!(
-                        server_message(record),
-                        Some(piko_protocol::ServerMessage::TurnLifecycle(
-                            piko_protocol::TurnEvent::Completed { .. }
-                        ))
-                    )
-                })
-                .count()
-                >= count
+        self.wait_for_trace("completed agent work", |records| {
+            completed_work_count(records) >= count
         });
     }
 

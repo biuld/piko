@@ -29,48 +29,4 @@ impl HostState {
             timestamp: now_ms(),
         }))
     }
-
-    /// Pair a terminal turn lifecycle event with a usage projection when applicable.
-    pub fn with_usage_projection(
-        &self,
-        terminal: ServerMessage,
-        size: Option<u64>,
-    ) -> Vec<ServerMessage> {
-        let projection = match &terminal {
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                usage,
-                ..
-            })
-            | ServerMessage::TurnLifecycle(crate::api::TurnEvent::Failed {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                usage,
-                ..
-            })
-            | ServerMessage::TurnLifecycle(crate::api::TurnEvent::Cancelled {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                usage,
-                ..
-            }) => self
-                .usage_updated_event(
-                    session_id,
-                    Some(agent_instance_id.clone()),
-                    Some(turn_id.clone()),
-                    Some(usage),
-                    size,
-                )
-                .ok(),
-            _ => None,
-        };
-        match projection {
-            Some(usage_event) => vec![terminal, usage_event],
-            None => vec![terminal],
-        }
-    }
 }

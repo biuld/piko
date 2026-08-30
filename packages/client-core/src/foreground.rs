@@ -29,7 +29,9 @@ pub fn agent_foreground(agent_instance_id: &str, session: &LiveSession) -> Agent
         .iter()
         .find(|a| a.agent_instance_id == agent_instance_id)
         .map(|a| &a.activity);
-    AgentForeground::project(false, None, activity)
+    activity
+        .map(AgentForeground::from_activity)
+        .unwrap_or(AgentForeground::Idle)
 }
 
 /// Project foreground for the session focus (selected agent), or any busy agent.

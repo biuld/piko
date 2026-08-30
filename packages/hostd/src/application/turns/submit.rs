@@ -294,13 +294,6 @@ impl HostApp {
             .ensure_session_runtime(&session_id, &cwd, &session_dir, resume_agent.as_ref())
             .await
         {
-            let failed = crate::domain::sessions::turn_failed(
-                &session_id,
-                &turn_id,
-                &agent_instance_id,
-                error.to_string(),
-                piko_protocol::Usage::empty(),
-            );
             send_event(
                 tx,
                 ServerMessage::CommandResponse {
@@ -309,7 +302,6 @@ impl HostApp {
                 },
             )
             .await;
-            self.send_turn_terminal(tx, failed).await;
             return Ok(());
         }
         let request = SendAgentInputRequest {
@@ -334,13 +326,6 @@ impl HostApp {
         let receipt = match runner.submit_agent_input(canonical, runtime).await {
             Ok(receipt) => receipt,
             Err(error) => {
-                let failed = crate::domain::sessions::turn_failed(
-                    &session_id,
-                    &turn_id,
-                    &agent_instance_id,
-                    error.to_string(),
-                    piko_protocol::Usage::empty(),
-                );
                 send_event(
                     tx,
                     ServerMessage::CommandResponse {
@@ -349,11 +334,9 @@ impl HostApp {
                     },
                 )
                 .await;
-                self.send_turn_terminal(tx, failed).await;
                 return Ok(());
             }
         };
-        let status = crate::domain::sessions::turn_status_from_disposition(receipt.disposition);
         send_event(
             tx,
             ServerMessage::CommandResponse {
@@ -376,18 +359,6 @@ impl HostApp {
             ),
         )
         .await;
-        if status == crate::api::TurnStatus::Queued {
-            send_event(
-                tx,
-                crate::domain::sessions::turn_queued(
-                    session_id.clone(),
-                    turn_id.clone(),
-                    agent_instance_id.clone(),
-                ),
-            )
-            .await;
-        }
-
         let turn_result = self
             .run_turn_observation_loop(
                 &runner,
@@ -403,16 +374,6 @@ impl HostApp {
             Ok(succeeded) => succeeded,
             Err(error) => {
                 if error.to_string().to_ascii_lowercase().contains("cancel") {
-                    self.send_turn_terminal(
-                        tx,
-                        crate::domain::sessions::turn_cancelled(
-                            &session_id,
-                            &turn_id,
-                            &agent_instance_id,
-                            piko_protocol::Usage::empty(),
-                        ),
-                    )
-                    .await;
                     return Ok(());
                 }
                 return Err(error);
@@ -432,6 +393,10 @@ impl HostApp {
                 )
                 .await;
         }
+        // The terminal reconciliation is the host-side observation barrier:
+        // publish it only after post-run compaction has finished so a client
+        // cannot race a follow-up stateful command against that bookkeeping.
+        self.publish_work_reconcile(&session_id, tx).await?;
         Ok(())
     }
 }

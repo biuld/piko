@@ -136,8 +136,6 @@ pub struct SessionSnapshot {
     /// Authoritative AgentInstance view selected for this Session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_agent_instance_id: Option<crate::AgentInstanceId>,
-    #[serde(default)]
-    pub active_turns: Vec<TurnSnapshot>,
     /// Host-authoritative work and pending-input projection per AgentInstance.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_work: Vec<crate::AgentWorkSnapshot>,
@@ -168,31 +166,6 @@ pub struct AgentUsageSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_duration_ms: Option<u64>,
     pub usage: crate::messages::Usage,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnSnapshot {
-    pub turn_id: TurnId,
-    pub agent_instance_id: crate::AgentInstanceId,
-    pub status: TurnStatus,
-    pub assistant_text: String,
-    pub tool_calls: Vec<ToolCallSnapshot>,
-    /// In-flight or last known roll-up for this turn (hostd ledger; F-15/D-29).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<crate::messages::Usage>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnStatus {
-    Queued,
-    Running,
-    WaitingForApproval,
-    Cancelling,
-    Completed,
-    Failed,
-    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -170,10 +170,10 @@ async fn child_transcript_and_selected_view_persist_independently() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        ServerMessage::TurnLifecycle(piko_protocol::TurnEvent::Completed {
-            agent_instance_id,
-            ..
-        }) if agent_instance_id == "agent-child"
+        ServerMessage::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().any(|work| {
+                work.agent_instance_id == "agent-child" && work.active_work.is_none()
+            })
     )));
     let child_commits: Vec<_> = events
         .iter()
@@ -186,7 +186,11 @@ async fn child_transcript_and_selected_view_persist_independently() {
             _ => None,
         })
         .collect();
-    assert_eq!(child_commits.len(), 2);
+    assert_eq!(child_commits.len(), 1);
+    assert!(matches!(
+        child_commits[0].message,
+        Message::Assistant { .. }
+    ));
     server
         .handle_command(Command::AgentSubscribe {
             command_id: "return-root".into(),

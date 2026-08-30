@@ -1,7 +1,7 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (slices 1–5 and slice 6.1 landed. Slice 6.2+ leftover cleanup
-> remains: Turn wire leftovers, Execution product maps, grain rekeys, recovery)
+> Status: proposed (slices 1–5 and slices 6.1–6.2 landed. Slice 6.3+ leftover
+> cleanup remains: Execution product maps, grain rekeys, recovery)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -424,8 +424,8 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
   `steer_queue` are gone.
 - Queue, foreground, and active work project from AgentInput facts and
   `AgentWorkSnapshot`.
-- Open: `StoredExecution` product storage, host observation port still named
-  `run_agent(AgentRunInput)`, and in-process `active_agent_runs`.
+- Open: `StoredExecution` product storage (Slice 6.3). Host observation no
+  longer admits through `run_agent(AgentRunInput)`.
 
 ### Slice 5 — TUI cutover (implemented)
 
@@ -433,10 +433,8 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
   client `active_turns` maps are gone.
 - Composer busy/steer/queue and desktop chrome compile against `agent_work`.
 - `piko-desktop` remains out of product scope.
-- Open: protocol `TurnEvent` / `TurnSnapshot` / always-empty
-  `SessionSnapshot.active_turns` still exist as wire leftovers.
 
-### Slice 6 — Remaining leftover cleanup (open)
+### Slice 6 — Remaining leftover cleanup (6.3+ open)
 
 Land in this order. Do not introduce a replacement Turn/Run/Execution product
 type; keep AgentInput / `agent_work` / `AgentWorkReport`.
@@ -445,9 +443,12 @@ type; keep AgentInput / `agent_work` / `AgentWorkReport`.
    into submit + wait. Delete `AgentRunInput` as an admission DTO. Rekey
    in-process `active_agent_runs` off `root_input_id` or drop it if observation
    no longer needs a second map.
-2. **Turn wire leftovers.** Delete `TurnEvent`, `TurnSnapshot`, and
-   `SessionSnapshot.active_turns`. Tests wait on `AgentWorkSnapshot` /
-   `AgentInputSubmitted` / work terminal facts, not TurnLifecycle.
+2. **Turn wire leftovers (implemented).** `TurnEvent`, `TurnSnapshot`,
+   `TurnStatus`, `LifecycleEvent`, `ServerMessage::TurnLifecycle`, and
+   `SessionSnapshot.active_turns` are gone. Tests wait on
+   `AgentWorkSnapshot` / `AgentInputSubmitted` / work terminal facts.
+   Remaining Turn-named fields (`TurnId`, `TurnDiffEvent`,
+   `UsageEvent.turn_id`, `source_turn_id`, `QueueEvent`) stay until Slice 6.4.
 3. **Execution product maps.** Delete `StoredExecution` as a session-store
    aggregate and stop treating `execution_started` / `execution_finished` as
    the product processing boundary. Start/finish/interrupt remain facts on

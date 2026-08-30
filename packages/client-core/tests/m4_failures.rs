@@ -6,55 +6,9 @@ use helpers::*;
 use piko_client_core::{AttentionKind, ClientIntent, TimelineItem, prompt_queue};
 use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{
-    ApprovalEvent, ApprovalSnapshot, ApprovalStatus, ReconcileReason, ServerMessage, TurnEvent,
+    ApprovalEvent, ApprovalSnapshot, ApprovalStatus, ReconcileReason, ServerMessage,
     UserInteractionSnapshot, UserInteractionStatus,
 };
-
-#[test]
-fn m4_turn_cancelled_does_not_record_a_failure() {
-    let mut ids = SeqIds(0);
-    let state = drive_to_live(&mut ids, "sess-1");
-
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Queued {
-            session_id: "sess-1".into(),
-            turn_id: "turn-q".into(),
-            agent_instance_id: "root".into(),
-            timestamp: 1,
-        }),
-        &mut ids,
-    );
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Started {
-            session_id: "sess-1".into(),
-            turn_id: "turn-q".into(),
-            agent_instance_id: "root".into(),
-            timestamp: 2,
-        }),
-        &mut ids,
-    );
-    let (state, _) = host(
-        state,
-        ServerMessage::TurnLifecycle(TurnEvent::Cancelled {
-            session_id: "sess-1".into(),
-            turn_id: "turn-q".into(),
-            agent_instance_id: "root".into(),
-            usage: Default::default(),
-            timestamp: 3,
-        }),
-        &mut ids,
-    );
-    assert!(
-        state
-            .live_session
-            .as_ref()
-            .unwrap()
-            .turn_failures
-            .is_empty()
-    );
-}
 
 #[test]
 fn m4_stale_realtime_delta_seq_ignored() {

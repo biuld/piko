@@ -246,16 +246,12 @@ async fn agent_interrupt_preserves_turn_terminal_authority() {
             ..
         }
     )));
-    assert!(cancel.iter().all(|event| !matches!(
-        event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { .. })
-    )));
-
     runner.finish_cancelled();
     let terminal = turn.await.unwrap();
     assert!(terminal.iter().any(|event| matches!(
         event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Cancelled { .. })
+        Event::SessionReconciled(reconciled)
+            if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none())
     )));
 }
 
@@ -445,10 +441,6 @@ async fn mismatched_agent_report_cannot_complete_turn() {
         ))
         .await;
 
-    assert!(events.iter().all(|event| !matches!(
-        event,
-        Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
-    )));
     assert!(events.iter().any(|event| matches!(
         event,
         Event::CommandResponse { result: Err(error), .. }

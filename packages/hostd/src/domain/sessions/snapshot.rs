@@ -12,7 +12,6 @@ impl SessionState {
             model_steps: Vec::new(),
             current_leaf_id: self.current_leaf_id.clone(),
             selected_agent_instance_id: self.active_agent_instance_id.clone(),
-            active_turns: Vec::new(),
             agent_work: Vec::new(),
             pending_approvals: Vec::new(),
             pending_interactions: Vec::new(),

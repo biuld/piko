@@ -33,15 +33,12 @@ pub enum AgentActivity {
 
 /// Client-facing foreground work state (F-22 / D-34).
 ///
-/// This is a projection of host-authoritative turns, pending prompts, and
-/// [`AgentActivity`] — not a separate orchd-owned state machine. Maps to ACP
+/// This is a projection of host-authoritative work facts and pending actions,
+/// not a separate orchd-owned state machine. Maps to ACP
 /// v2-style session readiness semantics (`idle` / `running` / `requires_action`).
 ///
-/// Compatibility mapping tables for the pre-F-51 client projection:
-/// - [`Self::from_activity`] — host/runtime [`AgentActivity`] → foreground names
-/// - [`Self::project`] — full priority projection (blocked / turn / activity)
-///
-/// New client work surfaces must use [`Self::project_work`].
+/// Runtime-only views may fall back through [`Self::from_activity`]. Product
+/// clients use [`Self::project_work`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentForeground {
@@ -74,39 +71,6 @@ impl AgentForeground {
             AgentActivity::WaitingForApproval => Self::RequiresAction,
             AgentActivity::Cancelling => Self::Cancelling,
         }
-    }
-
-    /// Compatibility foreground projection (F-22 / D-34).
-    ///
-    /// Priority (highest first):
-    /// 1. `blocked_on_user` (pending approval or interaction for this agent)
-    ///    → [`RequiresAction`](Self::RequiresAction)
-    /// 2. Active turn [`TurnStatus`] when present
-    /// 3. Host [`AgentActivity`] via [`from_activity`](Self::from_activity)
-    /// 4. [`Idle`](Self::Idle)
-    ///
-    /// Retained for clients that still consume Turn/Activity projections;
-    /// F-51 clients use [`Self::project_work`] instead.
-    pub fn project(
-        blocked_on_user: bool,
-        turn_status: Option<crate::TurnStatus>,
-        activity: Option<&AgentActivity>,
-    ) -> Self {
-        if blocked_on_user {
-            return Self::RequiresAction;
-        }
-        if let Some(status) = turn_status {
-            return match status {
-                crate::TurnStatus::Queued => Self::Queued,
-                crate::TurnStatus::Running => Self::Running,
-                crate::TurnStatus::WaitingForApproval => Self::RequiresAction,
-                crate::TurnStatus::Cancelling => Self::Cancelling,
-                crate::TurnStatus::Completed
-                | crate::TurnStatus::Failed
-                | crate::TurnStatus::Cancelled => Self::Idle,
-            };
-        }
-        activity.map(Self::from_activity).unwrap_or(Self::Idle)
     }
 
     /// Project the canonical Agent work view using the shared priority:
@@ -142,7 +106,7 @@ impl AgentForeground {
 #[cfg(test)]
 mod foreground_tests {
     use super::*;
-    use crate::{ActiveWorkSnapshot, AgentWorkViewState, PendingActionSummary, TurnStatus};
+    use crate::{ActiveWorkSnapshot, AgentWorkViewState, PendingActionSummary};
 
     #[test]
     fn from_activity_is_sole_activity_table() {
@@ -161,54 +125,6 @@ mod foreground_tests {
         assert_eq!(
             AgentForeground::from_activity(&AgentActivity::Cancelling),
             AgentForeground::Cancelling
-        );
-    }
-
-    #[test]
-    fn project_priority_blocked_over_running_turn() {
-        assert_eq!(
-            AgentForeground::project(
-                true,
-                Some(TurnStatus::Running),
-                Some(&AgentActivity::Running)
-            ),
-            AgentForeground::RequiresAction
-        );
-    }
-
-    #[test]
-    fn project_turn_statuses() {
-        assert_eq!(
-            AgentForeground::project(false, Some(TurnStatus::Queued), None),
-            AgentForeground::Queued
-        );
-        assert_eq!(
-            AgentForeground::project(false, Some(TurnStatus::Running), None),
-            AgentForeground::Running
-        );
-        assert_eq!(
-            AgentForeground::project(false, Some(TurnStatus::WaitingForApproval), None),
-            AgentForeground::RequiresAction
-        );
-        assert_eq!(
-            AgentForeground::project(false, Some(TurnStatus::Cancelling), None),
-            AgentForeground::Cancelling
-        );
-        assert_eq!(
-            AgentForeground::project(false, Some(TurnStatus::Completed), None),
-            AgentForeground::Idle
-        );
-    }
-
-    #[test]
-    fn project_falls_back_to_activity() {
-        assert_eq!(
-            AgentForeground::project(false, None, Some(&AgentActivity::Cancelling)),
-            AgentForeground::Cancelling
-        );
-        assert_eq!(
-            AgentForeground::project(false, None, None),
-            AgentForeground::Idle
         );
     }
 

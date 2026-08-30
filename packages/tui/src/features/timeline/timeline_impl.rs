@@ -119,22 +119,8 @@ impl Timeline {
         self.mark_projection_applied();
     }
 
-    pub fn finish_turn(&mut self, turn_id: &str, status: crate::app::ToolStatus) {
-        let status = match status {
-            crate::app::ToolStatus::Failed => piko_client_core::ToolStatus::Failed,
-            crate::app::ToolStatus::Cancelled => piko_client_core::ToolStatus::Cancelled,
-            _ => return,
-        };
-        self.projection.finish_turn(turn_id, status);
-        self.mark_projection_applied();
-    }
-
     pub fn push_error(&mut self, text: String) {
         self.push_anchored_error(text, None);
-    }
-
-    pub fn push_turn_error(&mut self, turn_id: &str, text: String) {
-        self.push_anchored_error(text, Some(turn_id.to_string()));
     }
 
     fn push_anchored_error(&mut self, text: String, after_turn_id: Option<String>) {

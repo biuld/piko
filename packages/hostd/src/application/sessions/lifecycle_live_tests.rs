@@ -60,10 +60,11 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
     .await
     .unwrap();
 
-    assert!(events.iter().all(|event| !matches!(
-        event,
-        ServerMessage::TurnLifecycle(crate::api::TurnEvent::Failed { .. })
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, ServerMessage::SessionReconciled(_)))
+    );
 }
 
 #[tokio::test]
@@ -87,13 +88,9 @@ async fn same_process_open_preserves_live_turn_for_reconcile() {
     .await
     .unwrap();
 
-    assert!(events.iter().all(|event| !matches!(
-        event,
-        ServerMessage::TurnLifecycle(crate::api::TurnEvent::Failed { .. })
-    )));
     assert!(events.iter().any(|event| matches!(
         event,
         ServerMessage::SessionReconciled(reconciled)
-            if reconciled.snapshot.active_turns.is_empty()
+            if reconciled.snapshot.agent_work.is_empty()
     )));
 }

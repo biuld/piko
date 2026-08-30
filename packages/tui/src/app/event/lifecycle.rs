@@ -1,85 +1,6 @@
 use super::*;
 
 impl AppState {
-    pub(super) fn apply_turn_lifecycle(&mut self, event: piko_protocol::TurnEvent) -> Vec<Effect> {
-        let effects = Vec::new();
-        match event {
-            piko_protocol::TurnEvent::Queued {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.session
-                    .pending
-                    .clear_kind(crate::app::pending::PendingCommandKind::AgentInputSubmit);
-                self.status = format!("turn {turn_id} queued ({agent_instance_id})");
-            }
-            piko_protocol::TurnEvent::Started {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.session
-                    .pending
-                    .clear_kind(crate::app::pending::PendingCommandKind::AgentInputSubmit);
-                self.status = format!("turn {turn_id} running ({agent_instance_id})");
-            }
-            piko_protocol::TurnEvent::Completed {
-                session_id,
-                turn_id,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                // Usage chrome is host-authoritative via Event::Usage only.
-                self.last_turn_id = Some(turn_id.clone());
-                self.status = format!("turn {turn_id} completed");
-            }
-            piko_protocol::TurnEvent::Failed {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                error,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.last_turn_id = Some(turn_id.clone());
-                self.status = format!("turn {turn_id} failed");
-                self.with_agent_timeline(&agent_instance_id, |timeline| {
-                    timeline.finish_turn(&turn_id, crate::app::ToolStatus::Failed);
-                    timeline.push_turn_error(&turn_id, error);
-                });
-            }
-            piko_protocol::TurnEvent::Cancelled {
-                session_id,
-                turn_id,
-                agent_instance_id,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                self.last_turn_id = Some(turn_id.clone());
-                self.status = format!("turn {turn_id} cancelled");
-                self.with_agent_timeline(&agent_instance_id, |timeline| {
-                    timeline.finish_turn(&turn_id, crate::app::ToolStatus::Cancelled);
-                });
-            }
-        }
-        effects
-    }
-
     pub(super) fn apply_approval(&mut self, event: piko_protocol::ApprovalEvent) -> Vec<Effect> {
         let effects = Vec::new();
         match event {
@@ -191,7 +112,6 @@ impl AppState {
     }
 
     pub(super) fn apply_queue(&mut self, _event: piko_protocol::QueueEvent) -> Vec<Effect> {
-        // Queue counts come from AgentWorkSnapshot, not QueueEvent.
         Vec::new()
     }
 
@@ -199,9 +119,9 @@ impl AppState {
         let mut effects = Vec::new();
         match event {
             piko_protocol::AuthEvent::LoginBrowser {
-                login_id: _,
                 provider,
                 authorization_url,
+                ..
             } => {
                 self.notifications.push_with(
                     NoticeScope::Global,
@@ -214,10 +134,10 @@ impl AppState {
                 effects.push(Effect::open_url(authorization_url));
             }
             piko_protocol::AuthEvent::LoginDeviceCode {
-                login_id: _,
                 provider,
                 user_code,
                 verification_uri,
+                ..
             } => {
                 self.notifications.push_with(
                     NoticeScope::Global,
@@ -226,10 +146,7 @@ impl AppState {
                     format!("{provider} login: open {verification_uri} and enter {user_code}"),
                 );
             }
-            piko_protocol::AuthEvent::LoginSuccess {
-                login_id: _,
-                provider,
-            } => {
+            piko_protocol::AuthEvent::LoginSuccess { provider, .. } => {
                 self.notifications
                     .resolve(&NoticeSubject::Auth(provider.clone()));
                 self.notify(
@@ -241,10 +158,7 @@ impl AppState {
                 }));
             }
             piko_protocol::AuthEvent::LoginFailed {
-                login_id: _,
-                provider,
-                reason: _,
-                error,
+                provider, error, ..
             } => {
                 self.notifications
                     .resolve(&NoticeSubject::Auth(provider.clone()));
@@ -264,64 +178,50 @@ impl AppState {
 
     pub(super) fn apply_model(&mut self, event: piko_protocol::ModelEvent) -> Vec<Effect> {
         let effects = Vec::new();
-        match event {
-            piko_protocol::ModelEvent::ConfigChanged {
-                model_id,
-                provider,
-                thinking_level,
-                context_window,
-                ..
-            } => {
-                self.model.active_model_id = if model_id.is_empty() {
-                    None
-                } else {
-                    Some(model_id.clone())
-                };
-                self.model.active_provider = if provider.is_empty() {
-                    None
-                } else {
-                    Some(provider.clone())
-                };
-                if let Some(level) = thinking_level {
-                    self.model.active_thinking_level = Some(level.as_str().to_string());
-                } else {
-                    self.model.active_thinking_level = Some("off".to_string());
-                }
-                self.model.host_context_window = context_window.filter(|w| *w > 0);
-                if self.model.active_model_id.is_some() && self.model.active_provider.is_some() {
-                    self.status = format!("model {provider}/{model_id}");
-                } else {
-                    self.status = "no model active".to_string();
-                }
-            }
-        }
+        let piko_protocol::ModelEvent::ConfigChanged {
+            model_id,
+            provider,
+            thinking_level,
+            context_window,
+            ..
+        } = event;
+        self.model.active_model_id = (!model_id.is_empty()).then(|| model_id.clone());
+        self.model.active_provider = (!provider.is_empty()).then(|| provider.clone());
+        self.model.active_thinking_level = Some(
+            thinking_level
+                .map(|level| level.as_str().to_string())
+                .unwrap_or_else(|| "off".to_string()),
+        );
+        self.model.host_context_window = context_window.filter(|w| *w > 0);
+        self.status =
+            if self.model.active_model_id.is_some() && self.model.active_provider.is_some() {
+                format!("model {provider}/{model_id}")
+            } else {
+                "no model active".to_string()
+            };
         effects
     }
 
     pub(super) fn apply_usage(&mut self, event: piko_protocol::UsageEvent) -> Vec<Effect> {
         let effects = Vec::new();
-        match event {
-            piko_protocol::UsageEvent::Updated {
-                session_id,
-                used,
-                size,
-                cumulative,
-                ..
-            } => {
-                if !self.accepts_session(&session_id) {
-                    return effects;
-                }
-                if used > 0 {
-                    self.session.last_context_tokens = Some(used);
-                }
-                if let Some(window) = size.filter(|w| *w > 0) {
-                    self.model.host_context_window = Some(window);
-                }
-                if let Some(cumulative) = cumulative {
-                    // Host ledger is authoritative when present.
-                    self.session.cumulative_usage = Some(cumulative);
-                }
-            }
+        let piko_protocol::UsageEvent::Updated {
+            session_id,
+            used,
+            size,
+            cumulative,
+            ..
+        } = event;
+        if !self.accepts_session(&session_id) {
+            return effects;
+        }
+        if used > 0 {
+            self.session.last_context_tokens = Some(used);
+        }
+        if let Some(window) = size.filter(|w| *w > 0) {
+            self.model.host_context_window = Some(window);
+        }
+        if let Some(cumulative) = cumulative {
+            self.session.cumulative_usage = Some(cumulative);
         }
         effects
     }

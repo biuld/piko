@@ -2,51 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TurnEvent {
-    Queued {
-        session_id: SessionId,
-        turn_id: TurnId,
-        agent_instance_id: crate::AgentInstanceId,
-        timestamp: i64,
-    },
-    Started {
-        session_id: SessionId,
-        turn_id: TurnId,
-        agent_instance_id: crate::AgentInstanceId,
-        timestamp: i64,
-    },
-    Completed {
-        session_id: SessionId,
-        turn_id: TurnId,
-        agent_instance_id: crate::AgentInstanceId,
-        /// Rolled-up model-step usage for this turn (hostd ledger; F-15/D-29).
-        #[serde(default)]
-        usage: crate::messages::Usage,
-        timestamp: i64,
-    },
-    Failed {
-        session_id: SessionId,
-        turn_id: TurnId,
-        agent_instance_id: crate::AgentInstanceId,
-        error: String,
-        /// Partial turn usage when steps completed before failure (F-15/D-29).
-        #[serde(default)]
-        usage: crate::messages::Usage,
-        timestamp: i64,
-    },
-    Cancelled {
-        session_id: SessionId,
-        turn_id: TurnId,
-        agent_instance_id: crate::AgentInstanceId,
-        /// Partial turn usage when steps completed before cancel (F-15/D-29).
-        #[serde(default)]
-        usage: crate::messages::Usage,
-        timestamp: i64,
-    },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentRunEvent {
@@ -69,14 +24,6 @@ pub enum AgentRunEvent {
         error: String,
         timestamp: i64,
     },
-}
-
-/// lifecycle channel — hostd Turn lifecycle (Execution observation is separate).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "lc_kind", content = "event", rename_all = "snake_case")]
-pub enum LifecycleEvent {
-    Turn(TurnEvent),
-    AgentRun(AgentRunEvent),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,8 +105,7 @@ impl From<ModelEvent> for ServerMessage {
 /// Live usage / context chrome projection (ACP-inspired `usage_update`, piko-native).
 ///
 /// Prefer this for status bars over client-side roll-up of turn usage alone.
-/// Host typically emits `Updated` immediately after a terminal `TurnLifecycle`
-/// message; clients may treat `cumulative` as authoritative session ledger.
+/// Clients may treat `cumulative` as the authoritative session ledger.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UsageEvent {
