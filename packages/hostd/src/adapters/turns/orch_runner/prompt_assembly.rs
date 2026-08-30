@@ -45,7 +45,6 @@ impl piko_orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
                             session_id: request.session_id.clone(),
                             agent_instance_id: request.agent_instance_id.clone(),
                             root_input_id: request.root_input_id.clone(),
-                            source_turn_id: None,
                         },
                         assembly_version: run_prompt.assembly_version,
                         prompt_digest: run_prompt.source_digest.clone(),

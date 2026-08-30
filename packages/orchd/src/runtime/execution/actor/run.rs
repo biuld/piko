@@ -88,8 +88,9 @@ impl ExecutionActor {
     }
 
     pub(super) async fn commit_abort_marker(&mut self) -> Result<(), AgentApiError> {
-        let message = piko_protocol::turn_abort_marker(&self.identity.root_input_id);
-        let message_id = piko_protocol::turn_abort_marker_message_id(&self.identity.root_input_id);
+        let message = piko_protocol::agent_work_abort_marker(&self.identity.root_input_id);
+        let message_id =
+            piko_protocol::agent_work_abort_marker_message_id(&self.identity.root_input_id);
         self.commit_message(message, message_id).await
     }
 
@@ -330,7 +331,7 @@ impl ExecutionActor {
             },
         };
         tracing::debug!(
-            execution_id = %self.identity.root_input_id,
+            root_input_id = %self.identity.root_input_id,
             step_id = %request.context.step_id,
             prompt_assembly_version = request.conversation.instructions.assembly_version,
             prompt_source_digest = %request.conversation.instructions.source_digest,
@@ -348,7 +349,7 @@ impl ExecutionActor {
             self.identity.root_input_id.clone(),
             self.identity.agent_id.clone(),
         );
-        let source_turn_id = self.identity.source_turn_id.clone().unwrap_or_default();
+        let root_input_id = self.identity.root_input_id.clone();
         let model_step_started_at = now_ms();
 
         let step = match self
@@ -361,7 +362,7 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_stream(
                     identity,
                     message_id.clone(),
-                    source_turn_id.clone(),
+                    root_input_id.clone(),
                     model.clone(),
                     llm.events,
                 );
@@ -376,7 +377,7 @@ impl ExecutionActor {
                 let mut dispatch = StepDispatch::from_step_failure(
                     identity,
                     message_id.clone(),
-                    source_turn_id,
+                    root_input_id,
                     model.clone(),
                     error.to_string(),
                 );

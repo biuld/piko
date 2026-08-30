@@ -201,8 +201,8 @@ async fn turn_records_metrics_and_logs_without_span_export() {
         logs.iter().any(|log| {
             log.record
                 .attributes_iter()
-                .any(|(key, _)| key.as_str() == "run_id")
+                .any(|(key, _)| key.as_str() == "root_input_id")
         }),
-        "expected a LogRecord carrying run_id"
+        "expected a LogRecord carrying root_input_id"
     );
 }

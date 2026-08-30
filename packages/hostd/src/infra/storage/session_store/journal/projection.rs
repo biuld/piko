@@ -106,7 +106,6 @@ impl SessionStore {
                         let data = &stored_step.data;
                         piko_protocol::ModelStepBoundary {
                             session_id: session_id.clone(),
-                            source_turn_id: data.source_turn_id.clone(),
                             root_input_id: data.root_input_id.clone(),
                             agent_instance_id: data.agent_instance_id.clone(),
                             model_step_id: data.model_step_id.clone(),
@@ -125,7 +124,6 @@ impl SessionStore {
                         agent_instance_id,
                         root_input_id: input.input.input_id.clone(),
                         request_id: input.input.request_id.clone(),
-                        source_turn_id: processing.source_turn_id.clone(),
                         detached_recipient_agent_instance_id: processing
                             .detached_recipient_agent_instance_id
                             .clone(),

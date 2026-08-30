@@ -46,7 +46,6 @@ impl SessionAggregate {
                 agent_parent_message_id: data.agent_parent_message_id,
                 tree_parent_entry_id: data.tree_parent_entry_id,
                 root_input_id: Some(data.root_input_id),
-                source_turn_id: data.source_turn_id,
                 committed_at: data.committed_at,
                 message: Message::User {
                     content,
@@ -95,7 +94,7 @@ impl SessionAggregate {
             ));
         }
         if root.input.agent_instance_id != data.agent_instance_id
-            || processing.source_turn_id != data.source_turn_id
+            || processing.root_input_id.as_deref() != Some(data.root_input_id.as_str())
         {
             return Err(StoreError::InvalidEvent(
                 "model step identity does not match the root work".into(),
@@ -144,7 +143,7 @@ impl SessionAggregate {
         if assistant.revision != revision
             || assistant.data.agent_instance_id != data.agent_instance_id
             || assistant.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
-            || assistant.data.source_turn_id != data.source_turn_id
+            || assistant.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
             || !matches!(&assistant.data.message, Message::Assistant { .. })
         {
             return Err(StoreError::InvalidEvent(
@@ -183,7 +182,7 @@ impl SessionAggregate {
             if message.revision != revision
                 || message.data.agent_instance_id != data.agent_instance_id
                 || message.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
-                || message.data.source_turn_id != data.source_turn_id
+                || message.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
                 || message.data.agent_parent_message_id.as_deref() != Some(previous_parent.as_str())
                 || !matches!(&message.data.message, Message::ToolCall { .. })
             {

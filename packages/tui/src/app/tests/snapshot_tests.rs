@@ -167,7 +167,7 @@ fn session_facts_are_merged_into_every_agent_timeline() {
         timestamp: "2".into(),
         agent_id: "main".into(),
         agent_instance_id: "root".into(),
-        source_turn_id: "turn-root".into(),
+        root_input_id: "turn-root".into(),
         transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String("root".into()),
@@ -180,7 +180,7 @@ fn session_facts_are_merged_into_every_agent_timeline() {
         timestamp: "3".into(),
         agent_id: "child".into(),
         agent_instance_id: "child".into(),
-        source_turn_id: "turn-child".into(),
+        root_input_id: "turn-child".into(),
         transcript_seq: 1,
         message: assistant("child"),
     });

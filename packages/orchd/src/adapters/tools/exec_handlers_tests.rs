@@ -47,7 +47,6 @@ fn context() -> ToolExecutionContext {
         tool_call_index: None,
         tool_entity_id: None,
         host_context: None,
-        source_turn_id: None,
         context_remaining: None,
     }
 }

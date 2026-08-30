@@ -147,7 +147,7 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
             session_id: "session-context".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "context-message".into(),
             content: MessageContent::String("run".into()),
             delivery: piko_protocol::AgentInputDelivery::Auto,

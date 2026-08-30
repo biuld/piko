@@ -12,7 +12,7 @@
 | Multi-step roll-up + terminal event | `multi_step_usages_roll_up_on_turn_completed` |
 | Resume rebuilds cumulative from transcript | rebuild path inside multi-step test + `rebuild_cumulative_usage_from_entries` on load |
 | Protocol accumulate helper | `messages::usage_tests::accumulate_sums_tokens_and_cost` |
-| Turn OTel projection uses ledger | `Telemetry::record_turn_usage` on first terminal transition |
+| Root-input OTel projection uses ledger | `Telemetry::record_input_usage` on first terminal transition |
 
 ## Commands
 
@@ -35,9 +35,8 @@ cargo test -p piko-orchd --lib
 
 ## Notes
 
-- Step-level `piko.model.tokens` remain llmd-side; turn counters are
-  `piko.turn.tokens` / `piko.turn.cost_usd` from hostd’s turn ledger.
-- Historical per-turn totals are not rehydrated into `TurnRecord` after a
+- Step-level `piko.model.tokens` remain llmd-side; root-input counters are
+  `piko.turn.tokens` / `piko.turn.cost_usd` from hostd’s work ledger.
+- Historical totals are not rehydrated into a product turn record after a
   process restart; durable assistant messages remain reconstructible facts.
-- `TurnEvent` terminal variants include `usage` with serde default for wire
-  compatibility.
+- Terminal work facts carry usage through the `AgentWorkReport`.

@@ -63,12 +63,11 @@ impl AppState {
             Event::SessionCleared(cleared) => self.apply_session_cleared(cleared),
             Event::AgentChanged(agent) => self.apply_agent_changed(agent),
             Event::Interaction(event) => self.apply_interaction(event),
-            Event::TurnDiff(diff) => self.apply_turn_diff(diff),
+            Event::AgentWorkDiff(diff) => self.apply_agent_work_diff(diff),
             Event::CommandResponse { command_id, result } => {
                 self.apply_command_response(command_id, result)
             }
             Event::Approval(event) => self.apply_approval(event),
-            Event::Queue(event) => self.apply_queue(event),
             Event::Auth(event) => self.apply_auth(event),
             Event::Model(event) => self.apply_model(event),
             Event::Usage(event) => self.apply_usage(event),

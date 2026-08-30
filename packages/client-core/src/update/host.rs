@@ -35,7 +35,7 @@ pub(super) fn handle_host(
                     event.message_id,
                     event.transcript_seq,
                     event.message,
-                    event.source_turn_id,
+                    event.root_input_id,
                 );
                 if outcome == ApplyOutcome::Inconsistent {
                     request_refresh(state, ctx, effects);
@@ -86,9 +86,6 @@ pub(super) fn handle_host(
         }
         ServerMessage::Interaction(event) => {
             events::handle_interaction_event(state, event);
-        }
-        ServerMessage::Queue(event) => {
-            events::handle_queue_event(state, event);
         }
         ServerMessage::AgentChanged(info) => {
             if !is_live_session_event(state, &info.session_id) {
@@ -458,7 +455,7 @@ fn apply_sequenced_to_timeline(
                 event.message_id.clone(),
                 event.transcript_seq,
                 event.message.clone(),
-                event.source_turn_id.clone(),
+                event.root_input_id.clone(),
             );
         }
         ServerMessage::ModelStepCommitted(boundary)

@@ -231,7 +231,7 @@ mod tests {
             timestamp: seq.to_string(),
             agent_id: "main".into(),
             agent_instance_id: "agent-1".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             transcript_seq: seq,
             message: Message::User {
                 content: MessageContent::String("hi".into()),

@@ -137,7 +137,7 @@ fn component_fingerprint(component: &TimelineComponent) -> u64 {
         TimelineComponent::Error(component) => {
             6u8.hash(&mut hasher);
             component.text.hash(&mut hasher);
-            component.after_turn_id.hash(&mut hasher);
+            component.after_root_input_id.hash(&mut hasher);
         }
     }
     hasher.finish()

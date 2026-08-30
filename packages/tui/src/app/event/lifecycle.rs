@@ -111,10 +111,6 @@ impl AppState {
         effects
     }
 
-    pub(super) fn apply_queue(&mut self, _event: piko_protocol::QueueEvent) -> Vec<Effect> {
-        Vec::new()
-    }
-
     pub(super) fn apply_auth(&mut self, event: piko_protocol::AuthEvent) -> Vec<Effect> {
         let mut effects = Vec::new();
         match event {

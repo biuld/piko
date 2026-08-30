@@ -12,7 +12,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "agent-1".into(),
         agent_instance_id: "task-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         transcript_seq: 1,
         message: Message::Assistant {
             content: vec![ContentBlock::Text {
@@ -46,7 +46,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
         timestamp: "2026-06-29T12:00:01Z".into(),
         agent_id: "agent-1".into(),
         agent_instance_id: "task-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         transcript_seq: 3,
         message: Message::ToolResult {
             tool_call_id: "call-1".into(),
@@ -116,7 +116,7 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String("root prompt".into()),
@@ -142,7 +142,7 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
         timestamp: "2026-06-29T12:00:02Z".into(),
         agent_id: "coder".into(),
         agent_instance_id: "task-child".into(),
-        source_turn_id: "work-child".into(),
+        root_input_id: "work-child".into(),
         transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String("child prompt".into()),
@@ -273,22 +273,6 @@ fn queue_update_populates_status_data() {
 }
 
 #[test]
-fn stale_session_events_do_not_mutate_live_view() {
-    let mut app = live_app();
-
-    app.apply_event(Event::Queue(piko_protocol::QueueEvent::Updated {
-        session_id: "session-2".into(),
-        steer_count: 9,
-        follow_up_count: 9,
-        next_turn_count: 9,
-        steer_preview: None,
-        follow_up_preview: None,
-    }));
-    assert_eq!(app.queue_status.steer_count, 0);
-    assert!(app.session.agent_work.is_empty());
-}
-
-#[test]
 fn test_active_branch_entries_filtering() {
     use piko_protocol::{MessageEntry, SessionTreeEntry};
 
@@ -298,7 +282,7 @@ fn test_active_branch_entries_filtering() {
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-a".into(),
+        root_input_id: "work-a".into(),
         transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String("A".into()),
@@ -311,7 +295,7 @@ fn test_active_branch_entries_filtering() {
         timestamp: "2026-06-29T12:01:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-b".into(),
+        root_input_id: "work-b".into(),
         transcript_seq: 2,
         message: Message::User {
             content: piko_protocol::MessageContent::String("B".into()),
@@ -324,7 +308,7 @@ fn test_active_branch_entries_filtering() {
         timestamp: "2026-06-29T12:02:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-c".into(),
+        root_input_id: "work-c".into(),
         transcript_seq: 3,
         message: Message::User {
             content: piko_protocol::MessageContent::String("C".into()),
@@ -337,7 +321,7 @@ fn test_active_branch_entries_filtering() {
         timestamp: "2026-06-29T12:03:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-d".into(),
+        root_input_id: "work-d".into(),
         transcript_seq: 4,
         message: Message::User {
             content: piko_protocol::MessageContent::String("D".into()),

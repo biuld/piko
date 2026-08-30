@@ -94,8 +94,8 @@ pub struct OrchRunOptions {
     pub history: Option<Vec<Message>>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "hostContext")]
     pub host_context: Option<super::agents::HostSessionContext>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "sourceTurnId")]
-    pub source_turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "rootInputId")]
+    pub root_input_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

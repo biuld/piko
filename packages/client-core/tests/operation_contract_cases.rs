@@ -167,11 +167,11 @@ fn usage_updated_event_is_authoritative_for_chrome() {
         ServerMessage::Usage(piko_protocol::UsageEvent::Updated {
             session_id: "sess-1".into(),
             agent_instance_id: Some("root".into()),
-            turn_id: Some("turn-u".into()),
+            root_input_id: Some("input-u".into()),
             used: 60_000,
             size: Some(200_000),
             cumulative: Some(cumulative),
-            turn_usage: None,
+            input_usage: None,
             timestamp: 2,
         }),
         &mut ids,

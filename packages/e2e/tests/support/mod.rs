@@ -356,7 +356,7 @@ impl HostdHarness {
                 ServerMessage::SessionReconciled(event) => event.session_id == session_id,
                 ServerMessage::Usage(piko_protocol::UsageEvent::Updated {
                     session_id: id,
-                    turn_id: Some(_),
+                    root_input_id: Some(_),
                     ..
                 }) => id == session_id,
                 _ => false,
@@ -376,7 +376,7 @@ impl HostdHarness {
                 .insert(receipt.input_id.clone(), receipt.session_id.clone());
         }
         if let ServerMessage::Usage(piko_protocol::UsageEvent::Updated {
-            turn_id: Some(root_input_id),
+            root_input_id: Some(root_input_id),
             ..
         }) = message
         {

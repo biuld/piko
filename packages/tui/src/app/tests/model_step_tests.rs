@@ -101,7 +101,7 @@ fn snapshot_restores_model_step_dividers() {
         timestamp: "1".into(),
         agent_id: "agent-1".into(),
         agent_instance_id: "task-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         transcript_seq: 1,
         message: assistant("first"),
     });
@@ -111,7 +111,7 @@ fn snapshot_restores_model_step_dividers() {
         timestamp: "2".into(),
         agent_id: "agent-1".into(),
         agent_instance_id: "task-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         transcript_seq: 2,
         message: assistant("second"),
     });

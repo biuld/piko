@@ -24,7 +24,7 @@ fn tool_lifecycle_is_projected_and_scoped() {
                 tool_name: "exec".into(),
                 args: serde_json::json!({"cmd": "true"}),
                 parent_message_id: Some("m1".into()),
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             })
             .into_iter()
             .next()
@@ -54,7 +54,7 @@ fn tool_lifecycle_is_projected_and_scoped() {
                 result: serde_json::json!({"exit": 0}),
                 is_error: false,
                 parent_message_id: None,
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             })
             .into_iter()
             .next()

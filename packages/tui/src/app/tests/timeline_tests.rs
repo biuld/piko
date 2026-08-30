@@ -111,7 +111,7 @@ fn tool_start_and_end_update_one_timeline_item() {
                 tool_name: "read".into(),
                 args: json!({ "path": "Cargo.toml" }),
                 parent_message_id: Some("message-1".into()),
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -129,7 +129,7 @@ fn tool_start_and_end_update_one_timeline_item() {
                 result: json!({ "ok": true }),
                 is_error: false,
                 parent_message_id: None,
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -156,7 +156,7 @@ fn committed_tool_result_updates_existing_tool_call() {
                 tool_name: "run".into(),
                 args: json!({ "cmd": "true" }),
                 parent_message_id: None,
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             },
         )
         .into_iter()
@@ -174,7 +174,7 @@ fn committed_tool_result_updates_existing_tool_call() {
                 result: json!({"done": true}),
                 is_error: true,
                 parent_message_id: None,
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             },
         )
         .into_iter()

@@ -91,12 +91,12 @@ fn session_reconcile_projects_cumulative_usage() {
 fn usage_event_sets_chrome() {
     let mut app = live_app();
 
-    let mut turn_usage = piko_protocol::messages::Usage::empty();
-    turn_usage.input = 12_200;
-    turn_usage.cache_read = 800;
-    turn_usage.output = 400;
-    turn_usage.total_tokens = 13_400;
-    turn_usage.cost = test_cost(0.05);
+    let mut input_usage = piko_protocol::messages::Usage::empty();
+    input_usage.input = 12_200;
+    input_usage.cache_read = 800;
+    input_usage.output = 400;
+    input_usage.total_tokens = 13_400;
+    input_usage.cost = test_cost(0.05);
 
     assert!(app.session.last_context_tokens.is_none());
     assert!(app.session.cumulative_usage.is_none());
@@ -104,11 +104,11 @@ fn usage_event_sets_chrome() {
     app.apply_event(Event::Usage(piko_protocol::UsageEvent::Updated {
         session_id: "session-1".into(),
         agent_instance_id: Some("agent-1".into()),
-        turn_id: Some("turn-1".into()),
+        root_input_id: Some("input-1".into()),
         used: 13_000,
         size: Some(128_000),
-        cumulative: Some(turn_usage),
-        turn_usage: None,
+        cumulative: Some(input_usage),
+        input_usage: None,
         timestamp: 0,
     }));
 

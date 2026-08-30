@@ -221,7 +221,7 @@ async fn submit_direct(
         session_id: session_id.to_string(),
         agent_instance_id: agent_instance_id.to_string(),
         caller_agent_instance_id: None,
-        source_turn_id: Some(input_id.to_string()),
+        root_input_id: Some(input_id.to_string()),
         message_id: format!("msg_{input_id}"),
         content: piko_protocol::MessageContent::String(text.to_string()),
         delivery: piko_protocol::AgentInputDelivery::FollowUp,
@@ -232,7 +232,7 @@ async fn submit_direct(
     let runtime = piko_orchd_api::AgentInputRuntime {
         prompt_resources: None,
         active_tool_names: Some(Vec::new()),
-        source_turn_id: Some(input_id.to_string()),
+        root_input_id: Some(input_id.to_string()),
         message_id: Some(request.message_id),
     };
     let _ = session_dir;

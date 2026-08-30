@@ -60,7 +60,7 @@ impl AppState {
                         session_id: snapshot.session_id.clone(),
                         agent_instance_id: agent_instance_id.clone(),
                         agent_id: message_entry.agent_id,
-                        source_turn_id: message_entry.source_turn_id,
+                        root_input_id: message_entry.root_input_id,
                         message_id: message_entry.id,
                         transcript_seq: message_entry.transcript_seq,
                         message: message_entry.message,

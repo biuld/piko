@@ -13,19 +13,21 @@ impl HostState {
         &self,
         session_id: &str,
         agent_instance_id: Option<String>,
-        turn_id: Option<String>,
-        turn_usage: Option<&crate::api::Usage>,
+        root_input_id: Option<String>,
+        input_usage: Option<&crate::api::Usage>,
         size: Option<u64>,
     ) -> Result<ServerMessage, ProtocolError> {
         let session = self.session(session_id)?;
         Ok(ServerMessage::Usage(crate::api::UsageEvent::Updated {
             session_id: session_id.to_string(),
             agent_instance_id,
-            turn_id,
-            used: turn_usage.map(crate::api::Usage::context_fill).unwrap_or(0),
+            root_input_id,
+            used: input_usage
+                .map(crate::api::Usage::context_fill)
+                .unwrap_or(0),
             size: size.filter(|value| *value > 0),
             cumulative: Some(session.cumulative_usage.clone()),
-            turn_usage: turn_usage.cloned(),
+            input_usage: input_usage.cloned(),
             timestamp: now_ms(),
         }))
     }

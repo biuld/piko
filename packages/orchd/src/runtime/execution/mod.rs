@@ -63,9 +63,6 @@ mod terminal;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionIdentity {
     pub session_id: String,
-    /// Interaction Turn this Execution is bound to. `None` for child agent
-    /// Executions spawned by multi-agent tools.
-    pub source_turn_id: Option<String>,
     /// Work identity: the root AgentInput this execution runs.
     pub root_input_id: String,
     pub agent_instance_id: String,

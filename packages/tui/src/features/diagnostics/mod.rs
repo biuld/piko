@@ -1,9 +1,9 @@
-//! Read-only diagnostic overlay: turn diff.
+//! Read-only diagnostic overlay: Agent work diff.
 //!
-//! Fed by the existing host wire command (`TurnDiffGet`) and optional push
-//! `TurnDiff` events. Presentation-only.
+//! Fed by the existing host wire command (`AgentWorkDiffGet`) and optional push
+//! `AgentWorkDiff` events. Presentation-only.
 
-use piko_protocol::TurnDiffEvent;
+use piko_protocol::AgentWorkDiffEvent;
 use piko_tui_layout::{Component, SurfacePanel, ViewportMetrics, ViewportState};
 use ratatui::{Frame, layout::Rect, style::Style};
 use std::cell::Cell;
@@ -107,9 +107,9 @@ impl DiagnosticsPanel {
         self.viewport.set(viewport);
     }
 
-    pub fn set_diff(&mut self, diff: &TurnDiffEvent) {
+    pub fn set_diff(&mut self, diff: &AgentWorkDiffEvent) {
         self.kind = DiagnosticsKind::Diff;
-        self.title = format!("turn diff · {}", short(&diff.turn_id));
+        self.title = format!("work diff · {}", short(&diff.root_input_id));
         self.viewport.get_mut().scroll_to(0);
         self.lines = format_diff(diff);
     }
@@ -171,10 +171,10 @@ fn short(id: &str) -> String {
     id.chars().take(10).collect()
 }
 
-fn format_diff(diff: &TurnDiffEvent) -> Vec<String> {
+fn format_diff(diff: &AgentWorkDiffEvent) -> Vec<String> {
     let mut lines = vec![
         format!("session  {}", diff.session_id),
-        format!("turn     {}", diff.turn_id),
+        format!("input    {}", diff.root_input_id),
         format!("files    {}", diff.files.len()),
         String::new(),
     ];
@@ -218,9 +218,9 @@ mod tests {
 
     #[test]
     fn format_diff_empty() {
-        let diff = TurnDiffEvent {
+        let diff = AgentWorkDiffEvent {
             session_id: "s".into(),
-            turn_id: "t".into(),
+            root_input_id: "input-t".into(),
             files: vec![],
             unified_diff: String::new(),
         };
@@ -230,10 +230,10 @@ mod tests {
 
     #[test]
     fn format_diff_unified() {
-        let diff = TurnDiffEvent {
+        let diff = AgentWorkDiffEvent {
             session_id: "s".into(),
-            turn_id: "t".into(),
-            files: vec![piko_protocol::TurnFileChange {
+            root_input_id: "input-t".into(),
+            files: vec![piko_protocol::AgentWorkFileChange {
                 path: "a.rs".into(),
                 before: None,
                 after: None,

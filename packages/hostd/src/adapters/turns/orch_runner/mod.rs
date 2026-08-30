@@ -27,8 +27,8 @@ mod tests;
 use crate::infra::trajectory::TrajectoryRecorderRegistry;
 use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 
-type AgentRunKey = (String, String);
-type AgentHubMap = HashMap<AgentRunKey, Arc<piko_orchd::events::SessionOutputHub>>;
+type AgentInputKey = (String, String);
+type AgentHubMap = HashMap<AgentInputKey, Arc<piko_orchd::events::SessionOutputHub>>;
 
 /// Live observation state for one admitted AgentInput. `input_id` is the
 /// durable control identity (the root input id when applied as root), so no
@@ -42,7 +42,7 @@ pub(crate) struct ActiveAgentRunRuntime {
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
-    active_agent_runs: Arc<std::sync::Mutex<HashMap<AgentRunKey, ActiveAgentRunRuntime>>>,
+    active_agent_inputs: Arc<std::sync::Mutex<HashMap<AgentInputKey, ActiveAgentRunRuntime>>>,
     agent_hubs: Arc<std::sync::Mutex<AgentHubMap>>,
     pub(crate) trajectory_recorders: TrajectoryRecorderRegistry,
     commit_routers: Arc<std::sync::Mutex<HashMap<String, Arc<ExecutionCommitRouter>>>>,

@@ -16,7 +16,6 @@ fn linear_messages(
             .commit_message(
                 MessageCommit {
                     session_id: session_id.into(),
-                    source_turn_id: Some(format!("turn-{id}")),
                     root_input_id: format!("exec-{id}"),
                     agent_instance_id: agent_instance_id.into(),
                     message_id: (*id).into(),
@@ -136,7 +135,6 @@ async fn full_clone_clears_world_state_baseline_and_transient_queues() {
         .commit_message(
             MessageCommit {
                 session_id: session_id.clone(),
-                source_turn_id: Some("turn-m3".into()),
                 root_input_id: "exec-m3".into(),
                 agent_instance_id: root.clone(),
                 message_id: "m3".into(),

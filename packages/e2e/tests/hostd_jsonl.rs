@@ -223,14 +223,14 @@ fn chat_persists_transcript_and_supports_rollout_diff_and_usage_queries() {
     assert_eq!(page.items.len(), 1);
     assert!(page.next_cursor.is_some());
 
-    host.send(Command::TurnDiffGet {
+    host.send(Command::AgentWorkDiffGet {
         command_id: "diff".into(),
         session_id,
-        turn_id,
+        root_input_id: turn_id,
     });
     assert!(matches!(
         host.command_result("diff"),
-        CommandResult::TurnDiffGot { diff: None, .. }
+        CommandResult::AgentWorkDiffGot { diff: None, .. }
     ));
 }
 

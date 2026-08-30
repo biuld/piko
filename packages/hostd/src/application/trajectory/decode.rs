@@ -24,7 +24,6 @@ pub(super) fn summarize(
         session_id: session_id.to_string(),
         agent_instance_id: run.agent_instance_id.clone().unwrap_or_default(),
         root_input_id: run_id.to_string(),
-        source_turn_id: run.source_turn_id.clone(),
         started_at: run.started_at.unwrap_or_default(),
         finished_at: run.finished_at,
         terminal: run.terminal,

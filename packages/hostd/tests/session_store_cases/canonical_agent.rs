@@ -76,7 +76,6 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 root_input_id: "input-follow-up".into(),
                 request_id: "request-follow-up".into(),
-                source_turn_id: Some("turn-follow-up".into()),
                 detached_recipient_agent_instance_id: None,
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
@@ -128,7 +127,7 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
         session_id: "session-1".into(),
         agent_instance_id: root.agent_instance_id.clone(),
         caller_agent_instance_id: None,
-        source_turn_id: Some("turn-root".into()),
+        root_input_id: None,
         message_id: "message-root".into(),
         content: piko_protocol::MessageContent::String("start work".into()),
         delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
@@ -144,7 +143,6 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 root_input_id: input.input_id.clone(),
                 request_id: request.request_id.clone(),
-                source_turn_id: request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: None,
                 prompt_assembly_version: 1,
                 prompt_digest: "digest-root".into(),
@@ -176,7 +174,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         session_id: "session-1".into(),
         agent_instance_id: root.agent_instance_id.clone(),
         caller_agent_instance_id: None,
-        source_turn_id: Some("turn-root-steer".into()),
+        root_input_id: None,
         message_id: "message-root-steer".into(),
         content: piko_protocol::MessageContent::String("start".into()),
         delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
@@ -190,7 +188,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 root_input_id: root_request.request_id.clone(),
                 request_id: root_request.request_id.clone(),
-                source_turn_id: root_request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: None,
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
@@ -204,7 +201,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         .commit_message(
             piko_protocol::execution::MessageCommit {
                 session_id: "session-1".into(),
-                source_turn_id: root_request.source_turn_id.clone(),
                 root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: root_request.message_id.clone(),
@@ -225,7 +221,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         session_id: "session-1".into(),
         agent_instance_id: root.agent_instance_id.clone(),
         caller_agent_instance_id: None,
-        source_turn_id: Some("turn-root-steer".into()),
+        root_input_id: Some(root_request.request_id.clone()),
         message_id: "message-steer".into(),
         content: piko_protocol::MessageContent::String("change direction".into()),
         delivery: piko_protocol::AgentInputDelivery::SteerActive,
@@ -280,7 +276,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         .commit_steer(
             piko_protocol::execution::MessageCommit {
                 session_id: "session-1".into(),
-                source_turn_id: steer_request.source_turn_id.clone(),
                 root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: steer_request.message_id.clone(),
@@ -321,7 +316,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         .commit_model_step(
             piko_protocol::execution::ModelStepCommit {
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-root-steer".into()),
             root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 model_step_id: "request-root-steer:step_1".into(),
@@ -331,7 +325,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 outcome: piko_protocol::ModelStepOutcome::Completed,
                 assistant: piko_protocol::execution::MessageCommit {
                     session_id: "session-1".into(),
-                    source_turn_id: Some("turn-root-steer".into()),
                 root_input_id: "request-root-steer".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
                     message_id: "assistant-steer".into(),

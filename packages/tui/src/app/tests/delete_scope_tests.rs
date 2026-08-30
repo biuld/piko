@@ -40,7 +40,7 @@ fn tool_execution_scopes_to_non_active_agent_timeline() {
                 tool_name: "read".into(),
                 args: json!({ "path": "Cargo.toml" }),
                 parent_message_id: Some("message-1".into()),
-                source_turn_id: Some("turn-1".into()),
+                root_input_id: Some("turn-1".into()),
             },
         )
         .into_iter()

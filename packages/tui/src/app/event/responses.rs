@@ -53,22 +53,22 @@ impl AppState {
             }
             // Rollout is no longer surfaced by the TUI; ignore stale responses.
             Ok(piko_protocol::CommandResult::RolloutPaged { .. }) => {}
-            Ok(piko_protocol::CommandResult::TurnDiffGot { diff, .. }) => match diff {
+            Ok(piko_protocol::CommandResult::AgentWorkDiffGot { diff, .. }) => match diff {
                 Some(diff) => {
-                    self.last_turn_id = Some(diff.turn_id.clone());
-                    self.last_turn_diff = Some(diff.clone());
+                    self.last_root_input_id = Some(diff.root_input_id.clone());
+                    self.last_agent_work_diff = Some(diff.clone());
                     self.diagnostics.set_diff(&diff);
                     self.push_surface(SurfaceId::Diagnostics);
-                    self.status = "turn diff".to_string();
+                    self.status = "work diff".to_string();
                 }
                 None => {
                     self.diagnostics.set_message(
                         crate::features::diagnostics::DiagnosticsKind::Diff,
-                        "turn diff",
-                        "No diff recorded for that turn.",
+                        "work diff",
+                        "No diff recorded for that input.",
                     );
                     self.push_surface(SurfaceId::Diagnostics);
-                    self.status = "no turn diff".to_string();
+                    self.status = "no work diff".to_string();
                 }
             },
             Ok(piko_protocol::CommandResult::SessionCreated {

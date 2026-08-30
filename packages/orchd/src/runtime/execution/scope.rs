@@ -151,11 +151,10 @@ mod tests {
         }
     }
 
-    fn handle(execution_id: &str, generation: u64) -> ExecutionHandle {
+    fn handle(root_input_id: &str, generation: u64) -> ExecutionHandle {
         let identity = ExecutionIdentity {
             session_id: "session".into(),
-            source_turn_id: None,
-            root_input_id: execution_id.into(),
+            root_input_id: root_input_id.into(),
             agent_instance_id: "agent".into(),
             agent_id: "main".into(),
             agent_role: None,

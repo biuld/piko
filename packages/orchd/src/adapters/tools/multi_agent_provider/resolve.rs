@@ -236,8 +236,8 @@ pub(super) fn agent_target_schema() -> serde_json::Value {
     })
 }
 
-pub(super) fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> String {
-    piko_orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
+pub(super) fn stable_runtime_id(root_input_id: &str, tool_call_id: &str) -> String {
+    piko_orchd_api::stable_internal_id("spawn", &[root_input_id, tool_call_id])
 }
 
 pub(super) fn report_value(report: &piko_protocol::AgentWorkReport) -> serde_json::Value {

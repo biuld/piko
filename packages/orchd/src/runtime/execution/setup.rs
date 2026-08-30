@@ -90,18 +90,18 @@ impl AgentExecutionRuntime {
     pub(crate) async fn wait_terminal_state(
         &self,
         session_id: &str,
-        execution_id: &str,
+        root_input_id: &str,
     ) -> Result<ExecutionTerminal, AgentApiError> {
         let scope = self.scope(session_id).await?;
-        if let Some(terminal) = scope.take_completed(execution_id).await {
+        if let Some(terminal) = scope.take_completed(root_input_id).await {
             return Ok(terminal);
         }
         let handle = scope
-            .get_execution(execution_id)
+            .get_execution(root_input_id)
             .await
             .ok_or(AgentApiError::ExecutionNotFound)?;
         let terminal = handle.terminal_rx.wait().await?;
-        let _ = scope.take_completed(execution_id).await;
+        let _ = scope.take_completed(root_input_id).await;
         Ok(terminal)
     }
 

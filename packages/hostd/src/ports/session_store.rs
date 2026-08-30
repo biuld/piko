@@ -37,12 +37,12 @@ pub trait SessionStorePort: Send + Sync {
         message_id: &str,
     ) -> Result<Option<CommittedMessage>, SessionStorageError>;
 
-    async fn agent_report_for_turn(
+    async fn agent_report_for_input(
         &self,
-        turn_id: &str,
+        root_input_id: &str,
     ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError>;
 
-    async fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError>;
+    async fn interrupt_incomplete_agent_work(&self) -> Result<usize, SessionStorageError>;
 
     async fn trajectory(
         &self,

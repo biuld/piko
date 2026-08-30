@@ -9,12 +9,12 @@
 | Acceptance criterion | Evidence |
 |---|---|
 | Assembly records are durable and per-agent isolated | `captures_and_replaces_successful_assembly_per_agent` — three assemblies written to the journal as `trajectory.assembly` optional events, keyed by run identity |
-| Run list/fetch joins journal facts with trajectory records | `query_lists_and_fetches_runs_from_journal_events` — `execution_started`/`execution_finished` facts + assembly/model-step records replay into a summary (terminal, step count, turn id) and a full run record; the query opens a fresh store from the same directory (survives restart) |
+| Run list/fetch joins journal facts with trajectory records | `query_lists_and_fetches_runs_from_journal_events` — AgentInput processing facts + assembly/model-step records replay into a summary (terminal, step count, root input) and a full trajectory record; the query opens a fresh store from the same directory (survives restart) |
 | Model steps capture the actual provider-neutral request | `captures_actual_model_step_before_provider_dispatch` — start record carries request/options/identity; finish record carries duration |
 | Trajectory DTOs round-trip | `trajectory_records_round_trip` |
 | Observational events never alter the acknowledged projection | Journal decode treats `trajectory.*` as ignorable (existing optional-event contract, schema-v4); session aggregate tests unchanged and passing |
 | D-30 prompt debugging removed | No `PromptDebug`/`prompt_debug` identifiers remain in the workspace; protocol command/result, hostd port/dispatch, TUI slash/surface and their tests deleted |
-| OTel span export and GenAI content removed; metrics/logs retained | `turn_records_metrics_and_logs_without_span_export` — one turn records `piko.turn.duration_ms`/`piko.model.step.duration_ms` and OTel LogRecords with `run_id`; no span exporter is installed |
+| OTel span export and GenAI content removed; metrics/logs retained | `turn_records_metrics_and_logs_without_span_export` — one root input records `piko.turn.duration_ms`/`piko.model.step.duration_ms` and OTel LogRecords with `root_input_id`; no span exporter is installed |
 | End-to-end turn writes durable trajectory records | `turn_writes_durable_trajectory_records` — a real hostd turn appends `trajectory.assembly` + started/completed `trajectory.tool_call` optional events; a fresh query replays the run (terminal, counts, messages) |
 | Approval/denial/run-error system notifications | Approval gateway emits `ApprovalRequested`/`ApprovalResolved`/`ToolDenied` resolved to the active run; turn failure emits `RunError` (run loop) |
 | Layering: application never imports `infra`/`adapters` | `application_must_not_depend_on_infra_or_adapters` — the trajectory registry is reached through `TrajectoryRegistryPort` |

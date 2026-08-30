@@ -155,10 +155,10 @@ pub struct AppState {
     pub mcp: crate::features::mcp::McpPanel,
     pub processes: crate::features::processes::ProcessPanel,
     pub diagnostics: crate::features::diagnostics::DiagnosticsPanel,
-    /// Last known turn id for `/diff` when no turn is actively running.
-    pub last_turn_id: Option<String>,
-    /// Last push/result turn diff for offline re-open via `/diff`.
-    pub last_turn_diff: Option<piko_protocol::TurnDiffEvent>,
+    /// Last known root input id for `/diff` when no work is actively running.
+    pub last_root_input_id: Option<String>,
+    /// Last push/result work diff for offline re-open via `/diff`.
+    pub last_agent_work_diff: Option<piko_protocol::AgentWorkDiffEvent>,
     pub interactions: ToolInteractionPanel,
     pub sessions: SessionList,
     pub models: ModelSelector,

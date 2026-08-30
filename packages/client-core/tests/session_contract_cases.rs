@@ -196,7 +196,7 @@ fn c2_reconcile_hydrates_timelines_from_active_branch() {
             timestamp: "1".into(),
             agent_id: "main".into(),
             agent_instance_id: "root".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::User {
                 content: piko_protocol::MessageContent::String("hello from tree".into()),

@@ -54,7 +54,6 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
                     request_id: "req-1".into(),
                     base_message_id: None,
                     tree_base_entry_id: None,
-                    source_turn_id: Some("turn-1".into()),
                     detached_recipient_agent_instance_id: None,
                     prompt_assembly_version: 5,
                     prompt_digest: "digest".into(),
@@ -68,7 +67,6 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
             session_id: "s1".into(),
             agent_instance_id: agent_instance_id.into(),
             root_input_id: "input-1".into(),
-            source_turn_id: None,
         },
         assembly_version: 5,
         prompt_digest: "digest".into(),
@@ -179,7 +177,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         Some(TrajectoryTerminalKind::Completed)
     );
     assert_eq!(page.runs[0].step_count, 1);
-    assert_eq!(page.runs[0].source_turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(page.runs[0].root_input_id, "input-1");
 
     let run = query
         .fetch_run("s1", "input-1", &HashMap::new())
@@ -255,7 +253,6 @@ async fn query_resolves_persisted_session_without_session_paths_entry() {
             session_id: session_id.clone(),
             agent_instance_id: format!("agent_{session_id}_root"),
             root_input_id: "input-1".into(),
-            source_turn_id: None,
         },
         assembly_version: 5,
         prompt_digest: "digest".into(),
@@ -295,7 +292,6 @@ fn run_usage_rolls_up_model_steps_host_side() {
         session_id: "s".into(),
         agent_instance_id: "a".into(),
         root_input_id: "input-r".into(),
-        source_turn_id: None,
     };
     let usage = piko_protocol::Usage {
         input: 1000,
@@ -336,7 +332,6 @@ fn run_usage_rolls_up_model_steps_host_side() {
                 session_id: "s".into(),
                 agent_instance_id: "a".into(),
                 root_input_id: "input-r".into(),
-                source_turn_id: None,
             },
             kind: piko_protocol::TrajectoryNotificationKind::RunError,
             summary: "boom".into(),

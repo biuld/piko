@@ -12,7 +12,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "cap-active-message".into(),
             content: MessageContent::String("active".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
@@ -34,7 +34,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
                 session_id: "session-1".into(),
                 agent_instance_id: "root".into(),
                 caller_agent_instance_id: None,
-                source_turn_id: None,
+                root_input_id: None,
                 message_id: format!("cap-queued-message-{index}"),
                 content: MessageContent::String("queued".into()),
                 delivery: AgentInputDelivery::FollowUp,
@@ -54,7 +54,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "cap-overflow-message".into(),
             content: MessageContent::String("overflow".into()),
             delivery: AgentInputDelivery::FollowUp,
@@ -82,7 +82,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "cap-freed-message".into(),
             content: MessageContent::String("freed".into()),
             delivery: AgentInputDelivery::FollowUp,
@@ -133,7 +133,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
             session_id: "session-cancel-marker".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "cancel-marker-message".into(),
             content: MessageContent::String("run then cancel".into()),
             delivery: AgentInputDelivery::StartWhenIdle,
@@ -169,7 +169,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
     ));
 
     let execution_id = "cancel-marker-run";
-    let marker_id = piko_protocol::turn_abort_marker_message_id(execution_id);
+    let marker_id = piko_protocol::agent_work_abort_marker_message_id(execution_id);
     let messages = executions.messages();
     let markers: Vec<_> = messages
         .iter()
@@ -237,7 +237,7 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
                     session_id: "session-start-cancel-marker".into(),
                     agent_instance_id: "root".into(),
                     caller_agent_instance_id: None,
-                    source_turn_id: None,
+                    root_input_id: None,
                     message_id: "message-start-cancel-marker".into(),
                     content: MessageContent::String("cancel during startup".into()),
                     delivery: AgentInputDelivery::StartWhenIdle,
@@ -273,7 +273,7 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
     assert_eq!(model.call_count().await, 0);
 
     let execution_id = "start-cancel-marker";
-    let marker_id = piko_protocol::turn_abort_marker_message_id(execution_id);
+    let marker_id = piko_protocol::agent_work_abort_marker_message_id(execution_id);
     let messages = executions.messages();
     let markers: Vec<_> = messages
         .iter()
@@ -298,7 +298,7 @@ async fn agent_reuses_private_transcript_across_executions() {
                 session_id: "session-1".into(),
                 agent_instance_id: "root".into(),
                 caller_agent_instance_id: None,
-                source_turn_id: None,
+                root_input_id: None,
                 message_id: message_id.into(),
                 content: MessageContent::String(content.into()),
                 delivery: AgentInputDelivery::StartWhenIdle,

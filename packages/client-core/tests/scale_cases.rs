@@ -22,7 +22,7 @@ fn scale_many_committed_messages() {
                 session_id: "sess-1".into(),
                 agent_instance_id: "root".into(),
                 agent_id: "main".into(),
-                source_turn_id: format!("turn-{i}"),
+                root_input_id: format!("turn-{i}"),
                 message_id: format!("msg-{i}"),
                 transcript_seq: (i as u64) + 1,
                 message: piko_protocol::Message::User {
@@ -99,7 +99,7 @@ fn scale_rapid_realtime_then_commit() {
             session_id: "sess-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-s".into(),
+            root_input_id: "turn-s".into(),
             message_id: "stream-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::Assistant {

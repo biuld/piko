@@ -155,7 +155,6 @@ fn tool_exec_context(
         host_context: Some(piko_protocol::agents::HostSessionContext::new(
             identity.session_id.clone(),
         )),
-        source_turn_id: identity.source_turn_id.clone(),
         context_remaining,
     }
 }

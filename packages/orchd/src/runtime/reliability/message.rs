@@ -26,7 +26,6 @@ impl MessageCommitScope {
         Self {
             commit: MessageCommit {
                 session_id: identity.session_id.clone(),
-                source_turn_id: identity.source_turn_id.clone(),
                 root_input_id: identity.root_input_id.clone(),
                 agent_instance_id: identity.agent_instance_id.clone(),
                 message_id,

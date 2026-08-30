@@ -172,7 +172,6 @@ impl ExecutionActor {
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             root_input_id: self.identity.root_input_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
         }
     }
 
@@ -224,7 +223,6 @@ impl ExecutionActor {
             self.record_trajectory_tool(TrajectoryRecord::ChildRun(TrajectoryChildRunRecord {
                 identity: self.trajectory_identity(),
                 child_agent_instance_id: child_id.into(),
-                child_run_id: None,
                 spawned_at: started_at,
                 completed_at: None,
             }))
@@ -267,7 +265,6 @@ impl ExecutionActor {
         let committed_at = step.finished_at;
         let assistant = MessageCommit {
             session_id: self.identity.session_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
             root_input_id: self.identity.root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: step.message_id.clone(),
@@ -285,7 +282,6 @@ impl ExecutionActor {
                     tool_batch::tool_call_message_id(&step.message_id, tool_call.tool_call_index);
                 let commit = MessageCommit {
                     session_id: self.identity.session_id.clone(),
-                    source_turn_id: self.identity.source_turn_id.clone(),
                     root_input_id: self.identity.root_input_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
                     message_id,
@@ -300,7 +296,6 @@ impl ExecutionActor {
             .collect();
         let commit = ModelStepCommit {
             session_id: self.identity.session_id.clone(),
-            source_turn_id: self.identity.source_turn_id.clone(),
             root_input_id: self.identity.root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             model_step_id: step.model_step_id.clone(),

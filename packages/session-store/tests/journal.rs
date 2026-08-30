@@ -60,7 +60,6 @@ fn work_start(
                     request_id: request_id.into(),
                     base_message_id: None,
                     tree_base_entry_id: None,
-                    source_turn_id: Some(turn_id.into()),
                     detached_recipient_agent_instance_id: None,
                     prompt_assembly_version: 1,
                     prompt_digest: "digest".into(),
@@ -101,7 +100,6 @@ fn message(id: &str, agent_parent: Option<&str>, tree_parent: Option<&str>) -> E
         agent_parent_message_id: agent_parent.map(str::to_string),
         tree_parent_entry_id: tree_parent.map(str::to_string),
         root_input_id: Some(format!("input-{id}")),
-        source_turn_id: Some(format!("turn-{id}")),
         committed_at: 2,
         message: Message::User {
             content: MessageContent::String(id.into()),
@@ -117,7 +115,6 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
         agent_parent_message_id: None,
         tree_parent_entry_id: None,
         root_input_id: Some("input-1".into()),
-        source_turn_id: Some("turn-1".into()),
         committed_at: 3,
         message: Message::Assistant {
             content: vec![
@@ -145,7 +142,6 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
         agent_parent_message_id: Some("assistant-1".into()),
         tree_parent_entry_id: Some("assistant-1".into()),
         root_input_id: Some("input-1".into()),
-        source_turn_id: Some("turn-1".into()),
         committed_at: 3,
         message: Message::ToolCall {
             id: "call-1".into(),
@@ -161,7 +157,6 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
         step_index: 1,
         root_input_id: "input-1".into(),
         agent_instance_id: "root".into(),
-        source_turn_id: Some("turn-1".into()),
         assistant_message_id: "assistant-1".into(),
         tool_call_message_ids: vec!["tool-call-message-1".into()],
         outcome: ModelStepOutcome::ToolCalls,
@@ -347,7 +342,6 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
             request_id: "request-1".into(),
             base_message_id: None,
             tree_base_entry_id: None,
-            source_turn_id: Some("turn-1".into()),
             detached_recipient_agent_instance_id: None,
             prompt_assembly_version: 1,
             prompt_digest: "digest".into(),
@@ -363,7 +357,6 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
             agent_parent_message_id: None,
             tree_parent_entry_id: None,
             root_input_id: "input-1".into(),
-            source_turn_id: Some("turn-1".into()),
             committed_at: 3,
         }),
     );

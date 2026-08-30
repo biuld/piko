@@ -74,7 +74,7 @@ pub struct SessionAgentHandle {
 pub struct AgentInputRuntime {
     pub prompt_resources: Option<PromptResourceSnapshot>,
     pub active_tool_names: Option<Vec<String>>,
-    pub source_turn_id: Option<String>,
+    pub root_input_id: Option<String>,
     pub message_id: Option<String>,
 }
 

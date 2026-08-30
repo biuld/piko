@@ -27,9 +27,8 @@ pub enum ServerMessage {
     ModelStepCommitted(crate::execution::ModelStepBoundary),
     /// Full agent projection keyed by agent_instance_id as entity identity.
     AgentChanged(AgentInfo),
-    TurnDiff(TurnDiffEvent),
+    AgentWorkDiff(AgentWorkDiffEvent),
     Approval(ApprovalEvent),
-    Queue(QueueEvent),
     Model(ModelEvent),
     /// Host-authoritative context fill / cost chrome (F-22 / D-34).
     Usage(UsageEvent),
@@ -41,16 +40,16 @@ pub enum ServerMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct TurnDiffEvent {
+pub struct AgentWorkDiffEvent {
     pub session_id: SessionId,
-    pub turn_id: TurnId,
-    pub files: Vec<TurnFileChange>,
+    pub root_input_id: String,
+    pub files: Vec<AgentWorkFileChange>,
     pub unified_diff: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct TurnFileChange {
+pub struct AgentWorkFileChange {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<String>,
@@ -65,7 +64,7 @@ pub struct TranscriptCommittedEvent {
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_id: AgentId,
     /// Interaction Turn this message was committed under, if any.
-    pub source_turn_id: String,
+    pub root_input_id: String,
     pub message_id: MessageId,
     pub transcript_seq: u64,
     pub message: crate::messages::Message,
@@ -116,7 +115,7 @@ pub enum ToolExecutionEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         parent_message_id: Option<MessageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_turn_id: Option<TurnId>,
+        root_input_id: Option<String>,
     },
     Ended {
         session_id: SessionId,
@@ -129,7 +128,7 @@ pub enum ToolExecutionEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_message_id: Option<MessageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_turn_id: Option<TurnId>,
+        root_input_id: Option<String>,
     },
 }
 

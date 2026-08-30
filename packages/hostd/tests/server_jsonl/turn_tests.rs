@@ -36,9 +36,17 @@ async fn root_chat_streams_started_before_runner_finishes() {
         } if command_id == "submit"
     ));
 
-    let started = events.recv().await.unwrap();
-    assert!(matches!(started, Event::SessionReconciled(reconciled)
-        if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())));
+    // Admission returns before the runner publishes its first live event. The
+    // immediate reconciliation is therefore a durable snapshot, not a
+    // synthetic "started" lifecycle event. The stream remains open while the
+    // runner is still waiting to finish.
+    let admitted_snapshot = events.recv().await.unwrap();
+    assert!(matches!(admitted_snapshot, Event::SessionReconciled(_)));
+    let progress = tokio::time::timeout(Duration::from_millis(50), events.recv())
+        .await
+        .expect("runner output should stream before completion")
+        .expect("stream should remain open");
+    assert!(matches!(progress, Event::Interaction(_)));
 }
 
 #[tokio::test]
@@ -82,9 +90,8 @@ async fn approval_response_is_not_blocked_by_active_turn() {
             ..
         }
     ));
-    let started_event = events.recv().await.unwrap();
-    assert!(matches!(started_event, Event::SessionReconciled(reconciled)
-        if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())));
+    let admitted_snapshot = events.recv().await.unwrap();
+    assert!(matches!(admitted_snapshot, Event::SessionReconciled(_)));
     tokio::time::timeout(Duration::from_millis(50), started.notified())
         .await
         .unwrap();
@@ -188,7 +195,7 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
         .unwrap();
     let completed_index = turn_events
         .iter()
-        .position(|event| {
+        .rposition(|event| {
             matches!(event, Event::SessionReconciled(reconciled)
                 if reconciled.snapshot.agent_work.iter().all(|work| work.active_work.is_none()))
         })

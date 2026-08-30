@@ -89,8 +89,8 @@ impl AgentActor {
                     let mut request = input.to_request();
                     request.prompt_resources = runtime.prompt_resources;
                     request.active_tool_names = runtime.active_tool_names;
-                    if runtime.source_turn_id.is_some() {
-                        request.source_turn_id = runtime.source_turn_id;
+                    if runtime.root_input_id.is_some() {
+                        request.root_input_id = runtime.root_input_id;
                     }
                     if let Some(message_id) = runtime.message_id {
                         request.message_id = message_id;
@@ -177,7 +177,7 @@ impl AgentActor {
                     root_input_id,
                     terminal,
                 } => {
-                    self.handle_execution_finished(root_input_id, terminal)
+                    self.handle_processing_finished(root_input_id, terminal)
                         .await;
                 }
                 AgentCommand::RetryTerminal { root_input_id } => {

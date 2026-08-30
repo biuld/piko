@@ -196,7 +196,7 @@ fn agent_view_message_from_entry(
                         session_id: session_id.to_string(),
                         agent_instance_id: message.agent_instance_id.clone(),
                         agent_id: message.agent_id.clone(),
-                        source_turn_id: message.source_turn_id.clone(),
+                        root_input_id: message.root_input_id.clone(),
                         message_id: message.id.clone(),
                         transcript_seq: message.transcript_seq,
                         message: message.message.clone(),

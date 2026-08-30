@@ -201,7 +201,6 @@ impl InferenceGateway for LlmdExecutor {
             session_id: request.context.session_id.clone(),
             agent_instance_id: request.context.agent_instance_id.clone(),
             root_input_id: request.context.root_input_id.clone(),
-            source_turn_id: None,
         };
         let step_capture = ModelStepCapture {
             telemetry: Arc::clone(&self.telemetry),

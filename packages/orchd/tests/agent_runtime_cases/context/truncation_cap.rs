@@ -76,7 +76,7 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
             session_id: "session-transcript-cap".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "transcript-cap-message".into(),
             content: MessageContent::String("run".into()),
             delivery: piko_protocol::AgentInputDelivery::Auto,

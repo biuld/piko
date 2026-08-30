@@ -316,7 +316,7 @@ mod tests {
                 timestamp: "2026-07-02T00:00:00Z".into(),
                 agent_id: "main".into(),
                 agent_instance_id: "task-main".into(),
-                source_turn_id: "work-main".into(),
+                root_input_id: "work-main".into(),
                 transcript_seq: 1,
                 message: Message::User {
                     content: MessageContent::String("root".into()),

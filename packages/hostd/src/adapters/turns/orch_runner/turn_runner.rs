@@ -191,7 +191,7 @@ impl AgentRunRunner for OrchAgentRunRunner {
     }
 
     async fn has_active_session_run(&self, session_id: &str) -> bool {
-        self.active_agent_runs
+        self.active_agent_inputs
             .lock()
             .unwrap()
             .keys()

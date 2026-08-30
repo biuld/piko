@@ -77,7 +77,7 @@ impl MultiAgentToolProvider {
             session_id: context.session_id.clone(),
             agent_instance_id: child.identity.agent_instance_id.clone(),
             caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-            source_turn_id: None,
+            root_input_id: None,
             message_id: format!("message:{}:{}", context.root_input_id, call.id),
             content: MessageContent::String(prompt),
             delivery: AgentInputDelivery::StartWhenIdle,

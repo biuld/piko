@@ -83,7 +83,7 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: Some("turn-1".into()),
+            root_input_id: Some("turn-1".into()),
             message_id: "message-1".into(),
             content: MessageContent::String("hello".into()),
             delivery: AgentInputDelivery::StartWhenIdle,

@@ -80,13 +80,13 @@ pub enum SessionEvent {
     MessageCommitted {
         transcript_seq: u64,
         message_id: MessageId,
-        source_turn_id: String,
+        root_input_id: String,
         role: MessageRole,
     },
     ToolCommitted {
         transcript_seq: u64,
         message_id: MessageId,
-        source_turn_id: String,
+        root_input_id: String,
         tool_call_id: String,
     },
     InteractionRequested {
@@ -182,7 +182,7 @@ mod tests {
             event: SessionEvent::MessageCommitted {
                 transcript_seq: 1,
                 message_id: "message-1".into(),
-                source_turn_id: "turn-1".into(),
+                root_input_id: "turn-1".into(),
                 role: MessageRole::Assistant,
             },
         })

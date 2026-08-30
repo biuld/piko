@@ -91,7 +91,7 @@ fn committed(message_id: &str, task_seq: u64, message: Message) -> Event {
         session_id: "session-1".into(),
         agent_instance_id: "task-1".into(),
         agent_id: "agent-1".into(),
-        source_turn_id: "work-1".into(),
+        root_input_id: "work-1".into(),
         message_id: message_id.into(),
         transcript_seq: task_seq,
         message,
@@ -119,7 +119,6 @@ fn model_step(
 ) -> Event {
     Event::ModelStepCommitted(piko_protocol::ModelStepBoundary {
         session_id: "session-1".into(),
-        source_turn_id: Some("work-1".into()),
         root_input_id: "input-1".into(),
         agent_instance_id: "task-1".into(),
         model_step_id: model_step_id.into(),
@@ -168,7 +167,7 @@ fn user_tree_entry(
         timestamp: "2026-06-29T12:00:00Z".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-main".into(),
+        root_input_id: "work-main".into(),
         transcript_seq: 1,
         message: Message::User {
             content: piko_protocol::MessageContent::String(text.into()),

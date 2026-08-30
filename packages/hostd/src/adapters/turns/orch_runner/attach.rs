@@ -65,7 +65,7 @@ impl OrchAgentRunRunner {
             let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(store.clone());
             let resolved_specs = crate::adapters::prompts::agent_loader::load_agents(cwd);
             store
-                .interrupt_incomplete_agent_executions()
+                .interrupt_incomplete_agent_work()
                 .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
             let recovered_agents: Vec<AgentRecoveryState> = store
                 .agent_instances()

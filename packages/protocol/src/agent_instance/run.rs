@@ -83,7 +83,7 @@ pub struct SendAgentInputRequest {
     /// Interaction Turn this input is bound to. `Some` on the root Turn path,
     /// `None` for child agent runs spawned by multi-agent tools.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<String>,
+    pub root_input_id: Option<String>,
     pub message_id: String,
     pub content: MessageContent,
     pub delivery: AgentInputDelivery,

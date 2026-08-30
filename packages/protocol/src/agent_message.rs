@@ -242,7 +242,7 @@ mod tests {
                 timestamp: "1".into(),
                 agent_id: "main".into(),
                 agent_instance_id: "task-main".into(),
-                source_turn_id: "work-main".into(),
+                root_input_id: "work-main".into(),
                 transcript_seq: 1,
                 message: Message::User {
                     content: MessageContent::String("hello".into()),

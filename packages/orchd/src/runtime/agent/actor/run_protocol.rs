@@ -89,7 +89,6 @@ impl AgentActor {
                 StartExecutionRequest {
                     request_id: request.request_id.clone(),
                     session_id: self.identity.session_id.clone(),
-                    source_turn_id: request.source_turn_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
                     agent_spec: self.spec.clone(),
                     run_prompt: run_context.prompt,
@@ -138,7 +137,6 @@ impl AgentActor {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             root_input_id: canonical_input_id.clone(),
             request_id: request.request_id.clone(),
-            source_turn_id: request.source_turn_id.clone(),
             detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
             prompt_assembly_version,
             prompt_digest,
@@ -185,7 +183,6 @@ impl AgentActor {
             return self
                 .finish_cancelled_started_run(
                     canonical_input_id.clone(),
-                    request.source_turn_id.clone(),
                     committed_input,
                     input_message_id,
                     receipt,
@@ -256,14 +253,13 @@ impl AgentActor {
             transcript: self.transcript.clone(),
             head_message_id: self.head_message_id.clone(),
         });
-        Box::pin(self.handle_execution_finished(root_input_id, terminal)).await;
+        Box::pin(self.handle_processing_finished(root_input_id, terminal)).await;
         Ok(failure.receipt)
     }
 
     async fn finish_cancelled_started_run(
         &mut self,
         root_input_id: String,
-        source_turn_id: Option<String>,
         committed_input: piko_protocol::Message,
         input_message_id: String,
         receipt: AgentInputReceipt,
@@ -276,11 +272,10 @@ impl AgentActor {
         // An interrupted startup commits the same durable, model-visible
         // abort marker as a live cancel, so recovery reconstructs the run
         // with the marker in place (F-01 / D-01).
-        let marker = piko_protocol::turn_abort_marker(&root_input_id);
-        let marker_id = piko_protocol::turn_abort_marker_message_id(&root_input_id);
+        let marker = piko_protocol::agent_work_abort_marker(&root_input_id);
+        let marker_id = piko_protocol::agent_work_abort_marker_message_id(&root_input_id);
         let marker_commit = piko_protocol::execution::MessageCommit {
             session_id: self.identity.session_id.clone(),
-            source_turn_id,
             root_input_id: root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: marker_id.clone(),
@@ -311,7 +306,7 @@ impl AgentActor {
             transcript,
             head_message_id: Some(head_message_id),
         });
-        Box::pin(self.handle_execution_finished(root_input_id, terminal)).await;
+        Box::pin(self.handle_processing_finished(root_input_id, terminal)).await;
         Ok(receipt)
     }
 
@@ -321,7 +316,7 @@ impl AgentActor {
         }
     }
 
-    pub(super) async fn handle_execution_finished(
+    pub(super) async fn handle_processing_finished(
         &mut self,
         root_input_id: String,
         terminal: ExecutionHandoffLease<ExecutionTerminal>,

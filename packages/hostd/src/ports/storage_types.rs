@@ -61,7 +61,6 @@ pub struct ExecutionProjection {
     /// Work identity of the projection; the map key as well.
     pub root_input_id: String,
     pub request_id: String,
-    pub source_turn_id: Option<String>,
     pub detached_recipient_agent_instance_id: Option<String>,
     pub detached_report_delivered: bool,
     pub prompt_assembly_version: u32,
@@ -86,8 +85,6 @@ pub struct CommittedMessage {
     pub agent_spec_id: String,
     #[serde(default)]
     pub root_input_id: Option<String>,
-    #[serde(default)]
-    pub source_turn_id: Option<String>,
     pub transcript_seq: u64,
     pub timestamp: i64,
     pub message: Message,

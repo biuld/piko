@@ -117,11 +117,13 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         ["first", "second"],
         "queued root chat must run after prior turn terminals"
     );
-    assert!(second_events.iter().any(|event| matches!(
-        event,
-        Event::SessionReconciled(reconciled)
-            if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())
-    )));
+    // Live progress is streamed as interaction/realtime events; the host
+    // reconciliation snapshots are durable admission and terminal barriers.
+    assert!(
+        second_events
+            .iter()
+            .any(|event| matches!(event, Event::Interaction(_)))
+    );
     assert!(second_events.iter().any(|event| matches!(
         event,
         Event::SessionReconciled(reconciled)

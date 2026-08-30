@@ -31,7 +31,7 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
                             session_id: session_id.clone(),
                             agent_instance_id: root.agent_instance_id,
                             caller_agent_instance_id: None,
-                            source_turn_id: Some("turn-queued".into()),
+                            root_input_id: Some("turn-queued".into()),
                             message_id: "message-queued".into(),
                             content: piko_protocol::MessageContent::String("follow up".into()),
                             delivery: piko_protocol::AgentInputDelivery::FollowUp,

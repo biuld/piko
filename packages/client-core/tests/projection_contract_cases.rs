@@ -137,7 +137,7 @@ fn c6_realtime_then_committed_replaces_draft() {
             session_id: "sess-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "msg-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::Assistant {
@@ -171,7 +171,7 @@ fn c6_committed_deduplicates() {
         session_id: "sess-1".into(),
         agent_instance_id: "root".into(),
         agent_id: "main".into(),
-        source_turn_id: "turn-1".into(),
+        root_input_id: "turn-1".into(),
         message_id: "msg-1".into(),
         transcript_seq: 1,
         message: piko_protocol::Message::User {
@@ -199,7 +199,7 @@ fn c6_foreign_session_transcript_rejected() {
             session_id: "other-session".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "msg-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::User {
@@ -268,7 +268,7 @@ fn c7_subscribe_prefers_snapshot_events() {
                 session_id: "sess-1".into(),
                 agent_instance_id: "child-1".into(),
                 agent_id: "child-spec".into(),
-                source_turn_id: "turn-1".into(),
+                root_input_id: "turn-1".into(),
                 message_id: "snap-msg-1".into(),
                 transcript_seq: 1,
                 message: piko_protocol::Message::User {
@@ -286,7 +286,7 @@ fn c7_subscribe_prefers_snapshot_events() {
                 session_id: "sess-1".into(),
                 agent_instance_id: "child-1".into(),
                 agent_id: "child-spec".into(),
-                source_turn_id: "turn-1".into(),
+                root_input_id: "turn-1".into(),
                 message_id: "replay-msg-1".into(),
                 transcript_seq: 1,
                 message: piko_protocol::Message::User {

@@ -45,7 +45,7 @@ pub struct StoredRootProcessing {
     #[serde(default)]
     pub tree_base_entry_id: Option<String>,
     #[serde(default)]
-    pub source_turn_id: Option<String>,
+    pub root_input_id: Option<String>,
     #[serde(default)]
     pub detached_recipient_agent_instance_id: Option<String>,
     #[serde(default)]

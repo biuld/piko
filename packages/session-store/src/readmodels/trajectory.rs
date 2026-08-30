@@ -31,7 +31,7 @@ pub struct TrajectoryProjection {
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryRunProjection {
     pub agent_instance_id: Option<String>,
-    pub source_turn_id: Option<String>,
+    pub root_input_id: Option<String>,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
     pub terminal: Option<TrajectoryTerminalKind>,
@@ -146,7 +146,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
                 .entry(started.root_input_id.clone())
                 .or_default();
             run.agent_instance_id = Some(started.agent_instance_id);
-            run.source_turn_id = started.source_turn_id;
+            run.root_input_id = Some(started.root_input_id);
             run.started_at = Some(started.started_at);
         }
         "agent_input_admitted_v1" => {

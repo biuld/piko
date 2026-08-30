@@ -24,7 +24,7 @@ impl AgentTimeline {
         tool_name: String,
         args: serde_json::Value,
         parent_message_id: Option<String>,
-        source_turn_id: Option<String>,
+        root_input_id: Option<String>,
         transcript_seq: Option<u64>,
     ) {
         if let Some(&idx) = self.tool_ids.get(&tool_call_id) {
@@ -40,8 +40,8 @@ impl AgentTimeline {
                 if parent_message_id.is_some() {
                     tool.parent_message_id = parent_message_id;
                 }
-                if source_turn_id.is_some() {
-                    tool.source_turn_id = source_turn_id;
+                if root_input_id.is_some() {
+                    tool.root_input_id = root_input_id;
                 }
                 tool.transcript_seq = min_seq(tool.transcript_seq, transcript_seq);
                 if tool.result.is_none() && tool.result_content.is_empty() {
@@ -64,7 +64,7 @@ impl AgentTimeline {
             result_details: None,
             status: ToolStatus::Running,
             parent_message_id,
-            source_turn_id,
+            root_input_id,
             transcript_seq,
             live_order,
             upstream: None,
@@ -103,7 +103,7 @@ impl AgentTimeline {
         result_content: Vec<ContentBlock>,
         result_details: Option<serde_json::Value>,
         is_error: bool,
-        source_turn_id: Option<String>,
+        root_input_id: Option<String>,
         transcript_seq: Option<u64>,
     ) {
         let status = if is_error {
@@ -126,8 +126,8 @@ impl AgentTimeline {
                 if result_details.is_some() {
                     tool.result_details = result_details;
                 }
-                if source_turn_id.is_some() {
-                    tool.source_turn_id = source_turn_id;
+                if root_input_id.is_some() {
+                    tool.root_input_id = root_input_id;
                 }
                 tool.transcript_seq = min_seq(tool.transcript_seq, transcript_seq);
                 if tool.args.is_null()
@@ -157,7 +157,7 @@ impl AgentTimeline {
             result_details,
             status,
             parent_message_id: None,
-            source_turn_id,
+            root_input_id,
             transcript_seq,
             live_order,
             upstream: None,
@@ -191,7 +191,7 @@ impl AgentTimeline {
         content_index: u32,
         text: Option<&str>,
         parent_message_id: Option<String>,
-        source_turn_id: Option<String>,
+        root_input_id: Option<String>,
     ) {
         if !self.tool_ids.contains_key(&tool_call_id) {
             let live_order = self.allocate_live_order();
@@ -206,7 +206,7 @@ impl AgentTimeline {
                 result_details: None,
                 status: ToolStatus::Running,
                 parent_message_id: parent_message_id.clone(),
-                source_turn_id: source_turn_id.clone(),
+                root_input_id: root_input_id.clone(),
                 transcript_seq: None,
                 live_order,
                 upstream: None,
@@ -226,8 +226,8 @@ impl AgentTimeline {
         if tool.parent_message_id.is_none() {
             tool.parent_message_id = parent_message_id;
         }
-        if tool.source_turn_id.is_none() {
-            tool.source_turn_id = source_turn_id;
+        if tool.root_input_id.is_none() {
+            tool.root_input_id = root_input_id;
         }
         let index = content_index as usize;
         match op {
@@ -329,7 +329,7 @@ impl AgentTimeline {
         &mut self,
         content: &[ContentBlock],
         transcript_seq: u64,
-        source_turn_id: &str,
+        root_input_id: &str,
     ) {
         use piko_protocol::messages::UpstreamActivityStatus;
 
@@ -353,7 +353,7 @@ impl AgentTimeline {
                                 Vec::new(),
                                 None,
                                 false,
-                                Some(source_turn_id.to_string()),
+                                Some(root_input_id.to_string()),
                                 Some(transcript_seq),
                             );
                         }
@@ -365,7 +365,7 @@ impl AgentTimeline {
                                 Vec::new(),
                                 None,
                                 true,
-                                Some(source_turn_id.to_string()),
+                                Some(root_input_id.to_string()),
                                 Some(transcript_seq),
                             );
                         }
@@ -375,7 +375,7 @@ impl AgentTimeline {
                                 tool_name.clone(),
                                 args.clone().unwrap_or(serde_json::Value::Null),
                                 None,
-                                Some(source_turn_id.to_string()),
+                                Some(root_input_id.to_string()),
                                 Some(transcript_seq),
                             );
                         }
@@ -400,7 +400,7 @@ impl AgentTimeline {
                         tool_name.clone(),
                         serde_json::Value::Null,
                         None,
-                        Some(source_turn_id.to_string()),
+                        Some(root_input_id.to_string()),
                         Some(transcript_seq),
                     );
                     self.mark_upstream(

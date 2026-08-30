@@ -217,7 +217,7 @@ mod tests {
             event: SessionEvent::MessageCommitted {
                 transcript_seq: 1,
                 message_id: message_id.into(),
-                source_turn_id: "turn".into(),
+                root_input_id: "turn".into(),
                 role: MessageRole::Assistant,
             },
         }

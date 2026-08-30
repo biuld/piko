@@ -32,7 +32,7 @@ impl StepDispatchSource {
 pub(crate) struct StepDispatchInput {
     pub(crate) identity: DispatchIdentity,
     pub(crate) message_id: MessageId,
-    pub(crate) source_turn_id: String,
+    pub(crate) root_input_id: String,
     pub(crate) model: ModelSpec,
     pub(crate) events: Pin<Box<dyn Stream<Item = InferenceEvent> + Send>>,
 }
@@ -40,7 +40,7 @@ pub(crate) struct StepDispatchInput {
 pub(crate) struct StepFailureInput {
     pub(crate) identity: DispatchIdentity,
     pub(crate) message_id: MessageId,
-    pub(crate) source_turn_id: String,
+    pub(crate) root_input_id: String,
     pub(crate) model: ModelSpec,
     pub(crate) error_message: String,
 }

@@ -185,7 +185,7 @@ pub struct ErrorComponent {
     /// Turn whose authored output this transient error terminates. Keeping the
     /// anchor lets projection rebuilds preserve causal order when host events
     /// from concurrent command streams arrive interleaved.
-    pub after_turn_id: Option<String>,
+    pub after_root_input_id: Option<String>,
 }
 
 /// Tool call state tracked inside the timeline.

@@ -32,7 +32,7 @@ impl OrchAgentRunRunner {
 
     pub(super) fn release_session_context_if_idle(&self, session_id: &str) {
         let active = self
-            .active_agent_runs
+            .active_agent_inputs
             .lock()
             .unwrap()
             .keys()

@@ -82,7 +82,7 @@ impl Timeline {
             event.message_id,
             event.transcript_seq,
             event.message,
-            event.source_turn_id,
+            event.root_input_id,
         );
         if outcome != piko_client_core::ApplyOutcome::Inconsistent
             && let Some(tool_call_id) = tool_call_id
@@ -123,13 +123,13 @@ impl Timeline {
         self.push_anchored_error(text, None);
     }
 
-    fn push_anchored_error(&mut self, text: String, after_turn_id: Option<String>) {
-        let anchored = after_turn_id.is_some();
+    fn push_anchored_error(&mut self, text: String, after_root_input_id: Option<String>) {
+        let anchored = after_root_input_id.is_some();
         let id = self.local_id();
         self.push_component(TimelineComponent::Error(ErrorComponent {
             id,
             text,
-            after_turn_id,
+            after_root_input_id,
         }));
         if anchored {
             self.mark_projection_applied();
@@ -339,13 +339,13 @@ impl Timeline {
                 });
         }
 
-        let mut last_component_by_turn = HashMap::new();
+        let mut last_component_by_root = HashMap::new();
         let mut seen_model_steps = std::collections::HashSet::new();
         let model_step_lookup = self.model_step_lookup();
         for item in self.projection.items() {
-            let source_turn_id = match item {
-                CoreItem::Committed(committed) => Some(committed.source_turn_id.clone()),
-                CoreItem::Tool(tool) => tool.source_turn_id.clone(),
+            let root_input_id = match item {
+                CoreItem::Committed(committed) => Some(committed.root_input_id.clone()),
+                CoreItem::Tool(tool) => tool.root_input_id.clone(),
                 CoreItem::RealtimeDraft(_) | CoreItem::SessionEntry(_) => None,
             };
             let components: Vec<TimelineComponent> = match item {
@@ -421,8 +421,8 @@ impl Timeline {
                     self.tool_calls.push(tool.clone());
                 }
                 self.components.push_back(component);
-                if let Some(turn_id) = &source_turn_id {
-                    last_component_by_turn.insert(turn_id.clone(), self.components.len() - 1);
+                if let Some(root_id) = &root_input_id {
+                    last_component_by_root.insert(root_id.clone(), self.components.len() - 1);
                 }
             }
         }
@@ -440,15 +440,15 @@ impl Timeline {
         for error in local_errors {
             let insertion_index = match &error {
                 TimelineComponent::Error(error) => error
-                    .after_turn_id
+                    .after_root_input_id
                     .as_ref()
-                    .and_then(|turn_id| last_component_by_turn.get(turn_id))
+                    .and_then(|root_id| last_component_by_root.get(root_id))
                     .map(|index| index + 1),
                 _ => None,
             };
             if let Some(index) = insertion_index {
                 self.components.insert(index, error);
-                for last_index in last_component_by_turn.values_mut() {
+                for last_index in last_component_by_root.values_mut() {
                     if *last_index >= index {
                         *last_index += 1;
                     }

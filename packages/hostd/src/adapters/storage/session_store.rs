@@ -67,21 +67,21 @@ impl SessionStorePort for BlockingSessionStore {
             .await
     }
 
-    async fn agent_report_for_turn(
+    async fn agent_report_for_input(
         &self,
-        turn_id: &str,
+        root_input_id: &str,
     ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError> {
         let store = self.inner.clone();
-        let turn_id = turn_id.to_string();
+        let root_input_id = root_input_id.to_string();
         self.pool
-            .run(move || store.agent_report_for_turn(&turn_id))
+            .run(move || store.agent_report_for_input(&root_input_id))
             .await
     }
 
-    async fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
+    async fn interrupt_incomplete_agent_work(&self) -> Result<usize, SessionStorageError> {
         let store = self.inner.clone();
         self.pool
-            .run(move || store.interrupt_incomplete_agent_executions())
+            .run(move || store.interrupt_incomplete_agent_work())
             .await
     }
 

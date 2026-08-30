@@ -21,7 +21,7 @@ pub fn agent_transcript_entries(recovered: &RecoveredAgent) -> Vec<SessionTreeEn
                 timestamp: message.timestamp.to_string(),
                 agent_id: message.agent_spec_id.clone(),
                 agent_instance_id: message.agent_instance_id.clone(),
-                source_turn_id: message.source_turn_id.clone().unwrap_or_default(),
+                root_input_id: message.root_input_id.clone().unwrap_or_default(),
                 transcript_seq: message.transcript_seq,
                 message: message.message.clone(),
             })
@@ -77,7 +77,6 @@ mod tests {
                 agent_instance_id: "agent-1".into(),
                 agent_spec_id: "main".into(),
                 root_input_id: Some("exec-1".into()),
-                source_turn_id: Some("turn-1".into()),
                 transcript_seq: 1,
                 timestamp: 1,
                 message: Message::User {
@@ -101,7 +100,6 @@ mod tests {
                     agent_instance_id: "agent-1".into(),
                     agent_spec_id: "main".into(),
                     root_input_id: Some("exec-1".into()),
-                    source_turn_id: Some("turn-1".into()),
                     transcript_seq: 2,
                     timestamp: 2,
                     message: Message::Assistant {
@@ -122,7 +120,6 @@ mod tests {
                     agent_instance_id: "agent-1".into(),
                     agent_spec_id: "main".into(),
                     root_input_id: Some("exec-1".into()),
-                    source_turn_id: Some("turn-1".into()),
                     transcript_seq: 1,
                     timestamp: 1,
                     message: Message::User {
@@ -150,7 +147,7 @@ mod tests {
         };
         assert_eq!(entry.agent_instance_id, "agent-1");
         assert_eq!(entry.agent_id, "main");
-        assert_eq!(entry.source_turn_id, "turn-1");
+        assert_eq!(entry.root_input_id, "exec-1");
         assert_eq!(entry.parent_id.as_deref(), Some("tree-root"));
     }
 }

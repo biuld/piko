@@ -48,39 +48,39 @@ impl AppState {
         }
     }
 
-    pub(super) fn request_turn_diff(&mut self) -> Vec<Effect> {
+    pub(super) fn request_agent_work_diff(&mut self) -> Vec<Effect> {
         let Some(session_id) = self.session.id.clone() else {
             self.status = "no active session for /diff".to_string();
             return Vec::new();
         };
-        let turn_id = self
+        let root_input_id = self
             .active_root_input_id()
             .map(str::to_string)
-            .or_else(|| self.last_turn_id.clone());
-        let Some(turn_id) = turn_id else {
-            if let Some(diff) = self.last_turn_diff.clone() {
+            .or_else(|| self.last_root_input_id.clone());
+        let Some(root_input_id) = root_input_id else {
+            if let Some(diff) = self.last_agent_work_diff.clone() {
                 self.diagnostics.set_diff(&diff);
                 self.push_surface(SurfaceId::Diagnostics);
-                self.status = "turn diff".to_string();
+                self.status = "work diff".to_string();
             } else {
-                self.status = "no turn id for /diff".to_string();
+                self.status = "no input id for /diff".to_string();
             }
             return Vec::new();
         };
         // Prefer cached push if it matches the requested turn.
-        if let Some(diff) = self.last_turn_diff.as_ref()
-            && diff.turn_id == turn_id
+        if let Some(diff) = self.last_agent_work_diff.as_ref()
+            && diff.root_input_id == root_input_id
         {
             self.diagnostics.set_diff(diff);
             self.push_surface(SurfaceId::Diagnostics);
-            self.status = "turn diff".to_string();
+            self.status = "work diff".to_string();
             return Vec::new();
         }
-        self.status = format!("fetching diff for turn {turn_id}");
-        vec![Effect::send(Command::TurnDiffGet {
+        self.status = format!("fetching diff for input {root_input_id}");
+        vec![Effect::send(Command::AgentWorkDiffGet {
             command_id: command_id(),
             session_id,
-            turn_id,
+            root_input_id,
         })]
     }
 

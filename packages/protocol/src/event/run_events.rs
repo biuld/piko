@@ -32,27 +32,6 @@ impl From<ApprovalEvent> for ServerMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum QueueEvent {
-    Updated {
-        session_id: SessionId,
-        steer_count: u32,
-        follow_up_count: u32,
-        next_turn_count: u32,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        steer_preview: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        follow_up_preview: Option<String>,
-    },
-}
-
-impl From<QueueEvent> for ServerMessage {
-    fn from(event: QueueEvent) -> Self {
-        Self::Queue(event)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelEvent {
     ConfigChanged {
         model_id: String,
@@ -90,7 +69,7 @@ pub enum UsageEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_instance_id: Option<crate::AgentInstanceId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_id: Option<TurnId>,
+        root_input_id: Option<String>,
         /// Context fill estimate (prompt side: `input + cache_read`).
         used: u64,
         /// Active model context window when host can resolve it.
@@ -99,9 +78,9 @@ pub enum UsageEvent {
         /// Session cumulative ledger after this update (when known).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cumulative: Option<crate::messages::Usage>,
-        /// Turn-scoped usage that triggered this projection (when applicable).
+        /// Input-scoped usage that triggered this projection (when applicable).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        turn_usage: Option<crate::messages::Usage>,
+        input_usage: Option<crate::messages::Usage>,
         timestamp: i64,
     },
 }

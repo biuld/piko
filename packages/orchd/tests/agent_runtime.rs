@@ -51,7 +51,7 @@ impl CanonicalRequestTestExt for AgentRuntime {
             piko_orchd_api::AgentInputRuntime {
                 prompt_resources: request.prompt_resources,
                 active_tool_names: request.active_tool_names,
-                source_turn_id: request.source_turn_id,
+                root_input_id: request.root_input_id,
                 message_id: Some(request.message_id),
             },
         )

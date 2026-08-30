@@ -43,7 +43,7 @@ impl SessionStore {
             return Err(CommitError::IdentityMismatch);
         }
         if root.input.agent_instance_id != commit.agent_instance_id
-            || processing.source_turn_id != commit.source_turn_id
+            || processing.root_input_id.as_deref() != Some(commit.root_input_id.as_str())
         {
             return Err(CommitError::IdentityMismatch);
         }
@@ -53,7 +53,6 @@ impl SessionStore {
             step_index: boundary.step_index,
             root_input_id: boundary.root_input_id.clone(),
             agent_instance_id: boundary.agent_instance_id.clone(),
-            source_turn_id: boundary.source_turn_id.clone(),
             assistant_message_id: boundary.assistant_message_id.clone(),
             tool_call_message_ids: boundary.tool_call_message_ids.clone(),
             outcome: boundary.outcome,
@@ -228,7 +227,6 @@ fn step_messages_match_existing(
                         stored.data.tree_parent_entry_id.as_ref() == Some(parent)
                     })
                     && stored.data.root_input_id.as_deref() == Some(proposed.root_input_id.as_str())
-                    && stored.data.source_turn_id == proposed.source_turn_id
                     && stored.data.committed_at == proposed.committed_at
                     && stored.data.message == proposed.message
             })
@@ -241,7 +239,6 @@ fn validate_step_message(
     assistant: bool,
 ) -> Result<(), CommitError> {
     if message.session_id != step.session_id
-        || message.source_turn_id != step.source_turn_id
         || message.root_input_id != step.root_input_id
         || message.agent_instance_id != step.agent_instance_id
     {
@@ -281,7 +278,7 @@ fn append_step_message(
         timestamp: message.committed_at.to_string(),
         agent_id: agent_spec_id.to_string(),
         agent_instance_id: step.agent_instance_id.clone(),
-        source_turn_id: step.source_turn_id.clone().unwrap_or_default(),
+        root_input_id: step.root_input_id.clone(),
         transcript_seq: *transcript_seq,
         message: message.message.clone(),
     });
@@ -291,7 +288,6 @@ fn append_step_message(
         agent_parent_message_id: message.parent_message_id.clone(),
         tree_parent_entry_id: tree_parent.clone(),
         root_input_id: Some(step.root_input_id.clone()),
-        source_turn_id: step.source_turn_id.clone(),
         committed_at: message.committed_at,
         message: message.message.clone(),
     }));

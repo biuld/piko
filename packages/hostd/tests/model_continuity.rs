@@ -196,7 +196,7 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
     let first = world_state(&snapshots[0]);
     assert!(first.contains("session_id:"));
     assert!(first.contains("agent_instance_id:"));
-    assert!(first.contains("operation_id: turn_"));
+    assert!(first.contains("operation_id: input_s1"));
     assert!(first.contains("run_kind: initial"));
     assert!(first.contains("model: model-a"));
     assert!(!first.contains("world-state changed"));
@@ -205,7 +205,7 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
     // identity facts, no model line (unchanged).
     let second = world_state(&snapshots[1]);
     assert!(second.starts_with("world-state changed since the previous run:"));
-    assert!(second.contains("operation_id: turn_"));
+    assert!(second.contains("operation_id: input_s2"));
     assert!(second.contains("run_kind: continuation"));
     assert!(!second.contains("session_id:"));
     assert!(!second.contains("agent_instance_id:"));
@@ -232,7 +232,7 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
         baseline
             .operation_id
             .as_deref()
-            .is_some_and(|id| id.starts_with("turn_"))
+            .is_some_and(|id| id == "input_s2")
     );
 
     let reopened = repo

@@ -47,8 +47,6 @@ pub enum AgentDurableCommand {
         root_input_id: AgentInputId,
         request_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        source_turn_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         detached_recipient_agent_instance_id: Option<AgentInstanceId>,
         #[serde(default)]
         prompt_assembly_version: u32,

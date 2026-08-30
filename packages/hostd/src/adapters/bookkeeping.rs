@@ -86,7 +86,7 @@ mod tests {
             timestamp: "1".into(),
             agent_id: "main".into(),
             agent_instance_id: "agent-main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             transcript_seq: 1,
             message: Message::User {
                 content: MessageContent::String(text.into()),

@@ -406,7 +406,7 @@ fn timelines_from_snapshot(
                     message_entry.id,
                     message_entry.transcript_seq,
                     message_entry.message,
-                    message_entry.source_turn_id,
+                    message_entry.root_input_id,
                 );
             }
             SessionTreeEntry::ToolCall(tool) => {

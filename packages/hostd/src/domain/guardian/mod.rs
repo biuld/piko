@@ -281,7 +281,7 @@ mod tests {
                 timestamp: String::new(),
                 agent_id: "main".into(),
                 agent_instance_id: "root".into(),
-                source_turn_id: String::new(),
+                root_input_id: String::new(),
                 transcript_seq: 0,
                 message: Message::User {
                     content: piko_protocol::messages::MessageContent::String(text.into()),

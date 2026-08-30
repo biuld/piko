@@ -5,34 +5,36 @@ use super::HostState;
 impl HostState {
     /// Rebuild the exact-content diff for one root AgentInput from the session
     /// tree (the same facts the journal already stores on tool results).
-    pub fn turn_diff(
+    pub fn agent_work_diff(
         &self,
         session_id: &str,
         root_input_id: &str,
-    ) -> Option<piko_protocol::TurnDiffEvent> {
+    ) -> Option<piko_protocol::AgentWorkDiffEvent> {
         let session = self.session(session_id).ok()?;
         let mut changes = Vec::new();
         for entry in &session.entries {
             let SessionTreeEntry::Message(message) = entry else {
                 continue;
             };
-            if message.source_turn_id != root_input_id {
+            if message.root_input_id != root_input_id {
                 continue;
             }
             if let Some(change) = file_change_from_message(&message.message) {
                 merge_file_change(&mut changes, change);
             }
         }
-        (!changes.is_empty()).then(|| piko_protocol::TurnDiffEvent {
+        (!changes.is_empty()).then(|| piko_protocol::AgentWorkDiffEvent {
             session_id: session_id.to_string(),
-            turn_id: root_input_id.to_string(),
-            unified_diff: render_turn_diff(&changes),
+            root_input_id: root_input_id.to_string(),
+            unified_diff: render_agent_work_diff(&changes),
             files: changes,
         })
     }
 }
 
-pub(crate) fn file_change_from_message(message: &Message) -> Option<piko_protocol::TurnFileChange> {
+pub(crate) fn file_change_from_message(
+    message: &Message,
+) -> Option<piko_protocol::AgentWorkFileChange> {
     let Message::ToolResult {
         details: Some(details),
         is_error,
@@ -48,8 +50,8 @@ pub(crate) fn file_change_from_message(message: &Message) -> Option<piko_protoco
 }
 
 pub(crate) fn merge_file_change(
-    changes: &mut Vec<piko_protocol::TurnFileChange>,
-    change: piko_protocol::TurnFileChange,
+    changes: &mut Vec<piko_protocol::AgentWorkFileChange>,
+    change: piko_protocol::AgentWorkFileChange,
 ) {
     if let Some(existing) = changes
         .iter_mut()
@@ -63,7 +65,7 @@ pub(crate) fn merge_file_change(
     changes.retain(|change| change.before != change.after);
 }
 
-pub(crate) fn render_turn_diff(changes: &[piko_protocol::TurnFileChange]) -> String {
+pub(crate) fn render_agent_work_diff(changes: &[piko_protocol::AgentWorkFileChange]) -> String {
     let mut rendered = String::new();
     for change in changes {
         let before_path = change

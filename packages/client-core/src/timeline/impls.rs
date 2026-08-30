@@ -41,10 +41,10 @@ impl AgentTimeline {
         message_id: MessageId,
         transcript_seq: u64,
         message: Message,
-        source_turn_id: String,
+        root_input_id: String,
     ) -> bool {
         matches!(
-            self.apply_committed_checked(message_id, transcript_seq, message, source_turn_id),
+            self.apply_committed_checked(message_id, transcript_seq, message, root_input_id),
             ApplyOutcome::Applied
         )
     }
@@ -54,18 +54,18 @@ impl AgentTimeline {
         message_id: MessageId,
         transcript_seq: u64,
         message: Message,
-        source_turn_id: String,
+        root_input_id: String,
     ) -> ApplyOutcome {
         let record = CommittedItem {
             message_id: message_id.clone(),
             transcript_seq,
             message: message.clone(),
-            source_turn_id: source_turn_id.clone(),
+            root_input_id: root_input_id.clone(),
         };
         if let Some(existing) = self.committed_records.get(&message_id) {
             return if existing.transcript_seq == transcript_seq
                 && existing.message == message
-                && existing.source_turn_id == source_turn_id
+                && existing.root_input_id == root_input_id
             {
                 ApplyOutcome::Ignored
             } else {
@@ -92,7 +92,7 @@ impl AgentTimeline {
                 }
                 // Upstream (provider-side) activity is a first-class tool
                 // timeline item, so committed messages also project it.
-                self.upsert_committed_upstream(content, transcript_seq, source_turn_id.as_str());
+                self.upsert_committed_upstream(content, transcript_seq, root_input_id.as_str());
             }
             Message::ToolCall {
                 id,
@@ -104,7 +104,7 @@ impl AgentTimeline {
                 name.clone(),
                 arguments.clone(),
                 None,
-                Some(source_turn_id.clone()),
+                Some(root_input_id.clone()),
                 Some(transcript_seq),
             ),
             Message::ToolResult {
@@ -121,7 +121,7 @@ impl AgentTimeline {
                 content.clone(),
                 details.clone(),
                 is_error.unwrap_or(false),
-                Some(source_turn_id.clone()),
+                Some(root_input_id.clone()),
                 Some(transcript_seq),
             ),
         }
@@ -248,10 +248,10 @@ impl AgentTimeline {
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .unwrap_or_else(|| patch.item_id.clone());
-        let source_turn_id = patch
+        let root_input_id = patch
             .fields
             .as_ref()
-            .and_then(|f| f.get("turnId"))
+            .and_then(|f| f.get("rootInputId"))
             .and_then(|v| v.as_str())
             .map(str::to_string);
 
@@ -335,7 +335,7 @@ impl AgentTimeline {
                             patch.content_index.unwrap_or(0),
                             patch.text.as_deref(),
                             Some(parent),
-                            source_turn_id,
+                            root_input_id,
                         );
                     }
                 }
@@ -370,7 +370,7 @@ impl AgentTimeline {
                         .get("parentMessageId")
                         .and_then(|v| v.as_str())
                         .map(str::to_string),
-                    source_turn_id,
+                    root_input_id,
                     None,
                 ),
                 Some("completed" | "failed") => self.apply_tool_ended_with_turn(
@@ -383,7 +383,7 @@ impl AgentTimeline {
                     Vec::new(),
                     None,
                     status == Some("failed"),
-                    source_turn_id,
+                    root_input_id,
                     None,
                 ),
                 Some("cancelled") => {
@@ -391,8 +391,8 @@ impl AgentTimeline {
                         && let TimelineItem::Tool(tool) = &mut self.items[idx]
                     {
                         tool.status = ToolStatus::Cancelled;
-                        if source_turn_id.is_some() {
-                            tool.source_turn_id = source_turn_id;
+                        if root_input_id.is_some() {
+                            tool.root_input_id = root_input_id;
                         }
                     } else {
                         let live_order = self.allocate_live_order();
@@ -417,7 +417,7 @@ impl AgentTimeline {
                                 .get("parentMessageId")
                                 .and_then(|v| v.as_str())
                                 .map(str::to_string),
-                            source_turn_id,
+                            root_input_id,
                             transcript_seq: None,
                             live_order,
                             upstream: None,
@@ -478,7 +478,7 @@ impl AgentTimeline {
                         tool_name,
                         args.clone().unwrap_or(serde_json::Value::Null),
                         parent.clone(),
-                        source_turn_id,
+                        root_input_id,
                         None,
                     );
                 }
@@ -490,7 +490,7 @@ impl AgentTimeline {
                         Vec::new(),
                         None,
                         status == "failed",
-                        source_turn_id,
+                        root_input_id,
                         None,
                     );
                 }

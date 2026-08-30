@@ -36,11 +36,16 @@ fn completed_work_count(records: &[Value]) -> usize {
         else {
             continue;
         };
+        let root_agent_instance_id = event
+            .agents
+            .iter()
+            .find(|agent| agent.parent_agent_instance_id.is_none())
+            .map(|agent| agent.agent_instance_id.as_str());
         let next = event
             .snapshot
             .agent_work
             .iter()
-            .find(|work| work.agent_instance_id == "root")
+            .find(|work| Some(work.agent_instance_id.as_str()) == root_agent_instance_id)
             .and_then(|work| work.active_work.as_ref())
             .map(|work| work.root_input_id.clone());
         if active_input != next

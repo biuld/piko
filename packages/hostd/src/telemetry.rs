@@ -130,7 +130,7 @@ impl Telemetry {
     }
 
     /// Project turn usage from the hostd ledger into turn-level OTel counters.
-    pub fn record_turn_usage(&self, usage: &Usage, status: &str) {
+    pub fn record_input_usage(&self, usage: &Usage, status: &str) {
         if let Some(counter) = &self.turn_tokens {
             for (token_type, count) in [
                 ("input", usage.input),

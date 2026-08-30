@@ -69,7 +69,7 @@ impl ExecutionCommitPort for ExecutionCommitRouter {
                     event: SessionEvent::MessageCommitted {
                         transcript_seq: ack.revision,
                         message_id: commit.message_id,
-                        source_turn_id: commit.source_turn_id.unwrap_or_default(),
+                        root_input_id: commit.root_input_id,
                         role,
                     },
                 })
@@ -138,7 +138,7 @@ impl ExecutionCommitPort for ExecutionCommitRouter {
                     event: SessionEvent::MessageCommitted {
                         transcript_seq: ack.revision,
                         message_id: commit.message_id,
-                        source_turn_id: commit.source_turn_id.unwrap_or_default(),
+                        root_input_id: commit.root_input_id,
                         role,
                     },
                 })

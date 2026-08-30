@@ -81,7 +81,7 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
             session_id: "session-context-tools".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "context-tools-message".into(),
             content: MessageContent::String("run".into()),
             delivery: piko_protocol::AgentInputDelivery::Auto,

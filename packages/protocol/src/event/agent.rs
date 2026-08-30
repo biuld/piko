@@ -4,7 +4,6 @@ use super::*;
 use crate::AgentStatus;
 
 pub type SessionId = String;
-pub type TurnId = String;
 pub type MessageId = String;
 pub type ToolCallId = String;
 pub type ApprovalId = String;

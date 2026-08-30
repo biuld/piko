@@ -12,10 +12,9 @@ pub use crate::event::{
     AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
     ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
     InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
-    InteractionQuestionId, MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage,
-    SessionId, SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef, ToolCallSnapshot,
-    ToolCallStatus, TurnId, UserInteractionResponse, UserInteractionSnapshot,
-    UserInteractionStatus,
+    InteractionQuestionId, MessageId, MessageRole, ModelEvent, ServerMessage, SessionId,
+    SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef, ToolCallSnapshot, ToolCallStatus,
+    UserInteractionResponse, UserInteractionSnapshot, UserInteractionStatus,
 };
 pub use crate::messages::{Usage, UsageCost};
 
@@ -240,11 +239,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
     },
-    /// Read the exact net workspace diff recorded for one turn.
-    TurnDiffGet {
+    /// Read the exact net workspace diff recorded for one AgentInput.
+    AgentWorkDiffGet {
         command_id: CommandId,
         session_id: SessionId,
-        turn_id: TurnId,
+        root_input_id: String,
     },
     /// Manually trigger session compaction (bypasses auto threshold).
     SessionCompact {
@@ -329,7 +328,7 @@ impl Command {
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::RolloutPageGet { command_id, .. }
-            | Self::TurnDiffGet { command_id, .. }
+            | Self::AgentWorkDiffGet { command_id, .. }
             | Self::SessionCompact { command_id, .. }
             | Self::ProcessList { command_id }
             | Self::ProcessStop { command_id, .. }

@@ -27,7 +27,6 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
 fn message_commit(id: &str, parent: Option<&str>) -> MessageCommit {
     MessageCommit {
         session_id: "session-1".into(),
-        source_turn_id: Some("turn-1".into()),
         root_input_id: "input-1".into(),
         agent_instance_id: "agent_session-1_root".into(),
         message_id: id.into(),
@@ -177,7 +176,6 @@ async fn private_transcripts_are_recovered_per_agent() {
             .commit_message(
                 MessageCommit {
                     session_id: "session-1".into(),
-                    source_turn_id: Some("turn-1".into()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: child_id.into(),
                     message_id: format!("message-{child_id}"),
@@ -383,7 +381,6 @@ async fn child_transcript_does_not_move_persisted_session_leaf() {
         .commit_message(
             MessageCommit {
                 session_id: "session-1".into(),
-                source_turn_id: None,
                 root_input_id: "input-1".into(),
                 agent_instance_id: "agent-child".into(),
                 message_id: "message-child".into(),

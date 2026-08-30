@@ -119,7 +119,6 @@ pub(super) fn start_run(
         agent_instance_id,
         root_input_id,
         request_id,
-        source_turn_id,
         detached_recipient_agent_instance_id,
         prompt_assembly_version,
         prompt_digest,
@@ -142,7 +141,7 @@ pub(super) fn start_run(
         if let Some(processing) = &existing.processing {
             let matches = existing.input == input
                 && processing.started_at == started_at
-                && processing.source_turn_id == source_turn_id
+                && processing.root_input_id.as_deref() == Some(root_input_id.as_str())
                 && processing.detached_recipient_agent_instance_id
                     == detached_recipient_agent_instance_id
                 && processing.prompt_assembly_version == prompt_assembly_version
@@ -164,7 +163,6 @@ pub(super) fn start_run(
             request_id,
             base_message_id: admitted_base(aggregate, &agent_instance_id),
             tree_base_entry_id: admitted_tree_base(aggregate, &agent_instance_id),
-            source_turn_id,
             detached_recipient_agent_instance_id,
             prompt_assembly_version,
             prompt_digest,

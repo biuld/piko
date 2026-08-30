@@ -9,7 +9,6 @@ use super::{AgentInputDelivery, AgentInstanceId, AgentInstanceLifecycle};
 use crate::MessageContent;
 
 pub type AgentInputId = String;
-pub type RunId = String;
 pub type ModelStepId = String;
 
 /// The typed source of an admitted input.
@@ -77,7 +76,7 @@ impl AgentInput {
             agent_instance_id: request.agent_instance_id.clone(),
             origin: if request.caller_agent_instance_id.is_some() {
                 AgentInputOrigin::Agent
-            } else if request.source_turn_id.is_some() {
+            } else if request.root_input_id.is_some() {
                 AgentInputOrigin::User
             } else {
                 AgentInputOrigin::System
@@ -98,7 +97,7 @@ impl AgentInput {
             session_id: self.session_id.clone(),
             agent_instance_id: self.agent_instance_id.clone(),
             caller_agent_instance_id: self.caller_agent_instance_id.clone(),
-            source_turn_id: None,
+            root_input_id: None,
             message_id: self.input_id.clone(),
             content: self.content.clone(),
             delivery: self.delivery,

@@ -39,7 +39,7 @@ pub struct MessageEntry {
     pub timestamp: String,
     pub agent_id: String,
     pub agent_instance_id: String,
-    pub source_turn_id: String,
+    pub root_input_id: String,
     pub transcript_seq: u64,
     pub message: Message,
 }

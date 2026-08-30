@@ -4,10 +4,6 @@ use crate::state::ClientState;
 
 use super::is_live_session_event;
 
-pub(super) fn handle_queue_event(_state: &mut ClientState, _event: piko_protocol::QueueEvent) {
-    // Queue counts come from AgentWorkSnapshot on reconcile.
-}
-
 pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protocol::ApprovalEvent) {
     match event {
         piko_protocol::ApprovalEvent::Requested {

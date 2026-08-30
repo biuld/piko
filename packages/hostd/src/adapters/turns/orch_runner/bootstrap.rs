@@ -233,7 +233,7 @@ impl OrchAgentRunRunner {
 
         let runner = Self {
             agent_runtime,
-            active_agent_runs: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            active_agent_inputs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             agent_hubs: Arc::new(std::sync::Mutex::new(HashMap::new())),
             trajectory_recorders: TrajectoryRecorderRegistry::global(),
             commit_routers: Arc::new(std::sync::Mutex::new(HashMap::new())),

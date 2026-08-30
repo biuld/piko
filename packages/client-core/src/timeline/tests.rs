@@ -307,7 +307,6 @@ fn reliable_model_step_boundary_closes_thought_without_message_end() {
     assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
     let boundary = piko_protocol::ModelStepBoundary {
         session_id: "s".into(),
-        source_turn_id: Some("turn-1".into()),
         root_input_id: "input-1".into(),
         agent_instance_id: "root".into(),
         model_step_id: "step-1".into(),
@@ -481,7 +480,7 @@ fn replace_and_clear_tool_argument_content_are_applied() {
             delta_seq: Some(seq),
             fields: Some(serde_json::json!({
                 "parentMessageId": "msg",
-                "turnId": "turn-1"
+                "rootInputId": "turn-1"
             })),
         };
         assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);

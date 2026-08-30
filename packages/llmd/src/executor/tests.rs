@@ -31,7 +31,6 @@ fn capture(telemetry: Arc<RecordingTelemetry>) -> ModelStepCapture {
             session_id: "s".into(),
             agent_instance_id: "a".into(),
             root_input_id: "input-r".into(),
-            source_turn_id: None,
         },
         step_id: "step-1".into(),
         provider: "test".into(),

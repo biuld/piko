@@ -31,21 +31,21 @@ impl SessionStore {
         Ok(root)
     }
 
-    pub fn agent_report_for_turn(
+    pub fn agent_report_for_input(
         &self,
-        turn_id: &str,
+        root_input_id: &str,
     ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError> {
         Ok(self
             .aggregate()?
             .agent_inputs
             .values()
             .filter(|input| {
-                input.input.input_id == turn_id
+                input.input.input_id == root_input_id
                     || input
                         .processing
                         .as_ref()
-                        .and_then(|processing| processing.source_turn_id.as_deref())
-                        == Some(turn_id)
+                        .and_then(|processing| processing.root_input_id.as_deref())
+                        == Some(root_input_id)
             })
             .filter_map(|input| input.processing.as_ref().and_then(|p| p.report.clone()))
             .next())
@@ -274,7 +274,6 @@ fn committed_message(
         agent_instance_id: stored.data.agent_instance_id.clone(),
         agent_spec_id: agent_spec_id.to_string(),
         root_input_id: stored.data.root_input_id.clone(),
-        source_turn_id: stored.data.source_turn_id.clone(),
         transcript_seq,
         timestamp: stored.data.committed_at,
         message: stored.data.message.clone(),

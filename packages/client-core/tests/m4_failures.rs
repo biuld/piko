@@ -82,7 +82,7 @@ fn m4_stale_realtime_delta_seq_ignored() {
             session_id: "sess-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "msg-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::Assistant {
@@ -174,7 +174,7 @@ fn m4_failed_tool_result_on_timeline() {
             session_id: "sess-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "tc-1".into(),
             transcript_seq: 1,
             message: piko_protocol::Message::ToolCall {
@@ -195,7 +195,7 @@ fn m4_failed_tool_result_on_timeline() {
             session_id: "sess-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "tr-1".into(),
             transcript_seq: 2,
             message: piko_protocol::Message::ToolResult {

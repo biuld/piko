@@ -138,7 +138,7 @@ struct TrajectoryWrite {
     committed_at: i64,
     event_type: &'static str,
     payload: serde_json::Value,
-    run_id: String,
+    root_input_id: String,
     record: TrajectoryRecord,
 }
 
@@ -183,11 +183,11 @@ impl TrajectoryRecorder {
                 match result {
                     Ok(Ok(revision)) => {
                         let session_id = write.session_id.clone();
-                        let run_id = write.run_id;
+                        let root_input_id = write.root_input_id;
                         let _ = live_writer.send(TrajectoryLiveEvent::Record(Box::new(
                             TrajectoryLiveRecordEvent {
                                 session_id: session_id.clone(),
-                                root_input_id: run_id,
+                                root_input_id,
                                 revision,
                                 committed_at,
                                 record: write.record,
@@ -202,7 +202,7 @@ impl TrajectoryRecorder {
                     }
                     _ => {
                         let mut dropped = dropped_writer.lock().unwrap();
-                        *dropped.entry(write.run_id).or_insert(0) += 1;
+                        *dropped.entry(write.root_input_id).or_insert(0) += 1;
                     }
                 }
             }
@@ -235,7 +235,7 @@ impl TrajectoryRecorder {
     }
 }
 
-/// Split a record into journal event type, run identity, and the serialized
+/// Split a record into journal event type, root input identity, and the serialized
 /// inner DTO (not the tagged enum wrapper).
 fn split_record(record: &TrajectoryRecord) -> Option<(&'static str, String, serde_json::Value)> {
     match record {
@@ -275,7 +275,7 @@ fn split_record(record: &TrajectoryRecord) -> Option<(&'static str, String, serd
 #[async_trait]
 impl TrajectoryCapturePort for TrajectoryRecorder {
     async fn record(&self, record: TrajectoryRecord) {
-        let Some((event_type, run_id, payload)) = split_record(&record) else {
+        let Some((event_type, root_input_id, payload)) = split_record(&record) else {
             // Serialization of a protocol DTO cannot fail; count as dropped.
             let mut dropped = self.dropped.lock().unwrap();
             *dropped.entry("unparseable".to_string()).or_insert(0) += 1;
@@ -284,7 +284,7 @@ impl TrajectoryCapturePort for TrajectoryRecorder {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let commit_id = piko_orchd_api::stable_internal_id(
             "trajectory",
-            &[&self.session_id, &run_id, &sequence.to_string()],
+            &[&self.session_id, &root_input_id, &sequence.to_string()],
         );
         let write = TrajectoryWrite {
             store: self.store.clone(),
@@ -293,13 +293,13 @@ impl TrajectoryCapturePort for TrajectoryRecorder {
             committed_at: now_ms(),
             event_type,
             payload,
-            run_id,
+            root_input_id,
             record,
         };
-        let run_id_for_drop = write.run_id.clone();
+        let root_input_id_for_drop = write.root_input_id.clone();
         if self.tx.try_send(write).is_err() {
             let mut dropped = self.dropped.lock().unwrap();
-            *dropped.entry(run_id_for_drop).or_insert(0) += 1;
+            *dropped.entry(root_input_id_for_drop).or_insert(0) += 1;
         }
     }
 }
@@ -331,7 +331,6 @@ mod tests {
                     session_id: "s1".into(),
                     agent_instance_id: "a".into(),
                     root_input_id: "input-r1".into(),
-                    source_turn_id: None,
                 },
                 kind: piko_protocol::TrajectoryTerminalKind::Completed,
                 reason: None,

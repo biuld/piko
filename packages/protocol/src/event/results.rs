@@ -68,9 +68,9 @@ pub enum CommandResult {
         page: crate::RolloutPage,
         timestamp: i64,
     },
-    TurnDiffGot {
+    AgentWorkDiffGot {
         #[serde(skip_serializing_if = "Option::is_none")]
-        diff: Option<TurnDiffEvent>,
+        diff: Option<AgentWorkDiffEvent>,
         timestamp: i64,
     },
     /// Live set of external processes spawned by the `process` tool (F-08).

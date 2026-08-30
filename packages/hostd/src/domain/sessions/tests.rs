@@ -71,7 +71,7 @@ fn turn_file_changes_roll_up_to_net_diff() {
             timestamp: "1".into(),
             agent_id: "main".into(),
             agent_instance_id: "root".into(),
-            source_turn_id: "input-1".into(),
+            root_input_id: "input-1".into(),
             transcript_seq: 1,
             message: crate::api::Message::ToolResult {
                 tool_call_id: id.into(),
@@ -94,7 +94,7 @@ fn turn_file_changes_roll_up_to_net_diff() {
         .unwrap()
         .entries
         .push(tool_result("r1", "one", "two"));
-    let first = state.turn_diff(&session_id, "input-1").unwrap();
+    let first = state.agent_work_diff(&session_id, "input-1").unwrap();
     assert!(first.unified_diff.contains("-one"));
     assert!(first.unified_diff.contains("+two"));
 
@@ -103,7 +103,7 @@ fn turn_file_changes_roll_up_to_net_diff() {
         .unwrap()
         .entries
         .push(tool_result("r2", "two", "three"));
-    let second = state.turn_diff(&session_id, "input-1").unwrap();
+    let second = state.agent_work_diff(&session_id, "input-1").unwrap();
     assert_eq!(second.files[0].before.as_deref(), Some("one"));
     assert_eq!(second.files[0].after.as_deref(), Some("three"));
     assert!(!second.unified_diff.contains("two"));

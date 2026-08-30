@@ -25,7 +25,6 @@ async fn project_committed_message_reads_session_store() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
@@ -69,7 +68,6 @@ async fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "message-rebuild".into(),
                 parent_message_id: None,
@@ -114,7 +112,6 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "root-msg".into(),
                 parent_message_id: None,
@@ -133,7 +130,6 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "followup-msg".into(),
                 parent_message_id: Some("root-msg".into()),
@@ -169,7 +165,7 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
             timestamp: "1".into(),
             agent_id: "main".into(),
             agent_instance_id: root.agent_instance_id.clone(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             transcript_seq: 1,
             message: Message::User {
                 content: MessageContent::String("first".into()),
@@ -184,7 +180,7 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
             timestamp: "2".into(),
             agent_id: "main".into(),
             agent_instance_id: root.agent_instance_id.clone(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             transcript_seq: 2,
             message: Message::Assistant {
                 content: vec![piko_protocol::ContentBlock::Text {
@@ -236,7 +232,6 @@ async fn record_committed_message_projects_into_host_state() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
@@ -284,7 +279,7 @@ async fn record_committed_message_projects_into_host_state() {
 }
 
 #[tokio::test]
-async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
+async fn durable_tool_change_rebuilds_agent_work_diff_without_workspace_read() {
     use piko_protocol::execution::MessageCommit;
     use tempfile::tempdir;
 
@@ -297,7 +292,6 @@ async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "tool-result-1".into(),
                 parent_message_id: None,
@@ -341,7 +335,7 @@ async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
     .await
     .unwrap();
 
-    let diff = state.turn_diff("session-1", "turn-1").unwrap();
+    let diff = state.agent_work_diff("session-1", "input-1").unwrap();
     assert_eq!(diff.files[0].path, "src/a.rs");
     assert!(diff.unified_diff.contains("-old"));
     assert!(diff.unified_diff.contains("+new"));
@@ -387,7 +381,6 @@ async fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: agent.clone(),
                 message_id: "todo-clear".into(),
                 parent_message_id: None,
@@ -451,7 +444,6 @@ async fn todo_write_nonempty_sets_map_and_pending() {
             MessageCommit {
                 root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
-                source_turn_id: Some("turn-1".into()),
                 agent_instance_id: agent.clone(),
                 message_id: "todo-write-1".into(),
                 parent_message_id: None,
@@ -523,7 +515,6 @@ fn empty_clear_pending_drives_durable_none() {
     let tool_result = |message_id: &str, parent_message_id: Option<&str>, todos| MessageCommit {
         root_input_id: "input-1".into(),
         session_id: "session-1".into(),
-        source_turn_id: Some("turn-1".into()),
         agent_instance_id: agent.clone(),
         message_id: message_id.into(),
         parent_message_id: parent_message_id.map(str::to_string),

@@ -123,7 +123,6 @@ impl AgentRunRunner for AgentPersistRunner {
             let _ = store.commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-main".into(),
                     message_id: "user-main".into(),
@@ -144,7 +143,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: "user-main".into(),
-                    source_turn_id: input_id.clone(),
+                    root_input_id: input_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -152,7 +151,6 @@ impl AgentRunRunner for AgentPersistRunner {
             let _ = store.commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some("child-work".into()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
                     message_id: "user-child".into(),
@@ -173,7 +171,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
                     message_id: "user-child".into(),
-                    source_turn_id: "child-work".into(),
+                    root_input_id: "child-work".into(),
                     role: MessageRole::User,
                 },
             );
@@ -195,7 +193,6 @@ impl AgentRunRunner for AgentPersistRunner {
             let _ = store.commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some("child-work".into()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
                     message_id: "assistant-child".into(),
@@ -213,7 +210,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 3,
                     message_id: "assistant-child".into(),
-                    source_turn_id: "child-work".into(),
+                    root_input_id: "child-work".into(),
                     role: MessageRole::Assistant,
                 },
             );

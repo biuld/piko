@@ -31,8 +31,6 @@ pub struct TrajectoryIdentity {
     pub agent_instance_id: AgentInstanceId,
     /// Work identity: the root AgentInput these records belong to.
     pub root_input_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<String>,
 }
 
 /// Prompt assembly (input side): the exact production prompt and tool catalog
@@ -143,8 +141,6 @@ pub struct TrajectoryToolCallRecord {
 pub struct TrajectoryChildRunRecord {
     pub identity: TrajectoryIdentity,
     pub child_agent_instance_id: AgentInstanceId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_run_id: Option<String>,
     pub spawned_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
@@ -174,10 +170,10 @@ pub struct TrajectorySystemNotificationRecord {
 }
 
 /// Terminal outcome of a run, recorded as the final trajectory record after
-/// the durable `execution_finished` fact (F-36 "terminal record"). Its SSE
+/// the durable processing-finished fact (F-36 "terminal record"). Its SSE
 /// fan-out is what lets a live viewer observe the running → terminal
 /// transition: on a clean completion no other trajectory record would follow
-/// `execution_finished`.
+/// the processing-finished fact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryTerminalRecord {
@@ -205,7 +201,7 @@ pub enum TrajectoryRecord {
 }
 
 /// Terminal outcome of a run. The query derives it from the durable
-/// `execution_finished` fact; `TrajectoryRecord::Terminal` also records it as
+/// processing-finished fact; `TrajectoryRecord::Terminal` also records it as
 /// the final observational record so live SSE viewers observe the
 /// running → terminal transition. Absent means the run is still running or
 /// was interrupted.
@@ -224,8 +220,6 @@ pub struct TrajectoryRunSummary {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
     pub root_input_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<String>,
     pub started_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<i64>,
@@ -339,7 +333,6 @@ mod tests {
             session_id: "s".into(),
             agent_instance_id: "a".into(),
             root_input_id: "input-r".into(),
-            source_turn_id: None,
         }
     }
 

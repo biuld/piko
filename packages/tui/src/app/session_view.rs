@@ -29,8 +29,8 @@ impl AppState {
         self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;
-        self.last_turn_id = None;
-        self.last_turn_diff = None;
+        self.last_root_input_id = None;
+        self.last_agent_work_diff = None;
         self.timelines.clear();
         self.thought_inspector = None;
         self.agent_panel.begin_loading();
@@ -52,8 +52,8 @@ impl AppState {
         self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;
-        self.last_turn_id = None;
-        self.last_turn_diff = None;
+        self.last_root_input_id = None;
+        self.last_agent_work_diff = None;
         self.timelines.clear();
         self.thought_inspector = None;
         self.agent_panel.begin_loading();

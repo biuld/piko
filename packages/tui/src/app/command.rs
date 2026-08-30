@@ -409,8 +409,8 @@ const LOCAL_SLASH_TABLE: &[(&str, LocalCommandId, &str, &str)] = &[
     (
         "/diff",
         LocalCommandId::Diff,
-        "Turn diff",
-        "Show workspace diff for the last or active turn",
+        "Work diff",
+        "Show workspace diff for the last or active input",
     ),
     ("/quit", LocalCommandId::Quit, "Quit", "Exit the TUI"),
 ];

@@ -294,7 +294,6 @@ impl ToolRegistry for ToolRegistryImpl {
             tool_call_index: context.tool_call_index,
             tool_entity_id: Some(tool_entity_id.clone()),
             host_context: context.host_context.clone(),
-            source_turn_id: context.source_turn_id.clone(),
             context_remaining: context.context_remaining,
         };
 

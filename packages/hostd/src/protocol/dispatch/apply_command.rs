@@ -84,15 +84,15 @@ impl HostServer {
                     }),
                 }])
             }
-            Command::TurnDiffGet {
+            Command::AgentWorkDiffGet {
                 session_id,
-                turn_id,
+                root_input_id,
                 ..
             } => {
-                let diff = self.0.turn_diff(&session_id, &turn_id).await?;
+                let diff = self.0.agent_work_diff(&session_id, &root_input_id).await?;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
-                    result: Ok(crate::api::CommandResult::TurnDiffGot {
+                    result: Ok(crate::api::CommandResult::AgentWorkDiffGot {
                         diff,
                         timestamp: now_ms(),
                     }),

@@ -13,7 +13,7 @@ use super::SessionStore;
 use super::mutations::tree_entry_event;
 
 impl SessionStore {
-    pub fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError> {
+    pub fn interrupt_incomplete_agent_work(&self) -> Result<usize, SessionStorageError> {
         self.with_io(|| {
             let active = self
                 .aggregate()?
@@ -37,7 +37,7 @@ impl SessionStore {
                     .get(&input.input.agent_instance_id)
                     .ok_or_else(|| self.invalid("interrupted work has no agent"))?;
                 let now = chrono::Utc::now().timestamp_millis();
-                let head = aggregate.work_message_head(started.execution_id());
+                let head = aggregate.work_message_head(started.root_input_id());
                 let mut parent_message_id = head
                     .map(str::to_string)
                     .or_else(|| processing.base_message_id.clone());
@@ -79,7 +79,7 @@ impl SessionStore {
                 for (tool_call_message_id, tool_call_id, tool_name) in unresolved {
                     let result_id = piko_orchd_api::stable_internal_id(
                         "recovery-tool-result",
-                        &[started.execution_id(), &tool_call_message_id],
+                        &[started.root_input_id(), &tool_call_message_id],
                     );
                     let result = Message::ToolResult {
                         tool_call_id,
@@ -108,8 +108,9 @@ impl SessionStore {
                     )?;
                 }
 
-                let marker_id = piko_protocol::turn_abort_marker_message_id(started.execution_id());
-                let marker = piko_protocol::turn_abort_marker(started.execution_id());
+                let marker_id =
+                    piko_protocol::agent_work_abort_marker_message_id(started.root_input_id());
+                let marker = piko_protocol::agent_work_abort_marker(started.root_input_id());
                 append_recovery_message(
                     &mut events,
                     &marker_id,
@@ -131,7 +132,7 @@ impl SessionStore {
                     outcome: piko_protocol::ExecutionOutcome::Cancelled {
                         reason: Some("interrupted during session recovery".into()),
                     },
-                    summary: "Execution interrupted during session recovery".into(),
+                    summary: "Agent work interrupted during session recovery".into(),
                     usage: Default::default(),
                     artifacts: Vec::new(),
                 };
@@ -175,7 +176,7 @@ struct StartedWorkRef<'a> {
 }
 
 impl StartedWorkRef<'_> {
-    fn execution_id(&self) -> &str {
+    fn root_input_id(&self) -> &str {
         &self.input.input.input_id
     }
 }
@@ -184,11 +185,11 @@ fn unresolved_tool_calls(
     aggregate: &piko_session_store::SessionAggregate,
     work: &StartedWorkRef<'_>,
 ) -> Result<Vec<(String, String, String)>, SessionStorageError> {
-    let execution_id = work.execution_id();
+    let root_input_id = work.root_input_id();
     let resolved = aggregate
         .messages
         .values()
-        .filter(|message| message.data.root_input_id.as_deref() == Some(execution_id))
+        .filter(|message| message.data.root_input_id.as_deref() == Some(root_input_id))
         .filter_map(|message| match &message.data.message {
             Message::ToolResult { tool_call_id, .. } => Some(tool_call_id.clone()),
             _ => None,
@@ -199,7 +200,7 @@ fn unresolved_tool_calls(
     for step in aggregate
         .model_steps
         .values()
-        .filter(|step| step.data.root_input_id == execution_id)
+        .filter(|step| step.data.root_input_id == root_input_id)
     {
         for message_id in &step.data.tool_call_message_ids {
             let message =
@@ -248,7 +249,11 @@ fn append_recovery_message(
         timestamp: committed_at.to_string(),
         agent_id: agent_spec_id.to_string(),
         agent_instance_id: work.input.input.agent_instance_id.clone(),
-        source_turn_id: work.processing.source_turn_id.clone().unwrap_or_default(),
+        root_input_id: work
+            .processing
+            .root_input_id
+            .clone()
+            .unwrap_or_else(|| work.root_input_id().to_string()),
         transcript_seq: *transcript_seq,
         message: message.clone(),
     });
@@ -257,8 +262,11 @@ fn append_recovery_message(
         agent_instance_id: work.input.input.agent_instance_id.clone(),
         agent_parent_message_id: parent_message_id.clone(),
         tree_parent_entry_id: tree_parent_entry_id.clone(),
-        root_input_id: Some(work.execution_id().to_string()),
-        source_turn_id: work.processing.source_turn_id.clone(),
+        root_input_id: work
+            .processing
+            .root_input_id
+            .clone()
+            .or_else(|| Some(work.root_input_id().to_string())),
         committed_at,
         message: message.clone(),
     }));

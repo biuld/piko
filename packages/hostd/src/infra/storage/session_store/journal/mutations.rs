@@ -88,7 +88,6 @@ impl SessionStore {
                     existing.data.tree_parent_entry_id.as_ref() == Some(parent)
                 })
                 && existing.data.root_input_id.as_deref() == Some(commit.root_input_id.as_str())
-                && existing.data.source_turn_id == commit.source_turn_id
                 && existing.data.message == commit.message
             {
                 if let Some(change) = steer_change.as_ref()
@@ -121,7 +120,7 @@ impl SessionStore {
             timestamp: commit.committed_at.to_string(),
             agent_id: agent_spec_id.to_string(),
             agent_instance_id: commit.agent_instance_id.clone(),
-            source_turn_id: commit.source_turn_id.clone().unwrap_or_default(),
+            root_input_id: commit.root_input_id.clone(),
             transcript_seq,
             message: commit.message.clone(),
         });
@@ -168,7 +167,6 @@ impl SessionStore {
                 agent_parent_message_id: commit.parent_message_id.clone(),
                 tree_parent_entry_id,
                 root_input_id: commit.root_input_id.clone(),
-                source_turn_id: commit.source_turn_id.clone(),
                 committed_at: commit.committed_at,
             }));
         } else {
@@ -178,7 +176,6 @@ impl SessionStore {
                 agent_parent_message_id: commit.parent_message_id.clone(),
                 tree_parent_entry_id,
                 root_input_id: Some(commit.root_input_id.clone()),
-                source_turn_id: commit.source_turn_id.clone(),
                 committed_at: commit.committed_at,
                 message: commit.message.clone(),
             }));
@@ -281,7 +278,7 @@ fn validate_steer_commit(
         .ok_or(CommitError::IdentityMismatch)?;
     if processing.finished_at.is_some()
         || root.input.agent_instance_id != message.agent_instance_id
-        || processing.source_turn_id != message.source_turn_id
+        || processing.root_input_id.as_deref() != Some(message.root_input_id.as_str())
     {
         return Err(CommitError::IdentityMismatch);
     }

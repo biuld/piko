@@ -1,7 +1,6 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (slices 1–5 and slices 6.1–6.4 landed. Remaining: Turn-named
-> field cleanup, recovery evidence)
+> Status: implemented (slices 1–6.4; recovery and control-plane evidence)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -13,9 +12,11 @@ applied as root, that `input_id` is the identity of the current work. hostd
 persists facts and publishes `AgentWorkSnapshot`; orchd serializes admission
 and operates live work without making private actor state durable authority.
 
-Turn, Run, and Execution are not product scopes. Remaining slices delete
-their types, IDs, maps, commands, and projections. Schema-v4 stays; this is
-not a journal-format rewrite. The only client in this design is the TUI.
+Turn, Run, and Execution are not product scopes. Their product types, IDs,
+maps, commands, and projections have been removed; the host retains only an
+internal observation registry keyed by `(session_id, input_id)`. Schema-v4
+stays; this is not a journal-format rewrite. The only client in this design
+is the TUI.
 `piko-desktop` is out of scope.
 
 ## Design constraints
@@ -415,7 +416,8 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
   and `AgentRunAcceptance` are gone. Observation is
   `wait_agent_input_started` / `wait_agent_input_completion` on the snapshot.
 - Receipts use `input_id` / `root_input_id`. Prompt staging, tool restriction,
-  `source_turn_id`, and `message_id` stay on `AgentInputRuntime` (not durable).
+  `root_input_id` and `message_id` stay on `AgentInputRuntime` (not durable
+  duplicates of the canonical AgentInput fact).
 
 ### Slice 4 — Host control plane (implemented)
 
@@ -432,21 +434,21 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 - Composer busy/steer/queue and desktop chrome compile against `agent_work`.
 - `piko-desktop` remains out of product scope.
 
-### Slice 6 — Remaining leftover cleanup (6.4+ open)
+### Slice 6 — Remaining leftover cleanup (implemented)
 
 Land in this order. Do not introduce a replacement Turn/Run/Execution product
 type; keep AgentInput / `agent_work` / `AgentWorkReport`.
 
 1. **Host observation port (implemented).** Fold `AgentRunRunner::run_agent`
    into submit + wait. Delete `AgentRunInput` as an admission DTO. Rekey
-   in-process `active_agent_runs` off `root_input_id` or drop it if observation
-   no longer needs a second map.
+   in-process observation registry is keyed by `(session_id, input_id)` and is
+   not persisted or exposed as product state.
 2. **Turn wire leftovers (implemented).** `TurnEvent`, `TurnSnapshot`,
    `TurnStatus`, `LifecycleEvent`, `ServerMessage::TurnLifecycle`, and
    `SessionSnapshot.active_turns` are gone. Tests wait on
    `AgentWorkSnapshot` / `AgentInputSubmitted` / work terminal facts.
-   Remaining Turn-named fields (`TurnId`, `TurnDiffEvent`,
-   `UsageEvent.turn_id`, `source_turn_id`, `QueueEvent`) stay until Slice 6.4.
+   Remaining presentation wording uses “work diff”; no Turn wire types or
+   fields remain in the protocol.
 3. **Execution product maps (implemented).** `StoredExecution` and the
    `executions` aggregate map are gone. The journal stores
    `agent_input_processing_started_v1` / `agent_input_processing_finished_v1`
@@ -454,10 +456,9 @@ type; keep AgentInput / `agent_work` / `AgentWorkReport`.
    `AgentWorkReport`); `execution_started` / `execution_finished` are no
    longer decodable (`READER_VERSION` 3). Per-root processing state lives on
    `StoredAgentInput.processing`; transcript head and model-step continuity
-   are derived from committed messages and steps. orchd keeps its internal
-   execution actor, still keyed by the interim `execution_id` derived from
-   the request; that key is removed with the commit-grain rekey below.
-4. **Rekey remaining grains (implemented for execution/run identity).** The
+   are derived from committed messages and steps. orchd's internal execution
+   actor is keyed directly by `root_input_id`.
+4. **Rekey remaining grains (implemented).** The
    `execution_id` / `run_id` / `internal_execution_id` grains are gone from
    protocol, journal, orchd, and read models; every commit, usage fact,
    trajectory record, abort marker, and realtime delta carries
@@ -467,13 +468,9 @@ type; keep AgentInput / `agent_work` / `AgentWorkReport`.
    `SessionExecutionScope` are keyed by `root_input_id` and
    `ExecutionIdentity` has no second id; the trajectory read model keys runs
    by root input and drops `execution_to_run`; the dead `AgentRunEvent` /
-   `ServerMessage::AgentRunLifecycle` wire surface is deleted. Still
-   Turn-named and deferred to the final cleanup: `TurnId`,
-   `UsageEvent.turn_id`, `source_turn_id` fields (messages, steps, inputs,
-   processing facts, tree entries, trajectory identities), and
-   `TurnDiffEvent`.
-5. **Recovery and evidence.** Crash-point, race, restart, and two-TUI
-   matrices, plus the Turn-named field cleanup above. Then mark F-51 / V-64
+   `ServerMessage::AgentRunLifecycle` wire surface is deleted.
+5. **Recovery and evidence (implemented).** Crash-point, race, restart, and
+   multi-client reconciliation evidence is recorded in V-64. F-51 is now
    implemented.
 
 ## Package impact

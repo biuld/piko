@@ -104,7 +104,6 @@ fn context() -> ToolExecutionContext {
         tool_call_index: Some(0),
         tool_entity_id: Some("entity".into()),
         host_context: None,
-        source_turn_id: None,
         context_remaining: None,
     }
 }

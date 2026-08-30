@@ -117,8 +117,8 @@ impl PendingTerminal {
     }
 }
 
-fn report_id(internal_execution_id: &str) -> String {
-    piko_orchd_api::stable_internal_id("report", &[internal_execution_id])
+fn report_id(root_input_id: &str) -> String {
+    piko_orchd_api::stable_internal_id("report", &[root_input_id])
 }
 
 impl CommittedTerminal {

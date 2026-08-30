@@ -224,7 +224,6 @@ fn request() -> StartExecutionRequest {
     StartExecutionRequest {
         request_id: "request".into(),
         session_id: "session".into(),
-        source_turn_id: None,
         root_input_id: "execution".into(),
         agent_instance_id: "agent".into(),
         agent_spec: AgentSpec {
@@ -260,9 +259,9 @@ fn request() -> StartExecutionRequest {
     }
 }
 
-fn request_with(execution_id: &str, message_id: &str) -> StartExecutionRequest {
+fn request_with(root_input_id: &str, message_id: &str) -> StartExecutionRequest {
     StartExecutionRequest {
-        root_input_id: execution_id.into(),
+        root_input_id: root_input_id.into(),
         input_message_id: message_id.into(),
         ..request()
     }

@@ -31,11 +31,7 @@ impl HostApp {
                 ) {
                     continue;
                 }
-                let root_input_id = execution
-                    .source_turn_id
-                    .clone()
-                    .filter(|id| !id.is_empty())
-                    .unwrap_or_else(|| execution.request_id.clone());
+                let root_input_id = execution.root_input_id.clone();
                 if root_input_id.is_empty() {
                     continue;
                 }
@@ -46,14 +42,14 @@ impl HostApp {
                 reports.push((
                     root_input_id.clone(),
                     store
-                        .agent_report_for_turn(&root_input_id)
+                        .agent_report_for_input(&root_input_id)
                         .await
                         .map_err(storage_error)?,
                 ));
             }
             if reports.iter().any(|(_, report)| report.is_none()) {
                 store
-                    .interrupt_incomplete_agent_executions()
+                    .interrupt_incomplete_agent_work()
                     .await
                     .map_err(storage_error)?;
             }
@@ -337,7 +333,6 @@ mod tests {
                     agent_instance_id: root.agent_instance_id.clone(),
                     root_input_id: "request-recovered".into(),
                     request_id: "request-recovered".into(),
-                    source_turn_id: Some("request-recovered".into()),
                     detached_recipient_agent_instance_id: None,
                     prompt_assembly_version: 1,
                     prompt_digest: "prompt-recovered".into(),
@@ -377,7 +372,7 @@ mod tests {
                 .any(|event| matches!(event, ServerMessage::SessionReconciled(_)))
         );
         let report = store
-            .agent_report_for_turn("request-recovered")
+            .agent_report_for_input("request-recovered")
             .unwrap()
             .expect("recovery report");
         assert!(matches!(
@@ -402,7 +397,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .agent_report_for_turn("request-recovered")
+                .agent_report_for_input("request-recovered")
                 .unwrap()
                 .expect("stable recovery report")
                 .report_id,

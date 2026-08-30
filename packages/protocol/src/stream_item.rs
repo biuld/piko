@@ -238,7 +238,7 @@ impl StreamItemPatch {
                 tool_name,
                 args,
                 parent_message_id,
-                source_turn_id,
+                root_input_id,
                 ..
             } => {
                 vec![Self {
@@ -255,7 +255,7 @@ impl StreamItemPatch {
                         "args": args,
                         "status": "running",
                         "parentMessageId": parent_message_id,
-                        "turnId": source_turn_id,
+                        "rootInputId": root_input_id,
                     })),
                 }]
             }
@@ -267,7 +267,7 @@ impl StreamItemPatch {
                 result,
                 is_error,
                 parent_message_id,
-                source_turn_id,
+                root_input_id,
                 ..
             } => {
                 let status = if *is_error { "failed" } else { "completed" };
@@ -285,7 +285,7 @@ impl StreamItemPatch {
                         "result": result,
                         "status": status,
                         "parentMessageId": parent_message_id,
-                        "turnId": source_turn_id,
+                        "rootInputId": root_input_id,
                     })),
                 }]
             }

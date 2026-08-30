@@ -45,7 +45,7 @@ impl StepEventConsumer for AssistantPersistCollectingConsumer {
             message_id: ctx.message_id.clone(),
             agent_instance_id: ctx.agent_instance_id.clone(),
             agent_id: ctx.agent_id.clone(),
-            source_turn_id: ctx.source_turn_id.to_string(),
+            root_input_id: ctx.root_input_id.to_string(),
             message: assistant_message,
         });
     }

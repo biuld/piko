@@ -88,7 +88,7 @@ fn compaction_estimates_threshold_and_formats_file_ops() {
         timestamp: "1".into(),
         agent_id: "main".into(),
         agent_instance_id: "task-main".into(),
-        source_turn_id: "work-main".into(),
+        root_input_id: "work-main".into(),
         transcript_seq: 1,
         message: Message::User {
             content: MessageContent::String("x".repeat(100)),

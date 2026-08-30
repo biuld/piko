@@ -49,7 +49,7 @@ fn user_entry(id: &str, parent: Option<&str>, seq: u64, text: &str) -> SessionTr
         timestamp: seq.to_string(),
         agent_id: "main".into(),
         agent_instance_id: "agent-main".into(),
-        source_turn_id: format!("turn-{id}"),
+        root_input_id: format!("turn-{id}"),
         transcript_seq: seq,
         message: Message::User {
             content: MessageContent::String(text.into()),
@@ -65,7 +65,7 @@ fn assistant_entry(id: &str, parent: Option<&str>, seq: u64, text: &str) -> Sess
         timestamp: seq.to_string(),
         agent_id: "main".into(),
         agent_instance_id: "agent-main".into(),
-        source_turn_id: format!("turn-{id}"),
+        root_input_id: format!("turn-{id}"),
         transcript_seq: seq,
         message: Message::Assistant {
             content: vec![ContentBlock::Text { text: text.into() }],

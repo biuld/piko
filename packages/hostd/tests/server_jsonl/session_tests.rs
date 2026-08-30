@@ -39,8 +39,10 @@ async fn root_chat_reuses_session_sink_across_turns() {
         }
         assert!(turn_events.iter().any(|event| matches!(
             event,
-            Event::SessionReconciled(reconciled)
-                if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some())
+            Event::CommandResponse {
+                result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
+                ..
+            }
         )));
         assert!(turn_events.iter().any(|event| matches!(
             event,
@@ -211,7 +213,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let mut line = String::new();
     tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
         .await
-        .expect("turn_started should arrive")
+        .expect("agent input admission should arrive")
         .unwrap();
     let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(
@@ -222,20 +224,16 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
         }
     ));
 
-    let event = loop {
-        line.clear();
-        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
-            .await
-            .expect("turn_started should arrive")
-            .unwrap();
-        let event = serde_json::from_str::<Event>(line.trim()).unwrap();
-        if matches!(&event, Event::SessionReconciled(reconciled)
-            if reconciled.snapshot.agent_work.iter().any(|work| work.active_work.is_some()))
-        {
-            break event;
-        }
-    };
+    line.clear();
+    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+        .await
+        .expect("admission reconciliation should arrive")
+        .unwrap();
+    let event = serde_json::from_str::<Event>(line.trim()).unwrap();
     assert!(matches!(event, Event::SessionReconciled(_)));
+    tokio::time::timeout(Duration::from_millis(100), started.notified())
+        .await
+        .expect("runner should be live before the next command");
 
     let approval = serde_json::to_string(&Command::ApprovalRespond {
         command_id: "approval".into(),

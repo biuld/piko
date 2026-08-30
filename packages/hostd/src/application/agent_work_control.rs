@@ -120,7 +120,7 @@ impl<'a> AgentWorkControl<'a> {
             | piko_protocol::AgentInputDelivery::StartWhenIdle
             | piko_protocol::AgentInputDelivery::FollowUp => {
                 self.app
-                    .submit_chat_with_input_id(
+                    .submit_input_with_id(
                         command_id,
                         input.session_id,
                         input.agent_instance_id,

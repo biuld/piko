@@ -52,16 +52,11 @@ impl JsonlSessionRepository {
                     .get(&agent_instance_id)
                     .map(|agent| agent.identity.agent_spec_id.clone())
                     .unwrap_or_else(|| message.agent_id.clone());
-                let execution_id = piko_orchd_api::stable_internal_id(
-                    "projection",
-                    &[&projection.session_id, &agent_instance_id, &message.id],
-                );
                 store
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: projection.session_id,
-                            source_turn_id: Some(message.source_turn_id.clone()),
-                            root_input_id: execution_id.clone(),
+                            root_input_id: message.root_input_id.clone(),
                             agent_instance_id,
                             message_id: message.id.clone(),
                             parent_message_id: message.parent_id.clone(),
@@ -84,7 +79,7 @@ impl JsonlSessionRepository {
                     });
                 };
                 let projection = store.load_projection()?;
-                let execution_id = piko_orchd_api::stable_internal_id(
+                let root_input_id = piko_orchd_api::stable_internal_id(
                     "projection",
                     &[&projection.session_id, agent_instance_id, &tool.id],
                 );
@@ -92,8 +87,7 @@ impl JsonlSessionRepository {
                     .commit_message(
                         piko_protocol::execution::MessageCommit {
                             session_id: projection.session_id,
-                            source_turn_id: Some(agent_instance_id.clone()),
-                            root_input_id: execution_id.clone(),
+                            root_input_id: root_input_id.clone(),
                             agent_instance_id: agent_instance_id.clone(),
                             message_id: tool.id.clone(),
                             parent_message_id: tool.parent_id.clone(),

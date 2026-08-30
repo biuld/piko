@@ -10,7 +10,6 @@ use crate::{Message, MessageContent, Usage};
 
 pub type RequestId = String;
 pub type SessionId = String;
-pub type TurnId = String;
 pub type MessageId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,10 +96,6 @@ impl Default for ExecutionConfig {
 pub struct StartExecutionRequest {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    /// Interaction Turn this Execution is bound to. `None` for child agent
-    /// Executions spawned by multi-agent tools (no Interaction Turn).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_spec: crate::AgentSpec,
     pub run_prompt: crate::SemanticRunPrompt,
@@ -130,8 +125,6 @@ pub struct StartExecutionRequest {
 pub struct ExecutionReceipt {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
     pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub status: ExecutionStatus,
@@ -205,10 +198,6 @@ pub struct CancelReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct MessageCommit {
     pub session_id: SessionId,
-    /// Interaction Turn this message was committed under. `None` for child
-    /// agent Executions spawned by multi-agent tools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
     pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: MessageId,
@@ -239,8 +228,6 @@ pub enum ModelStepOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct ModelStepCommit {
     pub session_id: SessionId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
     pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub model_step_id: String,
@@ -259,7 +246,6 @@ pub struct ModelStepCommit {
 #[serde(rename_all = "camelCase")]
 pub struct ModelStepBoundary {
     pub session_id: SessionId,
-    pub source_turn_id: Option<TurnId>,
     pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub model_step_id: String,
@@ -276,7 +262,6 @@ impl ModelStepCommit {
     pub fn boundary(&self) -> ModelStepBoundary {
         ModelStepBoundary {
             session_id: self.session_id.clone(),
-            source_turn_id: self.source_turn_id.clone(),
             root_input_id: self.root_input_id.clone(),
             agent_instance_id: self.agent_instance_id.clone(),
             model_step_id: self.model_step_id.clone(),
@@ -343,7 +328,6 @@ mod tests {
         let value = serde_json::to_value(StartExecutionRequest {
             request_id: "req-1".into(),
             session_id: "session-1".into(),
-            source_turn_id: Some("turn-1".into()),
             agent_instance_id: "root".into(),
             agent_spec: crate::AgentSpec {
                 id: "main".into(),
@@ -378,7 +362,6 @@ mod tests {
         assert!(value.get("taskId").is_none());
         assert!(value.get("workId").is_none());
         assert_eq!(value["rootInputId"], "input-1");
-        assert_eq!(value["sourceTurnId"], "turn-1");
         assert!(value.get("interAgentCompletions").is_none());
     }
 

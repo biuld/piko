@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use piko_protocol::{
     TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
@@ -46,6 +46,7 @@ impl HostApp {
         receipt: &piko_protocol::AgentInputReceipt,
         tx: &ClientEventSender,
     ) -> Result<bool, ProtocolError> {
+        let started_at = Instant::now();
         let observation = match runner
             .wait_agent_input_started(session_id, agent_instance_id, input_id, receipt.disposition)
             .await
@@ -91,7 +92,7 @@ impl HostApp {
         }
         let terminal = completion.result;
         // F-36: record the terminal outcome on the durable trajectory. The
-        // terminal record is appended after the `execution_finished` fact, so
+        // terminal record is appended after the processing-finished fact, so
         // its SSE fan-out makes a live viewer observe the running → terminal
         // transition (on a clean completion no other trajectory record would
         // follow the fact). Failures additionally keep the RunError
@@ -132,7 +133,12 @@ impl HostApp {
                 piko_protocol::ExecutionOutcome::Failed { .. } => "failed",
                 piko_protocol::ExecutionOutcome::Cancelled { .. } => "cancelled",
             };
-            crate::telemetry::handle().record_turn_usage(&report.usage, status);
+            crate::telemetry::handle().record_turn(
+                started_at.elapsed().as_millis() as u64,
+                status,
+                "agent_input",
+            );
+            crate::telemetry::handle().record_input_usage(&report.usage, status);
             let size = self.client_context_window_size().await;
             if let Ok(usage) = self.state.lock().await.usage_updated_event(
                 session_id,
@@ -193,7 +199,6 @@ impl HostApp {
             session_id: session_id.to_string(),
             agent_instance_id: agent_instance_id.to_string(),
             root_input_id: input_id.to_string(),
-            source_turn_id: Some(input_id.to_string()),
         }
     }
 

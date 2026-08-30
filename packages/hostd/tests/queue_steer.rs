@@ -341,7 +341,6 @@ async fn queue_steer_fails_closed_when_idle() {
         Event::CommandResponse { result: Err(error), .. }
             if error.contains("not running")
     )));
-    assert!(events.iter().all(|event| !matches!(event, Event::Queue(_))));
 }
 
 #[tokio::test]
@@ -373,7 +372,6 @@ async fn queue_steer_fails_when_runtime_rejects() {
         Event::CommandResponse { result: Err(error), .. }
             if error.contains("steer rejected")
     )));
-    assert!(events.iter().all(|event| !matches!(event, Event::Queue(_))));
     drop(turn);
 }
 

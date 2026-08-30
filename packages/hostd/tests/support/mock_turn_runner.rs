@@ -102,7 +102,6 @@ impl AgentRunRunner for MockAgentRunRunner {
                 piko_protocol::execution::MessageCommit {
                     root_input_id: "input-mock".into(),
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: message_id.clone(),
                     parent_message_id: None,
@@ -144,7 +143,7 @@ impl AgentRunRunner for MockAgentRunRunner {
                     SessionEvent::MessageCommitted {
                         transcript_seq: 1,
                         message_id,
-                        source_turn_id: publisher_channel_input_id.clone(),
+                        root_input_id: publisher_channel_input_id.clone(),
                         role: piko_protocol::MessageRole::User,
                     },
                 );

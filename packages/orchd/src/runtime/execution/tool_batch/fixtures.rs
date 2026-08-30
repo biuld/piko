@@ -321,12 +321,11 @@ pub(super) async fn discover_batch_routes(
         .unwrap()
 }
 
-pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExecutionRequest {
+pub(super) fn batch_request(root_input_id: &str, tools: Vec<ToolDef>) -> StartExecutionRequest {
     StartExecutionRequest {
         request_id: "request-batch".into(),
         session_id: "session-batch".into(),
-        source_turn_id: None,
-        root_input_id: execution_id.into(),
+        root_input_id: root_input_id.into(),
         agent_instance_id: "agent-batch".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
@@ -364,13 +363,13 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
 /// Run a tool batch to completion and return the actor transcript.
 pub(super) async fn run_batch(
     runtime: &Arc<AgentExecutionRuntime>,
-    execution_id: &str,
+    root_input_id: &str,
     tools: Vec<ToolDef>,
     routes: HashMap<String, CatalogRoute>,
 ) -> ExecutionTerminal {
     let prepared = runtime
         .prepare_execution(
-            batch_request(execution_id, tools),
+            batch_request(root_input_id, tools),
             routes,
             tracing::Span::none(),
         )
@@ -378,7 +377,7 @@ pub(super) async fn run_batch(
         .unwrap();
     prepared.activate().await;
     runtime
-        .wait_terminal_state("session-batch", execution_id)
+        .wait_terminal_state("session-batch", root_input_id)
         .await
         .unwrap()
 }

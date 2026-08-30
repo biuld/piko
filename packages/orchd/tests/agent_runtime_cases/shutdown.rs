@@ -24,7 +24,6 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
         tool_call_index: None,
         tool_entity_id: None,
         host_context: None,
-        source_turn_id: None,
         context_remaining: None,
     };
     let spawned = tokio::spawn(async move {
@@ -86,7 +85,7 @@ async fn session_detach_cancels_and_drains_active_executions() {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             caller_agent_instance_id: None,
-            source_turn_id: None,
+            root_input_id: None,
             message_id: "message-shutdown".into(),
             content: MessageContent::String("wait".into()),
             delivery: AgentInputDelivery::StartWhenIdle,

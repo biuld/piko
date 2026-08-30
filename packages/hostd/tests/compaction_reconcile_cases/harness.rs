@@ -139,7 +139,6 @@ impl AgentRunRunner for CompactAgentRunRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(turn_id.clone()),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
@@ -158,7 +157,6 @@ impl AgentRunRunner for CompactAgentRunRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(turn_id.clone()),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
@@ -193,7 +191,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: "user-1".into(),
-                    source_turn_id: turn_id.clone(),
+                    root_input_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
                 "main".to_string(),
@@ -203,7 +201,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
                     message_id: "assistant-1".into(),
-                    source_turn_id: turn_id,
+                    root_input_id: turn_id,
                     role: MessageRole::Assistant,
                 },
                 "main".to_string(),
@@ -306,7 +304,6 @@ impl AgentRunRunner for DistinctIdRunRunner {
             .commit_message(
                 MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(turn_id.clone()),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: user_id.clone(),
@@ -325,7 +322,6 @@ impl AgentRunRunner for DistinctIdRunRunner {
             .commit_message(
                 MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(turn_id.clone()),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_id.clone(),
@@ -360,7 +356,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: user_id,
-                    source_turn_id: turn_id.clone(),
+                    root_input_id: turn_id.clone(),
                     role: MessageRole::User,
                 },
                 "main".to_string(),
@@ -370,7 +366,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
                     message_id: assistant_id,
-                    source_turn_id: turn_id,
+                    root_input_id: turn_id,
                     role: MessageRole::Assistant,
                 },
                 "main".to_string(),

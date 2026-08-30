@@ -1,6 +1,8 @@
 use crate::api::{ProtocolError, RolloutPage, TranscriptCommittedEvent};
 use crate::application::host_app::HostApp;
-use crate::domain::sessions::{file_change_from_message, merge_file_change, render_turn_diff};
+use crate::domain::sessions::{
+    file_change_from_message, merge_file_change, render_agent_work_diff,
+};
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 200;
@@ -62,7 +64,7 @@ impl HostApp {
                 session_id: session_id.to_string(),
                 agent_instance_id: agent_instance_id.to_string(),
                 agent_id: message.agent_spec_id,
-                source_turn_id: message.source_turn_id.unwrap_or_default(),
+                root_input_id: message.root_input_id.unwrap_or_default(),
                 message_id: message.id,
                 transcript_seq: message.transcript_seq,
                 message: message.message,
@@ -76,13 +78,18 @@ impl HostApp {
         })
     }
 
-    /// Read a turn diff from live state or rebuild it from durable rollouts.
-    pub(crate) async fn turn_diff(
+    /// Read an Agent work diff from live state or rebuild it from durable rollouts.
+    pub(crate) async fn agent_work_diff(
         &self,
         session_id: &str,
-        turn_id: &str,
-    ) -> Result<Option<piko_protocol::TurnDiffEvent>, ProtocolError> {
-        if let Some(diff) = self.state.lock().await.turn_diff(session_id, turn_id) {
+        root_input_id: &str,
+    ) -> Result<Option<piko_protocol::AgentWorkDiffEvent>, ProtocolError> {
+        if let Some(diff) = self
+            .state
+            .lock()
+            .await
+            .agent_work_diff(session_id, root_input_id)
+        {
             return Ok(Some(diff));
         }
         let session_dir = self
@@ -93,7 +100,7 @@ impl HostApp {
             .cloned()
             .ok_or_else(|| {
                 ProtocolError::InvalidCommand(format!(
-                    "turn diff unavailable for session {session_id}"
+                    "work diff unavailable for session {session_id}"
                 ))
             })?;
         let store = self.session_store_factory.open(&session_dir);
@@ -108,7 +115,7 @@ impl HostApp {
                 .await
                 .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
             for committed in recovered.transcript {
-                if committed.source_turn_id.as_deref() != Some(turn_id) {
+                if committed.root_input_id.as_deref() != Some(root_input_id) {
                     continue;
                 }
                 if let Some(change) = file_change_from_message(&committed.message) {
@@ -116,12 +123,14 @@ impl HostApp {
                 }
             }
         }
-        Ok((!changes.is_empty()).then(|| piko_protocol::TurnDiffEvent {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            unified_diff: render_turn_diff(&changes),
-            files: changes,
-        }))
+        Ok(
+            (!changes.is_empty()).then(|| piko_protocol::AgentWorkDiffEvent {
+                session_id: session_id.to_string(),
+                root_input_id: root_input_id.to_string(),
+                unified_diff: render_agent_work_diff(&changes),
+                files: changes,
+            }),
+        )
     }
 }
 
@@ -156,7 +165,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_diff_query_reads_live_host_state() {
+    async fn agent_work_diff_query_reads_live_host_state() {
         let app = HostApp::new();
         let session_id = {
             let mut state = app.state.lock().await;
@@ -172,7 +181,7 @@ mod tests {
                     timestamp: "1".into(),
                     agent_id: "main".into(),
                     agent_instance_id: "agent-1".into(),
-                    source_turn_id: "input-1".into(),
+                    root_input_id: "input-1".into(),
                     transcript_seq: 1,
                     message: Message::ToolResult {
                         tool_call_id: "call-1".into(),
@@ -193,7 +202,7 @@ mod tests {
             (session_id, "input-1".to_string())
         };
         let diff = app
-            .turn_diff(&session_id.0, &session_id.1)
+            .agent_work_diff(&session_id.0, &session_id.1)
             .await
             .unwrap()
             .unwrap();
@@ -203,7 +212,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn turn_diff_query_rebuilds_from_durable_rollout() {
+    async fn agent_work_diff_query_rebuilds_from_durable_rollout() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::create_session(
             temp.path(),
@@ -217,7 +226,6 @@ mod tests {
             .commit_message(
                 MessageCommit {
                     session_id: "session-durable".into(),
-                    source_turn_id: Some("turn-durable".into()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: root.agent_instance_id,
                     message_id: "result-1".into(),
@@ -249,7 +257,7 @@ mod tests {
             .await
             .insert("session-durable".into(), temp.path().to_path_buf());
         let diff = app
-            .turn_diff("session-durable", "turn-durable")
+            .agent_work_diff("session-durable", "input-1")
             .await
             .unwrap()
             .unwrap();

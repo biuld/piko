@@ -1,7 +1,6 @@
 # F-51: Agent work lifecycle and control plane
 
-> Status: proposed (slices 1–5 and slices 6.1–6.2 landed. Remaining: Execution
-> product maps, grain rekeys, recovery; see D-68 Slice 6)
+> Status: implemented (D-68 slices 1–6.4; V-64)
 > Priority: P0
 > Source evidence: piko product/runtime review; consolidates [F-01](F-01-turn-runtime.md), [F-10](F-10-multi-agent.md), [F-22](F-22-client-agent-projection.md), [F-31](F-31-durable-session-journal.md), and [F-48](F-48-authoritative-agent-lifecycle.md)
 > Design: [D-68](../design/D-68-agent-control-plane.md)
@@ -264,18 +263,16 @@ Verification: [V-64](../verification/V-64-agent-control-plane.md)
 
 ### Primitive lifecycle and storage
 
-- [ ] Normative docs and protocol use Session, AgentInstance, AgentInput, and
-      ModelStep. Turn, Run, and Execution are not product identities
-      (Slice 6.3+: `StoredExecution` and `turn_id` / `execution_id` grains
-      remain).
+- [x] Normative docs and protocol use Session, AgentInstance, AgentInput, and
+      ModelStep. Turn, Run, and Execution are not product identities.
 - [x] Accepted start, steer, and follow-up inputs have durable identities and
       replayable dispositions.
 - [x] Active work is the unfinished root AgentInput; every accepted steer is
       durably bound to that `root_input_id` before acknowledgement.
-- [ ] A crash after input acceptance cannot lose or duplicate pending input
-      (Slice 6 recovery matrix).
-- [ ] Product lifecycle reconstructs from AgentInput, ModelStep, and causal
-      facts without Turn, Run, or Execution aggregates (Slice 6).
+- [x] A crash after input acceptance cannot lose or duplicate pending input
+      (V-64 recovery matrix).
+- [x] Product lifecycle reconstructs from AgentInput, ModelStep, and causal
+      facts without Turn, Run, or Execution aggregates.
 
 ### Projection and interaction
 
@@ -283,11 +280,10 @@ Verification: [V-64](../verification/V-64-agent-control-plane.md)
       follow-ups from host read models keyed by AgentInput.
 - [x] The TUI consumes host foreground and controls without local queue
       authority. `ChatSubmit`, `QueueSteer`, `TurnCancel`, `TurnEvent`, and
-      the local follow-up stack are gone. `execution_id` leftovers remain
-      (Slice 6.3+).
+      the local follow-up stack are gone.
 - [x] Detached and user-origin work have identical steer and interrupt
       behavior.
-- [ ] Queued input cancellation works after restart and from a second TUI
-      client (Slice 6).
-- [ ] Concurrent controls for one AgentInstance are linearized and cannot
-      affect a later root accidentally (Slice 6 evidence).
+- [x] Queued input cancellation works after restart and from a second TUI
+      client (V-64 multi-client reconciliation evidence).
+- [x] Concurrent controls for one AgentInstance are linearized and cannot
+      affect a later root accidentally (V-64 race evidence).

@@ -175,18 +175,18 @@ fn rollout_page_get_round_trips() {
 }
 
 #[test]
-fn turn_diff_get_round_trips() {
+fn agent_work_diff_get_round_trips() {
     let value = serde_json::json!({
-        "type": "turn_diff_get",
+        "type": "agent_work_diff_get",
         "command_id": "c-diff",
         "session_id": "s1",
-        "turn_id": "t1"
+        "root_input_id": "input-1"
     });
     let command: Command = serde_json::from_value(value.clone()).unwrap();
     assert!(matches!(
         &command,
-        Command::TurnDiffGet { session_id, turn_id, .. }
-            if session_id == "s1" && turn_id == "t1"
+        Command::AgentWorkDiffGet { session_id, root_input_id, .. }
+            if session_id == "s1" && root_input_id == "input-1"
     ));
     assert_eq!(serde_json::to_value(command).unwrap(), value);
 }

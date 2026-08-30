@@ -71,7 +71,7 @@ pub struct ToolItem {
     pub result_details: Option<serde_json::Value>,
     pub status: ToolStatus,
     pub parent_message_id: Option<String>,
-    pub source_turn_id: Option<String>,
+    pub root_input_id: Option<String>,
     pub transcript_seq: Option<u64>,
     pub live_order: u64,
     /// Provider-side ("upstream") marker when this card represents an upstream
@@ -107,7 +107,7 @@ pub struct CommittedItem {
     pub message_id: MessageId,
     pub transcript_seq: u64,
     pub message: Message,
-    pub source_turn_id: String,
+    pub root_input_id: String,
 }
 
 /// An ephemeral realtime draft assembled from deltas.

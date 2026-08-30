@@ -57,7 +57,7 @@ impl HostApp {
         Ok(dir)
     }
 
-    pub(crate) async fn submit_chat_with_input_id(
+    pub(crate) async fn submit_input_with_id(
         &self,
         command_id: String,
         session_id: String,
@@ -66,7 +66,7 @@ impl HostApp {
         content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
-        self.run_registered_turn(
+        self.run_registered_input(
             command_id,
             session_id,
             input_id,
@@ -77,11 +77,11 @@ impl HostApp {
         .await
     }
 
-    async fn run_registered_turn(
+    async fn run_registered_input(
         &self,
         command_id: String,
         session_id: String,
-        turn_id: String,
+        root_input_id: String,
         agent_instance_id: String,
         content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
@@ -138,7 +138,7 @@ impl HostApp {
         let world_state_facts = WorldStateFacts {
             session_id: Some(session_id.clone()),
             agent_instance_id: Some(agent_instance_id.clone()),
-            operation_id: Some(turn_id.clone()),
+            operation_id: Some(root_input_id.clone()),
             run_kind: if continuation {
                 RunKind::Continuation
             } else {
@@ -284,7 +284,7 @@ impl HostApp {
         let runner = self.turn_runner.lock().await.clone();
         tracing::info!(
             session_id = %session_id,
-            input_id = %turn_id,
+            input_id = %root_input_id,
             agent_instance_id = %agent_instance_id,
             "turn observation loop starting"
         );
@@ -305,11 +305,11 @@ impl HostApp {
             return Ok(());
         }
         let request = SendAgentInputRequest {
-            request_id: turn_id.clone(),
+            request_id: root_input_id.clone(),
             session_id: session_id.clone(),
             agent_instance_id: agent_instance_id.clone(),
             caller_agent_instance_id: None,
-            source_turn_id: Some(turn_id.clone()),
+            root_input_id: Some(root_input_id.clone()),
             message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
             content: expanded_content,
             delivery: piko_protocol::AgentInputDelivery::FollowUp,
@@ -320,7 +320,7 @@ impl HostApp {
         let runtime = AgentInputRuntime {
             prompt_resources: request.prompt_resources,
             active_tool_names: request.active_tool_names,
-            source_turn_id: request.source_turn_id,
+            root_input_id: request.root_input_id,
             message_id: Some(request.message_id),
         };
         let receipt = match runner.submit_agent_input(canonical, runtime).await {
@@ -363,7 +363,7 @@ impl HostApp {
             .run_turn_observation_loop(
                 &runner,
                 &session_id,
-                &turn_id,
+                &root_input_id,
                 &agent_instance_id,
                 &session_dir,
                 &receipt,

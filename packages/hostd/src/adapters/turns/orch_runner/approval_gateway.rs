@@ -477,7 +477,7 @@ impl OrchAgentRunRunner {
             return;
         };
         let Some(input_id) = self
-            .active_agent_runs
+            .active_agent_inputs
             .lock()
             .unwrap()
             .values()
@@ -495,7 +495,6 @@ impl OrchAgentRunRunner {
                         session_id: session_id.to_string(),
                         agent_instance_id: agent_instance_id.to_string(),
                         root_input_id: input_id.to_string(),
-                        source_turn_id: None,
                     },
                     kind,
                     summary,

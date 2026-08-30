@@ -32,19 +32,19 @@ usage-carrying SSE stream, and asserts on the exported `llm.request` span.
 - One turn exports the full span tree with correct parentage:
   `turn.run → agent.run → model.step`, with `model.step.commit` and
   `tool.batch → tool.call` as sibling phases under `agent.run`.
-- Correlation attributes: `turn.run` carries `session_id`/`run_id`;
+- Correlation attributes: the root work span carries `session_id`/`root_input_id`;
   `model.step` carries `model="test-model"`, `provider="test"`; spans carry
   `agent_instance_id`.
 - The `llm.request` span (parent `model.step`) records span events
   `llm.retry`, `llm.ttft`, `llm.usage`, `llm.stream_done` and the
-  `model`/`provider`/`run_id` attributes; retry/backoff and usage/cost
+  `model`/`provider`/`root_input_id` attributes; retry/backoff and usage/cost
   behavior (F-02) is visible inside one step.
 - Metrics exported: `piko.turn.duration_ms`, `piko.model.step.duration_ms`
   (plus `piko.tool.*`, `piko.model.ttft_ms`, `piko.model.tokens`,
   `piko.model.cost_usd`, `piko.model.retries`,
   `piko.model.streaming_fallbacks` in the same meter).
 - Unified OTel logs: tracing events export as LogRecords; at least one
-  LogRecord carries `run_id` and a trace context (correlated with a span).
+  LogRecord carries `root_input_id` and a trace context (correlated with a span).
 - The file-logging stack (`tracing-appender`, `--log-file`, `--no-log`,
   `PIKO_LOG_FILE`, `json-logs`) was removed — OTel logs is the managed sink,
   with a stderr console layer as the disabled-mode fallback.

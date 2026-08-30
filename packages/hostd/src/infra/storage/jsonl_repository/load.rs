@@ -107,7 +107,7 @@ fn message_entries(
                     timestamp: stored.data.committed_at.to_string(),
                     agent_id: spec_id,
                     agent_instance_id,
-                    source_turn_id: stored.data.source_turn_id.clone().unwrap_or_default(),
+                    root_input_id: stored.data.root_input_id.clone().unwrap_or_default(),
                     transcript_seq: seq,
                     message: stored.data.message.clone(),
                 }),
@@ -210,7 +210,7 @@ fn project_agent_view_from_entry(
                                 session_id: session_id.to_string(),
                                 agent_instance_id: agent_instance_id.clone(),
                                 agent_id: agent_id.clone(),
-                                source_turn_id: message.source_turn_id.clone(),
+                                root_input_id: message.root_input_id.clone(),
                                 message_id: message.id.clone(),
                                 transcript_seq: message.transcript_seq,
                                 message: message.message.clone(),
@@ -235,7 +235,7 @@ fn project_agent_view_from_entry(
                 tool_name: tool.tool_name.clone(),
                 args: tool.arguments.clone(),
                 parent_message_id: tool.parent_message_id.clone(),
-                source_turn_id: None,
+                root_input_id: None,
             };
             piko_protocol::StreamItemPatch::from_tool_execution(&tool_event)
                 .into_iter()

@@ -87,23 +87,23 @@ fn workspace_edit_requires_approval_updates_the_file_and_records_diff() {
     let diff = host.wait_for("edit turn diff", |message| {
         matches!(
             message,
-            ServerMessage::TurnDiff(event)
+            ServerMessage::AgentWorkDiff(event)
                 if event.session_id == session_id
-                    && event.turn_id == turn_id
+                    && event.root_input_id == turn_id
                     && event.files.iter().any(|file| file.path == "e2e-input.txt")
         )
     });
-    assert!(matches!(diff, ServerMessage::TurnDiff(_)));
+    assert!(matches!(diff, ServerMessage::AgentWorkDiff(_)));
     host.wait_completed(&session_id);
 
-    host.send(Command::TurnDiffGet {
+    host.send(Command::AgentWorkDiffGet {
         command_id: "diff-query".into(),
         session_id,
-        turn_id,
+        root_input_id: turn_id,
     });
     assert!(matches!(
         host.command_result("diff-query"),
-        CommandResult::TurnDiffGot { diff: Some(diff), .. }
+        CommandResult::AgentWorkDiffGot { diff: Some(diff), .. }
             if diff.files.iter().any(|file| file.path == "e2e-input.txt")
     ));
 }

@@ -253,9 +253,7 @@ pub struct MessageCommittedV1 {
     pub agent_instance_id: String,
     pub agent_parent_message_id: Option<String>,
     pub tree_parent_entry_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<String>,
-    pub source_turn_id: Option<String>,
     pub committed_at: i64,
     pub message: Message,
 }
@@ -303,8 +301,6 @@ pub struct AgentInputProcessingStartedV1 {
     pub base_message_id: Option<String>,
     #[serde(default)]
     pub tree_base_entry_id: Option<String>,
-    #[serde(default)]
-    pub source_turn_id: Option<String>,
     #[serde(default)]
     pub detached_recipient_agent_instance_id: Option<String>,
     #[serde(default)]
@@ -361,7 +357,6 @@ pub struct AgentInputAppliedV1 {
     pub agent_parent_message_id: Option<String>,
     pub tree_parent_entry_id: Option<String>,
     pub root_input_id: String,
-    pub source_turn_id: Option<String>,
     pub committed_at: i64,
 }
 
@@ -372,7 +367,6 @@ pub struct ModelStepCommittedV1 {
     pub step_index: u32,
     pub root_input_id: String,
     pub agent_instance_id: String,
-    pub source_turn_id: Option<String>,
     pub assistant_message_id: String,
     #[serde(default)]
     pub tool_call_message_ids: Vec<String>,

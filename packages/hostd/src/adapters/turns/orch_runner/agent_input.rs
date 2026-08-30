@@ -44,7 +44,7 @@ impl OrchAgentRunRunner {
         let session_id = input.session_id.clone();
         let key: AgentInputKey = (session_id.clone(), input_id.clone());
         {
-            let mut active = self.active_agent_runs.lock().unwrap();
+            let mut active = self.active_agent_inputs.lock().unwrap();
             if active.contains_key(&key) {
                 return Err(ProtocolError::InvalidCommand(format!(
                     "Agent input already active: {input_id}"
@@ -182,7 +182,7 @@ impl OrchAgentRunRunner {
         session_id: &str,
         input_id: &str,
     ) -> Option<Arc<piko_orchd::events::SessionOutputHub>> {
-        self.active_agent_runs
+        self.active_agent_inputs
             .lock()
             .unwrap()
             .get(&(session_id.to_string(), input_id.to_string()))
@@ -203,7 +203,7 @@ impl OrchAgentRunRunner {
 
     pub(super) fn finish_agent_input(&self, session_id: &str, input_id: &str) {
         let removed = self
-            .active_agent_runs
+            .active_agent_inputs
             .lock()
             .unwrap()
             .remove(&(session_id.to_string(), input_id.to_string()));

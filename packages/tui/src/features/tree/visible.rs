@@ -38,7 +38,7 @@ mod tests {
             timestamp: "2026-07-02T00:00:00Z".to_string(),
             agent_id: "main".into(),
             agent_instance_id: agent_instance_id.into(),
-            source_turn_id: "work-main".into(),
+            root_input_id: "work-main".into(),
             transcript_seq: 1,
             message: Message::User {
                 content: MessageContent::String(text.to_string()),

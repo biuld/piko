@@ -7,7 +7,7 @@ mod observation_projection_tests {
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
             agent_id: "main".into(),
-            source_turn_id: "turn-1".into(),
+            root_input_id: "turn-1".into(),
             message_id: "message-1".into(),
             transcript_seq: 3,
             message: crate::Message::User {
@@ -42,7 +42,7 @@ mod observation_projection_tests {
         let usage = ServerMessage::Usage(UsageEvent::Updated {
             session_id: "session-1".into(),
             agent_instance_id: Some("root".into()),
-            turn_id: Some("turn-1".into()),
+            root_input_id: Some("input-1".into()),
             used: 13_000,
             size: Some(128_000),
             cumulative: Some(crate::messages::Usage {
@@ -54,7 +54,7 @@ mod observation_projection_tests {
                 units: Default::default(),
                 cost: Default::default(),
             }),
-            turn_usage: Some(crate::messages::Usage {
+            input_usage: Some(crate::messages::Usage {
                 input: 10_000,
                 output: 100,
                 cache_read: 3_000,

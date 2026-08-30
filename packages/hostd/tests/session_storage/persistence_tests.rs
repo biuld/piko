@@ -57,6 +57,71 @@ async fn persistent_server_reopens_with_session() {
 }
 
 #[tokio::test]
+async fn two_clients_reconcile_the_same_authoritative_work_projection() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let created = repo.create("/tmp/project").unwrap();
+    let session_id = created.state.session_id.clone();
+    let session_path = created.path.clone();
+    let store = SessionStore::new(&session_path);
+    let root = store.ensure_root_agent("main").unwrap();
+    let input = piko_protocol::AgentInput {
+        input_id: "input-second-client".into(),
+        request_id: "request-second-client".into(),
+        session_id: session_id.clone(),
+        agent_instance_id: root.agent_instance_id.clone(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        content: MessageContent::String("queued from another client".into()),
+        submitted_at: 10,
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
+    };
+    store
+        .commit_agent_command(
+            &session_id,
+            AgentDurableCommand::AgentInputAdmitted {
+                admission: piko_protocol::AgentInputAdmission {
+                    input,
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                    root_input_id: None,
+                    admitted_at: 11,
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    // Independent HostServer instances model a restarted host and a second
+    // client. Both read the same published projection and must converge.
+    let first = HostServer::with_storage(repo.clone());
+    let second = HostServer::with_storage(repo);
+    let first_events = first
+        .handle_command(Command::SessionOpen {
+            command_id: "open-first".into(),
+            session_id: session_id.clone(),
+            session_path: Some(session_path.to_string_lossy().into_owned()),
+        })
+        .await;
+    let second_events = second
+        .handle_command(Command::SessionOpen {
+            command_id: "open-second".into(),
+            session_id,
+            session_path: Some(session_path.to_string_lossy().into_owned()),
+        })
+        .await;
+    let first_snapshot = snapshot_from_refresh(&first_events);
+    let second_snapshot = snapshot_from_refresh(&second_events);
+    assert_eq!(first_snapshot.agent_work, second_snapshot.agent_work);
+    let first_work = first_snapshot
+        .agent_work
+        .iter()
+        .find(|work| work.agent_instance_id == root.agent_instance_id)
+        .expect("root work projection");
+    assert_eq!(first_work.queued_inputs[0].input_id, "input-second-client");
+}
+
+#[tokio::test]
 async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
@@ -72,7 +137,6 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
                 agent_instance_id: root.agent_instance_id.clone(),
                 root_input_id: "request-interrupted".into(),
                 request_id: "request-interrupted".into(),
-                source_turn_id: Some("turn-interrupted".into()),
                 detached_recipient_agent_instance_id: None,
                 prompt_assembly_version: 1,
                 prompt_digest: "digest".into(),
@@ -97,7 +161,6 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
         .commit_message(
             piko_protocol::execution::MessageCommit {
                 session_id: session_id.clone(),
-                source_turn_id: Some("turn-interrupted".into()),
                 root_input_id: "request-interrupted".into(),
                 agent_instance_id: root.agent_instance_id,
                 message_id: "input-interrupted".into(),
@@ -128,7 +191,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
             _ => None,
         })
         .expect("first reconciled snapshot");
-    let marker_id = piko_protocol::turn_abort_marker_message_id("request-interrupted");
+    let marker_id = piko_protocol::agent_work_abort_marker_message_id("request-interrupted");
     assert!(
         reconciled
             .snapshot

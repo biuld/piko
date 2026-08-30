@@ -305,16 +305,19 @@ impl AppState {
         Vec::new()
     }
 
-    pub(super) fn apply_turn_diff(&mut self, diff: piko_protocol::TurnDiffEvent) -> Vec<Effect> {
+    pub(super) fn apply_agent_work_diff(
+        &mut self,
+        diff: piko_protocol::AgentWorkDiffEvent,
+    ) -> Vec<Effect> {
         let effects = Vec::new();
         if !self.accepts_session(&diff.session_id) {
             return effects;
         }
-        self.last_turn_id = Some(diff.turn_id.clone());
-        self.last_turn_diff = Some(diff.clone());
+        self.last_root_input_id = Some(diff.root_input_id.clone());
+        self.last_agent_work_diff = Some(diff.clone());
         self.status = format!(
-            "turn {} changed {} file{}",
-            diff.turn_id,
+            "work {} changed {} file{}",
+            diff.root_input_id,
             diff.files.len(),
             if diff.files.len() == 1 { "" } else { "s" }
         );

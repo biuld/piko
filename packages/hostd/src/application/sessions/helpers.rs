@@ -295,7 +295,6 @@ mod usage_tests {
             agent_instance_id: id.into(),
             root_input_id: format!("input-{started_at}"),
             request_id: String::new(),
-            source_turn_id: None,
             detached_recipient_agent_instance_id: None,
             detached_report_delivered: false,
             prompt_assembly_version: 0,

@@ -22,7 +22,6 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
         tool_call_index: None,
         tool_entity_id: None,
         host_context: None,
-        source_turn_id: None,
         context_remaining: None,
     };
 
@@ -208,7 +207,6 @@ fn v2_context() -> ToolExecutionContext {
         tool_call_index: None,
         tool_entity_id: None,
         host_context: None,
-        source_turn_id: None,
         context_remaining: None,
     }
 }

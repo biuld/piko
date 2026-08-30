@@ -157,7 +157,6 @@ impl AgentRunRunner for AssistantRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
@@ -188,7 +187,6 @@ impl AgentRunRunner for AssistantRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
@@ -219,7 +217,7 @@ impl AgentRunRunner for AssistantRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: "user-1".into(),
-                    source_turn_id: publish_input_id.clone(),
+                    root_input_id: publish_input_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -230,7 +228,7 @@ impl AgentRunRunner for AssistantRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
                     message_id: "assistant-1".into(),
-                    source_turn_id: publish_input_id,
+                    root_input_id: publish_input_id,
                     role: MessageRole::Assistant,
                 },
             );
@@ -344,7 +342,6 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: user_message_id.clone(),
@@ -389,7 +386,6 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
             .commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(input_id.clone()),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_message_id.clone(),
@@ -430,7 +426,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: user_message_id,
-                    source_turn_id: final_input_id.clone(),
+                    root_input_id: final_input_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -442,7 +438,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 2,
                     message_id: assistant_message_id,
-                    source_turn_id: final_input_id.clone(),
+                    root_input_id: final_input_id.clone(),
                     role: MessageRole::Assistant,
                 },
             );
