@@ -25,6 +25,52 @@ use tokio::sync::Semaphore;
 
 use faux_provider::{CannedResponse, FauxProvider};
 
+/// Migration helper for request-shaped test fixtures. Product code has no
+/// request adapter: every call below enters the canonical AgentInput API.
+#[async_trait]
+trait CanonicalRequestTestExt {
+    async fn send_agent_input(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_orchd_api::AgentApiError>;
+
+    async fn wait_sent_agent(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<piko_protocol::AgentWorkReport, piko_orchd_api::AgentApiError>;
+}
+
+#[async_trait]
+impl CanonicalRequestTestExt for AgentRuntime {
+    async fn send_agent_input(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_orchd_api::AgentApiError> {
+        self.submit_runtime_agent_input(
+            piko_protocol::AgentInput::from_request(&request, 0),
+            piko_orchd_api::AgentInputRuntime {
+                prompt_resources: request.prompt_resources,
+                active_tool_names: request.active_tool_names,
+                source_turn_id: request.source_turn_id,
+                message_id: Some(request.message_id),
+            },
+        )
+        .await
+    }
+
+    async fn wait_sent_agent(
+        &self,
+        request: SendAgentInputRequest,
+    ) -> Result<piko_protocol::AgentWorkReport, piko_orchd_api::AgentApiError> {
+        let session_id = request.session_id.clone();
+        let agent_instance_id = request.agent_instance_id.clone();
+        let input_id = request.request_id.clone();
+        self.send_agent_input(request).await?;
+        self.wait_agent_input_completion(session_id, agent_instance_id, input_id)
+            .await
+    }
+}
+
 #[derive(Default)]
 struct CollectingAgentCommitPort {
     revision: AtomicU64,

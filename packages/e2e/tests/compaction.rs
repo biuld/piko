@@ -11,15 +11,15 @@ fn summarize_compaction_uses_the_injected_gateway_and_rehydrates_the_tree() {
     let session_id = host.create_session("create");
     let agent_instance_id = root_agent_id(&session_id);
 
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id.clone(),
-        text: "compact me".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        agent_instance_id.clone(),
+        piko_protocol::MessageContent::String("compact me".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     host.wait_for("initial completion", |message| {
         matches!(

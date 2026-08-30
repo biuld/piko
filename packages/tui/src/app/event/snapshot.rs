@@ -14,22 +14,10 @@ impl AppState {
         self.todo_lists.replace_all(snapshot.todo_lists.clone());
         // Authoritative session ledger replaces any local roll-up.
         self.session.cumulative_usage = snapshot.cumulative_usage.clone();
-        self.session.last_context_tokens = snapshot
-            .active_turns
-            .iter()
-            .rev()
-            .find_map(|turn| {
-                turn.usage
-                    .as_ref()
-                    .map(crate::features::bottom_bar::context_tokens_from_usage)
-            })
-            .filter(|&tokens| tokens > 0)
-            .or_else(|| {
-                last_context_tokens_from_entries(
-                    &snapshot.entries,
-                    snapshot.current_leaf_id.as_deref(),
-                )
-            });
+        self.session.last_context_tokens = last_context_tokens_from_entries(
+            &snapshot.entries,
+            snapshot.current_leaf_id.as_deref(),
+        );
         self.tree
             .load(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
@@ -52,7 +40,9 @@ impl AppState {
         let selected_timeline = snapshot
             .selected_agent_instance_id
             .clone()
-            .filter(|selected| timeline_agent_ids.contains(selected))
+            .filter(|selected| {
+                timeline_agent_ids.is_empty() || timeline_agent_ids.contains(selected)
+            })
             .or_else(|| timeline_agent_ids.first().cloned());
         self.agent_panel.active_agent_instance_id = selected_timeline.clone();
         for agent_instance_id in timeline_agent_ids {
@@ -126,19 +116,21 @@ impl AppState {
         }
         self.timelines.end_projection_batch();
 
-        self.session.active_turns = snapshot
-            .active_turns
-            .into_iter()
-            .map(|turn| {
-                (
-                    turn.agent_instance_id,
-                    crate::app::ActiveTurnUi {
-                        turn_id: turn.turn_id,
-                        status: turn.status,
-                    },
-                )
-            })
+        self.session.agent_work = snapshot
+            .agent_work
+            .iter()
+            .cloned()
+            .map(|work| (work.agent_instance_id.clone(), work))
             .collect();
+        if let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.as_deref()
+            && let Some(work) = self.session.agent_work.get(agent_instance_id)
+        {
+            self.queue_status = QueueStatus {
+                steer_count: work.pending_steers.len() as u32,
+                follow_up_count: work.queued_inputs.len() as u32,
+                next_turn_count: work.queued_inputs.len() as u32,
+            };
+        }
 
         self.approvals.clear();
         for approval in snapshot.pending_approvals {

@@ -138,6 +138,9 @@ pub struct SessionSnapshot {
     pub selected_agent_instance_id: Option<crate::AgentInstanceId>,
     #[serde(default)]
     pub active_turns: Vec<TurnSnapshot>,
+    /// Host-authoritative work and pending-input projection per AgentInstance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_work: Vec<crate::AgentWorkSnapshot>,
     pub pending_approvals: Vec<ApprovalSnapshot>,
     #[serde(default)]
     pub pending_interactions: Vec<UserInteractionSnapshot>,

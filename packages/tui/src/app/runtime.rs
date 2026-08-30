@@ -124,17 +124,12 @@ impl AppState {
                     }
                 }
             }
-            Some(pending::PendingCommandKind::ChatSubmit) => {
-                if let Some(submission) = self.session.pending_submissions.remove(&command_id) {
-                    if submission.optimistic_follow_up {
-                        self.session
-                            .follow_ups
-                            .retain(|item| item.command_id.as_deref() != Some(&command_id));
-                    }
-                    if self.editor.is_empty() {
-                        self.editor.restore_draft(submission.draft);
-                        self.refresh_suggestions();
-                    }
+            Some(pending::PendingCommandKind::AgentInputSubmit) => {
+                if let Some(submission) = self.session.pending_submissions.remove(&command_id)
+                    && self.editor.is_empty()
+                {
+                    self.editor.restore_draft(submission.draft);
+                    self.refresh_suggestions();
                 }
             }
             Some(pending::PendingCommandKind::ModelList) => {

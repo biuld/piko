@@ -87,7 +87,6 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
                     delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
                     content: piko_protocol::MessageContent::String("hello".into()),
                     submitted_at: 1,
-                    user_turn_id: Some("turn-interrupted".into()),
                     caller_agent_instance_id: None,
                     detached_recipient_agent_instance_id: None,
                 },
@@ -156,12 +155,12 @@ async fn persistent_session_navigate_to_root_user_clears_cursor_without_leaf_nod
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
 
     let snapshot = server
@@ -260,12 +259,12 @@ async fn persistent_turn_recovers_each_agent_private_transcript() {
     let session_id = session_id_from(&created);
 
     let _ = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "spawn child".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("spawn child".into()),
+        ))
         .await;
 
     let listed = server

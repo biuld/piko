@@ -49,11 +49,21 @@ fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
 fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
     let mut app = app();
     app.agent_panel.active_agent_instance_id = Some("agent-1".into());
-    app.session.active_turns.insert(
+    app.session.agent_work.insert(
         "agent-1".into(),
-        crate::app::ActiveTurnUi {
-            turn_id: "turn-1".into(),
-            status: piko_protocol::TurnStatus::Running,
+        piko_protocol::AgentWorkSnapshot {
+            agent_instance_id: "agent-1".into(),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            foreground: piko_protocol::AgentForeground::Running,
+            active_work: Some(piko_protocol::ActiveWorkSnapshot {
+                root_input_id: "input-1".into(),
+                state: piko_protocol::AgentWorkViewState::Running,
+                active_model_step_id: None,
+                started_at: 1,
+            }),
+            pending_steers: Vec::new(),
+            queued_inputs: Vec::new(),
+            pending_action: None,
         },
     );
     let keymap = BindingRegistry::default();

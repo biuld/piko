@@ -17,26 +17,13 @@ impl HostApp {
         session_store_factory: &dyn SessionStoreFactory,
         live_turn_run: bool,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        if let Some(path) = session_path {
+        let interrupt_events = if live_turn_run {
+            Vec::new()
+        } else if let Some(path) = session_path {
             let store = session_store_factory.open(path);
             let projection = store.load_projection().await.map_err(storage_error)?;
-            for queued in projection.agent_input_queue {
-                let Some(turn_id) = queued.user_turn_id.as_deref() else {
-                    continue;
-                };
-                let message = match &queued.content {
-                    piko_protocol::MessageContent::String(text) => text.as_str(),
-                    piko_protocol::MessageContent::Blocks(_) => "",
-                };
-                state.restore_turn(
-                    &session_id,
-                    turn_id,
-                    &queued.agent_instance_id,
-                    message,
-                    crate::api::TurnStatus::Queued,
-                )?;
-            }
-            for execution in projection.agent_executions.into_values() {
+            let mut incomplete = Vec::new();
+            for execution in projection.agent_executions.values() {
                 if !matches!(
                     execution.status,
                     piko_protocol::ExecutionStatus::Accepted
@@ -44,74 +31,61 @@ impl HostApp {
                 ) {
                     continue;
                 }
-                let Some(turn_id) = execution.source_turn_id.as_deref() else {
+                let root_input_id = execution
+                    .source_turn_id
+                    .clone()
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or_else(|| execution.request_id.clone());
+                if root_input_id.is_empty() {
                     continue;
-                };
-                state.restore_turn(
-                    &session_id,
-                    turn_id,
-                    &execution.agent_instance_id,
-                    "",
-                    crate::api::TurnStatus::Running,
-                )?;
+                }
+                incomplete.push((root_input_id, execution.agent_instance_id.clone()));
             }
-        }
-        let active_turn_ids = state
-            .session(&session_id)?
-            .active_turns
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        let interrupt_events = if live_turn_run {
-            Vec::new()
-        } else if let Some(path) = session_path {
-            let store = session_store_factory.open(path);
-            let mut reports = Vec::with_capacity(active_turn_ids.len());
-            for turn_id in &active_turn_ids {
+            let mut reports = Vec::with_capacity(incomplete.len());
+            for (root_input_id, agent_instance_id) in incomplete {
                 reports.push((
-                    turn_id.clone(),
+                    root_input_id.clone(),
+                    agent_instance_id,
                     store
-                        .agent_report_for_turn(turn_id)
+                        .agent_report_for_turn(&root_input_id)
                         .await
                         .map_err(storage_error)?,
                 ));
             }
-            if reports.iter().any(|(_, report)| report.is_none()) {
+            if reports.iter().any(|(_, _, report)| report.is_none()) {
                 store
                     .interrupt_incomplete_agent_executions()
                     .await
                     .map_err(storage_error)?;
             }
             let mut events = Vec::with_capacity(reports.len());
-            for (turn_id, report) in reports {
+            for (root_input_id, agent_instance_id, report) in reports {
                 let report = match report {
                     Some(report) => Some(report),
                     None => store
-                        .agent_report_for_turn(&turn_id)
+                        .agent_report_for_turn(&root_input_id)
                         .await
                         .map_err(storage_error)?,
                 };
-                let event = match report.map(|report| report.outcome) {
-                    Some(piko_protocol::ExecutionOutcome::Succeeded { .. }) => {
-                        state.complete_turn(&session_id, &turn_id)?
-                    }
-                    Some(piko_protocol::ExecutionOutcome::Cancelled { .. }) => {
-                        state.cancel_turn(&session_id, &turn_id)?
-                    }
-                    Some(piko_protocol::ExecutionOutcome::Failed { error }) => {
-                        state.fail_turn(&session_id, &turn_id, error)?
-                    }
-                    None => state.fail_turn(
+                let event = match report {
+                    Some(report) => crate::domain::sessions::turn_terminal_from_report(
                         &session_id,
-                        &turn_id,
-                        "turn interrupted: session reopened without a live execution",
-                    )?,
+                        &root_input_id,
+                        &report,
+                    ),
+                    None => crate::domain::sessions::turn_failed(
+                        &session_id,
+                        &root_input_id,
+                        agent_instance_id,
+                        "work interrupted: session reopened without a live execution",
+                        piko_protocol::Usage::empty(),
+                    ),
                 };
                 events.extend(state.with_usage_projection(event, None));
             }
             events
         } else {
-            state.finalize_interrupted_turns(&session_id)?
+            Vec::new()
         };
         if let Some(path) = session_path {
             let store = session_store_factory.open(path);
@@ -361,29 +335,18 @@ impl HostApp {
 #[cfg(test)]
 mod tests {
     use piko_orchd_api::AgentCommitPort;
-    use piko_protocol::{AgentDurableCommand, AgentRunReport, ExecutionOutcome};
+    use piko_protocol::AgentDurableCommand;
 
     use super::*;
 
     #[tokio::test]
-    async fn session_open_recovers_turn_terminal_from_durable_root_report() {
+    async fn session_open_interrupts_incomplete_agent_work() {
         let mut state = crate::domain::sessions::HostState::new();
         let crate::api::CommandResult::SessionCreated { session_id, .. } =
             state.create_session("/project")
         else {
             unreachable!()
         };
-        let root_agent_instance_id = format!("agent_{session_id}_root");
-        let (turn_id, _) = state
-            .start_turn(&session_id, &root_agent_instance_id, "recover me")
-            .unwrap();
-        state
-            .apply_turn_input_disposition(
-                &session_id,
-                &turn_id,
-                piko_protocol::InputDisposition::Accepted,
-            )
-            .unwrap();
         let temp = tempfile::tempdir().unwrap();
         let store = crate::infra::storage::SessionStore::create_session(
             temp.path(),
@@ -401,7 +364,7 @@ mod tests {
                     run_id: "run-recovered".into(),
                     internal_execution_id: "exec-recovered".into(),
                     request_id: "request-recovered".into(),
-                    source_turn_id: Some(turn_id.clone()),
+                    source_turn_id: Some("request-recovered".into()),
                     detached_recipient_agent_instance_id: None,
                     prompt_assembly_version: 1,
                     prompt_digest: "prompt-recovered".into(),
@@ -415,30 +378,9 @@ mod tests {
                         delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
                         content: piko_protocol::MessageContent::String("recover me".into()),
                         submitted_at: 2,
-                        user_turn_id: Some(turn_id.clone()),
                         caller_agent_instance_id: None,
                         detached_recipient_agent_instance_id: None,
                     },
-                },
-            )
-            .await
-            .unwrap();
-        store
-            .commit_agent_command(
-                &session_id,
-                AgentDurableCommand::RunTerminal {
-                    run_id: "run-recovered".into(),
-                    report: AgentRunReport {
-                        agent_instance_id: root.agent_instance_id,
-                        report_id: "report-recovered".into(),
-                        outcome: ExecutionOutcome::Succeeded {
-                            usage: Default::default(),
-                        },
-                        summary: "done".into(),
-                        usage: Default::default(),
-                        artifacts: Vec::new(),
-                    },
-                    finished_at: 3,
                 },
             )
             .await
@@ -458,12 +400,11 @@ mod tests {
 
         assert!(events.iter().any(|event| matches!(
             event,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Completed {
-                turn_id: completed,
+            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Cancelled {
+                turn_id: cancelled,
                 ..
-            }) if completed == &turn_id
+            }) if cancelled == "request-recovered"
         )));
-        assert!(state.session(&session_id).unwrap().active_turns.is_empty());
 
         let replay = HostApp::session_open_response(
             &mut state,

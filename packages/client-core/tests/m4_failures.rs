@@ -7,11 +7,11 @@ use piko_client_core::{AttentionKind, ClientIntent, TimelineItem, prompt_queue};
 use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{
     ApprovalEvent, ApprovalSnapshot, ApprovalStatus, ReconcileReason, ServerMessage, TurnEvent,
-    TurnStatus, UserInteractionSnapshot, UserInteractionStatus,
+    UserInteractionSnapshot, UserInteractionStatus,
 };
 
 #[test]
-fn m4_turn_queued_then_started_then_cancelled() {
+fn m4_turn_cancelled_does_not_record_a_failure() {
     let mut ids = SeqIds(0);
     let state = drive_to_live(&mut ids, "sess-1");
 
@@ -25,12 +25,6 @@ fn m4_turn_queued_then_started_then_cancelled() {
         }),
         &mut ids,
     );
-    {
-        let session = state.live_session.as_ref().unwrap();
-        assert_eq!(session.active_turns.len(), 1);
-        assert_eq!(session.active_turns[0].status, TurnStatus::Queued);
-    }
-
     let (state, _) = host(
         state,
         ServerMessage::TurnLifecycle(TurnEvent::Started {
@@ -41,11 +35,6 @@ fn m4_turn_queued_then_started_then_cancelled() {
         }),
         &mut ids,
     );
-    assert_eq!(
-        state.live_session.as_ref().unwrap().active_turns[0].status,
-        TurnStatus::Running
-    );
-
     let (state, _) = host(
         state,
         ServerMessage::TurnLifecycle(TurnEvent::Cancelled {
@@ -57,7 +46,14 @@ fn m4_turn_queued_then_started_then_cancelled() {
         }),
         &mut ids,
     );
-    assert!(state.live_session.as_ref().unwrap().active_turns.is_empty());
+    assert!(
+        state
+            .live_session
+            .as_ref()
+            .unwrap()
+            .turn_failures
+            .is_empty()
+    );
 }
 
 #[test]

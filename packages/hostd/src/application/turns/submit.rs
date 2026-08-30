@@ -55,23 +55,19 @@ impl HostApp {
         Ok(dir)
     }
 
-    pub(crate) async fn submit_chat(
+    pub(crate) async fn submit_chat_with_input_id(
         &self,
         command_id: String,
         session_id: String,
         agent_instance_id: String,
+        input_id: String,
         content: piko_protocol::MessageContent,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
-        let display = super::content::text_projection(&content);
-        let (turn_id, _) = {
-            let mut state = self.state.lock().await;
-            state.start_turn(&session_id, &agent_instance_id, &display)?
-        };
         self.run_registered_turn(
             command_id,
             session_id,
-            turn_id,
+            input_id,
             agent_instance_id,
             content,
             tx,
@@ -307,11 +303,13 @@ impl HostApp {
         {
             Ok(run) => run,
             Err(error) => {
-                let failed =
-                    self.state
-                        .lock()
-                        .await
-                        .fail_turn(&session_id, &turn_id, error.to_string())?;
+                let failed = crate::domain::sessions::turn_failed(
+                    &session_id,
+                    &turn_id,
+                    &agent_instance_id,
+                    error.to_string(),
+                    piko_protocol::Usage::empty(),
+                );
                 send_event(
                     tx,
                     ServerMessage::CommandResponse {
@@ -324,28 +322,37 @@ impl HostApp {
                 return Ok(());
             }
         };
-        let status = self.state.lock().await.apply_turn_input_disposition(
-            &session_id,
-            &turn_id,
-            run.receipt.disposition,
-        )?;
+        let status = crate::domain::sessions::turn_status_from_disposition(run.receipt.disposition);
         send_event(
             tx,
             ServerMessage::CommandResponse {
                 command_id,
-                result: Ok(CommandResult::Empty),
+                result: Ok(CommandResult::AgentInputSubmitted {
+                    receipt: run.receipt.clone(),
+                    timestamp: now_ms(),
+                }),
             },
+        )
+        .await;
+        let (snapshot, agents) = self.session_view(&session_id).await?;
+        send_event(
+            tx,
+            crate::application::sessions::helpers::session_reconciled_message(
+                session_id.clone(),
+                piko_protocol::ReconcileReason::ExplicitRefresh,
+                snapshot,
+                agents,
+            ),
         )
         .await;
         if status == crate::api::TurnStatus::Queued {
             send_event(
                 tx,
-                ServerMessage::TurnLifecycle(crate::api::TurnEvent::Queued {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                    agent_instance_id: agent_instance_id.clone(),
-                    timestamp: now_ms(),
-                }),
+                crate::domain::sessions::turn_queued(
+                    session_id.clone(),
+                    turn_id.clone(),
+                    agent_instance_id.clone(),
+                ),
             )
             .await;
         }
@@ -364,13 +371,17 @@ impl HostApp {
         let turn_succeeded = match turn_result {
             Ok(succeeded) => succeeded,
             Err(error) => {
-                let cancelled = self
-                    .state
-                    .lock()
-                    .await
-                    .turn(&session_id, &turn_id)
-                    .is_ok_and(|turn| turn.status == crate::api::TurnStatus::Cancelled);
-                if cancelled {
+                if error.to_string().to_ascii_lowercase().contains("cancel") {
+                    self.send_turn_terminal(
+                        tx,
+                        crate::domain::sessions::turn_cancelled(
+                            &session_id,
+                            &turn_id,
+                            &agent_instance_id,
+                            piko_protocol::Usage::empty(),
+                        ),
+                    )
+                    .await;
                     return Ok(());
                 }
                 return Err(error);

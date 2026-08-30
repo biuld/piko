@@ -71,7 +71,7 @@ async fn transcript_max_tool_output_tokens_reaches_the_model_view() {
     model.push_text("done").await;
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "transcript-cap-run".into(),
             session_id: "session-transcript-cap".into(),
             agent_instance_id: "root".into(),

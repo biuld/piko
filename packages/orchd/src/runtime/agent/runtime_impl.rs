@@ -226,6 +226,11 @@ impl AgentRuntime {
             lifecycle,
             activity: AgentActivity::Idle,
             latest_report: latest_report.clone(),
+            active_root_input_id: None,
+            pending_follow_up_ids: queued_inputs
+                .iter()
+                .map(|input| input.input_id.clone())
+                .collect(),
             unread_report_count: inbox
                 .iter()
                 .filter(|item| item.consumed_at.is_none())

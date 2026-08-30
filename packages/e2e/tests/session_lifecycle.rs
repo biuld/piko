@@ -9,15 +9,15 @@ use piko_protocol::{
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 fn complete_chat(host: &mut HostdHarness, session_id: &str, command_id: &str, text: &str) {
-    host.send(Command::ChatSubmit {
-        command_id: command_id.into(),
-        session_id: session_id.into(),
-        target_agent_instance_id: root_agent_id(session_id),
-        text: text.into(),
-    });
+    host.send(Command::submit_follow_up(
+        command_id,
+        session_id,
+        root_agent_id(session_id),
+        piko_protocol::MessageContent::String(text.into()),
+    ));
     assert!(matches!(
         host.command_result(command_id),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     host.wait_for("completed chat", |message| {
         matches!(

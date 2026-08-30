@@ -3,28 +3,23 @@ use super::*;
 impl AgentActor {
     pub(super) async fn handle_input(
         &mut self,
-        request: SendAgentInputRequest,
-        canonical_input: Option<piko_protocol::AgentInput>,
+        proposed_input: piko_protocol::AgentInput,
     ) -> Result<AcceptedAgentInput, AgentApiError> {
-        let explicit_input = canonical_input.is_some();
-        let proposed_input = if let Some(input) = canonical_input {
-            input
-        } else if let Some((_, existing, _)) = self.input_requests.get(&request.request_id) {
-            existing.clone()
-        } else {
-            piko_protocol::AgentInput::from_request(&request, now_ms())
-        };
-        if let Some((existing_request, existing_input, accepted)) =
-            self.input_requests.get(&request.request_id)
-        {
-            if existing_request != &request || (explicit_input && existing_input != &proposed_input)
-            {
+        let request = proposed_input.to_request();
+        self.handle_input_request(request, proposed_input).await
+    }
+
+    pub(super) async fn handle_input_request(
+        &mut self,
+        request: SendAgentInputRequest,
+        proposed_input: piko_protocol::AgentInput,
+    ) -> Result<AcceptedAgentInput, AgentApiError> {
+        if let Some((_, existing_input, accepted)) = self.input_requests.get(&request.request_id) {
+            if existing_input != &proposed_input {
                 return Err(AgentApiError::IdempotencyConflict);
             }
             if let Some(accepted) = accepted {
-                let mut duplicate = accepted.clone();
-                duplicate.receipt.disposition = InputDisposition::Duplicate;
-                return Ok(duplicate);
+                return Ok(accepted.clone());
             }
         }
         let execution_id = internal_execution_id(&self.identity, &request.request_id);
@@ -35,8 +30,7 @@ impl AgentActor {
                     request_id: request.request_id,
                     session_id: self.identity.session_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
-                    disposition: InputDisposition::Duplicate,
-                    run_id: None,
+                    disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                     queued_position: None,
                 },
                 internal_execution_id: execution_id,
@@ -143,10 +137,10 @@ impl AgentActor {
             }
             (Some(execution_id), AgentInputDelivery::Auto | AgentInputDelivery::SteerActive) => {
                 let execution_id = execution_id.to_string();
-                let (root_input_id, active_run_id) = self
+                let root_input_id = self
                     .run_state
                     .active_root()
-                    .map(|(input_id, run_id)| (input_id.to_string(), run_id.to_string()))
+                    .map(|(input_id, _)| input_id.to_string())
                     .ok_or(AgentApiError::InvalidState)?;
                 let input_id = canonical_input.input_id.clone();
                 let submitted_at = canonical_input.submitted_at;
@@ -158,40 +152,37 @@ impl AgentActor {
                                 input: canonical_input,
                                 disposition: piko_protocol::AgentInputDisposition::PendingSteer,
                                 root_input_id: Some(root_input_id.clone()),
-                                run_id: None,
-                                bound_run_id: Some(active_run_id.clone()),
                                 admitted_at: submitted_at,
                             },
                         },
                     )
                     .await
                     .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
-                let receipt = self
-                    .execution
-                    .steer_execution(SteerExecutionRequest {
-                        request_id: request.request_id.clone(),
-                        input_id: Some(input_id.clone()),
-                        session_id: self.identity.session_id.clone(),
-                        execution_id: execution_id.clone(),
-                        message_id: request.message_id.clone(),
-                        content: request.content.clone(),
-                        submitted_at,
-                    })
-                    .await;
-                let receipt = match receipt {
-                    Ok(receipt) => receipt,
-                    // Do not cancel after durable admit; the caller retries
-                    // delivery with the same cached proposal.
-                    Err(error) => return Err(error),
+                let session_id = self.identity.session_id.clone();
+                let live_delivery = SteerExecutionRequest {
+                    request_id: request.request_id.clone(),
+                    input_id: Some(input_id.clone()),
+                    session_id: session_id.clone(),
+                    execution_id: execution_id.clone(),
+                    message_id: request.message_id.clone(),
+                    content: request.content.clone(),
+                    submitted_at,
                 };
+                let execution = Arc::clone(&self.execution);
+                tokio::spawn(async move {
+                    // Admission is already durable. Live delivery may wait for
+                    // the next model boundary; recovery replays the pending
+                    // input rather than making this mailbox acknowledgement
+                    // part of the acceptance contract.
+                    let _ = execution.steer_execution(live_delivery).await;
+                });
                 Ok(AcceptedAgentInput {
                     receipt: AgentInputReceipt {
                         input_id,
-                        request_id: receipt.request_id,
-                        session_id: receipt.session_id,
+                        request_id: request.request_id,
+                        session_id,
                         agent_instance_id: self.identity.agent_instance_id.clone(),
-                        disposition: receipt.disposition,
-                        run_id: None,
+                        disposition: piko_protocol::AgentInputDisposition::PendingSteer,
                         queued_position: None,
                     },
                     internal_execution_id: execution_id,

@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{AgentInputDelivery, AgentInstanceId, AgentInstanceLifecycle};
-use crate::{MessageContent, TurnId};
+use crate::MessageContent;
 
 pub type AgentInputId = String;
 pub type RunId = String;
@@ -34,8 +34,6 @@ pub struct AgentInput {
     pub content: MessageContent,
     pub submitted_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_turn_id: Option<TurnId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_agent_instance_id: Option<AgentInstanceId>,
     /// Recipient of the eventual detached completion, when this input was
     /// submitted as background Agent-to-Agent work.
@@ -44,6 +42,30 @@ pub struct AgentInput {
 }
 
 impl AgentInput {
+    /// Construct a client-origin user input. `request_id` is caller
+    /// idempotency; `input_id` is derived from it for tests and helpers.
+    pub fn user(
+        request_id: impl Into<String>,
+        session_id: impl Into<String>,
+        agent_instance_id: impl Into<String>,
+        delivery: AgentInputDelivery,
+        content: MessageContent,
+    ) -> Self {
+        let request_id = request_id.into();
+        Self {
+            input_id: format!("input_{request_id}"),
+            request_id: request_id.clone(),
+            session_id: session_id.into(),
+            agent_instance_id: agent_instance_id.into(),
+            origin: AgentInputOrigin::User,
+            delivery,
+            content,
+            submitted_at: chrono::Utc::now().timestamp_millis(),
+            caller_agent_instance_id: None,
+            detached_recipient_agent_instance_id: None,
+        }
+    }
+
     /// Build the canonical primitive proposal from the existing runtime input
     /// DTO. Prompt resources remain runtime-owned and are intentionally not
     /// copied into the durable fact.
@@ -63,7 +85,6 @@ impl AgentInput {
             delivery: request.delivery,
             content: request.content.clone(),
             submitted_at,
-            user_turn_id: request.source_turn_id.clone(),
             caller_agent_instance_id: request.caller_agent_instance_id.clone(),
             detached_recipient_agent_instance_id: None,
         }
@@ -77,7 +98,7 @@ impl AgentInput {
             session_id: self.session_id.clone(),
             agent_instance_id: self.agent_instance_id.clone(),
             caller_agent_instance_id: self.caller_agent_instance_id.clone(),
-            source_turn_id: self.user_turn_id.clone(),
+            source_turn_id: None,
             message_id: self.input_id.clone(),
             content: self.content.clone(),
             delivery: self.delivery,
@@ -106,10 +127,10 @@ impl AgentInput {
     }
 }
 
-/// Normalized state exposed by the host's derived Run view.
+/// Normalized state exposed by the host's derived active-work view.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum AgentRunViewState {
+pub enum AgentWorkViewState {
     Starting,
     Running,
     RequiresAction,
@@ -131,12 +152,9 @@ pub struct PendingActionSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ActiveRunSnapshot {
-    pub run_id: RunId,
+pub struct ActiveWorkSnapshot {
     pub root_input_id: AgentInputId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_turn_id: Option<TurnId>,
-    pub state: AgentRunViewState,
+    pub state: AgentWorkViewState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_model_step_id: Option<ModelStepId>,
     pub started_at: i64,
@@ -151,8 +169,6 @@ pub struct AgentInputSummary {
     pub admission_revision: u64,
     pub submitted_at: i64,
     pub delivery: AgentInputDelivery,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_turn_id: Option<TurnId>,
     pub disposition: crate::execution::AgentInputDisposition,
 }
 
@@ -163,7 +179,7 @@ pub struct AgentWorkSnapshot {
     pub lifecycle: AgentInstanceLifecycle,
     pub foreground: crate::AgentForeground,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_run: Option<ActiveRunSnapshot>,
+    pub active_work: Option<ActiveWorkSnapshot>,
     pub pending_steers: Vec<AgentInputSummary>,
     pub queued_inputs: Vec<AgentInputSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,10 +194,6 @@ pub struct AgentInputAdmission {
     pub disposition: crate::execution::AgentInputDisposition,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<AgentInputId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<RunId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bound_run_id: Option<RunId>,
     pub admitted_at: i64,
 }
 
@@ -194,10 +206,6 @@ pub struct AgentInputDispositionChange {
     pub disposition: crate::execution::AgentInputDisposition,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<AgentInputId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<RunId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bound_run_id: Option<RunId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_step_id: Option<ModelStepId>,
     pub changed_at: i64,

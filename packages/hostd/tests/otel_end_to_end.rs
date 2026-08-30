@@ -155,12 +155,12 @@ async fn turn_records_metrics_and_logs_without_span_export() {
         .await;
     let events = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        server.handle_command(Command::ChatSubmit {
-            command_id: "otel-turn".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent_instance_id.clone(),
-            text: "plan this".into(),
-        }),
+        server.handle_command(Command::submit_follow_up(
+            "otel-turn",
+            session_id.clone(),
+            root_agent_instance_id.clone(),
+            piko_protocol::MessageContent::String("plan this".into()),
+        )),
     )
     .await
     .expect("turn should complete");

@@ -45,6 +45,7 @@ fn empty_reconcile(session_id: &str) -> Event {
             current_leaf_id: None,
             selected_agent_instance_id: Some(format!("agent_{session_id}_root")),
             active_turns: Vec::new(),
+            agent_work: Vec::new(),
             pending_approvals: Vec::new(),
             pending_interactions: Vec::new(),
             name: None,

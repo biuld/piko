@@ -259,7 +259,6 @@ fn admitted_applied_to_step_is_rejected_without_panicking() {
         delivery: piko_protocol::AgentInputDelivery::SteerActive,
         content: MessageContent::String("invalid admission".into()),
         submitted_at: 2,
-        user_turn_id: Some("turn-1".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -276,8 +275,6 @@ fn admitted_applied_to_step_is_rejected_without_panicking() {
                         input,
                         disposition: piko_protocol::AgentInputDisposition::AppliedToStep,
                         root_input_id: Some("root-input".into()),
-                        run_id: Some("run-1".into()),
-                        bound_run_id: Some("run-1".into()),
                         admitted_at: 2,
                     }),
                 ),
@@ -305,7 +302,6 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
         delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
         content: MessageContent::String("only-payload-copy".into()),
         submitted_at: 2,
-        user_turn_id: Some("turn-1".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -315,8 +311,6 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
             input,
             disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
             root_input_id: Some("input-1".into()),
-            run_id: Some("run-1".into()),
-            bound_run_id: None,
             admitted_at: 2,
         }),
     );

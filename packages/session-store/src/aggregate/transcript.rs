@@ -125,12 +125,10 @@ impl SessionAggregate {
                 )));
             };
             if input.input.agent_instance_id != data.agent_instance_id
-                || input.run_id.as_deref() != Some(data.run_id.as_str())
-                || input.bound_run_id.as_deref() != Some(data.run_id.as_str())
                 || root.input.agent_instance_id != data.agent_instance_id
                 || root.disposition != piko_protocol::AgentInputDisposition::AppliedAsRoot
                 || root.root_input_id.as_deref() != Some(root_input_id)
-                || root.run_id.as_deref() != Some(data.run_id.as_str())
+                || root.input.request_id != execution.started.request_id
             {
                 return Err(StoreError::InvalidEvent(
                     "applied steer does not match the model step root".into(),

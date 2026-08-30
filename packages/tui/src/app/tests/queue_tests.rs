@@ -1,18 +1,52 @@
 use super::*;
 use crate::app::command::EditorAction;
-use piko_protocol::TurnStatus;
 
 fn running_app() -> AppState {
     let mut app = live_app();
     app.agent_panel.active_agent_instance_id = Some("task-1".into());
-    app.session.active_turns.insert(
+    app.session.agent_work.insert(
         "task-1".into(),
-        crate::app::ActiveTurnUi {
-            turn_id: "turn-live".into(),
-            status: TurnStatus::Running,
-        },
+        work_snapshot(Some("input-live"), Vec::new()),
     );
     app
+}
+
+fn work_snapshot(
+    active_root: Option<&str>,
+    queued_inputs: Vec<piko_protocol::AgentInputSummary>,
+) -> piko_protocol::AgentWorkSnapshot {
+    piko_protocol::AgentWorkSnapshot {
+        agent_instance_id: "task-1".into(),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        foreground: if active_root.is_some() {
+            piko_protocol::AgentForeground::Running
+        } else if queued_inputs.is_empty() {
+            piko_protocol::AgentForeground::Idle
+        } else {
+            piko_protocol::AgentForeground::Queued
+        },
+        active_work: active_root.map(|root_input_id| piko_protocol::ActiveWorkSnapshot {
+            root_input_id: root_input_id.into(),
+            state: piko_protocol::AgentWorkViewState::Running,
+            active_model_step_id: None,
+            started_at: 1,
+        }),
+        pending_steers: Vec::new(),
+        queued_inputs,
+        pending_action: None,
+    }
+}
+
+fn queued_input(input_id: &str, preview: &str) -> piko_protocol::AgentInputSummary {
+    piko_protocol::AgentInputSummary {
+        input_id: input_id.into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        preview: preview.into(),
+        admission_revision: 2,
+        submitted_at: 2,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+    }
 }
 
 #[test]
@@ -53,11 +87,12 @@ fn detached_runtime_activity_does_not_masquerade_as_a_host_turn_for_steer() {
 
     assert!(matches!(
         effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::ChatSubmit {
-            target_agent_instance_id,
-            text,
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit {
+            input,
             ..
-        })] if target_agent_instance_id == "agent-child" && text == "next task"
+        })] if input.agent_instance_id == "agent-child"
+            && input.content == piko_protocol::MessageContent::String("next task".into())
+            && input.delivery == piko_protocol::AgentInputDelivery::FollowUp
     ));
 }
 
@@ -78,14 +113,14 @@ fn queued_guidance_and_summary_show_follow_up_count() {
     use crate::features::guidance_row::{GuidanceContent, resolve};
 
     let mut app = running_app();
-    app.session.follow_ups.push(crate::app::FollowUpUi {
-        command_id: None,
-        agent_instance_id: "task-1".into(),
-        text: "later".into(),
-        content: piko_protocol::MessageContent::String("later".into()),
-        turn_id: None,
-        cancel_when_queued: false,
-    });
+    app.session.agent_work.insert(
+        "task-1".into(),
+        work_snapshot(
+            Some("input-live"),
+            vec![queued_input("input-later", "later")],
+        ),
+    );
+    app.queue_status.follow_up_count = 1;
     assert_eq!(app.queue_summary().follow_up_count, 1);
     let GuidanceContent::Hint(hint) = resolve(&app) else {
         panic!("expected composer hint");
@@ -102,14 +137,14 @@ fn enter_while_running_sends_queue_steer() {
 
     assert!(matches!(
         effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::QueueSteer {
-            agent_instance_id,
-            message,
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit {
+            input,
             ..
-        })] if agent_instance_id == "task-1" && message == "change course"
+        })] if input.agent_instance_id == "task-1"
+            && input.content == piko_protocol::MessageContent::String("change course".into())
+            && input.delivery == piko_protocol::AgentInputDelivery::SteerActive
     ));
     assert!(app.editor.is_empty());
-    assert!(app.session.follow_ups.is_empty());
 }
 
 #[test]
@@ -122,8 +157,12 @@ fn image_while_running_sends_structured_steer() {
 
     assert!(matches!(
         effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::QueueSteerMessage {
-            content: piko_protocol::MessageContent::Blocks(blocks),
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit {
+            input: piko_protocol::AgentInput {
+                content: piko_protocol::MessageContent::Blocks(blocks),
+                delivery: piko_protocol::AgentInputDelivery::SteerActive,
+                ..
+            },
             ..
         })] if matches!(blocks.as_slice(), [piko_protocol::ContentBlock::Image { data, .. }] if data == "AA==")
     ));
@@ -138,15 +177,14 @@ fn alt_enter_while_running_queues_follow_up() {
 
     assert!(matches!(
         effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::ChatSubmit {
-            target_agent_instance_id,
-            text,
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit {
+            input,
             ..
-        })] if target_agent_instance_id == "task-1" && text == "do this next"
+        })] if input.agent_instance_id == "task-1"
+            && input.content == piko_protocol::MessageContent::String("do this next".into())
+            && input.delivery == piko_protocol::AgentInputDelivery::FollowUp
     ));
-    assert_eq!(app.session.follow_ups.len(), 1);
-    assert_eq!(app.session.follow_ups[0].text, "do this next");
-    assert_eq!(app.queue_summary().follow_up_count, 1);
+    assert_eq!(app.queue_summary().follow_up_count, 0);
 }
 
 #[test]
@@ -155,7 +193,9 @@ fn rejected_follow_up_restores_draft_and_rolls_back_local_queue() {
     app.editor.restore_text("do this next");
     let effects = app.dispatch(EditorAction::FollowUp.into());
     let command_id = match effects.as_slice() {
-        [Effect::Send(piko_protocol::Command::ChatSubmit { command_id, .. })] => command_id.clone(),
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit { command_id, .. })] => {
+            command_id.clone()
+        }
         other => panic!("unexpected effects: {other:?}"),
     };
 
@@ -167,7 +207,6 @@ fn rejected_follow_up_restores_draft_and_rolls_back_local_queue() {
     )));
 
     assert_eq!(app.editor.text(), "do this next");
-    assert!(app.session.follow_ups.is_empty());
 }
 
 #[test]
@@ -184,16 +223,8 @@ fn steer_while_idle_keeps_draft() {
 }
 
 #[test]
-fn queued_event_does_not_replace_running_turn() {
+fn queued_event_does_not_replace_running_work() {
     let mut app = running_app();
-    app.session.follow_ups.push(crate::app::FollowUpUi {
-        command_id: None,
-        agent_instance_id: "task-1".into(),
-        text: "later".into(),
-        content: piko_protocol::MessageContent::String("later".into()),
-        turn_id: None,
-        cancel_when_queued: false,
-    });
 
     app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
         session_id: "session-1".into(),
@@ -202,69 +233,32 @@ fn queued_event_does_not_replace_running_turn() {
         timestamp: 0,
     }));
 
-    assert_eq!(app.session.active_turns["task-1"].turn_id, "turn-live");
     assert_eq!(
-        app.session.active_turns["task-1"].status,
-        TurnStatus::Running
-    );
-    assert_eq!(
-        app.session.follow_ups[0].turn_id.as_deref(),
-        Some("turn-queued")
+        app.session.agent_work["task-1"]
+            .active_work
+            .as_ref()
+            .map(|work| work.root_input_id.as_str()),
+        Some("input-live")
     );
 }
 
 #[test]
-fn dequeue_restores_text_and_cancels_queued_turn() {
+fn dequeue_restores_preview_and_cancels_authoritative_input() {
     let mut app = running_app();
-    app.session.follow_ups.push(crate::app::FollowUpUi {
-        command_id: None,
-        agent_instance_id: "task-1".into(),
-        text: "bring back".into(),
-        content: piko_protocol::MessageContent::String("bring back".into()),
-        turn_id: Some("turn-queued".into()),
-        cancel_when_queued: false,
-    });
+    app.session.agent_work.insert(
+        "task-1".into(),
+        work_snapshot(
+            Some("input-live"),
+            vec![queued_input("input-queued", "bring back")],
+        ),
+    );
 
     let effects = app.dispatch(EditorAction::DequeueFollowUp.into());
 
     assert_eq!(app.editor.text(), "bring back");
-    assert!(app.session.follow_ups.is_empty());
     assert!(matches!(
         effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::TurnCancel { turn_id, .. })]
-            if turn_id == "turn-queued"
+        [Effect::Send(piko_protocol::Command::AgentInputCancel { input_id, .. })]
+            if input_id == "input-queued"
     ));
-}
-
-#[test]
-fn dequeue_waits_for_queued_event_then_cancels() {
-    let mut app = running_app();
-    app.session.follow_ups.push(crate::app::FollowUpUi {
-        command_id: None,
-        agent_instance_id: "task-1".into(),
-        text: "pending id".into(),
-        content: piko_protocol::MessageContent::String("pending id".into()),
-        turn_id: None,
-        cancel_when_queued: false,
-    });
-
-    assert!(
-        app.dispatch(EditorAction::DequeueFollowUp.into())
-            .is_empty()
-    );
-    assert_eq!(app.editor.text(), "pending id");
-    assert!(app.session.follow_ups[0].cancel_when_queued);
-
-    let effects = app.apply_event(Event::TurnLifecycle(piko_protocol::TurnEvent::Queued {
-        session_id: "session-1".into(),
-        turn_id: "turn-late".into(),
-        agent_instance_id: "task-1".into(),
-        timestamp: 0,
-    }));
-    assert!(matches!(
-        effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::TurnCancel { turn_id, .. })]
-            if turn_id == "turn-late"
-    ));
-    assert!(app.session.follow_ups.is_empty());
 }

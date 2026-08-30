@@ -8,7 +8,7 @@ impl AgentActor {
         transcript: Vec<piko_protocol::Message>,
         head_message_id: Option<String>,
         inbox: Vec<AgentInboxItem>,
-        latest_report: Option<AgentRunReport>,
+        latest_report: Option<AgentWorkReport>,
         execution_reports: Vec<piko_orchd_api::RecoveredExecutionReport>,
         queued_inputs: Vec<piko_protocol::AgentInput>,
         recovered_detached_deliveries: Vec<piko_orchd_api::RecoveredDetachedDelivery>,
@@ -31,17 +31,15 @@ impl AgentActor {
             follow_ups: queued_inputs
                 .into_iter()
                 .map(|input| {
-                    let completion = input.detached_recipient_agent_instance_id.as_ref().map(
-                        |agent_instance_id| {
-                            QueuedCompletion::Detached(DetachedReportTarget {
-                                agent_instance_id: agent_instance_id.clone(),
-                            })
+                    let detached = input.detached_recipient_agent_instance_id.as_ref().map(
+                        |agent_instance_id| DetachedReportTarget {
+                            agent_instance_id: agent_instance_id.clone(),
                         },
                     );
                     QueuedRuntimeInput {
                         request: input.to_request(),
                         input,
-                        completion,
+                        detached,
                         parent: tracing::Span::none(),
                     }
                 })
@@ -53,7 +51,6 @@ impl AgentActor {
                 .into_iter()
                 .map(|recovered| (recovered.internal_execution_id, recovered.report))
                 .collect(),
-            execution_waiters: HashMap::new(),
             detached_reports: HashMap::new(),
             scope,
             recovered_detached_deliveries,
@@ -81,101 +78,51 @@ impl AgentActor {
         while let Some(command) = self.mailbox.recv().await {
             match command {
                 AgentCommand::Input {
-                    request,
-                    canonical_input,
-                    reply,
-                } => {
-                    let command =
-                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let result = self
-                        .handle_input(request, canonical_input)
-                        .await
-                        .map(|accepted| accepted.receipt);
-                    command.complete(result);
-                }
-                AgentCommand::Run {
-                    request,
-                    reply,
-                    parent,
-                } if self.should_queue_follow_up(&request) => {
-                    self.pending_run_parent = Some(parent.clone());
-                    let command =
-                        ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let (started_tx, started_rx) = piko_comms::reply::<AgentRunStarted, _>();
-                    let (report_tx, report_rx) = piko_comms::reply::<AgentRunReportContract, _>();
-                    match self
-                        .enqueue_follow_up(
-                            request,
-                            None,
-                            Some(QueuedCompletion::Waiter {
-                                started: started_tx,
-                                report: report_tx,
-                            }),
-                            parent,
-                        )
-                        .await
-                    {
-                        Ok(receipt) => command.complete(Ok(piko_orchd_api::AgentRunAcceptance {
-                            receipt,
-                            started: started_rx,
-                            completion: report_rx,
-                        })),
-                        Err((error, _)) => command.complete(Err(error)),
-                    }
-                }
-                AgentCommand::Run {
-                    request,
+                    input,
+                    runtime,
                     reply,
                     parent,
                 } => {
                     self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    match self.handle_input(request, None).await {
-                        Ok(accepted) => {
-                            let (started_tx, started_rx) =
-                                piko_comms::reply::<AgentRunStarted, _>();
-                            let (report_tx, report_rx) =
-                                piko_comms::reply::<AgentRunReportContract, _>();
-                            self.register_waiter(accepted.internal_execution_id, report_tx);
-                            let _ = started_tx.send(());
-                            command.complete(Ok(piko_orchd_api::AgentRunAcceptance {
-                                receipt: accepted.receipt,
-                                started: started_rx,
-                                completion: report_rx,
-                            }));
-                        }
-                        Err(error) => {
-                            command.complete(Err(error));
-                        }
+                    let mut request = input.to_request();
+                    request.prompt_resources = runtime.prompt_resources;
+                    request.active_tool_names = runtime.active_tool_names;
+                    if runtime.source_turn_id.is_some() {
+                        request.source_turn_id = runtime.source_turn_id;
                     }
+                    if let Some(message_id) = runtime.message_id {
+                        request.message_id = message_id;
+                    }
+                    let result = self
+                        .handle_input_request(request, input)
+                        .await
+                        .map(|accepted| accepted.receipt);
+                    command.complete(result);
                 }
                 AgentCommand::InputDetached {
-                    request,
+                    input,
                     recipient,
                     reply,
                     parent,
-                } if self.should_queue_follow_up(&request) => {
+                } if self.should_queue_follow_up(&input.to_request()) => {
                     self.pending_run_parent = Some(parent.clone());
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                     let result = self
-                        .enqueue_follow_up(
-                            request,
-                            None,
-                            Some(QueuedCompletion::Detached(recipient)),
-                            parent,
-                        )
+                        .enqueue_follow_up(input.to_request(), Some(input), Some(recipient), parent)
                         .await
                         .map_err(|(error, _)| error);
                     command.complete(result);
                 }
                 AgentCommand::InputDetached {
-                    request,
+                    input,
                     recipient,
                     reply,
                     parent,
                 } => {
+                    let request = input.to_request();
                     self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
@@ -194,11 +141,14 @@ impl AgentActor {
                                 | AgentInputDelivery::FollowUp
                         ) {
                         let stored_request = request.clone();
+                        let mut stored_input = input.clone();
+                        stored_input.detached_recipient_agent_instance_id =
+                            Some(recipient.agent_instance_id.clone());
                         let result = self
                             .start_execution_from(
                                 request,
                                 Some(recipient.agent_instance_id.clone()),
-                                None,
+                                Some(stored_input.clone()),
                             )
                             .await
                             .map(|receipt| AcceptedAgentInput {
@@ -206,16 +156,14 @@ impl AgentActor {
                                 internal_execution_id: request_execution_id,
                             });
                         if let Ok(accepted) = &result {
-                            let canonical =
-                                piko_protocol::AgentInput::from_request(&stored_request, now_ms());
                             self.input_requests.insert(
                                 stored_request.request_id.clone(),
-                                (stored_request, canonical, Some(accepted.clone())),
+                                (stored_request, stored_input, Some(accepted.clone())),
                             );
                         }
                         result
                     } else {
-                        self.handle_input(request, None).await
+                        self.handle_input(input).await
                     };
                     if let Ok(accepted) = &result {
                         self.register_detached_report(
@@ -280,10 +228,10 @@ impl AgentActor {
                     let result = self.cancel_run(request_id).await;
                     command.complete(result);
                 }
-                AgentCommand::CancelInput { request_id, reply } => {
+                AgentCommand::CancelInput { input_id, reply } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let result = self.cancel_input(request_id).await;
+                    let result = self.cancel_input(input_id).await;
                     command.complete(result);
                 }
                 AgentCommand::Inbox { reply } => {
@@ -315,16 +263,15 @@ impl AgentActor {
         &mut self,
         request: SendAgentInputRequest,
         canonical_input: Option<piko_protocol::AgentInput>,
-        completion: Option<QueuedCompletion>,
+        detached: Option<DetachedReportTarget>,
         parent: tracing::Span,
-    ) -> Result<AgentInputReceipt, (AgentApiError, Option<QueuedCompletion>)> {
+    ) -> Result<AgentInputReceipt, (AgentApiError, Option<DetachedReportTarget>)> {
         if self.follow_ups.len() >= MAX_QUEUED_FOLLOW_UPS {
-            return Err((AgentApiError::Overload, completion));
+            return Err((AgentApiError::Overload, detached));
         }
-        let detached_recipient_agent_instance_id = match &completion {
-            Some(QueuedCompletion::Detached(target)) => Some(target.agent_instance_id.clone()),
-            _ => None,
-        };
+        let detached_recipient_agent_instance_id = detached
+            .as_ref()
+            .map(|target| target.agent_instance_id.clone());
         let mut canonical_input = canonical_input
             .unwrap_or_else(|| piko_protocol::AgentInput::from_request(&request, now_ms()));
         canonical_input.detached_recipient_agent_instance_id = detached_recipient_agent_instance_id;
@@ -339,8 +286,6 @@ impl AgentActor {
                         input: canonical_input.clone(),
                         disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
                         root_input_id: None,
-                        run_id: None,
-                        bound_run_id: None,
                         admitted_at: canonical_input.submitted_at,
                     },
                 },
@@ -349,15 +294,16 @@ impl AgentActor {
         {
             return Err((
                 AgentApiError::PersistenceFailed(error.to_string()),
-                completion,
+                detached,
             ));
         }
         self.follow_ups.push_back(QueuedRuntimeInput {
             input: canonical_input,
             request,
-            completion,
+            detached,
             parent,
         });
+        self.publish_snapshot();
         self.publish_mailbox_event(AgentMailboxEvent::InputQueued {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             request_id: request_id.clone(),
@@ -367,8 +313,7 @@ impl AgentActor {
             request_id,
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            disposition: InputDisposition::Queued,
-            run_id: None,
+            disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
             queued_position: Some(self.follow_ups.len().saturating_sub(1) as u32),
         })
     }
@@ -411,6 +356,15 @@ impl AgentActor {
                 AgentActivity::Idle
             },
             latest_report: self.latest_report.clone(),
+            active_root_input_id: self
+                .run_state
+                .active_root()
+                .map(|(input_id, _)| input_id.to_string()),
+            pending_follow_up_ids: self
+                .follow_ups
+                .iter()
+                .map(|queued| queued.input.input_id.clone())
+                .collect(),
             unread_report_count: self
                 .inbox
                 .iter()

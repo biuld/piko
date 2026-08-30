@@ -89,14 +89,6 @@ pub struct PendingInteraction {
     pub response_in_flight: bool,
 }
 
-/// Active turn tracking per agent.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActiveTurn {
-    pub turn_id: TurnId,
-    pub agent_instance_id: AgentInstanceId,
-    pub status: piko_protocol::TurnStatus,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnFailure {
     pub turn_id: TurnId,
@@ -132,7 +124,8 @@ pub struct LiveSession {
     pub timelines: HashMap<AgentInstanceId, AgentTimeline>,
     /// Session-scoped durable entries merged into every agent Timeline.
     pub session_timeline_entries: Vec<(piko_protocol::SessionTreeEntry, u64)>,
-    pub active_turns: Vec<ActiveTurn>,
+    /// Authoritative work state keyed by AgentInstance identity.
+    pub agent_work: HashMap<AgentInstanceId, piko_protocol::AgentWorkSnapshot>,
     pub turn_failures: Vec<TurnFailure>,
     pub queue: QueueProjection,
     pub pending_approvals: Vec<PendingApproval>,
@@ -255,14 +248,11 @@ impl LiveSession {
         let selected_agent =
             resolve_selected_agent(snapshot.selected_agent_instance_id.as_deref(), agents);
 
-        let active_turns = snapshot
-            .active_turns
+        let agent_work = snapshot
+            .agent_work
             .iter()
-            .map(|t| ActiveTurn {
-                turn_id: t.turn_id.clone(),
-                agent_instance_id: t.agent_instance_id.clone(),
-                status: t.status,
-            })
+            .cloned()
+            .map(|work| (work.agent_instance_id.clone(), work))
             .collect();
 
         let pending_approvals = snapshot
@@ -293,7 +283,7 @@ impl LiveSession {
         let (timelines, session_timeline_entries) =
             timelines_from_snapshot(&snapshot.entries, snapshot.current_leaf_id.as_deref());
 
-        Self {
+        let mut live = Self {
             session_id,
             cwd: snapshot.cwd.clone(),
             name: snapshot.name.clone(),
@@ -303,14 +293,16 @@ impl LiveSession {
             selected_agent,
             timelines,
             session_timeline_entries,
-            active_turns,
+            agent_work,
             turn_failures: Vec::new(),
             queue: QueueProjection::default(),
             pending_approvals,
             pending_interactions,
             cumulative_usage: snapshot.cumulative_usage.clone(),
             last_context_tokens: last_context_tokens_from_snapshot(snapshot),
-        }
+        };
+        live.queue = queue_from_agent_work(&live);
+        live
     }
 
     pub(crate) fn timeline_mut(&mut self, agent_instance_id: &str) -> &mut AgentTimeline {
@@ -328,22 +320,27 @@ impl LiveSession {
     }
 }
 
-fn last_context_tokens_from_snapshot(snapshot: &SessionSnapshot) -> Option<u64> {
-    use crate::usage::context_fill_from_usage;
+fn queue_from_agent_work(session: &LiveSession) -> QueueProjection {
+    let Some(agent_id) = session.selected_agent.as_deref() else {
+        return QueueProjection::default();
+    };
+    let Some(work) = session.agent_work.get(agent_id) else {
+        return QueueProjection::default();
+    };
+    QueueProjection {
+        steer_count: work.pending_steers.len() as u32,
+        follow_up_count: work.queued_inputs.len() as u32,
+        next_turn_count: work.queued_inputs.len() as u32,
+        steer_preview: work
+            .pending_steers
+            .last()
+            .map(|input| input.preview.clone()),
+        follow_up_preview: work.queued_inputs.last().map(|input| input.preview.clone()),
+    }
+}
 
-    snapshot
-        .active_turns
-        .iter()
-        .rev()
-        .find_map(|turn| {
-            turn.usage
-                .as_ref()
-                .map(context_fill_from_usage)
-                .filter(|&tokens| tokens > 0)
-        })
-        .or_else(|| {
-            last_context_tokens_from_entries(&snapshot.entries, snapshot.current_leaf_id.as_deref())
-        })
+fn last_context_tokens_from_snapshot(snapshot: &SessionSnapshot) -> Option<u64> {
+    last_context_tokens_from_entries(&snapshot.entries, snapshot.current_leaf_id.as_deref())
 }
 
 fn last_context_tokens_from_entries(

@@ -1,7 +1,7 @@
 //! Inter-agent completion Context helpers (F-20).
 
 use crate::{
-    AgentRunReport, ContentTrust, ExecutionOutcome, Message, MessageContent, PromptSource,
+    AgentWorkReport, ContentTrust, ExecutionOutcome, Message, MessageContent, PromptSource,
 };
 
 /// Source kind for retained inter-agent completion Context messages (F-20).
@@ -30,7 +30,7 @@ pub fn is_agent_completion_message(message: &Message, report_id: &str) -> bool {
 /// Data-only Context message describing a detached child completion for the
 /// parent transcript (F-20). Trust is runtime-sourced; content is not
 /// instruction authority.
-pub fn agent_completion_context_message(report: &AgentRunReport) -> Message {
+pub fn agent_completion_context_message(report: &AgentWorkReport) -> Message {
     Message::Context {
         content: MessageContent::String(agent_completion_content(report)),
         trust: ContentTrust::Trusted,
@@ -45,7 +45,7 @@ pub fn agent_completion_context_message(report: &AgentRunReport) -> Message {
 }
 
 /// Pure formatter for the model-visible completion body (stable key order).
-pub fn agent_completion_content(report: &AgentRunReport) -> String {
+pub fn agent_completion_content(report: &AgentWorkReport) -> String {
     let outcome = match &report.outcome {
         ExecutionOutcome::Succeeded { .. } => "succeeded",
         ExecutionOutcome::Failed { .. } => "failed",
@@ -92,9 +92,10 @@ mod tests {
     use super::*;
     use crate::Usage;
 
-    fn report(summary: &str, outcome: ExecutionOutcome) -> AgentRunReport {
-        AgentRunReport {
+    fn report(summary: &str, outcome: ExecutionOutcome) -> AgentWorkReport {
+        AgentWorkReport {
             agent_instance_id: "agent_child".into(),
+            root_input_id: "input-42".into(),
             report_id: "report-42".into(),
             outcome,
             summary: summary.into(),

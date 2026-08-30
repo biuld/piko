@@ -164,12 +164,12 @@ async fn unanswered_approval_expires_fail_closed_and_ignores_late_response() {
     let started = Instant::now();
     let events = tokio::time::timeout(
         Duration::from_secs(15),
-        server.handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent_instance_id.clone(),
-            text: "run it".into(),
-        }),
+        server.handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            root_agent_instance_id.clone(),
+            piko_protocol::MessageContent::String("run it".into()),
+        )),
     )
     .await
     .expect("turn completes after approval expiry");

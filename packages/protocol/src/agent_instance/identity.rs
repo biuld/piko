@@ -112,23 +112,23 @@ impl AgentForeground {
     /// Project the canonical Agent work view using the shared priority:
     /// requires-action > cancelling > running > queued > idle.
     pub fn project_work(
-        active_run: Option<&crate::ActiveRunSnapshot>,
+        active_work: Option<&crate::ActiveWorkSnapshot>,
         pending_action: Option<&crate::PendingActionSummary>,
         has_queued_input: bool,
     ) -> Self {
         if pending_action.is_some() {
             return Self::RequiresAction;
         }
-        if let Some(run) = active_run {
-            return match run.state {
-                crate::AgentRunViewState::RequiresAction => Self::RequiresAction,
-                crate::AgentRunViewState::Cancelling => Self::Cancelling,
-                crate::AgentRunViewState::Starting | crate::AgentRunViewState::Running => {
+        if let Some(work) = active_work {
+            return match work.state {
+                crate::AgentWorkViewState::RequiresAction => Self::RequiresAction,
+                crate::AgentWorkViewState::Cancelling => Self::Cancelling,
+                crate::AgentWorkViewState::Starting | crate::AgentWorkViewState::Running => {
                     Self::Running
                 }
-                crate::AgentRunViewState::Completed
-                | crate::AgentRunViewState::Failed
-                | crate::AgentRunViewState::Cancelled => Self::Idle,
+                crate::AgentWorkViewState::Completed
+                | crate::AgentWorkViewState::Failed
+                | crate::AgentWorkViewState::Cancelled => Self::Idle,
             };
         }
         if has_queued_input {
@@ -142,7 +142,7 @@ impl AgentForeground {
 #[cfg(test)]
 mod foreground_tests {
     use super::*;
-    use crate::{ActiveRunSnapshot, AgentRunViewState, PendingActionSummary, TurnStatus};
+    use crate::{ActiveWorkSnapshot, AgentWorkViewState, PendingActionSummary, TurnStatus};
 
     #[test]
     fn from_activity_is_sole_activity_table() {
@@ -213,38 +213,34 @@ mod foreground_tests {
     }
 
     #[test]
-    fn project_work_treats_terminal_runs_as_idle() {
-        let mut run = ActiveRunSnapshot {
-            run_id: "run".into(),
+    fn project_work_treats_terminal_work_as_idle() {
+        let mut work = ActiveWorkSnapshot {
             root_input_id: "input".into(),
-            user_turn_id: None,
-            state: AgentRunViewState::Completed,
+            state: AgentWorkViewState::Completed,
             active_model_step_id: None,
             started_at: 1,
         };
         assert_eq!(
-            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::project_work(Some(&work), None, true),
             AgentForeground::Idle
         );
-        run.state = AgentRunViewState::Failed;
+        work.state = AgentWorkViewState::Failed;
         assert_eq!(
-            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::project_work(Some(&work), None, true),
             AgentForeground::Idle
         );
-        run.state = AgentRunViewState::Cancelled;
+        work.state = AgentWorkViewState::Cancelled;
         assert_eq!(
-            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::project_work(Some(&work), None, true),
             AgentForeground::Idle
         );
     }
 
     #[test]
     fn project_work_prioritizes_action_and_cancellation() {
-        let mut run = ActiveRunSnapshot {
-            run_id: "run".into(),
+        let mut work = ActiveWorkSnapshot {
             root_input_id: "input".into(),
-            user_turn_id: None,
-            state: AgentRunViewState::Running,
+            state: AgentWorkViewState::Running,
             active_model_step_id: None,
             started_at: 1,
         };
@@ -254,12 +250,12 @@ mod foreground_tests {
             summary: None,
         };
         assert_eq!(
-            AgentForeground::project_work(Some(&run), Some(&action), true),
+            AgentForeground::project_work(Some(&work), Some(&action), true),
             AgentForeground::RequiresAction
         );
-        run.state = AgentRunViewState::Cancelling;
+        work.state = AgentWorkViewState::Cancelling;
         assert_eq!(
-            AgentForeground::project_work(Some(&run), None, true),
+            AgentForeground::project_work(Some(&work), None, true),
             AgentForeground::Cancelling
         );
     }

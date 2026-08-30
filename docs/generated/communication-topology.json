@@ -36,40 +36,6 @@
     "cancellation": "drop_interest_only"
   },
   {
-    "id": "orchd.agent.run_started",
-    "kind": "reply",
-    "owner": "AgentRunAcceptance",
-    "producers": [
-      "AgentActor"
-    ],
-    "consumer": "AgentRunAcceptance",
-    "scope": "request",
-    "delivery": "in_memory",
-    "capacity": {
-      "type": "one"
-    },
-    "overflow": "not_applicable",
-    "closure": "runtime_unavailable",
-    "cancellation": "drop_interest_only"
-  },
-  {
-    "id": "orchd.agent.run_report",
-    "kind": "reply",
-    "owner": "AgentRunAcceptance",
-    "producers": [
-      "AgentActor"
-    ],
-    "consumer": "AgentRunAcceptance",
-    "scope": "request",
-    "delivery": "in_memory",
-    "capacity": {
-      "type": "one"
-    },
-    "overflow": "not_applicable",
-    "closure": "runtime_unavailable",
-    "cancellation": "drop_interest_only"
-  },
-  {
     "id": "orchd.agent.snapshot",
     "kind": "latest_state",
     "owner": "AgentActor",

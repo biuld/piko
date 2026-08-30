@@ -64,34 +64,46 @@ fn turn_file_changes_roll_up_to_net_diff() {
         crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         other => panic!("unexpected create result: {other:?}"),
     };
-    let (turn_id, _) = state.start_turn(&session_id, "root", "edit").unwrap();
-    let first = state
-        .track_turn_file_change(
-            &session_id,
-            &turn_id,
-            piko_protocol::TurnFileChange {
-                path: "a.rs".into(),
-                before: Some("one".into()),
-                after: Some("two".into()),
+    let tool_result = |id: &str, before: &str, after: &str| {
+        crate::api::SessionTreeEntry::Message(crate::api::MessageEntry {
+            id: id.into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            agent_id: "main".into(),
+            agent_instance_id: "root".into(),
+            source_turn_id: "input-1".into(),
+            transcript_seq: 1,
+            message: crate::api::Message::ToolResult {
+                tool_call_id: id.into(),
+                tool_name: Some("edit".into()),
+                content: Vec::new(),
+                details: Some(serde_json::json!({
+                    "_pikoFileChange": {
+                        "path": "a.rs",
+                        "before": before,
+                        "after": after
+                    }
+                })),
+                is_error: Some(false),
+                timestamp: Some(1),
             },
-        )
+        })
+    };
+    state
+        .session_mut(&session_id)
         .unwrap()
-        .unwrap();
+        .entries
+        .push(tool_result("r1", "one", "two"));
+    let first = state.turn_diff(&session_id, "input-1").unwrap();
     assert!(first.unified_diff.contains("-one"));
     assert!(first.unified_diff.contains("+two"));
 
-    let second = state
-        .track_turn_file_change(
-            &session_id,
-            &turn_id,
-            piko_protocol::TurnFileChange {
-                path: "a.rs".into(),
-                before: Some("two".into()),
-                after: Some("three".into()),
-            },
-        )
+    state
+        .session_mut(&session_id)
         .unwrap()
-        .unwrap();
+        .entries
+        .push(tool_result("r2", "two", "three"));
+    let second = state.turn_diff(&session_id, "input-1").unwrap();
     assert_eq!(second.files[0].before.as_deref(), Some("one"));
     assert_eq!(second.files[0].after.as_deref(), Some("three"));
     assert!(!second.unified_diff.contains("two"));

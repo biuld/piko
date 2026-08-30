@@ -208,7 +208,7 @@ async fn steered_message_is_answered_before_further_tool_work() {
     let steer = steer_task.await.unwrap().unwrap();
     assert_eq!(
         steer.disposition,
-        piko_protocol::InputDisposition::Queued,
+        piko_protocol::AgentInputDisposition::PendingSteer,
         "steer into a running turn queues until the next model-step boundary"
     );
 

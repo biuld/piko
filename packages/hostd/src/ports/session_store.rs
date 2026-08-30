@@ -40,7 +40,7 @@ pub trait SessionStorePort: Send + Sync {
     async fn agent_report_for_turn(
         &self,
         turn_id: &str,
-    ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError>;
+    ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError>;
 
     async fn interrupt_incomplete_agent_executions(&self) -> Result<usize, SessionStorageError>;
 

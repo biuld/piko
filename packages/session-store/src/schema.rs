@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use piko_protocol::{
     AgentInboxItem, AgentInput, AgentInputDisposition, AgentInstanceIdentity,
-    AgentInstanceLifecycle, AgentRunReport, AgentSpec, Message, ModelStepOutcome, TodoList, Usage,
+    AgentInstanceLifecycle, AgentSpec, AgentWorkReport, Message, ModelStepOutcome, TodoList, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -188,7 +188,7 @@ pub enum EventData {
     ExecutionStarted(ExecutionStartedV1),
     ExecutionFinished {
         execution_id: String,
-        report: AgentRunReport,
+        report: AgentWorkReport,
         finished_at: i64,
     },
     ModelStepCommitted(ModelStepCommittedV1),
@@ -322,10 +322,6 @@ pub struct AgentInputAdmittedV1 {
     pub disposition: AgentInputDisposition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound_run_id: Option<String>,
     pub admitted_at: i64,
 }
 
@@ -338,10 +334,6 @@ pub struct AgentInputDispositionChangedV1 {
     pub disposition: AgentInputDisposition,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bound_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_step_id: Option<String>,
     pub changed_at: i64,

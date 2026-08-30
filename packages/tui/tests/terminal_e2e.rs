@@ -21,6 +21,13 @@ use support::{
     unique_suffix,
 };
 
+fn command_content(record: &Value) -> Option<&str> {
+    (record["kind"].as_str() == Some("command")
+        && record["value"]["type"].as_str() == Some("agent_input_submit"))
+    .then(|| record["value"]["input"]["content"].as_str())
+    .flatten()
+}
+
 const ROWS: u16 = 24;
 const COLS: u16 = 80;
 const EXIT_AFTER_MS: &str = "60000";
@@ -217,22 +224,18 @@ impl E2eHarness {
         }
     }
 
-    fn wait_for_command(&mut self, kind: &str, field: &str, text: &str) -> String {
+    fn wait_for_command(&mut self, text: &str) -> String {
         self.wait_for_trace("expected TUI command", |records| {
-            records.iter().any(|record| {
-                record["kind"].as_str() == Some("command")
-                    && record["value"]["type"].as_str() == Some(kind)
-                    && record["value"][field].as_str() == Some(text)
-            })
+            records
+                .iter()
+                .any(|record| command_content(record) == Some(text))
         });
         read_records(&self.log_path)
             .iter()
             .find_map(|record| {
-                (record["kind"].as_str() == Some("command")
-                    && record["value"]["type"].as_str() == Some(kind)
-                    && record["value"][field].as_str() == Some(text))
-                .then(|| record["value"]["command_id"].as_str().map(str::to_string))
-                .flatten()
+                (command_content(record) == Some(text))
+                    .then(|| record["value"]["command_id"].as_str().map(str::to_string))
+                    .flatten()
             })
             .expect("matching e2e command has command_id")
     }
@@ -244,7 +247,10 @@ impl E2eHarness {
                     server_message(record),
                     Some(piko_protocol::ServerMessage::CommandResponse {
                         command_id: id,
-                        result: Ok(piko_protocol::CommandResult::Empty),
+                        result: Ok(
+                            piko_protocol::CommandResult::Empty
+                                | piko_protocol::CommandResult::AgentInputSubmitted { .. }
+                        ),
                     }) if id == command_id
                 )
             })
@@ -299,13 +305,12 @@ impl E2eHarness {
     }
 
     fn wait_for_steer_queue(&mut self) {
-        self.wait_for_trace("steer queue update", |records| {
+        self.wait_for_trace("steer snapshot", |records| {
             records.iter().any(|record| {
                 matches!(
                     server_message(record),
-                    Some(piko_protocol::ServerMessage::Queue(
-                        piko_protocol::QueueEvent::Updated { steer_count: 1, .. }
-                    ))
+                    Some(piko_protocol::ServerMessage::SessionReconciled(event))
+                        if event.snapshot.agent_work.iter().any(|work| !work.pending_steers.is_empty())
                 )
             })
         });
@@ -390,7 +395,7 @@ fn steer_round_trips_from_tui_through_hostd_to_orchd() {
     harness.answer_keyboard_query();
     harness.send_after(b"initial work");
     harness.send_after(b"\r");
-    let command_id = harness.wait_for_command("chat_submit", "text", "initial work");
+    let command_id = harness.wait_for_command("initial work");
     harness.wait_for_command_success(&command_id);
     harness.wait_for_gateway("initial work", 1);
     harness.wait_for_started();
@@ -408,7 +413,7 @@ fn steer_round_trips_from_tui_through_hostd_to_orchd() {
     harness.send_after(b"change course");
     let feedback_started = Instant::now();
     harness.send(b"\x1b[13;5u");
-    let command_id = harness.wait_for_command("queue_steer", "message", "change course");
+    let command_id = harness.wait_for_command("change course");
     harness.release();
     harness.wait_for_command_success(&command_id);
     harness.wait_for_steer_queue();
@@ -437,7 +442,7 @@ fn queue_round_trips_from_tui_through_hostd_to_orchd() {
     harness.answer_keyboard_query();
     harness.send_after(b"initial work");
     harness.send_after(b"\r");
-    let command_id = harness.wait_for_command("chat_submit", "text", "initial work");
+    let command_id = harness.wait_for_command("initial work");
     harness.wait_for_command_success(&command_id);
     harness.wait_for_gateway("initial work", 1);
     harness.wait_for_started();
@@ -455,7 +460,7 @@ fn queue_round_trips_from_tui_through_hostd_to_orchd() {
     harness.send_after(b"queued follow-up");
     let feedback_started = Instant::now();
     harness.send(b"\x1b[13;3u");
-    let command_id = harness.wait_for_command("chat_submit", "text", "queued follow-up");
+    let command_id = harness.wait_for_command("queued follow-up");
     harness.wait_for_command_success(&command_id);
     harness.wait_for_queued();
     let feedback_latency = harness.wait_for_screen_text_since(

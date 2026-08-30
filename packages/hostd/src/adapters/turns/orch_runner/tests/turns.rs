@@ -170,7 +170,7 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
         .unwrap();
     assert_eq!(
         duplicate.receipt.disposition,
-        piko_protocol::InputDisposition::Queued
+        piko_protocol::AgentInputDisposition::PendingFollowUp
     );
     let second = runner
         .run_agent(AgentRunInput {

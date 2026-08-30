@@ -330,15 +330,6 @@ async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
         "session-1".into(),
         "/project".into(),
     ));
-    state
-        .restore_turn(
-            "session-1",
-            "turn-1",
-            &root.agent_instance_id,
-            "edit",
-            crate::api::TurnStatus::Running,
-        )
-        .unwrap();
     let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
     record_committed_message(
         &mut state,

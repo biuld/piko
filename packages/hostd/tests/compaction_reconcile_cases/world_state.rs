@@ -71,12 +71,12 @@ async fn compaction_clears_world_state_baseline_and_next_run_reinjects_full() {
 
     for (index, text) in ["first", "second"].iter().enumerate() {
         let events = server
-            .handle_command(Command::ChatSubmit {
-                command_id: format!("submit-{index}"),
-                session_id: session_id.clone(),
-                target_agent_instance_id: root.clone(),
-                text: text.to_string(),
-            })
+            .handle_command(Command::submit_follow_up(
+format!("submit-{index}"),
+session_id.clone(),
+root.clone(),
+piko_protocol::MessageContent::String(text.to_string()),
+))
             .await;
         assert!(
             events.iter().any(|event| matches!(
@@ -135,12 +135,12 @@ async fn compaction_clears_world_state_baseline_and_next_run_reinjects_full() {
     );
 
     let events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit-2".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root,
-            text: "third".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit-2",
+session_id.clone(),
+root,
+piko_protocol::MessageContent::String("third".into()),
+))
         .await;
     assert!(
         events

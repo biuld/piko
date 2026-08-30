@@ -75,6 +75,7 @@ pub fn session_snapshot(session_id: &str) -> SessionSnapshot {
         current_leaf_id: None,
         selected_agent_instance_id: Some("root".to_string()),
         active_turns: Vec::new(),
+        agent_work: Vec::new(),
         pending_approvals: Vec::new(),
         pending_interactions: Vec::new(),
         name: Some("Test Session".to_string()),

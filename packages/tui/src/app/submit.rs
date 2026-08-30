@@ -1,7 +1,7 @@
-use piko_protocol::{Command, TurnStatus};
+use piko_protocol::Command;
 
 use crate::{
-    app::{AppState, FollowUpUi, QueueStatus, command_id, effect::Effect},
+    app::{AppState, QueueStatus, command_id, effect::Effect},
     features::guidance_row::binding_hint,
     features::notifications::NotificationLevel,
     input::command::CommandId,
@@ -9,9 +9,9 @@ use crate::{
 
 #[derive(Clone, Copy)]
 enum Delivery {
-    /// `ChatSubmit` / FollowUp: start when idle, queue when busy.
+    /// FollowUp: start when idle, queue when busy.
     FollowUp,
-    /// `QueueSteer`: inject into the running turn only.
+    /// Steer: inject into the active root only.
     Steer,
 }
 
@@ -37,11 +37,12 @@ impl AppState {
             self.status = "no agent selected".to_string();
             return Vec::new();
         };
-        let Some(index) = self
+        let Some(input) = self
             .session
-            .follow_ups
-            .iter()
-            .rposition(|item| item.agent_instance_id == agent_instance_id)
+            .agent_work
+            .get(&agent_instance_id)
+            .and_then(|work| work.queued_inputs.last())
+            .cloned()
         else {
             self.status = "no queued follow-up".to_string();
             return Vec::new();
@@ -52,21 +53,18 @@ impl AppState {
             return Vec::new();
         }
 
-        let content = self.session.follow_ups[index].content.clone();
-        let turn_id = self.session.follow_ups[index].turn_id.clone();
-        self.editor.restore_content(&content);
+        self.editor
+            .restore_content(&piko_protocol::MessageContent::String(input.preview));
         self.refresh_suggestions();
-        if let (Some(session_id), Some(turn_id)) = (self.session.id.clone(), turn_id) {
-            self.session.follow_ups.remove(index);
+        if let Some(session_id) = self.session.id.clone() {
             self.status = "follow-up restored".to_string();
-            return vec![Effect::send(Command::TurnCancel {
+            return vec![Effect::send(Command::AgentInputCancel {
                 command_id: command_id(),
                 session_id,
-                turn_id,
+                agent_instance_id,
+                input_id: input.input_id,
             })];
         }
-        self.session.follow_ups[index].cancel_when_queued = true;
-        self.status = "follow-up restored".to_string();
         Vec::new()
     }
 
@@ -74,13 +72,10 @@ impl AppState {
         let Some(agent_instance_id) = self.agent_panel.active_agent_instance_id.as_deref() else {
             return false;
         };
-        matches!(
-            self.session
-                .active_turns
-                .get(agent_instance_id)
-                .map(|turn| turn.status),
-            Some(TurnStatus::Running | TurnStatus::WaitingForApproval | TurnStatus::Cancelling)
-        )
+        self.session
+            .agent_work
+            .get(agent_instance_id)
+            .is_some_and(|work| work.active_work.is_some())
     }
 
     pub fn viewed_agent_is_running(&self) -> bool {
@@ -105,12 +100,7 @@ impl AppState {
     }
 
     pub fn queue_summary(&self) -> QueueStatus {
-        let mut summary = self.queue_status.clone();
-        let local = self.session.follow_ups.len() as u32;
-        if local > summary.follow_up_count {
-            summary.follow_up_count = local;
-        }
-        summary
+        self.queue_status.clone()
     }
 
     fn submit_delivery(&mut self, delivery: Delivery) -> Vec<Effect> {
@@ -215,31 +205,20 @@ impl AppState {
         session_id: String,
         agent_instance_id: String,
         content: piko_protocol::MessageContent,
-        display_text: String,
+        _display_text: String,
         submitted_draft: crate::features::editor::state::EditorDraft,
         record_follow_up: bool,
     ) -> Vec<Effect> {
         let target_name = self.agent_label(&agent_instance_id);
         let submit_command_id = command_id();
-        if record_follow_up {
-            self.session.follow_ups.push(FollowUpUi {
-                command_id: Some(submit_command_id.clone()),
-                agent_instance_id: agent_instance_id.clone(),
-                text: display_text,
-                content: content.clone(),
-                turn_id: None,
-                cancel_when_queued: false,
-            });
-        }
         self.session.pending.track(
             submit_command_id.clone(),
-            super::pending::PendingCommandKind::ChatSubmit,
+            super::pending::PendingCommandKind::AgentInputSubmit,
         );
         self.session.pending_submissions.insert(
             submit_command_id.clone(),
             super::pending::PendingSubmissionUi {
                 draft: submitted_draft,
-                optimistic_follow_up: record_follow_up,
             },
         );
         let status = if record_follow_up {
@@ -248,19 +227,15 @@ impl AppState {
             format!("submitted to {target_name}")
         };
         self.status = status;
-        let command = match content {
-            piko_protocol::MessageContent::String(text) => Command::ChatSubmit {
-                command_id: submit_command_id,
+        let command = Command::AgentInputSubmit {
+            input: user_agent_input(
+                &submit_command_id,
                 session_id,
-                target_agent_instance_id: agent_instance_id,
-                text,
-            },
-            content => Command::ChatSubmitMessage {
-                command_id: submit_command_id,
-                session_id,
-                target_agent_instance_id: agent_instance_id,
+                agent_instance_id,
+                piko_protocol::AgentInputDelivery::FollowUp,
                 content,
-            },
+            ),
+            command_id: submit_command_id,
         };
         vec![Effect::send(command)]
     }
@@ -277,28 +252,23 @@ impl AppState {
         let submit_command_id = command_id();
         self.session.pending.track(
             submit_command_id.clone(),
-            super::pending::PendingCommandKind::ChatSubmit,
+            super::pending::PendingCommandKind::AgentInputSubmit,
         );
         self.session.pending_submissions.insert(
             submit_command_id.clone(),
             super::pending::PendingSubmissionUi {
                 draft: submitted_draft,
-                optimistic_follow_up: false,
             },
         );
-        let command = match content {
-            piko_protocol::MessageContent::String(message) => Command::QueueSteer {
-                command_id: submit_command_id,
+        let command = Command::AgentInputSubmit {
+            input: user_agent_input(
+                &submit_command_id,
                 session_id,
                 agent_instance_id,
-                message,
-            },
-            content => Command::QueueSteerMessage {
-                command_id: submit_command_id,
-                session_id,
-                agent_instance_id,
+                piko_protocol::AgentInputDelivery::SteerActive,
                 content,
-            },
+            ),
+            command_id: submit_command_id,
         };
         vec![Effect::send(command)]
     }
@@ -338,36 +308,6 @@ impl AppState {
         Vec::new()
     }
 
-    pub(crate) fn bind_follow_up_queued(
-        &mut self,
-        session_id: &str,
-        agent_instance_id: &str,
-        turn_id: &str,
-    ) -> Option<Effect> {
-        let item =
-            self.session.follow_ups.iter_mut().find(|item| {
-                item.agent_instance_id == agent_instance_id && item.turn_id.is_none()
-            })?;
-        item.turn_id = Some(turn_id.to_string());
-        if !item.cancel_when_queued {
-            return None;
-        }
-        self.session
-            .follow_ups
-            .retain(|item| item.turn_id.as_deref() != Some(turn_id));
-        Some(Effect::send(Command::TurnCancel {
-            command_id: command_id(),
-            session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-        }))
-    }
-
-    pub(crate) fn drop_follow_up_turn(&mut self, turn_id: &str) {
-        self.session
-            .follow_ups
-            .retain(|item| item.turn_id.as_deref() != Some(turn_id));
-    }
-
     fn agent_label(&self, agent_instance_id: &str) -> String {
         self.agent_panel
             .agents()
@@ -375,5 +315,26 @@ impl AppState {
             .find(|agent| agent.agent_instance_id == agent_instance_id)
             .map(|agent| agent.name.clone())
             .unwrap_or_else(|| agent_instance_id.to_string())
+    }
+}
+
+pub(super) fn user_agent_input(
+    request_id: &str,
+    session_id: String,
+    agent_instance_id: String,
+    delivery: piko_protocol::AgentInputDelivery,
+    content: piko_protocol::MessageContent,
+) -> piko_protocol::AgentInput {
+    piko_protocol::AgentInput {
+        input_id: format!("input_{}", uuid::Uuid::new_v4()),
+        request_id: request_id.to_string(),
+        session_id,
+        agent_instance_id,
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery,
+        content,
+        submitted_at: chrono::Utc::now().timestamp_millis(),
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     }
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use piko_orchd_api::{AgentApiError, AgentCommitPort};
-use piko_protocol::{AgentDurableCommand, AgentInputReceipt, InputDisposition};
+use piko_protocol::{AgentDurableCommand, AgentInputReceipt};
 
 use crate::runtime::execution::PreparedExecution;
 
@@ -90,8 +90,7 @@ fn agent_receipt(prepared: &PreparedExecution) -> AgentInputReceipt {
         request_id: receipt.request_id.clone(),
         session_id: receipt.session_id,
         agent_instance_id: receipt.agent_instance_id,
-        disposition: InputDisposition::Accepted,
-        run_id: Some(receipt.request_id),
+        disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
         queued_position: None,
     }
 }

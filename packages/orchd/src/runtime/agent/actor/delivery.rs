@@ -1,33 +1,17 @@
 use super::*;
 
 impl AgentActor {
-    pub(super) fn register_waiter(
-        &mut self,
-        execution_id: String,
-        reply: ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>,
-    ) {
-        if let Some(report) = self.completed_executions.get(&execution_id) {
-            let _ = reply.send(Ok(report.clone()));
-        } else if self.run_state.execution_id() == Some(&execution_id) {
-            self.execution_waiters
-                .entry(execution_id)
-                .or_default()
-                .push(reply);
-        } else {
-            let _ = reply.send(Err(AgentApiError::ExecutionNotFound));
-        }
-    }
-
     pub(super) async fn cancel_input(
         &mut self,
         input_id: String,
-    ) -> Result<AgentCancelReceipt, AgentApiError> {
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, AgentApiError> {
         let Some(index) = self
             .follow_ups
             .iter()
             .position(|queued| queued.input.input_id == input_id)
         else {
-            return Ok(AgentCancelReceipt {
+            return Ok(piko_protocol::AgentInputCancelReceipt {
+                input_id: input_id.clone(),
                 request_id: input_id,
                 session_id: self.identity.session_id.clone(),
                 agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -45,8 +29,6 @@ impl AgentActor {
                         input_id: input_id.clone(),
                         disposition: piko_protocol::AgentInputDisposition::Cancelled,
                         root_input_id: None,
-                        run_id: None,
-                        bound_run_id: None,
                         model_step_id: None,
                         changed_at: now_ms(),
                     },
@@ -54,13 +36,10 @@ impl AgentActor {
             )
             .await
             .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
-        if let Some(input) = self.follow_ups.remove(index)
-            && let Some(QueuedCompletion::Waiter { report, .. }) = input.completion
-        {
-            let _ = report.send(Err(AgentApiError::Cancelled));
-        }
+        self.follow_ups.remove(index);
         self.publish_snapshot();
-        Ok(AgentCancelReceipt {
+        Ok(piko_protocol::AgentInputCancelReceipt {
+            input_id,
             request_id,
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -87,15 +66,8 @@ impl AgentActor {
                 Ok(_) => {
                     let execution_id =
                         internal_execution_id(&self.identity, &follow_up.request.request_id);
-                    match follow_up.completion {
-                        Some(QueuedCompletion::Waiter { started, report }) => {
-                            let _ = started.send(());
-                            self.register_waiter(execution_id, report)
-                        }
-                        Some(QueuedCompletion::Detached(target)) => {
-                            self.register_detached_report(execution_id, target).await
-                        }
-                        None => {}
+                    if let Some(target) = follow_up.detached {
+                        self.register_detached_report(execution_id, target).await
                     }
                 }
                 Err(_) => {

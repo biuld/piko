@@ -1,7 +1,8 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (Slice 1 agent interrupt implemented; remaining slices
-> delete leftover Turn/Run/Execution types)
+> Status: proposed (slices 1–5 landed. Slice 6 leftover cleanup remains:
+> Execution product maps, host observation `run_agent`, TurnEvent /
+> empty `active_turns`)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -400,56 +401,63 @@ it. Do not land a dual-write or leave a deleted type behind as an adapter.
 
 Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 
-### Slice 2 — Primitive facts and published work projection
+### Slice 2 — Primitive facts and published work projection (implemented)
 
 - AgentInput facts, `root_input_id` correlation, reducers, and invariants are
   the admission/storage path.
 - Publish `AgentWorkSnapshot` in `readmodels/current.json` with `active_work`
   keyed by `root_input_id`, plus `pending_action` and active ModelStep. It is
   not a shadow.
-- Do not add Run, Turn, or Execution aggregates.
-- Stop treating leftover Turn/queue/execution records as product lifecycle.
 
-### Slice 3 — Canonical runtime admission only
+### Slice 3 — Canonical runtime admission only (implemented)
 
-- Route start, steer, and follow-up through `submit_agent_input` only.
-- Delete `send_agent_input`, `steer_agent`, `run_agent`, and request-id cancel
-  shims.
-- Receipts and actor maps use `input_id` / `root_input_id`, not `run_id` or
-  `execution_id`.
-- Commit acceptance before actor mutation and response.
-- Bind pending steers to root input and persist their application.
-- Advance follow-ups from host-recoverable pending inputs.
+- Start, steer, and follow-up admit through `submit_agent_input` only.
+- orchd `send_agent_input`, `steer_agent`, `run_agent`, `AgentCommand::Run`,
+  and `AgentRunAcceptance` are gone. Observation is
+  `wait_agent_input_started` / `wait_agent_input_completion` on the snapshot.
+- Receipts use `input_id` / `root_input_id`. Prompt staging, tool restriction,
+  `source_turn_id`, and `message_id` stay on `AgentInputRuntime` (not durable).
 
-### Slice 4 — Host control plane; delete Turn/Run/Execution command authority
+### Slice 4 — Host control plane (implemented; Execution leftover open)
 
-- Introduce `AgentWorkControl` as the only application use case behind
-  dispatch.
-- Replace `ChatSubmit` / `ChatSubmitMessage`, `QueueSteer` /
-  `QueueSteerMessage`, and `TurnCancel` with `AgentInputSubmit`,
-  `cancel_input`, and `interrupt_current`.
-- Project queue, foreground, and active work from AgentInput and ModelStep
-  facts.
-- Delete process-local `TurnRecord`, `steer_queue`, `UserTurnView`, Run maps,
-  and `StoredExecution` product storage.
-- Rekey trajectory / prompt assembly / usage grain to `root_input_id`.
+- `AgentWorkControl` is the only application use case behind dispatch.
+- `ChatSubmit` / `QueueSteer` / `TurnCancel`, host `TurnRecord`, and
+  `steer_queue` are gone.
+- Queue, foreground, and active work project from AgentInput facts and
+  `AgentWorkSnapshot`.
+- Open: `StoredExecution` product storage, host observation port still named
+  `run_agent(AgentRunInput)`, and in-process `active_agent_runs`.
 
-### Slice 5 — TUI cutover
+### Slice 5 — TUI cutover (implemented)
 
-- Move the TUI to `AgentWorkSnapshot`.
-- Delete local follow-up stacks, `active_turns`, and Turn-gated composer
-  routing.
-- Group timeline rows from user-origin AgentInputs and their root.
-- Do not update `piko-desktop`.
+- TUI and client-core consume `AgentWorkSnapshot`. Local follow-up stacks and
+  client `active_turns` maps are gone.
+- Composer busy/steer/queue and desktop chrome compile against `agent_work`.
+- `piko-desktop` remains out of product scope.
+- Open: protocol `TurnEvent` / `TurnSnapshot` / always-empty
+  `SessionSnapshot.active_turns` still exist as wire leftovers.
 
-### Slice 6 — Recovery and leftover cleanup
+### Slice 6 — Remaining leftover cleanup (open)
 
-- Run crash-point, race, restart, and two-TUI-client matrices.
-- Confirm Turn, Run, and Execution types, IDs, commands, and maps are gone
-  from protocol, host, orchd API, session-store, client-core, and TUI
-  product surfaces. Internal orchd actors may remain if keyed only by
-  `root_input_id`.
-- Update F-51 and verification evidence to implemented.
+Land in this order. Do not introduce a replacement Turn/Run/Execution product
+type; keep AgentInput / `agent_work` / `AgentWorkReport`.
+
+1. **Host observation port.** Fold `AgentRunRunner::run_agent` into submit +
+   wait. Delete `AgentRunInput` as an admission DTO. Rekey in-process
+   `active_agent_runs` off `root_input_id` or drop it if observation no longer
+   needs a second map.
+2. **Turn wire leftovers.** Delete `TurnEvent`, `TurnSnapshot`, and
+   `SessionSnapshot.active_turns`. Tests wait on `AgentWorkSnapshot` /
+   `AgentInputSubmitted` / work terminal facts, not TurnLifecycle.
+3. **Execution product maps.** Delete `StoredExecution` as a session-store
+   aggregate and stop treating `execution_started` / `execution_finished` as
+   the product processing boundary. Start/finish/interrupt remain facts on
+   the root AgentInput. orchd may keep an internal actor keyed only by
+   `root_input_id`.
+4. **Rekey remaining grains.** Trajectory, prompt assembly, and usage that
+   still key by `turn_id` / `execution_id` move to `root_input_id`.
+5. **Recovery and evidence.** Crash-point, race, restart, and two-TUI
+   matrices. Then mark F-51 / V-64 implemented.
 
 ## Package impact
 

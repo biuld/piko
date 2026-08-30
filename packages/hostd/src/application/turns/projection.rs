@@ -9,7 +9,7 @@ use piko_protocol::agent_runtime::RealtimeDeltaEnvelope;
 use piko_protocol::{Message, SessionTreeEntry, TranscriptCommittedEvent};
 
 use crate::api::{MessageEntry, ProtocolError, ServerMessage};
-use crate::domain::sessions::{HostState, file_change_from_message};
+use crate::domain::sessions::HostState;
 use crate::ports::session_store::SessionStorePort;
 use crate::ports::storage_types::SessionStorageError;
 
@@ -218,13 +218,7 @@ fn append_committed_message(
         } = message
         && let Ok(session) = state.session_mut(session_id)
     {
-        session.account_step_usage(Some(source_turn_id), usage);
-    }
-    if is_new
-        && let Some(change) = file_change_from_message(message)
-        && !source_turn_id.is_empty()
-    {
-        let _ = state.track_turn_file_change(session_id, source_turn_id, change)?;
+        session.account_step_usage(Some(agent_instance_id), usage);
     }
     // F-27: successful todo_write replaces the agent’s durable projected list.
     if is_new && let Ok(session) = state.session_mut(session_id) {

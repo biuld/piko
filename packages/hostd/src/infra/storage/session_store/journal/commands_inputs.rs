@@ -31,8 +31,6 @@ pub(super) fn admit(
         if existing.input == input
             && existing.admission_disposition == disposition
             && existing.admission_root_input_id == expected_root_input_id
-            && existing.admission_run_id == admission.run_id
-            && existing.admission_bound_run_id == admission.bound_run_id
         {
             return Ok((String::new(), input.agent_instance_id, 0, Vec::new()));
         }
@@ -54,8 +52,6 @@ pub(super) fn admit(
                 input,
                 disposition,
                 root_input_id: expected_root_input_id,
-                run_id: admission.run_id,
-                bound_run_id: admission.bound_run_id,
                 admitted_at: admission.admitted_at,
             },
         )],
@@ -84,19 +80,12 @@ pub(super) fn change_disposition(
             .clone()
             .or_else(|| existing.root_input_id.clone())
     };
-    let run_id = change.run_id.clone().or_else(|| existing.run_id.clone());
-    let bound_run_id = change
-        .bound_run_id
-        .clone()
-        .or_else(|| existing.bound_run_id.clone());
     let model_step_id = change
         .model_step_id
         .clone()
         .or_else(|| existing.model_step_id.clone());
     if existing.disposition == disposition
         && existing.root_input_id == root_input_id
-        && existing.run_id == run_id
-        && existing.bound_run_id == bound_run_id
         && existing.model_step_id == model_step_id
     {
         return Ok((String::new(), change.agent_instance_id, 0, Vec::new()));
@@ -114,8 +103,6 @@ pub(super) fn change_disposition(
                 input_id: change.input_id,
                 disposition,
                 root_input_id,
-                run_id,
-                bound_run_id,
                 model_step_id,
                 changed_at: change.changed_at,
             },
@@ -194,8 +181,6 @@ pub(super) fn start_run(
                 input,
                 disposition: AgentInputDisposition::AppliedAsRoot,
                 root_input_id: None,
-                run_id: Some(committed_run_id.clone()),
-                bound_run_id: None,
                 admitted_at: started_at,
             },
         )),
@@ -213,8 +198,6 @@ pub(super) fn start_run(
                     input_id: input_id.clone(),
                     disposition: AgentInputDisposition::AppliedAsRoot,
                     root_input_id: Some(input_id),
-                    run_id: Some(committed_run_id.clone()),
-                    bound_run_id: None,
                     model_step_id: None,
                     changed_at: started_at,
                 },

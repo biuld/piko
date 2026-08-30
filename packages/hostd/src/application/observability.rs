@@ -165,19 +165,32 @@ mod tests {
             else {
                 unreachable!()
             };
-            let (turn_id, _) = state.start_turn(&session_id, "agent-1", "change").unwrap();
-            state
-                .track_turn_file_change(
-                    &session_id,
-                    &turn_id,
-                    piko_protocol::TurnFileChange {
-                        path: "a.txt".into(),
-                        before: Some("old\n".into()),
-                        after: Some("new\n".into()),
+            state.session_mut(&session_id).unwrap().entries.push(
+                crate::api::SessionTreeEntry::Message(crate::api::MessageEntry {
+                    id: "result-1".into(),
+                    parent_id: None,
+                    timestamp: "1".into(),
+                    agent_id: "main".into(),
+                    agent_instance_id: "agent-1".into(),
+                    source_turn_id: "input-1".into(),
+                    transcript_seq: 1,
+                    message: Message::ToolResult {
+                        tool_call_id: "call-1".into(),
+                        tool_name: Some("write".into()),
+                        content: Vec::new(),
+                        details: Some(serde_json::json!({
+                            "_pikoFileChange": {
+                                "path": "a.txt",
+                                "before": "old\n",
+                                "after": "new\n"
+                            }
+                        })),
+                        is_error: Some(false),
+                        timestamp: Some(1),
                     },
-                )
-                .unwrap();
-            (session_id, turn_id)
+                }),
+            );
+            (session_id, "input-1".to_string())
         };
         let diff = app
             .turn_diff(&session_id.0, &session_id.1)

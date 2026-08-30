@@ -189,7 +189,7 @@ async fn v2_list_agents_returns_depth_sorted_tree() {
 }
 
 #[tokio::test]
-async fn v2_wait_agent_returns_on_run_finished() {
+async fn v2_wait_agent_returns_on_work_finished() {
     let (runtime, _commits, model) = attached_runtime().await;
     let runtime = Arc::new(runtime);
     let provider = MultiAgentToolProvider::new(runtime.clone() as Arc<dyn AgentRuntimeApi>);
@@ -221,7 +221,7 @@ async fn v2_wait_agent_returns_on_run_finished() {
     assert!(result.ok, "wait failed: {:?}", result.error);
     let value = result.value.as_ref().unwrap();
     assert_eq!(value["timedOut"], false);
-    assert_eq!(value["event"]["kind"], "runFinished");
+    assert_eq!(value["event"]["kind"], "workFinished");
     assert_eq!(value["event"]["agentInstanceId"], child);
     assert!(value["agents"].as_array().unwrap().len() >= 2);
 }

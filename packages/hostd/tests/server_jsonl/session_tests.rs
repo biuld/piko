@@ -22,12 +22,12 @@ async fn root_chat_reuses_session_sink_across_turns() {
 
     for (command_id, text) in [("submit-1", "hello"), ("submit-2", "follow up")] {
         let turn_events = server
-            .handle_command(Command::ChatSubmit {
-                command_id: command_id.into(),
-                session_id: session_id.clone(),
-                target_agent_instance_id: format!("agent_{session_id}_root"),
-                text: text.into(),
-            })
+            .handle_command(Command::submit_follow_up(
+                command_id,
+                session_id.clone(),
+                format!("agent_{session_id}_root"),
+                piko_protocol::MessageContent::String(text.into()),
+            ))
             .await;
         for event in &turn_events {
             if let Event::CommandResponse {
@@ -89,12 +89,12 @@ async fn in_memory_session_navigate_to_root_user_resets_current_leaf_without_lea
     };
 
     let _ = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
 
     let refresh = server
@@ -201,12 +201,12 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let mut writer = client_in;
     let mut reader = BufReader::new(client_out);
 
-    let submit = serde_json::to_string(&Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: format!("agent_{session_id}_root"),
-        text: "hello".into(),
-    })
+    let submit = serde_json::to_string(&Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        format!("agent_{session_id}_root"),
+        piko_protocol::MessageContent::String("hello".into()),
+    ))
     .unwrap();
     writer.write_all(submit.as_bytes()).await.unwrap();
     writer.write_all(b"\n").await.unwrap();
@@ -220,17 +220,25 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     assert!(matches!(
         event,
         Event::CommandResponse {
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
             ..
         }
     ));
 
-    line.clear();
-    tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
-        .await
-        .expect("turn_started should arrive")
-        .unwrap();
-    let event = serde_json::from_str::<Event>(line.trim()).unwrap();
+    let event = loop {
+        line.clear();
+        tokio::time::timeout(Duration::from_millis(100), reader.read_line(&mut line))
+            .await
+            .expect("turn_started should arrive")
+            .unwrap();
+        let event = serde_json::from_str::<Event>(line.trim()).unwrap();
+        if matches!(
+            event,
+            Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
+        ) {
+            break event;
+        }
+    };
     assert!(matches!(
         event,
         Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })

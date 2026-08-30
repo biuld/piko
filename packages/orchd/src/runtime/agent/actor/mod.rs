@@ -5,18 +5,14 @@ mod delivery;
 mod input;
 mod run_protocol;
 
-use piko_comms::contracts::{
-    AgentCommands, AgentRunReport as AgentRunReportContract, AgentRunStarted,
-    AgentSnapshot as AgentSnapshotContract,
-};
-use piko_comms::{LatestSender, MailboxReceiver, MailboxSender, ReplySender};
+use piko_comms::contracts::{AgentCommands, AgentSnapshot as AgentSnapshotContract};
+use piko_comms::{LatestSender, MailboxReceiver, MailboxSender};
 use piko_orchd_api::{AgentApiError, AgentCommitPort};
 use piko_protocol::{
-    AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot,
-    AgentInputDelivery, AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle,
-    AgentLifecycleReceipt, AgentMailboxEvent, AgentRunReport, AgentSnapshot, ConversationContext,
-    ExecutionConfig, InputDisposition, SendAgentInputRequest, StartExecutionRequest,
-    SteerExecutionRequest,
+    AgentActivity, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery,
+    AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt,
+    AgentMailboxEvent, AgentSnapshot, AgentWorkReport, ConversationContext, ExecutionConfig,
+    SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
 };
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
@@ -50,12 +46,8 @@ pub struct AgentActor {
         ),
     >,
     run_state: AgentRunState,
-    latest_report: Option<AgentRunReport>,
-    completed_executions: HashMap<String, AgentRunReport>,
-    execution_waiters: HashMap<
-        String,
-        Vec<ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>>,
-    >,
+    latest_report: Option<AgentWorkReport>,
+    completed_executions: HashMap<String, AgentWorkReport>,
     detached_reports: HashMap<String, Vec<DetachedReportTarget>>,
     scope: std::sync::Weak<SessionAgentScope>,
     recovered_detached_deliveries: Vec<piko_orchd_api::RecoveredDetachedDelivery>,
@@ -75,17 +67,9 @@ pub struct AgentActor {
 struct QueuedRuntimeInput {
     input: piko_protocol::AgentInput,
     request: SendAgentInputRequest,
-    completion: Option<QueuedCompletion>,
+    detached: Option<DetachedReportTarget>,
     /// Parent span captured when the follow-up was queued.
     parent: tracing::Span,
-}
-
-enum QueuedCompletion {
-    Waiter {
-        started: ReplySender<AgentRunStarted, ()>,
-        report: ReplySender<AgentRunReportContract, Result<AgentRunReport, AgentApiError>>,
-    },
-    Detached(DetachedReportTarget),
 }
 
 #[derive(Clone)]

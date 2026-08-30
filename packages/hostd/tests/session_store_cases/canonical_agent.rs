@@ -13,7 +13,6 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
         delivery: piko_protocol::AgentInputDelivery::FollowUp,
         content: piko_protocol::MessageContent::String("continue the task".into()),
         submitted_at: 10,
-        user_turn_id: Some("turn-follow-up".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -21,8 +20,6 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
         input: input.clone(),
         disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
         root_input_id: None,
-        run_id: None,
-        bound_run_id: None,
         admitted_at: 11,
     };
     let first = store
@@ -40,8 +37,6 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
                     input: input.clone(),
                     disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
                     root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
                     admitted_at: 11,
                 },
             },
@@ -67,8 +62,6 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
                     input_id: "input-follow-up".into(),
                     disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                     root_input_id: Some("input-follow-up".into()),
-                    run_id: Some("run-follow-up".into()),
-                    bound_run_id: None,
                     model_step_id: None,
                     changed_at: 20,
                 },
@@ -100,12 +93,22 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
         .unwrap()
         .unwrap();
     assert_eq!(active.foreground, piko_protocol::AgentForeground::Running);
-    assert_eq!(active.active_run.as_ref().unwrap().run_id, "run-follow-up");
     assert_eq!(
-        active.active_run.as_ref().unwrap().root_input_id,
+        active.active_work.as_ref().unwrap().root_input_id,
         "input-follow-up"
     );
     assert!(active.queued_inputs.is_empty());
+
+    let current: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(temp.path().join("readmodels/current.json")).unwrap(),
+    )
+    .unwrap();
+    let published = &current["aggregate"]["agent_work"][&root.agent_instance_id];
+    assert_eq!(
+        published["activeWork"]["rootInputId"],
+        serde_json::json!("input-follow-up")
+    );
+    assert!(published.get("activeRun").is_none());
 
     let reopened = SessionStore::new(temp.path());
     let replayed = reopened
@@ -158,10 +161,8 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
         .agent_work_snapshot(&root.agent_instance_id)
         .unwrap()
         .unwrap();
-    let run = snapshot.active_run.unwrap();
-    assert_eq!(run.run_id, "run-root");
-    assert_eq!(run.root_input_id, input.input_id);
-    assert_eq!(run.user_turn_id.as_deref(), Some("turn-root"));
+    let work = snapshot.active_work.unwrap();
+    assert_eq!(work.root_input_id, input.input_id);
     assert!(snapshot.queued_inputs.is_empty());
     assert!(snapshot.pending_steers.is_empty());
 }
@@ -238,8 +239,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         input: piko_protocol::AgentInput::from_request(&steer_request, 20),
         disposition: piko_protocol::AgentInputDisposition::PendingSteer,
         root_input_id: Some(root_request.request_id.clone()),
-        run_id: None,
-        bound_run_id: Some("run-steer".into()),
         admitted_at: 20,
     };
     let first_steer = store
@@ -269,8 +268,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                     input: piko_protocol::AgentInput::from_request(&steer_request, 21),
                     disposition: piko_protocol::AgentInputDisposition::PendingSteer,
                     root_input_id: Some(root_request.request_id.clone()),
-                    run_id: None,
-                    bound_run_id: Some("run-steer".into()),
                     admitted_at: 21,
                 },
             },
@@ -304,8 +301,6 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 input_id: steer_request.request_id.clone(),
                 disposition: piko_protocol::AgentInputDisposition::AppliedToStep,
                 root_input_id: Some(root_request.request_id.clone()),
-                run_id: Some("run-steer".into()),
-                bound_run_id: Some("run-steer".into()),
                 model_step_id: Some("execution-steer:step_1".into()),
                 changed_at: 20,
             },
@@ -317,6 +312,13 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         .unwrap()
         .unwrap();
     assert!(after_steer.pending_steers.is_empty());
+    assert_eq!(
+        after_steer
+            .active_work
+            .as_ref()
+            .and_then(|work| work.active_model_step_id.as_deref()),
+        Some("execution-steer:step_1")
+    );
 
     store
         .commit_model_step(
@@ -359,6 +361,14 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
         )
         .unwrap();
     let projection = store.load_projection().unwrap();
+    assert!(
+        projection.agent_work[&root.agent_instance_id]
+            .active_work
+            .as_ref()
+            .unwrap()
+            .active_model_step_id
+            .is_none()
+    );
     assert_eq!(
         projection.agent_executions["run-steer"].model_steps[0].model_step_id,
         "execution-steer:step_1"

@@ -60,12 +60,12 @@ pub enum AgentDurableCommand {
     },
     RunTerminal {
         run_id: String,
-        report: AgentRunReport,
+        report: AgentWorkReport,
         finished_at: i64,
     },
     CommitReport {
         recipient_agent_instance_id: AgentInstanceId,
-        report: AgentRunReport,
+        report: AgentWorkReport,
     },
     ConsumeInboxItem {
         agent_instance_id: AgentInstanceId,

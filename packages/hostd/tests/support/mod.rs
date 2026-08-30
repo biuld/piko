@@ -91,17 +91,37 @@ pub fn successful_turn_run(
             request_id: turn_id,
             session_id,
             agent_instance_id: root_agent_instance_id.clone(),
-            disposition: piko_protocol::InputDisposition::Accepted,
-            run_id: None,
+            disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
             queued_position: None,
         },
         process: test_agent_run_process(started, completion),
     }
 }
 
-pub fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::AgentRunReport {
-    piko_protocol::AgentRunReport {
+pub fn running_agent_info(
+    session_id: impl Into<String>,
+    agent_instance_id: impl Into<String>,
+) -> piko_protocol::AgentInfo {
+    let session_id = session_id.into();
+    let agent_instance_id = agent_instance_id.into();
+    piko_protocol::AgentInfo {
+        session_id,
+        agent_instance_id,
+        agent_id: "main".into(),
+        parent_agent_instance_id: None,
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        activity: piko_protocol::AgentActivity::Running,
+        unread_report_count: 0,
+        name: "Main".into(),
+        role: "assistant".into(),
+        status: piko_protocol::AgentStatus::Running,
+    }
+}
+
+pub fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::AgentWorkReport {
+    piko_protocol::AgentWorkReport {
         agent_instance_id: agent_instance_id.into(),
+        root_input_id: "input-test".into(),
         report_id: format!("report_{}", uuid::Uuid::new_v4()),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),

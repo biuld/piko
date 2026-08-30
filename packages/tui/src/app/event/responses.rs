@@ -9,6 +9,30 @@ impl AppState {
         let mut effects = Vec::new();
         match result {
             Ok(piko_protocol::CommandResult::Empty) => {}
+            Ok(piko_protocol::CommandResult::AgentInputSubmitted { receipt, .. }) => {
+                self.session
+                    .pending
+                    .clear_kind(crate::app::pending::PendingCommandKind::AgentInputSubmit);
+                self.session
+                    .pending_submissions
+                    .remove(&response_command_id);
+                self.status = match receipt.disposition {
+                    piko_protocol::AgentInputDisposition::PendingFollowUp => {
+                        format!("input {} queued", receipt.input_id)
+                    }
+                    piko_protocol::AgentInputDisposition::PendingSteer => {
+                        format!("input {} will steer", receipt.input_id)
+                    }
+                    _ => format!("input {} accepted", receipt.input_id),
+                };
+            }
+            Ok(piko_protocol::CommandResult::AgentInputCancelled { receipt, .. }) => {
+                self.status = if receipt.accepted {
+                    format!("input {} cancelled", receipt.input_id)
+                } else {
+                    format!("input {} is no longer pending", receipt.input_id)
+                };
+            }
             Ok(piko_protocol::CommandResult::AgentInterrupted {
                 agent_instance_id,
                 accepted,

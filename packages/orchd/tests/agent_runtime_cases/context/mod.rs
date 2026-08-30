@@ -142,7 +142,7 @@ async fn oversized_tool_output_is_truncated_in_model_view_but_kept_in_committed_
         .await;
     model.push_text("done").await;
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "context-run".into(),
             session_id: "session-context".into(),
             agent_instance_id: "root".into(),

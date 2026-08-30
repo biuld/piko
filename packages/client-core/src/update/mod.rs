@@ -135,11 +135,14 @@ fn handle_intent(
                 let aid = agent_id.clone();
                 let id = ctx.command_ids.next_command_id();
                 state.pending_commands.insert(id.clone(), PendingOp::Submit);
-                effects.push(ClientEffect::Send(Command::ChatSubmit {
+                effects.push(ClientEffect::Send(Command::AgentInputSubmit {
+                    input: user_agent_input(
+                        &id,
+                        sid,
+                        aid,
+                        piko_protocol::MessageContent::String(text_trimmed),
+                    ),
                     command_id: id,
-                    session_id: sid,
-                    target_agent_instance_id: aid,
-                    text: text_trimmed,
                 }));
             }
         }
@@ -151,30 +154,27 @@ fn handle_intent(
                 let aid = agent_id.clone();
                 let id = ctx.command_ids.next_command_id();
                 state.pending_commands.insert(id.clone(), PendingOp::Submit);
-                effects.push(ClientEffect::Send(Command::ChatSubmitMessage {
+                effects.push(ClientEffect::Send(Command::AgentInputSubmit {
+                    input: user_agent_input(&id, sid, aid, content),
                     command_id: id,
-                    session_id: sid,
-                    target_agent_instance_id: aid,
-                    content,
                 }));
             }
         }
         ClientIntent::CancelTurn => {
             if let Some(session) = &state.live_session
                 && let Some(agent_id) = &session.selected_agent
-                && let Some(turn) = session
-                    .active_turns
-                    .iter()
-                    .find(|t| &t.agent_instance_id == agent_id)
+                && session
+                    .agent_work
+                    .get(agent_id)
+                    .is_some_and(|work| work.active_work.is_some())
             {
                 let sid = session.session_id.clone();
-                let tid = turn.turn_id.clone();
                 let id = ctx.command_ids.next_command_id();
                 state.pending_commands.insert(id.clone(), PendingOp::Cancel);
-                effects.push(ClientEffect::Send(Command::TurnCancel {
+                effects.push(ClientEffect::Send(Command::AgentInterrupt {
                     command_id: id,
                     session_id: sid,
-                    turn_id: tid,
+                    agent_instance_id: agent_id.clone(),
                 }));
             }
         }
@@ -336,6 +336,30 @@ fn handle_intent(
                 }),
             }));
         }
+    }
+}
+
+fn user_agent_input(
+    request_id: &str,
+    session_id: String,
+    agent_instance_id: String,
+    content: piko_protocol::MessageContent,
+) -> piko_protocol::AgentInput {
+    let submitted_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default();
+    piko_protocol::AgentInput {
+        input_id: format!("input-{request_id}"),
+        request_id: request_id.to_string(),
+        session_id,
+        agent_instance_id,
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        content,
+        submitted_at,
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     }
 }
 

@@ -33,12 +33,12 @@ async fn concurrent_compacts_produce_a_single_rewrite() {
         .expect("session created");
 
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+session_id.clone(),
+format!("agent_{session_id}_root"),
+piko_protocol::MessageContent::String("hello".into()),
+))
         .await;
 
     let compact = |command_id: String| {

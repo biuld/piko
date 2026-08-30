@@ -53,8 +53,10 @@ fn pending_first_turn_is_submitted_only_after_reconcile() {
     let reconcile_effects = app.apply_event(empty_reconcile("session-1"));
     assert!(matches!(
         reconcile_effects.as_slice(),
-        [Effect::Send(piko_protocol::Command::ChatSubmit { session_id, text, .. })]
-            if session_id == "session-1" && text == "hello"
+        [Effect::Send(piko_protocol::Command::AgentInputSubmit { input, .. })]
+            if input.session_id == "session-1"
+                && input.content == piko_protocol::MessageContent::String("hello".into())
+                && input.delivery == piko_protocol::AgentInputDelivery::FollowUp
     ));
 }
 
@@ -205,6 +207,7 @@ fn session_reconciled_marks_agents_hydrated_with_host_names() {
                 current_leaf_id: None,
                 selected_agent_instance_id: None,
                 active_turns: Vec::new(),
+                agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,

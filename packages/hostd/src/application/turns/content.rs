@@ -49,17 +49,6 @@ pub(crate) fn validate_user_content(content: &MessageContent) -> Result<(), Prot
     }
 }
 
-pub(crate) fn text_projection(content: &MessageContent) -> String {
-    match content {
-        MessageContent::String(text) => text.clone(),
-        MessageContent::Blocks(blocks) => blocks
-            .iter()
-            .map(ContentBlock::text_projection)
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
-}
-
 pub(super) fn plain_text(content: &MessageContent) -> String {
     match content {
         MessageContent::String(text) => text.clone(),
@@ -111,7 +100,17 @@ mod tests {
             mime_type: "image/png".into(),
         }]);
         validate_user_content(&content).unwrap();
-        assert_eq!(text_projection(&content), "[image: image/png]");
+        let MessageContent::Blocks(blocks) = &content else {
+            panic!("expected blocks");
+        };
+        assert_eq!(
+            blocks
+                .iter()
+                .map(ContentBlock::text_projection)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            "[image: image/png]"
+        );
         assert_eq!(plain_text(&content), "");
     }
 

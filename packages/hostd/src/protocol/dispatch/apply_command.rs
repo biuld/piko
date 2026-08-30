@@ -15,8 +15,8 @@ impl HostServer {
             Command::AuthCancelOAuth { provider, .. } => {
                 self.apply_auth_cancel_oauth(&command_id, provider).await
             }
-            Command::ChatSubmit { .. } | Command::ChatSubmitMessage { .. } => {
-                unreachable!("streaming chat commands handled in stream")
+            Command::AgentInputSubmit { .. } => {
+                unreachable!("streaming agent input commands handled in stream")
             }
             Command::AuthSetApiKey {
                 provider, api_key, ..
@@ -186,100 +186,23 @@ impl HostServer {
             Command::StateSnapshot { session_id, .. } => {
                 self.0.apply_session_snapshot(&command_id, session_id).await
             }
-            Command::QueueSteer {
+            Command::AgentInputCancel {
                 session_id,
                 agent_instance_id,
-                message,
+                input_id,
                 ..
             } => {
-                self.apply_steer_message(
-                    command_id,
-                    session_id,
-                    agent_instance_id,
-                    piko_protocol::MessageContent::String(message),
-                )
-                .await
-            }
-            Command::QueueSteerMessage {
-                session_id,
-                agent_instance_id,
-                content,
-                ..
-            } => {
-                self.apply_steer_message(command_id, session_id, agent_instance_id, content)
+                crate::application::AgentWorkControl::new(&self.0)
+                    .cancel_input(command_id, session_id, agent_instance_id, input_id)
                     .await
-            }
-            Command::TurnCancel {
-                command_id,
-                session_id,
-                turn_id,
-            } => {
-                let (agent_instance_id, status) = {
-                    let state = self.state.lock().await;
-                    let turn = state.turn(&session_id, &turn_id)?;
-                    (turn.agent_instance_id.clone(), turn.status)
-                };
-                if status == crate::api::TurnStatus::Queued {
-                    let runner = self.turn_runner.lock().await.clone();
-                    let address = crate::ports::AgentOperationAddress {
-                        session_id: session_id.clone(),
-                        operation_id: turn_id.clone(),
-                        agent_instance_id,
-                    };
-                    if !runner.cancel_queued_agent_run(&address).await {
-                        return Err(ProtocolError::InvalidCommand(format!(
-                            "queued Agent input not found for Turn {turn_id}"
-                        )));
-                    }
-                    let event = self.state.lock().await.cancel_turn(&session_id, &turn_id)?;
-                    let size = self.client_context_window_size().await;
-                    let mut messages = self.state.lock().await.with_usage_projection(event, size);
-                    messages.push(
-                        self.state
-                            .lock()
-                            .await
-                            .build_queue_update(&session_id)
-                            .into(),
-                    );
-                    let mut out = vec![ServerMessage::CommandResponse {
-                        command_id,
-                        result: Ok(crate::api::CommandResult::Empty),
-                    }];
-                    out.append(&mut messages);
-                    return Ok(out);
-                }
-                let runner = self.turn_runner.lock().await.clone();
-                let address = crate::ports::AgentOperationAddress {
-                    session_id: session_id.clone(),
-                    operation_id: turn_id.clone(),
-                    agent_instance_id,
-                };
-                self.state.lock().await.set_turn_status(
-                    &session_id,
-                    &turn_id,
-                    crate::api::TurnStatus::Cancelling,
-                )?;
-                if !runner.cancel_agent_run(&address).await {
-                    self.state.lock().await.set_turn_status(
-                        &session_id,
-                        &turn_id,
-                        crate::api::TurnStatus::Running,
-                    )?;
-                    return Err(ProtocolError::InvalidCommand(format!(
-                        "no active Agent run for Turn {turn_id}"
-                    )));
-                }
-                Ok(vec![ServerMessage::CommandResponse {
-                    command_id,
-                    result: Ok(crate::api::CommandResult::Empty),
-                }])
             }
             Command::AgentInterrupt {
                 session_id,
                 agent_instance_id,
                 ..
             } => {
-                self.apply_agent_interrupt(command_id, session_id, agent_instance_id)
+                crate::application::AgentWorkControl::new(&self.0)
+                    .interrupt_current(command_id, session_id, agent_instance_id)
                     .await
             }
             Command::ApprovalRespond {

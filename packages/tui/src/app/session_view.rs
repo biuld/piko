@@ -25,8 +25,7 @@ impl AppState {
         }
         self.session.opening_id = target_id;
         self.session.initializing = true;
-        self.session.active_turns.clear();
-        self.session.follow_ups.clear();
+        self.session.agent_work.clear();
         self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;
@@ -49,8 +48,7 @@ impl AppState {
         self.session.opening_id = None;
         self.session.previous_live_id = None;
         self.session.initializing = false;
-        self.session.active_turns.clear();
-        self.session.follow_ups.clear();
+        self.session.agent_work.clear();
         self.session.pending_submissions.clear();
         self.session.cumulative_usage = None;
         self.session.last_context_tokens = None;

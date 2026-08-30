@@ -1,34 +1,40 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use piko_orchd_api::AgentRuntimeApi;
-use piko_protocol::{AgentInputDelivery, SendAgentInputRequest};
+use piko_orchd_api::{AgentInputRuntime, AgentRuntimeApi};
+use piko_protocol::{AgentInput, AgentInputDelivery, SendAgentInputRequest};
 
 use crate::api::ProtocolError;
 use crate::ports::{
     AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,
     AgentRunProcess,
 };
+use crate::util::now_ms;
 
 use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
 struct OrchAgentRunProcess {
-    runtime_handle: piko_orchd_api::AgentRunAcceptance,
+    runtime: Arc<piko_orchd::AgentRuntime>,
     hub: Arc<piko_orchd::events::SessionOutputHub>,
     acceptance_cursor: piko_protocol::agent_runtime::SessionCursor,
-    disposition: piko_protocol::InputDisposition,
+    disposition: piko_protocol::AgentInputDisposition,
     address: AgentOperationAddress,
+    input_id: String,
 }
 
 #[async_trait]
 impl AgentRunProcess for OrchAgentRunProcess {
     async fn wait_started(&mut self) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
-        self.runtime_handle
-            .wait_started()
+        self.runtime
+            .wait_agent_input_started(
+                self.address.session_id.clone(),
+                self.address.agent_instance_id.clone(),
+                self.input_id.clone(),
+            )
             .await
             .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
-        let cursor = if self.disposition == piko_protocol::InputDisposition::Queued {
+        let cursor = if self.disposition == piko_protocol::AgentInputDisposition::PendingFollowUp {
             self.hub.cursor()
         } else {
             self.acceptance_cursor.clone()
@@ -47,13 +53,18 @@ impl AgentRunProcess for OrchAgentRunProcess {
 
     async fn wait_completion(self: Box<Self>) -> Result<AgentRunCompletion, ProtocolError> {
         let Self {
-            runtime_handle,
+            runtime,
             hub,
             address,
+            input_id,
             ..
         } = *self;
-        let result = runtime_handle
-            .wait()
+        let result = runtime
+            .wait_agent_input_completion(
+                address.session_id.clone(),
+                address.agent_instance_id.clone(),
+                input_id,
+            )
             .await
             .map_err(|error| AgentRunFailure {
                 message: error.to_string(),
@@ -98,7 +109,6 @@ impl OrchAgentRunRunner {
                 key.clone(),
                 super::ActiveAgentRunRuntime {
                     run_id: input.operation_id.clone(),
-                    agent_instance_id: input.agent_instance_id.clone(),
                     observation: Arc::clone(&hub),
                 },
             );
@@ -149,15 +159,28 @@ impl OrchAgentRunRunner {
             session_id: input.session_id.clone(),
             agent_instance_id: input.agent_instance_id.clone(),
             caller_agent_instance_id: None,
-            source_turn_id: input.source_turn_id,
+            source_turn_id: input.source_turn_id.clone(),
             message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
             content: input.content,
             delivery: AgentInputDelivery::FollowUp,
             prompt_resources: input.prompt_resources,
             active_tool_names: input.active_tool_names,
         };
-        let runtime_handle = match self.agent_runtime.run_agent(request).await {
-            Ok(handle) => handle,
+        let canonical = AgentInput::from_request(&request, now_ms());
+        let receipt = match self
+            .agent_runtime
+            .submit_runtime_agent_input(
+                canonical,
+                AgentInputRuntime {
+                    prompt_resources: request.prompt_resources,
+                    active_tool_names: request.active_tool_names,
+                    source_turn_id: request.source_turn_id,
+                    message_id: Some(request.message_id),
+                },
+            )
+            .await
+        {
+            Ok(receipt) => receipt,
             Err(error) => {
                 self.abort_agent_input(
                     &input.session_id,
@@ -167,7 +190,6 @@ impl OrchAgentRunRunner {
                 return Err(ProtocolError::InvalidCommand(error.to_string()));
             }
         };
-        let receipt = runtime_handle.receipt.clone();
         let disposition = receipt.disposition;
         let address = AgentOperationAddress {
             session_id: input.session_id.clone(),
@@ -179,11 +201,12 @@ impl OrchAgentRunRunner {
             address: address.clone(),
             receipt,
             process: Box::new(OrchAgentRunProcess {
-                runtime_handle,
+                runtime: Arc::clone(&self.agent_runtime),
                 hub,
                 acceptance_cursor,
                 disposition,
                 address,
+                input_id: input.operation_id,
             }),
         })
     }

@@ -7,7 +7,7 @@ use piko_protocol::{
     AgentCancelReceipt, AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInput,
     AgentInputCancelReceipt, AgentInputReceipt, AgentInterruptReceipt, AgentLifecycleReceipt,
     AgentLifecycleRequest, AgentSnapshot, CommitError, CreateAgentReceipt, CreateAgentRequest,
-    SendAgentInputRequest, SteerAgentRequest,
+    PromptResourceSnapshot,
 };
 
 use crate::{AgentApiError, SessionExecutionPorts};
@@ -45,7 +45,7 @@ pub struct AgentRecoveryState {
     pub transcript: Vec<piko_protocol::Message>,
     pub head_message_id: Option<String>,
     pub inbox: Vec<piko_protocol::AgentInboxItem>,
-    pub latest_report: Option<piko_protocol::AgentRunReport>,
+    pub latest_report: Option<piko_protocol::AgentWorkReport>,
     pub execution_reports: Vec<RecoveredExecutionReport>,
     pub queued_inputs: Vec<piko_protocol::AgentInput>,
     pub pending_detached_deliveries: Vec<RecoveredDetachedDelivery>,
@@ -54,13 +54,13 @@ pub struct AgentRecoveryState {
 #[derive(Debug, Clone)]
 pub struct RecoveredDetachedDelivery {
     pub recipient_agent_instance_id: String,
-    pub report: piko_protocol::AgentRunReport,
+    pub report: piko_protocol::AgentWorkReport,
 }
 
 #[derive(Debug, Clone)]
 pub struct RecoveredExecutionReport {
     pub internal_execution_id: String,
-    pub report: piko_protocol::AgentRunReport,
+    pub report: piko_protocol::AgentWorkReport,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,27 +69,13 @@ pub struct SessionAgentHandle {
     pub root_agent_instance_id: String,
 }
 
-pub struct AgentRunAcceptance {
-    pub receipt: AgentInputReceipt,
-    pub started: piko_comms::ReplyReceiver<piko_comms::contracts::AgentRunStarted, ()>,
-    pub completion: piko_comms::ReplyReceiver<
-        piko_comms::contracts::AgentRunReport,
-        Result<piko_protocol::AgentRunReport, AgentApiError>,
-    >,
-}
-
-impl AgentRunAcceptance {
-    pub async fn wait_started(&mut self) -> Result<(), AgentApiError> {
-        (&mut self.started)
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)
-    }
-
-    pub async fn wait(self) -> Result<piko_protocol::AgentRunReport, AgentApiError> {
-        self.completion
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?
-    }
+/// Live extras for one AgentInput admission. Not part of the durable fact.
+#[derive(Debug, Clone, Default)]
+pub struct AgentInputRuntime {
+    pub prompt_resources: Option<PromptResourceSnapshot>,
+    pub active_tool_names: Option<Vec<String>>,
+    pub source_turn_id: Option<String>,
+    pub message_id: Option<String>,
 }
 
 /// Mandatory control surface for AgentInstances.
@@ -110,48 +96,29 @@ pub trait AgentRuntimeApi: Send + Sync {
         request: CreateAgentRequest,
     ) -> Result<CreateAgentReceipt, AgentApiError>;
 
-    async fn send_agent_input(
-        &self,
-        request: SendAgentInputRequest,
-    ) -> Result<AgentInputReceipt, AgentApiError>;
-
-    /// Canonical AgentInput admission entry point. The compatibility request
-    /// adapter is retained until all callers provide primitive proposals.
+    /// Canonical and only AgentInput admission entry point.
     async fn submit_agent_input(
         &self,
         input: AgentInput,
     ) -> Result<AgentInputReceipt, AgentApiError> {
-        let input_id = input.input_id.clone();
-        let mut receipt = self.send_agent_input(input.to_request()).await?;
-        // Compatibility implementations historically used request_id as the
-        // input identity. The concrete orchd implementation overrides this
-        // method and preserves distinct IDs; this mapping keeps older trait
-        // adapters truthful for the initial equal-ID migration case.
-        if input_id != receipt.request_id {
-            return Err(AgentApiError::IdempotencyConflict);
-        }
-        receipt.input_id = input_id;
-        Ok(receipt)
+        self.submit_runtime_agent_input(input, AgentInputRuntime::default())
+            .await
     }
 
-    /// Accept one Agent input and return its durable receipt plus start and
-    /// completion signals without exposing the backing Execution identity.
-    async fn run_agent(
+    /// Admit an AgentInput with host-private runtime extras (prompt staging,
+    /// tool restriction, Turn correlation). Durable facts stay on `input`.
+    async fn submit_runtime_agent_input(
         &self,
-        request: SendAgentInputRequest,
-    ) -> Result<AgentRunAcceptance, AgentApiError>;
+        input: AgentInput,
+        runtime: AgentInputRuntime,
+    ) -> Result<AgentInputReceipt, AgentApiError>;
 
     /// Accept Agent input and durably deliver its eventual report to another
     /// Agent's inbox.
-    async fn send_agent_input_detached(
+    async fn submit_agent_input_detached(
         &self,
-        request: SendAgentInputRequest,
+        input: AgentInput,
         recipient_agent_instance_id: String,
-    ) -> Result<AgentInputReceipt, AgentApiError>;
-
-    async fn steer_agent(
-        &self,
-        request: SteerAgentRequest,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
     async fn cancel_agent_run(
@@ -176,37 +143,13 @@ pub trait AgentRuntimeApi: Send + Sync {
         })
     }
 
+    /// Cancel exactly one pending input by its durable control identity.
     async fn cancel_agent_input(
         &self,
         session_id: String,
         agent_instance_id: String,
-        request_id: String,
-    ) -> Result<AgentCancelReceipt, AgentApiError>;
-
-    /// Canonical input-ID cancellation adapter. Older runtimes used the
-    /// request ID as their queue identity, so the compatibility method is
-    /// used until the actor stores distinct input IDs end to end.
-    async fn cancel_agent_input_id(
-        &self,
-        session_id: String,
-        agent_instance_id: String,
         input_id: String,
-    ) -> Result<AgentInputCancelReceipt, AgentApiError> {
-        let receipt = self
-            .cancel_agent_input(
-                session_id.clone(),
-                agent_instance_id.clone(),
-                input_id.clone(),
-            )
-            .await?;
-        Ok(AgentInputCancelReceipt {
-            input_id,
-            request_id: receipt.request_id,
-            session_id,
-            agent_instance_id,
-            accepted: receipt.accepted,
-        })
-    }
+    ) -> Result<AgentInputCancelReceipt, AgentApiError>;
 
     async fn close_agent(
         &self,
@@ -223,6 +166,24 @@ pub trait AgentRuntimeApi: Send + Sync {
         session_id: String,
         agent_instance_id: String,
     ) -> Result<Option<AgentSnapshot>, AgentApiError>;
+
+    /// Wait until `input_id` is the active root, has already produced a
+    /// report, or is no longer a pending follow-up (cancelled).
+    async fn wait_agent_input_started(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<(), AgentApiError>;
+
+    /// Observe the durable terminal report for one root input. This is a
+    /// latest-state query, not a second admission or work handle.
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<piko_protocol::AgentWorkReport, AgentApiError>;
 
     async fn list_agents(&self, session_id: String) -> Result<Vec<AgentSnapshot>, AgentApiError>;
 

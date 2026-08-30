@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, AgentSpec,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec, AgentWorkReport,
     TodoList,
 };
 use serde::{Deserialize, Serialize};
@@ -35,10 +35,9 @@ pub struct SessionAggregate {
     /// Canonical primitive input facts, keyed by durable input identity.
     #[serde(default)]
     pub agent_inputs: BTreeMap<String, StoredAgentInput>,
-    /// In-memory shadow of the per-agent work view. It is rebuilt from the
-    /// primitive facts and existing execution facts, but is not serialized
-    /// until pending-action and active-step facts are part of the projection.
-    #[serde(skip)]
+    /// Published per-agent current-state projection. Rebuilt deterministically
+    /// from primitive facts whenever the aggregate advances.
+    #[serde(default)]
     pub agent_work: BTreeMap<String, piko_protocol::AgentWorkSnapshot>,
     /// Derived indexes rebuilt from `agent_inputs` and execution facts.
     #[serde(default)]
@@ -99,6 +98,7 @@ impl SessionAggregate {
         self.commit_ids
             .insert(commit.commit_id.clone(), commit.revision);
         self.rebuild_agent_input_indexes();
+        self.agent_work = self.agent_work_snapshots();
         Ok(())
     }
 
@@ -381,20 +381,33 @@ impl SessionAggregate {
     fn apply_execution_finished(
         &mut self,
         execution_id: String,
-        report: AgentRunReport,
+        report: AgentWorkReport,
         finished_at: i64,
     ) -> Result<()> {
         let execution = self
             .executions
-            .get_mut(&execution_id)
+            .get(&execution_id)
             .ok_or_else(|| StoreError::InvalidEvent(format!("unknown execution {execution_id}")))?;
+        let expected_root_input_id = self
+            .agent_inputs
+            .values()
+            .find(|input| input.input.request_id == execution.started.request_id)
+            .and_then(|input| input.root_input_id.as_deref())
+            .ok_or_else(|| {
+                StoreError::InvalidEvent("execution completion has no root input".into())
+            })?;
         if execution.finished_at.is_some()
             || report.agent_instance_id != execution.started.agent_instance_id
+            || report.root_input_id != expected_root_input_id
         {
             return Err(StoreError::InvalidEvent(
                 "invalid execution completion".into(),
             ));
         }
+        let execution = self
+            .executions
+            .get_mut(&execution_id)
+            .expect("execution validated above");
         execution.report = Some(report);
         execution.finished_at = Some(finished_at);
         Ok(())

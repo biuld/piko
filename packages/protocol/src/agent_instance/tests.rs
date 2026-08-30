@@ -27,6 +27,8 @@ fn activity_is_separate_from_lifecycle() {
         lifecycle: AgentInstanceLifecycle::Open,
         activity: AgentActivity::Running,
         latest_report: None,
+        active_root_input_id: None,
+        pending_follow_up_ids: Vec::new(),
         unread_report_count: 0,
         generation: 1,
     };
@@ -43,8 +45,9 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
         agent_spec_id: "main".into(),
         parent_agent_instance_id: None,
     };
-    let report = AgentRunReport {
+    let report = AgentWorkReport {
         agent_instance_id: "root".into(),
+        root_input_id: "input-1".into(),
         report_id: "report-1".into(),
         outcome: ExecutionOutcome::Succeeded {
             usage: Usage::default(),
@@ -59,11 +62,13 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
             lifecycle: AgentInstanceLifecycle::Open,
             activity: AgentActivity::Running,
             latest_report: Some(report.clone()),
+            active_root_input_id: None,
+            pending_follow_up_ids: Vec::new(),
             unread_report_count: 0,
             generation: 1,
         })
         .expect("serialize AgentSnapshot"),
-        serde_json::to_value(report).expect("serialize AgentRunReport"),
+        serde_json::to_value(report).expect("serialize AgentWorkReport"),
         serde_json::to_value(CreateAgentRequest {
             request_id: "create-1".into(),
             session_id: "session-1".into(),
@@ -91,8 +96,7 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
             request_id: "input-1".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
-            disposition: crate::InputDisposition::Accepted,
-            run_id: None,
+            disposition: crate::AgentInputDisposition::AppliedAsRoot,
             queued_position: None,
         })
         .expect("serialize AgentInputReceipt"),

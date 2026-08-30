@@ -1,4 +1,4 @@
-use crate::api::{SessionSnapshot, TurnSnapshot};
+use crate::api::SessionSnapshot;
 
 use super::types::SessionState;
 
@@ -12,21 +12,8 @@ impl SessionState {
             model_steps: Vec::new(),
             current_leaf_id: self.current_leaf_id.clone(),
             selected_agent_instance_id: self.active_agent_instance_id.clone(),
-            // Pending approvals/interactions are process-local and filled by
-            // HostApp::enrich_session_view from the live AgentRunRunner.
-            active_turns: self
-                .active_turns
-                .values()
-                .filter_map(|turn_id| self.turns.get(turn_id))
-                .map(|turn| TurnSnapshot {
-                    turn_id: turn.turn_id.clone(),
-                    agent_instance_id: turn.agent_instance_id.clone(),
-                    status: turn.status,
-                    assistant_text: String::new(),
-                    tool_calls: Vec::new(),
-                    usage: Some(turn.usage.clone()),
-                })
-                .collect(),
+            active_turns: Vec::new(),
+            agent_work: Vec::new(),
             pending_approvals: Vec::new(),
             pending_interactions: Vec::new(),
             name: self.name.clone(),

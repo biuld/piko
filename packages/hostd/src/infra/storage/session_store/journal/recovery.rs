@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use piko_protocol::{AgentInputDisposition, AgentRunReport, ContentBlock, Message};
+use piko_protocol::{AgentInputDisposition, AgentWorkReport, ContentBlock, Message};
 use piko_session_store::{
     AgentInputDispositionChangedV1, EventData, MessageCommittedV1, StoredExecution,
 };
@@ -50,7 +50,12 @@ impl SessionStore {
                     .filter(|input| {
                         input.input.agent_instance_id == started.agent_instance_id
                             && input.disposition == AgentInputDisposition::PendingSteer
-                            && input.bound_run_id.as_deref() == Some(started.run_id.as_str())
+                            && input.root_input_id.as_deref()
+                                == aggregate
+                                    .agent_inputs
+                                    .values()
+                                    .find(|root| root.input.request_id == started.request_id)
+                                    .and_then(|root| root.root_input_id.as_deref())
                     })
                     .collect::<Vec<_>>();
                 let mut events =
@@ -62,8 +67,6 @@ impl SessionStore {
                             input_id: input.input.input_id.clone(),
                             disposition: AgentInputDisposition::Cancelled,
                             root_input_id: input.root_input_id.clone(),
-                            run_id: input.run_id.clone(),
-                            bound_run_id: input.bound_run_id.clone(),
                             model_step_id: None,
                             changed_at: now,
                         },
@@ -114,8 +117,14 @@ impl SessionStore {
                     &mut tree_parent_entry_id,
                     &mut transcript_seq,
                 )?;
-                let report = AgentRunReport {
+                let report = AgentWorkReport {
                     agent_instance_id: started.agent_instance_id.clone(),
+                    root_input_id: aggregate
+                        .agent_inputs
+                        .values()
+                        .find(|input| input.input.request_id == started.request_id)
+                        .and_then(|input| input.root_input_id.clone())
+                        .unwrap_or_else(|| started.request_id.clone()),
                     report_id: piko_orchd_api::stable_internal_id(
                         "report",
                         &["interrupted", &started.run_id],

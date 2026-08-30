@@ -1,7 +1,8 @@
 # F-51: Agent work lifecycle and control plane
 
-> Status: proposed (Slice 1 agent interrupt implemented; remaining slices are a
-> direct TUI cutover that deletes Turn/Run/Execution leftovers)
+> Status: proposed (slices 1–5 landed. Remaining: Execution product maps,
+> host observation `run_agent`, TurnEvent / empty `active_turns`; see D-68
+> Slice 6)
 > Priority: P0
 > Source evidence: piko product/runtime review; consolidates [F-01](F-01-turn-runtime.md), [F-10](F-10-multi-agent.md), [F-22](F-22-client-agent-projection.md), [F-31](F-31-durable-session-journal.md), and [F-48](F-48-authoritative-agent-lifecycle.md)
 > Design: [D-68](../design/D-68-agent-control-plane.md)
@@ -265,26 +266,28 @@ Verification: [V-64](../verification/V-64-agent-control-plane.md)
 ### Primitive lifecycle and storage
 
 - [ ] Normative docs and protocol use Session, AgentInstance, AgentInput, and
-      ModelStep. Turn, Run, and Execution are not product identities.
-- [ ] Accepted start, steer, and follow-up inputs have durable identities and
+      ModelStep. Turn, Run, and Execution are not product identities
+      (Slice 6: `TurnEvent` / `StoredExecution` still exist).
+- [x] Accepted start, steer, and follow-up inputs have durable identities and
       replayable dispositions.
-- [ ] Active work is the unfinished root AgentInput; every accepted steer is
+- [x] Active work is the unfinished root AgentInput; every accepted steer is
       durably bound to that `root_input_id` before acknowledgement.
-- [ ] A crash after input acceptance cannot lose or duplicate pending input.
+- [ ] A crash after input acceptance cannot lose or duplicate pending input
+      (Slice 6 recovery matrix).
 - [ ] Product lifecycle reconstructs from AgentInput, ModelStep, and causal
-      facts without Turn, Run, or Execution aggregates.
+      facts without Turn, Run, or Execution aggregates (Slice 6).
 
 ### Projection and interaction
 
-- [ ] Session reconciliation restores active work, pending steers, and
+- [x] Session reconciliation restores active work, pending steers, and
       follow-ups from host read models keyed by AgentInput.
-- [ ] The TUI consumes host foreground and controls without local queue
-      authority. `ChatSubmit`, `QueueSteer`, `TurnCancel`, `turn_id` /
-      `run_id` / `execution_id` product handles, and the local follow-up
-      stack are gone.
-- [ ] Detached and user-origin work have identical steer and interrupt
+- [x] The TUI consumes host foreground and controls without local queue
+      authority. `ChatSubmit`, `QueueSteer`, `TurnCancel`, and the local
+      follow-up stack are gone. `TurnEvent` / `execution_id` leftovers remain
+      (Slice 6).
+- [x] Detached and user-origin work have identical steer and interrupt
       behavior.
 - [ ] Queued input cancellation works after restart and from a second TUI
-      client.
+      client (Slice 6).
 - [ ] Concurrent controls for one AgentInstance are linearized and cannot
-      affect a later root accidentally.
+      affect a later root accidentally (Slice 6 evidence).

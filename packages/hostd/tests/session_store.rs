@@ -2,7 +2,7 @@ use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_orchd_api::AgentCommitPort;
 use piko_protocol::execution::{CommitError, MessageCommit};
 use piko_protocol::{
-    AgentDurableCommand, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport, Message,
+    AgentDurableCommand, AgentInstanceIdentity, AgentInstanceLifecycle, AgentWorkReport, Message,
     MessageContent,
 };
 use tempfile::tempdir;
@@ -118,8 +118,9 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
             "session-1",
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id: root.agent_instance_id.clone(),
-                report: AgentRunReport {
+                report: AgentWorkReport {
                     agent_instance_id: child.agent_instance_id.clone(),
+                    root_input_id: "input-child-1".into(),
                     report_id: "report-child-1".into(),
                     outcome: piko_protocol::ExecutionOutcome::Succeeded {
                         usage: Default::default(),

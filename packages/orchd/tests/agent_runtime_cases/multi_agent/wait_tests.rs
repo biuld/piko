@@ -12,7 +12,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     let child = spawn_detached_v2(&provider, "blocking work").await;
     wait_until_activity(&runtime, &child, piko_protocol::AgentActivity::Running).await;
 
-    // A filter matching no live agent skips both the child's RunFinished
+    // A filter matching no live agent skips both the child's WorkFinished
     // event and root's InboxReport event, so the wait times out.
     let wait_task = tokio::spawn({
         let provider = provider.clone();
@@ -40,7 +40,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     assert!(result.ok, "filtered wait failed: {:?}", result.error);
     assert_eq!(result.value.as_ref().unwrap()["timedOut"], true);
 
-    // The same filter on the child itself matches the next RunFinished event.
+    // The same filter on the child itself matches the next WorkFinished event.
     model
         .push_response(faux_provider::CannedResponse::waiting_for_cancel())
         .await;
@@ -86,7 +86,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     assert!(result.ok, "targeted wait failed: {:?}", result.error);
     let value = result.value.as_ref().unwrap();
     assert_eq!(value["timedOut"], false);
-    assert_eq!(value["event"]["kind"], "runFinished");
+    assert_eq!(value["event"]["kind"], "workFinished");
     assert_eq!(value["event"]["agentInstanceId"], child);
 }
 

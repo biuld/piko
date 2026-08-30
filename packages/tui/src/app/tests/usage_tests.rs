@@ -40,6 +40,7 @@ fn session_reconcile_projects_cumulative_usage() {
                 current_leaf_id: None,
                 selected_agent_instance_id: Some("agent_session-1_root".into()),
                 active_turns: Vec::new(),
+                agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,
@@ -90,13 +91,6 @@ fn session_reconcile_projects_cumulative_usage() {
 #[test]
 fn usage_event_sets_chrome_and_clears_active_turn() {
     let mut app = live_app();
-    app.session.active_turns.insert(
-        "agent-1".into(),
-        crate::app::ActiveTurnUi {
-            turn_id: "turn-1".into(),
-            status: piko_protocol::TurnStatus::Running,
-        },
-    );
 
     let mut turn_usage = piko_protocol::messages::Usage::empty();
     turn_usage.input = 12_200;
@@ -115,7 +109,6 @@ fn usage_event_sets_chrome_and_clears_active_turn() {
     }));
     assert!(app.session.last_context_tokens.is_none());
     assert!(app.session.cumulative_usage.is_none());
-    assert!(app.session.active_turns.is_empty());
 
     app.apply_event(Event::Usage(piko_protocol::UsageEvent::Updated {
         session_id: "session-1".into(),

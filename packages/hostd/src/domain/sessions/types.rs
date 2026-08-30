@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::api::{
     AgentId, ContentBlock, Message, MessageContent, SessionId, SessionSummary, SessionTreeEntry,
-    TurnId, TurnStatus,
 };
 use piko_protocol::SequencedServerMessage;
 use piko_protocol::messages::Usage;
@@ -38,15 +37,10 @@ pub struct SessionState {
     pub cwd: String,
     pub seq: u64,
     pub entries: Vec<SessionTreeEntry>,
-    pub turns: HashMap<TurnId, TurnRecord>,
-    pub active_turns: HashMap<String, TurnId>,
     pub name: Option<String>,
     pub current_leaf_id: Option<String>,
     /// Last committed transcript message for each runtime agent instance.
     pub task_heads: HashMap<String, String>,
-    /// Steers accepted for the agent's current turn. Cleared when that turn
-    /// becomes terminal. Not a durable follow-up queue.
-    pub steer_queue: Vec<(String, String)>,
     /// Last provider+model recorded for a turn in this session. Durable via
     /// `SessionProjection.last_model`; drives the prompt model-switch fragment
     /// and the durable JSONL `ModelChange` marker.
@@ -77,18 +71,6 @@ pub struct SessionState {
     /// for the observation path to emit `TodoListUpdated` + durable persist.
     /// Process-local; not part of snapshot.
     pub pending_todo_projection: Option<piko_protocol::TodoList>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TurnRecord {
-    pub turn_id: TurnId,
-    pub agent_instance_id: String,
-    pub message: String,
-    pub status: TurnStatus,
-    /// Rolled-up model-step usage for this turn (hostd ledger; F-15/D-29).
-    pub usage: Usage,
-    /// Net exact-content changes from built-in workspace mutations.
-    pub file_changes: Vec<piko_protocol::TurnFileChange>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -138,12 +120,9 @@ impl SessionState {
             cwd,
             seq: 0,
             entries: Vec::new(),
-            turns: HashMap::new(),
-            active_turns: HashMap::new(),
             name: None,
             current_leaf_id: None,
             task_heads: HashMap::new(),
-            steer_queue: Vec::new(),
             last_model: None,
             world_state_baseline: None,
             cumulative_usage: Usage::empty(),
@@ -253,15 +232,4 @@ pub(super) fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
-}
-
-pub(super) fn truncate_preview(text: &str) -> String {
-    if text.len() <= 80 {
-        return text.to_string();
-    }
-    let mut end = 77.min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &text[..end])
 }

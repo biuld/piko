@@ -17,12 +17,12 @@ async fn root_chat_streams_started_before_runner_finishes() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::ChatSubmit {
-        command_id: "submit".into(),
-        target_agent_instance_id: format!("agent_{session_id}_root"),
-        session_id: session_id.clone(),
-        text: "hello".into(),
-    });
+    let mut events = server.handle_command_stream(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        format!("agent_{session_id}_root"),
+        piko_protocol::MessageContent::String("hello".into()),
+    ));
 
     let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
@@ -32,11 +32,14 @@ async fn root_chat_streams_started_before_runner_finishes() {
         accepted,
         Event::CommandResponse {
             command_id,
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
         } if command_id == "submit"
     ));
 
-    let started = events.recv().await.unwrap();
+    let mut started = events.recv().await.unwrap();
+    if matches!(started, Event::SessionReconciled(_)) {
+        started = events.recv().await.unwrap();
+    }
     assert!(matches!(
         started,
         Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
@@ -65,12 +68,12 @@ async fn approval_response_is_not_blocked_by_active_turn() {
         other => panic!("expected session_created, got {other:?}"),
     };
 
-    let mut events = server.handle_command_stream(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: format!("agent_{session_id}_root"),
-        text: "hello".into(),
-    });
+    let mut events = server.handle_command_stream(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        format!("agent_{session_id}_root"),
+        piko_protocol::MessageContent::String("hello".into()),
+    ));
 
     let accepted = tokio::time::timeout(Duration::from_millis(50), events.recv())
         .await
@@ -79,11 +82,14 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     assert!(matches!(
         accepted,
         Event::CommandResponse {
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
             ..
         }
     ));
-    let started_event = events.recv().await.unwrap();
+    let mut started_event = events.recv().await.unwrap();
+    if matches!(started_event, Event::SessionReconciled(_)) {
+        started_event = events.recv().await.unwrap();
+    }
     assert!(matches!(
         started_event,
         Event::TurnLifecycle(piko_hostd::api::TurnEvent::Started { .. })
@@ -166,12 +172,12 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
     };
 
     let turn_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
     let committed = turn_events
         .iter()
@@ -251,12 +257,12 @@ async fn rollout_pages_durable_agent_transcript_with_opaque_cursor() {
     };
     let target_agent_instance_id = format!("agent_{session_id}_root");
     let _turn_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit-page".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: target_agent_instance_id.clone(),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit-page",
+            session_id.clone(),
+            target_agent_instance_id.clone(),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
     let agent_instance_id = target_agent_instance_id;
 

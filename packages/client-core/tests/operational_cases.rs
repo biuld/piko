@@ -6,7 +6,7 @@ use piko_client_core::{
 };
 use piko_protocol::agent_runtime::RealtimeDelta;
 use piko_protocol::{
-    ApprovalDecision, ApprovalEvent, QueueEvent, ServerMessage, ToolExecutionEvent, TurnEvent,
+    ApprovalDecision, ApprovalEvent, ReconcileReason, ServerMessage, ToolExecutionEvent, TurnEvent,
 };
 
 #[test]
@@ -123,22 +123,61 @@ fn live_session_entry_is_backfilled_into_future_agent_timeline() {
 fn queue_update_populates_projection() {
     let mut ids = SeqIds(0);
     let state = drive_to_live(&mut ids, "s1");
+    let mut snapshot = session_snapshot("s1");
+    snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
+        agent_instance_id: "root".into(),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        foreground: piko_protocol::AgentForeground::Queued,
+        active_work: None,
+        pending_steers: vec![piko_protocol::AgentInputSummary {
+            input_id: "steer-1".into(),
+            origin: piko_protocol::AgentInputOrigin::User,
+            preview: "steer".into(),
+            admission_revision: 1,
+            submitted_at: 1,
+            delivery: piko_protocol::AgentInputDelivery::SteerActive,
+            disposition: piko_protocol::AgentInputDisposition::PendingSteer,
+        }],
+        queued_inputs: vec![
+            piko_protocol::AgentInputSummary {
+                input_id: "q-1".into(),
+                origin: piko_protocol::AgentInputOrigin::User,
+                preview: "later".into(),
+                admission_revision: 2,
+                submitted_at: 2,
+                delivery: piko_protocol::AgentInputDelivery::FollowUp,
+                disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+            },
+            piko_protocol::AgentInputSummary {
+                input_id: "q-2".into(),
+                origin: piko_protocol::AgentInputOrigin::User,
+                preview: "after".into(),
+                admission_revision: 3,
+                submitted_at: 3,
+                delivery: piko_protocol::AgentInputDelivery::FollowUp,
+                disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+            },
+        ],
+        pending_action: None,
+    }];
     let (state, _) = host(
         state,
-        ServerMessage::Queue(QueueEvent::Updated {
+        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
             session_id: "s1".into(),
-            steer_count: 1,
-            follow_up_count: 2,
-            next_turn_count: 3,
-            steer_preview: Some("steer".into()),
-            follow_up_preview: Some("later".into()),
+            reason: ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "e1".into(),
+                seq: 2,
+            },
+            snapshot,
+            agents: vec![agent_info("s1", "root", None)],
         }),
         &mut ids,
     );
     let queue = &state.live_session.as_ref().unwrap().queue;
     assert_eq!(queue.steer_count, 1);
     assert_eq!(queue.follow_up_count, 2);
-    assert_eq!(queue.next_turn_count, 3);
+    assert_eq!(queue.next_turn_count, 2);
 }
 
 #[test]
@@ -158,7 +197,6 @@ fn failed_turn_remains_actionable() {
         &mut ids,
     );
     let live = state.live_session.as_ref().unwrap();
-    assert!(live.active_turns.is_empty());
     assert_eq!(live.turn_failures[0].error, "model failed");
 }
 

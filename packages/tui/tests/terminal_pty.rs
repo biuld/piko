@@ -132,14 +132,18 @@ impl PtyHarness {
         loop {
             self.drain_output();
             if read_commands(&self.log_path).iter().any(|command| {
-                command.get("type").and_then(Value::as_str) == Some("chat_submit")
-                    && command.get("text").and_then(Value::as_str) == Some(expected_text)
+                command.get("type").and_then(Value::as_str) == Some("agent_input_submit")
+                    && command
+                        .get("input")
+                        .and_then(|input| input.get("content"))
+                        .and_then(Value::as_str)
+                        == Some(expected_text)
             }) {
                 return;
             }
             if Instant::now() >= deadline {
                 panic!(
-                    "mock hostd did not receive chat_submit with {expected_text:?}; commands: {:?}",
+                    "mock hostd did not receive agent_input_submit with {expected_text:?}; commands: {:?}",
                     read_commands(&self.log_path)
                 );
             }

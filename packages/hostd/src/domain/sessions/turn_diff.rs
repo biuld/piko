@@ -1,39 +1,33 @@
-use crate::api::Message;
+use crate::api::{Message, SessionTreeEntry};
 
 use super::HostState;
 
 impl HostState {
-    pub fn track_turn_file_change(
-        &mut self,
-        session_id: &str,
-        turn_id: &str,
-        change: piko_protocol::TurnFileChange,
-    ) -> Result<Option<piko_protocol::TurnDiffEvent>, crate::api::ProtocolError> {
-        let Some(turn) = self.session_mut(session_id)?.turns.get_mut(turn_id) else {
-            return Ok(None);
-        };
-        merge_file_change(&mut turn.file_changes, change);
-        Ok(
-            (!turn.file_changes.is_empty()).then(|| piko_protocol::TurnDiffEvent {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                unified_diff: render_turn_diff(&turn.file_changes),
-                files: turn.file_changes.clone(),
-            }),
-        )
-    }
-
+    /// Rebuild the exact-content diff for one root AgentInput from the session
+    /// tree (the same facts the journal already stores on tool results).
     pub fn turn_diff(
         &self,
         session_id: &str,
-        turn_id: &str,
+        root_input_id: &str,
     ) -> Option<piko_protocol::TurnDiffEvent> {
-        let turn = self.session(session_id).ok()?.turns.get(turn_id)?;
-        (!turn.file_changes.is_empty()).then(|| piko_protocol::TurnDiffEvent {
+        let session = self.session(session_id).ok()?;
+        let mut changes = Vec::new();
+        for entry in &session.entries {
+            let SessionTreeEntry::Message(message) = entry else {
+                continue;
+            };
+            if message.source_turn_id != root_input_id {
+                continue;
+            }
+            if let Some(change) = file_change_from_message(&message.message) {
+                merge_file_change(&mut changes, change);
+            }
+        }
+        (!changes.is_empty()).then(|| piko_protocol::TurnDiffEvent {
             session_id: session_id.to_string(),
-            turn_id: turn_id.to_string(),
-            unified_diff: render_turn_diff(&turn.file_changes),
-            files: turn.file_changes.clone(),
+            turn_id: root_input_id.to_string(),
+            unified_diff: render_turn_diff(&changes),
+            files: changes,
         })
     }
 }

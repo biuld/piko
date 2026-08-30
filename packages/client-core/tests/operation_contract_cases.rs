@@ -4,7 +4,7 @@ use helpers::*;
 use piko_client_core::ClientIntent;
 use piko_protocol::{
     ApprovalDecision, ApprovalEvent, Command, InteractionEvent, ServerMessage, TurnEvent,
-    TurnStatus, UserInteractionResponse, UserInteractionStatus,
+    UserInteractionResponse, UserInteractionStatus,
 };
 
 fn test_cost(total: f64) -> piko_protocol::messages::UsageCost {
@@ -36,17 +36,16 @@ fn c8_submit_turn() {
 
     assert_eq!(effects.len(), 1);
     match first_command(&effects) {
-        Command::ChatSubmit {
-            session_id,
-            target_agent_instance_id,
-            text,
-            ..
-        } => {
-            assert_eq!(session_id, "sess-1");
-            assert_eq!(target_agent_instance_id, "root");
-            assert_eq!(text, "Hello agent");
+        Command::AgentInputSubmit { input, .. } => {
+            assert_eq!(input.session_id, "sess-1");
+            assert_eq!(input.agent_instance_id, "root");
+            assert_eq!(
+                input.content,
+                piko_protocol::MessageContent::String("Hello agent".into())
+            );
+            assert_eq!(input.delivery, piko_protocol::AgentInputDelivery::FollowUp);
         }
-        _ => panic!("expected ChatSubmit"),
+        _ => panic!("expected AgentInputSubmit"),
     }
 }
 
@@ -81,15 +80,48 @@ fn c8_turn_lifecycle_tracking() {
         &mut ids,
     );
 
-    let session = state.live_session.as_ref().unwrap();
-    assert_eq!(session.active_turns.len(), 1);
-    assert_eq!(session.active_turns[0].status, TurnStatus::Running);
+    let mut snapshot = session_snapshot("sess-1");
+    snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
+        agent_instance_id: "root".into(),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        foreground: piko_protocol::AgentForeground::Running,
+        active_work: Some(piko_protocol::ActiveWorkSnapshot {
+            root_input_id: "turn-1".into(),
+            state: piko_protocol::AgentWorkViewState::Running,
+            active_model_step_id: None,
+            started_at: 1,
+        }),
+        pending_steers: Vec::new(),
+        queued_inputs: Vec::new(),
+        pending_action: None,
+    }];
+    let (state, _) = host(
+        state,
+        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+            session_id: "sess-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "e1".into(),
+                seq: 2,
+            },
+            snapshot,
+            agents: vec![agent_info("sess-1", "root", None)],
+        }),
+        &mut ids,
+    );
 
     // Cancel intent
     let (state, effects) = intent(state, ClientIntent::CancelTurn, &mut ids);
     match first_command(&effects) {
-        Command::TurnCancel { turn_id, .. } => assert_eq!(turn_id, "turn-1"),
-        _ => panic!("expected TurnCancel"),
+        Command::AgentInterrupt {
+            session_id,
+            agent_instance_id,
+            ..
+        } => {
+            assert_eq!(session_id, "sess-1");
+            assert_eq!(agent_instance_id, "root");
+        }
+        _ => panic!("expected AgentInterrupt"),
     }
 
     // Turn completed
@@ -106,7 +138,7 @@ fn c8_turn_lifecycle_tracking() {
     );
 
     let session = state.live_session.as_ref().unwrap();
-    assert!(session.active_turns.is_empty());
+    assert!(session.turn_failures.is_empty());
 }
 
 #[test]
@@ -246,13 +278,7 @@ fn c9_approval_requested_then_responded() {
     assert_eq!(session.pending_approvals.len(), 1);
     assert_eq!(session.pending_approvals[0].approval_id, "approval-1");
     assert_eq!(
-        piko_client_core::agent_foreground(
-            "root",
-            &session.agents,
-            &session.active_turns,
-            &session.pending_approvals,
-            &session.pending_interactions,
-        ),
+        piko_client_core::agent_foreground("root", session),
         piko_protocol::AgentForeground::RequiresAction
     );
 

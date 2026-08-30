@@ -32,21 +32,9 @@ impl HostApp {
     /// Emit a terminal turn event followed by a host usage projection when applicable.
     pub(crate) async fn send_turn_terminal(&self, tx: &ClientEventSender, terminal: ServerMessage) {
         let size = self.client_context_window_size().await;
-        let session_id = match &terminal {
-            ServerMessage::TurnLifecycle(
-                crate::api::TurnEvent::Completed { session_id, .. }
-                | crate::api::TurnEvent::Failed { session_id, .. }
-                | crate::api::TurnEvent::Cancelled { session_id, .. },
-            ) => Some(session_id.clone()),
-            _ => None,
-        };
         let messages = {
             let state = self.state.lock().await;
-            let mut messages = state.with_usage_projection(terminal, size);
-            if let Some(session_id) = session_id {
-                messages.push(state.build_queue_update(&session_id).into());
-            }
-            messages
+            state.with_usage_projection(terminal, size)
         };
         for message in messages {
             send_event(tx, message).await;
@@ -77,19 +65,35 @@ impl HostApp {
             agent_instance_id: agent_instance_id.to_string(),
         };
         let AgentRunHandle { mut process, .. } = run;
-        let observation = process.wait_started().await?;
-        self.state
-            .lock()
-            .await
-            .mark_turn_running(session_id, turn_id)?;
+        let observation = match process.wait_started().await {
+            Ok(observation) => observation,
+            Err(error) if error.to_string().to_ascii_lowercase().contains("cancel") => {
+                self.send_turn_terminal(
+                    tx,
+                    crate::domain::sessions::turn_cancelled(
+                        session_id,
+                        turn_id,
+                        agent_instance_id,
+                        piko_protocol::Usage::empty(),
+                    ),
+                )
+                .await;
+                runner
+                    .finish_agent_run(
+                        &address,
+                        &piko_protocol::agent_runtime::SessionCursor {
+                            epoch: String::new(),
+                            seq: 0,
+                        },
+                    )
+                    .await;
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
         send_event(
             tx,
-            ServerMessage::TurnLifecycle(crate::api::TurnEvent::Started {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
-                agent_instance_id: agent_instance_id.to_string(),
-                timestamp: crate::util::now_ms(),
-            }),
+            crate::domain::sessions::turn_started(session_id, turn_id, agent_instance_id),
         )
         .await;
         let completion = self
@@ -133,41 +137,17 @@ impl HostApp {
                 .await;
         }
 
-        let complete_event = {
-            let mut state = self.state.lock().await;
-            let still_active = state.turn(session_id, turn_id).is_ok_and(|turn| {
-                matches!(
-                    turn.status,
-                    crate::api::TurnStatus::Running | crate::api::TurnStatus::Cancelling
-                )
-            });
-            if !still_active {
-                // A replayed/recovered completion may find an already-terminal Turn.
-                None
-            } else {
-                match &terminal {
-                    Ok(report)
-                        if matches!(
-                            report.outcome,
-                            piko_protocol::ExecutionOutcome::Failed { .. }
-                        ) =>
-                    {
-                        Some(state.fail_turn(session_id, turn_id, "agent run failed")?)
-                    }
-                    Ok(report)
-                        if matches!(
-                            report.outcome,
-                            piko_protocol::ExecutionOutcome::Cancelled { .. }
-                        ) =>
-                    {
-                        Some(state.cancel_turn(session_id, turn_id)?)
-                    }
-                    Err(failure) => {
-                        Some(state.fail_turn(session_id, turn_id, failure.message.clone())?)
-                    }
-                    _ => Some(state.complete_turn(session_id, turn_id)?),
-                }
-            }
+        let complete_event = match &terminal {
+            Ok(report) => Some(crate::domain::sessions::turn_terminal_from_report(
+                session_id, turn_id, report,
+            )),
+            Err(failure) => Some(crate::domain::sessions::turn_failed(
+                session_id,
+                turn_id,
+                agent_instance_id,
+                failure.message.clone(),
+                piko_protocol::Usage::empty(),
+            )),
         };
         let turn_succeeded = matches!(
             (&complete_event, &terminal),
@@ -222,7 +202,7 @@ impl HostApp {
     async fn record_trajectory_terminal(
         &self,
         address: &AgentOperationAddress,
-        terminal: &Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+        terminal: &Result<piko_protocol::AgentWorkReport, AgentRunFailure>,
     ) {
         let runner = self.turn_runner.lock().await.clone();
         let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {

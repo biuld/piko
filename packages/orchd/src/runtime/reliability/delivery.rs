@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use piko_orchd_api::AgentCommitPort;
-use piko_protocol::{AgentDurableCommand, AgentInboxItem, AgentRunReport};
+use piko_protocol::{AgentDurableCommand, AgentInboxItem, AgentWorkReport};
 
 use crate::runtime::reliability::{CommitFailure, RetryState};
 
 pub(crate) struct DetachedDeliveryScope {
     recipient_agent_instance_id: String,
-    report: AgentRunReport,
+    report: AgentWorkReport,
     committed_at: i64,
     retry: RetryState,
 }
@@ -19,7 +19,7 @@ pub(crate) enum DetachedDeliveryResult {
 }
 
 impl DetachedDeliveryScope {
-    pub fn new(recipient_agent_instance_id: String, report: AgentRunReport) -> Self {
+    pub fn new(recipient_agent_instance_id: String, report: AgentWorkReport) -> Self {
         Self {
             recipient_agent_instance_id,
             report,

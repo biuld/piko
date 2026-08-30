@@ -15,15 +15,15 @@ fn workspace_edit_requires_approval_updates_the_file_and_records_diff() {
     let session_id = host.create_session("create");
     let agent_instance_id = root_agent_id(&session_id);
 
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id,
-        text: "exercise the edit tool".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        agent_instance_id,
+        piko_protocol::MessageContent::String("exercise the edit tool".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     let turn_id = match host.wait_for("turn started", |message| {
         matches!(

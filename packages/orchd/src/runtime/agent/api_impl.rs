@@ -173,42 +173,20 @@ impl AgentRuntimeApi for AgentRuntime {
         Ok(receipt)
     }
 
-    async fn send_agent_input(
-        &self,
-        request: SendAgentInputRequest,
-    ) -> Result<AgentInputReceipt, AgentApiError> {
-        let scope = self.scope(&request.session_id).await?;
-        scope
-            .authorize_input(
-                request.caller_agent_instance_id.as_deref(),
-                &request.agent_instance_id,
-            )
-            .await?;
-        let handle = scope
-            .agent(&request.agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
-        handle
-            .command_tx
-            .try_send(AgentCommand::Input {
-                request,
-                canonical_input: None,
-                reply,
-            })
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
-                mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
-            })?;
-        received
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?
-    }
-
     async fn submit_agent_input(
         &self,
         input: piko_protocol::AgentInput,
     ) -> Result<AgentInputReceipt, AgentApiError> {
+        self.submit_runtime_agent_input(input, piko_orchd_api::AgentInputRuntime::default())
+            .await
+    }
+
+    async fn submit_runtime_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<AgentInputReceipt, AgentApiError> {
+        let parent = tracing::Span::current();
         let scope = self.scope(&input.session_id).await?;
         scope
             .authorize_input(
@@ -221,14 +199,14 @@ impl AgentRuntimeApi for AgentRuntime {
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
         let input_id = input.input_id.clone();
-        let request = input.to_request();
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .try_send(AgentCommand::Input {
-                request,
-                canonical_input: Some(input),
+                input,
+                runtime,
                 reply,
+                parent,
             })
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
@@ -241,54 +219,21 @@ impl AgentRuntimeApi for AgentRuntime {
         Ok(receipt)
     }
 
-    async fn run_agent(
+    async fn submit_agent_input_detached(
         &self,
-        request: SendAgentInputRequest,
-    ) -> Result<piko_orchd_api::AgentRunAcceptance, AgentApiError> {
-        let parent = tracing::Span::current();
-        let scope = self.scope(&request.session_id).await?;
-        scope
-            .authorize_input(
-                request.caller_agent_instance_id.as_deref(),
-                &request.agent_instance_id,
-            )
-            .await?;
-        let handle = scope
-            .agent(&request.agent_instance_id)
-            .await
-            .ok_or(AgentApiError::AgentNotFound)?;
-        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
-        handle
-            .command_tx
-            .try_send(AgentCommand::Run {
-                request,
-                reply,
-                parent,
-            })
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => AgentApiError::Overload,
-                mpsc::error::TrySendError::Closed(_) => AgentApiError::RuntimeUnavailable,
-            })?;
-        received
-            .await
-            .map_err(|_| AgentApiError::RuntimeUnavailable)?
-    }
-
-    async fn send_agent_input_detached(
-        &self,
-        request: SendAgentInputRequest,
+        input: piko_protocol::AgentInput,
         recipient_agent_instance_id: String,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         let parent = tracing::Span::current();
-        let scope = self.scope(&request.session_id).await?;
+        let scope = self.scope(&input.session_id).await?;
         scope
             .authorize_input(
-                request.caller_agent_instance_id.as_deref(),
-                &request.agent_instance_id,
+                input.caller_agent_instance_id.as_deref(),
+                &input.agent_instance_id,
             )
             .await?;
         let source = scope
-            .agent(&request.agent_instance_id)
+            .agent(&input.agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
         scope
@@ -299,7 +244,7 @@ impl AgentRuntimeApi for AgentRuntime {
         source
             .command_tx
             .try_send(AgentCommand::InputDetached {
-                request,
+                input,
                 recipient: self::mailbox::DetachedReportTarget {
                     agent_instance_id: recipient_agent_instance_id,
                 },
@@ -313,25 +258,6 @@ impl AgentRuntimeApi for AgentRuntime {
         received
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
-    }
-
-    async fn steer_agent(
-        &self,
-        request: SteerAgentRequest,
-    ) -> Result<AgentInputReceipt, AgentApiError> {
-        self.send_agent_input(SendAgentInputRequest {
-            request_id: request.request_id,
-            session_id: request.session_id,
-            agent_instance_id: request.agent_instance_id,
-            caller_agent_instance_id: request.caller_agent_instance_id,
-            source_turn_id: None,
-            message_id: request.message_id,
-            content: request.content,
-            delivery: piko_protocol::AgentInputDelivery::SteerActive,
-            prompt_resources: None,
-            active_tool_names: None,
-        })
-        .await
     }
 
     async fn cancel_agent_run(
@@ -372,8 +298,8 @@ impl AgentRuntimeApi for AgentRuntime {
         &self,
         session_id: String,
         agent_instance_id: String,
-        request_id: String,
-    ) -> Result<AgentCancelReceipt, AgentApiError> {
+        input_id: String,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, AgentApiError> {
         let scope = self.scope(&session_id).await?;
         let handle = scope
             .agent(&agent_instance_id)
@@ -382,7 +308,7 @@ impl AgentRuntimeApi for AgentRuntime {
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
-            .send(AgentCommand::CancelInput { request_id, reply })
+            .send(AgentCommand::CancelInput { input_id, reply })
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?;
         received
@@ -412,6 +338,26 @@ impl AgentRuntimeApi for AgentRuntime {
         agent_instance_id: String,
     ) -> Result<Option<AgentSnapshot>, AgentApiError> {
         self.agent_snapshot_impl(session_id, agent_instance_id)
+            .await
+    }
+
+    async fn wait_agent_input_started(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<(), AgentApiError> {
+        self.wait_agent_input_started_impl(session_id, agent_instance_id, input_id)
+            .await
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<piko_protocol::AgentWorkReport, AgentApiError> {
+        self.wait_agent_input_completion_impl(session_id, agent_instance_id, input_id)
             .await
     }
 

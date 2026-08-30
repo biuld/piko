@@ -165,11 +165,6 @@ pub enum InputDisposition {
     Overload,
 }
 
-/// Immediate result of submitting an AgentInput to an AgentInstance.
-///
-/// Admission outcomes are receipts, not durable lifecycle states.
-pub type AgentInputAdmissionOutcome = InputDisposition;
-
 /// Durable lifecycle state of an admitted AgentInput.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

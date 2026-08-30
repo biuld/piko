@@ -159,30 +159,23 @@ impl AppState {
                     let submit_command_id = command_id();
                     self.session.pending.track(
                         submit_command_id.clone(),
-                        crate::app::pending::PendingCommandKind::ChatSubmit,
+                        crate::app::pending::PendingCommandKind::AgentInputSubmit,
                     );
                     if let Some(draft) = draft {
                         self.session.pending_submissions.insert(
                             submit_command_id.clone(),
-                            crate::app::pending::PendingSubmissionUi {
-                                draft,
-                                optimistic_follow_up: false,
-                            },
+                            crate::app::pending::PendingSubmissionUi { draft },
                         );
                     }
-                    let command = match content {
-                        piko_protocol::MessageContent::String(text) => Command::ChatSubmit {
-                            command_id: submit_command_id,
-                            session_id: reconciled.session_id,
+                    let command = Command::AgentInputSubmit {
+                        input: crate::app::submit::user_agent_input(
+                            &submit_command_id,
+                            reconciled.session_id,
                             target_agent_instance_id,
-                            text,
-                        },
-                        content => Command::ChatSubmitMessage {
-                            command_id: submit_command_id,
-                            session_id: reconciled.session_id,
-                            target_agent_instance_id,
+                            piko_protocol::AgentInputDelivery::FollowUp,
                             content,
-                        },
+                        ),
+                        command_id: submit_command_id,
                     };
                     effects.push(Effect::send(command));
                     self.status = "submitted first message".to_string();

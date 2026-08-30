@@ -29,7 +29,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
     }
     for index in 0..64 {
         let receipt = runtime
-            .run_agent(SendAgentInputRequest {
+            .send_agent_input(SendAgentInputRequest {
                 request_id: format!("cap-queued-{index}"),
                 session_id: "session-1".into(),
                 agent_instance_id: "root".into(),
@@ -44,12 +44,12 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
             .await
             .expect("follow-ups up to the cap must queue");
         assert_eq!(
-            receipt.receipt.disposition,
-            piko_protocol::InputDisposition::Queued
+            receipt.disposition,
+            piko_protocol::AgentInputDisposition::PendingFollowUp
         );
     }
     let overloaded = match runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "cap-overflow".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -77,7 +77,7 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
         .await
         .unwrap();
     let freed = runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "cap-freed-slot".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -92,8 +92,8 @@ async fn follow_up_queue_rejects_past_its_fixed_cap_with_overload() {
         .await
         .expect("a cancelled queued input frees its slot");
     assert_eq!(
-        freed.receipt.disposition,
-        piko_protocol::InputDisposition::Queued
+        freed.disposition,
+        piko_protocol::AgentInputDisposition::PendingFollowUp
     );
 }
 
@@ -127,8 +127,8 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
         .await
         .unwrap();
 
-    let run = runtime
-        .run_agent(SendAgentInputRequest {
+    runtime
+        .send_agent_input(SendAgentInputRequest {
             request_id: "cancel-marker-run".into(),
             session_id: "session-cancel-marker".into(),
             agent_instance_id: "root".into(),
@@ -154,7 +154,11 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
         .unwrap();
     let report = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        run.wait(),
+        runtime.wait_agent_input_completion(
+            "session-cancel-marker".into(),
+            "root".into(),
+            "cancel-marker-run".into(),
+        ),
     )
     .await
     .expect("cancelled run terminates")
@@ -231,7 +235,7 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .run_agent(SendAgentInputRequest {
+                .wait_sent_agent(SendAgentInputRequest {
                     request_id: "start-cancel-marker".into(),
                     session_id: "session-start-cancel-marker".into(),
                     agent_instance_id: "root".into(),
@@ -243,8 +247,6 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
                     prompt_resources: None,
                     active_tool_names: None,
                 })
-                .await?
-                .wait()
                 .await
         })
     };

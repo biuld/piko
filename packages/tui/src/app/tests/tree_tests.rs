@@ -70,7 +70,8 @@ fn submit_with_session_waits_for_server_committed_user_message() {
 
     assert!(matches!(
         &effects[0],
-        Effect::Send(piko_protocol::Command::ChatSubmit { text, .. }) if text == "hello"
+        Effect::Send(piko_protocol::Command::AgentInputSubmit { input, .. })
+            if input.content == piko_protocol::MessageContent::String("hello".into())
     ));
     assert!(app.timeline().message_ids().is_empty());
 }
@@ -99,14 +100,11 @@ fn submit_targets_the_viewed_child_agent() {
 
     assert!(matches!(
         &effects[0],
-        Effect::Send(piko_protocol::Command::ChatSubmit {
-            session_id,
-            target_agent_instance_id: agent_instance_id,
-            text,
-            ..
-        }) if session_id == "session-1"
-            && agent_instance_id == "agent-child"
-            && text == "follow up"
+        Effect::Send(piko_protocol::Command::AgentInputSubmit { input, .. })
+            if input.session_id == "session-1"
+                && input.agent_instance_id == "agent-child"
+                && input.content == piko_protocol::MessageContent::String("follow up".into())
+                && input.delivery == piko_protocol::AgentInputDelivery::FollowUp
     ));
 }
 
@@ -140,5 +138,5 @@ fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
     let agent = &app.agent_panel.agents()[0];
     assert_eq!(agent.activity, piko_protocol::AgentActivity::Idle);
     assert_eq!(agent.status, piko_protocol::AgentStatus::Idle);
-    assert!(app.session.active_turns.is_empty());
+    assert!(app.session.agent_work.is_empty());
 }

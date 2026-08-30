@@ -3,6 +3,101 @@
 use super::*;
 
 impl AgentRuntime {
+    pub(super) async fn wait_agent_input_started_impl(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<(), AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let mut snapshots = handle.snapshot_rx.clone();
+        let mut saw_pending = false;
+        loop {
+            {
+                let snapshot = snapshots.borrow_and_update();
+                if snapshot.active_root_input_id.as_deref() == Some(input_id.as_str())
+                    || snapshot
+                        .latest_report
+                        .as_ref()
+                        .is_some_and(|report| report.root_input_id == input_id)
+                {
+                    return Ok(());
+                }
+                if snapshot
+                    .pending_follow_up_ids
+                    .iter()
+                    .any(|pending| pending == &input_id)
+                {
+                    saw_pending = true;
+                } else if saw_pending {
+                    return Err(AgentApiError::Cancelled);
+                } else if matches!(
+                    snapshot.lifecycle,
+                    piko_protocol::AgentInstanceLifecycle::Terminated
+                        | piko_protocol::AgentInstanceLifecycle::Unavailable
+                ) {
+                    return Err(AgentApiError::InvalidState);
+                }
+            }
+            snapshots
+                .changed()
+                .await
+                .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        }
+    }
+
+    pub(super) async fn wait_agent_input_completion_impl(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        input_id: String,
+    ) -> Result<piko_protocol::AgentWorkReport, AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let mut snapshots = handle.snapshot_rx.clone();
+        let mut saw_pending = false;
+        loop {
+            {
+                let snapshot = snapshots.borrow_and_update();
+                if let Some(report) = snapshot
+                    .latest_report
+                    .as_ref()
+                    .filter(|report| report.root_input_id == input_id)
+                {
+                    return Ok(report.clone());
+                }
+                if snapshot.active_root_input_id.as_deref() == Some(input_id.as_str()) {
+                    saw_pending = false;
+                } else if snapshot
+                    .pending_follow_up_ids
+                    .iter()
+                    .any(|pending| pending == &input_id)
+                {
+                    saw_pending = true;
+                } else if saw_pending {
+                    return Err(AgentApiError::Cancelled);
+                } else if matches!(
+                    snapshot.lifecycle,
+                    piko_protocol::AgentInstanceLifecycle::Terminated
+                        | piko_protocol::AgentInstanceLifecycle::Unavailable
+                ) {
+                    return Err(AgentApiError::InvalidState);
+                }
+            }
+            snapshots
+                .changed()
+                .await
+                .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        }
+    }
+
     pub(super) async fn agent_snapshot_impl(
         &self,
         session_id: String,

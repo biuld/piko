@@ -30,12 +30,12 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
         let session_id = session_id.clone();
         tokio::spawn(async move {
             server
-                .handle_command(Command::ChatSubmit {
-                    command_id: "submit-1".into(),
-                    target_agent_instance_id: format!("agent_{session_id}_root"),
-                    session_id: session_id.clone(),
-                    text: "first".into(),
-                })
+                .handle_command(Command::submit_follow_up(
+                    "submit-1",
+                    session_id.clone(),
+                    format!("agent_{session_id}_root"),
+                    piko_protocol::MessageContent::String("first".into()),
+                ))
                 .await
         })
     };
@@ -51,27 +51,33 @@ async fn root_chat_while_active_is_queued_until_prior_turn_terminals() {
     .await
     .expect("first turn should start");
 
-    let mut second = server.handle_command_stream(Command::ChatSubmit {
-        command_id: "submit-2".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: format!("agent_{session_id}_root"),
-        text: "second".into(),
-    });
+    let mut second = server.handle_command_stream(Command::submit_follow_up(
+        "submit-2",
+        session_id.clone(),
+        format!("agent_{session_id}_root"),
+        piko_protocol::MessageContent::String("second".into()),
+    ));
     let mut second_events = Vec::new();
-    for _ in 0..2 {
-        second_events.push(
-            tokio::time::timeout(std::time::Duration::from_secs(2), second.recv())
-                .await
-                .expect("queued receipt events should arrive")
-                .expect("queued command stream should remain open"),
+    for _ in 0..4 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), second.recv())
+            .await
+            .expect("queued receipt events should arrive")
+            .expect("queued command stream should remain open");
+        let queued = matches!(
+            event,
+            Event::TurnLifecycle(piko_protocol::TurnEvent::Queued { .. })
         );
+        second_events.push(event);
+        if queued {
+            break;
+        }
     }
 
     assert!(second_events.iter().any(|event| matches!(
         event,
         Event::CommandResponse {
             command_id,
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
         } if command_id == "submit-2"
     )));
     assert!(

@@ -11,6 +11,14 @@ use crate::session::SessionTreeEntry;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
     Empty,
+    AgentInputSubmitted {
+        receipt: crate::AgentInputReceipt,
+        timestamp: i64,
+    },
+    AgentInputCancelled {
+        receipt: crate::AgentInputCancelReceipt,
+        timestamp: i64,
+    },
     AgentInterrupted {
         session_id: SessionId,
         agent_instance_id: crate::AgentInstanceId,

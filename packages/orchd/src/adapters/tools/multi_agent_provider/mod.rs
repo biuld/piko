@@ -19,6 +19,7 @@ use piko_protocol::{
 use resolve::{
     MessageWhen, ToolFail, activity_str, catalog_value, map_spawn_agent_error, multi_agent_tools,
     report_value, required_string, resolve_spawn_spec_id, resolve_when, stable_runtime_id,
+    tool_disposition,
 };
 
 #[derive(Clone)]
@@ -85,8 +86,10 @@ impl MultiAgentToolProvider {
         };
 
         if detached {
+            let canonical =
+                piko_protocol::AgentInput::from_request(&input, crate::runtime::utils::now_ms());
             self.runtime
-                .send_agent_input_detached(input, context.agent_instance_id.clone())
+                .submit_agent_input_detached(canonical, context.agent_instance_id.clone())
                 .await
                 .map_err(ToolFail::from_agent)?;
             Ok(serde_json::json!({
@@ -96,9 +99,14 @@ impl MultiAgentToolProvider {
                 "status": "accepted"
             }))
         } else {
-            let acceptance = if let Some(cancellation) = &context.cancellation {
+            let canonical =
+                piko_protocol::AgentInput::from_request(&input, crate::runtime::utils::now_ms());
+            let input_id = canonical.input_id.clone();
+            if let Some(cancellation) = &context.cancellation {
                 tokio::select! {
-                    acceptance = self.runtime.run_agent(input) => acceptance.map_err(ToolFail::from_agent)?,
+                    receipt = self.runtime.submit_agent_input(canonical) => {
+                        receipt.map_err(ToolFail::from_agent)?;
+                    },
                     _ = cancellation.cancelled() => {
                         let _ = self.runtime.cancel_agent_run(
                             context.session_id.clone(),
@@ -109,13 +117,18 @@ impl MultiAgentToolProvider {
                 }
             } else {
                 self.runtime
-                    .run_agent(input)
+                    .submit_agent_input(canonical)
                     .await
-                    .map_err(ToolFail::from_agent)?
-            };
+                    .map_err(ToolFail::from_agent)?;
+            }
+            let completion = self.runtime.wait_agent_input_completion(
+                context.session_id.clone(),
+                child.identity.agent_instance_id.clone(),
+                input_id,
+            );
             let report = if let Some(cancellation) = &context.cancellation {
                 tokio::select! {
-                    report = acceptance.wait() => report.map_err(ToolFail::from_agent)?,
+                    report = completion => report.map_err(ToolFail::from_agent)?,
                     _ = cancellation.cancelled() => {
                         let _ = self.runtime.cancel_agent_run(
                             context.session_id.clone(),
@@ -125,7 +138,7 @@ impl MultiAgentToolProvider {
                     }
                 }
             } else {
-                acceptance.wait().await.map_err(ToolFail::from_agent)?
+                completion.await.map_err(ToolFail::from_agent)?
             };
             let mut value = report_value(&report);
             if let Some(object) = value.as_object_mut() {
@@ -174,26 +187,27 @@ impl MultiAgentToolProvider {
             MessageWhen::Queue => AgentInputDelivery::FollowUp,
             MessageWhen::Steer => AgentInputDelivery::SteerActive,
         };
+        let request_id = format!("message:{}:{}", context.execution_id, call.id);
         let receipt = self
             .runtime
-            .send_agent_input(SendAgentInputRequest {
-                request_id: format!("message:{}:{}", context.execution_id, call.id),
+            .submit_agent_input(piko_protocol::AgentInput {
+                input_id: stable_runtime_id(&context.execution_id, &call.id),
+                request_id,
                 session_id: context.session_id.clone(),
                 agent_instance_id: target,
+                origin: piko_protocol::AgentInputOrigin::Agent,
                 caller_agent_instance_id: Some(context.agent_instance_id.clone()),
-                source_turn_id: None,
-                message_id: format!("message:{}:{}", context.execution_id, call.id),
                 content: MessageContent::String(message),
                 delivery,
-                prompt_resources: None,
-                active_tool_names: None,
+                submitted_at: crate::runtime::utils::now_ms(),
+                detached_recipient_agent_instance_id: None,
             })
             .await
             .map_err(ToolFail::from_agent)?;
         Ok(serde_json::json!({
             "agent_instance_id": receipt.agent_instance_id,
             "when": when.as_str(),
-            "disposition": receipt.disposition,
+            "disposition": tool_disposition(receipt.disposition),
         }))
     }
 

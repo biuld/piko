@@ -76,7 +76,7 @@ async fn context_budget_tools_report_remaining_and_request_fresh_window() {
     model.push_text("done").await;
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "context-tools-run".into(),
             session_id: "session-context-tools".into(),
             agent_instance_id: "root".into(),

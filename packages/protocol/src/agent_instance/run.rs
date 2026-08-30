@@ -5,8 +5,9 @@ use crate::{ExecutionOutcome, MessageContent, Usage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentRunReport {
+pub struct AgentWorkReport {
     pub agent_instance_id: AgentInstanceId,
+    pub root_input_id: AgentInputId,
     pub report_id: String,
     pub outcome: ExecutionOutcome,
     pub summary: String,
@@ -31,7 +32,13 @@ pub struct AgentSnapshot {
     pub lifecycle: AgentInstanceLifecycle,
     pub activity: AgentActivity,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_report: Option<AgentRunReport>,
+    pub latest_report: Option<AgentWorkReport>,
+    /// Root AgentInput currently starting or running, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_root_input_id: Option<crate::AgentInputId>,
+    /// Follow-ups admitted but not yet applied as root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_follow_up_ids: Vec<crate::AgentInputId>,
     pub unread_report_count: u32,
     pub generation: u64,
 }
@@ -89,18 +96,6 @@ pub struct SendAgentInputRequest {
     pub active_tool_names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SteerAgentRequest {
-    pub request_id: String,
-    pub session_id: String,
-    pub agent_instance_id: AgentInstanceId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub caller_agent_instance_id: Option<AgentInstanceId>,
-    pub message_id: String,
-    pub content: MessageContent,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInputReceipt {
@@ -109,9 +104,7 @@ pub struct AgentInputReceipt {
     pub request_id: String,
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
-    pub disposition: crate::AgentInputAdmissionOutcome,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<RunId>,
+    pub disposition: crate::AgentInputDisposition,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queued_position: Option<u32>,
 }
@@ -159,7 +152,7 @@ pub struct AgentInboxItem {
     pub report_id: String,
     pub recipient_agent_instance_id: AgentInstanceId,
     pub source_agent_instance_id: AgentInstanceId,
-    pub report: AgentRunReport,
+    pub report: AgentWorkReport,
     pub committed_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub consumed_at: Option<i64>,

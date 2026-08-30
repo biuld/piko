@@ -31,20 +31,39 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         .commit_events(
             "ex-start",
             1,
-            vec![EventData::ExecutionStarted(ExecutionStartedV1 {
-                run_id: "run-1".into(),
-                execution_id: execution_id.clone(),
-                request_id: "req-1".into(),
-                agent_instance_id: agent_instance_id.into(),
-                admitted_revision: 0,
-                base_message_id: None,
-                tree_base_entry_id: None,
-                source_turn_id: Some("turn-1".into()),
-                detached_recipient_agent_instance_id: None,
-                prompt_assembly_version: 5,
-                prompt_digest: "digest".into(),
-                started_at: 10,
-            })],
+            vec![
+                EventData::AgentInputAdmittedV1(piko_session_store::AgentInputAdmittedV1 {
+                    input: piko_protocol::AgentInput {
+                        input_id: "input-1".into(),
+                        request_id: "req-1".into(),
+                        session_id: "s1".into(),
+                        agent_instance_id: agent_instance_id.into(),
+                        origin: piko_protocol::AgentInputOrigin::User,
+                        delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+                        content: piko_protocol::MessageContent::String("hi".into()),
+                        submitted_at: 10,
+                        caller_agent_instance_id: None,
+                        detached_recipient_agent_instance_id: None,
+                    },
+                    disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+                    root_input_id: Some("input-1".into()),
+                    admitted_at: 10,
+                }),
+                EventData::ExecutionStarted(ExecutionStartedV1 {
+                    run_id: "run-1".into(),
+                    execution_id: execution_id.clone(),
+                    request_id: "req-1".into(),
+                    agent_instance_id: agent_instance_id.into(),
+                    admitted_revision: 0,
+                    base_message_id: None,
+                    tree_base_entry_id: None,
+                    source_turn_id: Some("turn-1".into()),
+                    detached_recipient_agent_instance_id: None,
+                    prompt_assembly_version: 5,
+                    prompt_digest: "digest".into(),
+                    started_at: 10,
+                }),
+            ],
         )
         .unwrap();
     let assembly = TrajectoryAssemblyRecord {
@@ -112,8 +131,9 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
             5,
             vec![EventData::ExecutionFinished {
                 execution_id,
-                report: piko_protocol::AgentRunReport {
+                report: piko_protocol::AgentWorkReport {
                     agent_instance_id: agent_instance_id.into(),
+                    root_input_id: "input-1".into(),
                     report_id: "report-1".into(),
                     outcome: piko_protocol::ExecutionOutcome::Succeeded {
                         usage: piko_protocol::Usage::empty(),

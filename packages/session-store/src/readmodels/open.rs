@@ -36,9 +36,8 @@ pub(crate) fn load_or_rebuild(
         None
     };
     if let Some((mut aggregate, trajectory)) = fast {
-        // `agent_work` is an in-memory shadow and is intentionally omitted
-        // from the published JSON. Rebuild it before exposing an opened
-        // session so fast-path loads have the same value as journal replay.
+        // Recompute the published projection so older or repaired read models
+        // converge to the same value as journal replay.
         aggregate.rebuild_work_projection();
         if normalize_segment_boundary(path, aggregate.revision)? {
             recovery.repaired = true;

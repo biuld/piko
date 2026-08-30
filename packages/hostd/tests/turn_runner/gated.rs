@@ -43,16 +43,16 @@ impl AgentRunRunner for GatedAgentRunRunner {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             == 0
         {
-            piko_protocol::InputDisposition::Accepted
+            piko_protocol::AgentInputDisposition::AppliedAsRoot
         } else {
-            piko_protocol::InputDisposition::Queued
+            piko_protocol::AgentInputDisposition::PendingFollowUp
         };
-        if disposition == piko_protocol::InputDisposition::Accepted {
+        if disposition == piko_protocol::AgentInputDisposition::AppliedAsRoot {
             self.prompts.lock().unwrap().push(input.text_projection());
         }
         let (started_tx, started) = support::test_oneshot();
         let epoch = subscription.cursor.epoch.clone();
-        let queued_start = if disposition == piko_protocol::InputDisposition::Accepted {
+        let queued_start = if disposition == piko_protocol::AgentInputDisposition::AppliedAsRoot {
             let _ = started_tx.send(subscription);
             None
         } else {
@@ -92,7 +92,6 @@ impl AgentRunRunner for GatedAgentRunRunner {
                 session_id: input.session_id,
                 agent_instance_id: input.agent_instance_id,
                 disposition,
-                run_id: None,
                 queued_position: None,
             },
             process: test_agent_run_process(started, completion),

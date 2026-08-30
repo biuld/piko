@@ -2,7 +2,7 @@
 mod support;
 
 use piko_protocol::{
-    Command, CommandResult, ContentBlock, MessageContent, QueueEvent, ServerMessage, TurnEvent,
+    Command, CommandResult, ContentBlock, MessageContent, ServerMessage, TurnEvent,
 };
 use support::{HostdHarness, has_gateway_request, root_agent_id, serial_guard};
 
@@ -13,15 +13,15 @@ fn structured_steer_round_trips_through_jsonl_queue_and_orchd() {
     let session_id = host.create_session("create");
     let agent_instance_id = root_agent_id(&session_id);
 
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id.clone(),
-        text: "initial work".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        agent_instance_id.clone(),
+        MessageContent::String("initial work".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     host.wait_for_gateway("initial work", 1);
     host.wait_for("initial turn started", |message| {
@@ -32,11 +32,11 @@ fn structured_steer_round_trips_through_jsonl_queue_and_orchd() {
         )
     });
 
-    host.send(Command::QueueSteerMessage {
-        command_id: "steer".into(),
-        session_id: session_id.clone(),
+    host.send(Command::submit_steer(
+        "steer",
+        session_id.clone(),
         agent_instance_id,
-        content: MessageContent::Blocks(vec![
+        MessageContent::Blocks(vec![
             ContentBlock::Text {
                 text: "course changed".into(),
             },
@@ -45,27 +45,28 @@ fn structured_steer_round_trips_through_jsonl_queue_and_orchd() {
                 mime_type: "image/png".into(),
             },
         ]),
-    });
+    ));
     // The active execution drains steer controls at its step boundary.  The
     // scripted first step is intentionally paused until the test releases it,
     // so release before awaiting the steer receipt to avoid waiting on that
     // boundary from the command task itself.
     host.release();
-    assert!(matches!(host.command_result("steer"), CommandResult::Empty));
     assert!(matches!(
-        host.wait_for("steer queue update", |message| {
-            matches!(
-                message,
-                ServerMessage::Queue(QueueEvent::Updated {
-                    session_id: id,
-                    steer_count: 1,
-                    steer_preview: Some(preview),
-                    ..
-                }) if id == &session_id && preview == "course changed\n[image: image/png]"
-            )
-        }),
-        ServerMessage::Queue(_)
+        host.command_result("steer"),
+        CommandResult::AgentInputSubmitted { .. }
     ));
+    host.wait_for("steer snapshot", |message| {
+        matches!(
+            message,
+            ServerMessage::SessionReconciled(event)
+                if event.session_id == session_id
+                    && event.snapshot.agent_work.iter().any(|work| {
+                        work.pending_steers.iter().any(|input| {
+                            input.preview.contains("course changed")
+                        })
+                    })
+        )
+    });
 
     host.wait_for_gateway("course changed", 2);
     host.wait_for_gateway("course changed", 3);
@@ -83,15 +84,15 @@ fn turn_cancel_crosses_jsonl_hostd_and_orchd_and_clears_active_state() {
     let mut host = HostdHarness::launch("cancel");
     let session_id = host.create_session("create");
     let agent_instance_id = root_agent_id(&session_id);
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id,
-        text: "cancel this turn".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        agent_instance_id.clone(),
+        MessageContent::String("cancel this turn".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
 
     let started = host.wait_for("cancellable turn started", |message| {
@@ -105,14 +106,14 @@ fn turn_cancel_crosses_jsonl_hostd_and_orchd_and_clears_active_state() {
         unreachable!();
     };
 
-    host.send(Command::TurnCancel {
+    host.send(Command::AgentInterrupt {
         command_id: "cancel".into(),
         session_id: session_id.clone(),
-        turn_id: turn_id.clone(),
+        agent_instance_id,
     });
     assert!(matches!(
         host.command_result("cancel"),
-        CommandResult::Empty
+        CommandResult::AgentInterrupted { accepted: true, .. }
     ));
     assert!(matches!(
         host.wait_for("cancelled turn", |message| {

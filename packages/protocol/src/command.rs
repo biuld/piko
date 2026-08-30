@@ -180,30 +180,21 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
-    /// Submit user text to one concrete AgentInstance. Every accepted submit
-    /// creates a hostd Turn and uses the same Agent run API.
-    ChatSubmit {
+    /// Submit one immutable AgentInput through the canonical work-control path.
+    AgentInputSubmit {
+        command_id: CommandId,
+        input: crate::AgentInput,
+    },
+    /// Cancel exactly one pending AgentInput by durable input identity.
+    AgentInputCancel {
         command_id: CommandId,
         session_id: SessionId,
-        target_agent_instance_id: crate::AgentInstanceId,
-        text: String,
+        agent_instance_id: crate::AgentInstanceId,
+        input_id: crate::AgentInputId,
     },
-    /// Submit one structured text/image message. This is the multimodal
-    /// counterpart to `ChatSubmit`; both use the same host-owned Turn path.
-    ChatSubmitMessage {
-        command_id: CommandId,
-        session_id: SessionId,
-        target_agent_instance_id: crate::AgentInstanceId,
-        content: crate::MessageContent,
-    },
-    TurnCancel {
-        command_id: CommandId,
-        session_id: SessionId,
-        turn_id: TurnId,
-    },
-    /// Interrupt the current work of one AgentInstance without exposing its
-    /// short-lived Execution identity. Unlike `TurnCancel`, this also covers
-    /// detached child runs that have no source Turn.
+    /// Interrupt the current work of one AgentInstance without exposing a
+    /// short-lived Execution identity. This also covers detached child work
+    /// that has no source Turn.
     AgentInterrupt {
         command_id: CommandId,
         session_id: SessionId,
@@ -230,21 +221,6 @@ pub enum Command {
     ConfigUpdate {
         command_id: CommandId,
         patch: serde_json::Value,
-    },
-    /// Inject a steering message into a running AgentInstance turn.
-    /// Fails closed when the agent has no running turn or orchd rejects.
-    QueueSteer {
-        command_id: CommandId,
-        session_id: SessionId,
-        agent_instance_id: crate::AgentInstanceId,
-        message: String,
-    },
-    /// Inject structured text/image content into a running AgentInstance Turn.
-    QueueSteerMessage {
-        command_id: CommandId,
-        session_id: SessionId,
-        agent_instance_id: crate::AgentInstanceId,
-        content: crate::MessageContent,
     },
     /// Request the list of available models from hostd's catalog.
     ModelList {
@@ -343,16 +319,13 @@ impl Command {
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
-            | Self::ChatSubmit { command_id, .. }
-            | Self::ChatSubmitMessage { command_id, .. }
-            | Self::TurnCancel { command_id, .. }
+            | Self::AgentInputSubmit { command_id, .. }
+            | Self::AgentInputCancel { command_id, .. }
             | Self::AgentInterrupt { command_id, .. }
             | Self::ApprovalRespond { command_id, .. }
             | Self::UserInteractionRespond { command_id, .. }
             | Self::StateSnapshot { command_id, .. }
             | Self::ConfigUpdate { command_id, .. }
-            | Self::QueueSteer { command_id, .. }
-            | Self::QueueSteerMessage { command_id, .. }
             | Self::ModelList { command_id }
             | Self::CommandCatalogGet { command_id }
             | Self::RolloutPageGet { command_id, .. }
@@ -366,6 +339,44 @@ impl Command {
             | Self::AgentList { command_id, .. }
             | Self::AgentSubscribe { command_id, .. }
             | Self::AgentUnsubscribe { command_id, .. } => command_id,
+        }
+    }
+
+    pub fn submit_follow_up(
+        command_id: impl AsRef<str>,
+        session_id: impl AsRef<str>,
+        agent_instance_id: impl AsRef<str>,
+        content: crate::MessageContent,
+    ) -> Self {
+        let command_id = command_id.as_ref().to_string();
+        Self::AgentInputSubmit {
+            input: crate::AgentInput::user(
+                command_id.clone(),
+                session_id.as_ref(),
+                agent_instance_id.as_ref(),
+                crate::AgentInputDelivery::FollowUp,
+                content,
+            ),
+            command_id,
+        }
+    }
+
+    pub fn submit_steer(
+        command_id: impl AsRef<str>,
+        session_id: impl AsRef<str>,
+        agent_instance_id: impl AsRef<str>,
+        content: crate::MessageContent,
+    ) -> Self {
+        let command_id = command_id.as_ref().to_string();
+        Self::AgentInputSubmit {
+            input: crate::AgentInput::user(
+                command_id.clone(),
+                session_id.as_ref(),
+                agent_instance_id.as_ref(),
+                crate::AgentInputDelivery::SteerActive,
+                content,
+            ),
+            command_id,
         }
     }
 }

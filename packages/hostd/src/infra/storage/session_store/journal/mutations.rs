@@ -134,8 +134,6 @@ impl SessionStore {
                     input_id: change.input_id.clone(),
                     disposition: change.disposition,
                     root_input_id: change.root_input_id.clone(),
-                    run_id: change.run_id.clone(),
-                    bound_run_id: change.bound_run_id.clone(),
                     model_step_id: change.model_step_id.clone(),
                     changed_at: change.changed_at,
                 },
@@ -293,8 +291,6 @@ fn validate_steer_commit(
     if execution.finished_at.is_some()
         || execution.started.agent_instance_id != message.agent_instance_id
         || execution.started.source_turn_id != message.source_turn_id
-        || execution.started.run_id != change.run_id.as_deref().unwrap_or_default()
-        || change.bound_run_id.as_deref() != Some(execution.started.run_id.as_str())
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -309,7 +305,7 @@ fn validate_steer_commit(
     if root.input.agent_instance_id != message.agent_instance_id
         || root.disposition != AgentInputDisposition::AppliedAsRoot
         || root.root_input_id.as_deref() != Some(root_input_id)
-        || root.run_id.as_deref() != Some(execution.started.run_id.as_str())
+        || root.input.request_id != execution.started.request_id
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -320,7 +316,6 @@ fn validate_steer_commit(
     if input.input.agent_instance_id != message.agent_instance_id
         || input.disposition != AgentInputDisposition::PendingSteer
         || input.root_input_id.as_deref() != Some(root_input_id)
-        || input.bound_run_id.as_deref() != Some(execution.started.run_id.as_str())
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -348,8 +343,6 @@ fn steer_transition_matches(
             input.input.agent_instance_id == change.agent_instance_id
                 && input.disposition == AgentInputDisposition::AppliedToStep
                 && input.root_input_id == change.root_input_id
-                && input.run_id == change.run_id
-                && input.bound_run_id == change.bound_run_id
                 && input.model_step_id == change.model_step_id
         })
 }

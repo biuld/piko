@@ -48,15 +48,15 @@ async fn recovery_marks_accepted_execution_interrupted() {
         )
         .unwrap();
 
-    let legacy_work = store
+    let active_work = store
         .agent_work_snapshot(&root.agent_instance_id)
         .unwrap()
         .unwrap();
     assert_eq!(
-        legacy_work
-            .active_run
+        active_work
+            .active_work
             .as_ref()
-            .map(|run| run.root_input_id.as_str()),
+            .map(|work| work.root_input_id.as_str()),
         Some("request-interrupted")
     );
 
@@ -280,8 +280,9 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
         )
         .await
         .unwrap();
-    let report = AgentRunReport {
+    let report = AgentWorkReport {
         agent_instance_id: child.agent_instance_id.clone(),
+        root_input_id: "request-detached".into(),
         report_id: "report-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
@@ -362,8 +363,9 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
             .await
             .unwrap();
     }
-    let report = AgentRunReport {
+    let report = AgentWorkReport {
         agent_instance_id: root.agent_instance_id.clone(),
+        root_input_id: "request-idempotent".into(),
         report_id: "report-idempotent".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
@@ -406,7 +408,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         delivery: piko_protocol::AgentInputDelivery::FollowUp,
         content: MessageContent::String("follow up".into()),
         submitted_at: 2,
-        user_turn_id: None,
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -418,8 +419,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                     input: queued.clone(),
                     disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
                     root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
                     admitted_at: 2,
                 },
             },
@@ -469,7 +468,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
         delivery: piko_protocol::AgentInputDelivery::FollowUp,
         content: MessageContent::String("cancel me".into()),
         submitted_at: 3,
-        user_turn_id: Some("turn-queued-cancelled".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -481,8 +479,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                     input: cancelled,
                     disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
                     root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
                     admitted_at: 3,
                 },
             },
@@ -498,8 +494,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                     input_id: "queued-cancelled".into(),
                     disposition: piko_protocol::AgentInputDisposition::Cancelled,
                     root_input_id: None,
-                    run_id: None,
-                    bound_run_id: None,
                     model_step_id: None,
                     changed_at: 3,
                 },
@@ -528,7 +522,6 @@ fn root_input(
         delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
         content: piko_protocol::MessageContent::String(content.into()),
         submitted_at,
-        user_turn_id: source_turn_id.map(str::to_string),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     }

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentRunReport,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentWorkReport,
     AgentWorkSnapshot, Message, ModelStepBoundary, SessionTreeEntry,
 };
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ pub struct AgentProjection {
     pub identity: AgentInstanceIdentity,
     pub spec: Option<piko_protocol::AgentSpec>,
     pub lifecycle: AgentInstanceLifecycle,
-    pub latest_report: Option<AgentRunReport>,
+    pub latest_report: Option<AgentWorkReport>,
     /// Durable current todo list for this agent (F-27).
     pub todo_list: Option<piko_protocol::TodoList>,
     pub created_at: i64,
@@ -69,7 +69,7 @@ pub struct ExecutionProjection {
     pub status: piko_protocol::ExecutionStatus,
     pub started_at: i64,
     pub finished_at: Option<i64>,
-    pub report: Option<AgentRunReport>,
+    pub report: Option<AgentWorkReport>,
     pub model_steps: Vec<ModelStepBoundary>,
 }
 

@@ -11,21 +11,17 @@ impl SessionState {
 
     /// Account one model-step usage into the product ledger.
     ///
-    /// Always updates session `cumulative_usage`. When `turn_id` matches an
-    /// open turn record, also rolls the step into that turn and its
-    /// AgentInstance.
-    pub fn account_step_usage(&mut self, turn_id: Option<&str>, usage: &Usage) {
+    /// Always updates session `cumulative_usage`. When an AgentInstance is
+    /// supplied, also rolls the step into that agent's incurred usage.
+    pub fn account_step_usage(&mut self, agent_instance_id: Option<&str>, usage: &Usage) {
         self.accumulate_usage(usage);
-        let Some(turn_id) = turn_id else {
+        let Some(agent_instance_id) = agent_instance_id else {
             return;
         };
-        if let Some(turn) = self.turns.get_mut(turn_id) {
-            self.agent_usage
-                .entry(turn.agent_instance_id.clone())
-                .or_default()
-                .accumulate(usage);
-            turn.usage.accumulate(usage);
-        }
+        self.agent_usage
+            .entry(agent_instance_id.to_string())
+            .or_default()
+            .accumulate(usage);
     }
 
     /// Rebuild per-AgentInstance token/cost buckets from durable message facts.
@@ -86,14 +82,12 @@ mod tests {
             crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
             other => panic!("unexpected create result: {other:?}"),
         };
-        let (turn_id, _) = state.start_turn(&session_id, "root", "hello").unwrap();
         let session = state.session_mut(&session_id).unwrap();
-        session.account_step_usage(Some(&turn_id), &usage(10, 4));
-        session.account_step_usage(Some(&turn_id), &usage(3, 1));
+        session.account_step_usage(Some("root"), &usage(10, 4));
+        session.account_step_usage(Some("root"), &usage(3, 1));
 
         assert_eq!(session.cumulative_usage.input, 13);
         assert_eq!(session.cumulative_usage.output, 5);
-        assert_eq!(session.turns[&turn_id].usage.total_tokens, 18);
         assert_eq!(session.agent_usage["root"].input, 13);
     }
 

@@ -34,7 +34,7 @@ impl SessionStore {
     pub fn agent_report_for_turn(
         &self,
         turn_id: &str,
-    ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError> {
+    ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError> {
         Ok(self
             .aggregate()?
             .executions

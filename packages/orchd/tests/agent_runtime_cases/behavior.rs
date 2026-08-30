@@ -51,7 +51,7 @@ async fn lifecycle_and_activity_are_independent() {
     assert_eq!(reopened.lifecycle, AgentInstanceLifecycle::Open);
     model.push_text("reused after reopen").await;
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "reopened-input".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -100,7 +100,7 @@ async fn each_run_gets_one_fresh_prompt_from_its_resource_snapshot() {
 
     for (suffix, context) in [("first", "day one"), ("second", "day two")] {
         runtime
-            .run_agent(SendAgentInputRequest {
+            .send_agent_input(SendAgentInputRequest {
                 request_id: format!("request-{suffix}"),
                 session_id: "session-prompt-refresh".into(),
                 agent_instance_id: "root".into(),
@@ -141,7 +141,6 @@ async fn canonical_submission_preserves_distinct_root_input_identity() {
         delivery: AgentInputDelivery::StartWhenIdle,
         content: MessageContent::String("start with a distinct identity".into()),
         submitted_at: 10,
-        user_turn_id: Some("turn-distinct-root".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
@@ -151,7 +150,15 @@ async fn canonical_submission_preserves_distinct_root_input_identity() {
         .await
         .expect("canonical input should start a run");
     assert_eq!(receipt.input_id, input.input_id);
-    wait_until_idle(&runtime).await;
+    let report = runtime
+        .wait_agent_input_completion(
+            input.session_id.clone(),
+            input.agent_instance_id.clone(),
+            input.input_id.clone(),
+        )
+        .await
+        .expect("root input should publish its terminal report");
+    assert_eq!(report.root_input_id, input.input_id);
 
     let commands = commits.commands.lock().await;
     let started = commands.iter().find_map(|command| match command {

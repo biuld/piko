@@ -51,13 +51,13 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
     active_tool_names: None,
 };
     assert!(matches!(
-        runtime.run_agent(request).await,
+        runtime.send_agent_input(request).await,
         Err(piko_orchd_api::AgentApiError::PersistenceFailed(_))
     ));
     assert_eq!(model.call_count().await, 0);
 
     let report = runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "atomic-start-retry".into(),
             message_id: "message-atomic-start-retry".into(),
             content: MessageContent::String("retry".into()),
@@ -74,9 +74,6 @@ async fn failed_run_start_commit_rolls_back_execution_reservation() {
             active_tool_names: None,
 }
         })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
     assert_eq!(report.summary, "runs after retry");
@@ -120,7 +117,7 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .run_agent(SendAgentInputRequest {
+                .wait_sent_agent(SendAgentInputRequest {
                     request_id: "start-cancel".into(),
                     session_id: "session-start-cancel".into(),
                     agent_instance_id: "root".into(),
@@ -132,8 +129,6 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
-                .await?
-                .wait()
                 .await
         })
     };
@@ -190,7 +185,7 @@ async fn terminal_report_is_not_published_until_retry_commits() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .run_agent(SendAgentInputRequest {
+                .wait_sent_agent(SendAgentInputRequest {
                     request_id: "terminal-retry".into(),
                     session_id: "session-1".into(),
                     agent_instance_id: "root".into(),
@@ -202,8 +197,6 @@ async fn terminal_report_is_not_published_until_retry_commits() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
-                .await?
-                .wait()
                 .await
         })
     };
@@ -256,7 +249,7 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .run_agent(SendAgentInputRequest {
+                .wait_sent_agent(SendAgentInputRequest {
                     request_id: "finalizing-cancel".into(),
                     session_id: "session-1".into(),
                     agent_instance_id: "root".into(),
@@ -268,8 +261,6 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
                 prompt_resources: None,
                 active_tool_names: None,
 })
-                .await?
-                .wait()
                 .await
         })
     };
@@ -305,7 +296,7 @@ async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavail
     commits.conflict_next_run_terminal();
 
     let result = runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "terminal-conflict".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -317,13 +308,10 @@ async fn permanent_terminal_conflict_publishes_no_report_and_marks_agent_unavail
         prompt_resources: None,
         active_tool_names: None,
 })
-        .await
-        .unwrap()
-        .wait()
         .await;
     assert!(matches!(
         result,
-        Err(piko_orchd_api::AgentApiError::PersistenceFailed(_))
+        Err(piko_orchd_api::AgentApiError::InvalidState)
     ));
     let snapshot = runtime
         .agent_snapshot("session-1".into(), "root".into())
@@ -360,7 +348,7 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
         .await
         .unwrap();
     let report = runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "panic".into(),
             session_id: "session-panic".into(),
             agent_instance_id: "root".into(),
@@ -372,9 +360,6 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
         prompt_resources: None,
         active_tool_names: None,
         })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
     assert!(matches!(
@@ -422,7 +407,7 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
         .unwrap();
 
     let report = runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "message-atomicity".into(),
             session_id: "session-message-atomicity".into(),
             agent_instance_id: "root".into(),
@@ -434,9 +419,6 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
         prompt_resources: None,
         active_tool_names: None,
 })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
     assert!(matches!(

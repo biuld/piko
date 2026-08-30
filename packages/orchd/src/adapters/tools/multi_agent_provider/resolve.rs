@@ -24,6 +24,17 @@ impl MessageWhen {
     }
 }
 
+/// Model-facing admission result. Durable disposition stays on the receipt.
+pub(super) fn tool_disposition(disposition: piko_protocol::AgentInputDisposition) -> &'static str {
+    match disposition {
+        piko_protocol::AgentInputDisposition::AppliedAsRoot
+        | piko_protocol::AgentInputDisposition::AppliedToStep => "accepted",
+        piko_protocol::AgentInputDisposition::PendingFollowUp => "queued",
+        piko_protocol::AgentInputDisposition::PendingSteer => "steered",
+        piko_protocol::AgentInputDisposition::Cancelled => "cancelled",
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct ToolFail {
     pub code: String,
@@ -229,7 +240,7 @@ pub(super) fn stable_runtime_id(execution_id: &str, tool_call_id: &str) -> Strin
     piko_orchd_api::stable_internal_id("spawn", &[execution_id, tool_call_id])
 }
 
-pub(super) fn report_value(report: &piko_protocol::AgentRunReport) -> serde_json::Value {
+pub(super) fn report_value(report: &piko_protocol::AgentWorkReport) -> serde_json::Value {
     serde_json::json!({
         "agent_instance_id": report.agent_instance_id,
         "outcome": report.outcome,

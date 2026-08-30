@@ -68,7 +68,6 @@ pub struct OrchAgentRunRunner {
 
 struct ActiveAgentRunRuntime {
     run_id: String,
-    agent_instance_id: String,
     observation: Arc<piko_orchd::events::SessionOutputHub>,
 }
 

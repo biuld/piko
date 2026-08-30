@@ -48,12 +48,12 @@ async fn mock_turn_with_storage_populates_state() {
     };
 
     let turn_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
     for event in &turn_events {
         if let Event::CommandResponse {
@@ -136,12 +136,12 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         .unwrap();
 
     let events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            session_id: session_id.clone(),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
 
     assert!(
@@ -149,8 +149,7 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
             Event::SessionReconciled(reconciled)
                 if reconciled.reason == piko_protocol::ReconcileReason::RetentionExhausted
                     && reconciled.snapshot.pending_approvals.len() == 1
-                    && reconciled.snapshot.active_turns.iter().any(|turn|
-                        turn.status == piko_protocol::TurnStatus::WaitingForApproval)
+                    && reconciled.snapshot.active_turns.is_empty()
         )),
         "events={events:?}"
     );

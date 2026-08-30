@@ -330,10 +330,12 @@ impl Shell {
             .live_session
             .as_ref()
             .is_some_and(|session| {
-                session
-                    .active_turns
-                    .iter()
-                    .any(|turn| Some(turn.agent_instance_id.as_str()) == view_key)
+                view_key.is_some_and(|id| {
+                    session
+                        .agent_work
+                        .get(id)
+                        .is_some_and(|work| work.active_work.is_some())
+                })
             });
         let context = self
             .state

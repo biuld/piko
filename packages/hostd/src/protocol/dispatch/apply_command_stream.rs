@@ -12,36 +12,9 @@ impl HostServer {
                 self.start_oauth_login(&command_id, provider, mode, tx)
                     .await
             }
-            Command::ChatSubmit {
-                session_id,
-                target_agent_instance_id,
-                text,
-                ..
-            } => {
-                self.0
-                    .apply_chat_submit(
-                        command_id,
-                        session_id,
-                        target_agent_instance_id,
-                        piko_protocol::MessageContent::String(text),
-                        tx,
-                    )
-                    .await
-            }
-            Command::ChatSubmitMessage {
-                session_id,
-                target_agent_instance_id,
-                content,
-                ..
-            } => {
-                self.0
-                    .apply_chat_submit(
-                        command_id,
-                        session_id,
-                        target_agent_instance_id,
-                        content,
-                        tx,
-                    )
+            Command::AgentInputSubmit { input, .. } => {
+                crate::application::AgentWorkControl::new(&self.0)
+                    .submit(command_id, input, tx)
                     .await
             }
             Command::SessionCompact {

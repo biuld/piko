@@ -153,17 +153,11 @@ async fn create_and_input_requests_are_idempotent() {
     active_tool_names: None,
 };
     let first_report = runtime
-        .run_agent(input.clone())
-        .await
-        .unwrap()
-        .wait()
+        .wait_sent_agent(input.clone())
         .await
         .unwrap();
     let duplicate_report = runtime
-        .run_agent(input)
-        .await
-        .unwrap()
-        .wait()
+        .wait_sent_agent(input)
         .await
         .unwrap();
     assert_eq!(first_report.report_id, duplicate_report.report_id);
@@ -172,7 +166,7 @@ async fn create_and_input_requests_are_idempotent() {
 
 #[tokio::test]
 async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() {
-    let (runtime, _commits, model) = attached_runtime().await;
+    let (runtime, commits, model) = attached_runtime().await;
     model.push_text("completed once").await;
     let input = SendAgentInputRequest {
         request_id: "input-completed-detached".into(),
@@ -187,20 +181,31 @@ async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() 
     active_tool_names: None,
 };
     let report = runtime
-        .run_agent(input.clone())
-        .await
-        .unwrap()
-        .wait()
+        .wait_sent_agent(input.clone())
         .await
         .unwrap();
 
+    let canonical = commits
+        .commands
+        .lock()
+        .await
+        .iter()
+        .find_map(|command| match command {
+            piko_protocol::AgentDurableCommand::RunStarted { input, .. }
+                if input.request_id == "input-completed-detached" =>
+            {
+                Some(input.clone())
+            }
+            _ => None,
+        })
+        .expect("root admission must retain its canonical input");
     let receipt = runtime
-        .send_agent_input_detached(input, "root".into())
+        .submit_agent_input_detached(canonical, "root".into())
         .await
         .unwrap();
     assert_eq!(
         receipt.disposition,
-        piko_protocol::InputDisposition::Duplicate
+        piko_protocol::AgentInputDisposition::AppliedAsRoot
     );
     let inbox = runtime
         .agent_inbox("session-1".into(), "root".into())
@@ -265,7 +270,7 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
     runtime.register_agent(updated).await;
     model.push_text("done").await;
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "run-snapshot".into(),
             session_id: "session-1".into(),
             agent_instance_id: "snapshot-child".into(),

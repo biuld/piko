@@ -1,6 +1,6 @@
 //! Execution-terminal command handling.
 
-use piko_protocol::{AgentInputDisposition, AgentRunReport, CommitError};
+use piko_protocol::{AgentInputDisposition, AgentWorkReport, CommitError};
 use piko_session_store::EventData;
 
 use super::stable;
@@ -9,7 +9,7 @@ pub(super) fn finish_run(
     aggregate: &piko_session_store::SessionAggregate,
     session_id: &str,
     run_id: String,
-    report: AgentRunReport,
+    report: AgentWorkReport,
     finished_at: i64,
 ) -> Result<(String, String, i64, Vec<EventData>), CommitError> {
     let execution = aggregate
@@ -23,13 +23,19 @@ pub(super) fn finish_run(
     if execution.report.is_some() {
         return Err(CommitError::IdempotencyConflict);
     }
+    let root_input_id = aggregate
+        .agent_inputs
+        .values()
+        .find(|input| input.input.request_id == execution.started.request_id)
+        .and_then(|input| input.root_input_id.as_deref())
+        .ok_or(CommitError::IdentityMismatch)?;
     let mut events = aggregate
         .agent_inputs
         .values()
         .filter(|input| {
             input.input.agent_instance_id == execution.started.agent_instance_id
                 && input.disposition == AgentInputDisposition::PendingSteer
-                && input.bound_run_id.as_deref() == Some(run_id.as_str())
+                && input.root_input_id.as_deref() == Some(root_input_id)
         })
         .map(|input| {
             EventData::AgentInputDispositionChangedV1(
@@ -38,8 +44,6 @@ pub(super) fn finish_run(
                     input_id: input.input.input_id.clone(),
                     disposition: AgentInputDisposition::Cancelled,
                     root_input_id: input.root_input_id.clone(),
-                    run_id: input.run_id.clone(),
-                    bound_run_id: input.bound_run_id.clone(),
                     model_step_id: None,
                     changed_at: finished_at,
                 },

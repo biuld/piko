@@ -1,38 +1,72 @@
 use super::*;
 
 #[test]
-fn text_and_multimodal_chat_commands_are_wire_compatible() {
-    let legacy: Command = serde_json::from_value(serde_json::json!({
-        "type": "chat_submit",
-        "command_id": "legacy",
-        "session_id": "s1",
-        "target_agent_instance_id": "a1",
-        "text": "hello"
-    }))
-    .unwrap();
-    assert!(matches!(legacy, Command::ChatSubmit { text, .. } if text == "hello"));
-
-    let structured = Command::ChatSubmitMessage {
-        command_id: "image".into(),
+fn canonical_agent_input_commands_round_trip() {
+    let input = crate::AgentInput {
+        input_id: "input-1".into(),
+        request_id: "request-1".into(),
         session_id: "s1".into(),
-        target_agent_instance_id: "a1".into(),
-        content: crate::MessageContent::Blocks(vec![
-            crate::ContentBlock::Text {
-                text: "inspect".into(),
-            },
-            crate::ContentBlock::Image {
-                data: "AA==".into(),
-                mime_type: "image/png".into(),
-            },
-        ]),
+        agent_instance_id: "a1".into(),
+        origin: crate::AgentInputOrigin::User,
+        delivery: crate::AgentInputDelivery::FollowUp,
+        content: crate::MessageContent::String("hello".into()),
+        submitted_at: 42,
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
     };
-    let value = serde_json::to_value(&structured).unwrap();
-    assert_eq!(value["type"], "chat_submit_message");
-    assert_eq!(value["content"][1]["type"], "image");
-    assert_eq!(
-        serde_json::from_value::<Command>(value).unwrap(),
-        structured
+    let submit = Command::AgentInputSubmit {
+        command_id: "command-1".into(),
+        input: input.clone(),
+    };
+    let value = serde_json::to_value(&submit).unwrap();
+    assert_eq!(value["type"], "agent_input_submit");
+    assert_eq!(serde_json::from_value::<Command>(value).unwrap(), submit);
+
+    let cancel = Command::AgentInputCancel {
+        command_id: "command-2".into(),
+        session_id: input.session_id,
+        agent_instance_id: input.agent_instance_id,
+        input_id: input.input_id,
+    };
+    let value = serde_json::to_value(&cancel).unwrap();
+    assert_eq!(value["type"], "agent_input_cancel");
+    assert_eq!(serde_json::from_value::<Command>(value).unwrap(), cancel);
+}
+
+#[test]
+fn follow_up_and_steer_helpers_build_agent_input_submit() {
+    let follow_up = Command::submit_follow_up(
+        "c1",
+        "s1",
+        "a1",
+        crate::MessageContent::String("hello".into()),
     );
+    let Command::AgentInputSubmit { input, .. } = follow_up else {
+        panic!("expected AgentInputSubmit");
+    };
+    assert_eq!(input.session_id, "s1");
+    assert_eq!(input.agent_instance_id, "a1");
+    assert_eq!(input.delivery, crate::AgentInputDelivery::FollowUp);
+    assert_eq!(input.content, crate::MessageContent::String("hello".into()));
+
+    let steer = Command::submit_steer(
+        "c2",
+        "s1",
+        "a1",
+        crate::MessageContent::Blocks(vec![crate::ContentBlock::Image {
+            data: "AA==".into(),
+            mime_type: "image/png".into(),
+        }]),
+    );
+    let Command::AgentInputSubmit { input, .. } = steer else {
+        panic!("expected AgentInputSubmit");
+    };
+    assert_eq!(input.delivery, crate::AgentInputDelivery::SteerActive);
+    assert!(matches!(
+        input.content,
+        crate::MessageContent::Blocks(blocks)
+            if matches!(blocks.as_slice(), [crate::ContentBlock::Image { data, .. }] if data == "AA==")
+    ));
 }
 
 #[test]

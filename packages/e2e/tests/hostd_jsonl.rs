@@ -172,15 +172,15 @@ fn chat_persists_transcript_and_supports_rollout_diff_and_usage_queries() {
     let session_id = host.create_session("create");
     let agent_instance_id = root_agent_id(&session_id);
 
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id.clone(),
-        text: "hello from jsonl".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        agent_instance_id.clone(),
+        MessageContent::String("hello from jsonl".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     host.wait_for("turn started", |message| {
         matches!(
@@ -268,15 +268,15 @@ fn multimodal_submit_preserves_structured_content_at_the_host_boundary() {
         },
     ]);
 
-    host.send(Command::ChatSubmitMessage {
-        command_id: "submit-message".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: agent_instance_id,
+    host.send(Command::submit_follow_up(
+        "submit-message",
+        session_id.clone(),
+        agent_instance_id,
         content,
-    });
+    ));
     assert!(matches!(
         host.command_result("submit-message"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
     let user = host.wait_for("multimodal user transcript", |message| {
         matches!(

@@ -40,7 +40,7 @@ async fn parent_next_run_injects_unread_completion_before_input() {
 
     // Parent's next turn should inject the completion before the user input.
     runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "parent-after-child".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -52,9 +52,6 @@ async fn parent_next_run_injects_unread_completion_before_input() {
             prompt_resources: None,
             active_tool_names: None,
         })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
 
@@ -101,7 +98,7 @@ async fn parent_next_run_injects_unread_completion_before_input() {
     model.push_text("second parent turn").await;
     let before = executions.messages().len();
     runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "parent-after-inject".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -113,9 +110,6 @@ async fn parent_next_run_injects_unread_completion_before_input() {
             prompt_resources: None,
             active_tool_names: None,
         })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
     let completions_after = executions
@@ -175,7 +169,7 @@ async fn consumed_inbox_skips_completion_injection() {
     );
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .wait_sent_agent(SendAgentInputRequest {
             request_id: "parent-after-collect".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -187,9 +181,6 @@ async fn consumed_inbox_skips_completion_injection() {
             prompt_resources: None,
             active_tool_names: None,
         })
-        .await
-        .unwrap()
-        .wait()
         .await
         .unwrap();
 

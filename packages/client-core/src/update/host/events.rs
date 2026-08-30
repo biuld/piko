@@ -1,49 +1,76 @@
-//! Live Turn, tool, queue, and prompt event projection.
+//! Live work, tool, queue, and prompt event projection.
 
-use crate::state::{ActiveTurn, ClientState, TurnFailure};
+use crate::state::{ClientState, TurnFailure};
 use piko_protocol::TurnStatus;
 
 use super::is_live_session_event;
 
 pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protocol::TurnEvent) {
-    let (session_id, turn_id, agent_instance_id) = match &event {
+    let (session_id, turn_id, agent_instance_id, status, failure) = match &event {
         piko_protocol::TurnEvent::Queued {
             session_id,
             turn_id,
             agent_instance_id,
             ..
-        }
-        | piko_protocol::TurnEvent::Started {
+        } => (
             session_id,
             turn_id,
             agent_instance_id,
-            ..
-        }
-        | piko_protocol::TurnEvent::Completed {
-            session_id,
-            turn_id,
-            agent_instance_id,
-            ..
-        }
-        | piko_protocol::TurnEvent::Failed {
-            session_id,
-            turn_id,
-            agent_instance_id,
-            ..
-        }
-        | piko_protocol::TurnEvent::Cancelled {
+            TurnStatus::Queued,
+            None,
+        ),
+        piko_protocol::TurnEvent::Started {
             session_id,
             turn_id,
             agent_instance_id,
             ..
         } => (
-            session_id.clone(),
-            turn_id.clone(),
-            agent_instance_id.clone(),
+            session_id,
+            turn_id,
+            agent_instance_id,
+            TurnStatus::Running,
+            None,
+        ),
+        piko_protocol::TurnEvent::Completed {
+            session_id,
+            turn_id,
+            agent_instance_id,
+            ..
+        } => (
+            session_id,
+            turn_id,
+            agent_instance_id,
+            TurnStatus::Completed,
+            None,
+        ),
+        piko_protocol::TurnEvent::Failed {
+            session_id,
+            turn_id,
+            agent_instance_id,
+            error,
+            ..
+        } => (
+            session_id,
+            turn_id,
+            agent_instance_id,
+            TurnStatus::Failed,
+            Some(error.clone()),
+        ),
+        piko_protocol::TurnEvent::Cancelled {
+            session_id,
+            turn_id,
+            agent_instance_id,
+            ..
+        } => (
+            session_id,
+            turn_id,
+            agent_instance_id,
+            TurnStatus::Cancelled,
+            None,
         ),
     };
 
-    if !is_live_session_event(state, &session_id) {
+    if !is_live_session_event(state, session_id) {
         return;
     }
 
@@ -51,87 +78,44 @@ pub(super) fn handle_turn_lifecycle(state: &mut ClientState, event: piko_protoco
         return;
     };
 
-    let failure = match &event {
-        piko_protocol::TurnEvent::Failed { error, .. } => Some(error.clone()),
-        _ => None,
-    };
-    let status = match &event {
-        piko_protocol::TurnEvent::Queued { .. } => TurnStatus::Queued,
-        piko_protocol::TurnEvent::Started { .. } => TurnStatus::Running,
-        piko_protocol::TurnEvent::Completed { .. } => TurnStatus::Completed,
-        piko_protocol::TurnEvent::Failed { .. } => TurnStatus::Failed,
-        piko_protocol::TurnEvent::Cancelled { .. } => TurnStatus::Cancelled,
-    };
-
-    let is_terminal = matches!(
+    if !matches!(
         status,
         TurnStatus::Completed | TurnStatus::Failed | TurnStatus::Cancelled
-    );
+    ) {
+        return;
+    }
 
-    if is_terminal {
-        // Usage chrome is projected only from ServerMessage::Usage.
-        session.active_turns.retain(|t| t.turn_id != turn_id);
-        if let Some(error) = failure {
-            session.turn_failures.retain(|item| item.turn_id != turn_id);
-            session.turn_failures.push(TurnFailure {
-                turn_id: turn_id.clone(),
-                agent_instance_id: agent_instance_id.clone(),
-                error,
-            });
-            const MAX_FAILURES: usize = 20;
-            if session.turn_failures.len() > MAX_FAILURES {
-                session
-                    .turn_failures
-                    .drain(..session.turn_failures.len() - MAX_FAILURES);
-            }
-        }
-        if let Some(timeline) = session.timelines.get_mut(&agent_instance_id) {
-            match status {
-                TurnStatus::Failed => {
-                    timeline.finish_turn(&turn_id, crate::timeline::ToolStatus::Failed)
-                }
-                TurnStatus::Cancelled => {
-                    timeline.finish_turn(&turn_id, crate::timeline::ToolStatus::Cancelled)
-                }
-                _ => {}
-            }
-        }
-    } else if let Some(existing) = session
-        .active_turns
-        .iter_mut()
-        .find(|t| t.turn_id == turn_id)
-    {
-        existing.status = status;
-    } else {
-        session.active_turns.push(ActiveTurn {
-            turn_id,
-            agent_instance_id,
-            status,
+    if let Some(error) = failure {
+        session
+            .turn_failures
+            .retain(|item| item.turn_id != *turn_id);
+        session.turn_failures.push(TurnFailure {
+            turn_id: turn_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+            error,
         });
+        const MAX_FAILURES: usize = 20;
+        if session.turn_failures.len() > MAX_FAILURES {
+            session
+                .turn_failures
+                .drain(..session.turn_failures.len() - MAX_FAILURES);
+        }
+    }
+    if let Some(timeline) = session.timelines.get_mut(agent_instance_id) {
+        match status {
+            TurnStatus::Failed => {
+                timeline.finish_turn(turn_id, crate::timeline::ToolStatus::Failed)
+            }
+            TurnStatus::Cancelled => {
+                timeline.finish_turn(turn_id, crate::timeline::ToolStatus::Cancelled)
+            }
+            _ => {}
+        }
     }
 }
 
-pub(super) fn handle_queue_event(state: &mut ClientState, event: piko_protocol::QueueEvent) {
-    let piko_protocol::QueueEvent::Updated {
-        session_id,
-        steer_count,
-        follow_up_count,
-        next_turn_count,
-        steer_preview,
-        follow_up_preview,
-    } = event;
-    if !is_live_session_event(state, &session_id) {
-        return;
-    }
-    if let Some(session) = &mut state.live_session {
-        session.queue = crate::state::QueueProjection {
-            steer_count,
-            follow_up_count,
-            next_turn_count,
-            steer_preview,
-            follow_up_preview,
-        };
-    }
+pub(super) fn handle_queue_event(_state: &mut ClientState, _event: piko_protocol::QueueEvent) {
+    // Queue counts come from AgentWorkSnapshot on reconcile.
 }
 
 pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protocol::ApprovalEvent) {
@@ -166,7 +150,7 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
                     });
                 crate::foreground::refresh_prompt_blocking(
                     &mut session.agents,
-                    &mut session.active_turns,
+                    &session.agent_work,
                     &session.pending_approvals,
                     &session.pending_interactions,
                     &agent_instance_id,
@@ -193,7 +177,7 @@ pub(super) fn handle_approval_event(state: &mut ClientState, event: piko_protoco
                 if let Some(agent_instance_id) = agent_instance_id {
                     crate::foreground::refresh_prompt_blocking(
                         &mut session.agents,
-                        &mut session.active_turns,
+                        &session.agent_work,
                         &session.pending_approvals,
                         &session.pending_interactions,
                         &agent_instance_id,
@@ -237,7 +221,7 @@ pub(super) fn handle_interaction_event(
                     });
                 crate::foreground::refresh_prompt_blocking(
                     &mut session.agents,
-                    &mut session.active_turns,
+                    &session.agent_work,
                     &session.pending_approvals,
                     &session.pending_interactions,
                     &agent_instance_id,
@@ -264,7 +248,7 @@ pub(super) fn handle_interaction_event(
                 if let Some(agent_instance_id) = agent_instance_id {
                     crate::foreground::refresh_prompt_blocking(
                         &mut session.agents,
-                        &mut session.active_turns,
+                        &session.agent_work,
                         &session.pending_approvals,
                         &session.pending_interactions,
                         &agent_instance_id,
@@ -299,7 +283,6 @@ pub(super) fn handle_usage_event(state: &mut ClientState, event: piko_protocol::
         session.last_context_tokens = Some(used);
     }
     if let Some(cumulative) = cumulative {
-        // Authoritative ledger from host — replace any local turn roll-up.
         session.cumulative_usage = Some(cumulative);
     }
 }

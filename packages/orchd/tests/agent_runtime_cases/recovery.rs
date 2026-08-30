@@ -17,8 +17,9 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
         agent_spec_id: "main".into(),
         parent_agent_instance_id: Some("root".into()),
     };
-    let report = piko_protocol::AgentRunReport {
+    let report = piko_protocol::AgentWorkReport {
         agent_instance_id: "child".into(),
+        root_input_id: "input-recovered-detached".into(),
         report_id: "report-recovered-detached".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
@@ -118,8 +119,9 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
         agent_spec_id: "main".into(),
         parent_agent_instance_id: Some("root".into()),
     };
-    let old_report = piko_protocol::AgentRunReport {
+    let old_report = piko_protocol::AgentWorkReport {
         agent_instance_id: "child".into(),
+        root_input_id: "input-old".into(),
         report_id: "report-old".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),
@@ -183,8 +185,9 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                             "child",
                             "replayed-old-execution",
                         ),
-                        report: piko_protocol::AgentRunReport {
+                        report: piko_protocol::AgentWorkReport {
                             agent_instance_id: "child".into(),
+                            root_input_id: "input-old".into(),
                             report_id: "report-old".into(),
                             outcome: piko_protocol::ExecutionOutcome::Succeeded {
                                 usage: Default::default(),
@@ -230,11 +233,11 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
         .unwrap();
     assert_eq!(
         duplicate.disposition,
-        piko_protocol::InputDisposition::Duplicate
+        piko_protocol::AgentInputDisposition::AppliedAsRoot
     );
     assert_eq!(model.call_count().await, 0);
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "after-recovery".into(),
             session_id: "session-recovery".into(),
             agent_instance_id: "child".into(),
@@ -304,7 +307,6 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
                     delivery: AgentInputDelivery::FollowUp,
                     content: MessageContent::String("continue".into()),
                     submitted_at: 1,
-                    user_turn_id: None,
                     caller_agent_instance_id: None,
                     detached_recipient_agent_instance_id: None,
                 }],
@@ -412,7 +414,7 @@ async fn attach_restores_durable_agent_spec_instead_of_live_registry() {
         .unwrap();
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "stale-spec-run".into(),
             session_id: "session-stale-spec".into(),
             agent_instance_id: "root".into(),

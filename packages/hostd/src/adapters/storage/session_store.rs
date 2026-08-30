@@ -70,7 +70,7 @@ impl SessionStorePort for BlockingSessionStore {
     async fn agent_report_for_turn(
         &self,
         turn_id: &str,
-    ) -> Result<Option<piko_protocol::AgentRunReport>, SessionStorageError> {
+    ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError> {
         let store = self.inner.clone();
         let turn_id = turn_id.to_string();
         self.pool

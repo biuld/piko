@@ -80,6 +80,7 @@ impl HostApp {
             None => None,
         };
         if let Some(projection) = projection.as_ref() {
+            snapshot.agent_work = projection.agent_work.values().cloned().collect();
             snapshot.model_steps = projection
                 .agent_executions
                 .values()
@@ -98,25 +99,40 @@ impl HostApp {
         let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
-        for turn in &mut snapshot.active_turns {
-            if snapshot
-                .pending_approvals
-                .iter()
-                .any(|approval| approval.agent_instance_id == turn.agent_instance_id)
-                || snapshot
-                    .pending_interactions
-                    .iter()
-                    .any(|interaction| interaction.agent_instance_id == turn.agent_instance_id)
-            {
-                turn.status = crate::api::TurnStatus::WaitingForApproval;
-            } else if agents.iter().any(|agent| {
-                agent.agent_instance_id == turn.agent_instance_id
-                    && agent.activity == piko_protocol::AgentActivity::Cancelling
-            }) {
-                turn.status = crate::api::TurnStatus::Cancelling;
-            }
-        }
         (snapshot, agents)
+    }
+
+    /// True when this session has live or durable Agent work that must not
+    /// race navigate/fork. Live runner and published `agent_work` are the
+    /// control surface.
+    pub(crate) async fn session_has_active_work(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, ProtocolError> {
+        self.state.lock().await.session(session_id)?;
+        let runner = self.turn_runner.lock().await.clone();
+        if runner.has_active_session_run(session_id).await {
+            return Ok(true);
+        }
+        if let Some(agents) = runner.list_agent_instances(session_id).await
+            && agents.iter().any(agent_info_is_live)
+        {
+            return Ok(true);
+        }
+        if let Some(session_dir) = self.session_paths.lock().await.get(session_id).cloned()
+            && let Ok(projection) = self
+                .session_store_factory
+                .open(&session_dir)
+                .load_projection()
+                .await
+            && projection
+                .agent_work
+                .values()
+                .any(|work| work.active_work.is_some() || work.foreground.is_busy())
+        {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub(super) async fn enrich_reconcile_messages(
@@ -169,6 +185,15 @@ impl HostApp {
         };
         Ok(self.enrich_session_view(session_id, snapshot, agents).await)
     }
+}
+
+fn agent_info_is_live(agent: &AgentInfo) -> bool {
+    matches!(
+        agent.activity,
+        piko_protocol::AgentActivity::Running
+            | piko_protocol::AgentActivity::WaitingForApproval
+            | piko_protocol::AgentActivity::Cancelling
+    )
 }
 
 fn merge_agent_usage_runtime(

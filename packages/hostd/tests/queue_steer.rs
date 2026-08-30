@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use piko_hostd::api::ServerMessage as Event;
 use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_hostd::protocol::HostServer;
-use support::{MockSessionPublisher, test_agent_run_process};
+use support::{MockSessionPublisher, running_agent_info, test_agent_run_process};
 
 #[derive(Clone, Default)]
 struct SteerAgentRunRunner {
@@ -61,31 +61,30 @@ impl AgentRunRunner for SteerAgentRunRunner {
                 request_id: input.operation_id,
                 session_id: input.session_id,
                 agent_instance_id: input.agent_instance_id,
-                disposition: piko_protocol::InputDisposition::Accepted,
-                run_id: None,
+                disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                 queued_position: None,
             },
             process: test_agent_run_process(started, completion),
         })
     }
 
-    async fn steer_agent(
+    async fn submit_agent_input(
         &self,
-        session_id: &str,
-        agent_instance_id: &str,
-        content: piko_protocol::MessageContent,
-    ) -> bool {
+        input: piko_protocol::AgentInput,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
         let running = self.active.lock().unwrap().as_ref().is_some_and(|run| {
-            run.session_id == session_id && run.agent_instance_id == agent_instance_id
+            run.session_id == input.session_id && run.agent_instance_id == input.agent_instance_id
         });
         if !running || !self.accept_steer {
-            return false;
+            return Err(piko_hostd::api::ProtocolError::InvalidCommand(
+                "steer rejected".into(),
+            ));
         }
-        self.raw_steers.lock().unwrap().push(content.clone());
+        self.raw_steers.lock().unwrap().push(input.content.clone());
         self.steers.lock().unwrap().push((
-            agent_instance_id.to_string(),
-            match content {
-                piko_protocol::MessageContent::String(text) => text,
+            input.agent_instance_id.clone(),
+            match &input.content {
+                piko_protocol::MessageContent::String(text) => text.clone(),
                 piko_protocol::MessageContent::Blocks(blocks) => blocks
                     .iter()
                     .map(piko_protocol::ContentBlock::text_projection)
@@ -93,12 +92,41 @@ impl AgentRunRunner for SteerAgentRunRunner {
                     .join("\n"),
             },
         ));
-        true
+        Ok(piko_protocol::AgentInputReceipt {
+            input_id: input.input_id,
+            request_id: input.request_id,
+            session_id: input.session_id,
+            agent_instance_id: input.agent_instance_id,
+            disposition: piko_protocol::AgentInputDisposition::PendingSteer,
+            queued_position: None,
+        })
     }
 
     async fn cancel_agent_run(&self, operation: &piko_hostd::ports::AgentOperationAddress) -> bool {
         self.active.lock().unwrap().as_ref().is_some_and(|run| {
             run.session_id == operation.session_id && run.turn_id == operation.operation_id
+        })
+    }
+
+    async fn has_active_session_run(&self, session_id: &str) -> bool {
+        self.active
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|run| run.session_id == session_id)
+    }
+
+    async fn list_agent_instances(
+        &self,
+        session_id: &str,
+    ) -> Option<Vec<piko_protocol::AgentInfo>> {
+        self.active.lock().unwrap().as_ref().and_then(|run| {
+            (run.session_id == session_id).then(|| {
+                vec![running_agent_info(
+                    session_id,
+                    run.agent_instance_id.clone(),
+                )]
+            })
         })
     }
 }
@@ -129,12 +157,12 @@ async fn structured_image_content_reaches_start_and_steer_runner_ports() {
     let turn_content = image_content.clone();
     let turn = tokio::spawn(async move {
         turn_server
-            .handle_command(piko_hostd::api::Command::ChatSubmitMessage {
-                command_id: "submit-image".into(),
-                session_id: turn_session,
-                target_agent_instance_id: turn_agent,
-                content: turn_content,
-            })
+            .handle_command(piko_hostd::api::Command::submit_follow_up(
+                "submit-image",
+                turn_session,
+                turn_agent,
+                turn_content,
+            ))
             .await
     });
     while runner.inputs.lock().unwrap().is_empty() {
@@ -146,17 +174,17 @@ async fn structured_image_content_reaches_start_and_steer_runner_ports() {
     );
 
     let steered = server
-        .handle_command(piko_hostd::api::Command::QueueSteerMessage {
-            command_id: "steer-image".into(),
+        .handle_command(piko_hostd::api::Command::submit_steer(
+            "steer-image",
             session_id,
-            agent_instance_id: agent,
-            content: image_content.clone(),
-        })
+            agent,
+            image_content.clone(),
+        ))
         .await;
     assert!(steered.iter().any(|event| matches!(
         event,
         Event::CommandResponse {
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
             ..
         }
     )));
@@ -177,12 +205,12 @@ async fn start_running_turn(
     let target = agent_instance_id.to_string();
     let turn = tokio::spawn(async move {
         server_for_turn
-            .handle_command(piko_hostd::api::Command::ChatSubmit {
-                command_id: "submit".into(),
-                target_agent_instance_id: target,
-                session_id: turn_session_id,
-                text: "wait".into(),
-            })
+            .handle_command(piko_hostd::api::Command::submit_follow_up(
+                "submit",
+                turn_session_id,
+                target,
+                piko_protocol::MessageContent::String("wait".into()),
+            ))
             .await
     });
     let turn_id = loop {
@@ -193,11 +221,9 @@ async fn start_running_turn(
             })
             .await;
         let found = refresh.iter().find_map(|event| match event {
-            Event::SessionReconciled(reconciled) => reconciled
-                .snapshot
-                .active_turns
-                .first()
-                .map(|turn| turn.turn_id.clone()),
+            Event::SessionReconciled(reconciled) => {
+                running_root_input_id(reconciled, agent_instance_id)
+            }
             _ => None,
         });
         if let Some(turn_id) = found {
@@ -206,6 +232,38 @@ async fn start_running_turn(
         tokio::task::yield_now().await;
     };
     (turn, turn_id)
+}
+
+fn running_root_input_id(
+    reconciled: &piko_protocol::SessionReconciledEvent,
+    agent_instance_id: &str,
+) -> Option<String> {
+    if let Some(root_input_id) = reconciled
+        .snapshot
+        .agent_work
+        .iter()
+        .find(|work| work.agent_instance_id == agent_instance_id)
+        .and_then(|work| {
+            work.active_work
+                .as_ref()
+                .map(|active| active.root_input_id.clone())
+        })
+    {
+        return Some(root_input_id);
+    }
+    reconciled
+        .agents
+        .iter()
+        .any(|agent| {
+            agent.agent_instance_id == agent_instance_id
+                && matches!(
+                    agent.activity,
+                    piko_protocol::AgentActivity::Running
+                        | piko_protocol::AgentActivity::WaitingForApproval
+                        | piko_protocol::AgentActivity::Cancelling
+                )
+        })
+        .then(String::new)
 }
 
 fn session_id_from(events: &[Event]) -> String {
@@ -237,12 +295,12 @@ async fn queue_steer_fails_closed_when_idle() {
     let session_id = session_id_from(&created);
     let agent = format!("agent_{session_id}_root");
     let events = server
-        .handle_command(piko_hostd::api::Command::QueueSteer {
-            command_id: "steer".into(),
+        .handle_command(piko_hostd::api::Command::submit_steer(
+            "steer",
             session_id,
-            agent_instance_id: agent,
-            message: "go left".into(),
-        })
+            agent,
+            piko_protocol::MessageContent::String("go left".into()),
+        ))
         .await;
     assert!(events.iter().any(|event| matches!(
         event,
@@ -269,12 +327,12 @@ async fn queue_steer_fails_when_runtime_rejects() {
     let agent = format!("agent_{session_id}_root");
     let (turn, _turn_id) = start_running_turn(&server, &session_id, &agent).await;
     let events = server
-        .handle_command(piko_hostd::api::Command::QueueSteer {
-            command_id: "steer".into(),
-            session_id: session_id.clone(),
-            agent_instance_id: agent,
-            message: "go left".into(),
-        })
+        .handle_command(piko_hostd::api::Command::submit_steer(
+            "steer",
+            session_id.clone(),
+            agent,
+            piko_protocol::MessageContent::String("go left".into()),
+        ))
         .await;
     assert!(events.iter().any(|event| matches!(
         event,
@@ -303,24 +361,25 @@ async fn queue_steer_injects_only_after_runtime_accepts() {
     let (_turn, _turn_id) = start_running_turn(&server, &session_id, &agent).await;
 
     let steered = server
-        .handle_command(piko_hostd::api::Command::QueueSteer {
-            command_id: "steer".into(),
+        .handle_command(piko_hostd::api::Command::submit_steer(
+            "steer",
             session_id,
-            agent_instance_id: agent.clone(),
-            message: "go left".into(),
-        })
+            agent.clone(),
+            piko_protocol::MessageContent::String("go left".into()),
+        ))
         .await;
     assert!(steered.iter().any(|event| matches!(
         event,
         Event::CommandResponse {
-            result: Ok(piko_hostd::api::CommandResult::Empty),
+            result: Ok(piko_hostd::api::CommandResult::AgentInputSubmitted { .. }),
             ..
         }
     )));
-    assert!(steered.iter().any(|event| matches!(
-        event,
-        Event::Queue(piko_protocol::QueueEvent::Updated { steer_count: 1, .. })
-    )));
+    assert!(
+        steered
+            .iter()
+            .any(|event| matches!(event, Event::SessionReconciled(_)))
+    );
     assert_eq!(
         runner.steers.lock().unwrap().as_slice(),
         &[(agent, "go left".into())]

@@ -44,10 +44,10 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
 })
         .await
         .unwrap();
-    assert_eq!(first.disposition, piko_protocol::InputDisposition::Accepted);
+    assert_eq!(first.disposition, piko_protocol::AgentInputDisposition::AppliedAsRoot);
     assert_eq!(
         follow_up.disposition,
-        piko_protocol::InputDisposition::Queued
+        piko_protocol::AgentInputDisposition::PendingFollowUp
     );
     assert!(commits.commands.lock().await.iter().any(|command| matches!(
         command,
@@ -132,23 +132,22 @@ async fn canonical_follow_up_retry_preserves_distinct_input_identity() {
         delivery: AgentInputDelivery::FollowUp,
         content: MessageContent::String("retry this follow-up".into()),
         submitted_at: 10,
-        user_turn_id: Some("canonical-follow-up-turn".into()),
         caller_agent_instance_id: None,
         detached_recipient_agent_instance_id: None,
     };
     let first = runtime.submit_agent_input(input.clone()).await.unwrap();
     assert_eq!(
         first.disposition,
-        piko_protocol::InputDisposition::Queued
+        piko_protocol::AgentInputDisposition::PendingFollowUp
     );
     assert_eq!(first.input_id, input.input_id);
 
     let retry = runtime.submit_agent_input(input).await.unwrap();
-    assert_eq!(retry.disposition, piko_protocol::InputDisposition::Duplicate);
+    assert_eq!(retry.disposition, piko_protocol::AgentInputDisposition::PendingFollowUp);
     assert_eq!(retry.input_id, "canonical-follow-up-input");
 
     let cancelled = runtime
-        .cancel_agent_input_id(
+        .cancel_agent_input(
             "session-1".into(),
             "root".into(),
             "canonical-follow-up-input".into(),
@@ -166,15 +165,16 @@ async fn canonical_follow_up_retry_preserves_distinct_input_identity() {
 
 #[tokio::test]
 async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
-    let (runtime, _commits, model) = attached_runtime().await;
+    let (runtime, commits, model) = attached_runtime().await;
     model
         .push_response(faux_provider::CannedResponse::waiting_for_cancel())
         .await;
     model
         .push_response(faux_provider::CannedResponse::waiting_for_cancel())
         .await;
-    runtime
-        .send_agent_input(SendAgentInputRequest {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        runtime.send_agent_input(SendAgentInputRequest {
             request_id: "active-before-queue".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -185,12 +185,18 @@ async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
             delivery: AgentInputDelivery::StartWhenIdle,
             prompt_resources: None,
             active_tool_names: None,
-        })
-        .await
-        .unwrap();
-    while model.call_count().await < 1 {
-        tokio::task::yield_now().await;
-    }
+        }),
+    )
+    .await
+    .expect("active-before-queue admission timed out")
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while model.call_count().await < 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("first root did not start: {:?}", commits.commands));
     runtime
         .send_agent_input(SendAgentInputRequest {
             request_id: "queued-root-request".into(),
@@ -210,9 +216,13 @@ async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
         .cancel_agent_run("session-1".into(), "root".into())
         .await
         .unwrap();
-    while model.call_count().await < 2 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while model.call_count().await < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("queued root did not advance: {:?}", commits.commands));
 
     let steer = runtime
         .send_agent_input(SendAgentInputRequest {
@@ -229,7 +239,7 @@ async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
         })
         .await
         .expect("the active queued follow-up must accept steer");
-    assert_eq!(steer.disposition, piko_protocol::InputDisposition::Queued);
+    assert_eq!(steer.disposition, piko_protocol::AgentInputDisposition::PendingSteer);
     runtime
         .cancel_agent_run("session-1".into(), "root".into())
         .await
@@ -264,7 +274,7 @@ async fn queued_follow_up_can_be_cancelled_before_it_starts() {
         tokio::task::yield_now().await;
     }
     let queued = runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "cancel-queued-input".into(),
             session_id: "session-1".into(),
             agent_instance_id: "root".into(),
@@ -279,19 +289,29 @@ async fn queued_follow_up_can_be_cancelled_before_it_starts() {
         .await
         .unwrap();
     assert_eq!(
-        queued.receipt.disposition,
-        piko_protocol::InputDisposition::Queued
+        queued.disposition,
+        piko_protocol::AgentInputDisposition::PendingFollowUp
     );
-    let cancelled = runtime
-        .cancel_agent_input(
+    let (started, cancelled) = tokio::join!(
+        runtime.wait_agent_input_started(
             "session-1".into(),
             "root".into(),
             "cancel-queued-input".into(),
-        )
-        .await
-        .unwrap();
+        ),
+        async {
+            tokio::task::yield_now().await;
+            runtime
+                .cancel_agent_input(
+                    "session-1".into(),
+                    "root".into(),
+                    "cancel-queued-input".into(),
+                )
+                .await
+        }
+    );
+    let cancelled = cancelled.unwrap();
     assert!(cancelled.accepted);
-    assert!(matches!(queued.wait().await, Err(piko_orchd_api::AgentApiError::Cancelled)));
+    assert!(matches!(started, Err(piko_orchd_api::AgentApiError::Cancelled)));
     assert!(commits.commands.lock().await.iter().any(|command| matches!(
         command,
         AgentDurableCommand::AgentInputDispositionChanged { change }

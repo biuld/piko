@@ -16,8 +16,9 @@ pub enum AgentMailboxEvent {
         report_id: String,
         source_agent_instance_id: AgentInstanceId,
     },
-    RunFinished {
+    WorkFinished {
         agent_instance_id: AgentInstanceId,
+        root_input_id: AgentInputId,
         report_id: String,
     },
     InputQueued {
@@ -32,7 +33,7 @@ impl AgentMailboxEvent {
             Self::InboxReport {
                 agent_instance_id, ..
             }
-            | Self::RunFinished {
+            | Self::WorkFinished {
                 agent_instance_id, ..
             }
             | Self::InputQueued {

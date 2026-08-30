@@ -11,15 +11,15 @@ fn spawn_agent_round_trips_from_jsonl_hostd_through_orchd_and_back() {
     let session_id = host.create_session("create");
     let root_agent = root_agent_id(&session_id);
 
-    host.send(Command::ChatSubmit {
-        command_id: "submit".into(),
-        session_id: session_id.clone(),
-        target_agent_instance_id: root_agent.clone(),
-        text: "delegate this subtask".into(),
-    });
+    host.send(Command::submit_follow_up(
+        "submit",
+        session_id.clone(),
+        root_agent.clone(),
+        piko_protocol::MessageContent::String("delegate this subtask".into()),
+    ));
     assert!(matches!(
         host.command_result("submit"),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
 
     let root_turn_id = match host.wait_for("root turn started", |message| {

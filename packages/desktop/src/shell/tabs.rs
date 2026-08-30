@@ -72,13 +72,7 @@ pub fn view_target_requires_action(core: &ClientState, view_key: Option<&str>) -
     let (Some(session), Some(id)) = (core.live_session.as_ref(), view_key) else {
         return false;
     };
-    agent_foreground(
-        id,
-        &session.agents,
-        &session.active_turns,
-        &session.pending_approvals,
-        &session.pending_interactions,
-    ) == AgentForeground::RequiresAction
+    agent_foreground(id, session) == AgentForeground::RequiresAction
 }
 
 pub fn truncate_chrome_label(label: &str, max_chars: usize) -> String {
@@ -158,13 +152,7 @@ fn tab_badge(core: &ClientState, agent_instance_id: &str, selected: bool) -> Tab
     let Some(session) = core.live_session.as_ref() else {
         return TabBadge::None;
     };
-    let foreground = agent_foreground(
-        agent_instance_id,
-        &session.agents,
-        &session.active_turns,
-        &session.pending_approvals,
-        &session.pending_interactions,
-    );
+    let foreground = agent_foreground(agent_instance_id, session);
     match foreground {
         AgentForeground::RequiresAction => TabBadge::Attention,
         AgentForeground::Running | AgentForeground::Queued | AgentForeground::Cancelling => {

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
-use piko_protocol::{AgentInstanceLifecycle, MessageContent};
+use piko_protocol::AgentInstanceLifecycle;
 use tracing::Instrument;
 
 use crate::api::{ProtocolError, UserInteractionResponse};
@@ -13,6 +13,32 @@ use super::run::root_agent_spec;
 
 #[async_trait]
 impl AgentRunRunner for OrchAgentRunRunner {
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+    ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
+        self.agent_runtime
+            .submit_agent_input(input)
+            .await
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+    }
+
+    async fn cancel_agent_input(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, ProtocolError> {
+        self.agent_runtime
+            .cancel_agent_input(
+                session_id.to_string(),
+                agent_instance_id.to_string(),
+                input_id.to_string(),
+            )
+            .await
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+    }
+
     fn trajectory_registry(&self) -> Arc<dyn TrajectoryRegistryPort> {
         Arc::new(self.trajectory_recorders.clone())
     }
@@ -146,36 +172,6 @@ impl AgentRunRunner for OrchAgentRunRunner {
                 output: piko_orchd::events::merged_output_stream(hub_sub, cursor),
             },
         ))
-    }
-
-    async fn steer_agent(
-        &self,
-        session_id: &str,
-        agent_instance_id: &str,
-        content: MessageContent,
-    ) -> bool {
-        if !self
-            .active_agent_runs
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|((active_session_id, _), run)| {
-                active_session_id == session_id && run.agent_instance_id == agent_instance_id
-            })
-        {
-            return false;
-        }
-        self.agent_runtime
-            .steer_agent(piko_protocol::SteerAgentRequest {
-                request_id: format!("req_steer_{}", uuid::Uuid::new_v4()),
-                session_id: session_id.to_string(),
-                agent_instance_id: agent_instance_id.to_string(),
-                caller_agent_instance_id: None,
-                message_id: format!("msg_steer_{}", uuid::Uuid::new_v4()),
-                content,
-            })
-            .await
-            .is_ok()
     }
 
     async fn cancel_agent_run(&self, operation: &crate::ports::AgentOperationAddress) -> bool {

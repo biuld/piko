@@ -32,12 +32,12 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
         .expect("session created");
 
     let turn_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+session_id.clone(),
+format!("agent_{session_id}_root"),
+piko_protocol::MessageContent::String("hello".into()),
+))
         .await;
     assert!(
         turn_events.iter().any(|event| matches!(
@@ -132,12 +132,12 @@ async fn summarizer_failure_falls_back_to_default_model() {
         .expect("session created");
 
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "submit".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "submit",
+session_id.clone(),
+format!("agent_{session_id}_root"),
+piko_protocol::MessageContent::String("hello".into()),
+))
         .await;
 
     let compact_events = server

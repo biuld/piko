@@ -1,6 +1,6 @@
 use piko_protocol::{
-    AgentInput, AgentInputDisposition, AgentInstanceIdentity, AgentInstanceLifecycle,
-    AgentRunReport, AgentSpec,
+    AgentInput, AgentInputDisposition, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec,
+    AgentWorkReport,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ pub struct StoredExecution {
     pub message_head: Option<String>,
     #[serde(default)]
     pub model_step_ids: Vec<String>,
-    pub report: Option<AgentRunReport>,
+    pub report: Option<AgentWorkReport>,
     pub finished_at: Option<i64>,
 }
 
@@ -50,20 +50,12 @@ pub struct StoredAgentInput {
     pub admission_disposition: AgentInputDisposition,
     #[serde(default)]
     pub admission_root_input_id: Option<String>,
-    #[serde(default)]
-    pub admission_run_id: Option<String>,
-    #[serde(default)]
-    pub admission_bound_run_id: Option<String>,
     pub disposition: AgentInputDisposition,
     pub admission_revision: u64,
     pub admission_event_id: String,
     pub admitted_at: i64,
     #[serde(default)]
     pub root_input_id: Option<String>,
-    #[serde(default)]
-    pub run_id: Option<String>,
-    #[serde(default)]
-    pub bound_run_id: Option<String>,
     #[serde(default)]
     pub model_step_id: Option<String>,
     #[serde(default)]

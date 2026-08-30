@@ -377,8 +377,9 @@ async fn inter_agent_completions_chain_after_world_state_before_input() {
         source: piko_protocol::PromptSource::new("run-state", "hostd/session"),
         timestamp: None,
     });
-    let report = piko_protocol::AgentRunReport {
+    let report = piko_protocol::AgentWorkReport {
         agent_instance_id: "child".into(),
+        root_input_id: "input-child".into(),
         report_id: "report-7".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: piko_protocol::Usage::default(),

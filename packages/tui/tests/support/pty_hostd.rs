@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         current_leaf_id: None,
                         selected_agent_instance_id: Some("pty-agent".into()),
                         active_turns: Vec::new(),
+                        agent_work: Vec::new(),
                         pending_approvals: Vec::new(),
                         pending_interactions: Vec::new(),
                         name: None,

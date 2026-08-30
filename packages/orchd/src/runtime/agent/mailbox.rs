@@ -2,10 +2,10 @@ use piko_comms::contracts::{
     AgentCommandReply, AgentCommands, AgentSnapshot as AgentSnapshotContract,
 };
 use piko_comms::{LatestReceiver, MailboxSender, ReplySender};
-use piko_orchd_api::{AgentApiError, AgentRunAcceptance};
+use piko_orchd_api::AgentApiError;
 use piko_protocol::{
     AgentInboxSnapshot, AgentInputReceipt, AgentInstanceLifecycle, AgentLifecycleReceipt,
-    AgentSnapshot, SendAgentInputRequest,
+    AgentSnapshot,
 };
 
 use crate::runtime::execution::ExecutionTerminal;
@@ -18,21 +18,13 @@ pub struct DetachedReportTarget {
 
 pub enum AgentCommand {
     Input {
-        request: SendAgentInputRequest,
-        /// Full canonical proposal when submitted through the primitive API.
-        /// Runtime-only prompt/tool context remains on `request`.
-        canonical_input: Option<piko_protocol::AgentInput>,
+        input: piko_protocol::AgentInput,
+        runtime: piko_orchd_api::AgentInputRuntime,
         reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
-    },
-    Run {
-        request: SendAgentInputRequest,
-        reply: ReplySender<AgentCommandReply, Result<AgentRunAcceptance, AgentApiError>>,
-        /// Parent span captured at the send site so the `agent.run` span
-        /// nests under the turn/tool context even across the actor task.
         parent: tracing::Span,
     },
     InputDetached {
-        request: SendAgentInputRequest,
+        input: piko_protocol::AgentInput,
         recipient: DetachedReportTarget,
         reply: ReplySender<AgentCommandReply, Result<AgentInputReceipt, AgentApiError>>,
         parent: tracing::Span,
@@ -64,10 +56,10 @@ pub enum AgentCommand {
         >,
     },
     CancelInput {
-        request_id: String,
+        input_id: String,
         reply: ReplySender<
             AgentCommandReply,
-            Result<piko_protocol::AgentCancelReceipt, AgentApiError>,
+            Result<piko_protocol::AgentInputCancelReceipt, AgentApiError>,
         >,
     },
     Inbox {

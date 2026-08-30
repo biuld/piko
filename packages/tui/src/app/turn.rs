@@ -23,22 +23,9 @@ impl AppState {
     }
 
     pub(crate) fn cancel(&mut self) -> Vec<Effect> {
-        let mut effects = Vec::new();
-        let (Some(session_id), Some(turn_id)) = (
-            self.session.id.clone(),
-            self.active_turn_id().map(str::to_string),
-        ) else {
-            self.editor.restore_text("");
-            self.status = "editor cleared".to_string();
-            return effects;
-        };
-        effects.push(Effect::send(Command::TurnCancel {
-            command_id: command_id(),
-            session_id,
-            turn_id,
-        }));
-        self.status = "cancel requested".to_string();
-        effects
+        self.editor.restore_text("");
+        self.status = "editor cleared".to_string();
+        Vec::new()
     }
 
     pub(crate) fn respond_approval(&mut self, decision: ApprovalDecision) -> Vec<Effect> {

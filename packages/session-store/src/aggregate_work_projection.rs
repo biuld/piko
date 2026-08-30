@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use piko_protocol::{
-    ActiveRunSnapshot, AgentInputDisposition, AgentInputSummary, AgentRunViewState,
-    AgentWorkSnapshot,
+    ActiveWorkSnapshot, AgentInputDisposition, AgentInputSummary, AgentWorkSnapshot,
+    AgentWorkViewState,
 };
 
 use crate::aggregate::SessionAggregate;
@@ -44,17 +44,29 @@ impl SessionAggregate {
                 .find(|input| input.input.request_id == execution.started.request_id)
                 .copied()
         });
-        let active_run = active_execution.map(|execution| ActiveRunSnapshot {
-            run_id: execution.started.run_id.clone(),
-            root_input_id: active_input
+        let active_work = active_execution.map(|execution| {
+            let root_input_id = active_input
                 .and_then(|input| input.root_input_id.clone())
-                .unwrap_or_else(|| execution.started.request_id.clone()),
-            user_turn_id: active_input
-                .and_then(|input| input.input.user_turn_id.clone())
-                .or_else(|| execution.started.source_turn_id.clone()),
-            state: AgentRunViewState::Running,
-            active_model_step_id: None,
-            started_at: execution.started.started_at,
+                .unwrap_or_else(|| execution.started.request_id.clone());
+            let active_model_step_id = stored_inputs
+                .iter()
+                .filter(|input| {
+                    input.disposition == AgentInputDisposition::AppliedToStep
+                        && input.root_input_id.as_deref() == Some(root_input_id.as_str())
+                })
+                .filter_map(|input| {
+                    let step_id = input.model_step_id.as_ref()?;
+                    (!self.model_steps.contains_key(step_id))
+                        .then_some((input.admission_revision, step_id.clone()))
+                })
+                .max_by_key(|(revision, _)| *revision)
+                .map(|(_, step_id)| step_id);
+            ActiveWorkSnapshot {
+                root_input_id,
+                state: AgentWorkViewState::Running,
+                active_model_step_id,
+                started_at: execution.started.started_at,
+            }
         });
         let mut pending_steers = Vec::new();
         let mut queued_inputs = Vec::new();
@@ -70,7 +82,7 @@ impl SessionAggregate {
         queued_inputs.sort_by_key(|input| (input.admission_revision, input.input_id.clone()));
         let pending_action = None;
         let foreground = piko_protocol::AgentForeground::project_work(
-            active_run.as_ref(),
+            active_work.as_ref(),
             pending_action.as_ref(),
             !queued_inputs.is_empty(),
         );
@@ -82,7 +94,7 @@ impl SessionAggregate {
             agent_instance_id: agent_instance_id.to_string(),
             lifecycle,
             foreground,
-            active_run,
+            active_work,
             pending_steers,
             queued_inputs,
             pending_action,
@@ -98,7 +110,6 @@ fn input_summary(input: &StoredAgentInput) -> AgentInputSummary {
         admission_revision: input.admission_revision,
         submitted_at: input.input.submitted_at,
         delivery: input.input.delivery,
-        user_turn_id: input.input.user_turn_id.clone(),
         disposition: input.disposition,
     }
 }

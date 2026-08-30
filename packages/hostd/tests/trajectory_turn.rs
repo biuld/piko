@@ -163,12 +163,12 @@ async fn turn_writes_durable_trajectory_records() {
     });
     let events = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        server.handle_command(Command::ChatSubmit {
-            command_id: "trajectory-turn".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent_instance_id.clone(),
-            text: "plan this".into(),
-        }),
+        server.handle_command(Command::submit_follow_up(
+            "trajectory-turn",
+            session_id.clone(),
+            root_agent_instance_id.clone(),
+            piko_protocol::MessageContent::String("plan this".into()),
+        )),
     )
     .await
     .expect("turn should complete");

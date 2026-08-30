@@ -13,12 +13,12 @@ impl HostApp {
         summarize: bool,
         custom_instructions: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let mut state = self.state.lock().await;
-        let session = state.session(&session_id)?;
-        if !session.active_turns.is_empty() {
+        if self.session_has_active_work(&session_id).await? {
             return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
         }
 
+        let mut state = self.state.lock().await;
+        let session = state.session(&session_id)?;
         let old_leaf_id = session.current_leaf_id.clone();
         let entries = session.entries.clone();
 
@@ -136,11 +136,11 @@ impl HostApp {
                         branch_summary = Some(b_entry);
                     }
                 }
-                state = self.state.lock().await;
-                let session = state.session(&session_id)?;
-                if !session.active_turns.is_empty() {
+                if self.session_has_active_work(&session_id).await? {
                     return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
                 }
+                state = self.state.lock().await;
+                let session = state.session(&session_id)?;
                 if session.current_leaf_id != old_leaf_id {
                     return Err(ProtocolError::InvalidCommand(
                         "session changed while summarizing branch".into(),

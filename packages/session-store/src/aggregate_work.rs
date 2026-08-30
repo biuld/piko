@@ -50,23 +50,11 @@ impl SessionAggregate {
                 })?;
                 if target_input.input.agent_instance_id != input.agent_instance_id
                     || target_input.disposition != AgentInputDisposition::AppliedAsRoot
+                    || self.active_root_by_agent.get(&input.agent_instance_id)
+                        != Some(&target.to_string())
                 {
                     return Err(StoreError::InvalidEvent(
                         "steer root is not an active root input".into(),
-                    ));
-                }
-                let bound_run_id = data.bound_run_id.as_deref().ok_or_else(|| {
-                    StoreError::InvalidEvent("pending steer requires a bound run".into())
-                })?;
-                if target_input.run_id.as_deref() != Some(bound_run_id)
-                    || !self.executions.values().any(|execution| {
-                        execution.started.agent_instance_id == input.agent_instance_id
-                            && execution.started.run_id == bound_run_id
-                            && execution.finished_at.is_none()
-                    })
-                {
-                    return Err(StoreError::InvalidEvent(
-                        "pending steer is not bound to the active root run".into(),
                     ));
                 }
                 Some(target.to_string())
@@ -94,8 +82,6 @@ impl SessionAggregate {
             return if existing.input == input
                 && existing.admission_disposition == disposition
                 && existing.admission_root_input_id == root_input_id
-                && existing.admission_run_id == data.run_id
-                && existing.admission_bound_run_id == data.bound_run_id
             {
                 Ok(())
             } else {
@@ -113,8 +99,7 @@ impl SessionAggregate {
             && self.executions.values().any(|execution| {
                 execution.started.agent_instance_id == input.agent_instance_id
                     && execution.finished_at.is_none()
-                    && (execution.started.request_id != input.request_id
-                        || data.run_id.as_deref() != Some(execution.started.run_id.as_str()))
+                    && execution.started.request_id != input.request_id
             })
         {
             return Err(StoreError::InvalidEvent(
@@ -128,15 +113,11 @@ impl SessionAggregate {
                 input,
                 admission_disposition: disposition,
                 admission_root_input_id: root_input_id.clone(),
-                admission_run_id: data.run_id.clone(),
-                admission_bound_run_id: data.bound_run_id.clone(),
                 disposition,
                 admission_revision: revision,
                 admission_event_id: raw.event_id.clone(),
                 admitted_at: data.admitted_at,
                 root_input_id,
-                run_id: data.run_id,
-                bound_run_id: data.bound_run_id,
                 model_step_id: None,
                 applied_message_id: None,
             },
@@ -165,19 +146,12 @@ impl SessionAggregate {
                 .clone()
                 .or_else(|| input.root_input_id.clone())
         };
-        let run_id = data.run_id.clone().or_else(|| input.run_id.clone());
-        let bound_run_id = data
-            .bound_run_id
-            .clone()
-            .or_else(|| input.bound_run_id.clone());
         let model_step_id = data
             .model_step_id
             .clone()
             .or_else(|| input.model_step_id.clone());
         if input.disposition == disposition
             && input.root_input_id == root_input_id
-            && input.run_id == run_id
-            && input.bound_run_id == bound_run_id
             && input.model_step_id == model_step_id
         {
             return Ok(());
@@ -195,13 +169,6 @@ impl SessionAggregate {
                 "root application must identify the input itself".into(),
             ));
         }
-        if disposition == AgentInputDisposition::AppliedAsRoot
-            && run_id.as_deref().is_none_or(str::is_empty)
-        {
-            return Err(StoreError::InvalidEvent(
-                "root application requires a run".into(),
-            ));
-        }
         if disposition == AgentInputDisposition::AppliedToStep {
             let root_input_id = root_input_id.as_deref().ok_or_else(|| {
                 StoreError::InvalidEvent("step application requires a root input".into())
@@ -216,24 +183,11 @@ impl SessionAggregate {
                     "step application root is invalid".into(),
                 ));
             }
-            let run_id = run_id.as_deref().ok_or_else(|| {
-                StoreError::InvalidEvent("step application requires a run".into())
-            })?;
-            let bound_run_id = bound_run_id.as_deref().ok_or_else(|| {
-                StoreError::InvalidEvent("step application requires a bound run".into())
-            })?;
-            if root.run_id.as_deref() != Some(run_id) || bound_run_id != run_id {
+            if self.active_root_by_agent.get(&data.agent_instance_id)
+                != Some(&root_input_id.to_string())
+            {
                 return Err(StoreError::InvalidEvent(
-                    "step application run does not match its root".into(),
-                ));
-            }
-            if !self.executions.values().any(|execution| {
-                execution.started.agent_instance_id == data.agent_instance_id
-                    && execution.started.run_id == run_id
-                    && execution.finished_at.is_none()
-            }) {
-                return Err(StoreError::InvalidEvent(
-                    "step application requires an active run".into(),
+                    "step application requires the active root input".into(),
                 ));
             }
             if model_step_id.as_deref().is_none_or(str::is_empty) {
@@ -253,20 +207,14 @@ impl SessionAggregate {
         if disposition == AgentInputDisposition::Cancelled {
             match input.disposition {
                 AgentInputDisposition::PendingFollowUp
-                    if root_input_id.is_some()
-                        || run_id.is_some()
-                        || bound_run_id.is_some()
-                        || model_step_id.is_some() =>
+                    if root_input_id.is_some() || model_step_id.is_some() =>
                 {
                     return Err(StoreError::InvalidEvent(
                         "follow-up cancellation cannot add causal bindings".into(),
                     ));
                 }
                 AgentInputDisposition::PendingSteer
-                    if root_input_id != input.root_input_id
-                        || run_id != input.run_id
-                        || bound_run_id != input.bound_run_id
-                        || model_step_id.is_some() =>
+                    if root_input_id != input.root_input_id || model_step_id.is_some() =>
                 {
                     return Err(StoreError::InvalidEvent(
                         "steer cancellation cannot change causal bindings".into(),
@@ -281,8 +229,6 @@ impl SessionAggregate {
             .expect("input validated above");
         input.disposition = disposition;
         input.root_input_id = root_input_id;
-        input.run_id = run_id;
-        input.bound_run_id = bound_run_id;
         input.model_step_id = model_step_id;
         Ok(())
     }
@@ -310,15 +256,6 @@ impl SessionAggregate {
                 "execution request does not resolve to an applied root input".into(),
             ));
         }
-        if let Some(existing_run_id) = &input.run_id {
-            if existing_run_id != &started.run_id {
-                return Err(StoreError::InvalidEvent(
-                    "execution root input is bound to another run".into(),
-                ));
-            }
-        } else {
-            input.run_id = Some(started.run_id.clone());
-        }
         Ok(())
     }
 
@@ -326,6 +263,7 @@ impl SessionAggregate {
     /// before a query consumes an aggregate loaded from an older read model.
     pub fn rebuild_work_projection(&mut self) {
         self.rebuild_agent_input_indexes();
+        self.agent_work = self.agent_work_snapshots();
     }
 }
 

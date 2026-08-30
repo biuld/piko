@@ -54,7 +54,7 @@ impl AppState {
             return Vec::new();
         };
         let turn_id = self
-            .active_turn_id()
+            .active_root_input_id()
             .map(str::to_string)
             .or_else(|| self.last_turn_id.clone());
         let Some(turn_id) = turn_id else {

@@ -152,12 +152,12 @@ async fn child_transcript_and_selected_view_persist_independently() {
 
     let events = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        server.handle_command(Command::ChatSubmit {
-            command_id: "direct".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: "agent-child".into(),
-            text: "follow up".into(),
-        }),
+        server.handle_command(Command::submit_follow_up(
+            "direct",
+            session_id.clone(),
+            "agent-child",
+            MessageContent::String("follow up".into()),
+        )),
     )
     .await
     .expect("direct child run should finish");
@@ -165,7 +165,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
         event,
         ServerMessage::CommandResponse {
             command_id,
-            result: Ok(CommandResult::Empty),
+            result: Ok(CommandResult::AgentInputSubmitted { .. }),
         } if command_id == "direct"
     )));
     assert!(events.iter().any(|event| matches!(

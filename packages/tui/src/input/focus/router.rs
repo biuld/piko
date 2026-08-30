@@ -187,7 +187,7 @@ fn cancel_action(app: &AppState) -> Action {
         ToolInteractionAction::Cancel.into()
     } else if app.mode() != AppMode::Chat {
         SurfaceAction::Close.into()
-    } else if app.active_turn_id().is_some() {
+    } else if app.viewed_agent_is_busy() {
         EditorAction::Interrupt.into()
     } else {
         // `ui.cancel` is not bound in the editor while it contains text.  A

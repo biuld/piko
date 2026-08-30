@@ -43,12 +43,12 @@ async fn new_context_window_mode_rewrites_without_calling_the_model() {
 
     for (index, text) in ["first", "second"].iter().enumerate() {
         let events = server
-            .handle_command(Command::ChatSubmit {
-                command_id: format!("submit-{index}"),
-                session_id: session_id.clone(),
-                target_agent_instance_id: format!("agent_{session_id}_root"),
-                text: text.to_string(),
-            })
+            .handle_command(Command::submit_follow_up(
+format!("submit-{index}"),
+session_id.clone(),
+format!("agent_{session_id}_root"),
+piko_protocol::MessageContent::String(text.to_string()),
+))
             .await;
         assert!(
             events.iter().any(|event| matches!(

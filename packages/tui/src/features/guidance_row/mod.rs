@@ -95,11 +95,9 @@ fn composer_hint(app: &AppState) -> Cow<'static, str> {
         };
     }
     let viewed = app.agent_panel.active_agent_instance_id.as_deref();
-    let has_follow_up = app
-        .session
-        .follow_ups
-        .iter()
-        .any(|item| viewed.is_some_and(|id| item.agent_instance_id == id));
+    let has_follow_up = app.session.agent_work.values().any(|work| {
+        viewed == Some(work.agent_instance_id.as_str()) && !work.queued_inputs.is_empty()
+    });
     if has_follow_up || pending.is_some() {
         let mut parts = Vec::new();
         if let Some(key) = dequeue {

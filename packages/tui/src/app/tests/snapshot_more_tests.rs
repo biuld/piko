@@ -79,6 +79,7 @@ fn snapshot_tool_result_updates_assistant_tool_call_component() {
                 current_leaf_id: Some("msg-tool".into()),
                 selected_agent_instance_id: None,
                 active_turns: Vec::new(),
+                agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,
@@ -195,6 +196,7 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
                 current_leaf_id: Some("child".into()),
                 selected_agent_instance_id: Some("task-child".into()),
                 active_turns: Vec::new(),
+                agent_work: Vec::new(),
                 pending_approvals: Vec::new(),
                 pending_interactions: Vec::new(),
                 name: None,
@@ -224,19 +226,52 @@ fn reconcile_selects_agent_and_filters_tree_to_viewed_agent() {
 #[test]
 fn queue_update_populates_status_data() {
     let mut app = live_app();
-
-    app.apply_event(Event::Queue(piko_protocol::QueueEvent::Updated {
-        session_id: "session-1".into(),
-        steer_count: 1,
-        follow_up_count: 2,
-        next_turn_count: 3,
-        steer_preview: Some("steer".into()),
-        follow_up_preview: Some("follow".into()),
-    }));
+    let mut reconcile = empty_reconcile("session-1");
+    if let Event::SessionReconciled(event) = &mut reconcile {
+        event.snapshot.selected_agent_instance_id = Some("task-1".into());
+        event.snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
+            agent_instance_id: "task-1".into(),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            foreground: piko_protocol::AgentForeground::Queued,
+            active_work: None,
+            pending_steers: vec![piko_protocol::AgentInputSummary {
+                input_id: "steer-1".into(),
+                origin: piko_protocol::AgentInputOrigin::User,
+                preview: "steer".into(),
+                admission_revision: 1,
+                submitted_at: 1,
+                delivery: piko_protocol::AgentInputDelivery::SteerActive,
+                disposition: piko_protocol::AgentInputDisposition::PendingSteer,
+            }],
+            queued_inputs: vec![
+                piko_protocol::AgentInputSummary {
+                    input_id: "q-1".into(),
+                    origin: piko_protocol::AgentInputOrigin::User,
+                    preview: "follow".into(),
+                    admission_revision: 2,
+                    submitted_at: 2,
+                    delivery: piko_protocol::AgentInputDelivery::FollowUp,
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                },
+                piko_protocol::AgentInputSummary {
+                    input_id: "q-2".into(),
+                    origin: piko_protocol::AgentInputOrigin::User,
+                    preview: "later".into(),
+                    admission_revision: 3,
+                    submitted_at: 3,
+                    delivery: piko_protocol::AgentInputDelivery::FollowUp,
+                    disposition: piko_protocol::AgentInputDisposition::PendingFollowUp,
+                },
+            ],
+            pending_action: None,
+        }];
+        event.agents[0].agent_instance_id = "task-1".into();
+    }
+    app.apply_event(reconcile);
 
     assert_eq!(app.queue_status.steer_count, 1);
     assert_eq!(app.queue_status.follow_up_count, 2);
-    assert_eq!(app.queue_status.next_turn_count, 3);
+    assert_eq!(app.queue_status.next_turn_count, 2);
 }
 
 #[test]
@@ -259,7 +294,7 @@ fn stale_session_events_do_not_mutate_live_view() {
     }));
 
     assert_eq!(app.queue_status.steer_count, 0);
-    assert!(app.session.active_turns.is_empty());
+    assert!(app.session.agent_work.is_empty());
 }
 
 #[test]

@@ -80,20 +80,20 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
         .set_active_model(Some(SessionModelRef::new("openai", "model-a")))
         .await;
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "s1".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent.clone(),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "s1",
+            session_id.clone(),
+            root_agent.clone(),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "s2".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent,
-            text: "again".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "s2",
+            session_id.clone(),
+            root_agent,
+            piko_protocol::MessageContent::String("again".into()),
+        ))
         .await;
 
     let snapshots = captured.lock().unwrap().clone();
@@ -174,24 +174,24 @@ async fn session_model_continuity_is_durable_and_drives_prompt_fragment() {
         .set_active_model(Some(SessionModelRef::new("openai", "model-a")))
         .await;
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "s1".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent.clone(),
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "s1",
+            session_id.clone(),
+            root_agent.clone(),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
 
     server
         .set_active_model(Some(SessionModelRef::new("anthropic", "model-b")))
         .await;
     let second_turn_events = server
-        .handle_command(Command::ChatSubmit {
-            command_id: "s2".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent,
-            text: "switch".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "s2",
+            session_id.clone(),
+            root_agent,
+            piko_protocol::MessageContent::String("switch".into()),
+        ))
         .await;
 
     let snapshots = captured.lock().unwrap().clone();
@@ -289,12 +289,12 @@ async fn unconfigured_active_model_produces_no_model_fragments() {
     // Without auth/registry, rebuilding the runner leaves the active model
     // unset; a submitted turn must not fabricate a model or a switch.
     server
-        .handle_command(Command::ChatSubmit {
-            command_id: "s1".into(),
-            session_id: session_id.clone(),
-            target_agent_instance_id: root_agent,
-            text: "hello".into(),
-        })
+        .handle_command(Command::submit_follow_up(
+            "s1",
+            session_id.clone(),
+            root_agent,
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
         .await;
     let snapshots = captured.lock().unwrap().clone();
     assert_eq!(snapshots.len(), 1);

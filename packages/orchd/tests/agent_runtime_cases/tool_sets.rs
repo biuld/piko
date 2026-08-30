@@ -77,7 +77,7 @@ async fn declared_tool_sets_expand_into_model_catalog() {
         .unwrap();
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "catalog-run".into(),
             session_id: "session-catalog".into(),
             agent_instance_id: "root".into(),
@@ -176,7 +176,7 @@ async fn undeclared_tool_sets_are_absent_from_model_catalog() {
         .unwrap();
 
     runtime
-        .run_agent(SendAgentInputRequest {
+        .send_agent_input(SendAgentInputRequest {
             request_id: "sparse-run".into(),
             session_id: "session-sparse".into(),
             agent_instance_id: "root".into(),

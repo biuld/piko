@@ -18,8 +18,6 @@ flowchart LR
     subgraph orchd["orchd"]
         norchd_agent_commands["orchd.agent.commands<br/>Mailbox / Agent<br/>Bounded(32)"]
         norchd_agent_command_reply["orchd.agent.command_reply<br/>Reply / Request<br/>One"]
-        norchd_agent_run_started["orchd.agent.run_started<br/>Reply / Request<br/>One"]
-        norchd_agent_run_report["orchd.agent.run_report<br/>Reply / Request<br/>One"]
         norchd_agent_snapshot["orchd.agent.snapshot<br/>LatestState / Agent<br/>Latest"]
         norchd_agent_mailbox_event["orchd.agent.mailbox_event<br/>Observation / Session<br/>Bounded(64)"]
         norchd_execution_commands["orchd.execution.commands<br/>Mailbox / Execution<br/>Bounded(32)"]
@@ -36,7 +34,6 @@ flowchart LR
     end
     ncomponent_AgentActor["AgentActor"]
     ncomponent_AgentExecutionRuntime["AgentExecutionRuntime"]
-    ncomponent_AgentRunAcceptance["AgentRunAcceptance"]
     ncomponent_AgentRuntime["AgentRuntime"]
     ncomponent_AgentRuntime__wait_agent_mailbox["AgentRuntime::wait_agent_mailbox"]
     ncomponent_AgentRuntimeCaller["AgentRuntimeCaller"]
@@ -66,10 +63,6 @@ flowchart LR
     norchd_agent_commands --> ncomponent_AgentActor
     ncomponent_AgentActor --> norchd_agent_command_reply
     norchd_agent_command_reply --> ncomponent_AgentRuntimeCaller
-    ncomponent_AgentActor --> norchd_agent_run_started
-    norchd_agent_run_started --> ncomponent_AgentRunAcceptance
-    ncomponent_AgentActor --> norchd_agent_run_report
-    norchd_agent_run_report --> ncomponent_AgentRunAcceptance
     ncomponent_AgentActor --> norchd_agent_snapshot
     norchd_agent_snapshot --> ncomponent_AgentRuntime
     ncomponent_AgentActor --> norchd_agent_mailbox_event

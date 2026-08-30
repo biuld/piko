@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use piko_hostd::api::ServerMessage as Event;
 use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
 use piko_hostd::protocol::HostServer;
-use support::{MockSessionPublisher, test_agent_run_process};
+use support::{MockSessionPublisher, running_agent_info, test_agent_run_process};
 
 #[derive(Clone, Default)]
 struct CancellableAgentRunRunner {
@@ -26,16 +26,18 @@ impl CancellableAgentRunRunner {
     fn finish_cancelled(&self) {
         let run = self.active.lock().unwrap().take().unwrap();
         let agent_instance_id = run.agent_instance_id;
+        let turn_id = run.turn_id;
         let _ = run
             .completion_tx
             .send(piko_hostd::ports::AgentRunCompletion {
                 address: piko_hostd::ports::AgentOperationAddress {
                     session_id: run.session_id,
-                    operation_id: run.turn_id,
+                    operation_id: turn_id.clone(),
                     agent_instance_id: agent_instance_id.clone(),
                 },
-                result: Ok(piko_protocol::AgentRunReport {
+                result: Ok(piko_protocol::AgentWorkReport {
                     agent_instance_id: agent_instance_id.clone(),
+                    root_input_id: turn_id,
                     report_id: "report-cancelled".into(),
                     outcome: piko_protocol::ExecutionOutcome::Cancelled {
                         reason: Some("cancelled by test".into()),
@@ -91,8 +93,7 @@ impl AgentRunRunner for CancellableAgentRunRunner {
                 request_id: input.operation_id,
                 session_id: input.session_id,
                 agent_instance_id: input.agent_instance_id,
-                disposition: piko_protocol::InputDisposition::Accepted,
-                run_id: None,
+                disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                 queued_position: None,
             },
             process: test_agent_run_process(started, completion),
@@ -108,6 +109,28 @@ impl AgentRunRunner for CancellableAgentRunRunner {
     async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
         self.active.lock().unwrap().as_ref().is_some_and(|run| {
             run.session_id == session_id && run.agent_instance_id == agent_instance_id
+        })
+    }
+
+    async fn has_active_session_run(&self, session_id: &str) -> bool {
+        self.active
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|run| run.session_id == session_id)
+    }
+
+    async fn list_agent_instances(
+        &self,
+        session_id: &str,
+    ) -> Option<Vec<piko_protocol::AgentInfo>> {
+        self.active.lock().unwrap().as_ref().and_then(|run| {
+            (run.session_id == session_id).then(|| {
+                vec![running_agent_info(
+                    session_id,
+                    run.agent_instance_id.clone(),
+                )]
+            })
         })
     }
 }
@@ -127,12 +150,12 @@ async fn agent_interrupt_preserves_turn_terminal_authority() {
     let turn_session_id = session_id.clone();
     let turn = tokio::spawn(async move {
         server_for_turn
-            .handle_command(piko_hostd::api::Command::ChatSubmit {
-                command_id: "submit".into(),
-                target_agent_instance_id: format!("agent_{turn_session_id}_root"),
-                session_id: turn_session_id.clone(),
-                text: "wait".into(),
-            })
+            .handle_command(piko_hostd::api::Command::submit_follow_up(
+                "submit",
+                turn_session_id.clone(),
+                format!("agent_{turn_session_id}_root"),
+                piko_protocol::MessageContent::String("wait".into()),
+            ))
             .await
     });
     let _turn_id = loop {
@@ -143,11 +166,34 @@ async fn agent_interrupt_preserves_turn_terminal_authority() {
             })
             .await;
         let found = refresh.iter().find_map(|event| match event {
-            Event::SessionReconciled(reconciled) => reconciled
-                .snapshot
-                .active_turns
-                .first()
-                .map(|turn| turn.turn_id.clone()),
+            Event::SessionReconciled(reconciled) => {
+                let agent = format!("agent_{session_id}_root");
+                reconciled
+                    .snapshot
+                    .agent_work
+                    .iter()
+                    .find(|work| work.agent_instance_id == agent)
+                    .and_then(|work| {
+                        work.active_work
+                            .as_ref()
+                            .map(|active| active.root_input_id.clone())
+                    })
+                    .or_else(|| {
+                        reconciled
+                            .agents
+                            .iter()
+                            .any(|info| {
+                                info.agent_instance_id == agent
+                                    && matches!(
+                                        info.activity,
+                                        piko_protocol::AgentActivity::Running
+                                            | piko_protocol::AgentActivity::WaitingForApproval
+                                            | piko_protocol::AgentActivity::Cancelling
+                                    )
+                            })
+                            .then(String::new)
+                    })
+            }
             _ => None,
         });
         if let Some(turn_id) = found {
@@ -311,8 +357,7 @@ impl AgentRunRunner for ChildReportRunner {
                 request_id: input.operation_id,
                 session_id: input.session_id,
                 agent_instance_id: input.agent_instance_id,
-                disposition: piko_protocol::InputDisposition::Accepted,
-                run_id: None,
+                disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                 queued_position: None,
             },
             process: test_agent_run_process(started, completion),
@@ -332,12 +377,12 @@ async fn mismatched_agent_report_cannot_complete_turn() {
     let session_id = session_id_from(&created);
 
     let events = server
-        .handle_command(piko_hostd::api::Command::ChatSubmit {
-            command_id: "submit".into(),
-            target_agent_instance_id: format!("agent_{session_id}_root"),
-            session_id: session_id.clone(),
-            text: "run".into(),
-        })
+        .handle_command(piko_hostd::api::Command::submit_follow_up(
+            "submit",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("run".into()),
+        ))
         .await;
 
     assert!(events.iter().all(|event| !matches!(
@@ -364,9 +409,11 @@ fn session_id_from(events: &[Event]) -> String {
         .unwrap()
 }
 
-fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::AgentRunReport {
-    piko_protocol::AgentRunReport {
-        agent_instance_id: agent_instance_id.into(),
+fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::AgentWorkReport {
+    let agent_instance_id = agent_instance_id.into();
+    piko_protocol::AgentWorkReport {
+        agent_instance_id: agent_instance_id.clone(),
+        root_input_id: agent_instance_id.clone(),
         report_id: "report-success".into(),
         outcome: piko_protocol::ExecutionOutcome::Succeeded {
             usage: Default::default(),

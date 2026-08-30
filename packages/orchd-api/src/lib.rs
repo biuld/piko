@@ -19,7 +19,7 @@ pub mod telemetry;
 pub mod tools;
 
 pub use agent::{
-    AgentCommitPort, AgentRecoveryState, AgentRunAcceptance, AgentRuntimeApi,
+    AgentCommitPort, AgentInputRuntime, AgentRecoveryState, AgentRuntimeApi,
     RecoveredDetachedDelivery, RecoveredExecutionReport, SessionAgentConfig, SessionAgentHandle,
     SessionAgentPorts,
 };
@@ -41,15 +41,14 @@ pub use tools::{
 
 // Re-export Execution DTOs used by the new API surface.
 pub use piko_protocol::execution::{
-    AgentInputAdmissionOutcome, AgentInputDisposition, CancelReceipt, CommitAck, CommitError,
-    ExecutionId, ExecutionOutcome, ExecutionStatus, InputDisposition,
-    MessageCommit as ExecutionMessageCommit,
+    AgentInputDisposition, CancelReceipt, CommitAck, CommitError, ExecutionId, ExecutionOutcome,
+    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,
     AgentInboxSnapshot, AgentInput, AgentInputCancelReceipt, AgentInputDelivery,
     AgentInputDispositionChange, AgentInputReceipt, AgentInstanceId, AgentInstanceIdentity,
     AgentInstanceLifecycle, AgentInterruptReceipt, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentRunReport, AgentSnapshot, AgentSpecId, ConsumeAgentInboxReceipt, ConsumeAgentInboxRequest,
-    CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest, SteerAgentRequest,
+    AgentSnapshot, AgentSpecId, AgentWorkReport, ConsumeAgentInboxReceipt,
+    ConsumeAgentInboxRequest, CreateAgentReceipt, CreateAgentRequest, SendAgentInputRequest,
 };

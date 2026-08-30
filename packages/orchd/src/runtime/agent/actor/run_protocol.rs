@@ -240,8 +240,7 @@ impl AgentActor {
             request_id: receipt.request_id,
             session_id: receipt.session_id,
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            disposition: InputDisposition::Accepted,
-            run_id: Some(run_id),
+            disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
             queued_position: None,
         })
     }
@@ -344,9 +343,15 @@ impl AgentActor {
         if self.run_state.execution_id() != Some(&execution_id) || !self.run_state.is_running() {
             return;
         }
+        let root_input_id = self
+            .run_state
+            .active_root()
+            .map(|(root_input_id, _)| root_input_id.to_string())
+            .expect("running agent work must have a root input");
         self.run_state = AgentRunState::Finalizing(TerminalCommitScope::new(
             execution_id,
             self.identity.agent_instance_id.clone(),
+            root_input_id,
             terminal,
         ));
         self.try_commit_terminal().await;
@@ -363,13 +368,6 @@ impl AgentActor {
             TerminalCommitResult::PermanentFailure(mut failure) => {
                 self.lifecycle = AgentInstanceLifecycle::Unavailable;
                 self.finish_run_cancellation();
-                if let Some(waiters) = self.execution_waiters.remove(&failure.execution_id) {
-                    for waiter in waiters {
-                        let _ = waiter.send(Err(AgentApiError::PersistenceFailed(
-                            failure.error.to_string(),
-                        )));
-                    }
-                }
                 failure.acknowledge_handoff();
                 self.publish_snapshot();
             }
@@ -395,16 +393,12 @@ impl AgentActor {
                 self.run_state = AgentRunState::Idle;
                 self.finish_run_cancellation();
                 self.publish_snapshot();
-                self.publish_mailbox_event(AgentMailboxEvent::RunFinished {
+                self.publish_mailbox_event(AgentMailboxEvent::WorkFinished {
                     agent_instance_id: self.identity.agent_instance_id.clone(),
+                    root_input_id: committed.report.root_input_id.clone(),
                     report_id: committed.report.report_id.clone(),
                 });
 
-                if let Some(waiters) = self.execution_waiters.remove(&committed.execution_id) {
-                    for waiter in waiters {
-                        let _ = waiter.send(Ok(committed.report.clone()));
-                    }
-                }
                 if let Some(targets) = self.detached_reports.remove(&committed.execution_id) {
                     for target in targets {
                         self.deliver_report_or_retry(DetachedDeliveryScope::new(

@@ -10,15 +10,15 @@ use piko_protocol::{
 use support::{HostdHarness, root_agent_id, serial_guard};
 
 fn submit(host: &mut HostdHarness, session_id: &str, agent_instance_id: &str, command_id: &str) {
-    host.send(Command::ChatSubmit {
-        command_id: command_id.into(),
-        session_id: session_id.into(),
-        target_agent_instance_id: agent_instance_id.into(),
-        text: "exercise the real tool path".into(),
-    });
+    host.send(Command::submit_follow_up(
+        command_id,
+        session_id,
+        agent_instance_id,
+        piko_protocol::MessageContent::String("exercise the real tool path".into()),
+    ));
     assert!(matches!(
         host.command_result(command_id),
-        CommandResult::Empty
+        CommandResult::AgentInputSubmitted { .. }
     ));
 }
 

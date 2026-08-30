@@ -394,8 +394,6 @@ impl ExecutionActor {
                     .clone()
                     .unwrap_or_else(|| self.request.request_id.clone()),
             ),
-            run_id: Some(self.identity.run_id.clone()),
-            bound_run_id: Some(self.identity.run_id.clone()),
             model_step_id: Some(format!(
                 "{}:step_{next_step_index}",
                 self.identity.execution_id

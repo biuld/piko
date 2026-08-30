@@ -236,18 +236,21 @@ impl AppState {
         self.session.id.as_deref()
     }
 
-    pub fn active_turn_id(&self) -> Option<&str> {
+    pub fn active_root_input_id(&self) -> Option<&str> {
         let agent_instance_id = self.agent_panel.active_agent_instance_id.as_deref()?;
         self.session
-            .active_turns
-            .get(agent_instance_id)
-            .map(|t| t.turn_id.as_str())
+            .agent_work
+            .get(agent_instance_id)?
+            .active_work
+            .as_ref()
+            .map(|work| work.root_input_id.as_str())
     }
 
-    /// Per-agent foreground work projection (F-22).
+    /// Per-agent foreground work projection (F-22 / F-51).
     ///
-    /// Uses the sole protocol path [`piko_protocol::AgentForeground::project`]
-    /// so Queued / Running / RequiresAction / Cancelling match client-core.
+    /// Prefer the host-authored `AgentWorkSnapshot`. Local pending
+    /// approvals/interactions still upgrade the view to RequiresAction
+    /// before the next snapshot arrives.
     pub fn agent_foreground(
         &self,
         agent_instance_id: &str,
@@ -259,12 +262,13 @@ impl AppState {
             .iter()
             .any(|a| a.agent_instance_id == agent_instance_id)
             || self.interactions.pending_for_agent(agent_instance_id);
-        let turn_status = self
-            .session
-            .active_turns
-            .get(agent_instance_id)
-            .map(|t| t.status);
-        piko_protocol::AgentForeground::project(blocked, turn_status, Some(activity))
+        if blocked {
+            return piko_protocol::AgentForeground::RequiresAction;
+        }
+        if let Some(work) = self.session.agent_work.get(agent_instance_id) {
+            return work.foreground;
+        }
+        piko_protocol::AgentForeground::project(false, None, Some(activity))
     }
 
     pub fn push_focus(&mut self, mode: AppMode) {

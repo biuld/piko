@@ -70,7 +70,7 @@ pub trait AgentRunProcess: Send {
 #[derive(Debug)]
 pub struct AgentRunCompletion {
     pub address: AgentOperationAddress,
-    pub result: Result<piko_protocol::AgentRunReport, AgentRunFailure>,
+    pub result: Result<piko_protocol::AgentWorkReport, AgentRunFailure>,
     pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
 }
 
@@ -131,13 +131,26 @@ pub trait AgentRunRunner: Send + Sync {
         ))
     }
 
-    async fn steer_agent(
+    /// Canonical admission path for AgentInputs that need no host-private
+    /// prompt staging (steers and agent-to-agent inputs).
+    async fn submit_agent_input(
+        &self,
+        _input: piko_protocol::AgentInput,
+    ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "Agent input admission is unavailable".into(),
+        ))
+    }
+
+    async fn cancel_agent_input(
         &self,
         _session_id: &str,
         _agent_instance_id: &str,
-        _content: piko_protocol::MessageContent,
-    ) -> bool {
-        false
+        _input_id: &str,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "Agent input cancellation is unavailable".into(),
+        ))
     }
 
     async fn finish_agent_run(

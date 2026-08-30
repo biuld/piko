@@ -190,8 +190,9 @@ async fn full_clone_clears_world_state_baseline_and_transient_queues() {
             &session_id,
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id: root.clone(),
-                report: AgentRunReport {
+                report: AgentWorkReport {
                     agent_instance_id: "child".into(),
+                    root_input_id: "input-child".into(),
                     report_id: "r1".into(),
                     outcome: piko_protocol::ExecutionOutcome::Succeeded {
                         usage: Default::default(),

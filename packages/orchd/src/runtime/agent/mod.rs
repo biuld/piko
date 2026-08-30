@@ -20,7 +20,6 @@ use piko_protocol::{
     AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
     AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
     AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, MailboxWaitRequest, MailboxWaitSummary,
-    SendAgentInputRequest, SteerAgentRequest,
 };
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;

@@ -54,42 +54,6 @@ pub mod contracts {
         }
     );
     contract!(
-        AgentRunStarted,
-        ReplyContract,
-        AGENT_RUN_STARTED,
-        CommunicationSpec {
-            id: "orchd.agent.run_started",
-            kind: CommunicationKind::Reply,
-            owner: "AgentRunAcceptance",
-            producers: &["AgentActor"],
-            consumer: "AgentRunAcceptance",
-            scope: CommunicationScope::Request,
-            delivery: DeliveryGuarantee::InMemory,
-            capacity: CapacityPolicy::One,
-            overflow: OverflowPolicy::NotApplicable,
-            closure: ClosureMeaning::RuntimeUnavailable,
-            cancellation: CancellationMeaning::DropInterestOnly,
-        }
-    );
-    contract!(
-        AgentRunReport,
-        ReplyContract,
-        AGENT_RUN_REPORT,
-        CommunicationSpec {
-            id: "orchd.agent.run_report",
-            kind: CommunicationKind::Reply,
-            owner: "AgentRunAcceptance",
-            producers: &["AgentActor"],
-            consumer: "AgentRunAcceptance",
-            scope: CommunicationScope::Request,
-            delivery: DeliveryGuarantee::InMemory,
-            capacity: CapacityPolicy::One,
-            overflow: OverflowPolicy::NotApplicable,
-            closure: ClosureMeaning::RuntimeUnavailable,
-            cancellation: CancellationMeaning::DropInterestOnly,
-        }
-    );
-    contract!(
         AgentSnapshot,
         LatestContract,
         AGENT_SNAPSHOT,
@@ -430,8 +394,6 @@ pub mod contracts {
     pub const ALL: &[CommunicationSpec] = &[
         AGENT_COMMANDS,
         AGENT_COMMAND_REPLY,
-        AGENT_RUN_STARTED,
-        AGENT_RUN_REPORT,
         AGENT_SNAPSHOT,
         AGENT_MAILBOX_EVENT,
         EXECUTION_COMMANDS,
