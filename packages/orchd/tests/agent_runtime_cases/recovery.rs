@@ -54,7 +54,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
                     inbox: Vec::new(),
                     latest_report: Some(report.clone()),
                     execution_reports: vec![piko_orchd_api::RecoveredExecutionReport {
-                        internal_execution_id: "exec-recovered-detached".into(),
+                        root_input_id: "exec-recovered-detached".into(),
                         report: report.clone(),
                     }],
                     queued_inputs: Vec::new(),
@@ -180,7 +180,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                     inbox: Vec::new(),
                     latest_report: Some(old_report),
                     execution_reports: vec![piko_orchd_api::RecoveredExecutionReport {
-                        internal_execution_id: recovered_execution_id(
+                        root_input_id: recovered_execution_id(
                             "session-recovery",
                             "child",
                             "replayed-old-execution",
@@ -267,8 +267,8 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
     );
 }
 
-fn recovered_execution_id(session_id: &str, agent_instance_id: &str, request_id: &str) -> String {
-    piko_orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, request_id])
+fn recovered_execution_id(_session_id: &str, _agent_instance_id: &str, request_id: &str) -> String {
+    request_id.to_string()
 }
 
 #[tokio::test]

@@ -70,8 +70,6 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
             &session_id,
             AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "exec-interrupted".into(),
-                execution_id: "exec-interrupted".into(),
                 root_input_id: "request-interrupted".into(),
                 request_id: "request-interrupted".into(),
                 source_turn_id: Some("turn-interrupted".into()),
@@ -100,7 +98,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
             piko_protocol::execution::MessageCommit {
                 session_id: session_id.clone(),
                 source_turn_id: Some("turn-interrupted".into()),
-                execution_id: "exec-interrupted".into(),
+                root_input_id: "request-interrupted".into(),
                 agent_instance_id: root.agent_instance_id,
                 message_id: "input-interrupted".into(),
                 parent_message_id: None,
@@ -130,7 +128,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
             _ => None,
         })
         .expect("first reconciled snapshot");
-    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-interrupted");
+    let marker_id = piko_protocol::turn_abort_marker_message_id("request-interrupted");
     assert!(
         reconciled
             .snapshot
@@ -142,7 +140,10 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
         matches!(entry, SessionTreeEntry::Message(message) if message.id == marker_id)
     }));
     let projection = store.load_projection().unwrap();
-    let execution = projection.agent_executions.get("run-interrupted").unwrap();
+    let execution = projection
+        .agent_executions
+        .get("request-interrupted")
+        .unwrap();
     assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
     assert!(execution.report.is_some());
 }

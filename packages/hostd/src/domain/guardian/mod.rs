@@ -196,7 +196,7 @@ pub async fn run_review(
         InvocationContext {
             session_id: "guardian".into(),
             agent_instance_id: "guardian".into(),
-            run_id: "guardian".into(),
+            root_input_id: "guardian".into(),
             step_id: "review".into(),
             step_message_id: "guardian-review".into(),
         },

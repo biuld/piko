@@ -387,7 +387,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
     async fn on_step_started(&mut self, ctx: &AgentDispatchContext<'_>) {
         self.collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.execution_id.clone(),
+            ctx.root_input_id.to_string(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::MessageStarted {
@@ -403,7 +403,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             | InferenceEvent::RefusalDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.execution_id.clone(),
+                    ctx.root_input_id.to_string(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Text {
@@ -417,7 +417,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             InferenceEvent::ReasoningDelta { delta, .. } => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.execution_id.clone(),
+                    ctx.root_input_id.to_string(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     RealtimeDelta::Thinking {
@@ -431,7 +431,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             InferenceEvent::UpstreamActivity(activity) => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.execution_id.clone(),
+                    ctx.root_input_id.to_string(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     piko_protocol::agent_runtime::RealtimeDelta::UpstreamActivity {
@@ -447,7 +447,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             InferenceEvent::ApprovalRequired(approval) => {
                 self.collector.push(RealtimeFrame::new(
                     ctx.agent_instance_id.clone(),
-                    ctx.execution_id.clone(),
+                    ctx.root_input_id.to_string(),
                     ctx.agent_id.clone(),
                     ctx.message_id.clone(),
                     piko_protocol::agent_runtime::RealtimeDelta::UpstreamApproval {
@@ -468,7 +468,7 @@ impl StepEventConsumer for RealtimeCollectingConsumer {
             .build_message(ctx.model.expect("step dispatch model missing"));
         self.collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.execution_id.clone(),
+            ctx.root_input_id.to_string(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::MessageEnded {

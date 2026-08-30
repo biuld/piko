@@ -10,7 +10,7 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
     let context = ToolExecutionContext {
         session_id: "session-1".into(),
         agent_instance_id: "root".into(),
-        execution_id: "parent-cancel".into(),
+        root_input_id: "parent-cancel".into(),
         cancellation: Some(cancellation.clone()),
         agent_id: "main".into(),
         agent_role: None,

@@ -88,8 +88,8 @@ impl ExecutionActor {
     }
 
     pub(super) async fn commit_abort_marker(&mut self) -> Result<(), AgentApiError> {
-        let message = piko_protocol::turn_abort_marker(&self.identity.execution_id);
-        let message_id = piko_protocol::turn_abort_marker_message_id(&self.identity.execution_id);
+        let message = piko_protocol::turn_abort_marker(&self.identity.root_input_id);
+        let message_id = piko_protocol::turn_abort_marker_message_id(&self.identity.root_input_id);
         self.commit_message(message, message_id).await
     }
 
@@ -108,8 +108,7 @@ impl ExecutionActor {
             let step_span = tracing::info_span!(
                 "model.step",
                 session_id = %self.identity.session_id,
-                run_id = %self.identity.run_id,
-                execution_id = %self.identity.execution_id,
+                root_input_id = %self.identity.root_input_id,
                 agent_instance_id = %self.identity.agent_instance_id,
                 step_id = tracing::field::Empty,
                 model = tracing::field::Empty,
@@ -132,8 +131,7 @@ impl ExecutionActor {
             let commit_span = tracing::info_span!(
                 "model.step.commit",
                 session_id = %self.identity.session_id,
-                run_id = %self.identity.run_id,
-                execution_id = %self.identity.execution_id,
+                root_input_id = %self.identity.root_input_id,
                 agent_instance_id = %self.identity.agent_instance_id,
                 step_id = %step.model_step_id,
                 step_index = step.step_index,
@@ -207,9 +205,9 @@ impl ExecutionActor {
         self.state.model_step_index += 1;
         let step_count = self.state.model_step_index;
         let step_id = format!("step_{step_count}");
-        let model_step_id = format!("{}:{step_id}", self.identity.execution_id);
+        let model_step_id = format!("{}:{step_id}", self.identity.root_input_id);
         let respond_after_steer = std::mem::take(&mut self.state.respond_after_steer);
-        let message_id = runtime_assistant_message_id(&self.identity.execution_id, &step_id);
+        let message_id = runtime_assistant_message_id(&self.identity.root_input_id, &step_id);
 
         let agent = self.request.agent_spec.clone();
 
@@ -326,13 +324,13 @@ impl ExecutionActor {
             context: piko_llmd::gateway::InvocationContext {
                 session_id: self.identity.session_id.clone(),
                 agent_instance_id: self.identity.agent_instance_id.clone(),
-                run_id: self.identity.run_id.clone(),
+                root_input_id: self.identity.root_input_id.clone(),
                 step_id,
                 step_message_id: message_id.clone(),
             },
         };
         tracing::debug!(
-            execution_id = %self.identity.execution_id,
+            execution_id = %self.identity.root_input_id,
             step_id = %request.context.step_id,
             prompt_assembly_version = request.conversation.instructions.assembly_version,
             prompt_source_digest = %request.conversation.instructions.source_digest,
@@ -347,7 +345,7 @@ impl ExecutionActor {
         let identity = DispatchIdentity::new(
             self.identity.session_id.clone(),
             self.identity.agent_instance_id.clone(),
-            self.identity.execution_id.clone(),
+            self.identity.root_input_id.clone(),
             self.identity.agent_id.clone(),
         );
         let source_turn_id = self.identity.source_turn_id.clone().unwrap_or_default();

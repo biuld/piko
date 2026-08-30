@@ -56,37 +56,37 @@ impl SessionExecutionScope {
         self.completed
             .lock()
             .await
-            .remove(&handle.identity.execution_id);
-        executions.insert(handle.identity.execution_id.clone(), handle);
+            .remove(&handle.identity.root_input_id);
+        executions.insert(handle.identity.root_input_id.clone(), handle);
         Ok(())
     }
 
-    pub async fn get_execution(&self, execution_id: &str) -> Option<ExecutionHandle> {
-        self.executions.lock().await.get(execution_id).cloned()
+    pub async fn get_execution(&self, root_input_id: &str) -> Option<ExecutionHandle> {
+        self.executions.lock().await.get(root_input_id).cloned()
     }
 
-    pub async fn publish_terminal(&self, execution_id: &str, outcome: ExecutionTerminal) {
+    pub async fn publish_terminal(&self, root_input_id: &str, outcome: ExecutionTerminal) {
         self.completed
             .lock()
             .await
-            .insert(execution_id.to_string(), outcome);
+            .insert(root_input_id.to_string(), outcome);
     }
 
-    pub async fn take_completed(&self, execution_id: &str) -> Option<ExecutionTerminal> {
-        self.completed.lock().await.remove(execution_id)
+    pub async fn take_completed(&self, root_input_id: &str) -> Option<ExecutionTerminal> {
+        self.completed.lock().await.remove(root_input_id)
     }
 
-    pub async fn remove_if_generation(&self, execution_id: &str, generation: u64) {
+    pub async fn remove_if_generation(&self, root_input_id: &str, generation: u64) {
         let mut executions = self.executions.lock().await;
-        if let Some(handle) = executions.get(execution_id)
+        if let Some(handle) = executions.get(root_input_id)
             && handle.generation == generation
         {
-            executions.remove(execution_id);
+            executions.remove(root_input_id);
         }
     }
 
-    pub async fn rollback_reservation(&self, execution_id: &str, generation: u64) {
-        self.remove_if_generation(execution_id, generation).await;
+    pub async fn rollback_reservation(&self, root_input_id: &str, generation: u64) {
+        self.remove_if_generation(root_input_id, generation).await;
     }
 
     pub async fn cancel_all(&self) {
@@ -130,7 +130,7 @@ mod tests {
         ) -> Result<CommitAck, CommitError> {
             Ok(CommitAck {
                 session_id: commit.session_id,
-                execution_id: commit.execution_id,
+                root_input_id: commit.root_input_id,
                 agent_instance_id: commit.agent_instance_id,
                 message_id: Some(commit.message_id),
                 revision: 1,
@@ -143,7 +143,7 @@ mod tests {
         ) -> Result<CommitAck, CommitError> {
             Ok(CommitAck {
                 session_id: commit.session_id,
-                execution_id: commit.execution_id,
+                root_input_id: commit.root_input_id,
                 agent_instance_id: commit.agent_instance_id,
                 message_id: Some(commit.assistant.message_id),
                 revision: 1,
@@ -155,8 +155,7 @@ mod tests {
         let identity = ExecutionIdentity {
             session_id: "session".into(),
             source_turn_id: None,
-            run_id: "run".into(),
-            execution_id: execution_id.into(),
+            root_input_id: execution_id.into(),
             agent_instance_id: "agent".into(),
             agent_id: "main".into(),
             agent_role: None,

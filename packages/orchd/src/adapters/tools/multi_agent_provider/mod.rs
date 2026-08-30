@@ -58,12 +58,12 @@ impl MultiAgentToolProvider {
             .await
             .map_err(ToolFail::from_agent)?;
         let agent_spec_id = resolve_spawn_spec_id(&call.arguments, &specs)?;
-        let spawn_id = stable_runtime_id(&context.execution_id, &call.id);
+        let spawn_id = stable_runtime_id(&context.root_input_id, &call.id);
         let child_id = format!("agent_{spawn_id}");
         let child = self
             .runtime
             .create_agent(CreateAgentRequest {
-                request_id: format!("create:{}:{}", context.execution_id, call.id),
+                request_id: format!("create:{}:{}", context.root_input_id, call.id),
                 session_id: context.session_id.clone(),
                 parent_agent_instance_id: context.agent_instance_id.clone(),
                 agent_spec_id: agent_spec_id.clone(),
@@ -73,12 +73,12 @@ impl MultiAgentToolProvider {
             .await
             .map_err(|error| map_spawn_agent_error(error, &specs))?;
         let input = SendAgentInputRequest {
-            request_id: format!("input:{}:{}", context.execution_id, call.id),
+            request_id: format!("input:{}:{}", context.root_input_id, call.id),
             session_id: context.session_id.clone(),
             agent_instance_id: child.identity.agent_instance_id.clone(),
             caller_agent_instance_id: Some(context.agent_instance_id.clone()),
             source_turn_id: None,
-            message_id: format!("message:{}:{}", context.execution_id, call.id),
+            message_id: format!("message:{}:{}", context.root_input_id, call.id),
             content: MessageContent::String(prompt),
             delivery: AgentInputDelivery::StartWhenIdle,
             prompt_resources: None,
@@ -187,11 +187,11 @@ impl MultiAgentToolProvider {
             MessageWhen::Queue => AgentInputDelivery::FollowUp,
             MessageWhen::Steer => AgentInputDelivery::SteerActive,
         };
-        let request_id = format!("message:{}:{}", context.execution_id, call.id);
+        let request_id = format!("message:{}:{}", context.root_input_id, call.id);
         let receipt = self
             .runtime
             .submit_agent_input(piko_protocol::AgentInput {
-                input_id: stable_runtime_id(&context.execution_id, &call.id),
+                input_id: stable_runtime_id(&context.root_input_id, &call.id),
                 request_id,
                 session_id: context.session_id.clone(),
                 agent_instance_id: target,
@@ -384,7 +384,7 @@ impl ToolProvider for MultiAgentToolProvider {
                 match required_string(&call.arguments, "agent_instance_id") {
                     Ok(target) => {
                         let request = AgentLifecycleRequest {
-                            request_id: format!("lifecycle:{}:{}", context.execution_id, call.id),
+                            request_id: format!("lifecycle:{}:{}", context.root_input_id, call.id),
                             session_id: context.session_id.clone(),
                             agent_instance_id: target,
                             caller_agent_instance_id: Some(context.agent_instance_id.clone()),

@@ -213,7 +213,7 @@ impl StepEventConsumer for ToolCallDispatchConsumer {
         };
         self.realtime_collector.push(RealtimeFrame::new(
             ctx.agent_instance_id.clone(),
-            ctx.execution_id.clone(),
+            ctx.root_input_id.to_string(),
             ctx.agent_id.clone(),
             ctx.message_id.clone(),
             RealtimeDelta::ToolCall {

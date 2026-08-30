@@ -22,7 +22,7 @@ impl ExecutionCommitPort for CollectingExecutionCommitPort {
         };
         let ack = CommitAck {
             session_id: commit.session_id.clone(),
-            execution_id: commit.execution_id.clone(),
+            root_input_id: commit.root_input_id.clone(),
             agent_instance_id: commit.agent_instance_id.clone(),
             message_id: Some(commit.message_id.clone()),
             revision,
@@ -39,7 +39,7 @@ impl ExecutionCommitPort for CollectingExecutionCommitPort {
         };
         let ack = CommitAck {
             session_id: commit.session_id.clone(),
-            execution_id: commit.execution_id.clone(),
+            root_input_id: commit.root_input_id.clone(),
             agent_instance_id: commit.agent_instance_id.clone(),
             message_id: Some(commit.assistant.message_id.clone()),
             revision,

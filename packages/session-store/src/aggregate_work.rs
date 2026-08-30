@@ -255,8 +255,6 @@ impl SessionAggregate {
             agent_instance_id,
             root_input_id,
             request_id,
-            execution_id,
-            run_id,
             base_message_id,
             tree_base_entry_id,
             source_turn_id,
@@ -286,8 +284,6 @@ impl SessionAggregate {
             started_at,
             finished_at: None,
             report: None,
-            execution_id: (!execution_id.is_empty()).then_some(execution_id),
-            run_id: (!run_id.is_empty()).then_some(run_id),
             base_message_id,
             tree_base_entry_id,
             source_turn_id,
@@ -387,35 +383,30 @@ impl SessionAggregate {
         })
     }
 
-    /// The root input and processing facts behind an interim execution
-    /// correlation id (slice 6.4 rekeys message, model-step, and usage grains
-    /// onto `root_input_id`).
-    pub fn work_by_execution_id(
+    /// The root input and its processing facts.
+    pub fn work_by_root_input_id(
         &self,
-        execution_id: &str,
+        root_input_id: &str,
     ) -> Option<(&StoredAgentInput, &StoredRootProcessing)> {
-        self.agent_inputs.values().find_map(|input| {
-            let processing = input.processing.as_ref()?;
-            (processing.execution_id.as_deref() == Some(execution_id))
-                .then_some((input, processing))
-        })
+        let input = self.agent_inputs.get(root_input_id)?;
+        let processing = input.processing.as_ref()?;
+        Some((input, processing))
     }
 
-    /// Last message committed under the interim execution correlation id.
-    pub fn work_message_head(&self, execution_id: &str) -> Option<&str> {
+    /// Last message committed under this root input's work.
+    pub fn work_message_head(&self, root_input_id: &str) -> Option<&str> {
         self.messages
             .values()
-            .filter(|message| message.data.execution_id.as_deref() == Some(execution_id))
+            .filter(|message| message.data.root_input_id.as_deref() == Some(root_input_id))
             .max_by_key(|message| message.revision)
             .map(|message| message.data.message_id.as_str())
     }
 
-    /// Number of model steps committed under the interim execution
-    /// correlation id.
-    pub fn work_model_step_count(&self, execution_id: &str) -> usize {
+    /// Number of model steps committed under this root input's work.
+    pub fn work_model_step_count(&self, root_input_id: &str) -> usize {
         self.model_steps
             .values()
-            .filter(|step| step.data.execution_id == execution_id)
+            .filter(|step| step.data.root_input_id == root_input_id)
             .count()
     }
 }

@@ -45,7 +45,7 @@ impl SessionAggregate {
                 agent_instance_id: data.agent_instance_id,
                 agent_parent_message_id: data.agent_parent_message_id,
                 tree_parent_entry_id: data.tree_parent_entry_id,
-                execution_id: Some(data.execution_id),
+                root_input_id: Some(data.root_input_id),
                 source_turn_id: data.source_turn_id,
                 committed_at: data.committed_at,
                 message: Message::User {
@@ -68,8 +68,7 @@ impl SessionAggregate {
         data: ModelStepCommittedV1,
     ) -> Result<()> {
         if data.model_step_id.is_empty()
-            || data.run_id.is_empty()
-            || data.execution_id.is_empty()
+            || data.root_input_id.is_empty()
             || data.assistant_message_id.is_empty()
         {
             return Err(StoreError::InvalidEvent(
@@ -84,10 +83,10 @@ impl SessionAggregate {
         if self.model_steps.contains_key(&data.model_step_id) {
             return Err(StoreError::IdempotencyConflict(data.model_step_id));
         }
-        let execution_id = data.execution_id.clone();
-        let (root, processing) = self.work_by_execution_id(&execution_id).ok_or_else(|| {
+        let root_input_id = data.root_input_id.clone();
+        let (root, processing) = self.work_by_root_input_id(&root_input_id).ok_or_else(|| {
             StoreError::InvalidEvent(format!(
-                "model step references unknown work execution {execution_id}"
+                "model step references unknown root input {root_input_id}"
             ))
         })?;
         if processing.finished_at.is_some() {
@@ -95,8 +94,7 @@ impl SessionAggregate {
                 "model step was committed after work finished".into(),
             ));
         }
-        if processing.run_id.as_deref() != Some(data.run_id.as_str())
-            || root.input.agent_instance_id != data.agent_instance_id
+        if root.input.agent_instance_id != data.agent_instance_id
             || processing.source_turn_id != data.source_turn_id
         {
             return Err(StoreError::InvalidEvent(
@@ -110,8 +108,7 @@ impl SessionAggregate {
                 "model step does not reference an applied root input".into(),
             ));
         }
-        let root_input_id = root.input.input_id.clone();
-        let expected_index = self.work_model_step_count(&execution_id) as u32 + 1;
+        let expected_index = self.work_model_step_count(&root_input_id) as u32 + 1;
         if data.step_index != expected_index {
             return Err(StoreError::InvalidEvent(format!(
                 "model step index must be {expected_index}, got {}",
@@ -146,7 +143,7 @@ impl SessionAggregate {
             })?;
         if assistant.revision != revision
             || assistant.data.agent_instance_id != data.agent_instance_id
-            || assistant.data.execution_id.as_deref() != Some(data.execution_id.as_str())
+            || assistant.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
             || assistant.data.source_turn_id != data.source_turn_id
             || !matches!(&assistant.data.message, Message::Assistant { .. })
         {
@@ -185,7 +182,7 @@ impl SessionAggregate {
             })?;
             if message.revision != revision
                 || message.data.agent_instance_id != data.agent_instance_id
-                || message.data.execution_id.as_deref() != Some(data.execution_id.as_str())
+                || message.data.root_input_id.as_deref() != Some(data.root_input_id.as_str())
                 || message.data.source_turn_id != data.source_turn_id
                 || message.data.agent_parent_message_id.as_deref() != Some(previous_parent.as_str())
                 || !matches!(&message.data.message, Message::ToolCall { .. })
@@ -196,7 +193,7 @@ impl SessionAggregate {
             }
             previous_parent = message_id.clone();
         }
-        let head = self.work_message_head(&execution_id).map(str::to_string);
+        let head = self.work_message_head(&root_input_id).map(str::to_string);
         if head.as_deref() != Some(previous_parent.as_str()) {
             return Err(StoreError::InvalidEvent(
                 "model step messages do not end at the work transcript head".into(),
@@ -249,8 +246,8 @@ impl SessionAggregate {
                 ));
             }
         }
-        if let Some(execution_id) = &data.execution_id
-            && let Some((root, processing)) = self.work_by_execution_id(execution_id)
+        if let Some(root_input_id) = &data.root_input_id
+            && let Some((root, processing)) = self.work_by_root_input_id(root_input_id)
         {
             if root.input.agent_instance_id != data.agent_instance_id {
                 return Err(StoreError::InvalidEvent(
@@ -258,7 +255,7 @@ impl SessionAggregate {
                 ));
             }
             let expected_parent = self
-                .work_message_head(execution_id)
+                .work_message_head(root_input_id)
                 .map(str::to_string)
                 .or_else(|| processing.base_message_id.clone());
             if data.agent_parent_message_id != expected_parent {
@@ -267,7 +264,7 @@ impl SessionAggregate {
                 ));
             }
             let expected_tree_parent = self
-                .work_message_head(execution_id)
+                .work_message_head(root_input_id)
                 .map(str::to_string)
                 .or_else(|| processing.tree_base_entry_id.clone());
             if data.tree_parent_entry_id != expected_tree_parent {

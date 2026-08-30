@@ -29,11 +29,8 @@ pub const TRAJECTORY_EVENT_TERMINAL: &str = "trajectory.terminal";
 pub struct TrajectoryIdentity {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
-    pub run_id: String,
-    /// Resolved from the durable `execution_started` fact by run identity when
-    /// the capture point does not know it (for example prompt assembly).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
+    /// Work identity: the root AgentInput these records belong to.
+    pub root_input_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<String>,
 }
@@ -226,8 +223,7 @@ pub enum TrajectoryTerminalKind {
 pub struct TrajectoryRunSummary {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
-    pub run_id: String,
-    pub execution_id: String,
+    pub root_input_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<String>,
     pub started_at: i64,
@@ -328,7 +324,7 @@ pub enum TrajectoryLiveEvent {
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryLiveRecordEvent {
     pub session_id: String,
-    pub run_id: String,
+    pub root_input_id: String,
     pub revision: u64,
     pub committed_at: i64,
     pub record: TrajectoryRecord,
@@ -342,8 +338,7 @@ mod tests {
         TrajectoryIdentity {
             session_id: "s".into(),
             agent_instance_id: "a".into(),
-            run_id: "r".into(),
-            execution_id: None,
+            root_input_id: "input-r".into(),
             source_turn_id: None,
         }
     }
@@ -372,7 +367,7 @@ mod tests {
     fn live_events_round_trip() {
         let record = TrajectoryLiveEvent::Record(Box::new(TrajectoryLiveRecordEvent {
             session_id: "s".into(),
-            run_id: "r".into(),
+            root_input_id: "input-r".into(),
             revision: 7,
             committed_at: 1,
             record: TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
@@ -384,7 +379,7 @@ mod tests {
         }));
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["kind"], "record");
-        assert_eq!(json["runId"], "r");
+        assert_eq!(json["rootInputId"], "input-r");
         let back: TrajectoryLiveEvent = serde_json::from_value(json).unwrap();
         assert_eq!(record, back);
 

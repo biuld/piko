@@ -92,7 +92,7 @@ impl SessionStore {
             .filter_map(|input| {
                 let processing = input.processing.as_ref()?;
                 Some(piko_orchd_api::RecoveredExecutionReport {
-                    internal_execution_id: processing.execution_id.clone()?,
+                    root_input_id: input.input.input_id.clone(),
                     report: processing.report.clone()?,
                 })
             })
@@ -273,7 +273,7 @@ fn committed_message(
         tree_parent_id: stored.data.tree_parent_entry_id.clone(),
         agent_instance_id: stored.data.agent_instance_id.clone(),
         agent_spec_id: agent_spec_id.to_string(),
-        execution_id: stored.data.execution_id.clone(),
+        root_input_id: stored.data.root_input_id.clone(),
         source_turn_id: stored.data.source_turn_id.clone(),
         transcript_seq,
         timestamp: stored.data.committed_at,

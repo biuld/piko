@@ -8,7 +8,7 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
     let context = ToolExecutionContext {
         session_id: "session-1".into(),
         agent_instance_id: "root".into(),
-        execution_id: "parent-exec".into(),
+        root_input_id: "parent-exec".into(),
         cancellation: None,
         agent_id: "main".into(),
         agent_role: None,
@@ -194,7 +194,7 @@ fn v2_context() -> ToolExecutionContext {
     ToolExecutionContext {
         session_id: "session-1".into(),
         agent_instance_id: "root".into(),
-        execution_id: "parent-exec-v2".into(),
+        root_input_id: "parent-exec-v2".into(),
         cancellation: None,
         agent_id: "main".into(),
         agent_role: None,

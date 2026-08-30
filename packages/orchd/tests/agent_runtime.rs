@@ -240,7 +240,7 @@ impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
         }
         Ok(piko_protocol::CommitAck {
             session_id: commit.session_id,
-            execution_id: commit.execution_id,
+            root_input_id: commit.root_input_id,
             agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.message_id),
             revision: attempt,
@@ -257,7 +257,7 @@ impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
         }
         Ok(piko_protocol::CommitAck {
             session_id: commit.session_id,
-            execution_id: commit.execution_id,
+            root_input_id: commit.root_input_id,
             agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.assistant.message_id),
             revision: attempt,

@@ -119,7 +119,7 @@ pub async fn summarize_history(
         InvocationContext {
             session_id: "compaction".into(),
             agent_instance_id: "compaction".into(),
-            run_id: "compaction".into(),
+            root_input_id: "compaction".into(),
             step_id: "summary".into(),
             step_message_id: "compaction-summary".into(),
         },

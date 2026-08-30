@@ -40,13 +40,6 @@ pub struct StoredRootProcessing {
     pub finished_at: Option<i64>,
     #[serde(default)]
     pub report: Option<AgentWorkReport>,
-    /// Interim commit-correlation identity for message, model-step, and usage
-    /// grains (slice 6.4 rekeys them onto the root input).
-    #[serde(default)]
-    pub execution_id: Option<String>,
-    /// Interim run correlation; equals the root request id in orchd today.
-    #[serde(default)]
-    pub run_id: Option<String>,
     #[serde(default)]
     pub base_message_id: Option<String>,
     #[serde(default)]

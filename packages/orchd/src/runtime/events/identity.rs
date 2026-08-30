@@ -5,13 +5,13 @@ use crate::domain::model::step::ModelSpec;
 use crate::domain::tools::call::ToolCallItem;
 use crate::ports::tool_provider::ToolExecutionContext;
 use piko_protocol::agents::HostSessionContext;
-use piko_protocol::{AgentId, AgentInstanceId, ExecutionId, Message, MessageId, SessionId};
+use piko_protocol::{AgentId, AgentInstanceId, Message, MessageId, SessionId};
 
 #[derive(Clone)]
 pub(crate) struct DispatchIdentity {
     session_id: SessionId,
     agent_instance_id: AgentInstanceId,
-    execution_id: ExecutionId,
+    root_input_id: String,
     agent_id: AgentId,
 }
 
@@ -19,13 +19,13 @@ impl DispatchIdentity {
     pub(crate) fn new(
         session_id: SessionId,
         agent_instance_id: AgentInstanceId,
-        execution_id: ExecutionId,
+        root_input_id: String,
         agent_id: AgentId,
     ) -> Self {
         Self {
             session_id,
             agent_instance_id,
-            execution_id,
+            root_input_id,
             agent_id,
         }
     }
@@ -34,8 +34,8 @@ impl DispatchIdentity {
         &self.session_id
     }
 
-    pub(crate) fn execution_id(&self) -> &ExecutionId {
-        &self.execution_id
+    pub(crate) fn root_input_id(&self) -> &str {
+        &self.root_input_id
     }
 
     pub(crate) fn agent_instance_id(&self) -> &AgentInstanceId {
@@ -55,14 +55,14 @@ impl DispatchIdentity {
             Self::new(
                 host_context.session_id.clone(),
                 context.agent_instance_id.clone(),
-                context.execution_id.clone(),
+                context.root_input_id.clone(),
                 context.agent_id.clone(),
             )
         } else {
             Self::new(
-                context.execution_id.clone(),
+                context.root_input_id.clone(),
                 context.agent_instance_id.clone(),
-                context.execution_id.clone(),
+                context.root_input_id.clone(),
                 context.agent_id.clone(),
             )
         }
@@ -77,7 +77,7 @@ impl DispatchIdentity {
         AgentDispatchContext {
             session_id: &self.session_id,
             agent_instance_id: &self.agent_instance_id,
-            execution_id: &self.execution_id,
+            root_input_id: &self.root_input_id,
             agent_id: &self.agent_id,
             message_id,
             source_turn_id,
@@ -95,7 +95,7 @@ pub(crate) fn host_session_context_from_execution(
 pub(crate) struct AgentDispatchContext<'a> {
     pub session_id: &'a SessionId,
     pub agent_instance_id: &'a AgentInstanceId,
-    pub execution_id: &'a ExecutionId,
+    pub root_input_id: &'a str,
     pub agent_id: &'a AgentId,
     pub message_id: &'a MessageId,
     pub source_turn_id: &'a str,

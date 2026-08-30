@@ -280,7 +280,7 @@ impl ToolRegistry for ToolRegistryImpl {
         let exec_context = ToolExecutionContext {
             session_id: context.session_id.clone(),
             agent_instance_id: context.agent_instance_id.clone(),
-            execution_id: context.execution_id.clone(),
+            root_input_id: context.root_input_id.clone(),
             cancellation: context.cancellation.clone(),
             agent_id: context.agent_id.clone(),
             agent_role: context.agent_role.clone(),

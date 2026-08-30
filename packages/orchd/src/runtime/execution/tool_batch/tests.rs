@@ -244,7 +244,7 @@ async fn cancellation_mid_batch_commits_aborted_results_for_every_call() {
         .request_cancel(CancelExecutionRequest {
             request_id: "cancel-batch".into(),
             session_id: "session-batch".into(),
-            execution_id: "exec-cancel".into(),
+            root_input_id: "exec-cancel".into(),
             reason: CancelReason::UserRequested,
         })
         .await
@@ -324,7 +324,7 @@ async fn cancel_during_sequential_call_does_not_start_pending_parallel_calls() {
         .request_cancel(CancelExecutionRequest {
             request_id: "cancel-seq".into(),
             session_id: "session-batch".into(),
-            execution_id: "exec-cancel-seq".into(),
+            root_input_id: "exec-cancel-seq".into(),
             reason: CancelReason::UserRequested,
         })
         .await

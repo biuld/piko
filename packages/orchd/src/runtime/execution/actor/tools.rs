@@ -45,8 +45,7 @@ impl ExecutionActor {
             let batch_span = tracing::info_span!(
                 "tool.batch",
                 session_id = %self.identity.session_id,
-                run_id = %self.identity.run_id,
-                execution_id = %self.identity.execution_id,
+                root_input_id = %self.identity.root_input_id,
                 agent_instance_id = %self.identity.agent_instance_id,
                 step_id = format!("step_{model_step_index}"),
                 mode = tool_batch::mode_str(&group.mode),
@@ -172,8 +171,7 @@ impl ExecutionActor {
         TrajectoryIdentity {
             session_id: self.identity.session_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            run_id: self.identity.run_id.clone(),
-            execution_id: Some(self.identity.execution_id.clone()),
+            root_input_id: self.identity.root_input_id.clone(),
             source_turn_id: self.identity.source_turn_id.clone(),
         }
     }
@@ -270,7 +268,7 @@ impl ExecutionActor {
         let assistant = MessageCommit {
             session_id: self.identity.session_id.clone(),
             source_turn_id: self.identity.source_turn_id.clone(),
-            execution_id: self.identity.execution_id.clone(),
+            root_input_id: self.identity.root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: step.message_id.clone(),
             parent_message_id: self.state.head_message_id.clone(),
@@ -288,7 +286,7 @@ impl ExecutionActor {
                 let commit = MessageCommit {
                     session_id: self.identity.session_id.clone(),
                     source_turn_id: self.identity.source_turn_id.clone(),
-                    execution_id: self.identity.execution_id.clone(),
+                    root_input_id: self.identity.root_input_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
                     message_id,
                     parent_message_id: parent_message_id.clone(),
@@ -303,8 +301,7 @@ impl ExecutionActor {
         let commit = ModelStepCommit {
             session_id: self.identity.session_id.clone(),
             source_turn_id: self.identity.source_turn_id.clone(),
-            run_id: self.identity.run_id.clone(),
-            execution_id: self.identity.execution_id.clone(),
+            root_input_id: self.identity.root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             model_step_id: step.model_step_id.clone(),
             step_index: step.step_index,
@@ -388,15 +385,10 @@ impl ExecutionActor {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             input_id: input_id.to_string(),
             disposition: piko_protocol::AgentInputDisposition::AppliedToStep,
-            root_input_id: Some(
-                self.request
-                    .root_input_id
-                    .clone()
-                    .unwrap_or_else(|| self.request.request_id.clone()),
-            ),
+            root_input_id: Some(self.request.root_input_id.clone()),
             model_step_id: Some(format!(
                 "{}:step_{next_step_index}",
-                self.identity.execution_id
+                self.identity.root_input_id
             )),
             changed_at: now_ms(),
         };

@@ -87,7 +87,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
             piko_protocol::execution::MessageCommit {
                 session_id: session_id.clone(),
                 source_turn_id: Some("turn-root".into()),
-                execution_id: "exec-root".into(),
+                root_input_id: "input-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "message-root".into(),
                 parent_message_id: None,

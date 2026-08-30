@@ -58,8 +58,8 @@ pub struct AgentProjection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecutionProjection {
     pub agent_instance_id: String,
-    pub run_id: String,
-    pub execution_id: String,
+    /// Work identity of the projection; the map key as well.
+    pub root_input_id: String,
     pub request_id: String,
     pub source_turn_id: Option<String>,
     pub detached_recipient_agent_instance_id: Option<String>,
@@ -85,7 +85,7 @@ pub struct CommittedMessage {
     pub agent_instance_id: String,
     pub agent_spec_id: String,
     #[serde(default)]
-    pub execution_id: Option<String>,
+    pub root_input_id: Option<String>,
     #[serde(default)]
     pub source_turn_id: Option<String>,
     pub transcript_seq: u64,

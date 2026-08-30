@@ -25,7 +25,6 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
     let temp = tempfile::tempdir().unwrap();
     let store =
         SessionStore::create_session(temp.path(), "s1".into(), "/project".into(), 1).unwrap();
-    let execution_id = "exec-1".to_string();
     let agent_instance_id = "agent_s1_root";
     store
         .commit_events(
@@ -53,8 +52,6 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
                     agent_instance_id: agent_instance_id.into(),
                     root_input_id: "input-1".into(),
                     request_id: "req-1".into(),
-                    execution_id: execution_id.clone(),
-                    run_id: "run-1".into(),
                     base_message_id: None,
                     tree_base_entry_id: None,
                     source_turn_id: Some("turn-1".into()),
@@ -70,8 +67,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         identity: TrajectoryIdentity {
             session_id: "s1".into(),
             agent_instance_id: agent_instance_id.into(),
-            run_id: "run-1".into(),
-            execution_id: None,
+            root_input_id: "input-1".into(),
             source_turn_id: None,
         },
         assembly_version: 5,
@@ -177,7 +173,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         .await
         .unwrap();
     assert_eq!(page.runs.len(), 1);
-    assert_eq!(page.runs[0].run_id, "run-1");
+    assert_eq!(page.runs[0].root_input_id, "input-1");
     assert_eq!(
         page.runs[0].terminal,
         Some(TrajectoryTerminalKind::Completed)
@@ -186,7 +182,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
     assert_eq!(page.runs[0].source_turn_id.as_deref(), Some("turn-1"));
 
     let run = query
-        .fetch_run("s1", "run-1", &HashMap::new())
+        .fetch_run("s1", "input-1", &HashMap::new())
         .await
         .unwrap();
     assert!(run.assembly.is_some());
@@ -240,7 +236,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         )
         .unwrap();
     let run = query
-        .fetch_run("s1", "run-1", &HashMap::new())
+        .fetch_run("s1", "input-1", &HashMap::new())
         .await
         .unwrap();
     assert_eq!(run.summary.step_count, 2);
@@ -258,8 +254,7 @@ async fn query_resolves_persisted_session_without_session_paths_entry() {
         identity: TrajectoryIdentity {
             session_id: session_id.clone(),
             agent_instance_id: format!("agent_{session_id}_root"),
-            run_id: "run-1".into(),
-            execution_id: None,
+            root_input_id: "input-1".into(),
             source_turn_id: None,
         },
         assembly_version: 5,
@@ -291,7 +286,7 @@ async fn query_resolves_persisted_session_without_session_paths_entry() {
         1,
         "persisted session resolved via repository"
     );
-    assert_eq!(page.runs[0].run_id, "run-1");
+    assert_eq!(page.runs[0].root_input_id, "input-1");
 }
 
 #[test]
@@ -299,8 +294,7 @@ fn run_usage_rolls_up_model_steps_host_side() {
     let identity = TrajectoryIdentity {
         session_id: "s".into(),
         agent_instance_id: "a".into(),
-        run_id: "r".into(),
-        execution_id: None,
+        root_input_id: "input-r".into(),
         source_turn_id: None,
     };
     let usage = piko_protocol::Usage {
@@ -341,8 +335,7 @@ fn run_usage_rolls_up_model_steps_host_side() {
             identity: TrajectoryIdentity {
                 session_id: "s".into(),
                 agent_instance_id: "a".into(),
-                run_id: "r".into(),
-                execution_id: None,
+                root_input_id: "input-r".into(),
                 source_turn_id: None,
             },
             kind: piko_protocol::TrajectoryNotificationKind::RunError,

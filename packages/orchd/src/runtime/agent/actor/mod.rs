@@ -75,64 +75,40 @@ struct QueuedRuntimeInput {
 #[derive(Clone)]
 struct AcceptedAgentInput {
     receipt: AgentInputReceipt,
-    internal_execution_id: String,
+    root_input_id: String,
 }
 
 enum AgentRunState {
     Idle,
-    Starting {
-        execution_id: String,
-        root_input_id: String,
-        run_id: String,
-    },
-    Running {
-        execution_id: String,
-        root_input_id: String,
-        run_id: String,
-    },
+    Starting { root_input_id: String },
+    Running { root_input_id: String },
     Finalizing(TerminalCommitScope),
 }
 
-fn internal_execution_id(identity: &AgentInstanceIdentity, request_id: &str) -> String {
-    piko_orchd_api::stable_internal_id(
-        "exec",
-        &[
-            &identity.session_id,
-            &identity.agent_instance_id,
-            request_id,
-        ],
-    )
-}
-
 impl AgentRunState {
-    fn execution_id(&self) -> Option<&str> {
+    fn root_input_id(&self) -> Option<&str> {
         match self {
             Self::Idle => None,
-            Self::Starting { execution_id, .. } | Self::Running { execution_id, .. } => {
-                Some(execution_id)
+            Self::Starting { root_input_id } | Self::Running { root_input_id } => {
+                Some(root_input_id)
             }
-            Self::Finalizing(terminal) => Some(terminal.execution_id()),
+            Self::Finalizing(terminal) => Some(terminal.root_input_id()),
+        }
+    }
+
+    /// The root input of work that is still admitting or executing. Finalizing
+    /// work is terminal-bound and no longer projects as active.
+    fn active_root_input_id(&self) -> Option<&str> {
+        match self {
+            Self::Starting { root_input_id } | Self::Running { root_input_id } => {
+                Some(root_input_id)
+            }
+            Self::Idle | Self::Finalizing(_) => None,
         }
     }
 
     fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
-    }
-
-    fn active_root(&self) -> Option<(&str, &str)> {
-        match self {
-            Self::Starting {
-                root_input_id,
-                run_id,
-                ..
-            }
-            | Self::Running {
-                root_input_id,
-                run_id,
-                ..
-            } => Some((root_input_id, run_id)),
-            Self::Idle | Self::Finalizing(_) => None,
-        }
     }
 }
 

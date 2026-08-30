@@ -120,8 +120,7 @@ fn model_step(
     Event::ModelStepCommitted(piko_protocol::ModelStepBoundary {
         session_id: "session-1".into(),
         source_turn_id: Some("work-1".into()),
-        run_id: "run-1".into(),
-        execution_id: "execution-1".into(),
+        root_input_id: "input-1".into(),
         agent_instance_id: "task-1".into(),
         model_step_id: model_step_id.into(),
         step_index,

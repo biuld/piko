@@ -19,7 +19,7 @@ impl piko_orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
         let span = tracing::info_span!(
             "piko.prompt.assemble",
             session_id = %request.session_id,
-            run_id = %request.run_id,
+            root_input_id = %request.root_input_id,
             agent_instance_id = %request.agent_instance_id,
             agent_spec_id = %request.agent_spec.id,
             assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
@@ -44,8 +44,7 @@ impl piko_orchd_api::PromptAssemblyPort for HostPromptAssemblyPort {
                         identity: piko_protocol::TrajectoryIdentity {
                             session_id: request.session_id.clone(),
                             agent_instance_id: request.agent_instance_id.clone(),
-                            run_id: request.run_id.clone(),
-                            execution_id: None,
+                            root_input_id: request.root_input_id.clone(),
                             source_turn_id: None,
                         },
                         assembly_version: run_prompt.assembly_version,
@@ -130,7 +129,7 @@ mod tests {
         PromptAssemblyRequest {
             session_id: session_id.into(),
             agent_instance_id: agent_instance_id.into(),
-            run_id: format!("run-{marker}"),
+            root_input_id: format!("input-{marker}"),
             agent_spec: AgentSpec {
                 id: "main".into(),
                 version: "1".into(),
@@ -191,7 +190,8 @@ mod tests {
         let a1_second = assemblies
             .iter()
             .find(|record| {
-                record.identity.agent_instance_id == "a1" && record.identity.run_id == "run-second"
+                record.identity.agent_instance_id == "a1"
+                    && record.identity.root_input_id == "input-second"
             })
             .expect("second assembly for a1");
         assert_eq!(a1_second.prompt, second);
@@ -200,7 +200,7 @@ mod tests {
         assert!(
             assemblies
                 .iter()
-                .any(|record| record.identity.run_id == "run-first")
+                .any(|record| record.identity.root_input_id == "input-first")
         );
         assert!(assemblies.iter().any(|record| {
             record.identity.agent_instance_id == "a2" && record.tool_catalog.digest == "tools-other"

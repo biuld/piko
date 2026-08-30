@@ -2,30 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AgentRunEvent {
-    Started {
-        session_id: SessionId,
-        run_id: String,
-        agent_instance_id: crate::AgentInstanceId,
-        timestamp: i64,
-    },
-    Completed {
-        session_id: SessionId,
-        run_id: String,
-        agent_instance_id: crate::AgentInstanceId,
-        timestamp: i64,
-    },
-    Failed {
-        session_id: SessionId,
-        run_id: String,
-        agent_instance_id: crate::AgentInstanceId,
-        error: String,
-        timestamp: i64,
-    },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalEvent {

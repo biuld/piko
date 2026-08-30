@@ -21,8 +21,8 @@ pub fn truncate_json(value: &serde_json::Value, max: usize) -> String {
 }
 
 /// Produce a stable runtime assistant message ID.
-pub fn runtime_assistant_message_id(run_id: &str, step_id: &str) -> String {
-    format!("{run_id}:{step_id}:assistant")
+pub fn runtime_assistant_message_id(root_input_id: &str, step_id: &str) -> String {
+    format!("{root_input_id}:{step_id}:assistant")
 }
 
 /// Produce a stable runtime tool call message ID.

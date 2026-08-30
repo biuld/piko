@@ -119,8 +119,6 @@ pub(super) fn start_run(
         agent_instance_id,
         root_input_id,
         request_id,
-        execution_id,
-        run_id,
         source_turn_id,
         detached_recipient_agent_instance_id,
         prompt_assembly_version,
@@ -139,19 +137,11 @@ pub(super) fn start_run(
     {
         return Err(CommitError::IdentityMismatch);
     }
-    if aggregate.agent_inputs.values().any(|stored| {
-        stored.processing.as_ref().and_then(|p| p.run_id.as_deref()) == Some(run_id.as_str())
-            && stored.input.input_id != root_input_id
-    }) {
-        return Err(CommitError::IdempotencyConflict);
-    }
     let committed_input_id = root_input_id.clone();
     if let Some(existing) = aggregate.agent_inputs.get(&root_input_id) {
         if let Some(processing) = &existing.processing {
             let matches = existing.input == input
                 && processing.started_at == started_at
-                && processing.execution_id.as_deref() == Some(execution_id.as_str())
-                && processing.run_id.as_deref() == Some(run_id.as_str())
                 && processing.source_turn_id == source_turn_id
                 && processing.detached_recipient_agent_instance_id
                     == detached_recipient_agent_instance_id
@@ -172,8 +162,6 @@ pub(super) fn start_run(
             agent_instance_id: agent_instance_id.clone(),
             root_input_id: root_input_id.clone(),
             request_id,
-            execution_id,
-            run_id,
             base_message_id: admitted_base(aggregate, &agent_instance_id),
             tree_base_entry_id: admitted_tree_base(aggregate, &agent_instance_id),
             source_turn_id,

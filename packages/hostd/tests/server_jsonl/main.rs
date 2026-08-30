@@ -158,7 +158,7 @@ impl AgentRunRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: agent_instance_id.clone(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "user-1".into(),
                     parent_message_id: None,
@@ -189,7 +189,7 @@ impl AgentRunRunner for AssistantRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: agent_instance_id.clone(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: "assistant-1".into(),
                     parent_message_id: Some("user-1".into()),
@@ -345,7 +345,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: agent_instance_id.clone(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: user_message_id.clone(),
                     parent_message_id: if turn == 0 {
@@ -390,7 +390,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: agent_instance_id.clone(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: assistant_message_id.clone(),
                     parent_message_id: Some(user_message_id.clone()),

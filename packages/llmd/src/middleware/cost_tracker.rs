@@ -72,7 +72,7 @@ impl LlmdMiddleware for CostTrackerMiddleware {
                 .insert("cost_basis".to_string(), cost.basis.as_str().into());
             info!(
                 target: "llm.cost",
-                run_id = %ctx.run_id,
+                run_id = %ctx.root_input_id,
                 step_id = %ctx.step_id,
                 model = %ctx.model_id,
                 provider = %ctx.provider,

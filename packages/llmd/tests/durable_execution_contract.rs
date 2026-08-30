@@ -118,7 +118,7 @@ fn request() -> InferenceRequest {
         piko_llmd::gateway::InvocationContext {
             session_id: "session".into(),
             agent_instance_id: "root".into(),
-            run_id: "run".into(),
+            root_input_id: "run".into(),
             step_id: "step".into(),
             step_message_id: "step-message".into(),
         },

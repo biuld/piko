@@ -417,14 +417,14 @@ mod usage_tests {
 ///
 /// Context keeps `authority=None` so the marker is data, not instruction or
 /// fabricated model output; the gateway renders it to the next run's prompt.
-pub fn turn_abort_marker(execution_id: &str) -> Message {
+pub fn turn_abort_marker(root_input_id: &str) -> Message {
     Message::Context {
         content: MessageContent::String(
             "The previous turn was interrupted on purpose. Any tools or commands that were aborted may have partially executed."
                 .into(),
         ),
         trust: crate::ContentTrust::Trusted,
-        source: crate::PromptSource::new("turn_aborted", execution_id),
+        source: crate::PromptSource::new("turn_aborted", root_input_id),
         timestamp: Some(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -436,15 +436,15 @@ pub fn turn_abort_marker(execution_id: &str) -> Message {
 
 /// Stable message id for a turn's abort marker. Live cancellation and crash
 /// recovery share it so re-applying the marker is idempotent.
-pub fn turn_abort_marker_message_id(execution_id: &str) -> String {
-    format!("{execution_id}/abort_marker")
+pub fn turn_abort_marker_message_id(root_input_id: &str) -> String {
+    format!("{root_input_id}/abort_marker")
 }
 
 /// Stable message id for a run's world-state Context message (F-04 slice 2).
 /// Committed before the run input so the durable transcript chain stays
 /// linear: head → world-state → input.
-pub fn world_state_message_id(execution_id: &str) -> String {
-    format!("{execution_id}/world_state")
+pub fn world_state_message_id(root_input_id: &str) -> String {
+    format!("{root_input_id}/world_state")
 }
 
 #[cfg(test)]

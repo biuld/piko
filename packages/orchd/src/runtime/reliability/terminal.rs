@@ -8,8 +8,7 @@ use piko_protocol::{AgentDurableCommand, AgentWorkReport, CommitError, Execution
 /// Frozen terminal state. Publication data is private until `commit` returns a
 /// `CommittedTerminal` capability.
 pub(crate) struct PendingTerminal {
-    run_id: String,
-    execution_id: String,
+    root_input_id: String,
     report: AgentWorkReport,
     transcript: Vec<Message>,
     head_message_id: Option<String>,
@@ -21,7 +20,7 @@ pub(crate) struct PendingTerminal {
 pub(crate) type TerminalCommitScope = PendingTerminal;
 
 pub(crate) struct CommittedTerminal {
-    pub execution_id: String,
+    pub root_input_id: String,
     pub report: AgentWorkReport,
     pub transcript: Vec<Message>,
     pub head_message_id: Option<String>,
@@ -29,29 +28,31 @@ pub(crate) struct CommittedTerminal {
 }
 
 pub(crate) struct TerminalPersistenceFailure {
-    pub execution_id: String,
+    pub root_input_id: String,
     pub error: CommitError,
     handoff: Option<ExecutionHandoffLease<ExecutionTerminal>>,
 }
 
 pub(crate) enum TerminalCommitResult {
     Committed(CommittedTerminal),
-    Retry { execution_id: String, delay_ms: u64 },
+    Retry {
+        root_input_id: String,
+        delay_ms: u64,
+    },
     PermanentFailure(TerminalPersistenceFailure),
 }
 
 impl PendingTerminal {
     pub fn new(
-        execution_id: String,
-        agent_instance_id: String,
         root_input_id: String,
+        agent_instance_id: String,
         terminal: ExecutionHandoffLease<ExecutionTerminal>,
     ) -> Self {
         let candidate = terminal.payload();
         let report = AgentWorkReport {
             agent_instance_id,
-            root_input_id,
-            report_id: report_id(&execution_id),
+            report_id: report_id(&root_input_id),
+            root_input_id: root_input_id.clone(),
             summary: transcript_summary(&candidate.transcript),
             usage: match &candidate.outcome {
                 ExecutionOutcome::Succeeded { usage } => usage.clone(),
@@ -61,8 +62,7 @@ impl PendingTerminal {
             artifacts: Vec::new(),
         };
         Self {
-            run_id: candidate.run_id.clone(),
-            execution_id,
+            root_input_id,
             report,
             transcript: candidate.transcript.clone(),
             head_message_id: candidate.head_message_id.clone(),
@@ -72,8 +72,8 @@ impl PendingTerminal {
         }
     }
 
-    pub fn execution_id(&self) -> &str {
-        &self.execution_id
+    pub fn root_input_id(&self) -> &str {
+        &self.root_input_id
     }
 
     pub async fn commit(
@@ -94,7 +94,7 @@ impl PendingTerminal {
             .await;
         match result {
             Ok(_) => TerminalCommitResult::Committed(CommittedTerminal {
-                execution_id: self.execution_id.clone(),
+                root_input_id: self.root_input_id.clone(),
                 report: self.report.clone(),
                 transcript: self.transcript.clone(),
                 head_message_id: self.head_message_id.clone(),
@@ -103,13 +103,13 @@ impl PendingTerminal {
             Err(error) => match RetryState::classify(error) {
                 CommitFailure::Permanent(error) => {
                     TerminalCommitResult::PermanentFailure(TerminalPersistenceFailure {
-                        execution_id: self.execution_id.clone(),
+                        root_input_id: self.root_input_id.clone(),
                         error,
                         handoff: self.handoff.take(),
                     })
                 }
                 CommitFailure::Retryable => TerminalCommitResult::Retry {
-                    execution_id: self.execution_id.clone(),
+                    root_input_id: self.root_input_id.clone(),
                     delay_ms: self.retry.next_delay_ms(),
                 },
             },

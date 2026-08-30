@@ -308,8 +308,7 @@ fn reliable_model_step_boundary_closes_thought_without_message_end() {
     let boundary = piko_protocol::ModelStepBoundary {
         session_id: "s".into(),
         source_turn_id: Some("turn-1".into()),
-        run_id: "run-1".into(),
-        execution_id: "execution-1".into(),
+        root_input_id: "input-1".into(),
         agent_instance_id: "root".into(),
         model_step_id: "step-1".into(),
         step_index: 1,

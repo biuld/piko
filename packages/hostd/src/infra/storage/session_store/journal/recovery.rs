@@ -176,7 +176,7 @@ struct StartedWorkRef<'a> {
 
 impl StartedWorkRef<'_> {
     fn execution_id(&self) -> &str {
-        self.processing.execution_id.as_deref().unwrap_or_default()
+        &self.input.input.input_id
     }
 }
 
@@ -188,7 +188,7 @@ fn unresolved_tool_calls(
     let resolved = aggregate
         .messages
         .values()
-        .filter(|message| message.data.execution_id.as_deref() == Some(execution_id))
+        .filter(|message| message.data.root_input_id.as_deref() == Some(execution_id))
         .filter_map(|message| match &message.data.message {
             Message::ToolResult { tool_call_id, .. } => Some(tool_call_id.clone()),
             _ => None,
@@ -199,7 +199,7 @@ fn unresolved_tool_calls(
     for step in aggregate
         .model_steps
         .values()
-        .filter(|step| step.data.execution_id == execution_id)
+        .filter(|step| step.data.root_input_id == execution_id)
     {
         for message_id in &step.data.tool_call_message_ids {
             let message =
@@ -257,7 +257,7 @@ fn append_recovery_message(
         agent_instance_id: work.input.input.agent_instance_id.clone(),
         agent_parent_message_id: parent_message_id.clone(),
         tree_parent_entry_id: tree_parent_entry_id.clone(),
-        execution_id: Some(work.execution_id().to_string()),
+        root_input_id: Some(work.execution_id().to_string()),
         source_turn_id: work.processing.source_turn_id.clone(),
         committed_at,
         message: message.clone(),

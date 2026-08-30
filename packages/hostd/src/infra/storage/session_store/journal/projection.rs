@@ -101,17 +101,13 @@ impl SessionStore {
                 let model_steps = aggregate
                     .model_steps
                     .values()
-                    .filter(|stored_step| {
-                        processing.execution_id.as_deref()
-                            == Some(stored_step.data.execution_id.as_str())
-                    })
+                    .filter(|stored_step| stored_step.data.root_input_id == input.input.input_id)
                     .map(|stored_step| {
                         let data = &stored_step.data;
                         piko_protocol::ModelStepBoundary {
                             session_id: session_id.clone(),
                             source_turn_id: data.source_turn_id.clone(),
-                            run_id: data.run_id.clone(),
-                            execution_id: data.execution_id.clone(),
+                            root_input_id: data.root_input_id.clone(),
                             agent_instance_id: data.agent_instance_id.clone(),
                             model_step_id: data.model_step_id.clone(),
                             step_index: data.step_index,
@@ -124,14 +120,10 @@ impl SessionStore {
                     })
                     .collect();
                 Some((
-                    processing
-                        .run_id
-                        .clone()
-                        .unwrap_or_else(|| input.input.input_id.clone()),
+                    input.input.input_id.clone(),
                     ExecutionProjection {
                         agent_instance_id,
-                        run_id: processing.run_id.clone().unwrap_or_default(),
-                        execution_id: processing.execution_id.clone().unwrap_or_default(),
+                        root_input_id: input.input.input_id.clone(),
                         request_id: input.input.request_id.clone(),
                         source_turn_id: processing.source_turn_id.clone(),
                         detached_recipient_agent_instance_id: processing

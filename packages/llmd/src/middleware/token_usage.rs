@@ -33,7 +33,7 @@ impl LlmdMiddleware for TokenUsageMiddleware {
             // Emit a dedicated telemetry log for token usage
             info!(
                 target: "llm.usage",
-                run_id = %ctx.run_id,
+                run_id = %ctx.root_input_id,
                 step_id = %ctx.step_id,
                 model = %ctx.model_id,
                 provider = %ctx.provider,

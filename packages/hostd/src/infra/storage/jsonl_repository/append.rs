@@ -61,7 +61,7 @@ impl JsonlSessionRepository {
                         piko_protocol::execution::MessageCommit {
                             session_id: projection.session_id,
                             source_turn_id: Some(message.source_turn_id.clone()),
-                            execution_id,
+                            root_input_id: execution_id.clone(),
                             agent_instance_id,
                             message_id: message.id.clone(),
                             parent_message_id: message.parent_id.clone(),
@@ -93,7 +93,7 @@ impl JsonlSessionRepository {
                         piko_protocol::execution::MessageCommit {
                             session_id: projection.session_id,
                             source_turn_id: Some(agent_instance_id.clone()),
-                            execution_id,
+                            root_input_id: execution_id.clone(),
                             agent_instance_id: agent_instance_id.clone(),
                             message_id: tool.id.clone(),
                             parent_message_id: tool.parent_id.clone(),

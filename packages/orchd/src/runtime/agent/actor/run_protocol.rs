@@ -42,8 +42,6 @@ impl AgentActor {
         detached_recipient_agent_instance_id: Option<String>,
         canonical_input: Option<piko_protocol::AgentInput>,
     ) -> Result<AgentInputReceipt, AgentApiError> {
-        let run_id = request.request_id.clone();
-        let execution_id = internal_execution_id(&self.identity, &request.request_id);
         let canonical_input_id = canonical_input
             .as_ref()
             .map(|input| input.input_id.clone())
@@ -52,8 +50,7 @@ impl AgentActor {
             parent: self.pending_run_parent.take().unwrap_or_else(tracing::Span::none),
             "agent.run",
             session_id = %self.identity.session_id,
-            run_id = %run_id,
-            execution_id = %execution_id,
+            root_input_id = %canonical_input_id,
             agent_instance_id = %self.identity.agent_instance_id,
             parent_agent_instance_id = tracing::field::Empty,
             agent_id = %self.identity.agent_spec_id,
@@ -73,7 +70,7 @@ impl AgentActor {
         self.current_run_cancellation_generation = Some(cancellation_generation);
         let run_context = match self
             .execution
-            .prepare_run_context(&request, &self.spec, &run_id)
+            .prepare_run_context(&request, &self.spec, &canonical_input_id)
             .instrument(run_span.clone())
             .await
         {
@@ -93,7 +90,6 @@ impl AgentActor {
                     request_id: request.request_id.clone(),
                     session_id: self.identity.session_id.clone(),
                     source_turn_id: request.source_turn_id.clone(),
-                    execution_id: execution_id.clone(),
                     agent_instance_id: self.identity.agent_instance_id.clone(),
                     agent_spec: self.spec.clone(),
                     run_prompt: run_context.prompt,
@@ -118,7 +114,7 @@ impl AgentActor {
                         agent_id: self.identity.agent_spec_id.clone(),
                         ..Default::default()
                     },
-                    root_input_id: Some(canonical_input_id.clone()),
+                    root_input_id: canonical_input_id.clone(),
                 },
                 run_context.routes,
                 run_span,
@@ -142,8 +138,6 @@ impl AgentActor {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             root_input_id: canonical_input_id.clone(),
             request_id: request.request_id.clone(),
-            execution_id: execution_id.clone(),
-            run_id: run_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
             detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
             prompt_assembly_version,
@@ -166,9 +160,7 @@ impl AgentActor {
         // execution admission has acknowledged. Preparation and cancellation
         // remain local, so a failed admission cannot publish a phantom run.
         self.run_state = AgentRunState::Starting {
-            execution_id: execution_id.clone(),
             root_input_id: canonical_input_id.clone(),
-            run_id: run_id.clone(),
         };
         self.publish_snapshot();
         let startup = match startup.commit_input().await {
@@ -177,7 +169,11 @@ impl AgentActor {
                 let mut failure = failure;
                 failure.receipt.input_id = canonical_input_id.clone();
                 return self
-                    .finish_failed_started_run(run_id, execution_id, "input commit failed", failure)
+                    .finish_failed_started_run(
+                        canonical_input_id.clone(),
+                        "input commit failed",
+                        failure,
+                    )
                     .await;
             }
         };
@@ -188,8 +184,7 @@ impl AgentActor {
             startup.rollback().await;
             return self
                 .finish_cancelled_started_run(
-                    run_id,
-                    execution_id,
+                    canonical_input_id.clone(),
                     request.source_turn_id.clone(),
                     committed_input,
                     input_message_id,
@@ -199,18 +194,16 @@ impl AgentActor {
         }
         let receipt = startup.activate().await;
         self.run_state = AgentRunState::Running {
-            execution_id: execution_id.clone(),
             root_input_id: canonical_input_id.clone(),
-            run_id: run_id.clone(),
         };
         self.publish_snapshot();
         if startup_cancel.is_cancelled() {
             let _ = self
                 .execution
                 .request_cancel(piko_protocol::CancelExecutionRequest {
-                    request_id: format!("cancel-startup-{execution_id}"),
+                    request_id: format!("cancel-startup-{canonical_input_id}"),
                     session_id: self.identity.session_id.clone(),
-                    execution_id: execution_id.clone(),
+                    root_input_id: canonical_input_id.clone(),
                     reason: piko_protocol::CancelReason::Superseded,
                 })
                 .await;
@@ -219,16 +212,16 @@ impl AgentActor {
         let execution = Arc::clone(&self.execution);
         let command_tx = self.command_tx.clone();
         let session_id = self.identity.session_id.clone();
-        let watched_execution_id = execution_id.clone();
+        let watched_root_input_id = canonical_input_id.clone();
         tokio::spawn(async move {
             if let Ok(terminal) = execution
-                .wait_terminal_state(&session_id, &watched_execution_id)
+                .wait_terminal_state(&session_id, &watched_root_input_id)
                 .await
             {
                 let (terminal, acknowledged) = ExecutionHandoffLease::new(terminal);
                 let _ = command_tx
                     .send(AgentCommand::ExecutionFinished {
-                        execution_id: watched_execution_id,
+                        root_input_id: watched_root_input_id,
                         terminal,
                     })
                     .await;
@@ -248,18 +241,14 @@ impl AgentActor {
 
     async fn finish_failed_started_run(
         &mut self,
-        run_id: String,
-        execution_id: String,
+        root_input_id: String,
         context: &str,
         failure: StartedRunFailure,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         self.run_state = AgentRunState::Running {
-            execution_id: execution_id.clone(),
             root_input_id: failure.receipt.input_id.clone(),
-            run_id: run_id.clone(),
         };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
-            run_id,
             outcome: piko_protocol::ExecutionOutcome::failed(format!(
                 "{context}: {}",
                 failure.error
@@ -267,35 +256,32 @@ impl AgentActor {
             transcript: self.transcript.clone(),
             head_message_id: self.head_message_id.clone(),
         });
-        Box::pin(self.handle_execution_finished(execution_id, terminal)).await;
+        Box::pin(self.handle_execution_finished(root_input_id, terminal)).await;
         Ok(failure.receipt)
     }
 
     async fn finish_cancelled_started_run(
         &mut self,
-        run_id: String,
-        execution_id: String,
+        root_input_id: String,
         source_turn_id: Option<String>,
         committed_input: piko_protocol::Message,
         input_message_id: String,
         receipt: AgentInputReceipt,
     ) -> Result<AgentInputReceipt, AgentApiError> {
         self.run_state = AgentRunState::Running {
-            execution_id: execution_id.clone(),
             root_input_id: receipt.input_id.clone(),
-            run_id: run_id.clone(),
         };
         let mut transcript = self.transcript.clone();
         transcript.push(committed_input);
         // An interrupted startup commits the same durable, model-visible
         // abort marker as a live cancel, so recovery reconstructs the run
         // with the marker in place (F-01 / D-01).
-        let marker = piko_protocol::turn_abort_marker(&execution_id);
-        let marker_id = piko_protocol::turn_abort_marker_message_id(&execution_id);
+        let marker = piko_protocol::turn_abort_marker(&root_input_id);
+        let marker_id = piko_protocol::turn_abort_marker_message_id(&root_input_id);
         let marker_commit = piko_protocol::execution::MessageCommit {
             session_id: self.identity.session_id.clone(),
             source_turn_id,
-            execution_id: execution_id.clone(),
+            root_input_id: root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
             message_id: marker_id.clone(),
             parent_message_id: Some(input_message_id.clone()),
@@ -321,12 +307,11 @@ impl AgentActor {
             )),
         };
         let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
-            run_id,
             outcome,
             transcript,
             head_message_id: Some(head_message_id),
         });
-        Box::pin(self.handle_execution_finished(execution_id, terminal)).await;
+        Box::pin(self.handle_execution_finished(root_input_id, terminal)).await;
         Ok(receipt)
     }
 
@@ -338,21 +323,15 @@ impl AgentActor {
 
     pub(super) async fn handle_execution_finished(
         &mut self,
-        execution_id: String,
+        root_input_id: String,
         terminal: ExecutionHandoffLease<ExecutionTerminal>,
     ) {
-        if self.run_state.execution_id() != Some(&execution_id) || !self.run_state.is_running() {
+        if self.run_state.root_input_id() != Some(&root_input_id) || !self.run_state.is_running() {
             return;
         }
-        let root_input_id = self
-            .run_state
-            .active_root()
-            .map(|(root_input_id, _)| root_input_id.to_string())
-            .expect("running agent work must have a root input");
         self.run_state = AgentRunState::Finalizing(TerminalCommitScope::new(
-            execution_id,
-            self.identity.agent_instance_id.clone(),
             root_input_id,
+            self.identity.agent_instance_id.clone(),
             terminal,
         ));
         self.try_commit_terminal().await;
@@ -373,14 +352,14 @@ impl AgentActor {
                 self.publish_snapshot();
             }
             TerminalCommitResult::Retry {
-                execution_id,
+                root_input_id,
                 delay_ms,
             } => {
                 let command_tx = self.command_tx.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     let _ = command_tx
-                        .send(AgentCommand::RetryTerminal { execution_id })
+                        .send(AgentCommand::RetryTerminal { root_input_id })
                         .await;
                 });
             }
@@ -388,8 +367,10 @@ impl AgentActor {
                 self.transcript = committed.transcript.clone();
                 self.head_message_id = committed.head_message_id.clone();
                 self.latest_report = Some(committed.report.clone());
-                self.completed_executions
-                    .insert(committed.execution_id.clone(), committed.report.clone());
+                self.completed_executions.insert(
+                    committed.report.root_input_id.clone(),
+                    committed.report.clone(),
+                );
                 committed.acknowledge_handoff();
                 self.run_state = AgentRunState::Idle;
                 self.finish_run_cancellation();
@@ -400,7 +381,10 @@ impl AgentActor {
                     report_id: committed.report.report_id.clone(),
                 });
 
-                if let Some(targets) = self.detached_reports.remove(&committed.execution_id) {
+                if let Some(targets) = self
+                    .detached_reports
+                    .remove(&committed.report.root_input_id)
+                {
                     for target in targets {
                         self.deliver_report_or_retry(DetachedDeliveryScope::new(
                             target.agent_instance_id,

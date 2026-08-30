@@ -7,8 +7,8 @@ fn stream_projection_preserves_message_identity_and_delta_seq() {
     let events = stream_items_from_delta(
         "session-1",
         &RealtimeDeltaEnvelope {
+            root_input_id: "input-1".into(),
             agent_instance_id: "root".into(),
-            execution_id: "exec-1".into(),
             agent_id: "main".into(),
             message_id: Some("message-1".into()),
             delta_seq: 7,
@@ -34,8 +34,8 @@ fn stream_projection_rejects_missing_message_identity() {
         stream_items_from_delta(
             "session-1",
             &RealtimeDeltaEnvelope {
+                root_input_id: "input-1".into(),
                 agent_instance_id: "root".into(),
-                execution_id: "exec-1".into(),
                 agent_id: "main".into(),
                 message_id: None,
                 delta_seq: 0,

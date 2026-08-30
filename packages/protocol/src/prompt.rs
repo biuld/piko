@@ -186,9 +186,9 @@ impl ResolvedToolCatalog {
 pub struct PromptAssemblyRequest {
     pub session_id: String,
     pub agent_instance_id: AgentInstanceId,
-    /// Execution identity used to correlate this immutable assembly with the
+    /// Work identity used to correlate this immutable assembly with the
     /// model steps that consume it.
-    pub run_id: String,
+    pub root_input_id: String,
     pub agent_spec: AgentSpec,
     pub resources: PromptResourceSnapshot,
     pub tool_catalog: ResolvedToolCatalog,

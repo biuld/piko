@@ -139,7 +139,7 @@ impl LlmdExecutor {
 
     fn context(&self, request: &InferenceRequest, target: &ModelTarget) -> GatewayContext {
         GatewayContext {
-            run_id: request.context.run_id.clone(),
+            root_input_id: request.context.root_input_id.clone(),
             step_id: request.context.step_id.clone(),
             model_id: request.model.model.clone(),
             provider: request.model.provider.clone(),
@@ -188,7 +188,7 @@ impl InferenceGateway for LlmdExecutor {
             "llm.request",
             otel.kind = "client",
             session_id = %request.context.session_id,
-            run_id = %request.context.run_id,
+            root_input_id = %request.context.root_input_id,
             agent_instance_id = %request.context.agent_instance_id,
             step_id = %request.context.step_id,
             model = %request.model.model,
@@ -200,8 +200,7 @@ impl InferenceGateway for LlmdExecutor {
         let step_identity = TrajectoryIdentity {
             session_id: request.context.session_id.clone(),
             agent_instance_id: request.context.agent_instance_id.clone(),
-            run_id: request.context.run_id.clone(),
-            execution_id: None,
+            root_input_id: request.context.root_input_id.clone(),
             source_turn_id: None,
         };
         let step_capture = ModelStepCapture {

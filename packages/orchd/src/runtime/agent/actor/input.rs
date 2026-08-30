@@ -22,8 +22,8 @@ impl AgentActor {
                 return Ok(accepted.clone());
             }
         }
-        let execution_id = internal_execution_id(&self.identity, &request.request_id);
-        if self.completed_executions.contains_key(&execution_id) {
+        let root_input_id = proposed_input.input_id.clone();
+        if self.completed_executions.contains_key(&root_input_id) {
             return Ok(AcceptedAgentInput {
                 receipt: AgentInputReceipt {
                     input_id: proposed_input.input_id.clone(),
@@ -33,7 +33,7 @@ impl AgentActor {
                     disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
                     queued_position: None,
                 },
-                internal_execution_id: execution_id,
+                root_input_id,
             });
         }
         let result = self
@@ -101,28 +101,29 @@ impl AgentActor {
             return Err(AgentApiError::AgentTerminated);
         }
 
-        match (self.run_state.execution_id(), request.delivery) {
+        let active_root_input_id = self.run_state.root_input_id().map(str::to_string);
+        match (active_root_input_id.as_deref(), request.delivery) {
             (None, AgentInputDelivery::SteerActive) => Err(AgentApiError::InvalidState),
             (
                 None,
                 AgentInputDelivery::Auto
                 | AgentInputDelivery::StartWhenIdle
                 | AgentInputDelivery::FollowUp,
-            ) => {
-                let execution_id = internal_execution_id(&self.identity, &request.request_id);
-                self.start_execution(request, canonical_input)
-                    .await
-                    .map(|receipt| AcceptedAgentInput {
+            ) => self
+                .start_execution(request, canonical_input)
+                .await
+                .map(|receipt| {
+                    let root_input_id = receipt.input_id.clone();
+                    AcceptedAgentInput {
                         receipt,
-                        internal_execution_id: execution_id,
-                    })
-            }
+                        root_input_id,
+                    }
+                }),
             (Some(_), AgentInputDelivery::StartWhenIdle) => {
                 Err(AgentApiError::ExecutionAlreadyActive)
             }
-            (Some(_), AgentInputDelivery::FollowUp) => {
-                let execution_id = internal_execution_id(&self.identity, &request.request_id);
-                self.enqueue_follow_up(
+            (Some(_), AgentInputDelivery::FollowUp) => self
+                .enqueue_follow_up(
                     request,
                     Some(canonical_input),
                     None,
@@ -130,18 +131,15 @@ impl AgentActor {
                 )
                 .await
                 .map_err(|(error, _)| error)
-                .map(|receipt| AcceptedAgentInput {
-                    receipt,
-                    internal_execution_id: execution_id,
-                })
-            }
-            (Some(execution_id), AgentInputDelivery::Auto | AgentInputDelivery::SteerActive) => {
-                let execution_id = execution_id.to_string();
-                let root_input_id = self
-                    .run_state
-                    .active_root()
-                    .map(|(input_id, _)| input_id.to_string())
-                    .ok_or(AgentApiError::InvalidState)?;
+                .map(|receipt| {
+                    let root_input_id = receipt.input_id.clone();
+                    AcceptedAgentInput {
+                        receipt,
+                        root_input_id,
+                    }
+                }),
+            (Some(active_root), AgentInputDelivery::Auto | AgentInputDelivery::SteerActive) => {
+                let root_input_id = active_root.to_string();
                 let input_id = canonical_input.input_id.clone();
                 let submitted_at = canonical_input.submitted_at;
                 self.commit
@@ -163,7 +161,7 @@ impl AgentActor {
                     request_id: request.request_id.clone(),
                     input_id: Some(input_id.clone()),
                     session_id: session_id.clone(),
-                    execution_id: execution_id.clone(),
+                    root_input_id: root_input_id.clone(),
                     message_id: request.message_id.clone(),
                     content: request.content.clone(),
                     submitted_at,
@@ -185,7 +183,7 @@ impl AgentActor {
                         disposition: piko_protocol::AgentInputDisposition::PendingSteer,
                         queued_position: None,
                     },
-                    internal_execution_id: execution_id,
+                    root_input_id,
                 })
             }
         }

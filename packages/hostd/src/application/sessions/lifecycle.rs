@@ -335,8 +335,6 @@ mod tests {
                 &session_id,
                 AgentDurableCommand::AgentInputProcessingStarted {
                     agent_instance_id: root.agent_instance_id.clone(),
-                    run_id: "exec-recovered".into(),
-                    execution_id: "exec-recovered".into(),
                     root_input_id: "request-recovered".into(),
                     request_id: "request-recovered".into(),
                     source_turn_id: Some("request-recovered".into()),

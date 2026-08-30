@@ -51,7 +51,7 @@ pub struct ToolExecutionContext {
     /// Trusted runtime identity; never accepted from model-controlled args.
     pub session_id: String,
     pub agent_instance_id: String,
-    pub execution_id: String,
+    pub root_input_id: String,
     #[serde(skip, default)]
     pub cancellation: Option<tokio_util::sync::CancellationToken>,
     pub agent_id: String,

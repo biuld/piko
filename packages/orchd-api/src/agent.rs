@@ -59,7 +59,7 @@ pub struct RecoveredDetachedDelivery {
 
 #[derive(Debug, Clone)]
 pub struct RecoveredExecutionReport {
-    pub internal_execution_id: String,
+    pub root_input_id: String,
     pub report: piko_protocol::AgentWorkReport,
 }
 

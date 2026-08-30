@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 // ============================================================================
 
 pub use crate::event::{
-    AgentId, AgentInfo, AgentRunEvent, ApprovalDecision, ApprovalEvent, ApprovalId,
-    ApprovalSnapshot, ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer,
-    InteractionChoice, InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
+    AgentId, AgentInfo, ApprovalDecision, ApprovalEvent, ApprovalId, ApprovalSnapshot,
+    ApprovalStatus, AuthEvent, CommandResult, InteractionAnswer, InteractionChoice,
+    InteractionChoiceId, InteractionId, InteractionInput, InteractionQuestion,
     InteractionQuestionId, MessageId, MessageRole, ModelEvent, QueueEvent, ServerMessage,
     SessionId, SessionSnapshot, SessionSummary, ToolCallId, ToolCallRef, ToolCallSnapshot,
     ToolCallStatus, TurnId, UserInteractionResponse, UserInteractionSnapshot,

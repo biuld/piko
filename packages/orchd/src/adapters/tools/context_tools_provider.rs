@@ -211,7 +211,7 @@ mod tests {
         ToolExecutionContext {
             session_id: "session-1".into(),
             agent_instance_id: "agent_session-1_root".into(),
-            execution_id: "exec-1".into(),
+            root_input_id: "exec-1".into(),
             cancellation: None,
             agent_id: "main".into(),
             agent_role: None,

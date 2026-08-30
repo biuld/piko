@@ -1,7 +1,7 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (slices 1–5 and slices 6.1–6.3 landed. Slice 6.4+ leftover
-> cleanup remains: grain rekeys, recovery)
+> Status: proposed (slices 1–5 and slices 6.1–6.4 landed. Remaining: Turn-named
+> field cleanup, recovery evidence)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -457,17 +457,24 @@ type; keep AgentInput / `agent_work` / `AgentWorkReport`.
    are derived from committed messages and steps. orchd keeps its internal
    execution actor, still keyed by the interim `execution_id` derived from
    the request; that key is removed with the commit-grain rekey below.
-4. **Rekey remaining grains.** Message, model-step, usage, trajectory, and
-   prompt-assembly correlations that still carry `execution_id` / `run_id` /
-   `source_turn_id` (including `MessageCommittedV1.execution_id`,
-   `ModelStepCommittedV1.run_id`/`execution_id`, `UsageAttribution`,
-   `AgentInputAppliedV1.execution_id`, the processing-fact interim anchors,
-   `RecoveredExecutionReport.internal_execution_id`, and the abort-marker
-   message ids) move to `root_input_id`. The orchd internal actor and
-   `SessionExecutionScope` rekey onto `root_input_id`, and the trajectory
-   read model keys runs by root input.
+4. **Rekey remaining grains (implemented for execution/run identity).** The
+   `execution_id` / `run_id` / `internal_execution_id` grains are gone from
+   protocol, journal, orchd, and read models; every commit, usage fact,
+   trajectory record, abort marker, and realtime delta carries
+   `root_input_id`. `ModelStepCommit` / `ModelStepBoundary` /
+   `MessageCommit` / `UsageAttribution` / commit receipts carry
+   `root_input_id` only; the orchd execution actor and
+   `SessionExecutionScope` are keyed by `root_input_id` and
+   `ExecutionIdentity` has no second id; the trajectory read model keys runs
+   by root input and drops `execution_to_run`; the dead `AgentRunEvent` /
+   `ServerMessage::AgentRunLifecycle` wire surface is deleted. Still
+   Turn-named and deferred to the final cleanup: `TurnId`,
+   `UsageEvent.turn_id`, `source_turn_id` fields (messages, steps, inputs,
+   processing facts, tree entries, trajectory identities), and
+   `TurnDiffEvent`.
 5. **Recovery and evidence.** Crash-point, race, restart, and two-TUI
-   matrices. Then mark F-51 / V-64 implemented.
+   matrices, plus the Turn-named field cleanup above. Then mark F-51 / V-64
+   implemented.
 
 ## Package impact
 

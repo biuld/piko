@@ -186,8 +186,8 @@ async fn turn_writes_durable_trajectory_records() {
         .values()
         .next()
         .expect("root run projection");
-    assert!(!execution.run_id.is_empty());
-    assert_ne!(execution.execution_id, execution.run_id);
+    assert!(!execution.root_input_id.is_empty());
+    assert_eq!(execution.root_input_id, execution.request_id);
     assert_eq!(execution.model_steps.len(), 2);
     assert_eq!(
         execution.model_steps[0].outcome,
@@ -325,7 +325,11 @@ async fn turn_writes_durable_trajectory_records() {
         Some(piko_protocol::TrajectoryTerminalKind::Completed)
     );
     let run = query
-        .fetch_run(&session_id, &page.runs[0].run_id, &Default::default())
+        .fetch_run(
+            &session_id,
+            &page.runs[0].root_input_id,
+            &Default::default(),
+        )
         .await
         .unwrap();
     assert!(run.assembly.is_some());

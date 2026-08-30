@@ -193,7 +193,7 @@ async fn stream_run(
         };
         loop {
             match receiver.recv().await {
-                Ok(ref live @ TrajectoryLiveEvent::Record(ref event)) if event.run_id == run_id => {
+                Ok(ref live @ TrajectoryLiveEvent::Record(ref event)) if event.root_input_id == run_id => {
                     if let Ok(data) = serde_json::to_string(live) {
                         yield Ok(Event::default().id(event.revision.to_string()).data(data));
                     }

@@ -11,7 +11,6 @@ use crate::{Message, MessageContent, Usage};
 pub type RequestId = String;
 pub type SessionId = String;
 pub type TurnId = String;
-pub type ExecutionId = String;
 pub type MessageId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -102,7 +101,6 @@ pub struct StartExecutionRequest {
     /// Executions spawned by multi-agent tools (no Interaction Turn).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
     pub agent_instance_id: crate::AgentInstanceId,
     pub agent_spec: crate::AgentSpec,
     pub run_prompt: crate::SemanticRunPrompt,
@@ -123,10 +121,8 @@ pub struct StartExecutionRequest {
     pub input: MessageContent,
     pub context: ConversationContext,
     pub config: ExecutionConfig,
-    /// Canonical AgentInput identity for the root of this execution. Older
-    /// callers omit it and use `request_id` as the compatible fallback.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_input_id: Option<String>,
+    /// Canonical AgentInput identity for the root of this work.
+    pub root_input_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -136,7 +132,7 @@ pub struct ExecutionReceipt {
     pub session_id: SessionId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub status: ExecutionStatus,
 }
@@ -150,7 +146,7 @@ pub struct SteerExecutionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_id: Option<String>,
     pub session_id: SessionId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub message_id: MessageId,
     pub content: MessageContent,
     pub submitted_at: i64,
@@ -181,7 +177,7 @@ pub enum AgentInputDisposition {
 pub struct ExecutionInputReceipt {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub message_id: MessageId,
     pub disposition: InputDisposition,
 }
@@ -191,7 +187,7 @@ pub struct ExecutionInputReceipt {
 pub struct CancelExecutionRequest {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub reason: CancelReason,
 }
 
@@ -200,25 +196,9 @@ pub struct CancelExecutionRequest {
 pub struct CancelReceipt {
     pub request_id: RequestId,
     pub session_id: SessionId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     /// Actor accepted cancellation intent; terminal outcome is separate.
     pub accepted: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionSnapshot {
-    pub session_id: SessionId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
-    pub agent_instance_id: crate::AgentInstanceId,
-    pub agent_id: String,
-    pub status: ExecutionStatus,
-    pub model_step_index: u32,
-    pub usage: Usage,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -229,7 +209,7 @@ pub struct MessageCommit {
     /// agent Executions spawned by multi-agent tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<TurnId>,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: MessageId,
     pub parent_message_id: Option<MessageId>,
@@ -261,8 +241,7 @@ pub struct ModelStepCommit {
     pub session_id: SessionId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_turn_id: Option<TurnId>,
-    pub run_id: String,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub model_step_id: String,
     pub step_index: u32,
@@ -281,8 +260,7 @@ pub struct ModelStepCommit {
 pub struct ModelStepBoundary {
     pub session_id: SessionId,
     pub source_turn_id: Option<TurnId>,
-    pub run_id: String,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub model_step_id: String,
     pub step_index: u32,
@@ -299,8 +277,7 @@ impl ModelStepCommit {
         ModelStepBoundary {
             session_id: self.session_id.clone(),
             source_turn_id: self.source_turn_id.clone(),
-            run_id: self.run_id.clone(),
-            execution_id: self.execution_id.clone(),
+            root_input_id: self.root_input_id.clone(),
             agent_instance_id: self.agent_instance_id.clone(),
             model_step_id: self.model_step_id.clone(),
             step_index: self.step_index,
@@ -321,7 +298,7 @@ impl ModelStepCommit {
 #[serde(rename_all = "camelCase")]
 pub struct CommitAck {
     pub session_id: SessionId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_instance_id: crate::AgentInstanceId,
     pub message_id: Option<MessageId>,
     /// Host-owned durable sequence / revision for this commit.
@@ -367,7 +344,6 @@ mod tests {
             request_id: "req-1".into(),
             session_id: "session-1".into(),
             source_turn_id: Some("turn-1".into()),
-            execution_id: "exec-1".into(),
             agent_instance_id: "root".into(),
             agent_spec: crate::AgentSpec {
                 id: "main".into(),
@@ -396,12 +372,12 @@ mod tests {
             input: MessageContent::String("hi".into()),
             context: ConversationContext::empty(),
             config: ExecutionConfig::default(),
-            root_input_id: None,
+            root_input_id: "input-1".into(),
         })
         .unwrap();
         assert!(value.get("taskId").is_none());
         assert!(value.get("workId").is_none());
-        assert_eq!(value["executionId"], "exec-1");
+        assert_eq!(value["rootInputId"], "input-1");
         assert_eq!(value["sourceTurnId"], "turn-1");
         assert!(value.get("interAgentCompletions").is_none());
     }

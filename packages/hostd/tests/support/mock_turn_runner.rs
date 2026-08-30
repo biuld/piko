@@ -100,9 +100,9 @@ impl AgentRunRunner for MockAgentRunRunner {
             let message_id = format!("msg_{}", uuid::Uuid::new_v4());
             let committed = store.commit_message(
                 piko_protocol::execution::MessageCommit {
+                    root_input_id: "input-mock".into(),
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: agent_instance_id.clone(),
                     agent_instance_id: agent_instance_id.clone(),
                     message_id: message_id.clone(),
                     parent_message_id: None,

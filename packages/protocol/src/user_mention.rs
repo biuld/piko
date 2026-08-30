@@ -12,13 +12,13 @@ pub const SKILL_MENTION_SOURCE_KIND: &str = "user.skill-mention";
 pub const MENTION_BODY_MAX_CHARS: usize = 64_000;
 
 /// Stable message id for a file-mention Context on a given execution.
-pub fn file_mention_message_id(execution_id: &str, index: usize) -> String {
-    format!("{execution_id}/file-mention/{index}")
+pub fn file_mention_message_id(root_input_id: &str, index: usize) -> String {
+    format!("{root_input_id}/file-mention/{index}")
 }
 
 /// Stable message id for a skill-mention Context on a given execution.
-pub fn skill_mention_message_id(execution_id: &str, index: usize) -> String {
-    format!("{execution_id}/skill-mention/{index}")
+pub fn skill_mention_message_id(root_input_id: &str, index: usize) -> String {
+    format!("{root_input_id}/skill-mention/{index}")
 }
 
 /// Successful file mention body (model-visible).

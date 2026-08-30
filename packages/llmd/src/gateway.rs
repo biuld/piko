@@ -38,7 +38,7 @@ impl ModelRef {
 pub struct InvocationContext {
     pub session_id: String,
     pub agent_instance_id: String,
-    pub run_id: String,
+    pub root_input_id: String,
     pub step_id: String,
     /// Assistant message id assigned by the orchestrator for this step's
     /// output. Links the trajectory model-step record to the committed

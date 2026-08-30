@@ -37,7 +37,7 @@ fn prompt_request(tool_catalog: Vec<ToolDef>) -> PromptAssemblyRequest {
     PromptAssemblyRequest {
         session_id: "session".into(),
         agent_instance_id: "root".into(),
-        run_id: "run-1".into(),
+        root_input_id: "input-1".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
             version: "1".into(),

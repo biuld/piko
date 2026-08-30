@@ -218,7 +218,7 @@ mod tests {
                 MessageCommit {
                     session_id: "session-durable".into(),
                     source_turn_id: Some("turn-durable".into()),
-                    execution_id: "exec-1".into(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: root.agent_instance_id,
                     message_id: "result-1".into(),
                     parent_message_id: None,

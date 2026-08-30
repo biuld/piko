@@ -487,20 +487,14 @@ impl OrchAgentRunRunner {
         else {
             return;
         };
-        // The trajectory run identity is the orchd execution id, derived by
-        // orchd as `stable("exec", [session, agent, request_id])` where the
-        // root-turn request id is the hostd input id. Replicate that
-        // deterministic derivation so notifications join the right run.
-        let run_id =
-            piko_orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, &input_id]);
-        recorder
+        // Trajectory records join the run by the root input id itself.
+        let _recorded = recorder
             .record(TrajectoryRecord::SystemNotification(
                 TrajectorySystemNotificationRecord {
                     identity: TrajectoryIdentity {
                         session_id: session_id.to_string(),
                         agent_instance_id: agent_instance_id.to_string(),
-                        run_id,
-                        execution_id: None,
+                        root_input_id: input_id.to_string(),
                         source_turn_id: None,
                     },
                     kind,

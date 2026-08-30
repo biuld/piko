@@ -77,7 +77,7 @@ impl SharedRealtimeCollector {
         if let Some(sink) = &self.0.sink {
             sink.try_publish(piko_protocol::agent_runtime::RealtimeDeltaEnvelope {
                 agent_instance_id: frame.agent_instance_id,
-                execution_id: frame.execution_id,
+                root_input_id: frame.root_input_id,
                 agent_id: frame.agent_id,
                 message_id: Some(frame.message_id),
                 delta_seq,

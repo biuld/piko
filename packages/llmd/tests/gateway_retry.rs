@@ -308,7 +308,7 @@ fn request() -> InferenceRequest {
         context: piko_llmd::gateway::InvocationContext {
             session_id: "session-1".to_string(),
             agent_instance_id: "agent-1".to_string(),
-            run_id: "run-1".to_string(),
+            root_input_id: "run-1".to_string(),
             step_id: "step-1".to_string(),
             step_message_id: "step-message-1".to_string(),
         },
@@ -388,7 +388,7 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     let capture = Arc::new(PromptCapture::default());
     let exec = piko_llmd::build_gateway_with_telemetry(targets, retry_config(), capture.clone());
     let mut req = request();
-    req.context.run_id = "run-otel".to_string();
+    req.context.root_input_id = "run-otel".to_string();
     let stream = exec
         .start(req, tokio_util::sync::CancellationToken::new())
         .await
@@ -410,10 +410,9 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
         .iter()
         .find(|span| {
             span.name.as_ref() == "llm.request"
-                && span
-                    .attributes
-                    .iter()
-                    .any(|kv| kv.key.as_str() == "run_id" && kv.value.to_string() == "run-otel")
+                && span.attributes.iter().any(|kv| {
+                    kv.key.as_str() == "root_input_id" && kv.value.to_string() == "run-otel"
+                })
         })
         .unwrap_or_else(|| panic!("no llm.request span exported: {spans:?}"));
 
@@ -436,8 +435,8 @@ async fn llm_request_span_records_retry_ttft_usage_and_done_events() {
     assert_eq!(model.as_deref(), Some("gpt-test"));
     let provider = attrs("provider");
     assert_eq!(provider.as_deref(), Some("openai"));
-    let run_id = attrs("run_id");
-    assert_eq!(run_id.as_deref(), Some("run-otel"));
+    let root_input_id = attrs("root_input_id");
+    assert_eq!(root_input_id.as_deref(), Some("run-otel"));
 }
 
 #[tokio::test]

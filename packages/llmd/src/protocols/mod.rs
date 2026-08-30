@@ -87,7 +87,7 @@ fn semantic_digest(
     for value in [
         request.context.session_id.as_str(),
         request.context.agent_instance_id.as_str(),
-        request.context.run_id.as_str(),
+        request.context.root_input_id.as_str(),
         request.context.step_id.as_str(),
         kind,
     ] {

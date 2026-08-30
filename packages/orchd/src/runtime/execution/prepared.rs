@@ -90,11 +90,11 @@ impl PreparedExecution {
     }
 
     pub async fn rollback(mut self) {
-        let execution_id = self.identity().execution_id.clone();
+        let root_input_id = self.identity().root_input_id.clone();
         self.actor.take();
         self.terminal_tx.take();
         self.scope
-            .rollback_reservation(&execution_id, self.generation)
+            .rollback_reservation(&root_input_id, self.generation)
             .await;
     }
 }
@@ -104,12 +104,12 @@ impl Drop for PreparedExecution {
         let Some(actor) = self.actor.as_ref() else {
             return;
         };
-        let execution_id = actor.identity().execution_id.clone();
+        let root_input_id = actor.identity().root_input_id.clone();
         let generation = self.generation;
         let scope = Arc::clone(&self.scope);
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                scope.rollback_reservation(&execution_id, generation).await;
+                scope.rollback_reservation(&root_input_id, generation).await;
             });
         }
     }

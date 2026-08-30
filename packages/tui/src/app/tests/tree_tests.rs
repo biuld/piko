@@ -107,36 +107,3 @@ fn submit_targets_the_viewed_child_agent() {
                 && input.delivery == piko_protocol::AgentInputDelivery::FollowUp
     ));
 }
-
-#[test]
-fn agent_run_lifecycle_does_not_synthesize_agent_activity() {
-    let mut app = app();
-    app.session.id = Some("session-1".into());
-    app.agent_panel
-        .list
-        .items
-        .push(crate::features::agent_status::AgentEntry {
-            agent_id: "coder".into(),
-            agent_instance_id: "agent-child".into(),
-            name: "Coder".into(),
-            parent_agent_instance_id: Some("agent-root".into()),
-            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
-            activity: piko_protocol::AgentActivity::Idle,
-            unread_report_count: 0,
-            status: piko_protocol::AgentStatus::Idle,
-        });
-
-    app.apply_event(Event::AgentRunLifecycle(
-        piko_protocol::AgentRunEvent::Started {
-            session_id: "session-1".into(),
-            run_id: "run-1".into(),
-            agent_instance_id: "agent-child".into(),
-            timestamp: 1,
-        },
-    ));
-
-    let agent = &app.agent_panel.agents()[0];
-    assert_eq!(agent.activity, piko_protocol::AgentActivity::Idle);
-    assert_eq!(agent.status, piko_protocol::AgentStatus::Idle);
-    assert!(app.session.agent_work.is_empty());
-}

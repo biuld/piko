@@ -9,8 +9,6 @@ async fn recovery_marks_accepted_execution_interrupted() {
             "session-1",
             AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "exec-interrupted".into(),
-                execution_id: "exec-interrupted".into(),
                 root_input_id: "request-interrupted".into(),
                 request_id: "request-interrupted".into(),
                 source_turn_id: None,
@@ -34,7 +32,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
             piko_protocol::execution::MessageCommit {
                 session_id: "session-1".into(),
                 source_turn_id: None,
-                execution_id: "exec-interrupted".into(),
+                root_input_id: "request-interrupted".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "input-interrupted".into(),
                 parent_message_id: None,
@@ -64,7 +62,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 1);
     assert_eq!(store.interrupt_incomplete_agent_executions().unwrap(), 0);
     let projection = store.load_projection().unwrap();
-    let execution = projection.agent_executions.get("exec-interrupted").unwrap();
+    let execution = projection.agent_executions.get("request-interrupted").unwrap();
     assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
     assert!(matches!(
         execution.report.as_ref().map(|report| &report.outcome),
@@ -76,7 +74,7 @@ async fn recovery_marks_accepted_execution_interrupted() {
     let recovered = store
         .load_agent("session-1", &root.agent_instance_id)
         .unwrap();
-    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-interrupted");
+    let marker_id = piko_protocol::turn_abort_marker_message_id("request-interrupted");
     assert_eq!(recovered.transcript.len(), 2);
     assert_eq!(recovered.transcript[0].id, "input-interrupted");
     assert_eq!(recovered.transcript[1].id, marker_id);
@@ -106,8 +104,6 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
             "session-1",
             AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "exec-with-tool-call".into(),
-                execution_id: "exec-with-tool-call".into(),
                 root_input_id: "request-with-tool-call".into(),
                 request_id: "request-with-tool-call".into(),
                 source_turn_id: Some("turn-with-tool-call".into()),
@@ -130,8 +126,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
     let model_step = piko_protocol::execution::ModelStepCommit {
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-with-tool-call".into()),
-                run_id: "run-with-tool-call".into(),
-                execution_id: "exec-with-tool-call".into(),
+            root_input_id: "request-with-tool-call".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 model_step_id: "step-with-tool-call".into(),
                 step_index: 1,
@@ -141,7 +136,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                 assistant: piko_protocol::execution::MessageCommit {
                     session_id: "session-1".into(),
                     source_turn_id: Some("turn-with-tool-call".into()),
-                    execution_id: "exec-with-tool-call".into(),
+                root_input_id: "request-with-tool-call".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
                     message_id: "assistant-with-tool-call".into(),
                     parent_message_id: None,
@@ -163,7 +158,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                 tool_calls: vec![piko_protocol::execution::MessageCommit {
                     session_id: "session-1".into(),
                     source_turn_id: Some("turn-with-tool-call".into()),
-                    execution_id: "exec-with-tool-call".into(),
+                root_input_id: "request-with-tool-call".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
                     message_id: "tool-call-message".into(),
                     parent_message_id: Some("assistant-with-tool-call".into()),
@@ -217,7 +212,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
         recovered.transcript[2].parent_id.as_deref(),
         Some("tool-call-message")
     );
-    let marker_id = piko_protocol::turn_abort_marker_message_id("exec-with-tool-call");
+    let marker_id = piko_protocol::turn_abort_marker_message_id("request-with-tool-call");
     assert_eq!(recovered.transcript[3].id, marker_id);
     assert_eq!(
         recovered.transcript[3].parent_id.as_deref(),
@@ -227,7 +222,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
     let projection = store.load_projection().unwrap();
     let execution = projection
         .agent_executions
-        .get("run-with-tool-call")
+        .get("request-with-tool-call")
         .unwrap();
     assert_eq!(execution.model_steps.len(), 1);
     assert_eq!(execution.model_steps[0].model_step_id, "step-with-tool-call");
@@ -260,8 +255,6 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
             "session-1",
             AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: child.agent_instance_id.clone(),
-                run_id: "exec-detached".into(),
-                execution_id: "exec-detached".into(),
                 root_input_id: "request-detached".into(),
                 request_id: "request-detached".into(),
                 source_turn_id: None,
@@ -345,8 +338,6 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
     let root = store.ensure_root_agent("main").unwrap();
     let start = AgentDurableCommand::AgentInputProcessingStarted {
         agent_instance_id: root.agent_instance_id.clone(),
-        run_id: "exec-idempotent".into(),
-        execution_id: "exec-idempotent".into(),
         root_input_id: "request-idempotent".into(),
         request_id: "request-idempotent".into(),
         source_turn_id: None,
@@ -393,7 +384,7 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
     }
     let projection = store.load_projection().unwrap();
     assert_eq!(projection.agent_executions.len(), 1);
-    let execution = projection.agent_executions.get("run-idempotent").unwrap();
+    let execution = projection.agent_executions.get("request-idempotent").unwrap();
     assert_eq!(execution.report.as_ref(), Some(&report));
     assert_eq!(execution.prompt_assembly_version, 1);
     assert_eq!(execution.prompt_digest, "prompt-idempotent");
@@ -441,8 +432,6 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
             "session-1",
             AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "exec-queued".into(),
-                execution_id: "exec-queued".into(),
                 root_input_id: "queued-1".into(),
                 request_id: "queued-1".into(),
                 source_turn_id: None,
@@ -460,10 +449,10 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
     assert_eq!(
         projection
             .agent_executions
-            .get("run-queued")
+            .get("queued-1")
             .unwrap()
-            .execution_id,
-        "exec-queued"
+            .root_input_id,
+        "queued-1"
     );
 
     let cancelled = piko_protocol::AgentInput {

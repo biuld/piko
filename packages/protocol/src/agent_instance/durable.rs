@@ -46,11 +46,6 @@ pub enum AgentDurableCommand {
         agent_instance_id: AgentInstanceId,
         root_input_id: AgentInputId,
         request_id: String,
-        /// Interim commit-correlation identity for message, model-step, and
-        /// usage grains until they rekey onto `root_input_id` (slice 6.4).
-        execution_id: String,
-        /// Interim run correlation; equals the root request id in orchd today.
-        run_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_turn_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

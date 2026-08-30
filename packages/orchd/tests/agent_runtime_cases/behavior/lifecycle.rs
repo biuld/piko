@@ -168,11 +168,8 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
         piko_protocol::ExecutionOutcome::Cancelled { .. }
     ));
 
-    let execution_id = piko_orchd_api::stable_internal_id(
-        "exec",
-        &["session-cancel-marker", "root", "cancel-marker-run"],
-    );
-    let marker_id = piko_protocol::turn_abort_marker_message_id(&execution_id);
+    let execution_id = "cancel-marker-run";
+    let marker_id = piko_protocol::turn_abort_marker_message_id(execution_id);
     let messages = executions.messages();
     let markers: Vec<_> = messages
         .iter()
@@ -188,7 +185,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
     ));
     let execution_messages: Vec<_> = messages
         .iter()
-        .filter(|commit| commit.execution_id == execution_id)
+        .filter(|commit| commit.root_input_id == execution_id)
         .collect();
     assert_eq!(
         execution_messages.last().map(|commit| &commit.message_id),
@@ -275,15 +272,8 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
     assert!(cancelling.await.unwrap().unwrap().accepted);
     assert_eq!(model.call_count().await, 0);
 
-    let execution_id = piko_orchd_api::stable_internal_id(
-        "exec",
-        &[
-            "session-start-cancel-marker",
-            "root",
-            "start-cancel-marker",
-        ],
-    );
-    let marker_id = piko_protocol::turn_abort_marker_message_id(&execution_id);
+    let execution_id = "start-cancel-marker";
+    let marker_id = piko_protocol::turn_abort_marker_message_id(execution_id);
     let messages = executions.messages();
     let markers: Vec<_> = messages
         .iter()

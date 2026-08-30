@@ -28,9 +28,9 @@ fn fixture_config(name: &str, script: &str) -> McpServerConfig {
 
 fn execution_context() -> ToolExecutionContext {
     ToolExecutionContext {
+        root_input_id: "input-1".into(),
         session_id: "s1".into(),
         agent_instance_id: "root".into(),
-        execution_id: "e1".into(),
         cancellation: None,
         agent_id: "main".into(),
         agent_role: None,

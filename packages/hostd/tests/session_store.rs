@@ -28,7 +28,7 @@ fn message_commit(id: &str, parent: Option<&str>) -> MessageCommit {
     MessageCommit {
         session_id: "session-1".into(),
         source_turn_id: Some("turn-1".into()),
-        execution_id: "exec-1".into(),
+        root_input_id: "input-1".into(),
         agent_instance_id: "agent_session-1_root".into(),
         message_id: id.into(),
         parent_message_id: parent.map(str::to_string),
@@ -178,7 +178,7 @@ async fn private_transcripts_are_recovered_per_agent() {
                 MessageCommit {
                     session_id: "session-1".into(),
                     source_turn_id: Some("turn-1".into()),
-                    execution_id: format!("exec-{child_id}"),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: child_id.into(),
                     message_id: format!("message-{child_id}"),
                     parent_message_id: None,
@@ -384,7 +384,7 @@ async fn child_transcript_does_not_move_persisted_session_leaf() {
             MessageCommit {
                 session_id: "session-1".into(),
                 source_turn_id: None,
-                execution_id: "exec-child".into(),
+                root_input_id: "input-1".into(),
                 agent_instance_id: "agent-child".into(),
                 message_id: "message-child".into(),
                 parent_message_id: None,
@@ -420,7 +420,7 @@ fn rejects_wrong_parent_and_duplicate_payload_conflict() {
     );
 
     let mut conflict = message_commit("message-1", None);
-    conflict.execution_id = "different-exec".into();
+    conflict.root_input_id = "different-exec".into();
     assert_eq!(
         store.commit_message(conflict, "main"),
         Err(CommitError::IdempotencyConflict)

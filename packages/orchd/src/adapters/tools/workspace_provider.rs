@@ -188,7 +188,7 @@ mod tests {
         ToolExecutionContext {
             session_id: "session".into(),
             agent_instance_id: "agent".into(),
-            execution_id: "exec".into(),
+            root_input_id: "exec".into(),
             cancellation: None,
             agent_id: "main".into(),
             agent_role: role.map(str::to_string),

@@ -49,7 +49,7 @@ impl AgentActor {
             latest_report,
             completed_executions: execution_reports
                 .into_iter()
-                .map(|recovered| (recovered.internal_execution_id, recovered.report))
+                .map(|recovered| (recovered.root_input_id, recovered.report))
                 .collect(),
             detached_reports: HashMap::new(),
             scope,
@@ -126,12 +126,11 @@ impl AgentActor {
                     self.pending_run_parent = Some(parent);
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let request_execution_id =
-                        internal_execution_id(&self.identity, &request.request_id);
+                    let request_root_input_id = input.input_id.clone();
                     let known_request = self.input_requests.contains_key(&request.request_id)
                         || self
                             .completed_executions
-                            .contains_key(&request_execution_id);
+                            .contains_key(&request_root_input_id);
                     let result = if !known_request
                         && matches!(self.run_state, AgentRunState::Idle)
                         && matches!(
@@ -151,9 +150,12 @@ impl AgentActor {
                                 Some(stored_input.clone()),
                             )
                             .await
-                            .map(|receipt| AcceptedAgentInput {
-                                receipt,
-                                internal_execution_id: request_execution_id,
+                            .map(|receipt| {
+                                let root_input_id = receipt.input_id.clone();
+                                AcceptedAgentInput {
+                                    receipt,
+                                    root_input_id,
+                                }
                             });
                         if let Ok(accepted) = &result {
                             self.input_requests.insert(
@@ -166,22 +168,20 @@ impl AgentActor {
                         self.handle_input(input).await
                     };
                     if let Ok(accepted) = &result {
-                        self.register_detached_report(
-                            accepted.internal_execution_id.clone(),
-                            recipient,
-                        )
-                        .await;
+                        self.register_detached_report(accepted.root_input_id.clone(), recipient)
+                            .await;
                     }
                     command.complete(result.map(|accepted| accepted.receipt));
                 }
                 AgentCommand::ExecutionFinished {
-                    execution_id,
+                    root_input_id,
                     terminal,
                 } => {
-                    self.handle_execution_finished(execution_id, terminal).await;
+                    self.handle_execution_finished(root_input_id, terminal)
+                        .await;
                 }
-                AgentCommand::RetryTerminal { execution_id } => {
-                    if self.run_state.execution_id() == Some(&execution_id) {
+                AgentCommand::RetryTerminal { root_input_id } => {
+                    if self.run_state.root_input_id() == Some(&root_input_id) {
                         self.try_commit_terminal().await;
                     }
                 }
@@ -256,7 +256,7 @@ impl AgentActor {
     }
 
     pub(super) fn should_queue_follow_up(&self, request: &SendAgentInputRequest) -> bool {
-        self.run_state.execution_id().is_some() && request.delivery == AgentInputDelivery::FollowUp
+        self.run_state.root_input_id().is_some() && request.delivery == AgentInputDelivery::FollowUp
     }
 
     pub(super) async fn enqueue_follow_up(
@@ -329,10 +329,10 @@ impl AgentActor {
 
     pub(super) async fn register_detached_report(
         &mut self,
-        execution_id: String,
+        root_input_id: String,
         target: DetachedReportTarget,
     ) {
-        if let Some(report) = self.completed_executions.get(&execution_id).cloned() {
+        if let Some(report) = self.completed_executions.get(&root_input_id).cloned() {
             self.deliver_report_or_retry(DetachedDeliveryScope::new(
                 target.agent_instance_id,
                 report,
@@ -340,7 +340,7 @@ impl AgentActor {
             .await;
         } else {
             self.detached_reports
-                .entry(execution_id)
+                .entry(root_input_id)
                 .or_default()
                 .push(target);
         }
@@ -350,16 +350,13 @@ impl AgentActor {
         let _ = self.snapshot_tx.send(AgentSnapshot {
             identity: self.identity.clone(),
             lifecycle: self.lifecycle,
-            activity: if self.run_state.execution_id().is_some() {
+            activity: if self.run_state.root_input_id().is_some() {
                 AgentActivity::Running
             } else {
                 AgentActivity::Idle
             },
             latest_report: self.latest_report.clone(),
-            active_root_input_id: self
-                .run_state
-                .active_root()
-                .map(|(input_id, _)| input_id.to_string()),
+            active_root_input_id: self.run_state.active_root_input_id().map(str::to_string),
             pending_follow_up_ids: self
                 .follow_ups
                 .iter()
@@ -378,9 +375,9 @@ impl AgentActor {
         &self,
         request_id: String,
     ) -> Result<piko_protocol::AgentCancelReceipt, AgentApiError> {
-        let execution_id = self
+        let root_input_id = self
             .run_state
-            .execution_id()
+            .root_input_id()
             .ok_or(AgentApiError::InvalidState)?
             .to_string();
         if matches!(self.run_state, AgentRunState::Finalizing(_)) {
@@ -395,7 +392,7 @@ impl AgentActor {
             .request_cancel(piko_protocol::CancelExecutionRequest {
                 request_id,
                 session_id: self.identity.session_id.clone(),
-                execution_id,
+                root_input_id,
                 reason: piko_protocol::CancelReason::Superseded,
             })
             .await

@@ -30,11 +30,11 @@ pub enum AgentCommand {
         parent: tracing::Span,
     },
     ExecutionFinished {
-        execution_id: String,
+        root_input_id: String,
         terminal: ExecutionHandoffLease<ExecutionTerminal>,
     },
     RetryTerminal {
-        execution_id: String,
+        root_input_id: String,
     },
     RetryQueuedInput,
     RetryDetachedReport {

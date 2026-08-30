@@ -21,13 +21,8 @@ use super::files::{self, READ_MODEL_SCHEMA};
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryProjection {
     pub revision: u64,
+    /// Runs keyed by the root AgentInput of the work.
     pub runs: BTreeMap<String, TrajectoryRunProjection>,
-    #[serde(default)]
-    pub execution_to_run: HashMap<String, String>,
-    /// Interim join from the root input to its run key. Removed when the
-    /// trajectory grains rekey onto `root_input_id` (slice 6.4).
-    #[serde(default)]
-    pub root_to_run: HashMap<String, String>,
     #[serde(default)]
     pub input_contents: HashMap<String, piko_protocol::MessageContent>,
 }
@@ -36,7 +31,6 @@ pub struct TrajectoryProjection {
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryRunProjection {
     pub agent_instance_id: Option<String>,
-    pub execution_id: Option<String>,
     pub source_turn_id: Option<String>,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
@@ -147,15 +141,11 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             else {
                 return;
             };
-            decoded
-                .execution_to_run
-                .insert(started.execution_id.clone(), started.run_id.clone());
-            decoded
-                .root_to_run
-                .insert(started.root_input_id.clone(), started.run_id.clone());
-            let run = decoded.runs.entry(started.run_id).or_default();
+            let run = decoded
+                .runs
+                .entry(started.root_input_id.clone())
+                .or_default();
             run.agent_instance_id = Some(started.agent_instance_id);
-            run.execution_id = Some(started.execution_id);
             run.source_turn_id = started.source_turn_id;
             run.started_at = Some(started.started_at);
         }
@@ -178,12 +168,9 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             let Some(content) = decoded.input_contents.get(&applied.input_id).cloned() else {
                 return;
             };
-            let Some(run_id) = decoded.execution_to_run.get(&applied.execution_id).cloned() else {
-                return;
-            };
             decoded
                 .runs
-                .entry(run_id)
+                .entry(applied.root_input_id)
                 .or_default()
                 .messages
                 .push(TrajectoryMessage {
@@ -200,10 +187,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             else {
                 return;
             };
-            let Some(run_id) = decoded.root_to_run.get(&finished.root_input_id).cloned() else {
-                return;
-            };
-            let run = decoded.runs.entry(run_id).or_default();
+            let run = decoded.runs.entry(finished.root_input_id).or_default();
             run.finished_at = Some(finished.finished_at);
             run.terminal = Some(match finished.report.outcome {
                 piko_protocol::ExecutionOutcome::Succeeded { .. } => {
@@ -221,15 +205,12 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             else {
                 return;
             };
-            let Some(execution_id) = committed.execution_id else {
-                return;
-            };
-            let Some(run_id) = decoded.execution_to_run.get(&execution_id).cloned() else {
+            let Some(root_input_id) = committed.root_input_id else {
                 return;
             };
             decoded
                 .runs
-                .entry(run_id)
+                .entry(root_input_id)
                 .or_default()
                 .messages
                 .push(TrajectoryMessage {
@@ -244,7 +225,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             let run = decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default();
             run.agent_instance_id
                 .get_or_insert_with(|| record.identity.agent_instance_id.to_string());
@@ -257,7 +238,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             let run = decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default();
             run.records
                 .push(TrajectoryRecord::ModelStep(Box::new(record)));
@@ -270,7 +251,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             let run = decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default();
             run.records.push(TrajectoryRecord::ToolCall(record));
             run.refresh_counts();
@@ -282,7 +263,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             let run = decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default();
             run.child_run_count += 1;
             run.records.push(TrajectoryRecord::ChildRun(record));
@@ -295,7 +276,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default()
                 .records
                 .push(TrajectoryRecord::SystemNotification(record));
@@ -307,7 +288,7 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             };
             let run = decoded
                 .runs
-                .entry(record.identity.run_id.clone())
+                .entry(record.identity.root_input_id.clone())
                 .or_default();
             run.finished_at = Some(record.finished_at);
             run.terminal = Some(record.kind);

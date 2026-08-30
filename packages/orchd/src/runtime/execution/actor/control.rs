@@ -27,7 +27,7 @@ impl ExecutionActor {
                 let receipt = ExecutionInputReceipt {
                     request_id: request.request_id.clone(),
                     session_id: self.identity.session_id.clone(),
-                    execution_id: self.identity.execution_id.clone(),
+                    root_input_id: self.identity.root_input_id.clone(),
                     message_id: request.message_id.clone(),
                     disposition: InputDisposition::Queued,
                 };
@@ -44,7 +44,7 @@ impl ExecutionActor {
                 command.complete(Ok(CancelReceipt {
                     request_id,
                     session_id: self.identity.session_id.clone(),
-                    execution_id: self.identity.execution_id.clone(),
+                    root_input_id: self.identity.root_input_id.clone(),
                     accepted: true,
                 }));
             }

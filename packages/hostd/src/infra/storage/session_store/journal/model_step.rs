@@ -37,13 +37,12 @@ impl SessionStore {
             return Err(CommitError::IdentityMismatch);
         }
         let (root, processing) = aggregate
-            .work_by_execution_id(&commit.execution_id)
+            .work_by_root_input_id(&commit.root_input_id)
             .ok_or(CommitError::IdentityMismatch)?;
         if processing.finished_at.is_some() {
             return Err(CommitError::IdentityMismatch);
         }
-        if processing.run_id.as_deref() != Some(commit.run_id.as_str())
-            || root.input.agent_instance_id != commit.agent_instance_id
+        if root.input.agent_instance_id != commit.agent_instance_id
             || processing.source_turn_id != commit.source_turn_id
         {
             return Err(CommitError::IdentityMismatch);
@@ -52,8 +51,7 @@ impl SessionStore {
         let event_data = ModelStepCommittedV1 {
             model_step_id: boundary.model_step_id.clone(),
             step_index: boundary.step_index,
-            run_id: boundary.run_id.clone(),
-            execution_id: boundary.execution_id.clone(),
+            root_input_id: boundary.root_input_id.clone(),
             agent_instance_id: boundary.agent_instance_id.clone(),
             source_turn_id: boundary.source_turn_id.clone(),
             assistant_message_id: boundary.assistant_message_id.clone(),
@@ -66,7 +64,7 @@ impl SessionStore {
             if existing.data == event_data && step_messages_match_existing(&aggregate, &commit) {
                 return Ok(CommitAck {
                     session_id: commit.session_id,
-                    execution_id: commit.execution_id,
+                    root_input_id: commit.root_input_id,
                     agent_instance_id: commit.agent_instance_id,
                     message_id: Some(commit.assistant.message_id),
                     revision: existing.revision,
@@ -76,7 +74,7 @@ impl SessionStore {
         }
 
         let expected_parent = aggregate
-            .work_message_head(&commit.execution_id)
+            .work_message_head(&commit.root_input_id)
             .map(str::to_string)
             .or_else(|| processing.base_message_id.clone());
         if commit.assistant.parent_message_id != expected_parent {
@@ -108,7 +106,7 @@ impl SessionStore {
                 return Err(CommitError::IdentityMismatch);
             }
         }
-        let expected_index = aggregate.work_model_step_count(&commit.execution_id) as u32 + 1;
+        let expected_index = aggregate.work_model_step_count(&commit.root_input_id) as u32 + 1;
         if commit.step_index != expected_index {
             return Err(CommitError::IdentityMismatch);
         }
@@ -120,7 +118,7 @@ impl SessionStore {
         let mut events = Vec::with_capacity(3 + commit.tool_calls.len() * 2);
         let mut parent_message_id = expected_parent;
         let mut tree_parent_entry_id = aggregate
-            .work_message_head(&commit.execution_id)
+            .work_message_head(&commit.root_input_id)
             .map(str::to_string)
             .or_else(|| processing.tree_base_entry_id.clone())
             .or_else(|| aggregate.selected_tree_entry_id.clone());
@@ -154,8 +152,7 @@ impl SessionStore {
                 attribution: UsageAttribution {
                     session_id: commit.session_id.clone(),
                     agent_instance_id: commit.agent_instance_id.clone(),
-                    turn_id: commit.source_turn_id.clone(),
-                    execution_id: commit.execution_id.clone(),
+                    root_input_id: commit.root_input_id.clone(),
                     model_step_id: commit.model_step_id.clone(),
                 },
                 provider: provider.clone(),
@@ -194,7 +191,7 @@ impl SessionStore {
             "model-step-commit",
             &[
                 &commit.session_id,
-                &commit.execution_id,
+                &commit.root_input_id,
                 &commit.model_step_id,
             ],
         );
@@ -203,7 +200,7 @@ impl SessionStore {
             .map_err(Self::commit_error)?;
         Ok(CommitAck {
             session_id: commit.session_id,
-            execution_id: commit.execution_id,
+            root_input_id: commit.root_input_id,
             agent_instance_id: commit.agent_instance_id,
             message_id: Some(boundary.assistant_message_id),
             revision,
@@ -230,7 +227,7 @@ fn step_messages_match_existing(
                     && proposed.tree_parent_entry_id.as_ref().is_none_or(|parent| {
                         stored.data.tree_parent_entry_id.as_ref() == Some(parent)
                     })
-                    && stored.data.execution_id.as_deref() == Some(proposed.execution_id.as_str())
+                    && stored.data.root_input_id.as_deref() == Some(proposed.root_input_id.as_str())
                     && stored.data.source_turn_id == proposed.source_turn_id
                     && stored.data.committed_at == proposed.committed_at
                     && stored.data.message == proposed.message
@@ -245,7 +242,7 @@ fn validate_step_message(
 ) -> Result<(), CommitError> {
     if message.session_id != step.session_id
         || message.source_turn_id != step.source_turn_id
-        || message.execution_id != step.execution_id
+        || message.root_input_id != step.root_input_id
         || message.agent_instance_id != step.agent_instance_id
     {
         return Err(CommitError::IdentityMismatch);
@@ -293,7 +290,7 @@ fn append_step_message(
         agent_instance_id: step.agent_instance_id.clone(),
         agent_parent_message_id: message.parent_message_id.clone(),
         tree_parent_entry_id: tree_parent.clone(),
-        execution_id: Some(step.execution_id.clone()),
+        root_input_id: Some(step.root_input_id.clone()),
         source_turn_id: step.source_turn_id.clone(),
         committed_at: message.committed_at,
         message: message.message.clone(),

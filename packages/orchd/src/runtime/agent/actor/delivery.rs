@@ -64,10 +64,9 @@ impl AgentActor {
                 .await
             {
                 Ok(_) => {
-                    let execution_id =
-                        internal_execution_id(&self.identity, &follow_up.request.request_id);
                     if let Some(target) = follow_up.detached {
-                        self.register_detached_report(execution_id, target).await
+                        self.register_detached_report(follow_up.input.input_id.clone(), target)
+                            .await
                     }
                 }
                 Err(_) => {

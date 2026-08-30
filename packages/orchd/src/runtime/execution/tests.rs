@@ -199,7 +199,7 @@ impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
     ) -> Result<CommitAck, CommitError> {
         Ok(CommitAck {
             session_id: commit.session_id,
-            execution_id: commit.execution_id,
+            root_input_id: commit.root_input_id,
             agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.message_id),
             revision: 1,
@@ -212,7 +212,7 @@ impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
     ) -> Result<CommitAck, CommitError> {
         Ok(CommitAck {
             session_id: commit.session_id,
-            execution_id: commit.execution_id,
+            root_input_id: commit.root_input_id,
             agent_instance_id: commit.agent_instance_id,
             message_id: Some(commit.assistant.message_id),
             revision: 1,
@@ -225,7 +225,7 @@ fn request() -> StartExecutionRequest {
         request_id: "request".into(),
         session_id: "session".into(),
         source_turn_id: None,
-        execution_id: "execution".into(),
+        root_input_id: "execution".into(),
         agent_instance_id: "agent".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
@@ -257,13 +257,12 @@ fn request() -> StartExecutionRequest {
             agent_id: "main".into(),
             ..Default::default()
         },
-        root_input_id: None,
     }
 }
 
 fn request_with(execution_id: &str, message_id: &str) -> StartExecutionRequest {
     StartExecutionRequest {
-        execution_id: execution_id.into(),
+        root_input_id: execution_id.into(),
         input_message_id: message_id.into(),
         ..request()
     }

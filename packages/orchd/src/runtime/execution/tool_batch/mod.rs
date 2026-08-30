@@ -136,7 +136,7 @@ fn tool_exec_context(
     ToolExecutionContext {
         session_id: identity.session_id.clone(),
         agent_instance_id: identity.agent_instance_id.clone(),
-        execution_id: identity.execution_id.clone(),
+        root_input_id: identity.root_input_id.clone(),
         cancellation: Some(cancel),
         agent_id: identity.agent_id.clone(),
         agent_role: identity.agent_role.clone(),
@@ -321,8 +321,7 @@ fn tool_call_span(
     tracing::info_span!(
         "tool.call",
         session_id = %identity.session_id,
-        run_id = %identity.run_id,
-        execution_id = %identity.execution_id,
+        root_input_id = %identity.root_input_id,
         agent_instance_id = %identity.agent_instance_id,
         step_id = format!("step_{model_step_index}"),
         tool = %tc.name,

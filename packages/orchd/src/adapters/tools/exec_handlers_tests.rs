@@ -33,7 +33,7 @@ fn context() -> ToolExecutionContext {
     ToolExecutionContext {
         session_id: "session".into(),
         agent_instance_id: "agent".into(),
-        execution_id: "execution".into(),
+        root_input_id: "execution".into(),
         cancellation: None,
         agent_id: "root".into(),
         agent_role: None,

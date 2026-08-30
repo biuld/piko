@@ -19,7 +19,7 @@ fn context() -> ToolExecutionContext {
     ToolExecutionContext {
         session_id: "session".into(),
         agent_instance_id: "agent".into(),
-        execution_id: "exec".into(),
+        root_input_id: "exec".into(),
         cancellation: None,
         agent_id: "root".into(),
         agent_role: None,

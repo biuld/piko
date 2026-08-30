@@ -326,7 +326,7 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
         request_id: "request-batch".into(),
         session_id: "session-batch".into(),
         source_turn_id: None,
-        execution_id: execution_id.into(),
+        root_input_id: execution_id.into(),
         agent_instance_id: "agent-batch".into(),
         agent_spec: AgentSpec {
             id: "main".into(),
@@ -358,7 +358,6 @@ pub(super) fn batch_request(execution_id: &str, tools: Vec<ToolDef>) -> StartExe
             agent_id: "main".into(),
             ..Default::default()
         },
-        root_input_id: None,
     }
 }
 

@@ -30,8 +30,7 @@ fn capture(telemetry: Arc<RecordingTelemetry>) -> ModelStepCapture {
         identity: TrajectoryIdentity {
             session_id: "s".into(),
             agent_instance_id: "a".into(),
-            run_id: "r".into(),
-            execution_id: None,
+            root_input_id: "input-r".into(),
             source_turn_id: None,
         },
         step_id: "step-1".into(),

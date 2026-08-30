@@ -90,7 +90,7 @@ impl HostApp {
                 left.started_at
                     .cmp(&right.started_at)
                     .then_with(|| left.finished_at.cmp(&right.finished_at))
-                    .then_with(|| left.execution_id.cmp(&right.execution_id))
+                    .then_with(|| left.root_input_id.cmp(&right.root_input_id))
                     .then_with(|| left.step_index.cmp(&right.step_index))
                     .then_with(|| left.model_step_id.cmp(&right.model_step_id))
             });
@@ -293,8 +293,7 @@ mod usage_tests {
     fn execution(id: &str, started_at: i64, finished_at: Option<i64>) -> ExecutionProjection {
         ExecutionProjection {
             agent_instance_id: id.into(),
-            run_id: format!("run-{started_at}"),
-            execution_id: format!("execution-{started_at}"),
+            root_input_id: format!("input-{started_at}"),
             request_id: String::new(),
             source_turn_id: None,
             detached_recipient_agent_instance_id: None,

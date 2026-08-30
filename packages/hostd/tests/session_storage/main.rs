@@ -124,7 +124,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some(input_id.clone()),
-                    execution_id: "task-main".into(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: "task-main".into(),
                     message_id: "user-main".into(),
                     parent_message_id: None,
@@ -153,7 +153,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some("child-work".into()),
-                    execution_id: "task-child".into(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
                     message_id: "user-child".into(),
                     parent_message_id: None,
@@ -196,7 +196,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
                     source_turn_id: Some("child-work".into()),
-                    execution_id: "task-child".into(),
+                    root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
                     message_id: "assistant-child".into(),
                     parent_message_id: Some("user-child".into()),

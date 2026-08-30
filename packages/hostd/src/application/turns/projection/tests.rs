@@ -23,9 +23,9 @@ async fn project_committed_message_reads_session_store() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
@@ -67,9 +67,9 @@ async fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "message-rebuild".into(),
                 parent_message_id: None,
@@ -112,9 +112,9 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "root-msg".into(),
                 parent_message_id: None,
@@ -131,9 +131,9 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "followup-msg".into(),
                 parent_message_id: Some("root-msg".into()),
@@ -234,9 +234,9 @@ async fn record_committed_message_projects_into_host_state() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "msg-followup".into(),
                 parent_message_id: None,
@@ -295,9 +295,9 @@ async fn durable_tool_change_rebuilds_turn_diff_without_workspace_read() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
                 message_id: "tool-result-1".into(),
                 parent_message_id: None,
@@ -385,9 +385,9 @@ async fn todo_write_empty_clear_projects_pending_and_removes_durable_map() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: agent.clone(),
                 message_id: "todo-clear".into(),
                 parent_message_id: None,
@@ -449,9 +449,9 @@ async fn todo_write_nonempty_sets_map_and_pending() {
     store
         .commit_message(
             MessageCommit {
+                root_input_id: "input-1".into(),
                 session_id: "session-1".into(),
                 source_turn_id: Some("turn-1".into()),
-                execution_id: "exec-1".into(),
                 agent_instance_id: agent.clone(),
                 message_id: "todo-write-1".into(),
                 parent_message_id: None,
@@ -521,9 +521,9 @@ fn empty_clear_pending_drives_durable_none() {
     let agent = root.agent_instance_id.clone();
 
     let tool_result = |message_id: &str, parent_message_id: Option<&str>, todos| MessageCommit {
+        root_input_id: "input-1".into(),
         session_id: "session-1".into(),
         source_turn_id: Some("turn-1".into()),
-        execution_id: "exec-1".into(),
         agent_instance_id: agent.clone(),
         message_id: message_id.into(),
         parent_message_id: parent_message_id.map(str::to_string),

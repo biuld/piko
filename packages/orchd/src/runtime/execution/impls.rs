@@ -60,8 +60,7 @@ impl AgentExecutionRuntime {
         let identity = ExecutionIdentity {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
-            run_id: request.request_id.clone(),
-            execution_id: request.execution_id.clone(),
+            root_input_id: request.root_input_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             agent_id: request.config.agent_id.clone(),
             agent_role,
@@ -76,9 +75,9 @@ impl AgentExecutionRuntime {
                 .map(|message| piko_protocol::execution::MessageCommit {
                     session_id: request.session_id.clone(),
                     source_turn_id: request.source_turn_id.clone(),
-                    execution_id: request.execution_id.clone(),
+                    root_input_id: request.root_input_id.clone(),
                     agent_instance_id: request.agent_instance_id.clone(),
-                    message_id: piko_protocol::world_state_message_id(&request.execution_id),
+                    message_id: piko_protocol::world_state_message_id(&request.root_input_id),
                     parent_message_id: request.context.head_message_id.clone(),
                     tree_parent_entry_id: None,
                     message: message.clone(),
@@ -105,7 +104,7 @@ impl AgentExecutionRuntime {
             let commit = piko_protocol::execution::MessageCommit {
                 session_id: request.session_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
-                execution_id: request.execution_id.clone(),
+                root_input_id: request.root_input_id.clone(),
                 agent_instance_id: request.agent_instance_id.clone(),
                 message_id: message_id.clone(),
                 parent_message_id: chain_parent.clone(),
@@ -122,12 +121,12 @@ impl AgentExecutionRuntime {
                 piko_protocol::Message::Context { source, .. }
                     if source.kind == piko_protocol::FILE_MENTION_SOURCE_KIND =>
                 {
-                    piko_protocol::file_mention_message_id(&request.execution_id, index)
+                    piko_protocol::file_mention_message_id(&request.root_input_id, index)
                 }
                 piko_protocol::Message::Context { source, .. }
                     if source.kind == piko_protocol::SKILL_MENTION_SOURCE_KIND =>
                 {
-                    piko_protocol::skill_mention_message_id(&request.execution_id, index)
+                    piko_protocol::skill_mention_message_id(&request.root_input_id, index)
                 }
                 _ => {
                     return Err(AgentApiError::InputRejected);
@@ -136,7 +135,7 @@ impl AgentExecutionRuntime {
             let commit = piko_protocol::execution::MessageCommit {
                 session_id: request.session_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
-                execution_id: request.execution_id.clone(),
+                root_input_id: request.root_input_id.clone(),
                 agent_instance_id: request.agent_instance_id.clone(),
                 message_id: message_id.clone(),
                 parent_message_id: chain_parent.clone(),
@@ -150,7 +149,7 @@ impl AgentExecutionRuntime {
         let input_commit = piko_protocol::execution::MessageCommit {
             session_id: request.session_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
-            execution_id: request.execution_id.clone(),
+            root_input_id: request.root_input_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
             message_id: request.input_message_id.clone(),
             parent_message_id: chain_parent,
@@ -176,7 +175,7 @@ impl AgentExecutionRuntime {
             request_id: request.request_id.clone(),
             session_id: identity.session_id.clone(),
             source_turn_id: identity.source_turn_id.clone(),
-            execution_id: identity.execution_id.clone(),
+            root_input_id: identity.root_input_id.clone(),
             agent_instance_id: identity.agent_instance_id.clone(),
             status: ExecutionStatus::Accepted,
         };
@@ -246,7 +245,7 @@ impl AgentExecutionRuntime {
         let assembly = piko_protocol::PromptAssemblyRequest {
             session_id: request.session_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),
-            run_id: run_id.to_string(),
+            root_input_id: run_id.to_string(),
             agent_spec: agent_spec.clone(),
             resources: request.prompt_resources.clone().unwrap_or_default(),
             tool_catalog,
@@ -269,7 +268,7 @@ impl AgentExecutionRuntime {
     ) -> Result<ExecutionInputReceipt, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         let handle = scope
-            .get_execution(&request.execution_id)
+            .get_execution(&request.root_input_id)
             .await
             .ok_or(AgentApiError::ExecutionNotFound)?;
         let (reply_tx, reply_rx) = piko_comms::reply::<ExecutionCommandReply, _>();
@@ -291,7 +290,7 @@ impl AgentExecutionRuntime {
     ) -> Result<CancelReceipt, AgentApiError> {
         let scope = self.scope(&request.session_id).await?;
         let handle = scope
-            .get_execution(&request.execution_id)
+            .get_execution(&request.root_input_id)
             .await
             .ok_or(AgentApiError::ExecutionNotFound)?;
         handle.cancel.cancel();
@@ -307,7 +306,7 @@ impl AgentExecutionRuntime {
             Err(_) => Ok(CancelReceipt {
                 request_id: request.request_id,
                 session_id: request.session_id,
-                execution_id: request.execution_id,
+                root_input_id: request.root_input_id,
                 accepted: true,
             }),
         }

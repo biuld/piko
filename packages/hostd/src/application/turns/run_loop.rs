@@ -192,11 +192,7 @@ impl HostApp {
         TrajectoryIdentity {
             session_id: session_id.to_string(),
             agent_instance_id: agent_instance_id.to_string(),
-            run_id: input_id.to_string(),
-            execution_id: Some(piko_orchd_api::stable_internal_id(
-                "exec",
-                &[session_id, agent_instance_id, input_id],
-            )),
+            root_input_id: input_id.to_string(),
             source_turn_id: Some(input_id.to_string()),
         }
     }

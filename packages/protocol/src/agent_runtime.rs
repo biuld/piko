@@ -12,7 +12,6 @@ use crate::{Message, MessageRole};
 
 pub type RequestId = String;
 pub type MessageId = String;
-pub type ExecutionId = String;
 
 /// Committed transcript fragment used when resuming a root execution shard.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -113,7 +112,7 @@ pub enum SessionEvent {
 #[serde(rename_all = "camelCase")]
 pub struct RealtimeDeltaEnvelope {
     pub agent_instance_id: crate::AgentInstanceId,
-    pub execution_id: ExecutionId,
+    pub root_input_id: String,
     pub agent_id: String,
     pub message_id: Option<MessageId>,
     pub delta_seq: u64,

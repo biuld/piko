@@ -27,8 +27,7 @@ pub struct UsageSummary {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageQuery {
     pub agent_instance_id: Option<String>,
-    pub turn_id: Option<String>,
-    pub execution_id: Option<String>,
+    pub root_input_id: Option<String>,
     pub provider: Option<String>,
     pub model_id: Option<String>,
     pub incurred_only: bool,
@@ -67,13 +66,9 @@ impl AccountingProjection {
                     .as_ref()
                     .is_none_or(|id| id == &attribution.agent_instance_id)
                 && query
-                    .turn_id
+                    .root_input_id
                     .as_ref()
-                    .is_none_or(|id| attribution.turn_id.as_ref() == Some(id))
-                && query
-                    .execution_id
-                    .as_ref()
-                    .is_none_or(|id| id == &attribution.execution_id)
+                    .is_none_or(|id| id == &attribution.root_input_id)
                 && query
                     .provider
                     .as_ref()

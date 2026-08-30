@@ -253,7 +253,8 @@ pub struct MessageCommittedV1 {
     pub agent_instance_id: String,
     pub agent_parent_message_id: Option<String>,
     pub tree_parent_entry_id: Option<String>,
-    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_input_id: Option<String>,
     pub source_turn_id: Option<String>,
     pub committed_at: i64,
     pub message: Message,
@@ -264,8 +265,7 @@ pub struct MessageCommittedV1 {
 pub struct UsageAttribution {
     pub session_id: String,
     pub agent_instance_id: String,
-    pub turn_id: Option<String>,
-    pub execution_id: String,
+    pub root_input_id: String,
     pub model_step_id: String,
 }
 
@@ -300,13 +300,6 @@ pub struct AgentInputProcessingStartedV1 {
     pub agent_instance_id: String,
     pub root_input_id: String,
     pub request_id: String,
-    /// Interim commit-correlation identity for message, model-step, and usage
-    /// grains until they rekey onto `root_input_id` (slice 6.4).
-    #[serde(default)]
-    pub execution_id: String,
-    /// Interim run correlation; equals the root request id in orchd today.
-    #[serde(default)]
-    pub run_id: String,
     pub base_message_id: Option<String>,
     #[serde(default)]
     pub tree_base_entry_id: Option<String>,
@@ -367,7 +360,7 @@ pub struct AgentInputAppliedV1 {
     pub agent_instance_id: String,
     pub agent_parent_message_id: Option<String>,
     pub tree_parent_entry_id: Option<String>,
-    pub execution_id: String,
+    pub root_input_id: String,
     pub source_turn_id: Option<String>,
     pub committed_at: i64,
 }
@@ -377,8 +370,7 @@ pub struct AgentInputAppliedV1 {
 pub struct ModelStepCommittedV1 {
     pub model_step_id: String,
     pub step_index: u32,
-    pub run_id: String,
-    pub execution_id: String,
+    pub root_input_id: String,
     pub agent_instance_id: String,
     pub source_turn_id: Option<String>,
     pub assistant_message_id: String,

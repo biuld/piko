@@ -187,7 +187,7 @@ impl TrajectoryRecorder {
                         let _ = live_writer.send(TrajectoryLiveEvent::Record(Box::new(
                             TrajectoryLiveRecordEvent {
                                 session_id: session_id.clone(),
-                                run_id,
+                                root_input_id: run_id,
                                 revision,
                                 committed_at,
                                 record: write.record,
@@ -241,32 +241,32 @@ fn split_record(record: &TrajectoryRecord) -> Option<(&'static str, String, serd
     match record {
         TrajectoryRecord::Assembly(record) => Some((
             TRAJECTORY_EVENT_ASSEMBLY,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
         TrajectoryRecord::ModelStep(record) => Some((
             TRAJECTORY_EVENT_MODEL_STEP,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
         TrajectoryRecord::ToolCall(record) => Some((
             TRAJECTORY_EVENT_TOOL_CALL,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
         TrajectoryRecord::ChildRun(record) => Some((
             TRAJECTORY_EVENT_CHILD_RUN,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
         TrajectoryRecord::SystemNotification(record) => Some((
             TRAJECTORY_EVENT_SYSTEM_NOTIFICATION,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
         TrajectoryRecord::Terminal(record) => Some((
             TRAJECTORY_EVENT_TERMINAL,
-            record.identity.run_id.clone(),
+            record.identity.root_input_id.clone(),
             serde_json::to_value(record).ok()?,
         )),
     }
@@ -330,8 +330,7 @@ mod tests {
                 identity: piko_protocol::TrajectoryIdentity {
                     session_id: "s1".into(),
                     agent_instance_id: "a".into(),
-                    run_id: "r1".into(),
-                    execution_id: None,
+                    root_input_id: "input-r1".into(),
                     source_turn_id: None,
                 },
                 kind: piko_protocol::TrajectoryTerminalKind::Completed,

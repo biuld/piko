@@ -32,8 +32,8 @@ fn root_input(id: &str, request_id: &str) -> piko_protocol::AgentInput {
 fn work_start(
     id: &str,
     request_id: &str,
-    execution_id: &str,
-    run_id: &str,
+    _execution_id: &str,
+    _run_id: &str,
     turn_id: &str,
 ) -> ProposedCommit {
     let input = root_input(id, request_id);
@@ -58,8 +58,6 @@ fn work_start(
                     agent_instance_id: "root".into(),
                     root_input_id: id.into(),
                     request_id: request_id.into(),
-                    execution_id: execution_id.into(),
-                    run_id: run_id.into(),
                     base_message_id: None,
                     tree_base_entry_id: None,
                     source_turn_id: Some(turn_id.into()),
@@ -102,7 +100,7 @@ fn message(id: &str, agent_parent: Option<&str>, tree_parent: Option<&str>) -> E
         agent_instance_id: "root".into(),
         agent_parent_message_id: agent_parent.map(str::to_string),
         tree_parent_entry_id: tree_parent.map(str::to_string),
-        execution_id: Some(format!("exec-{id}")),
+        root_input_id: Some(format!("input-{id}")),
         source_turn_id: Some(format!("turn-{id}")),
         committed_at: 2,
         message: Message::User {
@@ -118,7 +116,7 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
         agent_instance_id: "root".into(),
         agent_parent_message_id: None,
         tree_parent_entry_id: None,
-        execution_id: Some("execution-1".into()),
+        root_input_id: Some("input-1".into()),
         source_turn_id: Some("turn-1".into()),
         committed_at: 3,
         message: Message::Assistant {
@@ -146,7 +144,7 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
         agent_instance_id: "root".into(),
         agent_parent_message_id: Some("assistant-1".into()),
         tree_parent_entry_id: Some("assistant-1".into()),
-        execution_id: Some("execution-1".into()),
+        root_input_id: Some("input-1".into()),
         source_turn_id: Some("turn-1".into()),
         committed_at: 3,
         message: Message::ToolCall {
@@ -161,8 +159,7 @@ fn model_step_messages() -> (EventData, EventData, EventData) {
     let boundary = EventData::ModelStepCommitted(ModelStepCommittedV1 {
         model_step_id: "step-1".into(),
         step_index: 1,
-        run_id: "run-1".into(),
-        execution_id: "execution-1".into(),
+        root_input_id: "input-1".into(),
         agent_instance_id: "root".into(),
         source_turn_id: Some("turn-1".into()),
         assistant_message_id: "assistant-1".into(),
@@ -208,10 +205,10 @@ fn model_step_commit_replays_as_an_atomic_authoritative_relation() {
         .processing
         .as_ref()
         .unwrap();
-    assert_eq!(processing.run_id.as_deref(), Some("run-1"));
+    assert_eq!(processing.started_at, 2);
     assert_eq!(
-        aggregate.model_steps["step-1"].data.execution_id,
-        "execution-1"
+        aggregate.model_steps["step-1"].data.root_input_id,
+        "input-1"
     );
     assert_eq!(
         aggregate.model_steps["step-1"].data.tool_call_message_ids,
@@ -348,8 +345,6 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
             agent_instance_id: "root".into(),
             root_input_id: "input-1".into(),
             request_id: "request-1".into(),
-            execution_id: "execution-1".into(),
-            run_id: "run-1".into(),
             base_message_id: None,
             tree_base_entry_id: None,
             source_turn_id: Some("turn-1".into()),
@@ -367,7 +362,7 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
             agent_instance_id: "root".into(),
             agent_parent_message_id: None,
             tree_parent_entry_id: None,
-            execution_id: "execution-1".into(),
+            root_input_id: "input-1".into(),
             source_turn_id: Some("turn-1".into()),
             committed_at: 3,
         }),
@@ -617,8 +612,7 @@ fn usage_correction_is_replayed_exactly_once() {
         attribution: UsageAttribution {
             session_id: "s1".into(),
             agent_instance_id: "root".into(),
-            turn_id: Some("t1".into()),
-            execution_id: "x1".into(),
+            root_input_id: "input-1".into(),
             model_step_id: "step1".into(),
         },
         provider: "test".into(),
@@ -660,7 +654,7 @@ fn usage_correction_is_replayed_exactly_once() {
     assert_eq!(summary.usage.input, 12);
     assert_eq!(
         aggregate.accounting.summarize(&UsageQuery {
-            execution_id: Some("x1".into()),
+            root_input_id: Some("input-1".into()),
             provider: Some("test".into()),
             incurred_only: true,
             ..UsageQuery::default()
@@ -686,8 +680,7 @@ fn usage_is_stable_across_retry_navigation_compaction_snapshot_and_replay() {
         attribution: UsageAttribution {
             session_id: "s1".into(),
             agent_instance_id: "root".into(),
-            turn_id: Some("turn-1".into()),
-            execution_id: "exec-1".into(),
+            root_input_id: "input-1".into(),
             model_step_id: "step-1".into(),
         },
         provider: "test".into(),

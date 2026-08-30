@@ -10,7 +10,7 @@ use crate::telemetry::{GatewayTelemetry, NoopGatewayTelemetry};
 /// Request-level context passed through the middleware chain
 #[derive(Clone, Default)]
 pub struct GatewayContext {
-    pub run_id: String,
+    pub root_input_id: String,
     pub step_id: String,
     pub model_id: String,
     pub provider: String,
@@ -27,7 +27,7 @@ pub struct GatewayContext {
 impl std::fmt::Debug for GatewayContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GatewayContext")
-            .field("run_id", &self.run_id)
+            .field("root_input_id", &self.root_input_id)
             .field("step_id", &self.step_id)
             .field("model_id", &self.model_id)
             .field("provider", &self.provider)
