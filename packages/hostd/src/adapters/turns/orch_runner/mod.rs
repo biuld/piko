@@ -30,6 +30,15 @@ use commit::{ExecutionCommitRouter, RealtimeDeltaRouter};
 type AgentRunKey = (String, String);
 type AgentHubMap = HashMap<AgentRunKey, Arc<piko_orchd::events::SessionOutputHub>>;
 
+/// Live observation state for one admitted AgentInput. `input_id` is the
+/// durable control identity (the root input id when applied as root), so no
+/// separate run/execution id is retained.
+pub(crate) struct ActiveAgentRunRuntime {
+    pub(crate) agent_instance_id: String,
+    pub(crate) observation: Arc<piko_orchd::events::SessionOutputHub>,
+    pub(crate) input_id: String,
+}
+
 #[derive(Clone)]
 pub struct OrchAgentRunRunner {
     agent_runtime: Arc<AgentRuntime>,
@@ -64,11 +73,6 @@ pub struct OrchAgentRunRunner {
     observation_router: Arc<observation_router::SessionObservationRouter>,
     prompt_gate: Arc<tokio::sync::Mutex<()>>,
     context_tools: Arc<piko_orchd::tools::ContextToolsProvider>,
-}
-
-struct ActiveAgentRunRuntime {
-    run_id: String,
-    observation: Arc<piko_orchd::events::SessionOutputHub>,
 }
 
 struct PendingApprovalEntry {

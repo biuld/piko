@@ -66,6 +66,15 @@ impl MockSessionPublisher {
         }));
     }
 
+    /// Current cursor position (epoch + published seq) for durability barrier
+    /// matching in mock completions.
+    pub fn cursor(&self) -> SessionCursor {
+        SessionCursor {
+            epoch: self.epoch.clone(),
+            seq: self.cursor_seq.load(Ordering::Relaxed),
+        }
+    }
+
     pub fn require_snapshot(&self, reason: piko_orchd_api::SnapshotRequiredReason) {
         let _ = self
             .tx

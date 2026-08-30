@@ -1,88 +1,87 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use piko_orchd_api::{AgentInputRuntime, AgentRuntimeApi};
-use piko_protocol::{AgentInput, AgentInputDelivery, SendAgentInputRequest};
+use piko_protocol::AgentInput;
 
 use crate::api::ProtocolError;
-use crate::ports::{
-    AgentOperationAddress, AgentRunCompletion, AgentRunFailure, AgentRunHandle, AgentRunInput,
-    AgentRunProcess,
-};
-use crate::util::now_ms;
+use crate::ports::{AgentRunCompletion, ResumeAgent};
 
 use super::OrchAgentRunRunner;
 use super::run::root_agent_spec;
 
-struct OrchAgentRunProcess {
-    runtime: Arc<piko_orchd::AgentRuntime>,
-    hub: Arc<piko_orchd::events::SessionOutputHub>,
-    acceptance_cursor: piko_protocol::agent_runtime::SessionCursor,
-    disposition: piko_protocol::AgentInputDisposition,
-    address: AgentOperationAddress,
-    input_id: String,
-}
-
-#[async_trait]
-impl AgentRunProcess for OrchAgentRunProcess {
-    async fn wait_started(&mut self) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
-        self.runtime
-            .wait_agent_input_started(
-                self.address.session_id.clone(),
-                self.address.agent_instance_id.clone(),
-                self.input_id.clone(),
-            )
-            .await
-            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
-        let cursor = if self.disposition == piko_protocol::AgentInputDisposition::PendingFollowUp {
-            self.hub.cursor()
-        } else {
-            self.acceptance_cursor.clone()
-        };
-        let subscription = self
-            .hub
-            .subscribe(&cursor)
-            .await
-            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
-        Ok(piko_orchd_api::SessionSubscription {
-            session_id: self.address.session_id.clone(),
-            cursor: cursor.clone(),
-            output: piko_orchd::events::merged_output_stream(subscription, cursor),
-        })
-    }
-
-    async fn wait_completion(self: Box<Self>) -> Result<AgentRunCompletion, ProtocolError> {
-        let Self {
-            runtime,
-            hub,
-            address,
-            input_id,
-            ..
-        } = *self;
-        let result = runtime
-            .wait_agent_input_completion(
-                address.session_id.clone(),
-                address.agent_instance_id.clone(),
-                input_id,
-            )
-            .await
-            .map_err(|error| AgentRunFailure {
-                message: error.to_string(),
-            });
-        Ok(AgentRunCompletion {
-            address,
-            result,
-            observation_barrier: hub.cursor(),
-        })
-    }
-}
+/// Stable key for one admitted input's live observation state. `input_id` is
+/// the durable control identity (the root input id when applied as root).
+type AgentInputKey = (String, String);
 
 impl OrchAgentRunRunner {
-    pub(super) async fn run_agent_subscription(
+    /// Register the root agent and attach the runtime session. Idempotent:
+    /// repeated turn turnaround on the same session reuses the attached scope.
+    pub(super) async fn ensure_session_runtime(
         &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, ProtocolError> {
-        let root_spec = root_agent_spec(&input.cwd);
+        session_id: &str,
+        cwd: &str,
+        session_dir: &std::path::Path,
+        resume_agent: Option<&ResumeAgent>,
+    ) -> Result<(), ProtocolError> {
+        self.agent_runtime
+            .set_approval_gateway(Box::new(self.clone()))
+            .await;
+        self.agent_runtime
+            .register_agent(root_agent_spec(cwd))
+            .await;
+        let root_spec = root_agent_spec(cwd);
+        self.prepare_session_runtime(session_id, cwd, session_dir, &root_spec, resume_agent)
+            .await
+    }
+
+    /// Admit one root input and register its live observation route.
+    pub(super) async fn submit_runtime(
+        &self,
+        input: AgentInput,
+        runtime: AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
+        let input_id = input.input_id.clone();
+        let session_id = input.session_id.clone();
+        let key: AgentInputKey = (session_id.clone(), input_id.clone());
+        {
+            let mut active = self.active_agent_runs.lock().unwrap();
+            if active.contains_key(&key) {
+                return Err(ProtocolError::InvalidCommand(format!(
+                    "Agent input already active: {input_id}"
+                )));
+            }
+            let hub = self.register_input_route(&input, &input_id);
+            active.insert(
+                key,
+                super::ActiveAgentRunRuntime {
+                    agent_instance_id: input.agent_instance_id.clone(),
+                    observation: hub,
+                    input_id: input_id.clone(),
+                },
+            );
+        }
+        let receipt = match self
+            .agent_runtime
+            .submit_runtime_agent_input(input, runtime)
+            .await
+        {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                self.finish_agent_input(&session_id, &input_id);
+                return Err(ProtocolError::InvalidCommand(error.to_string()));
+            }
+        };
+        Ok(receipt)
+    }
+
+    /// Register the live observation route for one admitted input and the hub
+    /// that carries its realtime deltas. Uses the AgentInstance-scoped hub so
+    /// concurrent Agents never replace each other's sink.
+    pub(super) fn register_input_route(
+        &self,
+        input: &AgentInput,
+        input_id: &str,
+    ) -> Arc<piko_orchd::events::SessionOutputHub> {
         let hub = {
             let mut hubs = self.agent_hubs.lock().unwrap();
             Arc::clone(
@@ -96,144 +95,121 @@ impl OrchAgentRunRunner {
                     }),
             )
         };
-        let key = (input.session_id.clone(), input.operation_id.clone());
-        {
-            let mut active = self.active_agent_runs.lock().unwrap();
-            if active.contains_key(&key) {
-                return Err(ProtocolError::InvalidCommand(format!(
-                    "Agent operation already exists: {}",
-                    input.operation_id
-                )));
-            }
-            active.insert(
-                key.clone(),
-                super::ActiveAgentRunRuntime {
-                    run_id: input.operation_id.clone(),
-                    observation: Arc::clone(&hub),
-                },
-            );
-        }
         self.observation_router.register(
             &input.session_id,
-            &input.operation_id,
+            input_id,
             &input.agent_instance_id,
             input.agent_instance_id == format!("agent_{}_root", input.session_id),
             Arc::clone(&hub),
         );
-        match self
-            .prepare_session_runtime(
-                &input.session_id,
-                &input.cwd,
-                &input.session_dir,
-                &root_spec,
-                input.resume_agent.as_ref(),
+        hub
+    }
+
+    /// Subscribe to the live observation stream for one admitted input. This
+    /// resolves once `input_id` is the active root, has produced a report, or
+    /// is no longer a pending follow-up.
+    pub(super) async fn wait_started(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+        disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
+        self.agent_runtime
+            .wait_agent_input_started(
+                session_id.to_string(),
+                agent_instance_id.to_string(),
+                input_id.to_string(),
             )
             .await
-        {
-            Ok(()) => {}
-            Err(error) => {
-                self.abort_agent_input(
-                    &input.session_id,
-                    &input.agent_instance_id,
-                    &input.operation_id,
-                );
-                return Err(error);
-            }
-        }
-        if let Err(error) = self
-            .agent_runtime
-            .agent_snapshot(input.session_id.clone(), input.agent_instance_id.clone())
+            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
+        let hub = self.hub_for_input(session_id, input_id).ok_or_else(|| {
+            ProtocolError::ObservationFailed(format!(
+                "no live observation hub for {session_id}/{agent_instance_id}/{input_id}"
+            ))
+        })?;
+        let cursor = if disposition == piko_protocol::AgentInputDisposition::PendingFollowUp {
+            hub.cursor()
+        } else {
+            self.acceptance_cursor_for(session_id, input_id)
+                .unwrap_or_else(|| hub.cursor())
+        };
+        let subscription = hub
+            .subscribe(&cursor)
             .await
-        {
-            self.abort_agent_input(
-                &input.session_id,
-                &input.agent_instance_id,
-                &input.operation_id,
-            );
-            return Err(ProtocolError::InvalidCommand(error.to_string()));
-        }
-
-        let acceptance_cursor = hub.cursor();
-        let request = SendAgentInputRequest {
-            request_id: input.operation_id.clone(),
-            session_id: input.session_id.clone(),
-            agent_instance_id: input.agent_instance_id.clone(),
-            caller_agent_instance_id: None,
-            source_turn_id: input.source_turn_id.clone(),
-            message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
-            content: input.content,
-            delivery: AgentInputDelivery::FollowUp,
-            prompt_resources: input.prompt_resources,
-            active_tool_names: input.active_tool_names,
-        };
-        let canonical = AgentInput::from_request(&request, now_ms());
-        let receipt = match self
-            .agent_runtime
-            .submit_runtime_agent_input(
-                canonical,
-                AgentInputRuntime {
-                    prompt_resources: request.prompt_resources,
-                    active_tool_names: request.active_tool_names,
-                    source_turn_id: request.source_turn_id,
-                    message_id: Some(request.message_id),
-                },
-            )
-            .await
-        {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                self.abort_agent_input(
-                    &input.session_id,
-                    &input.agent_instance_id,
-                    &input.operation_id,
-                );
-                return Err(ProtocolError::InvalidCommand(error.to_string()));
-            }
-        };
-        let disposition = receipt.disposition;
-        let address = AgentOperationAddress {
-            session_id: input.session_id.clone(),
-            operation_id: input.operation_id.clone(),
-            agent_instance_id: input.agent_instance_id.clone(),
-        };
-
-        Ok(AgentRunHandle {
-            address: address.clone(),
-            receipt,
-            process: Box::new(OrchAgentRunProcess {
-                runtime: Arc::clone(&self.agent_runtime),
-                hub,
-                acceptance_cursor,
-                disposition,
-                address,
-                input_id: input.operation_id,
-            }),
+            .map_err(|error| ProtocolError::ObservationFailed(error.to_string()))?;
+        Ok(piko_orchd_api::SessionSubscription {
+            session_id: session_id.to_string(),
+            cursor: cursor.clone(),
+            output: piko_orchd::events::merged_output_stream(subscription, cursor),
         })
     }
 
-    pub(super) fn finish_agent_input(
+    /// Observe the durable terminal report for one root input.
+    pub(super) async fn wait_completion(
         &self,
         session_id: &str,
-        _agent_instance_id: &str,
-        run_id: &str,
-    ) {
-        let removed = {
-            let mut active = self.active_agent_runs.lock().unwrap();
-            let key = (session_id.to_string(), run_id.to_string());
-            if active.get(&key).is_some_and(|run| run.run_id == run_id) {
-                active.remove(&key)
-            } else {
-                None
-            }
-        };
-        if removed.is_none() {
-            return;
-        }
-        self.release_session_context_if_idle(session_id);
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<AgentRunCompletion, ProtocolError> {
+        let result = self
+            .agent_runtime
+            .wait_agent_input_completion(
+                session_id.to_string(),
+                agent_instance_id.to_string(),
+                input_id.to_string(),
+            )
+            .await
+            .map_err(|error| crate::ports::AgentRunFailure {
+                message: error.to_string(),
+            });
+        let barrier = self
+            .hub_for_input(session_id, input_id)
+            .map(|hub| hub.cursor())
+            .unwrap_or_else(|| piko_protocol::agent_runtime::SessionCursor {
+                epoch: String::new(),
+                seq: 0,
+            });
+        Ok(AgentRunCompletion {
+            input_id: input_id.to_string(),
+            result,
+            observation_barrier: barrier,
+        })
     }
 
-    fn abort_agent_input(&self, session_id: &str, agent_instance_id: &str, run_id: &str) {
-        self.finish_agent_input(session_id, agent_instance_id, run_id);
-        self.observation_router.unregister(session_id, run_id);
+    pub(super) fn hub_for_input(
+        &self,
+        session_id: &str,
+        input_id: &str,
+    ) -> Option<Arc<piko_orchd::events::SessionOutputHub>> {
+        self.active_agent_runs
+            .lock()
+            .unwrap()
+            .get(&(session_id.to_string(), input_id.to_string()))
+            .map(|run| run.observation.clone())
+    }
+
+    /// Read the acceptance cursor from the hub's current epoch. The acceptance
+    /// cursor is the hub position captured just before admission, so a `wait`
+    /// that subscribes after admission does not replay the acceptance window.
+    fn acceptance_cursor_for(
+        &self,
+        session_id: &str,
+        input_id: &str,
+    ) -> Option<piko_protocol::agent_runtime::SessionCursor> {
+        self.hub_for_input(session_id, input_id)
+            .map(|hub| hub.cursor())
+    }
+
+    pub(super) fn finish_agent_input(&self, session_id: &str, input_id: &str) {
+        let removed = self
+            .active_agent_runs
+            .lock()
+            .unwrap()
+            .remove(&(session_id.to_string(), input_id.to_string()));
+        if removed.is_some() {
+            self.observation_router.unregister(session_id, input_id);
+            self.release_session_context_if_idle(session_id);
+        }
     }
 }

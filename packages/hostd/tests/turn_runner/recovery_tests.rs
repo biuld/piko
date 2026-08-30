@@ -2,26 +2,25 @@ use super::*;
 
 #[tokio::test]
 async fn mock_turn_runner_completes_turn() {
-    let runner = MockAgentRunRunner;
-    let subscription = runner
-        .run_agent(AgentRunInput {
-            session_id: "session-test".into(),
-            operation_id: "turn-test".into(),
-            agent_instance_id: "agent_session-test_root".into(),
-            content: piko_protocol::MessageContent::String("hello".into()),
-            source_turn_id: Some("turn-test".into()),
-            prompt_resources: Some(piko_protocol::PromptResourceSnapshot::default()),
-            cwd: "".into(),
-            active_tool_names: None,
-            session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            resume_agent: None,
-        })
-        .await
-        .unwrap();
-
-    let mut process = subscription.process;
-    let mut output = process.wait_started().await.unwrap().output;
-    assert!(output.next().await.is_some());
+    let runner = MockAgentRunRunner::default();
+    let receipt = AgentRunRunner::submit_agent_input(
+        &runner,
+        user_input("session-test", "agent_session-test_root", "turn-test"),
+        piko_orchd_api::AgentInputRuntime::default(),
+    )
+    .await
+    .expect("admission");
+    let subscription = AgentRunRunner::wait_agent_input_started(
+        &runner,
+        "session-test",
+        "agent_session-test_root",
+        &receipt.input_id,
+        receipt.disposition,
+    )
+    .await
+    .unwrap();
+    let mut output = subscription.output;
+    output.next().await;
 }
 
 #[tokio::test]
@@ -31,7 +30,7 @@ async fn mock_turn_with_storage_populates_state() {
 
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner::default()));
 
     let created = server
         .handle_command(Command::SessionCreate {
@@ -85,27 +84,25 @@ async fn mock_turn_with_storage_populates_state() {
 
 #[tokio::test]
 async fn turn_runner_returns_streaming_events() {
-    let runner = MockAgentRunRunner;
-
-    let subscription = runner
-        .run_agent(AgentRunInput {
-            session_id: "session-test".into(),
-            operation_id: "turn-test".into(),
-            agent_instance_id: "agent_session-test_root".into(),
-            content: piko_protocol::MessageContent::String("hello".into()),
-            source_turn_id: Some("turn-test".into()),
-            prompt_resources: Some(piko_protocol::PromptResourceSnapshot::default()),
-            cwd: "".into(),
-            active_tool_names: None,
-            session_dir: std::env::temp_dir().join("piko-test-turn-runner"),
-            resume_agent: None,
-        })
-        .await
-        .unwrap();
-
-    let mut process = subscription.process;
-    let mut output = process.wait_started().await.unwrap().output;
-    assert!(output.next().await.is_some());
+    let runner = MockAgentRunRunner::default();
+    let receipt = AgentRunRunner::submit_agent_input(
+        &runner,
+        user_input("session-test", "agent_session-test_root", "turn-test"),
+        piko_orchd_api::AgentInputRuntime::default(),
+    )
+    .await
+    .expect("admission");
+    let subscription = AgentRunRunner::wait_agent_input_started(
+        &runner,
+        "session-test",
+        "agent_session-test_root",
+        &receipt.input_id,
+        receipt.disposition,
+    )
+    .await
+    .unwrap();
+    let mut output = subscription.output;
+    output.next().await;
 }
 
 #[tokio::test]
@@ -157,4 +154,23 @@ async fn snapshot_required_reconciles_and_resubscribes_without_losing_turn() {
         event,
         Event::TurnLifecycle(piko_protocol::TurnEvent::Completed { .. })
     )));
+}
+
+fn user_input(
+    session_id: &str,
+    agent_instance_id: &str,
+    input_id: &str,
+) -> piko_protocol::AgentInput {
+    piko_protocol::AgentInput {
+        input_id: input_id.to_string(),
+        request_id: input_id.to_string(),
+        session_id: session_id.to_string(),
+        agent_instance_id: agent_instance_id.to_string(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        content: piko_protocol::MessageContent::String("hello".into()),
+        submitted_at: 0,
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
+    }
 }

@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_hostd::api::ServerMessage as Event;
-use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::ports::{AgentRunCompletion, AgentRunRunner};
 use piko_hostd::protocol::HostServer;
-use support::{MockSessionPublisher, running_agent_info, test_agent_run_process};
+use support::{MockSessionPublisher, running_agent_info};
 
 #[derive(Clone, Default)]
 struct SteerAgentRunRunner {
+    harness: crate::support::MockRunHarness,
     active: Arc<std::sync::Mutex<Option<ActiveRun>>>,
     inputs: Arc<std::sync::Mutex<Vec<piko_protocol::MessageContent>>>,
     steers: Arc<std::sync::Mutex<Vec<(String, String)>>>,
@@ -19,56 +20,12 @@ struct SteerAgentRunRunner {
 
 struct ActiveRun {
     session_id: String,
-    turn_id: String,
     agent_instance_id: String,
-    _keep_open: tokio::sync::oneshot::Sender<piko_hostd::ports::AgentRunCompletion>,
+    _keep_open: tokio::sync::oneshot::Sender<AgentRunCompletion>,
 }
 
-#[async_trait]
-impl AgentRunRunner for SteerAgentRunRunner {
-    async fn run_agent(
-        &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
-        self.inputs.lock().unwrap().push(input.content.clone());
-        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
-        publisher.publish(
-            "root",
-            "main",
-            0,
-            piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
-                interaction_id: "active".into(),
-                status: piko_protocol::UserInteractionStatus::Submitted,
-            },
-        );
-        let (completion_tx, completion) = support::test_oneshot();
-        *self.active.lock().unwrap() = Some(ActiveRun {
-            session_id: input.session_id.clone(),
-            turn_id: input.operation_id.clone(),
-            agent_instance_id: input.agent_instance_id.clone(),
-            _keep_open: completion_tx,
-        });
-        let (started_tx, started) = support::test_oneshot();
-        let _ = started_tx.send(subscription);
-        Ok(AgentRunHandle {
-            address: piko_hostd::ports::AgentOperationAddress {
-                session_id: input.session_id.clone(),
-                operation_id: input.operation_id.clone(),
-                agent_instance_id: input.agent_instance_id.clone(),
-            },
-            receipt: piko_protocol::AgentInputReceipt {
-                input_id: input.operation_id.clone(),
-                request_id: input.operation_id,
-                session_id: input.session_id,
-                agent_instance_id: input.agent_instance_id,
-                disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
-                queued_position: None,
-            },
-            process: test_agent_run_process(started, completion),
-        })
-    }
-
-    async fn submit_agent_input(
+impl SteerAgentRunRunner {
+    async fn submit_steer(
         &self,
         input: piko_protocol::AgentInput,
     ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
@@ -83,14 +40,7 @@ impl AgentRunRunner for SteerAgentRunRunner {
         self.raw_steers.lock().unwrap().push(input.content.clone());
         self.steers.lock().unwrap().push((
             input.agent_instance_id.clone(),
-            match &input.content {
-                piko_protocol::MessageContent::String(text) => text.clone(),
-                piko_protocol::MessageContent::Blocks(blocks) => blocks
-                    .iter()
-                    .map(piko_protocol::ContentBlock::text_projection)
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            },
+            support::content_text(&input.content),
         ));
         Ok(piko_protocol::AgentInputReceipt {
             input_id: input.input_id,
@@ -101,11 +51,95 @@ impl AgentRunRunner for SteerAgentRunRunner {
             queued_position: None,
         })
     }
+}
 
-    async fn cancel_agent_run(&self, operation: &piko_hostd::ports::AgentOperationAddress) -> bool {
-        self.active.lock().unwrap().as_ref().is_some_and(|run| {
-            run.session_id == operation.session_id && run.turn_id == operation.operation_id
+#[async_trait]
+impl AgentRunRunner for SteerAgentRunRunner {
+    async fn ensure_session_runtime(
+        &self,
+        _session_id: &str,
+        _cwd: &str,
+        _session_dir: &std::path::Path,
+        _resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        Ok(())
+    }
+
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
+        // Steer path (delivery = SteerActive) is handled by the wall of the
+        // active run; the follow-up path admits a root input.
+        if input.delivery == piko_protocol::AgentInputDelivery::SteerActive {
+            return self.submit_steer(input).await;
+        }
+        let _ = runtime;
+        self.inputs.lock().unwrap().push(input.content.clone());
+        let session_id = input.session_id.clone();
+        let input_id = input.input_id.clone();
+        let agent_instance_id = input.agent_instance_id.clone();
+        let (publisher, subscription) = MockSessionPublisher::new(session_id.clone());
+        publisher.publish(
+            "root",
+            "main",
+            0,
+            piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
+                interaction_id: "active".into(),
+                status: piko_protocol::UserInteractionStatus::Submitted,
+            },
+        );
+        let (completion_tx, completion_rx) = support::test_oneshot();
+        self.harness.register(
+            &session_id,
+            &input_id,
+            subscription,
+            completion_rx,
+            publisher,
+        );
+        *self.active.lock().unwrap() = Some(ActiveRun {
+            session_id: session_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+            _keep_open: completion_tx,
+        });
+        Ok(piko_protocol::AgentInputReceipt {
+            input_id,
+            request_id: input.request_id,
+            session_id,
+            agent_instance_id,
+            disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+            queued_position: None,
         })
+    }
+
+    async fn cancel_agent_run(&self, session_id: &str, agent_instance_id: &str) -> bool {
+        self.active.lock().unwrap().as_ref().is_some_and(|run| {
+            run.session_id == session_id && run.agent_instance_id == agent_instance_id
+        })
+    }
+
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+        _disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.take_subscription(session_id, input_id))
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<AgentRunCompletion, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.completion(session_id, input_id).await)
+    }
+
+    async fn finish_agent_run(&self, session_id: &str, _agent_instance_id: &str, input_id: &str) {
+        self.harness.finish(session_id, input_id);
     }
 
     async fn has_active_session_run(&self, session_id: &str) -> bool {

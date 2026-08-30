@@ -9,7 +9,7 @@ async fn session_compact_emits_session_reconciled_when_history_rewritten() {
     // still forces a rewrite via context_window = 0.
     let server = HostServer::with_storage_runner_settings(
         repo,
-        Arc::new(CompactAgentRunRunner),
+        Arc::new(CompactAgentRunRunner::new()),
         HostSettings::default(),
     );
     server.set_model_executor(Arc::new(SummaryGateway)).await;
@@ -95,7 +95,7 @@ async fn summarizer_failure_falls_back_to_default_model() {
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_runner_settings(
         repo,
-        Arc::new(CompactAgentRunRunner),
+        Arc::new(CompactAgentRunRunner::new()),
         HostSettings {
             compaction: Some(CompactionSettings {
                 enabled: Some(true),

@@ -6,7 +6,7 @@ use piko_hostd::api::{
     UserInteractionStatus,
 };
 use piko_hostd::infra::storage::JsonlSessionRepository;
-use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::ports::AgentRunRunner;
 use piko_hostd::protocol::HostServer;
 use piko_protocol::{InteractionChoice, InteractionQuestion};
 
@@ -18,10 +18,11 @@ struct PendingPromptRunner {
 
 #[async_trait]
 impl AgentRunRunner for PendingPromptRunner {
-    async fn run_agent(
+    async fn submit_agent_input(
         &self,
-        _: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
+        _input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
         Err(piko_hostd::api::ProtocolError::InvalidCommand(
             "not used".into(),
         ))

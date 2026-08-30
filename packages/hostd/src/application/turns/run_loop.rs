@@ -7,7 +7,7 @@ use piko_protocol::{
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
-use crate::ports::{AgentOperationAddress, AgentRunFailure, AgentRunHandle, AgentRunRunner};
+use crate::ports::{AgentRunFailure, AgentRunRunner};
 use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
@@ -43,49 +43,41 @@ impl HostApp {
 }
 
 impl HostApp {
-    /// Drive one Turn's session output stream to completion: apply realtime
-    /// deltas and committed-message events, reconnecting on stream exhaustion,
-    /// until the durable Agent run result reaches its observation barrier. Returns
-    /// whether the turn completed successfully (used by the caller to decide
-    /// whether to run compaction / drain the follow-up queue).
+    /// Drive one admitted root AgentInput's session output stream to
+    /// completion: apply realtime deltas and committed-message events,
+    /// reconnecting on stream exhaustion, until the durable Agent work result
+    /// reaches its observation barrier. Returns whether the work completed
+    /// successfully (used by the caller to decide whether to run compaction /
+    /// drain the follow-up queue).
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn run_turn_observation_loop(
         &self,
         runner: &Arc<dyn AgentRunRunner>,
         session_id: &str,
-        turn_id: &str,
+        input_id: &str,
         agent_instance_id: &str,
         session_dir: &std::path::Path,
-        run: AgentRunHandle,
+        receipt: &piko_protocol::AgentInputReceipt,
         tx: &ClientEventSender,
     ) -> Result<bool, ProtocolError> {
-        let address = AgentOperationAddress {
-            session_id: session_id.to_string(),
-            operation_id: turn_id.to_string(),
-            agent_instance_id: agent_instance_id.to_string(),
-        };
-        let AgentRunHandle { mut process, .. } = run;
-        let observation = match process.wait_started().await {
+        let observation = match runner
+            .wait_agent_input_started(session_id, agent_instance_id, input_id, receipt.disposition)
+            .await
+        {
             Ok(observation) => observation,
             Err(error) if error.to_string().to_ascii_lowercase().contains("cancel") => {
                 self.send_turn_terminal(
                     tx,
                     crate::domain::sessions::turn_cancelled(
                         session_id,
-                        turn_id,
+                        input_id,
                         agent_instance_id,
                         piko_protocol::Usage::empty(),
                     ),
                 )
                 .await;
                 runner
-                    .finish_agent_run(
-                        &address,
-                        &piko_protocol::agent_runtime::SessionCursor {
-                            epoch: String::new(),
-                            seq: 0,
-                        },
-                    )
+                    .finish_agent_run(session_id, agent_instance_id, input_id)
                     .await;
                 return Ok(false);
             }
@@ -93,16 +85,27 @@ impl HostApp {
         };
         send_event(
             tx,
-            crate::domain::sessions::turn_started(session_id, turn_id, agent_instance_id),
+            crate::domain::sessions::turn_started(session_id, input_id, agent_instance_id),
         )
         .await;
+        let completion_runner = Arc::clone(runner);
+        let completion_sid = session_id.to_string();
+        let completion_aid = agent_instance_id.to_string();
+        let completion_iid = input_id.to_string();
+        let completion_future = Box::pin(async move {
+            completion_runner
+                .wait_agent_input_completion(&completion_sid, &completion_aid, &completion_iid)
+                .await
+        });
         let completion = self
             .drive_operation_observation(
                 runner,
-                &address,
+                session_id,
+                agent_instance_id,
+                input_id,
                 session_dir,
                 observation,
-                process.wait_completion(),
+                completion_future,
                 tx,
             )
             .await?;
@@ -114,7 +117,6 @@ impl HostApp {
                 agent_instance_id, report.agent_instance_id
             )));
         }
-        let barrier = completion.observation_barrier.clone();
         let terminal = completion.result;
         // F-36: record the terminal outcome on the durable trajectory. The
         // terminal record is appended after the `execution_finished` fact, so
@@ -122,28 +124,39 @@ impl HostApp {
         // transition (on a clean completion no other trajectory record would
         // follow the fact). Failures additionally keep the RunError
         // notification so the human-readable reason is visible in the stream.
-        self.record_trajectory_terminal(&address, &terminal).await;
+        self.record_trajectory_terminal(session_id, agent_instance_id, input_id, &terminal)
+            .await;
         // F-36: record run failures on the durable trajectory.
         if let Err(failure) = &terminal {
-            self.record_trajectory_run_error(&address, failure.message.clone())
-                .await;
+            self.record_trajectory_run_error(
+                session_id,
+                agent_instance_id,
+                input_id,
+                failure.message.clone(),
+            )
+            .await;
         } else if let Ok(report) = &terminal
             && matches!(
                 report.outcome,
                 piko_protocol::ExecutionOutcome::Failed { .. }
             )
         {
-            self.record_trajectory_run_error(&address, "agent run failed".into())
-                .await;
+            self.record_trajectory_run_error(
+                session_id,
+                agent_instance_id,
+                input_id,
+                "agent run failed".into(),
+            )
+            .await;
         }
 
         let complete_event = match &terminal {
             Ok(report) => Some(crate::domain::sessions::turn_terminal_from_report(
-                session_id, turn_id, report,
+                session_id, input_id, report,
             )),
             Err(failure) => Some(crate::domain::sessions::turn_failed(
                 session_id,
-                turn_id,
+                input_id,
                 agent_instance_id,
                 failure.message.clone(),
                 piko_protocol::Usage::empty(),
@@ -161,51 +174,55 @@ impl HostApp {
         if let Some(complete_event) = complete_event {
             tracing::info!(
                 session_id = %session_id,
-                turn_id = %turn_id,
+                input_id = %input_id,
                 "turn observation loop finished; emitting terminal"
             );
             self.send_turn_terminal(tx, complete_event).await;
         } else {
             tracing::info!(
                 session_id = %session_id,
-                turn_id = %turn_id,
+                input_id = %input_id,
                 "turn observation loop finished; turn already terminal"
             );
         }
 
-        runner.finish_agent_run(&address, &barrier).await;
+        runner
+            .finish_agent_run(session_id, agent_instance_id, input_id)
+            .await;
 
         Ok(turn_succeeded)
     }
 
-    /// Trajectory identity for terminal/error records. The operation is the
-    /// logical Run; its concrete Execution is the stable runtime instance
-    /// derived from the session, agent, and operation.
-    fn trajectory_identity(&self, address: &AgentOperationAddress) -> TrajectoryIdentity {
+    /// Trajectory identity for terminal/error records. The work identity is the
+    /// root input id; the concrete runtime instance is derived deterministically.
+    fn trajectory_identity(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> TrajectoryIdentity {
         TrajectoryIdentity {
-            session_id: address.session_id.clone(),
-            agent_instance_id: address.agent_instance_id.clone(),
-            run_id: address.operation_id.clone(),
+            session_id: session_id.to_string(),
+            agent_instance_id: agent_instance_id.to_string(),
+            run_id: input_id.to_string(),
             execution_id: Some(piko_orchd_api::stable_internal_id(
                 "exec",
-                &[
-                    &address.session_id,
-                    &address.agent_instance_id,
-                    &address.operation_id,
-                ],
+                &[session_id, agent_instance_id, input_id],
             )),
-            source_turn_id: Some(address.operation_id.clone()),
+            source_turn_id: Some(input_id.to_string()),
         }
     }
 
-    /// Record the run's terminal outcome as the final trajectory record.
+    /// Record the work's terminal outcome as the final trajectory record.
     async fn record_trajectory_terminal(
         &self,
-        address: &AgentOperationAddress,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
         terminal: &Result<piko_protocol::AgentWorkReport, AgentRunFailure>,
     ) {
         let runner = self.turn_runner.lock().await.clone();
-        let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {
+        let Some(recorder) = runner.trajectory_registry().get(session_id) else {
             return;
         };
         let (kind, reason) = match terminal {
@@ -227,7 +244,7 @@ impl HostApp {
         };
         recorder
             .record(TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
-                identity: self.trajectory_identity(address),
+                identity: self.trajectory_identity(session_id, agent_instance_id, input_id),
                 kind,
                 reason,
                 finished_at: crate::util::now_ms(),
@@ -235,15 +252,21 @@ impl HostApp {
             .await;
     }
 
-    async fn record_trajectory_run_error(&self, address: &AgentOperationAddress, message: String) {
+    async fn record_trajectory_run_error(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+        message: String,
+    ) {
         let runner = self.turn_runner.lock().await.clone();
-        let Some(recorder) = runner.trajectory_registry().get(&address.session_id) else {
+        let Some(recorder) = runner.trajectory_registry().get(session_id) else {
             return;
         };
         recorder
             .record(TrajectoryRecord::SystemNotification(
                 TrajectorySystemNotificationRecord {
-                    identity: self.trajectory_identity(address),
+                    identity: self.trajectory_identity(session_id, agent_instance_id, input_id),
                     kind: TrajectoryNotificationKind::RunError,
                     summary: message,
                     recorded_at: crate::util::now_ms(),

@@ -1,10 +1,11 @@
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct GatedAgentRunRunner {
     pub(crate) released: Arc<(std::sync::Mutex<bool>, tokio::sync::Notify)>,
     pub(crate) prompts: Arc<std::sync::Mutex<Vec<String>>>,
     pub(crate) submissions: Arc<std::sync::atomic::AtomicUsize>,
+    harness: crate::support::MockRunHarness,
 }
 
 impl GatedAgentRunRunner {
@@ -13,6 +14,7 @@ impl GatedAgentRunRunner {
             released: Arc::new((std::sync::Mutex::new(false), tokio::sync::Notify::new())),
             prompts: Arc::new(std::sync::Mutex::new(Vec::new())),
             submissions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            harness: crate::support::MockRunHarness::new(),
         }
     }
 
@@ -33,11 +35,21 @@ impl GatedAgentRunRunner {
 
 #[async_trait]
 impl AgentRunRunner for GatedAgentRunRunner {
-    async fn run_agent(
+    async fn ensure_session_runtime(
         &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
-        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        _session_id: &str,
+        _cwd: &str,
+        _session_dir: &std::path::Path,
+        _resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        Ok(())
+    }
+
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
         let disposition = if self
             .submissions
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -47,54 +59,64 @@ impl AgentRunRunner for GatedAgentRunRunner {
         } else {
             piko_protocol::AgentInputDisposition::PendingFollowUp
         };
+        let content = support::content_text(&input.content);
         if disposition == piko_protocol::AgentInputDisposition::AppliedAsRoot {
-            self.prompts.lock().unwrap().push(input.text_projection());
+            self.prompts.lock().unwrap().push(content.clone());
         }
-        let (started_tx, started) = support::test_oneshot();
-        let epoch = subscription.cursor.epoch.clone();
-        let queued_start = if disposition == piko_protocol::AgentInputDisposition::AppliedAsRoot {
-            let _ = started_tx.send(subscription);
-            None
-        } else {
-            Some((started_tx, subscription))
-        };
-        let (completion_tx, completion) = support::test_oneshot();
+        let (receipt, control) = self.harness.alloc_root(
+            &input.session_id,
+            &input.agent_instance_id,
+            &input.input_id,
+            disposition,
+        );
         let runner = self.clone();
         let session_id = input.session_id.clone();
-        let operation_id = input.operation_id.clone();
+        let input_id = input.input_id.clone();
         let agent_instance_id = input.agent_instance_id.clone();
-        let prompt = input.text_projection();
-        let address = piko_hostd::ports::AgentOperationAddress {
-            session_id: session_id.clone(),
-            operation_id: operation_id.clone(),
-            agent_instance_id: agent_instance_id.clone(),
-        };
-        let completion_address = address.clone();
         tokio::spawn(async move {
             runner.wait_until_released().await;
-            if let Some((started_tx, subscription)) = queued_start {
-                runner.prompts.lock().unwrap().push(prompt);
-                let _ = started_tx.send(subscription);
+            if disposition == piko_protocol::AgentInputDisposition::PendingFollowUp {
+                runner.prompts.lock().unwrap().push(content);
             }
-            publisher.publish(agent_instance_id.clone(), "main", 1, execution_running());
-            publisher.publish(agent_instance_id.clone(), "main", 2, execution_succeeded());
-            let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
-                address: completion_address,
-                result: Ok(success_report(agent_instance_id)),
-                observation_barrier: piko_protocol::agent_runtime::SessionCursor { epoch, seq: 2 },
-            });
+            control
+                .publisher
+                .publish(agent_instance_id.clone(), "main", 1, execution_running());
+            control
+                .publisher
+                .publish(agent_instance_id.clone(), "main", 2, execution_succeeded());
+            let barrier = control.publisher.cursor();
+            let _ = control
+                .completion_tx
+                .send(piko_hostd::ports::AgentRunCompletion {
+                    input_id,
+                    result: Ok(success_report(&agent_instance_id)),
+                    observation_barrier: barrier,
+                });
+            let _ = session_id;
         });
-        Ok(AgentRunHandle {
-            address,
-            receipt: piko_protocol::AgentInputReceipt {
-                input_id: operation_id.clone(),
-                request_id: operation_id,
-                session_id: input.session_id,
-                agent_instance_id: input.agent_instance_id,
-                disposition,
-                queued_position: None,
-            },
-            process: test_agent_run_process(started, completion),
-        })
+        Ok(receipt)
+    }
+
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+        _disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.take_subscription(session_id, input_id))
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_hostd::ports::AgentRunCompletion, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.completion(session_id, input_id).await)
+    }
+
+    async fn finish_agent_run(&self, session_id: &str, _agent_instance_id: &str, input_id: &str) {
+        self.harness.finish(session_id, input_id);
     }
 }

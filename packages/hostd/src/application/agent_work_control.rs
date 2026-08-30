@@ -95,7 +95,7 @@ impl<'a> AgentWorkControl<'a> {
                     .lock()
                     .await
                     .clone()
-                    .submit_agent_input(input)
+                    .submit_agent_input(input, piko_orchd_api::AgentInputRuntime::default())
                     .await
                     .map_err(|_| {
                         ProtocolError::InvalidCommand(format!(

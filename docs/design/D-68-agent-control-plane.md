@@ -1,8 +1,7 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (slices 1–5 landed. Slice 6 leftover cleanup remains:
-> Execution product maps, host observation `run_agent`, TurnEvent /
-> empty `active_turns`)
+> Status: proposed (slices 1–5 and slice 6.1 landed. Slice 6.2+ leftover cleanup
+> remains: Turn wire leftovers, Execution product maps, grain rekeys, recovery)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -442,10 +441,10 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 Land in this order. Do not introduce a replacement Turn/Run/Execution product
 type; keep AgentInput / `agent_work` / `AgentWorkReport`.
 
-1. **Host observation port.** Fold `AgentRunRunner::run_agent` into submit +
-   wait. Delete `AgentRunInput` as an admission DTO. Rekey in-process
-   `active_agent_runs` off `root_input_id` or drop it if observation no longer
-   needs a second map.
+1. **Host observation port (implemented).** Fold `AgentRunRunner::run_agent`
+   into submit + wait. Delete `AgentRunInput` as an admission DTO. Rekey
+   in-process `active_agent_runs` off `root_input_id` or drop it if observation
+   no longer needs a second map.
 2. **Turn wire leftovers.** Delete `TurnEvent`, `TurnSnapshot`, and
    `SessionSnapshot.active_turns`. Tests wait on `AgentWorkSnapshot` /
    `AgentInputSubmitted` / work terminal facts, not TurnLifecycle.

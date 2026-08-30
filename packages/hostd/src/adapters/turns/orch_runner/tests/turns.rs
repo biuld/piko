@@ -125,72 +125,55 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
     let runner =
         super::super::OrchAgentRunRunner::new(Arc::new(DirectInputGateway), "test", "test-model")
             .await;
-    let run = runner
-        .run_agent(AgentRunInput {
-            session_id: "session-direct".into(),
-            operation_id: "run-direct".into(),
-            agent_instance_id: child_id.into(),
-            content: piko_protocol::MessageContent::String("follow up".into()),
-            source_turn_id: Some("run-direct".into()),
-            prompt_resources: None,
-            cwd: cwd.clone(),
-            active_tool_names: Some(Vec::new()),
-            session_dir: session_dir.clone(),
-            resume_agent: None,
-        })
+    runner
+        .ensure_session_runtime("session-direct", &cwd, &session_dir, None)
         .await
         .unwrap();
-    AgentRunRunner::finish_agent_run(
+    let run = submit_direct(
         &runner,
-        &AgentOperationAddress {
-            session_id: "session-direct".into(),
-            operation_id: "stale-run-id".into(),
-            agent_instance_id: child_id.into(),
-        },
-        &piko_protocol::agent_runtime::SessionCursor {
-            epoch: "stale".into(),
-            seq: 0,
-        },
+        "session-direct",
+        child_id,
+        "run-direct",
+        "follow up",
+        &session_dir,
     )
     .await;
-    let duplicate = runner
-        .run_agent(AgentRunInput {
-            session_id: "session-direct".into(),
-            operation_id: "run-duplicate".into(),
-            agent_instance_id: child_id.into(),
-            content: piko_protocol::MessageContent::String("duplicate".into()),
-            source_turn_id: Some("run-duplicate".into()),
-            prompt_resources: None,
-            cwd: cwd.clone(),
-            active_tool_names: Some(Vec::new()),
-            session_dir: session_dir.clone(),
-            resume_agent: None,
-        })
-        .await
-        .unwrap();
+    let _ = run;
+    AgentRunRunner::finish_agent_run(&runner, "session-direct", child_id, "stale-run-id").await;
+    let duplicate = submit_direct(
+        &runner,
+        "session-direct",
+        child_id,
+        "run-duplicate",
+        "duplicate",
+        &session_dir,
+    )
+    .await;
     assert_eq!(
-        duplicate.receipt.disposition,
+        duplicate.disposition,
         piko_protocol::AgentInputDisposition::PendingFollowUp
     );
-    let second = runner
-        .run_agent(AgentRunInput {
-            session_id: "session-direct".into(),
-            operation_id: "run-second-child".into(),
-            agent_instance_id: "agent-child-two".into(),
-            content: piko_protocol::MessageContent::String("parallel".into()),
-            source_turn_id: Some("run-second-child".into()),
-            prompt_resources: None,
-            cwd,
-            active_tool_names: Some(Vec::new()),
-            session_dir,
-            resume_agent: None,
-        })
-        .await
-        .expect("different AgentInstances may run concurrently");
-    let completed = run.process.wait_completion().await.unwrap();
-    let duplicate_completed = duplicate.process.wait_completion().await.unwrap();
-    let second_completed = second.process.wait_completion().await.unwrap();
-    assert_eq!(completed.address.agent_instance_id, child_id);
+    let second = submit_direct(
+        &runner,
+        "session-direct",
+        "agent-child-two",
+        "run-second-child",
+        "parallel",
+        &session_dir,
+    )
+    .await;
+    let _ = second;
+    let completed = wait_completion(&runner, "session-direct", child_id, "run-direct").await;
+    let duplicate_completed =
+        wait_completion(&runner, "session-direct", child_id, "run-duplicate").await;
+    let second_completed = wait_completion(
+        &runner,
+        "session-direct",
+        "agent-child-two",
+        "run-second-child",
+    )
+    .await;
+    assert_eq!(completed.input_id, "run-direct");
     assert!(completed.result.is_ok());
     assert!(
         duplicate_completed.result.is_ok(),
@@ -223,4 +206,48 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
             ..
         } if text == "duplicate"
     ));
+}
+
+async fn submit_direct(
+    runner: &super::super::OrchAgentRunRunner,
+    session_id: &str,
+    agent_instance_id: &str,
+    input_id: &str,
+    text: &str,
+    session_dir: &std::path::Path,
+) -> piko_protocol::AgentInputReceipt {
+    let request = piko_protocol::SendAgentInputRequest {
+        request_id: input_id.to_string(),
+        session_id: session_id.to_string(),
+        agent_instance_id: agent_instance_id.to_string(),
+        caller_agent_instance_id: None,
+        source_turn_id: Some(input_id.to_string()),
+        message_id: format!("msg_{input_id}"),
+        content: piko_protocol::MessageContent::String(text.to_string()),
+        delivery: piko_protocol::AgentInputDelivery::FollowUp,
+        prompt_resources: None,
+        active_tool_names: Some(Vec::new()),
+    };
+    let canonical = piko_protocol::AgentInput::from_request(&request, crate::util::now_ms());
+    let runtime = piko_orchd_api::AgentInputRuntime {
+        prompt_resources: None,
+        active_tool_names: Some(Vec::new()),
+        source_turn_id: Some(input_id.to_string()),
+        message_id: Some(request.message_id),
+    };
+    let _ = session_dir;
+    AgentRunRunner::submit_agent_input(runner, canonical, runtime)
+        .await
+        .unwrap()
+}
+
+async fn wait_completion(
+    runner: &super::super::OrchAgentRunRunner,
+    session_id: &str,
+    agent_instance_id: &str,
+    input_id: &str,
+) -> crate::ports::AgentRunCompletion {
+    AgentRunRunner::wait_agent_input_completion(runner, session_id, agent_instance_id, input_id)
+        .await
+        .unwrap()
 }

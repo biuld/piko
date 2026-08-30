@@ -6,7 +6,7 @@ async fn concurrent_compacts_produce_a_single_rewrite() {
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_runner_settings(
         repo,
-        Arc::new(CompactAgentRunRunner),
+        Arc::new(CompactAgentRunRunner::new()),
         HostSettings::default(),
     );
     let (started_tx, started_rx) = support::test_oneshot();

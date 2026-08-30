@@ -144,7 +144,7 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
 async fn persistent_session_navigate_to_root_user_clears_cursor_without_leaf_node() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner::default()));
 
     let created = server
         .handle_command(Command::SessionCreate {
@@ -200,7 +200,7 @@ async fn persistent_session_navigate_to_root_user_clears_cursor_without_leaf_nod
 async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create-delete".into(),
@@ -248,7 +248,7 @@ async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
 async fn persistent_turn_recovers_each_agent_private_transcript() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(AgentPersistRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AgentPersistRunner::default()));
 
     let created = server
         .handle_command(Command::SessionCreate {

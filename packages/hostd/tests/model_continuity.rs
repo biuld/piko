@@ -1,5 +1,5 @@
 mod support;
-pub use support::{MockSessionPublisher, successful_turn_run};
+pub use support::MockSessionPublisher;
 
 #[path = "support/mock_turn_runner.rs"]
 mod mock_turn_runner;
@@ -11,23 +11,113 @@ use mock_turn_runner::MockAgentRunRunner;
 use piko_hostd::api::{Command, ServerMessage as Event, SessionTreeEntry};
 use piko_hostd::domain::sessions::SessionModelRef;
 use piko_hostd::infra::storage::JsonlSessionRepository;
-use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::ports::AgentRunRunner;
 use piko_hostd::protocol::HostServer;
 use piko_protocol::PromptResourceSnapshot;
 
 #[derive(Clone)]
-struct CapturingRunner(Arc<std::sync::Mutex<Vec<PromptResourceSnapshot>>>);
+struct CapturingRunner(
+    Arc<std::sync::Mutex<Vec<PromptResourceSnapshot>>>,
+    MockAgentRunRunner,
+);
 
 #[async_trait]
 impl AgentRunRunner for CapturingRunner {
-    async fn run_agent(
+    async fn ensure_session_runtime(
         &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
-        if let Some(resources) = &input.prompt_resources {
+        session_id: &str,
+        cwd: &str,
+        session_dir: &std::path::Path,
+        resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        AgentRunRunner::ensure_session_runtime(&self.1, session_id, cwd, session_dir, resume_agent)
+            .await
+    }
+
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
+        if let Some(resources) = &runtime.prompt_resources {
             self.0.lock().unwrap().push(resources.clone());
         }
-        MockAgentRunRunner.run_agent(input).await
+        AgentRunRunner::submit_agent_input(&self.1, input, runtime).await
+    }
+
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+        disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
+        AgentRunRunner::wait_agent_input_started(
+            &self.1,
+            session_id,
+            agent_instance_id,
+            input_id,
+            disposition,
+        )
+        .await
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_hostd::ports::AgentRunCompletion, piko_hostd::api::ProtocolError> {
+        AgentRunRunner::wait_agent_input_completion(
+            &self.1,
+            session_id,
+            agent_instance_id,
+            input_id,
+        )
+        .await
+    }
+
+    async fn cancel_agent_input(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, piko_hostd::api::ProtocolError> {
+        AgentRunRunner::cancel_agent_input(&self.1, session_id, agent_instance_id, input_id).await
+    }
+
+    async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
+        AgentRunRunner::interrupt_agent(&self.1, session_id, agent_instance_id).await
+    }
+
+    async fn list_agent_instances(
+        &self,
+        session_id: &str,
+    ) -> Option<Vec<piko_protocol::AgentInfo>> {
+        AgentRunRunner::list_agent_instances(&self.1, session_id).await
+    }
+
+    async fn recover_observation(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<
+        (
+            piko_protocol::agent_runtime::SessionRuntimeSnapshot,
+            piko_orchd_api::SessionSubscription,
+        ),
+        piko_hostd::api::ProtocolError,
+    > {
+        AgentRunRunner::recover_observation(&self.1, session_id, agent_instance_id, input_id).await
+    }
+
+    async fn finish_agent_run(&self, session_id: &str, agent_instance_id: &str, input_id: &str) {
+        AgentRunRunner::finish_agent_run(&self.1, session_id, agent_instance_id, input_id).await;
+    }
+
+    async fn has_active_session_run(&self, session_id: &str) -> bool {
+        AgentRunRunner::has_active_session_run(&self.1, session_id).await
     }
 }
 
@@ -64,7 +154,10 @@ async fn world_state_is_injected_full_then_diff_and_baseline_is_durable() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server = HostServer::with_storage_and_runner(
         JsonlSessionRepository::new(root),
-        Arc::new(CapturingRunner(captured.clone())),
+        Arc::new(CapturingRunner(
+            captured.clone(),
+            MockAgentRunRunner::default(),
+        )),
     );
 
     let created = server
@@ -158,7 +251,10 @@ async fn session_model_continuity_is_durable_and_drives_prompt_fragment() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server = HostServer::with_storage_and_runner(
         JsonlSessionRepository::new(root),
-        Arc::new(CapturingRunner(captured.clone())),
+        Arc::new(CapturingRunner(
+            captured.clone(),
+            MockAgentRunRunner::default(),
+        )),
     );
 
     let created = server
@@ -273,7 +369,10 @@ async fn unconfigured_active_model_produces_no_model_fragments() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server = HostServer::with_storage_runner_settings(
         JsonlSessionRepository::new(root),
-        Arc::new(CapturingRunner(captured.clone())),
+        Arc::new(CapturingRunner(
+            captured.clone(),
+            MockAgentRunRunner::default(),
+        )),
         piko_hostd::domain::config::HostSettings::default(),
     );
 

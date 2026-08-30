@@ -2,18 +2,58 @@
 
 /// Captures frozen prompt resources per turn so the test can observe the
 /// full-vs-diff world-state injection across the compact boundary.
-struct WorldStateCapturingRunner(Arc<std::sync::Mutex<Vec<piko_protocol::PromptResourceSnapshot>>>);
+struct WorldStateCapturingRunner(
+    Arc<std::sync::Mutex<Vec<piko_protocol::PromptResourceSnapshot>>>,
+    DistinctIdRunRunner,
+);
 
 #[async_trait]
 impl AgentRunRunner for WorldStateCapturingRunner {
-    async fn run_agent(
+    async fn ensure_session_runtime(
         &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
-        if let Some(resources) = &input.prompt_resources {
+        session_id: &str,
+        cwd: &str,
+        session_dir: &std::path::Path,
+        resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        AgentRunRunner::ensure_session_runtime(&self.1, session_id, cwd, session_dir, resume_agent)
+            .await
+    }
+
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
+        if let Some(resources) = &runtime.prompt_resources {
             self.0.lock().unwrap().push(resources.clone());
         }
-        DistinctIdRunRunner.run_agent(input).await
+        AgentRunRunner::submit_agent_input(&self.1, input, runtime).await
+    }
+
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+        disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
+        AgentRunRunner::wait_agent_input_started(&self.1, session_id, agent_instance_id, input_id, disposition)
+            .await
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_hostd::ports::AgentRunCompletion, piko_hostd::api::ProtocolError> {
+        AgentRunRunner::wait_agent_input_completion(&self.1, session_id, agent_instance_id, input_id)
+            .await
+    }
+
+    async fn finish_agent_run(&self, session_id: &str, agent_instance_id: &str, input_id: &str) {
+        AgentRunRunner::finish_agent_run(&self.1, session_id, agent_instance_id, input_id).await;
     }
 }
 
@@ -46,7 +86,10 @@ async fn compaction_clears_world_state_baseline_and_next_run_reinjects_full() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let server = HostServer::with_storage_runner_settings(
         JsonlSessionRepository::new(temp.path()),
-        Arc::new(WorldStateCapturingRunner(captured.clone())),
+        Arc::new(WorldStateCapturingRunner(
+            captured.clone(),
+            DistinctIdRunRunner::new(),
+        )),
         HostSettings::default(),
     );
     server.set_model_executor(Arc::new(PanicGateway)).await;

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -11,10 +10,12 @@ use super::{NoopTrajectoryRegistry, TrajectoryRegistryPort};
 
 pub type TurnEventStream = Pin<Box<dyn Stream<Item = Result<ServerMessage, ProtocolError>> + Send>>;
 
+/// Identity of one admitted AgentInput as a work handle. `input_id` is the
+/// durable control identity (the root input id for a work root).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AgentOperationAddress {
+pub struct AgentWorkAddress {
     pub session_id: String,
-    pub operation_id: String,
+    pub input_id: String,
     pub agent_instance_id: String,
 }
 
@@ -24,64 +25,21 @@ pub struct ResumeAgent {
     pub state: piko_protocol::agent_runtime::AgentResumeState,
 }
 
-#[derive(Clone)]
-pub struct AgentRunInput {
-    pub session_id: String,
-    pub operation_id: String,
-    pub agent_instance_id: String,
-    pub content: piko_protocol::MessageContent,
-    pub source_turn_id: Option<String>,
-    pub prompt_resources: Option<piko_protocol::PromptResourceSnapshot>,
-    pub cwd: String,
-    /// Active tool names to enable. None = all tools enabled.
-    pub active_tool_names: Option<Vec<String>>,
-    /// Session storage directory for the durable journal.
-    pub session_dir: PathBuf,
-    /// Reattach a resumed root agent with committed transcript history.
-    pub resume_agent: Option<ResumeAgent>,
-}
-
-impl AgentRunInput {
-    pub fn text_projection(&self) -> String {
-        match &self.content {
-            piko_protocol::MessageContent::String(text) => text.clone(),
-            piko_protocol::MessageContent::Blocks(blocks) => blocks
-                .iter()
-                .map(piko_protocol::ContentBlock::text_projection)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        }
-    }
-}
-
-pub struct AgentRunHandle {
-    pub address: AgentOperationAddress,
-    pub receipt: piko_protocol::AgentInputReceipt,
-    pub process: Box<dyn AgentRunProcess>,
-}
-
-#[async_trait]
-pub trait AgentRunProcess: Send {
-    async fn wait_started(&mut self) -> Result<SessionSubscription, ProtocolError>;
-
-    async fn wait_completion(self: Box<Self>) -> Result<AgentRunCompletion, ProtocolError>;
-}
-
 #[derive(Debug)]
 pub struct AgentRunCompletion {
-    pub address: AgentOperationAddress,
+    pub input_id: String,
     pub result: Result<piko_protocol::AgentWorkReport, AgentRunFailure>,
     pub observation_barrier: piko_protocol::agent_runtime::SessionCursor,
 }
 
 pub trait OperationRunCompletion: Send {
-    fn operation_address(&self) -> AgentOperationAddress;
+    fn input_id(&self) -> &str;
     fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor;
 }
 
 impl OperationRunCompletion for AgentRunCompletion {
-    fn operation_address(&self) -> AgentOperationAddress {
-        self.address.clone()
+    fn input_id(&self) -> &str {
+        &self.input_id
     }
 
     fn observation_barrier(&self) -> &piko_protocol::agent_runtime::SessionCursor {
@@ -125,21 +83,30 @@ pub trait AgentRunRunner: Send + Sync {
     /// Seed orchd runtime todo store from host durable lists (F-27 hydrate).
     async fn seed_todo_lists(&self, _lists: Vec<piko_protocol::TodoList>) {}
 
-    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
-        Err(ProtocolError::InvalidCommand(
-            "Agent run is unavailable".into(),
-        ))
-    }
-
-    /// Canonical admission path for AgentInputs that need no host-private
-    /// prompt staging (steers and agent-to-agent inputs).
+    /// Canonical sole admission path for an AgentInput, with host-private
+    /// runtime extras (prompt staging, tool restriction, Turn correlation).
+    /// The durable facts stay on `input`; extras are never persisted.
     async fn submit_agent_input(
         &self,
         _input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
     ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
         Err(ProtocolError::InvalidCommand(
             "Agent input admission is unavailable".into(),
         ))
+    }
+
+    /// Bootstrap (idempotently) the runtime session an AgentInstance lives in.
+    /// Registration, attached agents, resume, and observation routing happen
+    /// here; admission follows as a separate canonical call.
+    async fn ensure_session_runtime(
+        &self,
+        _session_id: &str,
+        _cwd: &str,
+        _session_dir: &std::path::Path,
+        _resume_agent: Option<&ResumeAgent>,
+    ) -> Result<(), ProtocolError> {
+        Ok(())
     }
 
     async fn cancel_agent_input(
@@ -153,20 +120,48 @@ pub trait AgentRunRunner: Send + Sync {
         ))
     }
 
-    async fn finish_agent_run(
+    /// Subscribe to the live observation stream for one admitted input. This
+    /// resolves once `input_id` is the active root, has produced a report, or
+    /// is no longer a pending follow-up.
+    async fn wait_agent_input_started(
         &self,
-        _: &AgentOperationAddress,
-        _: &piko_protocol::agent_runtime::SessionCursor,
-    ) {
+        _session_id: &str,
+        _agent_instance_id: &str,
+        _input_id: &str,
+        _disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<SessionSubscription, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "agent input observation is unavailable".into(),
+        ))
     }
 
-    async fn cancel_queued_agent_run(&self, _: &AgentOperationAddress) -> bool {
+    /// Observe the durable terminal report for one root input. This is a
+    /// latest-state query, not a second admission or work handle.
+    async fn wait_agent_input_completion(
+        &self,
+        _session_id: &str,
+        _agent_instance_id: &str,
+        _input_id: &str,
+    ) -> Result<AgentRunCompletion, ProtocolError> {
+        Err(ProtocolError::InvalidCommand(
+            "agent input completion is unavailable".into(),
+        ))
+    }
+
+    /// Release observation/route state for one admitted input. Never cancels
+    /// or redelivers work; it only unregisters the live route.
+    async fn finish_agent_run(&self, _session_id: &str, _agent_instance_id: &str, _input_id: &str) {
+    }
+
+    async fn cancel_queued_agent_run(&self, _: &str, _: &str, _: &str) -> bool {
         false
     }
 
     async fn recover_observation(
         &self,
-        _: &AgentOperationAddress,
+        _session_id: &str,
+        _agent_instance_id: &str,
+        _input_id: &str,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,
@@ -195,7 +190,10 @@ pub trait AgentRunRunner: Send + Sync {
         Ok(false)
     }
 
-    async fn cancel_agent_run(&self, _: &AgentOperationAddress) -> bool {
+    /// Agent-addressed interrupt of whatever Execution is currently active.
+    /// It intentionally does not require a host Turn.
+    // (kept for the deprecated `cancel_agent_run(--)` no-op surface below)
+    async fn cancel_agent_run(&self, _: &str, _: &str) -> bool {
         false
     }
 
@@ -248,7 +246,11 @@ impl ErrorAgentRunRunner {
 
 #[async_trait]
 impl AgentRunRunner for ErrorAgentRunRunner {
-    async fn run_agent(&self, _: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
+    async fn submit_agent_input(
+        &self,
+        _input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
         Err(ProtocolError::InvalidCommand(self.message.clone()))
     }
 }

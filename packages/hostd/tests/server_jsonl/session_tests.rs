@@ -73,7 +73,7 @@ async fn root_chat_reuses_session_sink_across_turns() {
 async fn in_memory_session_navigate_to_root_user_resets_current_leaf_without_leaf_node() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -176,6 +176,7 @@ async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let server = HostServer::with_turn_runner(Arc::new(WaitingApprovalRunner {
         started: started.clone(),
         finish: finish.clone(),
+        ..WaitingApprovalRunner::default()
     }));
     let created = server
         .handle_command(Command::SessionCreate {

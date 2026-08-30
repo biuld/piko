@@ -19,7 +19,7 @@ async fn new_context_window_mode_rewrites_without_calling_the_model() {
     let repo = JsonlSessionRepository::new(temp.path());
     let server = HostServer::with_storage_runner_settings(
         repo,
-        Arc::new(DistinctIdRunRunner),
+        Arc::new(DistinctIdRunRunner::new()),
         HostSettings::default(),
     );
     server.set_model_executor(Arc::new(PanicGateway)).await;

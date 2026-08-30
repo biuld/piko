@@ -9,12 +9,12 @@ use async_trait::async_trait;
 use mock_turn_runner::MockAgentRunRunner;
 use piko_hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use piko_hostd::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner};
+use piko_hostd::ports::AgentRunRunner;
 use piko_hostd::protocol::HostServer;
 use piko_orchd_api::AgentCommitPort;
 use piko_protocol::agent_runtime::SessionEvent;
 use piko_protocol::{AgentDurableCommand, ContentBlock, MessageContent, MessageRole};
-use support::{MockSessionPublisher, execution_running, execution_succeeded, successful_turn_run};
+use support::{MockSessionPublisher, execution_running, execution_succeeded};
 
 fn session_id_from(events: &[Event]) -> String {
     events
@@ -39,23 +39,45 @@ fn snapshot_from_refresh(events: &[Event]) -> &piko_hostd::api::SessionSnapshot 
         .expect("session reconciled snapshot")
 }
 
-struct AgentPersistRunner;
+#[derive(Clone, Default)]
+struct AgentPersistRunner {
+    harness: crate::support::MockRunHarness,
+    session_dir: Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+}
 
 #[async_trait]
 impl AgentRunRunner for AgentPersistRunner {
-    async fn run_agent(
+    async fn ensure_session_runtime(
         &self,
-        input: AgentRunInput,
-    ) -> Result<AgentRunHandle, piko_hostd::api::ProtocolError> {
-        let session_dir = input.session_dir.clone();
+        _session_id: &str,
+        _cwd: &str,
+        session_dir: &std::path::Path,
+        _resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        *self.session_dir.lock().unwrap() = Some(session_dir.to_path_buf());
+        Ok(())
+    }
 
-        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+    async fn submit_agent_input(
+        &self,
+        input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
+        let session_dir = self.session_dir.lock().unwrap().clone().unwrap_or_default();
         let store = SessionStore::new(session_dir);
-        let session_id = input.session_id.clone();
-        let turn_id = input.operation_id.clone();
-        let prompt = input.text_projection();
+        let (publisher, subscription) = MockSessionPublisher::new(input.session_id.clone());
+        let (completion_tx, completion_rx) = support::test_oneshot();
         let publisher_task = Arc::clone(&publisher);
-
+        let session_id = input.session_id.clone();
+        let input_id = input.input_id.clone();
+        let prompt = support::content_text(&input.content);
+        self.harness.register(
+            &session_id,
+            &input_id,
+            subscription,
+            completion_rx,
+            publisher,
+        );
         tokio::spawn(async move {
             tokio::task::yield_now().await;
             let publish = |agent_instance_id: String,
@@ -101,7 +123,7 @@ impl AgentRunRunner for AgentPersistRunner {
             let _ = store.commit_message(
                 piko_protocol::execution::MessageCommit {
                     session_id: session_id.clone(),
-                    source_turn_id: Some(turn_id.clone()),
+                    source_turn_id: Some(input_id.clone()),
                     execution_id: "task-main".into(),
                     agent_instance_id: "task-main".into(),
                     message_id: "user-main".into(),
@@ -122,7 +144,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 SessionEvent::MessageCommitted {
                     transcript_seq: 1,
                     message_id: "user-main".into(),
-                    source_turn_id: turn_id.clone(),
+                    source_turn_id: input_id.clone(),
                     role: MessageRole::User,
                 },
             );
@@ -197,16 +219,44 @@ impl AgentRunRunner for AgentPersistRunner {
             );
 
             publish("task-main".into(), "main".into(), 2, execution_succeeded());
+            let barrier = publisher_task.cursor();
+            let _ = completion_tx.send(piko_hostd::ports::AgentRunCompletion {
+                input_id,
+                result: Ok(support::success_report("task-main")),
+                observation_barrier: barrier,
+            });
         });
+        Ok(piko_protocol::AgentInputReceipt {
+            input_id: input.input_id,
+            request_id: input.request_id,
+            session_id: input.session_id,
+            agent_instance_id: input.agent_instance_id,
+            disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+            queued_position: None,
+        })
+    }
 
-        Ok(successful_turn_run(
-            subscription,
-            input.session_id,
-            input.operation_id,
-            input.agent_instance_id,
-            5,
-            std::time::Duration::ZERO,
-        ))
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+        _disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<piko_orchd_api::SessionSubscription, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.take_subscription(session_id, input_id))
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        _agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_hostd::ports::AgentRunCompletion, piko_hostd::api::ProtocolError> {
+        Ok(self.harness.completion(session_id, input_id).await)
+    }
+
+    async fn finish_agent_run(&self, session_id: &str, _agent_instance_id: &str, input_id: &str) {
+        self.harness.finish(session_id, input_id);
     }
 }
 

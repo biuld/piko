@@ -1,26 +1,22 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use piko_orchd_api::{AgentRuntimeApi, SessionSubscription};
+use piko_orchd_api::{AgentInputRuntime, AgentRuntimeApi, SessionSubscription};
 use piko_protocol::AgentInstanceLifecycle;
-use tracing::Instrument;
 
 use crate::api::{ProtocolError, UserInteractionResponse};
-use crate::ports::{AgentRunHandle, AgentRunInput, AgentRunRunner, TrajectoryRegistryPort};
+use crate::ports::{AgentRunRunner, TrajectoryRegistryPort};
 
 use super::OrchAgentRunRunner;
-use super::run::root_agent_spec;
 
 #[async_trait]
 impl AgentRunRunner for OrchAgentRunRunner {
     async fn submit_agent_input(
         &self,
         input: piko_protocol::AgentInput,
+        runtime: AgentInputRuntime,
     ) -> Result<piko_protocol::AgentInputReceipt, ProtocolError> {
-        self.agent_runtime
-            .submit_agent_input(input)
-            .await
-            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))
+        self.submit_runtime(input, runtime).await
     }
 
     async fn cancel_agent_input(
@@ -73,64 +69,54 @@ impl AgentRunRunner for OrchAgentRunRunner {
         self.set_guardian_review_callback(callback);
     }
 
-    async fn run_agent(&self, input: AgentRunInput) -> Result<AgentRunHandle, ProtocolError> {
-        self.agent_runtime
-            .set_approval_gateway(Box::new(self.clone()))
-            .await;
+    async fn ensure_session_runtime(
+        &self,
+        session_id: &str,
+        cwd: &str,
+        session_dir: &std::path::Path,
+        resume_agent: Option<&crate::ports::ResumeAgent>,
+    ) -> Result<(), ProtocolError> {
+        self.ensure_session_runtime(session_id, cwd, session_dir, resume_agent)
+            .await
+    }
 
-        self.agent_runtime
-            .register_agent(root_agent_spec(&input.cwd))
-            .await;
-        tracing::info!(
-            session_id = %input.session_id,
-            operation_id = %input.operation_id,
-            agent_instance_id = %input.agent_instance_id,
-            "Agent run subscription starting"
-        );
-        let source = if input.source_turn_id.is_some() {
-            "turn"
-        } else {
-            "background"
-        };
-        let turn_span = tracing::info_span!(
-            "turn.run",
-            session_id = %input.session_id,
-            run_id = %input.operation_id,
-            agent_instance_id = %input.agent_instance_id,
-            source,
-            cwd = %input.cwd,
-        );
-        let started = std::time::Instant::now();
-        let result = self
-            .run_agent_subscription(input)
-            .instrument(turn_span)
-            .await;
-        let status = if result.is_ok() { "ok" } else { "error" };
-        crate::telemetry::handle().record_turn(
-            started.elapsed().as_millis() as u64,
-            status,
-            source,
-        );
-        result
+    async fn wait_agent_input_started(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+        disposition: piko_protocol::AgentInputDisposition,
+    ) -> Result<SessionSubscription, ProtocolError> {
+        self.wait_started(session_id, agent_instance_id, input_id, disposition)
+            .await
+    }
+
+    async fn wait_agent_input_completion(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<crate::ports::AgentRunCompletion, ProtocolError> {
+        self.wait_completion(session_id, agent_instance_id, input_id)
+            .await
     }
 
     async fn finish_agent_run(
         &self,
-        operation: &crate::ports::AgentOperationAddress,
-        _barrier: &piko_protocol::agent_runtime::SessionCursor,
+        session_id: &str,
+        agent_instance_id: &str,
+        operation_id: &str,
     ) {
-        self.finish_agent_input(
-            &operation.session_id,
-            &operation.agent_instance_id,
-            &operation.operation_id,
-        );
-        self.observation_router
-            .unregister(&operation.session_id, &operation.operation_id);
+        self.finish_agent_input(session_id, operation_id);
+        self.observation_router.unregister(session_id, operation_id);
+        let _ = agent_instance_id;
     }
 
     async fn recover_observation(
         &self,
-        operation: &crate::ports::AgentOperationAddress,
+        session_id: &str,
+        agent_instance_id: &str,
+        operation_id: &str,
     ) -> Result<
         (
             piko_protocol::agent_runtime::SessionRuntimeSnapshot,
@@ -139,18 +125,10 @@ impl AgentRunRunner for OrchAgentRunRunner {
         ProtocolError,
     > {
         // Resubscribe observation without cancelling the Agent run.
-        let hub = self
-            .active_agent_runs
-            .lock()
-            .unwrap()
-            .get(&(operation.session_id.clone(), operation.operation_id.clone()))
-            .and_then(|run| {
-                (run.run_id == operation.operation_id).then(|| run.observation.clone())
-            });
+        let hub = self.hub_for_input(session_id, operation_id);
         let Some(hub) = hub else {
             return Err(ProtocolError::ObservationFailed(format!(
-                "no live observation hub for {}/{}/{}",
-                operation.session_id, operation.agent_instance_id, operation.operation_id
+                "no live observation hub for {session_id}/{agent_instance_id}/{operation_id}"
             )));
         };
         let cursor = hub.cursor();
@@ -159,36 +137,24 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .await
             .map_err(|reason| ProtocolError::ObservationFailed(reason.to_string()))?;
         let snapshot = piko_protocol::agent_runtime::SessionRuntimeSnapshot {
-            session_id: operation.session_id.clone(),
-            root_agent_instance_id: Some(format!("agent_{}_root", operation.session_id)),
-            active_agent_instance_id: Some(operation.agent_instance_id.clone()),
+            session_id: session_id.to_string(),
+            root_agent_instance_id: Some(format!("agent_{session_id}_root")),
+            active_agent_instance_id: Some(agent_instance_id.to_string()),
             cursor: cursor.clone(),
         };
         Ok((
             snapshot,
             SessionSubscription {
-                session_id: operation.session_id.clone(),
+                session_id: session_id.to_string(),
                 cursor: cursor.clone(),
                 output: piko_orchd::events::merged_output_stream(hub_sub, cursor),
             },
         ))
     }
 
-    async fn cancel_agent_run(&self, operation: &crate::ports::AgentOperationAddress) -> bool {
-        let active = {
-            let active = self.active_agent_runs.lock().unwrap();
-            active
-                .get(&(operation.session_id.clone(), operation.operation_id.clone()))
-                .is_some_and(|run| run.run_id == operation.operation_id)
-        };
-        if !active {
-            return false;
-        }
+    async fn cancel_agent_run(&self, session_id: &str, agent_instance_id: &str) -> bool {
         self.agent_runtime
-            .cancel_agent_run(
-                operation.session_id.clone(),
-                operation.agent_instance_id.clone(),
-            )
+            .cancel_agent_run(session_id.to_string(), agent_instance_id.to_string())
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false)
@@ -204,24 +170,22 @@ impl AgentRunRunner for OrchAgentRunRunner {
 
     async fn cancel_queued_agent_run(
         &self,
-        operation: &crate::ports::AgentOperationAddress,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
     ) -> bool {
         let accepted = self
             .agent_runtime
             .cancel_agent_input(
-                operation.session_id.clone(),
-                operation.agent_instance_id.clone(),
-                operation.operation_id.clone(),
+                session_id.to_string(),
+                agent_instance_id.to_string(),
+                input_id.to_string(),
             )
             .await
             .map(|receipt| receipt.accepted)
             .unwrap_or(false);
         if accepted {
-            self.finish_agent_input(
-                &operation.session_id,
-                &operation.agent_instance_id,
-                &operation.operation_id,
-            );
+            self.finish_agent_input(session_id, input_id);
         }
         accepted
     }

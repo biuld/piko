@@ -1,8 +1,7 @@
 # F-51: Agent work lifecycle and control plane
 
-> Status: proposed (slices 1–5 landed. Remaining: Execution product maps,
-> host observation `run_agent`, TurnEvent / empty `active_turns`; see D-68
-> Slice 6)
+> Status: proposed (slices 1–5 and slice 6.1 landed. Remaining: Turn wire
+> leftovers, Execution product maps, grain rekeys, recovery; see D-68 Slice 6)
 > Priority: P0
 > Source evidence: piko product/runtime review; consolidates [F-01](F-01-turn-runtime.md), [F-10](F-10-multi-agent.md), [F-22](F-22-client-agent-projection.md), [F-31](F-31-durable-session-journal.md), and [F-48](F-48-authoritative-agent-lifecycle.md)
 > Design: [D-68](../design/D-68-agent-control-plane.md)

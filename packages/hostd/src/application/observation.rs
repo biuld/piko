@@ -4,7 +4,7 @@ use crate::api::{ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::application::turns::projection::reconcile_committed_messages;
 use crate::application::turns::projection::{record_committed_message, stream_items_from_delta};
-use crate::ports::{AgentOperationAddress, AgentRunRunner, OperationRunCompletion};
+use crate::ports::{AgentRunRunner, OperationRunCompletion};
 use crate::util::{ClientEventSender, send_event};
 
 impl HostApp {
@@ -12,7 +12,9 @@ impl HostApp {
     pub(crate) async fn drive_operation_observation<C>(
         &self,
         runner: &Arc<dyn AgentRunRunner>,
-        address: &AgentOperationAddress,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
         session_dir: &std::path::Path,
         observation: piko_orchd_api::SessionSubscription,
         mut completion_future: std::pin::Pin<
@@ -39,7 +41,7 @@ impl HostApp {
                 biased;
                 result = &mut completion_future, if completion.is_none() => {
                     let completed = result?;
-                    if completed.operation_address() != *address {
+                    if completed.input_id() != input_id {
                         return Err(ProtocolError::ObservationFailed(
                             "operation completion identity mismatch".into(),
                         ));
@@ -50,9 +52,9 @@ impl HostApp {
                     let Some(item) = item else {
                         let recovered = self.recover_operation_observation(
                             runner,
-                            &address.session_id,
-                            &address.operation_id,
-                            &address.agent_instance_id,
+                            session_id,
+                            agent_instance_id,
+                            input_id,
                             session_dir,
                             piko_protocol::ReconcileReason::Reconnect,
                             tx,
@@ -66,9 +68,9 @@ impl HostApp {
                         Err(piko_orchd_api::SessionStreamError::SnapshotRequired { .. }) => {
                             let recovered = self.recover_operation_observation(
                                 runner,
-                                &address.session_id,
-                                &address.operation_id,
-                                &address.agent_instance_id,
+                                session_id,
+                                agent_instance_id,
+                                input_id,
                                 session_dir,
                                 piko_protocol::ReconcileReason::RetentionExhausted,
                                 tx,
@@ -79,12 +81,12 @@ impl HostApp {
                         }
                         Err(error) => {
                             return Err(ProtocolError::ObservationFailed(format!(
-                                "session {}: {error}", address.session_id
+                                "session {}: {error}", session_id
                             )));
                         }
                     };
                     if let Some(cursor) = self
-                        .project_operation_output(&address.session_id, session_dir, envelope, tx)
+                        .project_operation_output(session_id, session_dir, envelope, tx)
                         .await?
                     {
                         observed_cursor = cursor;
@@ -300,24 +302,21 @@ impl HostApp {
     }
 
     /// Recover an operation observation and rebuild host projection from the
-    /// durable journal. Root Turns and direct Agent runs share this path.
+    /// durable journal. Root turns and direct Agent inputs share this path.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn recover_operation_observation(
         &self,
         runner: &Arc<dyn AgentRunRunner>,
         session_id: &str,
-        operation_id: &str,
         agent_instance_id: &str,
+        input_id: &str,
         session_dir: &std::path::Path,
         reason: piko_protocol::ReconcileReason,
         tx: &ClientEventSender,
     ) -> Result<piko_orchd_api::SessionSubscription, ProtocolError> {
-        let operation = AgentOperationAddress {
-            session_id: session_id.to_string(),
-            operation_id: operation_id.to_string(),
-            agent_instance_id: agent_instance_id.to_string(),
-        };
-        let (runtime_snapshot, recovered) = runner.recover_observation(&operation).await?;
+        let (runtime_snapshot, recovered) = runner
+            .recover_observation(session_id, agent_instance_id, input_id)
+            .await?;
         let (snapshot, agents) = {
             let mut state = self.state.lock().await;
             let store = self.session_store_factory.open(session_dir);

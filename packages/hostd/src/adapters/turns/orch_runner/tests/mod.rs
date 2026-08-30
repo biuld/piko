@@ -13,7 +13,7 @@ use piko_protocol::agents::AgentSpec;
 use piko_protocol::{AgentCommitAck, AgentDurableCommand, CommitError};
 
 use crate::infra::storage::SessionStore;
-use crate::ports::{AgentOperationAddress, AgentRunInput, AgentRunRunner};
+use crate::ports::AgentRunRunner;
 
 use super::agent_commit::{EphemeralAgentCommitPort, ProjectingAgentCommitPort};
 use super::run::{ensure_root_tool_sets, resolve_recovered_agent_spec};

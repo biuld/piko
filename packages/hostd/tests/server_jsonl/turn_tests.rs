@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn root_chat_streams_started_before_runner_finishes() {
-    let server = HostServer::with_turn_runner(Arc::new(SlowRunner));
+    let server = HostServer::with_turn_runner(Arc::new(SlowRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -53,6 +53,7 @@ async fn approval_response_is_not_blocked_by_active_turn() {
     let server = HostServer::with_turn_runner(Arc::new(WaitingApprovalRunner {
         started: started.clone(),
         finish: finish.clone(),
+        ..WaitingApprovalRunner::default()
     }));
     let created = server
         .handle_command(Command::SessionCreate {
@@ -156,7 +157,7 @@ async fn create_session_returns_session_created() {
 async fn root_chat_persists_completed_assistant_as_session_entry() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
@@ -241,7 +242,7 @@ async fn root_chat_persists_completed_assistant_as_session_entry() {
 async fn rollout_pages_durable_agent_transcript_with_opaque_cursor() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());
-    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner));
+    let server = HostServer::with_storage_and_runner(repo, Arc::new(AssistantRunner::default()));
     let created = server
         .handle_command(Command::SessionCreate {
             command_id: "create-page".into(),

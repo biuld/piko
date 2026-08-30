@@ -476,23 +476,23 @@ impl OrchAgentRunRunner {
         let Some(recorder) = self.trajectory_recorders.get(session_id) else {
             return;
         };
-        let Some(operation_id) = self
+        let Some(input_id) = self
             .active_agent_runs
             .lock()
             .unwrap()
-            .get(&(session_id.to_string(), agent_instance_id.to_string()))
-            .map(|run| run.run_id.clone())
+            .values()
+            .filter(|run| run.agent_instance_id == agent_instance_id)
+            .map(|run| run.input_id.clone())
+            .next()
         else {
             return;
         };
         // The trajectory run identity is the orchd execution id, derived by
         // orchd as `stable("exec", [session, agent, request_id])` where the
-        // root-turn request id is the hostd operation id. Replicate that
+        // root-turn request id is the hostd input id. Replicate that
         // deterministic derivation so notifications join the right run.
-        let run_id = piko_orchd_api::stable_internal_id(
-            "exec",
-            &[session_id, agent_instance_id, &operation_id],
-        );
+        let run_id =
+            piko_orchd_api::stable_internal_id("exec", &[session_id, agent_instance_id, &input_id]);
         recorder
             .record(TrajectoryRecord::SystemNotification(
                 TrajectorySystemNotificationRecord {

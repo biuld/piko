@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+use piko_orchd_api::AgentInputRuntime;
+use piko_protocol::SendAgentInputRequest;
+
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
@@ -7,7 +10,6 @@ use crate::domain::prompts::{
     snapshot_prompt_resources, world_state_context_message, world_state_diff_content,
     world_state_full_content,
 };
-use crate::ports::AgentRunInput;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
 
 impl HostApp {
@@ -282,26 +284,55 @@ impl HostApp {
         let runner = self.turn_runner.lock().await.clone();
         tracing::info!(
             session_id = %session_id,
-            turn_id = %turn_id,
+            input_id = %turn_id,
             agent_instance_id = %agent_instance_id,
             "turn observation loop starting"
         );
-        let run = match runner
-            .run_agent(AgentRunInput {
-                session_id: session_id.clone(),
-                operation_id: turn_id.clone(),
-                agent_instance_id: agent_instance_id.clone(),
-                content: expanded_content,
-                source_turn_id: Some(turn_id.clone()),
-                prompt_resources: Some(prompt_resources),
-                cwd: cwd.clone(),
-                active_tool_names,
-                session_dir: session_dir.clone(),
-                resume_agent,
-            })
+        // Bootstrap (idempotently) the runtime session before admission. The
+        // durable route registration happens on submit.
+        if let Err(error) = runner
+            .ensure_session_runtime(&session_id, &cwd, &session_dir, resume_agent.as_ref())
             .await
         {
-            Ok(run) => run,
+            let failed = crate::domain::sessions::turn_failed(
+                &session_id,
+                &turn_id,
+                &agent_instance_id,
+                error.to_string(),
+                piko_protocol::Usage::empty(),
+            );
+            send_event(
+                tx,
+                ServerMessage::CommandResponse {
+                    command_id,
+                    result: Err(error.to_string()),
+                },
+            )
+            .await;
+            self.send_turn_terminal(tx, failed).await;
+            return Ok(());
+        }
+        let request = SendAgentInputRequest {
+            request_id: turn_id.clone(),
+            session_id: session_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+            caller_agent_instance_id: None,
+            source_turn_id: Some(turn_id.clone()),
+            message_id: format!("msg_user_{}", uuid::Uuid::new_v4()),
+            content: expanded_content,
+            delivery: piko_protocol::AgentInputDelivery::FollowUp,
+            prompt_resources: Some(prompt_resources),
+            active_tool_names,
+        };
+        let canonical = piko_protocol::AgentInput::from_request(&request, now_ms());
+        let runtime = AgentInputRuntime {
+            prompt_resources: request.prompt_resources,
+            active_tool_names: request.active_tool_names,
+            source_turn_id: request.source_turn_id,
+            message_id: Some(request.message_id),
+        };
+        let receipt = match runner.submit_agent_input(canonical, runtime).await {
+            Ok(receipt) => receipt,
             Err(error) => {
                 let failed = crate::domain::sessions::turn_failed(
                     &session_id,
@@ -322,13 +353,13 @@ impl HostApp {
                 return Ok(());
             }
         };
-        let status = crate::domain::sessions::turn_status_from_disposition(run.receipt.disposition);
+        let status = crate::domain::sessions::turn_status_from_disposition(receipt.disposition);
         send_event(
             tx,
             ServerMessage::CommandResponse {
                 command_id,
                 result: Ok(CommandResult::AgentInputSubmitted {
-                    receipt: run.receipt.clone(),
+                    receipt: receipt.clone(),
                     timestamp: now_ms(),
                 }),
             },
@@ -364,7 +395,7 @@ impl HostApp {
                 &turn_id,
                 &agent_instance_id,
                 &session_dir,
-                run,
+                &receipt,
                 tx,
             )
             .await;
