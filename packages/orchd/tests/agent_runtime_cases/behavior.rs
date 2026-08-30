@@ -162,7 +162,7 @@ async fn canonical_submission_preserves_distinct_root_input_identity() {
 
     let commands = commits.commands.lock().await;
     let started = commands.iter().find_map(|command| match command {
-        piko_protocol::AgentDurableCommand::RunStarted {
+        piko_protocol::AgentDurableCommand::AgentInputProcessingStarted {
             input: started,
             ..
         } => Some(started),

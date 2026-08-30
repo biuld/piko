@@ -7,10 +7,11 @@ async fn recovery_marks_accepted_execution_interrupted() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
                 run_id: "exec-interrupted".into(),
-                internal_execution_id: "exec-interrupted".into(),
+                execution_id: "exec-interrupted".into(),
+                root_input_id: "request-interrupted".into(),
                 request_id: "request-interrupted".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: None,
@@ -103,10 +104,11 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-with-tool-call".into(),
-                internal_execution_id: "exec-with-tool-call".into(),
+                run_id: "exec-with-tool-call".into(),
+                execution_id: "exec-with-tool-call".into(),
+                root_input_id: "request-with-tool-call".into(),
                 request_id: "request-with-tool-call".into(),
                 source_turn_id: Some("turn-with-tool-call".into()),
                 detached_recipient_agent_instance_id: None,
@@ -256,10 +258,11 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: child.agent_instance_id.clone(),
-                run_id: "run-detached".into(),
-                internal_execution_id: "exec-detached".into(),
+                run_id: "exec-detached".into(),
+                execution_id: "exec-detached".into(),
+                root_input_id: "request-detached".into(),
                 request_id: "request-detached".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: Some(root.agent_instance_id.clone()),
@@ -294,8 +297,9 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunTerminal {
-                run_id: "run-detached".into(),
+            AgentDurableCommand::AgentInputProcessingFinished {
+                agent_instance_id: report.clone().agent_instance_id.clone(),
+                root_input_id: report.clone().root_input_id.clone(),
                 report: report.clone(),
                 finished_at: 3,
             },
@@ -339,10 +343,11 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
     let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
         .unwrap();
     let root = store.ensure_root_agent("main").unwrap();
-    let start = AgentDurableCommand::RunStarted {
+    let start = AgentDurableCommand::AgentInputProcessingStarted {
         agent_instance_id: root.agent_instance_id.clone(),
-        run_id: "run-idempotent".into(),
-        internal_execution_id: "exec-idempotent".into(),
+        run_id: "exec-idempotent".into(),
+        execution_id: "exec-idempotent".into(),
+        root_input_id: "request-idempotent".into(),
         request_id: "request-idempotent".into(),
         source_turn_id: None,
         detached_recipient_agent_instance_id: None,
@@ -374,8 +379,9 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
         usage: Default::default(),
         artifacts: Vec::new(),
     };
-    let terminal = AgentDurableCommand::RunTerminal {
-        run_id: "run-idempotent".into(),
+    let terminal = AgentDurableCommand::AgentInputProcessingFinished {
+        agent_instance_id: report.clone().agent_instance_id.clone(),
+        root_input_id: report.clone().root_input_id.clone(),
         report: report.clone(),
         finished_at: 2,
     };
@@ -433,10 +439,11 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-queued".into(),
-                internal_execution_id: "exec-queued".into(),
+                run_id: "exec-queued".into(),
+                execution_id: "exec-queued".into(),
+                root_input_id: "queued-1".into(),
                 request_id: "queued-1".into(),
                 source_turn_id: None,
                 detached_recipient_agent_instance_id: None,

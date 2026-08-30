@@ -159,14 +159,14 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
     let commands = collected.commands.lock().await;
     let start = commands
         .iter()
-        .position(|command| matches!(command, AgentDurableCommand::RunStarted { .. }))
+        .position(|command| matches!(command, AgentDurableCommand::AgentInputProcessingStarted { .. }))
         .unwrap();
     let terminal = commands
         .iter()
         .position(|command| {
             matches!(
                 command,
-                AgentDurableCommand::RunTerminal { report, .. }
+                AgentDurableCommand::AgentInputProcessingFinished { report, .. }
                     if matches!(report.outcome, piko_protocol::ExecutionOutcome::Cancelled { .. })
             )
         })
@@ -233,7 +233,7 @@ async fn terminal_report_is_not_published_until_retry_commits() {
             .lock()
             .await
             .iter()
-            .filter(|command| matches!(command, AgentDurableCommand::RunTerminal { .. }))
+            .filter(|command| matches!(command, AgentDurableCommand::AgentInputProcessingFinished { .. }))
             .count(),
         1
     );
@@ -372,7 +372,7 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
             .lock()
             .await
             .iter()
-            .filter(|command| matches!(command, AgentDurableCommand::RunTerminal { .. }))
+            .filter(|command| matches!(command, AgentDurableCommand::AgentInputProcessingFinished { .. }))
             .count(),
         1
     );

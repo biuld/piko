@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use piko_protocol::{AgentInputDisposition, AgentWorkReport, ContentBlock, Message};
 use piko_session_store::{
-    AgentInputDispositionChangedV1, EventData, MessageCommittedV1, StoredExecution,
+    AgentInputDispositionChangedV1, EventData, MessageCommittedV1, StoredAgentInput,
+    StoredRootProcessing,
 };
 
 use crate::api::{MessageEntry, SessionTreeEntry};
@@ -16,57 +17,60 @@ impl SessionStore {
         self.with_io(|| {
             let active = self
                 .aggregate()?
-                .executions
+                .agent_inputs
                 .into_values()
-                .filter(|execution| execution.finished_at.is_none())
+                .filter(|input| input.has_unfinished_processing())
                 .collect::<Vec<_>>();
             let mut interrupted = 0;
-            for execution in active {
+            for input in active {
                 let aggregate = self.aggregate()?;
-                let started = &execution.started;
+                let processing = input
+                    .processing
+                    .as_ref()
+                    .expect("active work has processing facts");
+                let started = StartedWorkRef {
+                    input: &input,
+                    processing,
+                };
                 let agent = aggregate
                     .agents
-                    .get(&started.agent_instance_id)
-                    .ok_or_else(|| self.invalid("interrupted execution has no agent"))?;
+                    .get(&input.input.agent_instance_id)
+                    .ok_or_else(|| self.invalid("interrupted work has no agent"))?;
                 let now = chrono::Utc::now().timestamp_millis();
-                let mut parent_message_id = execution
-                    .message_head
-                    .clone()
-                    .or_else(|| started.base_message_id.clone());
-                let mut tree_parent_entry_id = execution
-                    .message_head
-                    .clone()
-                    .or_else(|| started.tree_base_entry_id.clone())
+                let head = aggregate.work_message_head(started.execution_id());
+                let mut parent_message_id = head
+                    .map(str::to_string)
+                    .or_else(|| processing.base_message_id.clone());
+                let mut tree_parent_entry_id = head
+                    .map(str::to_string)
+                    .or_else(|| processing.tree_base_entry_id.clone())
                     .or_else(|| aggregate.selected_tree_entry_id.clone());
                 let mut transcript_seq = aggregate
                     .messages
                     .values()
-                    .filter(|message| message.data.agent_instance_id == started.agent_instance_id)
+                    .filter(|message| {
+                        message.data.agent_instance_id == input.input.agent_instance_id
+                    })
                     .count() as u64;
-                let unresolved = unresolved_tool_calls(&aggregate, &execution)?;
+                let unresolved = unresolved_tool_calls(&aggregate, &started)?;
                 let pending_steers = aggregate
                     .agent_inputs
                     .values()
-                    .filter(|input| {
-                        input.input.agent_instance_id == started.agent_instance_id
-                            && input.disposition == AgentInputDisposition::PendingSteer
-                            && input.root_input_id.as_deref()
-                                == aggregate
-                                    .agent_inputs
-                                    .values()
-                                    .find(|root| root.input.request_id == started.request_id)
-                                    .and_then(|root| root.root_input_id.as_deref())
+                    .filter(|steer| {
+                        steer.input.agent_instance_id == input.input.agent_instance_id
+                            && steer.disposition == AgentInputDisposition::PendingSteer
+                            && steer.root_input_id.as_deref() == Some(&input.input.input_id)
                     })
                     .collect::<Vec<_>>();
                 let mut events =
                     Vec::with_capacity(4 + unresolved.len() * 2 + pending_steers.len());
-                for input in pending_steers {
+                for steer in pending_steers {
                     events.push(EventData::AgentInputDispositionChangedV1(
                         AgentInputDispositionChangedV1 {
-                            agent_instance_id: started.agent_instance_id.clone(),
-                            input_id: input.input.input_id.clone(),
+                            agent_instance_id: input.input.agent_instance_id.clone(),
+                            input_id: steer.input.input_id.clone(),
                             disposition: AgentInputDisposition::Cancelled,
-                            root_input_id: input.root_input_id.clone(),
+                            root_input_id: steer.root_input_id.clone(),
                             model_step_id: None,
                             changed_at: now,
                         },
@@ -75,7 +79,7 @@ impl SessionStore {
                 for (tool_call_message_id, tool_call_id, tool_name) in unresolved {
                     let result_id = piko_orchd_api::stable_internal_id(
                         "recovery-tool-result",
-                        &[&started.execution_id, &tool_call_message_id],
+                        &[started.execution_id(), &tool_call_message_id],
                     );
                     let result = Message::ToolResult {
                         tool_call_id,
@@ -94,7 +98,7 @@ impl SessionStore {
                     append_recovery_message(
                         &mut events,
                         &result_id,
-                        started,
+                        &started,
                         &agent.identity.agent_spec_id,
                         &result,
                         now,
@@ -104,12 +108,12 @@ impl SessionStore {
                     )?;
                 }
 
-                let marker_id = piko_protocol::turn_abort_marker_message_id(&started.execution_id);
-                let marker = piko_protocol::turn_abort_marker(&started.execution_id);
+                let marker_id = piko_protocol::turn_abort_marker_message_id(started.execution_id());
+                let marker = piko_protocol::turn_abort_marker(started.execution_id());
                 append_recovery_message(
                     &mut events,
                     &marker_id,
-                    started,
+                    &started,
                     &agent.identity.agent_spec_id,
                     &marker,
                     now,
@@ -118,16 +122,11 @@ impl SessionStore {
                     &mut transcript_seq,
                 )?;
                 let report = AgentWorkReport {
-                    agent_instance_id: started.agent_instance_id.clone(),
-                    root_input_id: aggregate
-                        .agent_inputs
-                        .values()
-                        .find(|input| input.input.request_id == started.request_id)
-                        .and_then(|input| input.root_input_id.clone())
-                        .unwrap_or_else(|| started.request_id.clone()),
+                    agent_instance_id: input.input.agent_instance_id.clone(),
+                    root_input_id: input.input.input_id.clone(),
                     report_id: piko_orchd_api::stable_internal_id(
                         "report",
-                        &["interrupted", &started.run_id],
+                        &["interrupted", &input.input.input_id],
                     ),
                     outcome: piko_protocol::ExecutionOutcome::Cancelled {
                         reason: Some("interrupted during session recovery".into()),
@@ -136,15 +135,18 @@ impl SessionStore {
                     usage: Default::default(),
                     artifacts: Vec::new(),
                 };
-                events.push(EventData::ExecutionFinished {
-                    execution_id: started.execution_id.clone(),
-                    report,
-                    finished_at: now,
-                });
+                events.push(EventData::AgentInputProcessingFinishedV1(
+                    piko_session_store::AgentInputProcessingFinishedV1 {
+                        agent_instance_id: input.input.agent_instance_id.clone(),
+                        root_input_id: input.input.input_id.clone(),
+                        report,
+                        finished_at: now,
+                    },
+                ));
                 if aggregate
                     .root
                     .as_ref()
-                    .is_some_and(|root| root.agent_instance_id == started.agent_instance_id)
+                    .is_some_and(|root| root.agent_instance_id == input.input.agent_instance_id)
                 {
                     events.push(EventData::BranchSelected {
                         selected_tree_entry_id: Some(marker_id.clone()),
@@ -152,8 +154,11 @@ impl SessionStore {
                     });
                 }
                 let commit_id = piko_orchd_api::stable_internal_id(
-                    "execution-interrupted",
-                    &[&aggregate.session_id.unwrap_or_default(), &started.run_id],
+                    "work-interrupted",
+                    &[
+                        &aggregate.session_id.unwrap_or_default(),
+                        &input.input.input_id,
+                    ],
                 );
                 self.commit_events(&commit_id, now, events)?;
                 interrupted += 1;
@@ -163,16 +168,27 @@ impl SessionStore {
     }
 }
 
+/// Borrowed view of one unfinished root AgentInput and its processing facts.
+struct StartedWorkRef<'a> {
+    input: &'a StoredAgentInput,
+    processing: &'a StoredRootProcessing,
+}
+
+impl StartedWorkRef<'_> {
+    fn execution_id(&self) -> &str {
+        self.processing.execution_id.as_deref().unwrap_or_default()
+    }
+}
+
 fn unresolved_tool_calls(
     aggregate: &piko_session_store::SessionAggregate,
-    execution: &StoredExecution,
+    work: &StartedWorkRef<'_>,
 ) -> Result<Vec<(String, String, String)>, SessionStorageError> {
+    let execution_id = work.execution_id();
     let resolved = aggregate
         .messages
         .values()
-        .filter(|message| {
-            message.data.execution_id.as_deref() == Some(execution.started.execution_id.as_str())
-        })
+        .filter(|message| message.data.execution_id.as_deref() == Some(execution_id))
         .filter_map(|message| match &message.data.message {
             Message::ToolResult { tool_call_id, .. } => Some(tool_call_id.clone()),
             _ => None,
@@ -180,13 +196,11 @@ fn unresolved_tool_calls(
         .collect::<BTreeSet<_>>();
     let mut seen = BTreeSet::new();
     let mut unresolved = Vec::new();
-    for model_step_id in &execution.model_step_ids {
-        let step = aggregate.model_steps.get(model_step_id).ok_or_else(|| {
-            SessionStorageError::Invalid {
-                path: aggregate.session_id.clone().unwrap_or_default().into(),
-                message: format!("execution references unknown model step {model_step_id}"),
-            }
-        })?;
+    for step in aggregate
+        .model_steps
+        .values()
+        .filter(|step| step.data.execution_id == execution_id)
+    {
         for message_id in &step.data.tool_call_message_ids {
             let message =
                 aggregate
@@ -219,7 +233,7 @@ fn unresolved_tool_calls(
 fn append_recovery_message(
     events: &mut Vec<EventData>,
     message_id: &str,
-    started: &piko_session_store::ExecutionStartedV1,
+    work: &StartedWorkRef<'_>,
     agent_spec_id: &str,
     message: &Message,
     committed_at: i64,
@@ -233,18 +247,18 @@ fn append_recovery_message(
         parent_id: tree_parent_entry_id.clone(),
         timestamp: committed_at.to_string(),
         agent_id: agent_spec_id.to_string(),
-        agent_instance_id: started.agent_instance_id.clone(),
-        source_turn_id: started.source_turn_id.clone().unwrap_or_default(),
+        agent_instance_id: work.input.input.agent_instance_id.clone(),
+        source_turn_id: work.processing.source_turn_id.clone().unwrap_or_default(),
         transcript_seq: *transcript_seq,
         message: message.clone(),
     });
     events.push(EventData::MessageCommitted(MessageCommittedV1 {
         message_id: message_id.to_string(),
-        agent_instance_id: started.agent_instance_id.clone(),
+        agent_instance_id: work.input.input.agent_instance_id.clone(),
         agent_parent_message_id: parent_message_id.clone(),
         tree_parent_entry_id: tree_parent_entry_id.clone(),
-        execution_id: Some(started.execution_id.clone()),
-        source_turn_id: started.source_turn_id.clone(),
+        execution_id: Some(work.execution_id().to_string()),
+        source_turn_id: work.processing.source_turn_id.clone(),
         committed_at,
         message: message.clone(),
     }));

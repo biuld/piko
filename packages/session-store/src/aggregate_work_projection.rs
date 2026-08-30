@@ -30,24 +30,9 @@ impl SessionAggregate {
             .values()
             .filter(|input| input.input.agent_instance_id == agent_instance_id)
             .collect();
-        let active_execution = self
-            .executions
-            .values()
-            .filter(|execution| {
-                execution.started.agent_instance_id == agent_instance_id
-                    && execution.finished_at.is_none()
-            })
-            .min_by_key(|execution| execution.started.started_at);
-        let active_input = active_execution.and_then(|execution| {
-            stored_inputs
-                .iter()
-                .find(|input| input.input.request_id == execution.started.request_id)
-                .copied()
-        });
-        let active_work = active_execution.map(|execution| {
-            let root_input_id = active_input
-                .and_then(|input| input.root_input_id.clone())
-                .unwrap_or_else(|| execution.started.request_id.clone());
+        let active_work_input = self.unfinished_root(agent_instance_id);
+        let active_work = active_work_input.map(|(input, processing)| {
+            let root_input_id = input.input.input_id.clone();
             let active_model_step_id = stored_inputs
                 .iter()
                 .filter(|input| {
@@ -65,7 +50,7 @@ impl SessionAggregate {
                 root_input_id,
                 state: AgentWorkViewState::Running,
                 active_model_step_id,
-                started_at: execution.started.started_at,
+                started_at: processing.started_at,
             }
         });
         let mut pending_steers = Vec::new();

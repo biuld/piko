@@ -138,11 +138,12 @@ impl AgentActor {
             self.finish_run_cancellation();
             return Err(AgentApiError::Cancelled);
         }
-        let durable_start = AgentDurableCommand::RunStarted {
+        let durable_start = AgentDurableCommand::AgentInputProcessingStarted {
             agent_instance_id: self.identity.agent_instance_id.clone(),
-            run_id: run_id.clone(),
-            internal_execution_id: execution_id.clone(),
+            root_input_id: canonical_input_id.clone(),
             request_id: request.request_id.clone(),
+            execution_id: execution_id.clone(),
+            run_id: run_id.clone(),
             source_turn_id: request.source_turn_id.clone(),
             detached_recipient_agent_instance_id: detached_recipient_agent_instance_id.clone(),
             prompt_assembly_version,

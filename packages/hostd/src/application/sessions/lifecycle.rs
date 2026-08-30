@@ -333,10 +333,11 @@ mod tests {
         store
             .commit_agent_command(
                 &session_id,
-                AgentDurableCommand::RunStarted {
+                AgentDurableCommand::AgentInputProcessingStarted {
                     agent_instance_id: root.agent_instance_id.clone(),
-                    run_id: "run-recovered".into(),
-                    internal_execution_id: "exec-recovered".into(),
+                    run_id: "exec-recovered".into(),
+                    execution_id: "exec-recovered".into(),
+                    root_input_id: "request-recovered".into(),
                     request_id: "request-recovered".into(),
                     source_turn_id: Some("request-recovered".into()),
                     detached_recipient_agent_instance_id: None,

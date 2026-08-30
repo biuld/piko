@@ -62,11 +62,12 @@ impl SessionStore {
             .iter()
             .map(|(id, stored)| {
                 let latest_report = aggregate
-                    .executions
+                    .agent_inputs
                     .values()
-                    .filter(|execution| execution.started.agent_instance_id == *id)
-                    .filter_map(|execution| {
-                        Some((execution.finished_at?, execution.report.clone()?))
+                    .filter(|input| input.input.agent_instance_id == *id)
+                    .filter_map(|input| {
+                        let processing = input.processing.as_ref()?;
+                        Some((processing.finished_at?, processing.report.clone()?))
                     })
                     .max_by_key(|(finished_at, _)| *finished_at)
                     .map(|(_, report)| report);
@@ -85,21 +86,25 @@ impl SessionStore {
             })
             .collect();
         let agent_executions = aggregate
-            .executions
+            .agent_inputs
             .values()
-            .map(|stored| {
-                let started = &stored.started;
-                let delivered = stored.report.as_ref().is_some_and(|report| {
+            .filter_map(|input| {
+                let processing = input.processing.as_ref()?;
+                let agent_instance_id = input.input.agent_instance_id.clone();
+                let delivered = processing.report.as_ref().is_some_and(|report| {
                     aggregate.inbox.values().any(|item| {
                         item.report_id == report.report_id
                             && Some(item.recipient_agent_instance_id.as_str())
-                                == started.detached_recipient_agent_instance_id.as_deref()
+                                == processing.detached_recipient_agent_instance_id.as_deref()
                     })
                 });
-                let model_steps = stored
-                    .model_step_ids
-                    .iter()
-                    .filter_map(|model_step_id| aggregate.model_steps.get(model_step_id))
+                let model_steps = aggregate
+                    .model_steps
+                    .values()
+                    .filter(|stored_step| {
+                        processing.execution_id.as_deref()
+                            == Some(stored_step.data.execution_id.as_str())
+                    })
                     .map(|stored_step| {
                         let data = &stored_step.data;
                         piko_protocol::ModelStepBoundary {
@@ -118,30 +123,33 @@ impl SessionStore {
                         }
                     })
                     .collect();
-                (
-                    started.run_id.clone(),
+                Some((
+                    processing
+                        .run_id
+                        .clone()
+                        .unwrap_or_else(|| input.input.input_id.clone()),
                     ExecutionProjection {
-                        agent_instance_id: started.agent_instance_id.clone(),
-                        run_id: started.run_id.clone(),
-                        execution_id: started.execution_id.clone(),
-                        request_id: started.request_id.clone(),
-                        source_turn_id: started.source_turn_id.clone(),
-                        detached_recipient_agent_instance_id: started
+                        agent_instance_id,
+                        run_id: processing.run_id.clone().unwrap_or_default(),
+                        execution_id: processing.execution_id.clone().unwrap_or_default(),
+                        request_id: input.input.request_id.clone(),
+                        source_turn_id: processing.source_turn_id.clone(),
+                        detached_recipient_agent_instance_id: processing
                             .detached_recipient_agent_instance_id
                             .clone(),
                         detached_report_delivered: delivered,
-                        prompt_assembly_version: started.prompt_assembly_version,
-                        prompt_digest: started.prompt_digest.clone(),
-                        status: stored
+                        prompt_assembly_version: processing.prompt_assembly_version,
+                        prompt_digest: processing.prompt_digest.clone(),
+                        status: processing
                             .report
                             .as_ref()
                             .map_or(ExecutionStatus::Running, |report| report.outcome.status()),
-                        started_at: started.started_at,
-                        finished_at: stored.finished_at,
-                        report: stored.report.clone(),
+                        started_at: processing.started_at,
+                        finished_at: processing.finished_at,
+                        report: processing.report.clone(),
                         model_steps,
                     },
-                )
+                ))
             })
             .collect::<BTreeMap<_, _>>();
         let world_state_baseline = aggregate

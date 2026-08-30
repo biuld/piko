@@ -335,7 +335,7 @@ async fn agent_reuses_private_transcript_across_executions() {
     );
     assert!(commits.commands.lock().await.iter().any(|command| matches!(
         command,
-        AgentDurableCommand::RunTerminal { report, .. }
+        AgentDurableCommand::AgentInputProcessingFinished { report, .. }
             if report.summary == "second answer"
     )));
 }

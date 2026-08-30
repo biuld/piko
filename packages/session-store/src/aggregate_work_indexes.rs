@@ -30,16 +30,10 @@ impl SessionAggregate {
                     .map(|input| (input.admission_revision, input.input.input_id.clone()))
             });
         }
-        for execution in self
-            .executions
-            .values()
-            .filter(|execution| execution.finished_at.is_none())
-        {
-            if let Some(input_id) = self.input_by_request.get(&execution.started.request_id) {
-                self.active_root_by_agent.insert(
-                    execution.started.agent_instance_id.clone(),
-                    input_id.clone(),
-                );
+        for (input_id, stored) in &self.agent_inputs {
+            if stored.has_unfinished_processing() {
+                self.active_root_by_agent
+                    .insert(stored.input.agent_instance_id.clone(), input_id.clone());
             }
         }
         self.agent_work = self.agent_work_snapshots();

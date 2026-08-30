@@ -12,7 +12,7 @@ use piko_protocol::{
     TrajectoryIdentity, TrajectoryModelStepRecord, TrajectoryTerminalKind,
     TrajectoryTerminalRecord,
 };
-use piko_session_store::{EventData, ExecutionStartedV1};
+use piko_session_store::{AgentInputProcessingStartedV1, EventData};
 use tokio::sync::Mutex;
 
 use super::*;
@@ -49,12 +49,12 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
                     root_input_id: Some("input-1".into()),
                     admitted_at: 10,
                 }),
-                EventData::ExecutionStarted(ExecutionStartedV1 {
-                    run_id: "run-1".into(),
-                    execution_id: execution_id.clone(),
-                    request_id: "req-1".into(),
+                EventData::AgentInputProcessingStartedV1(AgentInputProcessingStartedV1 {
                     agent_instance_id: agent_instance_id.into(),
-                    admitted_revision: 0,
+                    root_input_id: "input-1".into(),
+                    request_id: "req-1".into(),
+                    execution_id: execution_id.clone(),
+                    run_id: "run-1".into(),
                     base_message_id: None,
                     tree_base_entry_id: None,
                     source_turn_id: Some("turn-1".into()),
@@ -129,21 +129,24 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
         .commit_events(
             "ex-finish",
             5,
-            vec![EventData::ExecutionFinished {
-                execution_id,
-                report: piko_protocol::AgentWorkReport {
+            vec![EventData::AgentInputProcessingFinishedV1(
+                piko_session_store::AgentInputProcessingFinishedV1 {
                     agent_instance_id: agent_instance_id.into(),
                     root_input_id: "input-1".into(),
-                    report_id: "report-1".into(),
-                    outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                    report: piko_protocol::AgentWorkReport {
+                        agent_instance_id: agent_instance_id.into(),
+                        root_input_id: "input-1".into(),
+                        report_id: "report-1".into(),
+                        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                            usage: piko_protocol::Usage::empty(),
+                        },
+                        summary: "done".into(),
                         usage: piko_protocol::Usage::empty(),
+                        artifacts: Vec::new(),
                     },
-                    summary: "done".into(),
-                    usage: piko_protocol::Usage::empty(),
-                    artifacts: Vec::new(),
+                    finished_at: 14,
                 },
-                finished_at: 14,
-            }],
+            )],
         )
         .unwrap();
     store

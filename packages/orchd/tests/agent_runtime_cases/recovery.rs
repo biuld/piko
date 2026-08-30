@@ -335,7 +335,7 @@ async fn recovered_durable_follow_up_starts_without_new_input() {
         {
             assert!(agents.commands.lock().await.iter().any(|command| matches!(
                 command,
-                AgentDurableCommand::RunStarted { input, .. }
+                AgentDurableCommand::AgentInputProcessingStarted { input, .. }
                     if input.input_id == "queued-recovery"
             )));
             return;

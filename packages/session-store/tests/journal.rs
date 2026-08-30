@@ -6,11 +6,73 @@ use piko_protocol::{
     AgentInstanceIdentity, ContentBlock, Message, MessageContent, ModelStepOutcome, Usage,
 };
 use piko_session_store::{
-    AgentInputAppliedV1, CompactionRecordedV1, EventData, ExecutionStartedV1, MessageCommittedV1,
-    ModelStepCommittedV1, NewSession, OpenOptions, ProposedCommit, RawEvent, SessionStore,
-    StoreError, UsageAttribution, UsageCorrectedV1, UsageQuery, UsageRecordedV1,
+    AgentInputAdmittedV1, AgentInputAppliedV1, AgentInputProcessingStartedV1, CompactionRecordedV1,
+    EventData, MessageCommittedV1, ModelStepCommittedV1, NewSession, OpenOptions, ProposedCommit,
+    RawEvent, SessionStore, StoreError, UsageAttribution, UsageCorrectedV1, UsageQuery,
+    UsageRecordedV1,
 };
 use tempfile::tempdir;
+
+fn root_input(id: &str, request_id: &str) -> piko_protocol::AgentInput {
+    piko_protocol::AgentInput {
+        input_id: id.into(),
+        request_id: request_id.into(),
+        session_id: "s1".into(),
+        agent_instance_id: "root".into(),
+        origin: piko_protocol::AgentInputOrigin::User,
+        delivery: piko_protocol::AgentInputDelivery::StartWhenIdle,
+        content: MessageContent::String("work".into()),
+        submitted_at: 2,
+        caller_agent_instance_id: None,
+        detached_recipient_agent_instance_id: None,
+    }
+}
+
+/// Admit an applied root input and start its processing in one commit.
+fn work_start(
+    id: &str,
+    request_id: &str,
+    execution_id: &str,
+    run_id: &str,
+    turn_id: &str,
+) -> ProposedCommit {
+    let input = root_input(id, request_id);
+    ProposedCommit {
+        commit_id: format!("work-start-{id}"),
+        committed_at: 2,
+        causation_id: None,
+        correlation_id: Some(turn_id.into()),
+        events: vec![
+            event(
+                "input-admitted",
+                EventData::AgentInputAdmittedV1(AgentInputAdmittedV1 {
+                    input,
+                    disposition: piko_protocol::AgentInputDisposition::AppliedAsRoot,
+                    root_input_id: None,
+                    admitted_at: 2,
+                }),
+            ),
+            event(
+                "processing-started",
+                EventData::AgentInputProcessingStartedV1(AgentInputProcessingStartedV1 {
+                    agent_instance_id: "root".into(),
+                    root_input_id: id.into(),
+                    request_id: request_id.into(),
+                    execution_id: execution_id.into(),
+                    run_id: run_id.into(),
+                    base_message_id: None,
+                    tree_base_entry_id: None,
+                    source_turn_id: Some(turn_id.into()),
+                    detached_recipient_agent_instance_id: None,
+                    prompt_assembly_version: 1,
+                    prompt_digest: "digest".into(),
+                    started_at: 2,
+                }),
+            ),
+        ],
+        extensions: BTreeMap::new(),
+    }
+}
 
 fn new_session(id: &str) -> NewSession {
     NewSession {
@@ -121,27 +183,7 @@ fn model_step_commit_replays_as_an_atomic_authoritative_relation() {
         .store
         .append(
             1,
-            commit(
-                "execution-start",
-                2,
-                event(
-                    "execution-start-event",
-                    EventData::ExecutionStarted(ExecutionStartedV1 {
-                        run_id: "run-1".into(),
-                        execution_id: "execution-1".into(),
-                        request_id: "turn-1".into(),
-                        agent_instance_id: "root".into(),
-                        admitted_revision: 1,
-                        base_message_id: None,
-                        tree_base_entry_id: None,
-                        source_turn_id: Some("turn-1".into()),
-                        detached_recipient_agent_instance_id: None,
-                        prompt_assembly_version: 1,
-                        prompt_digest: "digest".into(),
-                        started_at: 2,
-                    }),
-                ),
-            ),
+            work_start("input-1", "turn-1", "execution-1", "run-1", "turn-1"),
         )
         .unwrap();
     let (assistant, tool_call, boundary) = model_step_messages();
@@ -162,9 +204,15 @@ fn model_step_commit_replays_as_an_atomic_authoritative_relation() {
     assert_eq!(first, retry);
 
     let aggregate = opened.store.aggregate();
-    let execution = aggregate.executions.get("execution-1").unwrap();
-    assert_eq!(execution.started.run_id, "run-1");
-    assert_eq!(execution.model_step_ids, ["step-1"]);
+    let processing = aggregate.agent_inputs["input-1"]
+        .processing
+        .as_ref()
+        .unwrap();
+    assert_eq!(processing.run_id.as_deref(), Some("run-1"));
+    assert_eq!(
+        aggregate.model_steps["step-1"].data.execution_id,
+        "execution-1"
+    );
     assert_eq!(
         aggregate.model_steps["step-1"].data.tool_call_message_ids,
         ["tool-call-message-1"]
@@ -187,27 +235,7 @@ fn model_step_boundary_rejects_messages_from_an_earlier_revision() {
         .store
         .append(
             1,
-            commit(
-                "execution-start",
-                2,
-                event(
-                    "execution-start-event",
-                    EventData::ExecutionStarted(ExecutionStartedV1 {
-                        run_id: "run-1".into(),
-                        execution_id: "execution-1".into(),
-                        request_id: "turn-1".into(),
-                        agent_instance_id: "root".into(),
-                        admitted_revision: 1,
-                        base_message_id: None,
-                        tree_base_entry_id: None,
-                        source_turn_id: Some("turn-1".into()),
-                        detached_recipient_agent_instance_id: None,
-                        prompt_assembly_version: 1,
-                        prompt_digest: "digest".into(),
-                        started_at: 2,
-                    }),
-                ),
-            ),
+            work_start("input-1", "turn-1", "execution-1", "run-1", "turn-1"),
         )
         .unwrap();
     let (assistant, tool_call, boundary) = model_step_messages();
@@ -315,13 +343,13 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
         }),
     );
     let started = event(
-        "execution-started",
-        EventData::ExecutionStarted(ExecutionStartedV1 {
-            run_id: "run-1".into(),
-            execution_id: "execution-1".into(),
-            request_id: "request-1".into(),
+        "processing-started",
+        EventData::AgentInputProcessingStartedV1(AgentInputProcessingStartedV1 {
             agent_instance_id: "root".into(),
-            admitted_revision: 1,
+            root_input_id: "input-1".into(),
+            request_id: "request-1".into(),
+            execution_id: "execution-1".into(),
+            run_id: "run-1".into(),
             base_message_id: None,
             tree_base_entry_id: None,
             source_turn_id: Some("turn-1".into()),

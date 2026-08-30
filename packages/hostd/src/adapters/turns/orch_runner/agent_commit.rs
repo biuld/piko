@@ -75,16 +75,14 @@ impl ProjectingAgentCommitPort {
                     agents.insert(identity.agent_instance_id, info.clone());
                     Some(info)
                 }
-                AgentDurableCommand::RunStarted {
-                    agent_instance_id,
-                    internal_execution_id: _,
-                    ..
+                AgentDurableCommand::AgentInputProcessingStarted {
+                    agent_instance_id, ..
                 } => agents.get_mut(&agent_instance_id).map(|info| {
                     info.activity = piko_protocol::AgentActivity::Running;
                     info.status = crate::api::AgentStatus::Running;
                     info.clone()
                 }),
-                AgentDurableCommand::RunTerminal { report, .. } => {
+                AgentDurableCommand::AgentInputProcessingFinished { report, .. } => {
                     agents.get_mut(&report.agent_instance_id).map(|info| {
                         info.activity = piko_protocol::AgentActivity::Idle;
                         info.status = crate::api::AgentStatus::Idle;
@@ -184,8 +182,10 @@ impl AgentCommitPort for EphemeralAgentCommitPort {
             | AgentDurableCommand::ConsumeInboxItem {
                 agent_instance_id, ..
             } => agent_instance_id,
-            AgentDurableCommand::RunTerminal { report, .. } => report.agent_instance_id,
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingFinished { report, .. } => {
+                report.agent_instance_id
+            }
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id, ..
             } => agent_instance_id,
             AgentDurableCommand::CommitReport {

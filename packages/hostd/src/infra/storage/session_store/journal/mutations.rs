@@ -77,9 +77,8 @@ impl SessionStore {
             .or_else(|| commit.parent_message_id.clone())
             .or_else(|| {
                 aggregate
-                    .executions
-                    .get(&commit.execution_id)
-                    .and_then(|execution| execution.started.tree_base_entry_id.clone())
+                    .work_by_execution_id(&commit.execution_id)
+                    .and_then(|(_, processing)| processing.tree_base_entry_id.clone())
             })
             .or_else(|| aggregate.selected_tree_entry_id.clone());
         if let Some(existing) = aggregate.messages.get(&commit.message_id) {
@@ -145,14 +144,8 @@ impl SessionStore {
                 .map(|change| change.input_id.clone())
                 .or_else(|| {
                     aggregate
-                        .executions
-                        .get(&commit.execution_id)
-                        .and_then(|execution| {
-                            aggregate
-                                .input_by_request
-                                .get(&execution.started.request_id)
-                                .cloned()
-                        })
+                        .work_by_execution_id(&commit.execution_id)
+                        .map(|(root, _)| root.input.input_id.clone())
                 })
         } else {
             None
@@ -284,13 +277,12 @@ fn validate_steer_commit(
     {
         return Err(CommitError::IdentityMismatch);
     }
-    let execution = aggregate
-        .executions
-        .get(&message.execution_id)
+    let (root, processing) = aggregate
+        .work_by_execution_id(&message.execution_id)
         .ok_or(CommitError::IdentityMismatch)?;
-    if execution.finished_at.is_some()
-        || execution.started.agent_instance_id != message.agent_instance_id
-        || execution.started.source_turn_id != message.source_turn_id
+    if processing.finished_at.is_some()
+        || root.input.agent_instance_id != message.agent_instance_id
+        || processing.source_turn_id != message.source_turn_id
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -298,14 +290,9 @@ fn validate_steer_commit(
         .root_input_id
         .as_deref()
         .ok_or(CommitError::IdentityMismatch)?;
-    let root = aggregate
-        .agent_inputs
-        .get(root_input_id)
-        .ok_or(CommitError::IdentityMismatch)?;
-    if root.input.agent_instance_id != message.agent_instance_id
-        || root.disposition != AgentInputDisposition::AppliedAsRoot
+    if root.disposition != AgentInputDisposition::AppliedAsRoot
         || root.root_input_id.as_deref() != Some(root_input_id)
-        || root.input.request_id != execution.started.request_id
+        || root.input.input_id != root_input_id
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -321,11 +308,14 @@ fn validate_steer_commit(
     }
     let expected_step_id = format!(
         "{}:step_{}",
-        execution.started.execution_id,
-        execution.model_step_ids.len().saturating_add(1)
+        processing.execution_id.as_deref().unwrap_or_default(),
+        aggregate
+            .work_model_step_count(&message.execution_id)
+            .saturating_add(1)
     );
     if change.model_step_id.as_deref() != Some(expected_step_id.as_str())
-        || message.parent_message_id != execution.message_head
+        || message.parent_message_id.as_deref()
+            != aggregate.work_message_head(&message.execution_id)
     {
         return Err(CommitError::IdentityMismatch);
     }

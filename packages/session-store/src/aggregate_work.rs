@@ -3,8 +3,10 @@
 use piko_protocol::AgentInputDisposition;
 
 use crate::aggregate::SessionAggregate;
+use crate::projection::StoredRootProcessing;
 use crate::schema::{
-    AgentInputAdmittedV1, AgentInputDispositionChangedV1, ExecutionStartedV1, RawEvent,
+    AgentInputAdmittedV1, AgentInputDispositionChangedV1, AgentInputProcessingFinishedV1,
+    AgentInputProcessingStartedV1, RawEvent,
 };
 use crate::{Result, StoreError, StoredAgentInput};
 
@@ -96,14 +98,14 @@ impl SessionAggregate {
             return Err(StoreError::IdempotencyConflict(input.request_id));
         }
         if disposition == AgentInputDisposition::AppliedAsRoot
-            && self.executions.values().any(|execution| {
-                execution.started.agent_instance_id == input.agent_instance_id
-                    && execution.finished_at.is_none()
-                    && execution.started.request_id != input.request_id
+            && self.agent_inputs.values().any(|existing| {
+                existing.input.agent_instance_id == input.agent_instance_id
+                    && existing.input.input_id != input.input_id
+                    && existing.has_unfinished_processing()
             })
         {
             return Err(StoreError::InvalidEvent(
-                "agent already has an active root run".into(),
+                "agent already has an active root work".into(),
             ));
         }
         let input_id = input.input_id.clone();
@@ -120,6 +122,7 @@ impl SessionAggregate {
                 root_input_id,
                 model_step_id: None,
                 applied_message_id: None,
+                processing: None,
             },
         );
         Ok(())
@@ -167,6 +170,17 @@ impl SessionAggregate {
         {
             return Err(StoreError::InvalidEvent(
                 "root application must identify the input itself".into(),
+            ));
+        }
+        if disposition == AgentInputDisposition::AppliedAsRoot
+            && self.agent_inputs.values().any(|existing| {
+                existing.input.agent_instance_id == data.agent_instance_id
+                    && existing.input.input_id != data.input_id
+                    && existing.has_unfinished_processing()
+            })
+        {
+            return Err(StoreError::InvalidEvent(
+                "agent already has an active root work".into(),
             ));
         }
         if disposition == AgentInputDisposition::AppliedToStep {
@@ -233,29 +247,124 @@ impl SessionAggregate {
         Ok(())
     }
 
-    pub(crate) fn apply_execution_started_with_input(
+    pub(crate) fn apply_agent_input_processing_started(
         &mut self,
-        started: &ExecutionStartedV1,
+        data: AgentInputProcessingStartedV1,
     ) -> Result<()> {
-        let Some(input) = self
-            .agent_inputs
-            .values_mut()
-            .find(|input| input.input.request_id == started.request_id)
-        else {
-            return Ok(());
-        };
-        if input.input.agent_instance_id != started.agent_instance_id {
+        let AgentInputProcessingStartedV1 {
+            agent_instance_id,
+            root_input_id,
+            request_id,
+            execution_id,
+            run_id,
+            base_message_id,
+            tree_base_entry_id,
+            source_turn_id,
+            detached_recipient_agent_instance_id,
+            prompt_assembly_version,
+            prompt_digest,
+            started_at,
+        } = data;
+        if root_input_id.is_empty() {
             return Err(StoreError::InvalidEvent(
-                "execution root input belongs to another agent".into(),
+                "processing start requires a root input".into(),
             ));
         }
-        if input.disposition != AgentInputDisposition::AppliedAsRoot
-            || input.root_input_id.as_deref() != Some(input.input.input_id.as_str())
+        let input = self.agent_inputs.get(&root_input_id).ok_or_else(|| {
+            StoreError::InvalidEvent(format!("unknown root input {root_input_id}"))
+        })?;
+        if input.input.agent_instance_id != agent_instance_id
+            || input.input.request_id != request_id
+            || input.disposition != AgentInputDisposition::AppliedAsRoot
+            || input.root_input_id.as_deref() != Some(root_input_id.as_str())
         {
             return Err(StoreError::InvalidEvent(
-                "execution request does not resolve to an applied root input".into(),
+                "processing start does not target an applied root input".into(),
             ));
         }
+        let processing = StoredRootProcessing {
+            started_at,
+            finished_at: None,
+            report: None,
+            execution_id: (!execution_id.is_empty()).then_some(execution_id),
+            run_id: (!run_id.is_empty()).then_some(run_id),
+            base_message_id,
+            tree_base_entry_id,
+            source_turn_id,
+            detached_recipient_agent_instance_id,
+            prompt_assembly_version,
+            prompt_digest,
+        };
+        if let Some(existing) = &input.processing {
+            return if existing == &processing {
+                Ok(())
+            } else {
+                Err(StoreError::IdempotencyConflict(root_input_id))
+            };
+        }
+        if self.agent_inputs.values().any(|existing| {
+            existing.input.agent_instance_id == agent_instance_id
+                && existing.input.input_id != root_input_id
+                && existing.has_unfinished_processing()
+        }) {
+            return Err(StoreError::InvalidEvent(
+                "agent already has an active root work".into(),
+            ));
+        }
+        self.agent_inputs
+            .get_mut(&root_input_id)
+            .expect("root input validated above")
+            .processing = Some(processing);
+        Ok(())
+    }
+
+    pub(crate) fn apply_agent_input_processing_finished(
+        &mut self,
+        data: AgentInputProcessingFinishedV1,
+    ) -> Result<()> {
+        let AgentInputProcessingFinishedV1 {
+            agent_instance_id,
+            root_input_id,
+            report,
+            finished_at,
+        } = data;
+        let input = self.agent_inputs.get(&root_input_id).ok_or_else(|| {
+            StoreError::InvalidEvent(format!("unknown root input {root_input_id}"))
+        })?;
+        if input.input.agent_instance_id != agent_instance_id {
+            return Err(StoreError::InvalidEvent(
+                "processing finish belongs to another agent".into(),
+            ));
+        }
+        let Some(processing) = &input.processing else {
+            return Err(StoreError::InvalidEvent(
+                "processing finish without a processing start".into(),
+            ));
+        };
+        if processing.finished_at.is_some() {
+            return if processing.finished_at == Some(finished_at)
+                && processing.report.as_ref() == Some(&report)
+            {
+                Ok(())
+            } else {
+                Err(StoreError::IdempotencyConflict(root_input_id))
+            };
+        }
+        if report.agent_instance_id != agent_instance_id || report.root_input_id != root_input_id {
+            return Err(StoreError::InvalidEvent(
+                "invalid processing completion".into(),
+            ));
+        }
+        let input = self
+            .agent_inputs
+            .get_mut(&root_input_id)
+            .expect("root input validated above");
+        let processing = input
+            .processing
+            .as_mut()
+            .expect("processing validated above");
+        processing.report = Some(report);
+        processing.finished_at = Some(finished_at);
         Ok(())
     }
 
@@ -264,6 +373,50 @@ impl SessionAggregate {
     pub fn rebuild_work_projection(&mut self) {
         self.rebuild_agent_input_indexes();
         self.agent_work = self.agent_work_snapshots();
+    }
+
+    /// The applied root input whose processing is unfinished, if any.
+    pub(crate) fn unfinished_root(
+        &self,
+        agent_instance_id: &str,
+    ) -> Option<(&StoredAgentInput, &StoredRootProcessing)> {
+        self.agent_inputs.values().find_map(|input| {
+            let processing = input.processing.as_ref()?;
+            (input.input.agent_instance_id == agent_instance_id && processing.finished_at.is_none())
+                .then_some((input, processing))
+        })
+    }
+
+    /// The root input and processing facts behind an interim execution
+    /// correlation id (slice 6.4 rekeys message, model-step, and usage grains
+    /// onto `root_input_id`).
+    pub fn work_by_execution_id(
+        &self,
+        execution_id: &str,
+    ) -> Option<(&StoredAgentInput, &StoredRootProcessing)> {
+        self.agent_inputs.values().find_map(|input| {
+            let processing = input.processing.as_ref()?;
+            (processing.execution_id.as_deref() == Some(execution_id))
+                .then_some((input, processing))
+        })
+    }
+
+    /// Last message committed under the interim execution correlation id.
+    pub fn work_message_head(&self, execution_id: &str) -> Option<&str> {
+        self.messages
+            .values()
+            .filter(|message| message.data.execution_id.as_deref() == Some(execution_id))
+            .max_by_key(|message| message.revision)
+            .map(|message| message.data.message_id.as_str())
+    }
+
+    /// Number of model steps committed under the interim execution
+    /// correlation id.
+    pub fn work_model_step_count(&self, execution_id: &str) -> usize {
+        self.model_steps
+            .values()
+            .filter(|step| step.data.execution_id == execution_id)
+            .count()
     }
 }
 

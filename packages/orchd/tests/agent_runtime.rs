@@ -213,7 +213,10 @@ impl AgentCommitPort for BlockingRunStartCommitPort {
         session_id: &str,
         command: AgentDurableCommand,
     ) -> Result<AgentCommitAck, CommitError> {
-        if matches!(&command, AgentDurableCommand::RunStarted { .. }) {
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputProcessingStarted { .. }
+        ) {
             self.entered.add_permits(1);
             self.release
                 .acquire()
@@ -299,29 +302,38 @@ impl AgentCommitPort for CollectingAgentCommitPort {
         session_id: &str,
         command: AgentDurableCommand,
     ) -> Result<AgentCommitAck, CommitError> {
-        if matches!(&command, AgentDurableCommand::RunStarted { .. })
-            && Self::consume_failure(&self.fail_run_starts)
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputProcessingStarted { .. }
+        ) && Self::consume_failure(&self.fail_run_starts)
         {
             return Err(CommitError::Unavailable);
         }
         if matches!(
             &command,
-            AgentDurableCommand::RunStarted { input, .. }
+            AgentDurableCommand::AgentInputProcessingStarted { input, .. }
                 if input.delivery == AgentInputDelivery::FollowUp
         ) && Self::consume_failure(&self.fail_queued_starts)
         {
             return Err(CommitError::Unavailable);
         }
-        if matches!(&command, AgentDurableCommand::RunTerminal { .. }) {
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputProcessingFinished { .. }
+        ) {
             self.terminal_attempts.fetch_add(1, Ordering::SeqCst);
         }
-        if matches!(&command, AgentDurableCommand::RunTerminal { .. })
-            && Self::consume_failure(&self.fail_run_terminals)
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputProcessingFinished { .. }
+        ) && Self::consume_failure(&self.fail_run_terminals)
         {
             return Err(CommitError::Unavailable);
         }
-        if matches!(&command, AgentDurableCommand::RunTerminal { .. })
-            && Self::consume_failure(&self.conflict_run_terminals)
+        if matches!(
+            &command,
+            AgentDurableCommand::AgentInputProcessingFinished { .. }
+        ) && Self::consume_failure(&self.conflict_run_terminals)
         {
             return Err(CommitError::IdempotencyConflict);
         }
@@ -344,8 +356,10 @@ impl AgentCommitPort for CollectingAgentCommitPort {
             | AgentDurableCommand::ConsumeInboxItem {
                 agent_instance_id, ..
             } => agent_instance_id.clone(),
-            AgentDurableCommand::RunTerminal { report, .. } => report.agent_instance_id.clone(),
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingFinished { report, .. } => {
+                report.agent_instance_id.clone()
+            }
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id, ..
             } => agent_instance_id.clone(),
             AgentDurableCommand::CommitReport {

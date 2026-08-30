@@ -191,7 +191,7 @@ async fn duplicate_detached_input_delivers_the_completed_report_without_rerun() 
         .await
         .iter()
         .find_map(|command| match command {
-            piko_protocol::AgentDurableCommand::RunStarted { input, .. }
+            piko_protocol::AgentDurableCommand::AgentInputProcessingStarted { input, .. }
                 if input.request_id == "input-completed-detached" =>
             {
                 Some(input.clone())

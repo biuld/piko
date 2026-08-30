@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::ExecutionId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -41,11 +40,17 @@ pub enum AgentDurableCommand {
     AgentInputAdmitted { admission: AgentInputAdmission },
     /// Canonical durable disposition transition for an admitted input.
     AgentInputDispositionChanged { change: AgentInputDispositionChange },
-    RunStarted {
+    /// Durable processing-start fact on the root AgentInput. The root input is
+    /// the work identity; there is no Execution aggregate.
+    AgentInputProcessingStarted {
         agent_instance_id: AgentInstanceId,
-        run_id: String,
-        internal_execution_id: ExecutionId,
+        root_input_id: AgentInputId,
         request_id: String,
+        /// Interim commit-correlation identity for message, model-step, and
+        /// usage grains until they rekey onto `root_input_id` (slice 6.4).
+        execution_id: String,
+        /// Interim run correlation; equals the root request id in orchd today.
+        run_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_turn_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,11 +60,13 @@ pub enum AgentDurableCommand {
         #[serde(default)]
         prompt_digest: String,
         started_at: i64,
-        /// Canonical root input admitted atomically with the runtime start.
+        /// Canonical root input admitted atomically with the processing start.
         input: AgentInput,
     },
-    RunTerminal {
-        run_id: String,
+    /// Durable processing-finish fact on the root AgentInput.
+    AgentInputProcessingFinished {
+        agent_instance_id: AgentInstanceId,
+        root_input_id: AgentInputId,
         report: AgentWorkReport,
         finished_at: i64,
     },

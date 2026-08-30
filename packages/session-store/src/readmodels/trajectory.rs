@@ -24,6 +24,10 @@ pub struct TrajectoryProjection {
     pub runs: BTreeMap<String, TrajectoryRunProjection>,
     #[serde(default)]
     pub execution_to_run: HashMap<String, String>,
+    /// Interim join from the root input to its run key. Removed when the
+    /// trajectory grains rekey onto `root_input_id` (slice 6.4).
+    #[serde(default)]
+    pub root_to_run: HashMap<String, String>,
     #[serde(default)]
     pub input_contents: HashMap<String, piko_protocol::MessageContent>,
 }
@@ -137,8 +141,8 @@ pub fn apply_commit(decoded: &mut TrajectoryProjection, commit: &DurableCommit) 
 
 fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &serde_json::Value) {
     match event_type {
-        "execution_started" => {
-            let Ok(EventData::ExecutionStarted(started)) =
+        "agent_input_processing_started_v1" => {
+            let Ok(EventData::AgentInputProcessingStartedV1(started)) =
                 serde_json::from_value::<EventData>(payload.clone())
             else {
                 return;
@@ -146,6 +150,9 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             decoded
                 .execution_to_run
                 .insert(started.execution_id.clone(), started.run_id.clone());
+            decoded
+                .root_to_run
+                .insert(started.root_input_id.clone(), started.run_id.clone());
             let run = decoded.runs.entry(started.run_id).or_default();
             run.agent_instance_id = Some(started.agent_instance_id);
             run.execution_id = Some(started.execution_id);
@@ -187,21 +194,18 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
                     },
                 });
         }
-        "execution_finished" => {
-            let Ok(EventData::ExecutionFinished {
-                execution_id,
-                report,
-                finished_at,
-            }) = serde_json::from_value::<EventData>(payload.clone())
+        "agent_input_processing_finished_v1" => {
+            let Ok(EventData::AgentInputProcessingFinishedV1(finished)) =
+                serde_json::from_value::<EventData>(payload.clone())
             else {
                 return;
             };
-            let Some(run_id) = decoded.execution_to_run.get(&execution_id).cloned() else {
+            let Some(run_id) = decoded.root_to_run.get(&finished.root_input_id).cloned() else {
                 return;
             };
             let run = decoded.runs.entry(run_id).or_default();
-            run.finished_at = Some(finished_at);
-            run.terminal = Some(match report.outcome {
+            run.finished_at = Some(finished.finished_at);
+            run.terminal = Some(match finished.report.outcome {
                 piko_protocol::ExecutionOutcome::Succeeded { .. } => {
                     TrajectoryTerminalKind::Completed
                 }

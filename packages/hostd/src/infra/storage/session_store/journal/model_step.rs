@@ -36,16 +36,15 @@ impl SessionStore {
         if agent.identity.agent_spec_id != agent_spec_id {
             return Err(CommitError::IdentityMismatch);
         }
-        let execution = aggregate
-            .executions
-            .get(&commit.execution_id)
+        let (root, processing) = aggregate
+            .work_by_execution_id(&commit.execution_id)
             .ok_or(CommitError::IdentityMismatch)?;
-        if execution.finished_at.is_some() {
+        if processing.finished_at.is_some() {
             return Err(CommitError::IdentityMismatch);
         }
-        if execution.started.run_id != commit.run_id
-            || execution.started.agent_instance_id != commit.agent_instance_id
-            || execution.started.source_turn_id != commit.source_turn_id
+        if processing.run_id.as_deref() != Some(commit.run_id.as_str())
+            || root.input.agent_instance_id != commit.agent_instance_id
+            || processing.source_turn_id != commit.source_turn_id
         {
             return Err(CommitError::IdentityMismatch);
         }
@@ -76,11 +75,10 @@ impl SessionStore {
             return Err(CommitError::IdempotencyConflict);
         }
 
-        let expected_parent = execution
-            .message_head
-            .as_ref()
-            .or(execution.started.base_message_id.as_ref())
-            .cloned();
+        let expected_parent = aggregate
+            .work_message_head(&commit.execution_id)
+            .map(str::to_string)
+            .or_else(|| processing.base_message_id.clone());
         if commit.assistant.parent_message_id != expected_parent {
             return Err(CommitError::IdentityMismatch);
         }
@@ -110,7 +108,7 @@ impl SessionStore {
                 return Err(CommitError::IdentityMismatch);
             }
         }
-        let expected_index = execution.model_step_ids.len() as u32 + 1;
+        let expected_index = aggregate.work_model_step_count(&commit.execution_id) as u32 + 1;
         if commit.step_index != expected_index {
             return Err(CommitError::IdentityMismatch);
         }
@@ -121,12 +119,11 @@ impl SessionStore {
 
         let mut events = Vec::with_capacity(3 + commit.tool_calls.len() * 2);
         let mut parent_message_id = expected_parent;
-        let mut tree_parent_entry_id = execution
-            .message_head
-            .as_ref()
-            .or(execution.started.tree_base_entry_id.as_ref())
-            .or(aggregate.selected_tree_entry_id.as_ref())
-            .cloned();
+        let mut tree_parent_entry_id = aggregate
+            .work_message_head(&commit.execution_id)
+            .map(str::to_string)
+            .or_else(|| processing.tree_base_entry_id.clone())
+            .or_else(|| aggregate.selected_tree_entry_id.clone());
         let mut transcript_seq = aggregate
             .messages
             .values()

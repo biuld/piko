@@ -72,10 +72,11 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-follow-up".into(),
-                internal_execution_id: "execution-follow-up".into(),
+                run_id: "execution-follow-up".into(),
+                execution_id: "execution-follow-up".into(),
+                root_input_id: "request-follow-up".into(),
                 request_id: "request-follow-up".into(),
                 source_turn_id: Some("turn-follow-up".into()),
                 detached_recipient_agent_instance_id: None,
@@ -141,10 +142,11 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-root".into(),
-                internal_execution_id: "execution-root".into(),
+                run_id: "execution-root".into(),
+                execution_id: "execution-root".into(),
+                root_input_id: request.request_id.clone(),
                 request_id: request.request_id.clone(),
                 source_turn_id: request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: None,
@@ -188,10 +190,11 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
     store
         .commit_agent_command(
             "session-1",
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-steer".into(),
-                internal_execution_id: "execution-steer".into(),
+                run_id: "execution-steer".into(),
+                execution_id: "execution-steer".into(),
+                root_input_id: root_request.request_id.clone(),
                 request_id: root_request.request_id.clone(),
                 source_turn_id: root_request.source_turn_id.clone(),
                 detached_recipient_agent_instance_id: None,

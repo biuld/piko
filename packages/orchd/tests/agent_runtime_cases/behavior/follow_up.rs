@@ -82,7 +82,7 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
                     .iter()
                     .filter(|command| matches!(
                         command,
-                        AgentDurableCommand::RunStarted { input, .. }
+                        AgentDurableCommand::AgentInputProcessingStarted { input, .. }
                             if input.input_id == "follow-up-run"
                     ))
                     .count(),

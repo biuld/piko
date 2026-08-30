@@ -84,8 +84,9 @@ impl PendingTerminal {
         let result = port
             .commit_agent_command(
                 session_id,
-                AgentDurableCommand::RunTerminal {
-                    run_id: self.run_id.clone(),
+                AgentDurableCommand::AgentInputProcessingFinished {
+                    agent_instance_id: self.report.agent_instance_id.clone(),
+                    root_input_id: self.report.root_input_id.clone(),
                     report: self.report.clone(),
                     finished_at: self.finished_at,
                 },

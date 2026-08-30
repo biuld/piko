@@ -4,7 +4,7 @@ use piko_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{ExecutionStartedV1, MessageCommittedV1, ModelStepCommittedV1, TreeEntryRecordedV1};
+use crate::{MessageCommittedV1, ModelStepCommittedV1, TreeEntryRecordedV1};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredMessage {
@@ -29,14 +29,36 @@ pub struct StoredAgent {
     pub changed_at: i64,
 }
 
+/// Write-time projection of the processing facts on an applied root AgentInput.
+/// Start, finish, and outcome live on the root input; there is no Execution
+/// aggregate. The correlation anchors are interim until the message,
+/// model-step, and usage grains rekey onto `root_input_id` (slice 6.4).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StoredExecution {
-    pub started: ExecutionStartedV1,
-    pub message_head: Option<String>,
+pub struct StoredRootProcessing {
+    pub started_at: i64,
     #[serde(default)]
-    pub model_step_ids: Vec<String>,
-    pub report: Option<AgentWorkReport>,
     pub finished_at: Option<i64>,
+    #[serde(default)]
+    pub report: Option<AgentWorkReport>,
+    /// Interim commit-correlation identity for message, model-step, and usage
+    /// grains (slice 6.4 rekeys them onto the root input).
+    #[serde(default)]
+    pub execution_id: Option<String>,
+    /// Interim run correlation; equals the root request id in orchd today.
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub base_message_id: Option<String>,
+    #[serde(default)]
+    pub tree_base_entry_id: Option<String>,
+    #[serde(default)]
+    pub source_turn_id: Option<String>,
+    #[serde(default)]
+    pub detached_recipient_agent_instance_id: Option<String>,
+    #[serde(default)]
+    pub prompt_assembly_version: u32,
+    #[serde(default)]
+    pub prompt_digest: String,
 }
 
 /// Write-time projection of the primitive AgentInput admission fact.
@@ -60,6 +82,20 @@ pub struct StoredAgentInput {
     pub model_step_id: Option<String>,
     #[serde(default)]
     pub applied_message_id: Option<String>,
+    /// Processing facts on this input when it is an applied root. Absent for
+    /// steers, follow-ups, and cancelled inputs.
+    #[serde(default)]
+    pub processing: Option<StoredRootProcessing>,
+}
+
+impl StoredAgentInput {
+    /// True when this input is an applied root whose processing has started
+    /// but has no finish fact yet.
+    pub fn has_unfinished_processing(&self) -> bool {
+        self.processing
+            .as_ref()
+            .is_some_and(|processing| processing.finished_at.is_none())
+    }
 }
 
 fn default_admission_disposition() -> AgentInputDisposition {

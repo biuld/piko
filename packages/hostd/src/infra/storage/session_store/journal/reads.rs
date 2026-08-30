@@ -37,10 +37,18 @@ impl SessionStore {
     ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError> {
         Ok(self
             .aggregate()?
-            .executions
+            .agent_inputs
             .values()
-            .find(|execution| execution.started.source_turn_id.as_deref() == Some(turn_id))
-            .and_then(|execution| execution.report.clone()))
+            .filter(|input| {
+                input.input.input_id == turn_id
+                    || input
+                        .processing
+                        .as_ref()
+                        .and_then(|processing| processing.source_turn_id.as_deref())
+                        == Some(turn_id)
+            })
+            .filter_map(|input| input.processing.as_ref().and_then(|p| p.report.clone()))
+            .next())
     }
 
     pub fn agent_instances(&self) -> Result<Vec<AgentProjection>, SessionStorageError> {
@@ -78,13 +86,14 @@ impl SessionStore {
     ) -> Result<Vec<piko_orchd_api::RecoveredExecutionReport>, SessionStorageError> {
         Ok(self
             .aggregate()?
-            .executions
-            .into_values()
-            .filter(|execution| execution.started.agent_instance_id == agent_instance_id)
-            .filter_map(|execution| {
+            .agent_inputs
+            .values()
+            .filter(|input| input.input.agent_instance_id == agent_instance_id)
+            .filter_map(|input| {
+                let processing = input.processing.as_ref()?;
                 Some(piko_orchd_api::RecoveredExecutionReport {
-                    internal_execution_id: execution.started.execution_id,
-                    report: execution.report?,
+                    internal_execution_id: processing.execution_id.clone()?,
+                    report: processing.report.clone()?,
                 })
             })
             .collect())
@@ -115,15 +124,13 @@ impl SessionStore {
     ) -> Result<Vec<piko_orchd_api::RecoveredDetachedDelivery>, SessionStorageError> {
         let aggregate = self.aggregate()?;
         Ok(aggregate
-            .executions
+            .agent_inputs
             .values()
-            .filter(|execution| execution.started.agent_instance_id == source_agent_instance_id)
-            .filter_map(|execution| {
-                let recipient = execution
-                    .started
-                    .detached_recipient_agent_instance_id
-                    .clone()?;
-                let report = execution.report.clone()?;
+            .filter(|input| input.input.agent_instance_id == source_agent_instance_id)
+            .filter_map(|input| {
+                let processing = input.processing.as_ref()?;
+                let recipient = processing.detached_recipient_agent_instance_id.clone()?;
+                let report = processing.report.clone()?;
                 if aggregate.inbox.contains_key(&report.report_id) {
                     return None;
                 }

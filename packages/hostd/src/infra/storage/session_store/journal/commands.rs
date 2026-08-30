@@ -103,11 +103,12 @@ impl SessionStore {
             AgentDurableCommand::AgentInputDispositionChanged { change } => {
                 inputs::change_disposition(&aggregate, session_id, change)?
             }
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id,
-                run_id,
-                internal_execution_id,
+                root_input_id,
                 request_id,
+                execution_id,
+                run_id,
                 source_turn_id,
                 detached_recipient_agent_instance_id,
                 prompt_assembly_version,
@@ -117,11 +118,12 @@ impl SessionStore {
             } => inputs::start_run(
                 &aggregate,
                 session_id,
-                AgentDurableCommand::RunStarted {
+                AgentDurableCommand::AgentInputProcessingStarted {
                     agent_instance_id,
-                    run_id,
-                    internal_execution_id,
+                    root_input_id,
                     request_id,
+                    execution_id,
+                    run_id,
                     source_turn_id,
                     detached_recipient_agent_instance_id,
                     prompt_assembly_version,
@@ -130,11 +132,19 @@ impl SessionStore {
                     input,
                 },
             )?,
-            AgentDurableCommand::RunTerminal {
-                run_id,
+            AgentDurableCommand::AgentInputProcessingFinished {
+                agent_instance_id,
+                root_input_id,
                 report,
                 finished_at,
-            } => queue::finish_run(&aggregate, session_id, run_id, report, finished_at)?,
+            } => queue::finish_run(
+                &aggregate,
+                session_id,
+                agent_instance_id,
+                root_input_id,
+                report,
+                finished_at,
+            )?,
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id,
                 report,

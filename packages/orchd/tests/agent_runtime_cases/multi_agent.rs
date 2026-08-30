@@ -115,22 +115,22 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
                 .position(|command| {
                     matches!(
                         command,
-                        AgentDurableCommand::RunStarted {
+                        AgentDurableCommand::AgentInputProcessingStarted {
                             detached_recipient_agent_instance_id: Some(recipient),
                             ..
                         } if recipient == "root"
                     )
                 })
                 .expect("detached registration must be durable");
-            let (run_id, terminal_index) = commands
+            let (root_input_id, terminal_index) = commands
                 .iter()
                 .enumerate()
                 .find_map(|(index, command)| match command {
-                    AgentDurableCommand::RunTerminal { run_id, report, .. }
-                        if report.summary == "detached report" =>
-                    {
-                        Some((run_id, index))
-                    }
+                    AgentDurableCommand::AgentInputProcessingFinished {
+                        root_input_id,
+                        report,
+                        ..
+                    } if report.summary == "detached report" => Some((root_input_id, index)),
                     _ => None,
                 })
                 .expect("detached terminal must be durable");
@@ -151,7 +151,7 @@ async fn multi_agent_tools_use_trusted_context_for_attached_and_detached_spawn()
                     .iter()
                     .any(|command| matches!(
                         command,
-                        AgentDurableCommand::RunStarted { run_id: started, .. } if started == run_id
+                        AgentDurableCommand::AgentInputProcessingStarted { root_input_id: started, .. } if started == root_input_id
                     ))
             );
             drop(commands);

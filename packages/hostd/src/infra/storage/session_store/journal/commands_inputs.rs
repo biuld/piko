@@ -1,7 +1,7 @@
-//! Durable admission and root-run command handling.
+//! Durable admission and root-work command handling.
 
 use piko_protocol::{AgentDurableCommand, AgentInputDisposition, CommitError};
-use piko_session_store::{EventData, ExecutionStartedV1};
+use piko_session_store::{AgentInputProcessingStartedV1, EventData};
 
 use super::{admitted_base, admitted_tree_base, canonical_disposition, stable};
 
@@ -115,11 +115,12 @@ pub(super) fn start_run(
     session_id: &str,
     command: AgentDurableCommand,
 ) -> Result<(String, String, i64, Vec<EventData>), CommitError> {
-    let AgentDurableCommand::RunStarted {
+    let AgentDurableCommand::AgentInputProcessingStarted {
         agent_instance_id,
-        run_id,
-        internal_execution_id,
+        root_input_id,
         request_id,
+        execution_id,
+        run_id,
         source_turn_id,
         detached_recipient_agent_instance_id,
         prompt_assembly_version,
@@ -128,54 +129,61 @@ pub(super) fn start_run(
         input,
     } = command
     else {
-        unreachable!("root run helper called for another command")
+        unreachable!("root work helper called for another command")
     };
     if input.session_id != session_id
         || input.agent_instance_id != agent_instance_id
         || input.request_id != request_id
-        || input.input_id.is_empty()
+        || input.input_id != root_input_id
+        || root_input_id.is_empty()
     {
         return Err(CommitError::IdentityMismatch);
     }
-    if let Some(existing) = aggregate
-        .executions
-        .values()
-        .find(|execution| execution.started.run_id == run_id)
-    {
-        if existing.started.execution_id == internal_execution_id
-            && existing.started.agent_instance_id == agent_instance_id
-            && existing.started.request_id == request_id
-            && existing.started.source_turn_id == source_turn_id
-            && existing.started.detached_recipient_agent_instance_id
-                == detached_recipient_agent_instance_id
-            && existing.started.prompt_assembly_version == prompt_assembly_version
-            && existing.started.prompt_digest == prompt_digest
-            && aggregate
-                .agent_inputs
-                .get(&input.input_id)
-                .is_some_and(|stored| stored.input == input)
-        {
-            return Ok((String::new(), agent_instance_id, 0, Vec::new()));
-        }
+    if aggregate.agent_inputs.values().any(|stored| {
+        stored.processing.as_ref().and_then(|p| p.run_id.as_deref()) == Some(run_id.as_str())
+            && stored.input.input_id != root_input_id
+    }) {
         return Err(CommitError::IdempotencyConflict);
     }
-    let committed_run_id = run_id.clone();
-    let execution_event = EventData::ExecutionStarted(ExecutionStartedV1 {
-        run_id,
-        execution_id: internal_execution_id,
-        request_id,
-        admitted_revision: aggregate.revision,
-        base_message_id: admitted_base(aggregate, &agent_instance_id),
-        tree_base_entry_id: admitted_tree_base(aggregate, &agent_instance_id),
-        agent_instance_id: agent_instance_id.clone(),
-        source_turn_id,
-        detached_recipient_agent_instance_id,
-        prompt_assembly_version,
-        prompt_digest,
-        started_at,
-    });
+    let committed_input_id = root_input_id.clone();
+    if let Some(existing) = aggregate.agent_inputs.get(&root_input_id) {
+        if let Some(processing) = &existing.processing {
+            let matches = existing.input == input
+                && processing.started_at == started_at
+                && processing.execution_id.as_deref() == Some(execution_id.as_str())
+                && processing.run_id.as_deref() == Some(run_id.as_str())
+                && processing.source_turn_id == source_turn_id
+                && processing.detached_recipient_agent_instance_id
+                    == detached_recipient_agent_instance_id
+                && processing.prompt_assembly_version == prompt_assembly_version
+                && processing.prompt_digest == prompt_digest;
+            return if matches {
+                Ok((String::new(), agent_instance_id, 0, Vec::new()))
+            } else {
+                Err(CommitError::IdempotencyConflict)
+            };
+        }
+        if existing.input != input {
+            return Err(CommitError::IdempotencyConflict);
+        }
+    }
+    let processing_event =
+        EventData::AgentInputProcessingStartedV1(AgentInputProcessingStartedV1 {
+            agent_instance_id: agent_instance_id.clone(),
+            root_input_id: root_input_id.clone(),
+            request_id,
+            execution_id,
+            run_id,
+            base_message_id: admitted_base(aggregate, &agent_instance_id),
+            tree_base_entry_id: admitted_tree_base(aggregate, &agent_instance_id),
+            source_turn_id,
+            detached_recipient_agent_instance_id,
+            prompt_assembly_version,
+            prompt_digest,
+            started_at,
+        });
     let mut events = Vec::with_capacity(2);
-    match aggregate.agent_inputs.get(&input.input_id) {
+    match aggregate.agent_inputs.get(&root_input_id) {
         None => events.push(EventData::AgentInputAdmittedV1(
             piko_session_store::AgentInputAdmittedV1 {
                 input,
@@ -191,13 +199,12 @@ pub(super) fn start_run(
             if existing.input == input
                 && existing.disposition == AgentInputDisposition::PendingFollowUp =>
         {
-            let input_id = input.input_id.clone();
             events.push(EventData::AgentInputDispositionChangedV1(
                 piko_session_store::AgentInputDispositionChangedV1 {
                     agent_instance_id: agent_instance_id.clone(),
-                    input_id: input_id.clone(),
+                    input_id: root_input_id.clone(),
                     disposition: AgentInputDisposition::AppliedAsRoot,
-                    root_input_id: Some(input_id),
+                    root_input_id: Some(root_input_id),
                     model_step_id: None,
                     changed_at: started_at,
                 },
@@ -205,9 +212,9 @@ pub(super) fn start_run(
         }
         Some(_) => return Err(CommitError::IdempotencyConflict),
     }
-    events.push(execution_event);
+    events.push(processing_event);
     Ok((
-        stable("execution-start", &[session_id, &committed_run_id]),
+        stable("work-start", &[session_id, &committed_input_id]),
         agent_instance_id,
         started_at,
         events,

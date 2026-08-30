@@ -68,10 +68,11 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
     store
         .commit_agent_command(
             &session_id,
-            AgentDurableCommand::RunStarted {
+            AgentDurableCommand::AgentInputProcessingStarted {
                 agent_instance_id: root.agent_instance_id.clone(),
-                run_id: "run-interrupted".into(),
-                internal_execution_id: "exec-interrupted".into(),
+                run_id: "exec-interrupted".into(),
+                execution_id: "exec-interrupted".into(),
+                root_input_id: "request-interrupted".into(),
                 request_id: "request-interrupted".into(),
                 source_turn_id: Some("turn-interrupted".into()),
                 detached_recipient_agent_instance_id: None,

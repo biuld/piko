@@ -1,17 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec, AgentWorkReport,
-    TodoList,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec, TodoList,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{
-    CompactionRecordedV1, EventData, ExecutionStartedV1, RawEvent, SessionForkedV1,
-};
+use crate::schema::{CompactionRecordedV1, EventData, RawEvent, SessionForkedV1};
 use crate::{
     AccountingProjection, DurableCommit, ModelContinuity, Result, StoreError, StoredAgent,
-    StoredAgentInput, StoredExecution, StoredMessage, StoredModelStep, StoredTreeEntry,
+    StoredAgentInput, StoredMessage, StoredModelStep, StoredTreeEntry,
 };
 
 mod transcript;
@@ -39,14 +36,13 @@ pub struct SessionAggregate {
     /// from primitive facts whenever the aggregate advances.
     #[serde(default)]
     pub agent_work: BTreeMap<String, piko_protocol::AgentWorkSnapshot>,
-    /// Derived indexes rebuilt from `agent_inputs` and execution facts.
+    /// Derived indexes rebuilt from `agent_inputs` facts.
     #[serde(default)]
     pub active_root_by_agent: BTreeMap<String, String>,
     #[serde(default)]
     pub pending_inputs_by_agent: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub input_by_request: BTreeMap<String, String>,
-    pub executions: BTreeMap<String, StoredExecution>,
     #[serde(default)]
     pub model_steps: BTreeMap<String, StoredModelStep>,
     pub inbox: BTreeMap<String, AgentInboxItem>,
@@ -187,12 +183,12 @@ impl SessionAggregate {
                 self.apply_agent_input_disposition_changed(data)?
             }
             EventData::AgentInputAppliedV1(data) => self.apply_agent_input(revision, raw, data)?,
-            EventData::ExecutionStarted(started) => self.apply_execution_started(started)?,
-            EventData::ExecutionFinished {
-                execution_id,
-                report,
-                finished_at,
-            } => self.apply_execution_finished(execution_id, report, finished_at)?,
+            EventData::AgentInputProcessingStartedV1(data) => {
+                self.apply_agent_input_processing_started(data)?
+            }
+            EventData::AgentInputProcessingFinishedV1(data) => {
+                self.apply_agent_input_processing_finished(data)?
+            }
             EventData::ModelStepCommitted(data) => self.apply_model_step(revision, raw, data)?,
             EventData::InboxReportCommitted { item } => self.apply_inbox_committed(item)?,
             EventData::InboxReportConsumed {
@@ -346,70 +342,6 @@ impl SessionAggregate {
                 changed_at: created_at,
             },
         );
-        Ok(())
-    }
-
-    fn apply_execution_started(&mut self, started: ExecutionStartedV1) -> Result<()> {
-        self.agent(&started.agent_instance_id)?;
-        if self.executions.contains_key(&started.execution_id) {
-            return Err(StoreError::InvalidEvent("duplicate execution".into()));
-        }
-        if self.executions.values().any(|execution| {
-            execution.started.agent_instance_id == started.agent_instance_id
-                && execution.finished_at.is_none()
-        }) {
-            return Err(StoreError::InvalidEvent(
-                "agent already has an active execution".into(),
-            ));
-        }
-        let execution_id = started.execution_id.clone();
-        let started_for_input = started.clone();
-        self.executions.insert(
-            execution_id,
-            StoredExecution {
-                started,
-                message_head: None,
-                model_step_ids: Vec::new(),
-                report: None,
-                finished_at: None,
-            },
-        );
-        self.apply_execution_started_with_input(&started_for_input)?;
-        Ok(())
-    }
-
-    fn apply_execution_finished(
-        &mut self,
-        execution_id: String,
-        report: AgentWorkReport,
-        finished_at: i64,
-    ) -> Result<()> {
-        let execution = self
-            .executions
-            .get(&execution_id)
-            .ok_or_else(|| StoreError::InvalidEvent(format!("unknown execution {execution_id}")))?;
-        let expected_root_input_id = self
-            .agent_inputs
-            .values()
-            .find(|input| input.input.request_id == execution.started.request_id)
-            .and_then(|input| input.root_input_id.as_deref())
-            .ok_or_else(|| {
-                StoreError::InvalidEvent("execution completion has no root input".into())
-            })?;
-        if execution.finished_at.is_some()
-            || report.agent_instance_id != execution.started.agent_instance_id
-            || report.root_input_id != expected_root_input_id
-        {
-            return Err(StoreError::InvalidEvent(
-                "invalid execution completion".into(),
-            ));
-        }
-        let execution = self
-            .executions
-            .get_mut(&execution_id)
-            .expect("execution validated above");
-        execution.report = Some(report);
-        execution.finished_at = Some(finished_at);
         Ok(())
     }
 

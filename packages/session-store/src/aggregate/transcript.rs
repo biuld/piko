@@ -84,26 +84,34 @@ impl SessionAggregate {
         if self.model_steps.contains_key(&data.model_step_id) {
             return Err(StoreError::IdempotencyConflict(data.model_step_id));
         }
-        let execution = self.executions.get(&data.execution_id).ok_or_else(|| {
+        let execution_id = data.execution_id.clone();
+        let (root, processing) = self.work_by_execution_id(&execution_id).ok_or_else(|| {
             StoreError::InvalidEvent(format!(
-                "model step references unknown execution {}",
-                data.execution_id
+                "model step references unknown work execution {execution_id}"
             ))
         })?;
-        if execution.finished_at.is_some() {
+        if processing.finished_at.is_some() {
             return Err(StoreError::InvalidEvent(
-                "model step was committed after execution finished".into(),
+                "model step was committed after work finished".into(),
             ));
         }
-        if execution.started.run_id != data.run_id
-            || execution.started.agent_instance_id != data.agent_instance_id
-            || execution.started.source_turn_id != data.source_turn_id
+        if processing.run_id.as_deref() != Some(data.run_id.as_str())
+            || root.input.agent_instance_id != data.agent_instance_id
+            || processing.source_turn_id != data.source_turn_id
         {
             return Err(StoreError::InvalidEvent(
-                "model step identity does not match execution".into(),
+                "model step identity does not match the root work".into(),
             ));
         }
-        let expected_index = execution.model_step_ids.len() as u32 + 1;
+        if root.disposition != piko_protocol::AgentInputDisposition::AppliedAsRoot
+            || root.root_input_id.as_deref() != Some(root.input.input_id.as_str())
+        {
+            return Err(StoreError::InvalidEvent(
+                "model step does not reference an applied root input".into(),
+            ));
+        }
+        let root_input_id = root.input.input_id.clone();
+        let expected_index = self.work_model_step_count(&execution_id) as u32 + 1;
         if data.step_index != expected_index {
             return Err(StoreError::InvalidEvent(format!(
                 "model step index must be {expected_index}, got {}",
@@ -114,21 +122,13 @@ impl SessionAggregate {
             input.disposition == piko_protocol::AgentInputDisposition::AppliedToStep
                 && input.model_step_id.as_deref() == Some(data.model_step_id.as_str())
         }) {
-            let Some(root_input_id) = input.root_input_id.as_deref() else {
+            let Some(input_root_id) = input.root_input_id.as_deref() else {
                 return Err(StoreError::InvalidEvent(
                     "applied steer is missing its causal root".into(),
                 ));
             };
-            let Some(root) = self.agent_inputs.get(root_input_id) else {
-                return Err(StoreError::InvalidEvent(format!(
-                    "applied steer references unknown root input {root_input_id}"
-                )));
-            };
             if input.input.agent_instance_id != data.agent_instance_id
-                || root.input.agent_instance_id != data.agent_instance_id
-                || root.disposition != piko_protocol::AgentInputDisposition::AppliedAsRoot
-                || root.root_input_id.as_deref() != Some(root_input_id)
-                || root.input.request_id != execution.started.request_id
+                || input_root_id != root_input_id
             {
                 return Err(StoreError::InvalidEvent(
                     "applied steer does not match the model step root".into(),
@@ -196,9 +196,10 @@ impl SessionAggregate {
             }
             previous_parent = message_id.clone();
         }
-        if execution.message_head.as_deref() != Some(previous_parent.as_str()) {
+        let head = self.work_message_head(&execution_id).map(str::to_string);
+        if head.as_deref() != Some(previous_parent.as_str()) {
             return Err(StoreError::InvalidEvent(
-                "model step messages do not end at the execution head".into(),
+                "model step messages do not end at the work transcript head".into(),
             ));
         }
         match data.outcome {
@@ -226,11 +227,6 @@ impl SessionAggregate {
                 data: data.clone(),
             },
         );
-        self.executions
-            .get_mut(&data.execution_id)
-            .expect("execution validated above")
-            .model_step_ids
-            .push(data.model_step_id);
         Ok(())
     }
 
@@ -254,29 +250,29 @@ impl SessionAggregate {
             }
         }
         if let Some(execution_id) = &data.execution_id
-            && let Some(execution) = self.executions.get(execution_id)
+            && let Some((root, processing)) = self.work_by_execution_id(execution_id)
         {
-            if execution.started.agent_instance_id != data.agent_instance_id {
+            if root.input.agent_instance_id != data.agent_instance_id {
                 return Err(StoreError::InvalidEvent(
-                    "execution message belongs to another agent".into(),
+                    "work message belongs to another agent".into(),
                 ));
             }
-            let expected_parent = execution
-                .message_head
-                .as_ref()
-                .or(execution.started.base_message_id.as_ref());
-            if data.agent_parent_message_id.as_ref() != expected_parent {
+            let expected_parent = self
+                .work_message_head(execution_id)
+                .map(str::to_string)
+                .or_else(|| processing.base_message_id.clone());
+            if data.agent_parent_message_id != expected_parent {
                 return Err(StoreError::InvalidEvent(
-                    "execution message does not extend its admitted base".into(),
+                    "work message does not extend its admitted base".into(),
                 ));
             }
-            let expected_tree_parent = execution
-                .message_head
-                .as_ref()
-                .or(execution.started.tree_base_entry_id.as_ref());
-            if data.tree_parent_entry_id.as_ref() != expected_tree_parent {
+            let expected_tree_parent = self
+                .work_message_head(execution_id)
+                .map(str::to_string)
+                .or_else(|| processing.tree_base_entry_id.clone());
+            if data.tree_parent_entry_id != expected_tree_parent {
                 return Err(StoreError::InvalidEvent(
-                    "execution message does not extend its admitted tree base".into(),
+                    "work message does not extend its admitted tree base".into(),
                 ));
             }
         }
@@ -289,22 +285,16 @@ impl SessionAggregate {
             )));
         }
         let message_id = data.message_id.clone();
-        let execution_id = data.execution_id.clone();
         self.agent_heads
             .insert(data.agent_instance_id.clone(), message_id.clone());
         self.messages.insert(
-            message_id.clone(),
+            message_id,
             StoredMessage {
                 revision,
                 event_id: raw.event_id.clone(),
                 data,
             },
         );
-        if let Some(execution_id) = execution_id
-            && let Some(execution) = self.executions.get_mut(&execution_id)
-        {
-            execution.message_head = Some(message_id);
-        }
         Ok(())
     }
 }

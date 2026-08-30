@@ -108,8 +108,8 @@ impl RawEvent {
                 | "agent_input_admitted_v1"
                 | "agent_input_disposition_changed_v1"
                 | "agent_input_applied_v1"
-                | "execution_started"
-                | "execution_finished"
+                | "agent_input_processing_started_v1"
+                | "agent_input_processing_finished_v1"
                 | "model_step_committed"
                 | "inbox_report_committed"
                 | "inbox_report_consumed"
@@ -185,12 +185,8 @@ pub enum EventData {
     AgentInputAdmittedV1(AgentInputAdmittedV1),
     AgentInputDispositionChangedV1(AgentInputDispositionChangedV1),
     AgentInputAppliedV1(AgentInputAppliedV1),
-    ExecutionStarted(ExecutionStartedV1),
-    ExecutionFinished {
-        execution_id: String,
-        report: AgentWorkReport,
-        finished_at: i64,
-    },
+    AgentInputProcessingStartedV1(AgentInputProcessingStartedV1),
+    AgentInputProcessingFinishedV1(AgentInputProcessingFinishedV1),
     ModelStepCommitted(ModelStepCommittedV1),
     InboxReportCommitted {
         item: AgentInboxItem,
@@ -234,8 +230,8 @@ impl EventData {
             Self::AgentInputAdmittedV1(_) => "agent_input_admitted_v1",
             Self::AgentInputDispositionChangedV1(_) => "agent_input_disposition_changed_v1",
             Self::AgentInputAppliedV1(_) => "agent_input_applied_v1",
-            Self::ExecutionStarted(_) => "execution_started",
-            Self::ExecutionFinished { .. } => "execution_finished",
+            Self::AgentInputProcessingStartedV1(_) => "agent_input_processing_started_v1",
+            Self::AgentInputProcessingFinishedV1(_) => "agent_input_processing_finished_v1",
             Self::ModelStepCommitted(_) => "model_step_committed",
             Self::InboxReportCommitted { .. } => "inbox_report_committed",
             Self::InboxReportConsumed { .. } => "inbox_report_consumed",
@@ -296,22 +292,44 @@ pub struct UsageCorrectedV1 {
     pub reason: String,
 }
 
+/// Durable processing-start fact on the root AgentInput. This is the product
+/// processing boundary; there is no Execution aggregate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ExecutionStartedV1 {
-    pub run_id: String,
-    pub execution_id: String,
-    pub request_id: String,
+pub struct AgentInputProcessingStartedV1 {
     pub agent_instance_id: String,
-    pub admitted_revision: u64,
+    pub root_input_id: String,
+    pub request_id: String,
+    /// Interim commit-correlation identity for message, model-step, and usage
+    /// grains until they rekey onto `root_input_id` (slice 6.4).
+    #[serde(default)]
+    pub execution_id: String,
+    /// Interim run correlation; equals the root request id in orchd today.
+    #[serde(default)]
+    pub run_id: String,
     pub base_message_id: Option<String>,
     #[serde(default)]
     pub tree_base_entry_id: Option<String>,
+    #[serde(default)]
     pub source_turn_id: Option<String>,
+    #[serde(default)]
     pub detached_recipient_agent_instance_id: Option<String>,
+    #[serde(default)]
     pub prompt_assembly_version: u32,
+    #[serde(default)]
     pub prompt_digest: String,
     pub started_at: i64,
+}
+
+/// Durable processing-finish fact on the root AgentInput. The report carries
+/// the work outcome; there is no Execution aggregate.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInputProcessingFinishedV1 {
+    pub agent_instance_id: String,
+    pub root_input_id: String,
+    pub report: AgentWorkReport,
+    pub finished_at: i64,
 }
 
 /// Durable admission fact for one immutable AgentInput.

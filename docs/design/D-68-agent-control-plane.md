@@ -1,7 +1,7 @@
 # D-68: AgentInput work model and control plane
 
-> Status: proposed (slices 1–5 and slices 6.1–6.2 landed. Slice 6.3+ leftover
-> cleanup remains: Execution product maps, grain rekeys, recovery)
+> Status: proposed (slices 1–5 and slices 6.1–6.3 landed. Slice 6.4+ leftover
+> cleanup remains: grain rekeys, recovery)
 > Implements: [F-51](../features/F-51-agent-control-plane.md)
 > Decisions: [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md), [ADR-025](../decisions/ADR-025-authoritative-agent-lifecycle.md), [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
 
@@ -417,15 +417,13 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 - Receipts use `input_id` / `root_input_id`. Prompt staging, tool restriction,
   `source_turn_id`, and `message_id` stay on `AgentInputRuntime` (not durable).
 
-### Slice 4 — Host control plane (implemented; Execution leftover open)
+### Slice 4 — Host control plane (implemented)
 
 - `AgentWorkControl` is the only application use case behind dispatch.
 - `ChatSubmit` / `QueueSteer` / `TurnCancel`, host `TurnRecord`, and
   `steer_queue` are gone.
 - Queue, foreground, and active work project from AgentInput facts and
   `AgentWorkSnapshot`.
-- Open: `StoredExecution` product storage (Slice 6.3). Host observation no
-  longer admits through `run_agent(AgentRunInput)`.
 
 ### Slice 5 — TUI cutover (implemented)
 
@@ -434,7 +432,7 @@ Keep `AgentInterrupt` end to end. Esc targets the viewed AgentInstance.
 - Composer busy/steer/queue and desktop chrome compile against `agent_work`.
 - `piko-desktop` remains out of product scope.
 
-### Slice 6 — Remaining leftover cleanup (6.3+ open)
+### Slice 6 — Remaining leftover cleanup (6.4+ open)
 
 Land in this order. Do not introduce a replacement Turn/Run/Execution product
 type; keep AgentInput / `agent_work` / `AgentWorkReport`.
@@ -449,13 +447,25 @@ type; keep AgentInput / `agent_work` / `AgentWorkReport`.
    `AgentWorkSnapshot` / `AgentInputSubmitted` / work terminal facts.
    Remaining Turn-named fields (`TurnId`, `TurnDiffEvent`,
    `UsageEvent.turn_id`, `source_turn_id`, `QueueEvent`) stay until Slice 6.4.
-3. **Execution product maps.** Delete `StoredExecution` as a session-store
-   aggregate and stop treating `execution_started` / `execution_finished` as
-   the product processing boundary. Start/finish/interrupt remain facts on
-   the root AgentInput. orchd may keep an internal actor keyed only by
-   `root_input_id`.
-4. **Rekey remaining grains.** Trajectory, prompt assembly, and usage that
-   still key by `turn_id` / `execution_id` move to `root_input_id`.
+3. **Execution product maps (implemented).** `StoredExecution` and the
+   `executions` aggregate map are gone. The journal stores
+   `agent_input_processing_started_v1` / `agent_input_processing_finished_v1`
+   as facts on the root AgentInput (the finish fact carries the
+   `AgentWorkReport`); `execution_started` / `execution_finished` are no
+   longer decodable (`READER_VERSION` 3). Per-root processing state lives on
+   `StoredAgentInput.processing`; transcript head and model-step continuity
+   are derived from committed messages and steps. orchd keeps its internal
+   execution actor, still keyed by the interim `execution_id` derived from
+   the request; that key is removed with the commit-grain rekey below.
+4. **Rekey remaining grains.** Message, model-step, usage, trajectory, and
+   prompt-assembly correlations that still carry `execution_id` / `run_id` /
+   `source_turn_id` (including `MessageCommittedV1.execution_id`,
+   `ModelStepCommittedV1.run_id`/`execution_id`, `UsageAttribution`,
+   `AgentInputAppliedV1.execution_id`, the processing-fact interim anchors,
+   `RecoveredExecutionReport.internal_execution_id`, and the abort-marker
+   message ids) move to `root_input_id`. The orchd internal actor and
+   `SessionExecutionScope` rekey onto `root_input_id`, and the trajectory
+   read model keys runs by root input.
 5. **Recovery and evidence.** Crash-point, race, restart, and two-TUI
    matrices. Then mark F-51 / V-64 implemented.
 
