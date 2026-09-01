@@ -71,7 +71,7 @@ impl AgentExecutionRuntime {
             request
                 .world_state
                 .as_ref()
-                .map(|message| piko_protocol::execution::MessageCommit {
+                .map(|message| piko_protocol::agent_work::MessageCommit {
                     session_id: request.session_id.clone(),
                     root_input_id: request.root_input_id.clone(),
                     agent_instance_id: request.agent_instance_id.clone(),
@@ -99,7 +99,7 @@ impl AgentExecutionRuntime {
                     return Err(AgentApiError::InputRejected);
                 }
             };
-            let commit = piko_protocol::execution::MessageCommit {
+            let commit = piko_protocol::agent_work::MessageCommit {
                 session_id: request.session_id.clone(),
                 root_input_id: request.root_input_id.clone(),
                 agent_instance_id: request.agent_instance_id.clone(),
@@ -129,7 +129,7 @@ impl AgentExecutionRuntime {
                     return Err(AgentApiError::InputRejected);
                 }
             };
-            let commit = piko_protocol::execution::MessageCommit {
+            let commit = piko_protocol::agent_work::MessageCommit {
                 session_id: request.session_id.clone(),
                 root_input_id: request.root_input_id.clone(),
                 agent_instance_id: request.agent_instance_id.clone(),
@@ -142,7 +142,7 @@ impl AgentExecutionRuntime {
             chain_parent = Some(message_id);
             mention_commits.push(commit);
         }
-        let input_commit = piko_protocol::execution::MessageCommit {
+        let input_commit = piko_protocol::agent_work::MessageCommit {
             session_id: request.session_id.clone(),
             root_input_id: request.root_input_id.clone(),
             agent_instance_id: request.agent_instance_id.clone(),

@@ -129,7 +129,7 @@ impl HostServer {
                         )
                         .await;
                     } else {
-                        server.rebuild_turn_runner().await;
+                        server.rebuild_agent_runner().await;
                         let _ = tx_clone
                             .send(ServerMessage::Auth(crate::api::AuthEvent::LoginSuccess {
                                 login_id: Some(login_id.clone()),
@@ -192,7 +192,7 @@ impl HostServer {
         };
 
         // Auth is durable; rebuild so turns no longer hit a stale error runner.
-        self.rebuild_turn_runner().await;
+        self.rebuild_agent_runner().await;
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoginSuccess {
@@ -225,7 +225,7 @@ impl HostServer {
         };
 
         // Dropping credentials may invalidate the active default provider.
-        self.rebuild_turn_runner().await;
+        self.rebuild_agent_runner().await;
 
         Ok(vec![
             ServerMessage::Auth(crate::api::AuthEvent::LoggedOut { provider }),

@@ -2,7 +2,7 @@
 
 > Date: 2026-08-04
 > Fixture: protocol command round-trip (`packages/protocol/src/command.rs`),
-> hostd runner status port (`adapters/turns/orch_runner/tests.rs`), TUI
+> hostd runner status port (`adapters/agent_runner/orch_runner/tests.rs`), TUI
 > slash/event/panel (`packages/tui/src/app/{tests,command,dispatch,event}.rs`,
 > `features/mcp/mod.rs`); full workspace suite
 > Environment: macOS (arm64), `cargo test --workspace`,

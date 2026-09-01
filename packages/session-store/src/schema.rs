@@ -110,6 +110,9 @@ impl RawEvent {
                 | "agent_input_applied_v1"
                 | "agent_input_processing_started_v1"
                 | "agent_input_processing_finished_v1"
+                | "agent_pending_action_requested_v1"
+                | "agent_pending_action_resolved_v1"
+                | "agent_interrupt_requested_v1"
                 | "model_step_committed"
                 | "inbox_report_committed"
                 | "inbox_report_consumed"
@@ -187,6 +190,9 @@ pub enum EventData {
     AgentInputAppliedV1(AgentInputAppliedV1),
     AgentInputProcessingStartedV1(AgentInputProcessingStartedV1),
     AgentInputProcessingFinishedV1(AgentInputProcessingFinishedV1),
+    AgentPendingActionRequestedV1(AgentPendingActionRequestedV1),
+    AgentPendingActionResolvedV1(AgentPendingActionResolvedV1),
+    AgentInterruptRequestedV1(AgentInterruptRequestedV1),
     ModelStepCommitted(ModelStepCommittedV1),
     InboxReportCommitted {
         item: AgentInboxItem,
@@ -232,6 +238,9 @@ impl EventData {
             Self::AgentInputAppliedV1(_) => "agent_input_applied_v1",
             Self::AgentInputProcessingStartedV1(_) => "agent_input_processing_started_v1",
             Self::AgentInputProcessingFinishedV1(_) => "agent_input_processing_finished_v1",
+            Self::AgentPendingActionRequestedV1(_) => "agent_pending_action_requested_v1",
+            Self::AgentPendingActionResolvedV1(_) => "agent_pending_action_resolved_v1",
+            Self::AgentInterruptRequestedV1(_) => "agent_interrupt_requested_v1",
             Self::ModelStepCommitted(_) => "model_step_committed",
             Self::InboxReportCommitted { .. } => "inbox_report_committed",
             Self::InboxReportConsumed { .. } => "inbox_report_consumed",
@@ -319,6 +328,32 @@ pub struct AgentInputProcessingFinishedV1 {
     pub root_input_id: String,
     pub report: AgentWorkReport,
     pub finished_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPendingActionRequestedV1 {
+    pub agent_instance_id: String,
+    pub root_input_id: String,
+    pub action: piko_protocol::PendingActionSummary,
+    pub requested_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPendingActionResolvedV1 {
+    pub agent_instance_id: String,
+    pub root_input_id: String,
+    pub action_id: String,
+    pub resolved_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInterruptRequestedV1 {
+    pub agent_instance_id: String,
+    pub root_input_id: String,
+    pub requested_at: i64,
 }
 
 /// Durable admission fact for one immutable AgentInput.

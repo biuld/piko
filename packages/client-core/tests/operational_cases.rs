@@ -177,7 +177,6 @@ fn queue_update_populates_projection() {
     let queue = &state.live_session.as_ref().unwrap().queue;
     assert_eq!(queue.steer_count, 1);
     assert_eq!(queue.follow_up_count, 2);
-    assert_eq!(queue.next_turn_count, 2);
 }
 
 #[test]

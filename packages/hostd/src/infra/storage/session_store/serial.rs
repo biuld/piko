@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use piko_protocol::execution::CommitError;
+use piko_protocol::agent_work::CommitError;
 
 use super::SessionStore;
 

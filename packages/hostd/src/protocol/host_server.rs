@@ -50,25 +50,25 @@ impl HostServer {
         Self(HostApp::with_storage(storage))
     }
 
-    pub fn with_turn_runner(turn_runner: Arc<dyn AgentRunRunner>) -> Self {
-        Self(HostApp::with_turn_runner(turn_runner))
+    pub fn with_agent_runner(agent_runner: Arc<dyn AgentRunRunner>) -> Self {
+        Self(HostApp::with_agent_runner(agent_runner))
     }
 
     pub fn with_storage_and_runner(
         storage: JsonlSessionRepository,
-        turn_runner: Arc<dyn AgentRunRunner>,
+        agent_runner: Arc<dyn AgentRunRunner>,
     ) -> Self {
-        Self(HostApp::with_storage_and_runner(storage, turn_runner))
+        Self(HostApp::with_storage_and_runner(storage, agent_runner))
     }
 
     pub fn with_storage_runner_settings(
         storage: JsonlSessionRepository,
-        turn_runner: Arc<dyn AgentRunRunner>,
+        agent_runner: Arc<dyn AgentRunRunner>,
         settings: HostSettings,
     ) -> Self {
         Self(HostApp::with_storage_runner_settings(
             storage,
-            turn_runner,
+            agent_runner,
             settings,
         ))
     }
@@ -78,11 +78,11 @@ impl HostServer {
     /// Startup and model config changes share this path. Auth login/logout must
     /// also call it so an `ErrorAgentRunRunner` installed when credentials were
     /// missing is replaced after keys land in `auth.json`.
-    pub(crate) async fn rebuild_turn_runner(&self) {
+    pub(crate) async fn rebuild_agent_runner(&self) {
         use crate::ports::ErrorAgentRunRunner;
 
         let settings = self.settings.lock().await.clone();
-        let (runner, executor, active_model) = super::build_orch_turn_runner(&settings)
+        let (runner, executor, active_model) = super::build_orch_agent_runner(&settings)
             .await
             .unwrap_or_else(|e| {
                 (
@@ -91,7 +91,7 @@ impl HostServer {
                     None,
                 )
             });
-        *self.turn_runner.lock().await = runner;
+        *self.agent_runner.lock().await = runner;
         if let Some(exec) = executor {
             self.set_model_executor(exec).await;
         }

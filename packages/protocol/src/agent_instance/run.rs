@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::{ExecutionOutcome, MessageContent, Usage};
+use crate::{AgentWorkOutcome, MessageContent, Usage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -9,7 +9,7 @@ pub struct AgentWorkReport {
     pub agent_instance_id: AgentInstanceId,
     pub root_input_id: AgentInputId,
     pub report_id: String,
-    pub outcome: ExecutionOutcome,
+    pub outcome: AgentWorkOutcome,
     pub summary: String,
     pub usage: Usage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -80,8 +80,7 @@ pub struct SendAgentInputRequest {
     pub agent_instance_id: AgentInstanceId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller_agent_instance_id: Option<AgentInstanceId>,
-    /// Interaction Turn this input is bound to. `Some` on the root Turn path,
-    /// `None` for child agent runs spawned by multi-agent tools.
+    /// Live correlation only. Durable work identity lives on `AgentInput`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<String>,
     pub message_id: String,

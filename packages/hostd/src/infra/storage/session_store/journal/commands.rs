@@ -112,6 +112,10 @@ impl SessionStore {
                 prompt_digest,
                 started_at,
                 input,
+                input_message_id,
+                input_parent_message_id,
+                input_tree_parent_entry_id,
+                input_committed_at,
             } => inputs::start_run(
                 &aggregate,
                 session_id,
@@ -124,6 +128,10 @@ impl SessionStore {
                     prompt_digest,
                     started_at,
                     input,
+                    input_message_id,
+                    input_parent_message_id,
+                    input_tree_parent_entry_id,
+                    input_committed_at,
                 },
             )?,
             AgentDurableCommand::AgentInputProcessingFinished {
@@ -139,6 +147,96 @@ impl SessionStore {
                 report,
                 finished_at,
             )?,
+            AgentDurableCommand::PendingActionRequested {
+                agent_instance_id,
+                root_input_id,
+                action,
+                requested_at,
+            } => {
+                if let Some(existing) = aggregate.pending_actions.get(&action.action_id) {
+                    if existing.agent_instance_id == agent_instance_id
+                        && existing.root_input_id == root_input_id
+                        && existing.action == action
+                    {
+                        return Ok(agent_ack(
+                            session_id,
+                            &agent_instance_id,
+                            aggregate.revision,
+                        ));
+                    }
+                    return Err(CommitError::IdempotencyConflict);
+                }
+                (
+                    stable("pending-action-request", &[session_id, &action.action_id]),
+                    agent_instance_id.clone(),
+                    requested_at,
+                    vec![EventData::AgentPendingActionRequestedV1(
+                        piko_session_store::AgentPendingActionRequestedV1 {
+                            agent_instance_id,
+                            root_input_id,
+                            action,
+                            requested_at,
+                        },
+                    )],
+                )
+            }
+            AgentDurableCommand::PendingActionResolved {
+                agent_instance_id,
+                root_input_id,
+                action_id,
+                resolved_at,
+            } => {
+                let Some(existing) = aggregate.pending_actions.get(&action_id) else {
+                    return Ok(agent_ack(
+                        session_id,
+                        &agent_instance_id,
+                        aggregate.revision,
+                    ));
+                };
+                if existing.agent_instance_id != agent_instance_id
+                    || existing.root_input_id != root_input_id
+                {
+                    return Err(CommitError::IdentityMismatch);
+                }
+                (
+                    stable("pending-action-resolve", &[session_id, &action_id]),
+                    agent_instance_id.clone(),
+                    resolved_at,
+                    vec![EventData::AgentPendingActionResolvedV1(
+                        piko_session_store::AgentPendingActionResolvedV1 {
+                            agent_instance_id,
+                            root_input_id,
+                            action_id,
+                            resolved_at,
+                        },
+                    )],
+                )
+            }
+            AgentDurableCommand::InterruptRequested {
+                agent_instance_id,
+                root_input_id,
+                requested_at,
+            } => {
+                if aggregate.interrupt_requested_roots.contains(&root_input_id) {
+                    return Ok(agent_ack(
+                        session_id,
+                        &agent_instance_id,
+                        aggregate.revision,
+                    ));
+                }
+                (
+                    stable("interrupt-request", &[session_id, &root_input_id]),
+                    agent_instance_id.clone(),
+                    requested_at,
+                    vec![EventData::AgentInterruptRequestedV1(
+                        piko_session_store::AgentInterruptRequestedV1 {
+                            agent_instance_id,
+                            root_input_id,
+                            requested_at,
+                        },
+                    )],
+                )
+            }
             AgentDurableCommand::CommitReport {
                 recipient_agent_instance_id,
                 report,

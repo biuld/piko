@@ -149,7 +149,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
         tokio::task::yield_now().await;
     }
     runtime
-        .cancel_agent_run("session-cancel-marker".into(), "root".into())
+        .interrupt_agent("session-cancel-marker".into(), "root".into())
         .await
         .unwrap();
     let report = tokio::time::timeout(
@@ -165,7 +165,7 @@ async fn cancelled_run_commits_a_durable_abort_marker() {
     .unwrap();
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::AgentWorkOutcome::Cancelled { .. }
     ));
 
     let execution_id = "cancel-marker-run";
@@ -257,7 +257,7 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .cancel_agent_run("session-start-cancel-marker".into(), "root".into())
+                .interrupt_agent("session-start-cancel-marker".into(), "root".into())
                 .await
         })
     };
@@ -267,7 +267,7 @@ async fn startup_cancel_commits_a_durable_abort_marker() {
     let report = running.await.unwrap().unwrap();
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::AgentWorkOutcome::Cancelled { .. }
     ));
     assert!(cancelling.await.unwrap().unwrap().accepted);
     assert_eq!(model.call_count().await, 0);

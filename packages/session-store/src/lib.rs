@@ -38,7 +38,8 @@ pub use readmodels::{
 };
 pub use schema::{
     AgentInputAdmittedV1, AgentInputAppliedV1, AgentInputDispositionChangedV1,
-    AgentInputProcessingFinishedV1, AgentInputProcessingStartedV1, CompactionRecordedV1,
+    AgentInputProcessingFinishedV1, AgentInputProcessingStartedV1, AgentInterruptRequestedV1,
+    AgentPendingActionRequestedV1, AgentPendingActionResolvedV1, CompactionRecordedV1,
     Compatibility, EventData, MessageCommittedV1, ModelStepCommittedV1, RawEvent, SessionForkedV1,
     TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1, UsageRecordedV1,
 };

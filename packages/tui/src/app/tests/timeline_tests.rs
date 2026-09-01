@@ -52,6 +52,36 @@ fn committed_messages_use_task_seq_not_arrival_order() {
 }
 
 #[test]
+fn streaming_assistant_that_arrives_first_renders_after_its_user_prompt() {
+    let mut app = live_app();
+    let Event::StreamItem(mut patch) = realtime(
+        "assistant-1",
+        0,
+        piko_protocol::agent_runtime::RealtimeDelta::Text {
+            content_index: 0,
+            delta: "answer".into(),
+        },
+    ) else {
+        unreachable!("realtime helper returns a stream item")
+    };
+    patch.fields.as_mut().unwrap()["rootInputId"] = json!("work-1");
+    app.apply_event(Event::StreamItem(patch));
+    app.apply_event(committed(
+        "user-1",
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("question".into()),
+            timestamp: None,
+        },
+    ));
+
+    assert_eq!(
+        app.timeline().component_kinds(),
+        vec![TimelineKind::User, TimelineKind::Assistant]
+    );
+}
+
+#[test]
 fn commit_before_realtime_never_creates_a_second_draft() {
     let mut app = live_app();
     app.apply_event(committed("assistant-1", 2, assistant("complete")));

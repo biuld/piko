@@ -57,7 +57,7 @@ async fn follow_up_runs_as_a_later_execution_on_the_same_agent() {
     )));
     commits.fail_next_queued_start();
     runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
 
@@ -158,7 +158,7 @@ async fn canonical_follow_up_retry_preserves_distinct_input_identity() {
     assert_eq!(cancelled.input_id, "canonical-follow-up-input");
     assert_eq!(cancelled.request_id, "canonical-follow-up-request");
     runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
 }
@@ -213,7 +213,7 @@ async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
         .await
         .unwrap();
     runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -241,7 +241,7 @@ async fn queued_follow_up_keeps_root_identity_when_it_becomes_active() {
         .expect("the active queued follow-up must accept steer");
     assert_eq!(steer.disposition, piko_protocol::AgentInputDisposition::PendingSteer);
     runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
 }
@@ -319,7 +319,7 @@ async fn queued_follow_up_can_be_cancelled_before_it_starts() {
                 && change.disposition == piko_protocol::AgentInputDisposition::Cancelled
     )));
     runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
     assert_eq!(model.call_count().await, 1);

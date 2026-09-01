@@ -1,8 +1,6 @@
 //! Per-AgentInstance foreground work projection (F-22 / F-51).
 //!
-//! Prefer the host-authored [`AgentWorkSnapshot`]. Local pending
-//! approvals/interactions still upgrade the view to RequiresAction
-//! before the next snapshot arrives.
+//! The host-authored [`AgentWorkSnapshot`] is the sole foreground authority.
 
 use piko_protocol::{AgentActivity, AgentForeground, AgentInfo, AgentInstanceId};
 
@@ -10,27 +8,10 @@ use crate::state::{LiveSession, PendingApproval, PendingInteraction};
 
 /// Project foreground work for one agent instance.
 pub fn agent_foreground(agent_instance_id: &str, session: &LiveSession) -> AgentForeground {
-    let blocked = session
-        .pending_approvals
-        .iter()
-        .any(|a| a.agent_instance_id == agent_instance_id)
-        || session
-            .pending_interactions
-            .iter()
-            .any(|i| i.agent_instance_id == agent_instance_id);
-    if blocked {
-        return AgentForeground::RequiresAction;
-    }
-    if let Some(work) = session.agent_work.get(agent_instance_id) {
-        return work.foreground;
-    }
-    let activity = session
-        .agents
-        .iter()
-        .find(|a| a.agent_instance_id == agent_instance_id)
-        .map(|a| &a.activity);
-    activity
-        .map(AgentForeground::from_activity)
+    session
+        .agent_work
+        .get(agent_instance_id)
+        .map(|work| work.foreground)
         .unwrap_or(AgentForeground::Idle)
 }
 
@@ -151,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn approval_forces_requires_action() {
+    fn pending_approval_does_not_override_host_work() {
         let session = session(
             vec![agent("a1", AgentActivity::Running)],
             vec![work("a1", AgentForeground::Running)],
@@ -164,10 +145,7 @@ mod tests {
                 response_in_flight: false,
             }],
         );
-        assert_eq!(
-            agent_foreground("a1", &session),
-            AgentForeground::RequiresAction
-        );
+        assert_eq!(agent_foreground("a1", &session), AgentForeground::Running);
     }
 
     #[test]
@@ -179,13 +157,13 @@ mod tests {
     }
 
     #[test]
-    fn activity_fallback_when_no_work_snapshot() {
+    fn activity_does_not_replace_missing_work_snapshot() {
         let session = session(
             vec![agent("a1", AgentActivity::Running)],
             Vec::new(),
             Vec::new(),
         );
-        assert_eq!(agent_foreground("a1", &session), AgentForeground::Running);
+        assert_eq!(agent_foreground("a1", &session), AgentForeground::Idle);
     }
 
     #[test]

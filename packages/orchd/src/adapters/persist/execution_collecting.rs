@@ -2,13 +2,15 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use piko_orchd_api::ExecutionCommitPort;
-use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
+use piko_protocol::AgentInputDispositionChange;
+use piko_protocol::agent_work::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
 
 /// Test sink for the Execution commit port.
 #[derive(Debug, Default)]
 pub struct CollectingExecutionCommitPort {
     messages: Mutex<Vec<MessageCommit>>,
     model_steps: Mutex<Vec<ModelStepCommit>>,
+    steer_changes: Mutex<Vec<AgentInputDispositionChange>>,
     next_revision: Mutex<u64>,
 }
 
@@ -29,6 +31,18 @@ impl ExecutionCommitPort for CollectingExecutionCommitPort {
         };
         self.messages.lock().expect("messages lock").push(commit);
         Ok(ack)
+    }
+
+    async fn commit_steer(
+        &self,
+        message: MessageCommit,
+        change: AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.steer_changes
+            .lock()
+            .expect("steer changes lock")
+            .push(change);
+        self.commit_message(message).await
     }
 
     async fn commit_model_step(&self, commit: ModelStepCommit) -> Result<CommitAck, CommitError> {
@@ -68,5 +82,12 @@ impl CollectingExecutionCommitPort {
 
     pub fn model_steps(&self) -> Vec<ModelStepCommit> {
         self.model_steps.lock().expect("model steps lock").clone()
+    }
+
+    pub fn steer_changes(&self) -> Vec<AgentInputDispositionChange> {
+        self.steer_changes
+            .lock()
+            .expect("steer changes lock")
+            .clone()
     }
 }

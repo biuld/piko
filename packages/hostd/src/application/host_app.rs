@@ -22,7 +22,7 @@ use crate::ports::{AgentRunRunner, ErrorAgentRunRunner, TranscriptEstimator};
 /// type: command routing/transport lives in `protocol`, use-case bodies live
 /// here.
 ///
-/// `application::turns` / `application::sessions` bodies only ever see the
+/// `application::agent_work` / `application::sessions` bodies only ever see the
 /// port traits (`SessionRepositoryPort`, `SessionStoreFactory`,
 /// `PromptMaterialLoader`, `AgentRunRunner`) — never `crate::infra` or
 /// `crate::adapters` directly. The default-adapter wiring below is the one
@@ -35,7 +35,7 @@ pub struct HostApp {
     pub(crate) state: Arc<Mutex<HostState>>,
     pub(crate) storage: Option<Arc<dyn SessionRepositoryPort>>,
     pub(crate) session_paths: Arc<Mutex<HashMap<String, PathBuf>>>,
-    pub(crate) turn_runner: Arc<Mutex<Arc<dyn AgentRunRunner>>>,
+    pub(crate) agent_runner: Arc<Mutex<Arc<dyn AgentRunRunner>>>,
     pub(crate) model_executor: Arc<Mutex<Option<Arc<dyn InferenceGateway>>>>,
     pub(crate) settings: Arc<Mutex<HostSettings>>,
     pub(crate) model_registry: Arc<Mutex<ModelRegistry>>,
@@ -65,7 +65,7 @@ impl Default for HostApp {
 }
 
 impl HostApp {
-    fn default_turn_runner() -> Arc<dyn AgentRunRunner> {
+    fn default_agent_runner() -> Arc<dyn AgentRunRunner> {
         Arc::new(ErrorAgentRunRunner::new("turn runner not configured"))
     }
 
@@ -90,7 +90,7 @@ impl HostApp {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_runner: Arc::new(Mutex::new(Self::default_turn_runner())),
+            agent_runner: Arc::new(Mutex::new(Self::default_agent_runner())),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -107,15 +107,15 @@ impl HostApp {
     }
 
     pub fn with_storage(storage: impl SessionRepositoryPort + 'static) -> Self {
-        Self::with_storage_and_runner(storage, Self::default_turn_runner())
+        Self::with_storage_and_runner(storage, Self::default_agent_runner())
     }
 
-    pub fn with_turn_runner(turn_runner: Arc<dyn AgentRunRunner>) -> Self {
+    pub fn with_agent_runner(agent_runner: Arc<dyn AgentRunRunner>) -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: None,
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_runner: Arc::new(Mutex::new(turn_runner)),
+            agent_runner: Arc::new(Mutex::new(agent_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -133,13 +133,13 @@ impl HostApp {
 
     pub fn with_storage_and_runner(
         storage: impl SessionRepositoryPort + 'static,
-        turn_runner: Arc<dyn AgentRunRunner>,
+        agent_runner: Arc<dyn AgentRunRunner>,
     ) -> Self {
         Self {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(Arc::new(storage)),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_runner: Arc::new(Mutex::new(turn_runner)),
+            agent_runner: Arc::new(Mutex::new(agent_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(HostSettings::default())),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(
@@ -157,7 +157,7 @@ impl HostApp {
 
     pub fn with_storage_runner_settings(
         storage: impl SessionRepositoryPort + 'static,
-        turn_runner: Arc<dyn AgentRunRunner>,
+        agent_runner: Arc<dyn AgentRunRunner>,
         settings: HostSettings,
     ) -> Self {
         let auth = AuthStorage::create(None)
@@ -166,7 +166,7 @@ impl HostApp {
             state: Arc::new(Mutex::new(HostState::new())),
             storage: Some(Arc::new(storage)),
             session_paths: Arc::new(Mutex::new(HashMap::new())),
-            turn_runner: Arc::new(Mutex::new(turn_runner)),
+            agent_runner: Arc::new(Mutex::new(agent_runner)),
             model_executor: Arc::new(Mutex::new(None)),
             settings: Arc::new(Mutex::new(settings)),
             model_registry: Arc::new(Mutex::new(ModelRegistry::new(auth, vec![]))),
@@ -191,7 +191,7 @@ impl HostApp {
     /// both trimmed immediately.
     pub(crate) async fn wire_context_window_callback(&self) {
         let host = self.clone();
-        let runner = self.turn_runner.lock().await.clone();
+        let runner = self.agent_runner.lock().await.clone();
         let callback: piko_orchd::tools::NewContextWindowCallback =
             Arc::new(move |session_id, agent_instance_id| {
                 let host = host.clone();
@@ -214,7 +214,7 @@ impl HostApp {
     /// application to run the bounded review over the durable session tree.
     pub(crate) async fn wire_guardian_callback(&self) {
         let host = self.clone();
-        let runner = self.turn_runner.lock().await.clone();
+        let runner = self.agent_runner.lock().await.clone();
         let callback: crate::domain::guardian::GuardianReviewCallback =
             Arc::new(move |session_id, request| {
                 let host = host.clone();

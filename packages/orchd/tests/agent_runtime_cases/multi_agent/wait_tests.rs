@@ -33,7 +33,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     runtime
-        .cancel_agent_run("session-1".into(), child.clone())
+        .interrupt_agent("session-1".into(), child.clone())
         .await
         .unwrap();
     let result = wait_task.await.unwrap();
@@ -79,7 +79,7 @@ async fn v2_wait_agent_filter_ignores_other_agents_and_matches_target() {
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     runtime
-        .cancel_agent_run("session-1".into(), child.clone())
+        .interrupt_agent("session-1".into(), child.clone())
         .await
         .unwrap();
     let result = wait_task.await.unwrap();

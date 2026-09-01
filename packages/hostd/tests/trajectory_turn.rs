@@ -182,7 +182,7 @@ async fn turn_writes_durable_trajectory_records() {
     // trajectory records remain optional diagnostics for the same execution.
     let durable = store.load_projection().unwrap();
     let execution = durable
-        .agent_executions
+        .root_inputs
         .values()
         .next()
         .expect("root run projection");

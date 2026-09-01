@@ -21,7 +21,7 @@ predicate directly.
 
 All F-02 model-continuity acceptance criteria pass:
 
-- **Resolved record**: `build_orch_turn_runner` returns the resolved
+- **Resolved record**: `build_orch_agent_runner` returns the resolved
   provider+model, `HostApp.active_model` stores it, and the session record
   round-trips through `session.json` (`lastModel`); a fresh host loading the
   same directory restores `last_model = anthropic/model-b`.

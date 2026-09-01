@@ -130,7 +130,7 @@ pub struct SessionSnapshot {
     pub entries: Vec<SessionTreeEntry>,
     /// Durable model-step boundaries used to reconstruct presentation dividers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub model_steps: Vec<crate::execution::ModelStepBoundary>,
+    pub model_steps: Vec<crate::agent_work::ModelStepBoundary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_leaf_id: Option<String>,
     /// Authoritative AgentInstance view selected for this Session.
@@ -211,6 +211,7 @@ pub enum ToolCallStatus {
 pub struct ApprovalSnapshot {
     pub approval_id: ApprovalId,
     pub agent_instance_id: crate::AgentInstanceId,
+    pub root_input_id: crate::AgentInputId,
     pub tool_name: String,
     /// Tool arguments (or structured request payload).
     pub request: serde_json::Value,
@@ -237,6 +238,7 @@ pub enum ApprovalStatus {
 pub struct UserInteractionSnapshot {
     pub interaction_id: InteractionId,
     pub agent_instance_id: crate::AgentInstanceId,
+    pub root_input_id: crate::AgentInputId,
     pub agent_id: AgentId,
     pub tool_call_id: ToolCallId,
     pub status: UserInteractionStatus,

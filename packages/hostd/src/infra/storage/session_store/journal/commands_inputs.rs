@@ -124,6 +124,10 @@ pub(super) fn start_run(
         prompt_digest,
         started_at,
         input,
+        input_message_id,
+        input_parent_message_id,
+        input_tree_parent_entry_id,
+        input_committed_at,
     } = command
     else {
         unreachable!("root work helper called for another command")
@@ -133,6 +137,7 @@ pub(super) fn start_run(
         || input.request_id != request_id
         || input.input_id != root_input_id
         || root_input_id.is_empty()
+        || input_message_id.is_empty()
     {
         return Err(CommitError::IdentityMismatch);
     }
@@ -145,7 +150,8 @@ pub(super) fn start_run(
                 && processing.detached_recipient_agent_instance_id
                     == detached_recipient_agent_instance_id
                 && processing.prompt_assembly_version == prompt_assembly_version
-                && processing.prompt_digest == prompt_digest;
+                && processing.prompt_digest == prompt_digest
+                && existing.applied_message_id.as_deref() == Some(input_message_id.as_str());
             return if matches {
                 Ok((String::new(), agent_instance_id, 0, Vec::new()))
             } else {
@@ -156,19 +162,28 @@ pub(super) fn start_run(
             return Err(CommitError::IdempotencyConflict);
         }
     }
+    let base_message_id = admitted_base(aggregate, &agent_instance_id);
+    let tree_base_entry_id = admitted_tree_base(aggregate, &agent_instance_id);
+    if input_parent_message_id != base_message_id {
+        return Err(CommitError::IdentityMismatch);
+    }
+    let input_tree_parent_entry_id = input_tree_parent_entry_id.or(tree_base_entry_id.clone());
+    if input_tree_parent_entry_id != tree_base_entry_id {
+        return Err(CommitError::IdentityMismatch);
+    }
     let processing_event =
         EventData::AgentInputProcessingStartedV1(AgentInputProcessingStartedV1 {
             agent_instance_id: agent_instance_id.clone(),
             root_input_id: root_input_id.clone(),
             request_id,
-            base_message_id: admitted_base(aggregate, &agent_instance_id),
-            tree_base_entry_id: admitted_tree_base(aggregate, &agent_instance_id),
+            base_message_id,
+            tree_base_entry_id,
             detached_recipient_agent_instance_id,
             prompt_assembly_version,
             prompt_digest,
             started_at,
         });
-    let mut events = Vec::with_capacity(2);
+    let mut events = Vec::with_capacity(3);
     match aggregate.agent_inputs.get(&root_input_id) {
         None => events.push(EventData::AgentInputAdmittedV1(
             piko_session_store::AgentInputAdmittedV1 {
@@ -199,6 +214,17 @@ pub(super) fn start_run(
         Some(_) => return Err(CommitError::IdempotencyConflict),
     }
     events.push(processing_event);
+    events.push(EventData::AgentInputAppliedV1(
+        piko_session_store::AgentInputAppliedV1 {
+            input_id: committed_input_id.clone(),
+            message_id: input_message_id,
+            agent_instance_id: agent_instance_id.clone(),
+            agent_parent_message_id: input_parent_message_id,
+            tree_parent_entry_id: input_tree_parent_entry_id,
+            root_input_id: committed_input_id.clone(),
+            committed_at: input_committed_at,
+        },
+    ));
     Ok((
         stable("work-start", &[session_id, &committed_input_id]),
         agent_instance_id,

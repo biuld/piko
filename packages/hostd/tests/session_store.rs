@@ -1,6 +1,6 @@
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_orchd_api::AgentCommitPort;
-use piko_protocol::execution::{CommitError, MessageCommit};
+use piko_protocol::agent_work::{CommitError, MessageCommit};
 use piko_protocol::{
     AgentDurableCommand, AgentInstanceIdentity, AgentInstanceLifecycle, AgentWorkReport, Message,
     MessageContent,
@@ -121,7 +121,7 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
                     agent_instance_id: child.agent_instance_id.clone(),
                     root_input_id: "input-child-1".into(),
                     report_id: "report-child-1".into(),
-                    outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                    outcome: piko_protocol::AgentWorkOutcome::Succeeded {
                         usage: Default::default(),
                     },
                     summary: "done".into(),
@@ -487,5 +487,7 @@ async fn durable_commands_serialize_across_independent_store_handles() {
 }
 
 include!("session_store_cases/durable_agent.rs");
+include!("session_store_cases/races.rs");
+include!("session_store_cases/crash.rs");
 include!("session_store_cases/canonical_agent.rs");
 include!("session_store_cases/branch_point_fork.rs");

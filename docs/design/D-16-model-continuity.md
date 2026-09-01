@@ -29,7 +29,7 @@ marker.
 ### Ownership and data flow
 
 ```text
-settings + registry ──► build_orch_turn_runner ──► runner + active_model
+settings + registry ──► build_orch_agent_runner ──► runner + active_model
                                                      (provider + model id)
                                                             │
                                               turn submission (submit.rs)
@@ -43,7 +43,7 @@ settings + registry ──► build_orch_turn_runner ──► runner + active_m
                                                                         timeline entry
 ```
 
-- **Resolution**: `build_orch_turn_runner` returns the resolved
+- **Resolution**: `build_orch_agent_runner` returns the resolved
   `SessionModelRef` alongside the runner. `HostApp.active_model` stores it
   and is refreshed at startup (`jsonl_stdio.rs`) and on config change
   (`ModelRunnerObserver`).
@@ -75,7 +75,7 @@ settings + registry ──► build_orch_turn_runner ──► runner + active_m
 | Package | Change |
 |---|---|
 | `piko-protocol` | None |
-| `piko-hostd` | `SessionModelRef` + `SessionState.last_model`; `SessionManifest.last_model`; `set_last_model` on `SessionRepositoryPort` + adapters; `HostApp.active_model` + `set_active_model`; `build_orch_turn_runner` returns the resolved model; startup/config observers refresh it; `submit.rs` records + derives prompt/marker; config no longer writes timeline markers at settings time |
+| `piko-hostd` | `SessionModelRef` + `SessionState.last_model`; `SessionManifest.last_model`; `set_last_model` on `SessionRepositoryPort` + adapters; `HostApp.active_model` + `set_active_model`; `build_orch_agent_runner` returns the resolved model; startup/config observers refresh it; `submit.rs` records + derives prompt/marker; config no longer writes timeline markers at settings time |
 | `piko-orchd` | None |
 | `piko-llmd` | None |
 | `piko-sandbox` | None |
@@ -119,13 +119,13 @@ settings + registry ──► build_orch_turn_runner ──► runner + active_m
   marker need only the last executed model; history is an observability
   concern (F-15 usage/rollout records).
 - **Resolve the model inside `submit.rs` from `model_registry`.** Rejected in
-  favor of returning it from `build_orch_turn_runner`: the record must equal
+  favor of returning it from `build_orch_agent_runner`: the record must equal
   the runner's own resolution, and the registry instance used at build time
   is the authoritative one.
 
 ## Rollout
 
 1. `SessionModelRef` + domain record + manifest field + storage methods.
-2. `active_model` + `build_orch_turn_runner` return value + observer wiring.
+2. `active_model` + `build_orch_agent_runner` return value + observer wiring.
 3. `submit.rs` record + derived prompt/marker; config path cleanup.
 4. Integration/durability tests; PRD/roadmap/verification updates.

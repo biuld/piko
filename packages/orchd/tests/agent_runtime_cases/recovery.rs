@@ -21,7 +21,7 @@ async fn recovered_pending_detached_delivery_does_not_rerun_source_agent() {
         agent_instance_id: "child".into(),
         root_input_id: "input-recovered-detached".into(),
         report_id: "report-recovered-detached".into(),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: Default::default(),
         },
         summary: "recovered detached report".into(),
@@ -123,7 +123,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
         agent_instance_id: "child".into(),
         root_input_id: "input-old".into(),
         report_id: "report-old".into(),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: Default::default(),
         },
         summary: "old answer".into(),
@@ -189,7 +189,7 @@ async fn recovered_child_restores_private_transcript_and_inbox() {
                             agent_instance_id: "child".into(),
                             root_input_id: "input-old".into(),
                             report_id: "report-old".into(),
-                            outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                            outcome: piko_protocol::AgentWorkOutcome::Succeeded {
                                 usage: Default::default(),
                             },
                             summary: "old answer".into(),

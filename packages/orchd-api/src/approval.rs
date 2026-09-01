@@ -15,6 +15,9 @@ pub struct ToolApprovalRequest {
     pub agent_id: String,
     #[serde(rename = "agentInstanceId")]
     pub agent_instance_id: String,
+    /// Active root AgentInput that owns this approval request.
+    #[serde(rename = "rootInputId")]
+    pub root_input_id: String,
     /// F-19: role of the executing agent, copied from the registered
     /// `AgentSpec`. Identity metadata only — hostd resolves the role's
     /// permission profile. Absent/unknown roles use the session profile.

@@ -171,7 +171,7 @@ async fn jsonl_server_round_trips_events() {
 async fn jsonl_server_reads_next_command_while_turn_is_running() {
     let started = Arc::new(Notify::new());
     let finish = Arc::new(Notify::new());
-    let server = HostServer::with_turn_runner(Arc::new(WaitingApprovalRunner {
+    let server = HostServer::with_agent_runner(Arc::new(WaitingApprovalRunner {
         started: started.clone(),
         finish: finish.clone(),
         ..WaitingApprovalRunner::default()

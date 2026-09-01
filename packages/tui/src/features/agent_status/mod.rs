@@ -336,7 +336,7 @@ fn queue_detail(queue: &QueueStatus, _foreground: &[piko_protocol::AgentForegrou
     if queue.steer_count > 0 {
         parts.push(format!("{} steer", queue.steer_count));
     }
-    let queued = queue.follow_up_count.saturating_add(queue.next_turn_count);
+    let queued = queue.follow_up_count;
     if queued > 0 {
         parts.push(format!("{queued} queued"));
     }

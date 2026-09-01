@@ -92,7 +92,6 @@ pub struct PendingInteraction {
 pub struct QueueProjection {
     pub steer_count: u32,
     pub follow_up_count: u32,
-    pub next_turn_count: u32,
     pub steer_preview: Option<String>,
     pub follow_up_preview: Option<String>,
 }
@@ -320,7 +319,6 @@ fn queue_from_agent_work(session: &LiveSession) -> QueueProjection {
     QueueProjection {
         steer_count: work.pending_steers.len() as u32,
         follow_up_count: work.queued_inputs.len() as u32,
-        next_turn_count: work.queued_inputs.len() as u32,
         steer_preview: work
             .pending_steers
             .last()

@@ -1,6 +1,6 @@
 //! Atomic model-step commit implementation.
 
-use piko_protocol::execution::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
+use piko_protocol::agent_work::{CommitAck, CommitError, MessageCommit, ModelStepCommit};
 use piko_protocol::{Message, SessionTreeEntry};
 use piko_session_store::{
     EventData, MessageCommittedV1, ModelStepCommittedV1, UsageAttribution, UsageRecordedV1,

@@ -29,7 +29,7 @@ pub struct SessionProjection {
     pub journal_revision: u64,
     pub agents: BTreeMap<String, AgentProjection>,
     pub agent_inbox: Vec<AgentInboxItem>,
-    pub agent_executions: BTreeMap<String, ExecutionProjection>,
+    pub root_inputs: BTreeMap<String, RootInputProjection>,
     pub agent_input_queue: Vec<piko_protocol::AgentInput>,
     pub agent_work: BTreeMap<String, AgentWorkSnapshot>,
     /// Session-scoped model continuity record: the provider+model that
@@ -56,7 +56,7 @@ pub struct AgentProjection {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExecutionProjection {
+pub struct RootInputProjection {
     pub agent_instance_id: String,
     /// Work identity of the projection; the map key as well.
     pub root_input_id: String,
@@ -65,7 +65,7 @@ pub struct ExecutionProjection {
     pub detached_report_delivered: bool,
     pub prompt_assembly_version: u32,
     pub prompt_digest: String,
-    pub status: piko_protocol::ExecutionStatus,
+    pub status: piko_protocol::AgentWorkProcessingStatus,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub report: Option<AgentWorkReport>,

@@ -350,7 +350,7 @@ fn usage_tokens_from_json_text(text: &str) -> Option<u64> {
 }
 
 fn usage_tokens_from_value(value: &serde_json::Value) -> Option<u64> {
-    // Common placements: top-level `usage`, or ExecutionOutcome `outcome.usage`.
+    // Common placements: top-level `usage`, or AgentWorkOutcome `outcome.usage`.
     if let Some(n) = usage_object_tokens(value.get("usage")) {
         return Some(n);
     }

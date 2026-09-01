@@ -216,6 +216,6 @@ direct call to a disabled tool (no route)
 - codex-rs `core/src/config/requirements.rs`
   (`FeatureRequirementsToml`).
 - piko `packages/hostd/src/domain/config/settings.rs` (merge machinery),
-  `packages/hostd/src/protocol/orch_factory.rs` / `adapters/turns/orch_runner/mod.rs`
+  `packages/hostd/src/protocol/orch_factory.rs` / `adapters/agent_runner/orch_runner/mod.rs`
   (session bootstrap), `packages/orchd/src/adapters/tools/registry.rs`
   (catalog filter), `packages/protocol/src/config.rs` (`OrchdConfig`).

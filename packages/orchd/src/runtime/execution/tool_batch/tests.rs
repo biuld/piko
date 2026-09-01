@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use piko_llmd::gateway::{ErrorClass, FinishReason, InferenceError, InferenceEvent};
+use piko_orchd_api::{CancelExecutionRequest, CancelReason};
 use piko_protocol::Message;
-use piko_protocol::execution::{CancelExecutionRequest, CancelReason};
 use piko_protocol::tools::ToolSetPolicy;
 
 use super::fixtures::*;
@@ -98,7 +98,7 @@ async fn parallel_calls_overlap_and_commit_in_call_order() {
 
     assert!(matches!(
         terminal.outcome,
-        piko_protocol::execution::ExecutionOutcome::Succeeded { .. }
+        piko_protocol::agent_work::AgentWorkOutcome::Succeeded { .. }
     ));
     assert_eq!(
         harness.provider.max_concurrent(),
@@ -258,7 +258,7 @@ async fn cancellation_mid_batch_commits_aborted_results_for_every_call() {
 
     assert!(matches!(
         terminal.outcome,
-        piko_protocol::execution::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::agent_work::AgentWorkOutcome::Cancelled { .. }
     ));
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
@@ -338,7 +338,7 @@ async fn cancel_during_sequential_call_does_not_start_pending_parallel_calls() {
 
     assert!(matches!(
         terminal.outcome,
-        piko_protocol::execution::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::agent_work::AgentWorkOutcome::Cancelled { .. }
     ));
     assert_eq!(
         tool_kind_sequence(&terminal.transcript),
@@ -451,7 +451,7 @@ async fn stream_error_commits_failed_model_step_before_failed_terminal() {
 
     assert!(matches!(
         terminal.outcome,
-        piko_protocol::ExecutionOutcome::Failed { ref error }
+        piko_protocol::AgentWorkOutcome::Failed { ref error }
             if error.contains("connection lost")
     ));
     let steps = harness.commits.model_steps();
@@ -472,7 +472,7 @@ async fn cancelled_finish_commits_cancelled_model_step_before_cancelled_terminal
 
     assert!(matches!(
         terminal.outcome,
-        piko_protocol::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::AgentWorkOutcome::Cancelled { .. }
     ));
     let steps = harness.commits.model_steps();
     assert_eq!(steps.len(), 1);

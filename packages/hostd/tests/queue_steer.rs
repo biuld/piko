@@ -13,6 +13,7 @@ struct SteerAgentRunRunner {
     harness: crate::support::MockRunHarness,
     active: Arc<std::sync::Mutex<Option<ActiveRun>>>,
     inputs: Arc<std::sync::Mutex<Vec<piko_protocol::MessageContent>>>,
+    admitted: Arc<std::sync::Mutex<Vec<piko_protocol::AgentInput>>>,
     steers: Arc<std::sync::Mutex<Vec<(String, String)>>>,
     raw_steers: Arc<std::sync::Mutex<Vec<piko_protocol::MessageContent>>>,
     accept_steer: bool,
@@ -76,6 +77,7 @@ impl AgentRunRunner for SteerAgentRunRunner {
             return self.submit_steer(input).await;
         }
         let _ = runtime;
+        self.admitted.lock().unwrap().push(input.clone());
         self.inputs.lock().unwrap().push(input.content.clone());
         let session_id = input.session_id.clone();
         let input_id = input.input_id.clone();
@@ -113,7 +115,7 @@ impl AgentRunRunner for SteerAgentRunRunner {
         })
     }
 
-    async fn cancel_agent_run(&self, session_id: &str, agent_instance_id: &str) -> bool {
+    async fn interrupt_agent(&self, session_id: &str, agent_instance_id: &str) -> bool {
         self.active.lock().unwrap().as_ref().is_some_and(|run| {
             run.session_id == session_id && run.agent_instance_id == agent_instance_id
         })
@@ -171,7 +173,7 @@ async fn structured_image_content_reaches_start_and_steer_runner_ports() {
         accept_steer: true,
         ..SteerAgentRunRunner::default()
     });
-    let server = HostServer::with_turn_runner(runner.clone());
+    let server = HostServer::with_agent_runner(runner.clone());
     let created = server
         .handle_command(piko_hostd::api::Command::SessionCreate {
             command_id: "create-image".into(),
@@ -205,6 +207,14 @@ async fn structured_image_content_reaches_start_and_steer_runner_ports() {
     assert_eq!(
         runner.inputs.lock().unwrap().as_slice(),
         std::slice::from_ref(&image_content)
+    );
+    let admitted = runner.admitted.lock().unwrap()[0].clone();
+    assert_eq!(admitted.request_id, "submit-image");
+    assert_eq!(admitted.input_id, "input_submit-image");
+    assert_ne!(admitted.input_id, admitted.request_id);
+    assert_eq!(
+        admitted.delivery,
+        piko_protocol::AgentInputDelivery::FollowUp
     );
 
     let steered = server
@@ -319,7 +329,7 @@ async fn queue_steer_fails_closed_when_idle() {
         accept_steer: true,
         ..SteerAgentRunRunner::default()
     });
-    let server = HostServer::with_turn_runner(runner);
+    let server = HostServer::with_agent_runner(runner);
     let created = server
         .handle_command(piko_hostd::api::Command::SessionCreate {
             command_id: "create".into(),
@@ -349,7 +359,7 @@ async fn queue_steer_fails_when_runtime_rejects() {
         accept_steer: false,
         ..SteerAgentRunRunner::default()
     });
-    let server = HostServer::with_turn_runner(runner);
+    let server = HostServer::with_agent_runner(runner);
     let created = server
         .handle_command(piko_hostd::api::Command::SessionCreate {
             command_id: "create".into(),
@@ -381,7 +391,7 @@ async fn queue_steer_injects_only_after_runtime_accepts() {
         accept_steer: true,
         ..SteerAgentRunRunner::default()
     });
-    let server = HostServer::with_turn_runner(runner.clone());
+    let server = HostServer::with_agent_runner(runner.clone());
     let created = server
         .handle_command(piko_hostd::api::Command::SessionCreate {
             command_id: "create".into(),

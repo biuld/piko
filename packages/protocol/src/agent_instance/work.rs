@@ -65,9 +65,9 @@ impl AgentInput {
         }
     }
 
-    /// Build the canonical primitive proposal from the existing runtime input
-    /// DTO. Prompt resources remain runtime-owned and are intentionally not
-    /// copied into the durable fact.
+    /// Test/runtime helper: build a primitive from a live request DTO.
+    /// `input_id` starts equal to `request_id`; callers that own a durable
+    /// identity must overwrite it. Host user admission never uses this.
     pub fn from_request(request: &crate::SendAgentInputRequest, submitted_at: i64) -> Self {
         Self {
             input_id: request.request_id.clone(),
@@ -168,7 +168,7 @@ pub struct AgentInputSummary {
     pub admission_revision: u64,
     pub submitted_at: i64,
     pub delivery: AgentInputDelivery,
-    pub disposition: crate::execution::AgentInputDisposition,
+    pub disposition: crate::agent_work::AgentInputDisposition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -190,7 +190,7 @@ pub struct AgentWorkSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct AgentInputAdmission {
     pub input: AgentInput,
-    pub disposition: crate::execution::AgentInputDisposition,
+    pub disposition: crate::agent_work::AgentInputDisposition,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<AgentInputId>,
     pub admitted_at: i64,
@@ -202,7 +202,7 @@ pub struct AgentInputAdmission {
 pub struct AgentInputDispositionChange {
     pub agent_instance_id: AgentInstanceId,
     pub input_id: AgentInputId,
-    pub disposition: crate::execution::AgentInputDisposition,
+    pub disposition: crate::agent_work::AgentInputDisposition,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_input_id: Option<AgentInputId>,
     #[serde(skip_serializing_if = "Option::is_none")]

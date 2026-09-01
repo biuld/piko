@@ -196,14 +196,14 @@ its own tools.
 | `packages/orchd/src/adapters/tools/registry_tests.rs` | decision-mapping tests |
 | `packages/orchd/src/adapters/tools/workspace_handlers.rs` | explicit `cwd` param; edit uniqueness/not-found errors; `verify_resolved` before writes; `.piko` denial tests |
 | `packages/orchd/src/runtime/utils.rs` | default deny gains `.piko/` |
-| `packages/hostd/src/adapters/turns/approval.rs` | path-level fingerprints + tests |
+| `packages/hostd/src/adapters/agent_runner/approval.rs` | path-level fingerprints + tests |
 | `packages/hostd/src/domain/safety/mod.rs` | assessment, normalization, tests |
 | `packages/hostd/src/domain/mod.rs` | export `safety` |
 | `packages/hostd/src/domain/config/settings.rs` | `SafetySettings`, merge, defaults template |
 | `packages/hostd/resources/settings.toml` | `[safety]` section |
-| `packages/hostd/src/adapters/turns/orch_runner/mod.rs` | field + constructor param |
-| `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs` | assessment branch |
-| `packages/hostd/src/adapters/turns/orch_runner/tests.rs` | gateway acceptance tests |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/mod.rs` | field + constructor param |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/approval_gateway.rs` | assessment branch |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/tests.rs` | gateway acceptance tests |
 | `packages/hostd/src/protocol/orch_factory.rs` | pass `settings.safety` |
 | `docs/features/F-12-safety.md`, `docs/agent-runtime-roadmap.md`, `docs/features/README.md` | status updates |
 | `docs/verification/V-12-safety.md` | acceptance evidence |

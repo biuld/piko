@@ -190,11 +190,11 @@ fn apply_event(decoded: &mut TrajectoryProjection, event_type: &str, payload: &s
             let run = decoded.runs.entry(finished.root_input_id).or_default();
             run.finished_at = Some(finished.finished_at);
             run.terminal = Some(match finished.report.outcome {
-                piko_protocol::ExecutionOutcome::Succeeded { .. } => {
+                piko_protocol::AgentWorkOutcome::Succeeded { .. } => {
                     TrajectoryTerminalKind::Completed
                 }
-                piko_protocol::ExecutionOutcome::Failed { .. } => TrajectoryTerminalKind::Failed,
-                piko_protocol::ExecutionOutcome::Cancelled { .. } => {
+                piko_protocol::AgentWorkOutcome::Failed { .. } => TrajectoryTerminalKind::Failed,
+                piko_protocol::AgentWorkOutcome::Cancelled { .. } => {
                     TrajectoryTerminalKind::Cancelled
                 }
             });

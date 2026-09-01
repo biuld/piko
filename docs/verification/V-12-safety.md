@@ -3,7 +3,7 @@
 > Date: 2026-08-03
 > Fixture: `piko-hostd` domain safety unit tests (`domain/safety/mod.rs`,
 > `domain/config/settings.rs`), hostd approval-gateway integration tests
-> (`adapters/turns/orch_runner/tests.rs`), `piko-orchd` registry decision
+> (`adapters/agent_runner/orch_runner/tests.rs`), `piko-orchd` registry decision
 > tests (`adapters/tools/registry_tests.rs`), `piko-sandbox` policy
 > writable-root projection, full workspace suite.
 > Environment: macOS (arm64), `cargo test -p piko-hostd --lib safety`,

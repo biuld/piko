@@ -47,6 +47,7 @@ async fn state_snapshot_includes_in_process_pending_prompts() {
     runner.approvals.lock().unwrap().push(ApprovalSnapshot {
         approval_id: "appr-1".into(),
         agent_instance_id: "agent-root".into(),
+        root_input_id: "input-root".into(),
         tool_name: "bash".into(),
         request: serde_json::json!({ "cmd": "ls" }),
         prompt: None,
@@ -59,6 +60,7 @@ async fn state_snapshot_includes_in_process_pending_prompts() {
         .push(UserInteractionSnapshot {
             interaction_id: "ix-1".into(),
             agent_instance_id: "agent-1".into(),
+            root_input_id: "input-root".into(),
             agent_id: "main".into(),
             tool_call_id: "call-1".into(),
             status: UserInteractionStatus::Pending,

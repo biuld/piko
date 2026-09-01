@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use super::ExecutionIdentity;
 use super::ExecutionTerminal;
 use super::mailbox::ExecutionHandle;
-use piko_protocol::execution::ExecutionOutcome;
+use piko_protocol::agent_work::AgentWorkOutcome;
 
 pub struct SessionExecutionScope {
     session_id: String,
@@ -19,7 +19,7 @@ pub struct SessionExecutionScope {
 
 pub struct ExecutionExit {
     pub identity: ExecutionIdentity,
-    pub terminal: ExecutionOutcome,
+    pub terminal: AgentWorkOutcome,
 }
 
 impl SessionExecutionScope {
@@ -115,7 +115,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use piko_protocol::execution::{CommitAck, CommitError};
+    use piko_protocol::agent_work::{CommitAck, CommitError};
 
     use super::*;
     use crate::runtime::execution::mailbox::{ArcTerminalReceiver, ExecutionHandle};
@@ -126,7 +126,7 @@ mod tests {
     impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
         async fn commit_message(
             &self,
-            commit: piko_protocol::execution::MessageCommit,
+            commit: piko_protocol::agent_work::MessageCommit,
         ) -> Result<CommitAck, CommitError> {
             Ok(CommitAck {
                 session_id: commit.session_id,
@@ -137,9 +137,17 @@ mod tests {
             })
         }
 
+        async fn commit_steer(
+            &self,
+            message: piko_protocol::agent_work::MessageCommit,
+            _change: piko_protocol::AgentInputDispositionChange,
+        ) -> Result<CommitAck, CommitError> {
+            self.commit_message(message).await
+        }
+
         async fn commit_model_step(
             &self,
-            commit: piko_protocol::execution::ModelStepCommit,
+            commit: piko_protocol::agent_work::ModelStepCommit,
         ) -> Result<CommitAck, CommitError> {
             Ok(CommitAck {
                 session_id: commit.session_id,

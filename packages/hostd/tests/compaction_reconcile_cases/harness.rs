@@ -137,7 +137,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
 
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -155,7 +155,7 @@ impl AgentRunRunner for CompactAgentRunRunner {
             .unwrap();
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                 root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -279,7 +279,7 @@ impl AgentRunRunner for DistinctIdRunRunner {
         input: piko_protocol::AgentInput,
         _runtime: piko_orchd_api::AgentInputRuntime,
     ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
-        use piko_protocol::execution::MessageCommit;
+        use piko_protocol::agent_work::MessageCommit;
 
         let session_dir = self
             .session_dir

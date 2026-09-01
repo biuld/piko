@@ -11,7 +11,7 @@ use crate::infra::storage::JsonlSessionRepository;
 use crate::infra::web::{TrajectoryWebState, spawn as spawn_trajectory_web};
 use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
-use crate::protocol::{HostServer, build_orch_turn_runner};
+use crate::protocol::{HostServer, build_orch_agent_runner};
 
 const MAX_IN_FLIGHT_COMMANDS: usize = 64;
 
@@ -25,19 +25,20 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .or_else(|| settings.settings().session_dir.clone().map(PathBuf::from))
         .unwrap_or_else(JsonlSessionRepository::default_root);
-    let (turn_runner, model_executor, active_model) = build_orch_turn_runner(&settings.settings())
-        .await
-        .unwrap_or_else(|e| {
-            (
-                Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
-                None,
-                None,
-            )
-        });
-    let trajectory_registry = turn_runner.trajectory_registry();
+    let (agent_runner, model_executor, active_model) =
+        build_orch_agent_runner(&settings.settings())
+            .await
+            .unwrap_or_else(|e| {
+                (
+                    Arc::new(ErrorAgentRunRunner::new(e)) as Arc<dyn AgentRunRunner>,
+                    None,
+                    None,
+                )
+            });
+    let trajectory_registry = agent_runner.trajectory_registry();
     let server = HostServer::with_storage_runner_settings(
         JsonlSessionRepository::new(session_root),
-        turn_runner,
+        agent_runner,
         settings.settings(),
     );
     if let Some(model) = active_model {

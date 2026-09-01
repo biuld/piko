@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::api::{AgentInfo, ProtocolError, ServerMessage, SessionSnapshot};
 use crate::application::host_app::HostApp;
-use crate::util::now_ms;
+use crate::util::{ClientEventSender, now_ms, send_event};
 
 pub(super) fn server_response_ok(
     command_id: &str,
@@ -65,7 +65,7 @@ impl HostApp {
         mut snapshot: SessionSnapshot,
         mut agents: Vec<AgentInfo>,
     ) -> (SessionSnapshot, Vec<AgentInfo>) {
-        let runner = self.turn_runner.lock().await.clone();
+        let runner = self.agent_runner.lock().await.clone();
         if let Some(live_agents) = runner.list_agent_instances(session_id).await {
             agents = live_agents;
         }
@@ -82,9 +82,9 @@ impl HostApp {
         if let Some(projection) = projection.as_ref() {
             snapshot.agent_work = projection.agent_work.values().cloned().collect();
             snapshot.model_steps = projection
-                .agent_executions
+                .root_inputs
                 .values()
-                .flat_map(|execution| execution.model_steps.iter().cloned())
+                .flat_map(|root_input| root_input.model_steps.iter().cloned())
                 .collect();
             snapshot.model_steps.sort_by(|left, right| {
                 left.started_at
@@ -110,7 +110,7 @@ impl HostApp {
         session_id: &str,
     ) -> Result<bool, ProtocolError> {
         self.state.lock().await.session(session_id)?;
-        let runner = self.turn_runner.lock().await.clone();
+        let runner = self.agent_runner.lock().await.clone();
         if runner.has_active_session_run(session_id).await {
             return Ok(true);
         }
@@ -168,7 +168,7 @@ impl HostApp {
                 .map(|s| s.todo_lists_for_snapshot())
                 .unwrap_or_default()
         };
-        let runner = self.turn_runner.lock().await.clone();
+        let runner = self.agent_runner.lock().await.clone();
         runner.seed_todo_lists(lists).await;
     }
 
@@ -184,6 +184,26 @@ impl HostApp {
             )
         };
         Ok(self.enrich_session_view(session_id, snapshot, agents).await)
+    }
+
+    /// Push the current `AgentWorkSnapshot` to an already-attached client.
+    pub(crate) async fn publish_work_snapshot(
+        &self,
+        session_id: &str,
+        tx: &ClientEventSender,
+    ) -> Result<(), ProtocolError> {
+        let (snapshot, agents) = self.session_view(session_id).await?;
+        send_event(
+            tx,
+            session_reconciled_message(
+                session_id.to_string(),
+                piko_protocol::ReconcileReason::ExplicitRefresh,
+                snapshot,
+                agents,
+            ),
+        )
+        .await;
+        Ok(())
     }
 }
 
@@ -224,10 +244,10 @@ fn merge_agent_usage_runtime(
             row.run_count = Some(0);
             row.active_duration_ms = Some(0);
         }
-        merge_execution_stats(
+        merge_root_input_stats(
             &mut row_by_instance,
             agents,
-            projection.agent_executions.values().cloned(),
+            projection.root_inputs.values().cloned(),
             now_ms(),
         );
     }
@@ -253,29 +273,29 @@ fn merge_agent_usage_runtime(
     });
 }
 
-fn merge_execution_stats(
+fn merge_root_input_stats(
     rows: &mut HashMap<String, piko_protocol::AgentUsageSummary>,
     agents: &[AgentInfo],
-    executions: impl IntoIterator<Item = crate::ports::storage_types::ExecutionProjection>,
+    root_inputs: impl IntoIterator<Item = crate::ports::storage_types::RootInputProjection>,
     snapshot_at: i64,
 ) {
-    for execution in executions {
+    for root_input in root_inputs {
         let row = rows
-            .entry(execution.agent_instance_id.clone())
+            .entry(root_input.agent_instance_id.clone())
             .or_insert_with(|| piko_protocol::AgentUsageSummary {
-                agent_instance_id: execution.agent_instance_id.clone(),
+                agent_instance_id: root_input.agent_instance_id.clone(),
                 agent_id: agents
                     .iter()
-                    .find(|agent| agent.agent_instance_id == execution.agent_instance_id)
+                    .find(|agent| agent.agent_instance_id == root_input.agent_instance_id)
                     .map(|agent| agent.agent_id.clone())
-                    .unwrap_or_else(|| execution.agent_instance_id.clone()),
+                    .unwrap_or_else(|| root_input.agent_instance_id.clone()),
                 run_count: Some(0),
                 active_duration_ms: Some(0),
                 usage: piko_protocol::Usage::empty(),
             });
         row.run_count = Some(row.run_count.unwrap_or_default().saturating_add(1));
-        let finished_at = execution.finished_at.unwrap_or(snapshot_at);
-        let duration_ms = finished_at.saturating_sub(execution.started_at).max(0) as u64;
+        let finished_at = root_input.finished_at.unwrap_or(snapshot_at);
+        let duration_ms = finished_at.saturating_sub(root_input.started_at).max(0) as u64;
         row.active_duration_ms = Some(
             row.active_duration_ms
                 .unwrap_or_default()
@@ -286,12 +306,12 @@ fn merge_execution_stats(
 
 #[cfg(test)]
 mod usage_tests {
-    use super::merge_execution_stats;
-    use crate::ports::storage_types::ExecutionProjection;
+    use super::merge_root_input_stats;
+    use crate::ports::storage_types::RootInputProjection;
     use std::collections::HashMap;
 
-    fn execution(id: &str, started_at: i64, finished_at: Option<i64>) -> ExecutionProjection {
-        ExecutionProjection {
+    fn root_input(id: &str, started_at: i64, finished_at: Option<i64>) -> RootInputProjection {
+        RootInputProjection {
             agent_instance_id: id.into(),
             root_input_id: format!("input-{started_at}"),
             request_id: String::new(),
@@ -300,9 +320,9 @@ mod usage_tests {
             prompt_assembly_version: 0,
             prompt_digest: String::new(),
             status: if finished_at.is_some() {
-                piko_protocol::ExecutionStatus::Succeeded
+                piko_protocol::AgentWorkProcessingStatus::Succeeded
             } else {
-                piko_protocol::ExecutionStatus::Running
+                piko_protocol::AgentWorkProcessingStatus::Running
             },
             started_at,
             finished_at,
@@ -312,14 +332,14 @@ mod usage_tests {
     }
 
     #[test]
-    fn execution_stats_count_runs_and_include_running_elapsed_time() {
+    fn root_input_stats_count_runs_and_include_running_elapsed_time() {
         let mut rows = HashMap::new();
-        merge_execution_stats(
+        merge_root_input_stats(
             &mut rows,
             &[],
             [
-                execution("agent-1", 100, Some(350)),
-                execution("agent-1", 500, None),
+                root_input("agent-1", 100, Some(350)),
+                root_input("agent-1", 500, None),
             ],
             1_000,
         );

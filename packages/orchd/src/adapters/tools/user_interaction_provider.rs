@@ -55,6 +55,7 @@ pub struct UserInteractionCallbacks {
 pub struct UserInteractionRequest {
     pub session_id: String,
     pub agent_instance_id: String,
+    pub root_input_id: String,
     pub agent_id: String,
     pub tool_call_id: String,
     pub title: Option<String>,
@@ -235,6 +236,7 @@ impl ToolProvider for UserInteractionProvider {
                 let response = cb(UserInteractionRequest {
                     session_id: context.session_id.clone(),
                     agent_instance_id: context.agent_instance_id.clone(),
+                    root_input_id: context.root_input_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: Some("Question".into()),
@@ -295,6 +297,7 @@ impl ToolProvider for UserInteractionProvider {
                 let response = cb(UserInteractionRequest {
                     session_id: context.session_id.clone(),
                     agent_instance_id: context.agent_instance_id.clone(),
+                    root_input_id: context.root_input_id.clone(),
                     agent_id: context.agent_id.clone(),
                     tool_call_id: call_id_from_call(&call),
                     title: args.get("title").and_then(|v| v.as_str()).map(String::from),

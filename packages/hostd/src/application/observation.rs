@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use crate::api::{ProtocolError, ServerMessage};
+use crate::application::agent_work::projection::reconcile_committed_messages;
+use crate::application::agent_work::projection::{
+    record_committed_message, stream_items_from_delta,
+};
 use crate::application::host_app::HostApp;
-use crate::application::turns::projection::reconcile_committed_messages;
-use crate::application::turns::projection::{record_committed_message, stream_items_from_delta};
 use crate::ports::{AgentRunRunner, OperationRunCompletion};
 use crate::util::{ClientEventSender, send_event};
 
@@ -175,6 +177,7 @@ impl HostApp {
                             }),
                         )
                         .await;
+                        self.publish_work_snapshot(session_id, tx).await?;
                     }
                     piko_protocol::agent_runtime::SessionEvent::ApprovalResolved {
                         approval_id,
@@ -199,6 +202,7 @@ impl HostApp {
                             }),
                         )
                         .await;
+                        self.publish_work_snapshot(session_id, tx).await?;
                     }
                     piko_protocol::agent_runtime::SessionEvent::InteractionRequested {
                         interaction,
@@ -218,6 +222,7 @@ impl HostApp {
                             }),
                         )
                         .await;
+                        self.publish_work_snapshot(session_id, tx).await?;
                     }
                     piko_protocol::agent_runtime::SessionEvent::InteractionResolved {
                         interaction_id,
@@ -231,7 +236,8 @@ impl HostApp {
                                 status,
                             }),
                         )
-                        .await
+                        .await;
+                        self.publish_work_snapshot(session_id, tx).await?;
                     }
                 }
                 Ok(Some(cursor))

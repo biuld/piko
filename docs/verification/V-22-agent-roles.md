@@ -3,7 +3,7 @@
 > Date: 2026-08-04
 > Fixture: hostd settings merge + permission-domain tests
 > (`domain/config/settings.rs`, `domain/permissions/mod.rs`), hostd approval
-> gateway role tests (`adapters/turns/orch_runner/tests.rs`), orchd role
+> gateway role tests (`adapters/agent_runner/orch_runner/tests.rs`), orchd role
 > policy materialization + provider + registry tests (`runtime/utils.rs`,
 > `adapters/tools/workspace_provider.rs`, `adapters/tools/registry_tests.rs`),
 > full workspace suite

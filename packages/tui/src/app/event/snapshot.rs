@@ -128,7 +128,6 @@ impl AppState {
             self.queue_status = QueueStatus {
                 steer_count: work.pending_steers.len() as u32,
                 follow_up_count: work.queued_inputs.len() as u32,
-                next_turn_count: work.queued_inputs.len() as u32,
             };
         }
 

@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_protocol::{
-    AgentCancelReceipt, AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInput,
-    AgentInputCancelReceipt, AgentInputReceipt, AgentInterruptReceipt, AgentLifecycleReceipt,
-    AgentLifecycleRequest, AgentSnapshot, CommitError, CreateAgentReceipt, CreateAgentRequest,
-    PromptResourceSnapshot,
+    AgentCommitAck, AgentDurableCommand, AgentInboxSnapshot, AgentInput, AgentInputCancelReceipt,
+    AgentInputReceipt, AgentInterruptReceipt, AgentLifecycleReceipt, AgentLifecycleRequest,
+    AgentSnapshot, CommitError, CreateAgentReceipt, CreateAgentRequest, PromptResourceSnapshot,
 };
 
 use crate::{AgentApiError, SessionExecutionPorts};
@@ -106,7 +105,7 @@ pub trait AgentRuntimeApi: Send + Sync {
     }
 
     /// Admit an AgentInput with host-private runtime extras (prompt staging,
-    /// tool restriction, Turn correlation). Durable facts stay on `input`.
+    /// tool restriction). Durable facts stay on `input`.
     async fn submit_runtime_agent_input(
         &self,
         input: AgentInput,
@@ -121,27 +120,13 @@ pub trait AgentRuntimeApi: Send + Sync {
         recipient_agent_instance_id: String,
     ) -> Result<AgentInputReceipt, AgentApiError>;
 
-    async fn cancel_agent_run(
-        &self,
-        session_id: String,
-        agent_instance_id: String,
-    ) -> Result<AgentCancelReceipt, AgentApiError>;
-
-    /// Agent-addressed interrupt that does not require a host Turn.
+    /// Agent-addressed interrupt of the active root. Does not require a host
+    /// Turn and cannot address a successor root.
     async fn interrupt_agent(
         &self,
         session_id: String,
         agent_instance_id: String,
-    ) -> Result<AgentInterruptReceipt, AgentApiError> {
-        let receipt = self
-            .cancel_agent_run(session_id.clone(), agent_instance_id.clone())
-            .await?;
-        Ok(AgentInterruptReceipt {
-            session_id,
-            agent_instance_id,
-            accepted: receipt.accepted,
-        })
-    }
+    ) -> Result<AgentInterruptReceipt, AgentApiError>;
 
     /// Cancel exactly one pending input by its durable control identity.
     async fn cancel_agent_input(

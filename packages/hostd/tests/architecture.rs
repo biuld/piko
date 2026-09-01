@@ -90,11 +90,11 @@ fn application_must_not_depend_on_infra_or_adapters() {
 #[test]
 fn orch_turn_runner_lives_under_adapters() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let as_file = root.join("src/adapters/turns/orch_runner.rs");
-    let as_dir = root.join("src/adapters/turns/orch_runner/mod.rs");
+    let as_file = root.join("src/adapters/agent_runner/orch_runner.rs");
+    let as_dir = root.join("src/adapters/agent_runner/orch_runner/mod.rs");
     assert!(
         as_file.exists() || as_dir.exists(),
-        "OrchAgentRunRunner must live at adapters/turns/orch_runner.rs or orch_runner/mod.rs"
+        "OrchAgentRunRunner must live at adapters/agent_runner/orch_runner.rs or orch_runner/mod.rs"
     );
     let legacy = root.join("src/domain/turns/orch_runner.rs");
     assert!(
@@ -106,7 +106,7 @@ fn orch_turn_runner_lives_under_adapters() {
 #[test]
 fn turn_completion_never_synthesizes_execution_observation() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let run = fs::read_to_string(root.join("src/adapters/turns/orch_runner/run.rs"))
+    let run = fs::read_to_string(root.join("src/adapters/agent_runner/orch_runner/run.rs"))
         .expect("read OrchAgentRunRunner run adapter");
     assert!(!run.contains("ExecutionChanged"));
     assert!(!run.contains("ExecutionObservationSnapshot"));

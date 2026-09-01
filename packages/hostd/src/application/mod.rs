@@ -5,6 +5,7 @@
 //! `use crate::protocol`. `protocol` depends on `application`, never the
 //! other way around.
 
+pub mod agent_work;
 mod agent_work_control;
 pub mod compaction;
 mod guardian;
@@ -13,7 +14,6 @@ mod observability;
 mod observation;
 pub mod sessions;
 mod trajectory;
-pub mod turns;
 
 pub(crate) use agent_work_control::AgentWorkControl;
 pub use host_app::HostApp;

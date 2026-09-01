@@ -142,7 +142,7 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
         let runtime = runtime.clone();
         tokio::spawn(async move {
             runtime
-                .cancel_agent_run("session-start-cancel".into(), "root".into())
+                .interrupt_agent("session-start-cancel".into(), "root".into())
                 .await
         })
     };
@@ -152,7 +152,7 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
     let report = running.await.unwrap().unwrap();
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Cancelled { .. }
+        piko_protocol::AgentWorkOutcome::Cancelled { .. }
     ));
     assert!(cancelling.await.unwrap().unwrap().accepted);
     assert_eq!(model.call_count().await, 0);
@@ -167,7 +167,7 @@ async fn cancellation_during_durable_start_converges_without_model_call() {
             matches!(
                 command,
                 AgentDurableCommand::AgentInputProcessingFinished { report, .. }
-                    if matches!(report.outcome, piko_protocol::ExecutionOutcome::Cancelled { .. })
+                    if matches!(report.outcome, piko_protocol::AgentWorkOutcome::Cancelled { .. })
             )
         })
         .unwrap();
@@ -277,7 +277,7 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
         .unwrap();
     assert!(finalizing.latest_report.is_none());
     let cancelled = runtime
-        .cancel_agent_run("session-1".into(), "root".into())
+        .interrupt_agent("session-1".into(), "root".into())
         .await
         .unwrap();
     assert!(cancelled.accepted);
@@ -285,7 +285,7 @@ async fn cancellation_during_finalizing_preserves_the_selected_terminal() {
     assert_eq!(report.summary, "selected terminal");
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Succeeded { .. }
+        piko_protocol::AgentWorkOutcome::Succeeded { .. }
     ));
 }
 
@@ -364,7 +364,7 @@ async fn execution_panic_after_durable_start_converges_to_one_failed_terminal() 
         .unwrap();
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Failed { .. }
+        piko_protocol::AgentWorkOutcome::Failed { .. }
     ));
     assert_eq!(
         agents
@@ -399,7 +399,7 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
                 agents: agents as Arc<dyn AgentCommitPort>,
                 executions: SessionExecutionPorts::new(Arc::new(FailingMessageCommitPort {
                     attempt: AtomicU64::new(0),
-                    fail_at: 2,
+                    fail_at: 1,
                 })),
             },
         })
@@ -423,7 +423,7 @@ async fn failed_message_commit_never_advances_reusable_agent_transcript() {
         .unwrap();
     assert!(matches!(
         report.outcome,
-        piko_protocol::ExecutionOutcome::Failed { .. }
+        piko_protocol::AgentWorkOutcome::Failed { .. }
     ));
     assert!(report.summary.is_empty());
 }

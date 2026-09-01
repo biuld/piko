@@ -3,7 +3,7 @@
 > Date: 2026-08-03
 > Fixture: `piko-hostd` domain guardian unit tests (`domain/guardian/mod.rs`,
 > `domain/config/settings.rs`), hostd approval-gateway integration tests
-> (`adapters/turns/orch_runner/tests.rs`), `piko-orchd` registry decision
+> (`adapters/agent_runner/orch_runner/tests.rs`), `piko-orchd` registry decision
 > tests (`adapters/tools/registry_tests.rs`), full workspace suite
 > Environment: macOS (arm64), `cargo test -p piko-hostd --lib guardian`,
 > `cargo test -p piko-orchd --lib guardian`, `cargo test --workspace`,

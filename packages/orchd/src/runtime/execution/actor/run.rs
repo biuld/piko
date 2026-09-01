@@ -62,20 +62,20 @@ impl ExecutionActor {
     pub async fn run(mut self) -> ExecutionRunResult {
         let outcome = match self.run_loop().await {
             Ok(outcome) => outcome,
-            Err(AgentApiError::Cancelled) => ExecutionOutcome::Cancelled {
+            Err(AgentApiError::Cancelled) => AgentWorkOutcome::Cancelled {
                 reason: Some("cancelled".into()),
             },
-            Err(error) => ExecutionOutcome::failed(error.to_string()),
+            Err(error) => AgentWorkOutcome::failed(error.to_string()),
         };
         // Interrupted turns append a durable, model-visible abort marker
         // before the terminal, so the next run can see that work may have
         // partially executed (F-01 / D-01). A marker commit failure fails
         // closed rather than silently dropping the abort.
         let outcome = match outcome {
-            ExecutionOutcome::Cancelled { .. } => match self.commit_abort_marker().await {
+            AgentWorkOutcome::Cancelled { .. } => match self.commit_abort_marker().await {
                 Ok(()) => outcome,
                 Err(error) => {
-                    ExecutionOutcome::failed(format!("abort marker commit failed: {error}"))
+                    AgentWorkOutcome::failed(format!("abort marker commit failed: {error}"))
                 }
             },
             other => other,
@@ -94,12 +94,12 @@ impl ExecutionActor {
         self.commit_message(message, message_id).await
     }
 
-    pub(super) async fn run_loop(&mut self) -> Result<ExecutionOutcome, AgentApiError> {
+    pub(super) async fn run_loop(&mut self) -> Result<AgentWorkOutcome, AgentApiError> {
         self.transition(ExecutionStatus::Running);
 
         loop {
             if self.cancel.is_cancelled() {
-                return Ok(ExecutionOutcome::Cancelled {
+                return Ok(AgentWorkOutcome::Cancelled {
                     reason: Some("cancelled".into()),
                 });
             }
@@ -196,7 +196,7 @@ impl ExecutionActor {
                 continue;
             }
 
-            return Ok(ExecutionOutcome::Succeeded {
+            return Ok(AgentWorkOutcome::Succeeded {
                 usage: self.state.usage.clone(),
             });
         }

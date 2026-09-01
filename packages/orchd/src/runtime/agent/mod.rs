@@ -17,9 +17,10 @@ use piko_orchd_api::{
     AgentApiError, AgentRecoveryState, AgentRuntimeApi, SessionAgentConfig, SessionAgentHandle,
 };
 use piko_protocol::{
-    AgentActivity, AgentCancelReceipt, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
-    AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt, AgentLifecycleRequest,
-    AgentSnapshot, CreateAgentReceipt, CreateAgentRequest, MailboxWaitRequest, MailboxWaitSummary,
+    AgentActivity, AgentDurableCommand, AgentInboxSnapshot, AgentInputReceipt,
+    AgentInstanceIdentity, AgentInstanceLifecycle, AgentInterruptReceipt, AgentLifecycleReceipt,
+    AgentLifecycleRequest, AgentSnapshot, CreateAgentReceipt, CreateAgentRequest,
+    MailboxWaitRequest, MailboxWaitSummary,
 };
 use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;

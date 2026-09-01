@@ -259,6 +259,6 @@ command tool call needing approval (bash / process start)
   managed features, agent roles, schema.
 - codex-rs `core/src/exec/*`: command allow/deny prefix rules.
 - piko `packages/hostd/src/domain/config/settings.rs` (merge machinery),
-  `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs`
+  `packages/hostd/src/adapters/agent_runner/orch_runner/approval_gateway.rs`
   (gateway order), `packages/orchd/src/runtime/utils.rs`
   (`load_sandbox_policy`), `packages/sandbox/src/policy.rs` (Policy fields).

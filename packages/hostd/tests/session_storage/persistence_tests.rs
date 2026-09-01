@@ -153,13 +153,17 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
                     caller_agent_instance_id: None,
                     detached_recipient_agent_instance_id: None,
                 },
+                input_message_id: "input-interrupted".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 1,
             },
         )
         .await
         .unwrap();
     store
         .commit_message(
-            piko_protocol::execution::MessageCommit {
+            piko_protocol::agent_work::MessageCommit {
                 session_id: session_id.clone(),
                 root_input_id: "request-interrupted".into(),
                 agent_instance_id: root.agent_instance_id,
@@ -203,11 +207,11 @@ async fn first_reconciled_snapshot_contains_atomic_interruption_recovery() {
         matches!(entry, SessionTreeEntry::Message(message) if message.id == marker_id)
     }));
     let projection = store.load_projection().unwrap();
-    let execution = projection
-        .agent_executions
-        .get("request-interrupted")
-        .unwrap();
-    assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
+    let execution = projection.root_inputs.get("request-interrupted").unwrap();
+    assert_eq!(
+        execution.status,
+        piko_protocol::AgentWorkProcessingStatus::Cancelled
+    );
     assert!(execution.report.is_some());
 }
 

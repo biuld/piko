@@ -9,10 +9,10 @@ pub(crate) struct PreparedExecution {
     pub(super) terminal_tx:
         Option<piko_comms::ReplySender<ExecutionTerminalContract, ExecutionTerminal>>,
     pub(super) receipt: ExecutionReceipt,
-    pub(super) world_state_commit: Option<piko_protocol::execution::MessageCommit>,
-    pub(super) completion_commits: Vec<piko_protocol::execution::MessageCommit>,
-    pub(super) mention_commits: Vec<piko_protocol::execution::MessageCommit>,
-    pub(super) input_commit: piko_protocol::execution::MessageCommit,
+    pub(super) world_state_commit: Option<piko_protocol::agent_work::MessageCommit>,
+    pub(super) completion_commits: Vec<piko_protocol::agent_work::MessageCommit>,
+    pub(super) mention_commits: Vec<piko_protocol::agent_work::MessageCommit>,
+    pub(super) input_commit: piko_protocol::agent_work::MessageCommit,
     pub(super) trace_span: tracing::Span,
 }
 
@@ -55,7 +55,10 @@ impl PreparedExecution {
         )
     }
 
-    pub async fn commit_input(&self) -> Result<(), AgentApiError> {
+    /// Commit retained context that precedes the initiating user input. These
+    /// IDs are deterministic, so a retry after a crash is idempotent. The user
+    /// input itself is committed atomically by the host processing-start port.
+    pub async fn commit_prelude(&self) -> Result<(), AgentApiError> {
         if let Some(commit) = &self.world_state_commit {
             self.scope
                 .ports()
@@ -80,13 +83,11 @@ impl PreparedExecution {
                 .await
                 .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
         }
-        self.scope
-            .ports()
-            .commit
-            .commit_message(self.input_commit.clone())
-            .await
-            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
         Ok(())
+    }
+
+    pub fn input_commit(&self) -> &piko_protocol::agent_work::MessageCommit {
+        &self.input_commit
     }
 
     pub async fn rollback(mut self) {

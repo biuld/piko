@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use piko_llmd::gateway::{InferenceError, InferenceExecution, InferenceRequest};
-use piko_protocol::execution::{CommitAck, CommitError, StartExecutionRequest};
+use piko_orchd_api::StartExecutionRequest;
+use piko_protocol::agent_work::{CommitAck, CommitError};
 
 use super::*;
 use crate::domain::transcript::TranscriptSnapshot;
@@ -195,7 +196,7 @@ struct NoopCommit;
 impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
     async fn commit_message(
         &self,
-        commit: piko_protocol::execution::MessageCommit,
+        commit: piko_protocol::agent_work::MessageCommit,
     ) -> Result<CommitAck, CommitError> {
         Ok(CommitAck {
             session_id: commit.session_id,
@@ -206,9 +207,17 @@ impl piko_orchd_api::ExecutionCommitPort for NoopCommit {
         })
     }
 
+    async fn commit_steer(
+        &self,
+        message: piko_protocol::agent_work::MessageCommit,
+        _change: piko_protocol::AgentInputDispositionChange,
+    ) -> Result<CommitAck, CommitError> {
+        self.commit_message(message).await
+    }
+
     async fn commit_model_step(
         &self,
-        commit: piko_protocol::execution::ModelStepCommit,
+        commit: piko_protocol::agent_work::ModelStepCommit,
     ) -> Result<CommitAck, CommitError> {
         Ok(CommitAck {
             session_id: commit.session_id,
@@ -251,8 +260,8 @@ fn request() -> StartExecutionRequest {
         user_mentions: Vec::new(),
         input_message_id: "message".into(),
         input: piko_protocol::MessageContent::String("hello".into()),
-        context: piko_protocol::ConversationContext::empty(),
-        config: piko_protocol::ExecutionConfig {
+        context: piko_orchd_api::ConversationContext::empty(),
+        config: piko_orchd_api::ExecutionConfig {
             agent_id: "main".into(),
             ..Default::default()
         },
@@ -379,7 +388,7 @@ async fn inter_agent_completions_chain_after_world_state_before_input() {
         agent_instance_id: "child".into(),
         root_input_id: "input-child".into(),
         report_id: "report-7".into(),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: piko_protocol::Usage::default(),
         },
         summary: "child done".into(),

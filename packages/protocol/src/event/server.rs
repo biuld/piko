@@ -24,7 +24,7 @@ pub enum ServerMessage {
     Interaction(InteractionEvent),
     /// Authoritative model-step boundary after its transcript facts are
     /// durable. Message bodies arrive as `TranscriptCommitted` events.
-    ModelStepCommitted(crate::execution::ModelStepBoundary),
+    ModelStepCommitted(crate::agent_work::ModelStepBoundary),
     /// Full agent projection keyed by agent_instance_id as entity identity.
     AgentChanged(AgentInfo),
     AgentWorkDiff(AgentWorkDiffEvent),

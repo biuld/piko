@@ -190,6 +190,7 @@ impl ToolRegistry for ToolRegistryImpl {
                         call_id: call_id.clone(),
                         agent_id: context.agent_id.clone(),
                         agent_instance_id: context.agent_instance_id.clone(),
+                        root_input_id: context.root_input_id.clone(),
                         agent_role: context.agent_role.clone(),
                         // F-13: the catalog route's provider id (MCP server
                         // name for MCP tools) so hostd can resolve
@@ -338,6 +339,7 @@ impl ToolRegistry for ToolRegistryImpl {
                 call_id: call_id.clone(),
                 agent_id: context.agent_id.clone(),
                 agent_instance_id: context.agent_instance_id.clone(),
+                root_input_id: context.root_input_id.clone(),
                 agent_role: context.agent_role.clone(),
                 provider_id: Some(provider.id().to_string()),
                 tool_name: call_name.clone(),

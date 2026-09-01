@@ -201,7 +201,7 @@ max-tool-output-tokens = 24000
   from `self.settings` (the summarizer override and hysteresis need no orchd
   involvement).
 - `[transcript] max-tool-output-tokens` flows: `HostSettings` →
-  `build_orch_turn_runner` → `OrchConfig.transcript_max_tool_output_tokens`
+  `build_orch_agent_runner` → `OrchConfig.transcript_max_tool_output_tokens`
   (new `OrchdConfig` field, default 24_000) → `ModelConfig` in orchd
   (`services.set_model_config`) → the actor builds
   `TranscriptPolicy { max_tool_output_tokens }` instead of

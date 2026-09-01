@@ -229,7 +229,10 @@ fn dequeue_restores_preview_and_cancels_authoritative_input() {
         "task-1".into(),
         work_snapshot(
             Some("input-live"),
-            vec![queued_input("input-queued", "bring back")],
+            vec![
+                queued_input("input-older", "older"),
+                queued_input("input-queued", "bring back"),
+            ],
         ),
     );
 

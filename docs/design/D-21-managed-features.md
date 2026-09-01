@@ -169,7 +169,7 @@ discovery.
 
 ### 6. Session bootstrap wiring (`piko-hostd`)
 
-- `build_orch_turn_runner` passes `settings.features.as_ref()` into
+- `build_orch_agent_runner` passes `settings.features.as_ref()` into
   `OrchAgentRunRunner::new_with_mcp` (new parameter).
 - `new_with_mcp` resolves features, sets
   `config.features = Some(resolved.enabled)`, and skips

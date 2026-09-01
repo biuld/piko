@@ -39,7 +39,7 @@ impl ConfigObserver for ModelRunnerObserver {
 
         if changed {
             // settings already updated on the server before observers run
-            server.rebuild_turn_runner().await;
+            server.rebuild_agent_runner().await;
         }
 
         let model_id = new.default_model.clone().unwrap_or_default();

@@ -64,7 +64,7 @@ async fn cancelling_attached_spawn_cancels_child_execution() {
         if let Some(report) = child.latest_report {
             assert!(matches!(
                 report.outcome,
-                piko_protocol::ExecutionOutcome::Cancelled { .. }
+                piko_protocol::AgentWorkOutcome::Cancelled { .. }
             ));
             return;
         }

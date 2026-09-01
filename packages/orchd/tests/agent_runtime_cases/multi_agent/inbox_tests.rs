@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn parent_next_run_injects_unread_completion_before_input() {
-    let (runtime, _agents, executions, model) = attached_runtime_ports().await;
+    let (runtime, agents, executions, model) = attached_runtime_ports().await;
     let runtime = Arc::new(runtime);
     model.push_text("detached report").await;
     model.push_text("parent continues").await;
@@ -72,15 +72,26 @@ async fn parent_next_run_injects_unread_completion_before_input() {
             && text.contains("outcome: succeeded")
             && text.contains("summary: detached report")
     ));
-    let input = messages
+    let commands = agents.commands.lock().await;
+    let input_parent_message_id = commands
         .iter()
-        .find(|commit| commit.message_id == "parent-message-after-child")
+        .find_map(|command| match command {
+            AgentDurableCommand::AgentInputProcessingStarted {
+                input_message_id,
+                input_parent_message_id,
+                ..
+            } if input_message_id == "parent-message-after-child" => {
+                Some(input_parent_message_id.as_deref())
+            }
+            _ => None,
+        })
         .expect("parent input commit");
     assert_eq!(
-        input.parent_message_id.as_deref(),
+        input_parent_message_id,
         Some(completion_id.as_str()),
         "durable chain places completion immediately before the run input"
     );
+    drop(commands);
 
     // Inbox remains unread until collect.
     let inbox = runtime

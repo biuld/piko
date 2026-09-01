@@ -80,7 +80,7 @@ async fn v2_message_agent_queue_while_busy_and_commits_input() {
     drop(commands);
 
     runtime
-        .cancel_agent_run("session-1".into(), child.clone())
+        .interrupt_agent("session-1".into(), child.clone())
         .await
         .unwrap();
 }
@@ -213,7 +213,7 @@ async fn v2_wait_agent_returns_on_work_finished() {
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     runtime
-        .cancel_agent_run("session-1".into(), child.clone())
+        .interrupt_agent("session-1".into(), child.clone())
         .await
         .unwrap();
 

@@ -163,8 +163,8 @@ state so the loop re-arms.
 | `packages/orchd/src/adapters/tools/registry.rs` | decision → error mapping |
 | `packages/hostd/src/domain/guardian/mod.rs` | decision parse, prompt, context builder, breaker state, review call |
 | `packages/hostd/src/domain/mod.rs` | export `guardian` module |
-| `packages/hostd/src/adapters/turns/orch_runner/mod.rs` | fields + constructor param + callback setter |
-| `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs` | review branch + breaker updates |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/mod.rs` | fields + constructor param + callback setter |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/approval_gateway.rs` | review branch + breaker updates |
 | `packages/hostd/src/application/host_app.rs` | `wire_guardian_callback` |
 | `packages/hostd/src/protocol/transport/jsonl_stdio.rs`, `packages/hostd/src/protocol/commands/config.rs` | wire callback at startup |
 | `packages/hostd/src/protocol/orch_factory.rs` | pass `settings.guardian` |

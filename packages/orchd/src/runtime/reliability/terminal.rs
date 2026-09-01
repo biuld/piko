@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::runtime::execution::ExecutionTerminal;
 use crate::runtime::reliability::{CommitFailure, ExecutionHandoffLease, RetryState};
 use piko_orchd_api::AgentCommitPort;
-use piko_protocol::{AgentDurableCommand, AgentWorkReport, CommitError, ExecutionOutcome, Message};
+use piko_protocol::{AgentDurableCommand, AgentWorkOutcome, AgentWorkReport, CommitError, Message};
 
 /// Frozen terminal state. Publication data is private until `commit` returns a
 /// `CommittedTerminal` capability.
@@ -55,7 +55,7 @@ impl PendingTerminal {
             root_input_id: root_input_id.clone(),
             summary: transcript_summary(&candidate.transcript),
             usage: match &candidate.outcome {
-                ExecutionOutcome::Succeeded { usage } => usage.clone(),
+                AgentWorkOutcome::Succeeded { usage } => usage.clone(),
                 _ => Default::default(),
             },
             outcome: candidate.outcome.clone(),

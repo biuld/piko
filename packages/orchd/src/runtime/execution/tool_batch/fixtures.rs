@@ -9,9 +9,8 @@ use async_trait::async_trait;
 use piko_llmd::gateway::{
     InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
 };
-use piko_orchd_api::SessionExecutionPorts;
 use piko_orchd_api::tools::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
-use piko_protocol::execution::{ExecutionConfig, StartExecutionRequest};
+use piko_orchd_api::{ExecutionConfig, SessionExecutionPorts, StartExecutionRequest};
 use piko_protocol::tools::{ToolSet, ToolSetPolicy, ToolSetToolRef};
 use piko_protocol::{MessageContent, Usage};
 use tokio::sync::{Notify, Semaphore};
@@ -352,7 +351,7 @@ pub(super) fn batch_request(root_input_id: &str, tools: Vec<ToolDef>) -> StartEx
         user_mentions: Vec::new(),
         input_message_id: "message-batch".into(),
         input: MessageContent::String("run tools".into()),
-        context: piko_protocol::ConversationContext::empty(),
+        context: piko_orchd_api::ConversationContext::empty(),
         config: ExecutionConfig {
             agent_id: "main".into(),
             ..Default::default()

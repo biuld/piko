@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ExecutionOutcome, MessageContent, Usage};
+use crate::{AgentWorkOutcome, MessageContent, Usage};
 
 #[test]
 fn identity_keeps_spec_and_runtime_address_separate() {
@@ -49,7 +49,7 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
         agent_instance_id: "root".into(),
         root_input_id: "input-1".into(),
         report_id: "report-1".into(),
-        outcome: ExecutionOutcome::Succeeded {
+        outcome: AgentWorkOutcome::Succeeded {
             usage: Usage::default(),
         },
         summary: "done".into(),

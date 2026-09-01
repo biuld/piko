@@ -389,11 +389,11 @@ impl AgentActor {
             });
         }
         self.execution
-            .request_cancel(piko_protocol::CancelExecutionRequest {
+            .request_cancel(piko_orchd_api::CancelExecutionRequest {
                 request_id,
                 session_id: self.identity.session_id.clone(),
                 root_input_id,
-                reason: piko_protocol::CancelReason::Superseded,
+                reason: piko_orchd_api::CancelReason::Superseded,
             })
             .await
             .map(|receipt| piko_protocol::AgentCancelReceipt {

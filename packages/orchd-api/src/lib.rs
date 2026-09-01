@@ -28,8 +28,10 @@ pub use approval::{
 };
 pub use error::{AgentApiError, SessionStreamError, SnapshotRequiredReason};
 pub use execution::{
-    ApprovalPort, ExecutionCommitPort, InteractionPort, PromptAssemblyPort, RealtimeDeltaSink,
-    SessionExecutionPorts, TrajectoryCapturePort,
+    ApprovalPort, CancelExecutionRequest, CancelReason, CancelReceipt, ConversationContext,
+    ExecutionCommitPort, ExecutionConfig, ExecutionInputReceipt, ExecutionReceipt, ExecutionStatus,
+    InputDisposition, InteractionPort, PromptAssemblyPort, RealtimeDeltaSink,
+    SessionExecutionPorts, StartExecutionRequest, SteerExecutionRequest, TrajectoryCapturePort,
 };
 pub use request::SubscribeRequest;
 pub use response::SessionRuntimeSnapshot;
@@ -39,10 +41,10 @@ pub use tools::{
     ToolDiscoveryContext, ToolExecError, ToolExecResult, ToolExecutionContext, ToolProvider,
 };
 
-// Re-export Execution DTOs used by the new API surface.
-pub use piko_protocol::execution::{
-    AgentInputDisposition, CancelReceipt, CommitAck, CommitError, ExecutionOutcome,
-    ExecutionStatus, InputDisposition, MessageCommit as ExecutionMessageCommit,
+// Re-export durable work DTOs shared with hostd.
+pub use piko_protocol::agent_work::{
+    AgentInputDisposition, AgentWorkOutcome, CommitAck, CommitError,
+    MessageCommit as ExecutionMessageCommit,
 };
 pub use piko_protocol::{
     AgentActivity, AgentArtifactRef, AgentCommitAck, AgentDurableCommand, AgentInboxItem,

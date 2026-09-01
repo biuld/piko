@@ -16,7 +16,9 @@ use crate::ui::components::choice_workflow::{ChoiceOption, ChoiceWorkflow, Quest
 /// A single pending tool-approval request.
 pub struct PendingApproval {
     pub id: String,
-    /// Agent instance that requested the tool; used for F-22 foreground projection.
+    /// Host agent identity for this pending row. Foreground comes from
+    /// `AgentWorkSnapshot`, not this field.
+    #[allow(dead_code)]
     pub agent_instance_id: String,
     pub tool_name: String,
     pub args: serde_json::Value,

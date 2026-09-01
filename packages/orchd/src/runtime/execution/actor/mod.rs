@@ -4,12 +4,11 @@ use std::sync::Arc;
 use piko_comms::MailboxReceiver;
 use piko_comms::contracts::ExecutionCommands;
 use piko_orchd_api::telemetry::ModelStepTelemetry;
-use piko_orchd_api::{AgentApiError, CancelReceipt, InputDisposition};
-use piko_protocol::execution::ExecutionInputReceipt;
-use piko_protocol::execution::{
-    ExecutionOutcome, ExecutionStatus, ModelStepOutcome, StartExecutionRequest,
-    SteerExecutionRequest,
+use piko_orchd_api::{
+    AgentApiError, CancelReceipt, ExecutionInputReceipt, ExecutionStatus, InputDisposition,
+    StartExecutionRequest, SteerExecutionRequest,
 };
+use piko_protocol::agent_work::{AgentWorkOutcome, ModelStepOutcome};
 use piko_protocol::{Message, Usage};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
@@ -34,7 +33,7 @@ use piko_llmd::gateway::InferenceRequest;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionRunResult {
-    pub outcome: ExecutionOutcome,
+    pub outcome: AgentWorkOutcome,
     pub transcript: Vec<Message>,
     pub head_message_id: Option<String>,
 }

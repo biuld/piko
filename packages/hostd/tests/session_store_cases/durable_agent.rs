@@ -22,13 +22,17 @@ async fn recovery_marks_accepted_execution_interrupted() {
                     "interrupted input",
                     1,
                 ),
+                input_message_id: "input-interrupted".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 1,
             },
         )
         .await
         .unwrap();
     store
         .commit_message(
-            piko_protocol::execution::MessageCommit {
+            piko_protocol::agent_work::MessageCommit {
                 session_id: "session-1".into(),
                 root_input_id: "request-interrupted".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -60,11 +64,11 @@ async fn recovery_marks_accepted_execution_interrupted() {
     assert_eq!(store.interrupt_incomplete_agent_work().unwrap(), 1);
     assert_eq!(store.interrupt_incomplete_agent_work().unwrap(), 0);
     let projection = store.load_projection().unwrap();
-    let execution = projection.agent_executions.get("request-interrupted").unwrap();
-    assert_eq!(execution.status, piko_protocol::ExecutionStatus::Cancelled);
+    let execution = projection.root_inputs.get("request-interrupted").unwrap();
+    assert_eq!(execution.status, piko_protocol::AgentWorkProcessingStatus::Cancelled);
     assert!(matches!(
         execution.report.as_ref().map(|report| &report.outcome),
-        Some(piko_protocol::ExecutionOutcome::Cancelled { .. })
+        Some(piko_protocol::AgentWorkOutcome::Cancelled { .. })
     ));
 
     // Recovery also appends the durable, model-visible abort marker after the
@@ -88,6 +92,105 @@ async fn recovery_marks_accepted_execution_interrupted() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn pending_action_and_interrupt_replay_into_authoritative_work_snapshot() {
+    let temp = tempdir().unwrap();
+    let store = SessionStore::create_session(temp.path(), "session-1".into(), "/project".into(), 1)
+        .unwrap();
+    let root = store.ensure_root_agent("main").unwrap();
+    let root_input_id = "input-control";
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::AgentInputProcessingStarted {
+                agent_instance_id: root.agent_instance_id.clone(),
+                root_input_id: root_input_id.into(),
+                request_id: root_input_id.into(),
+                detached_recipient_agent_instance_id: None,
+                prompt_assembly_version: 1,
+                prompt_digest: "prompt-control".into(),
+                started_at: 1,
+                input: root_input(
+                    &root.agent_instance_id,
+                    root_input_id,
+                    None,
+                    "control input",
+                    1,
+                ),
+                input_message_id: "message-control".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::PendingActionRequested {
+                agent_instance_id: root.agent_instance_id.clone(),
+                root_input_id: root_input_id.into(),
+                action: piko_protocol::PendingActionSummary {
+                    action_id: "approval-1".into(),
+                    kind: "approval".into(),
+                    summary: Some("shell".into()),
+                },
+                requested_at: 2,
+            },
+        )
+        .await
+        .unwrap();
+
+    let reopened = SessionStore::new(temp.path());
+    let snapshot = reopened
+        .agent_work_snapshot(&root.agent_instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.foreground, piko_protocol::AgentForeground::RequiresAction);
+    assert_eq!(snapshot.pending_action.unwrap().action_id, "approval-1");
+
+    reopened
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::InterruptRequested {
+                agent_instance_id: root.agent_instance_id.clone(),
+                root_input_id: root_input_id.into(),
+                requested_at: 3,
+            },
+        )
+        .await
+        .unwrap();
+    let snapshot = reopened
+        .agent_work_snapshot(&root.agent_instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.foreground, piko_protocol::AgentForeground::RequiresAction);
+    assert_eq!(
+        snapshot.active_work.unwrap().state,
+        piko_protocol::AgentWorkViewState::Cancelling
+    );
+
+    reopened
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::PendingActionResolved {
+                agent_instance_id: root.agent_instance_id.clone(),
+                root_input_id: root_input_id.into(),
+                action_id: "approval-1".into(),
+                resolved_at: 4,
+            },
+        )
+        .await
+        .unwrap();
+    let snapshot = reopened
+        .agent_work_snapshot(&root.agent_instance_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.foreground, piko_protocol::AgentForeground::Cancelling);
+    assert!(snapshot.pending_action.is_none());
 }
 
 
@@ -115,12 +218,16 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                     "tool input",
                     1,
                 ),
+                input_message_id: "input-with-tool-call".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 1,
             },
         )
         .await
         .unwrap();
 
-    let model_step = piko_protocol::execution::ModelStepCommit {
+    let model_step = piko_protocol::agent_work::ModelStepCommit {
                 session_id: "session-1".into(),
             root_input_id: "request-with-tool-call".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -129,12 +236,12 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                 started_at: 2,
                 finished_at: 3,
                 outcome: piko_protocol::ModelStepOutcome::ToolCalls,
-                assistant: piko_protocol::execution::MessageCommit {
+                assistant: piko_protocol::agent_work::MessageCommit {
                     session_id: "session-1".into(),
                 root_input_id: "request-with-tool-call".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
                     message_id: "assistant-with-tool-call".into(),
-                    parent_message_id: None,
+                    parent_message_id: Some("input-with-tool-call".into()),
                     tree_parent_entry_id: None,
                     message: piko_protocol::Message::Assistant {
                         content: vec![piko_protocol::ContentBlock::Text {
@@ -150,7 +257,7 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
                     },
                     committed_at: 3,
                 },
-                tool_calls: vec![piko_protocol::execution::MessageCommit {
+                tool_calls: vec![piko_protocol::agent_work::MessageCommit {
                     session_id: "session-1".into(),
                 root_input_id: "request-with-tool-call".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
@@ -192,9 +299,9 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
     let recovered = store
         .load_agent("session-1", &root.agent_instance_id)
         .unwrap();
-    assert_eq!(recovered.transcript.len(), 4);
+    assert_eq!(recovered.transcript.len(), 5);
     assert!(matches!(
-        &recovered.transcript[2].message,
+        &recovered.transcript[3].message,
         piko_protocol::Message::ToolResult {
             tool_call_id,
             tool_name: Some(tool_name),
@@ -203,19 +310,19 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
         } if tool_call_id == "call-with-tool-call" && tool_name == "read"
     ));
     assert_eq!(
-        recovered.transcript[2].parent_id.as_deref(),
+        recovered.transcript[3].parent_id.as_deref(),
         Some("tool-call-message")
     );
     let marker_id = piko_protocol::agent_work_abort_marker_message_id("request-with-tool-call");
-    assert_eq!(recovered.transcript[3].id, marker_id);
+    assert_eq!(recovered.transcript[4].id, marker_id);
     assert_eq!(
-        recovered.transcript[3].parent_id.as_deref(),
-        Some(recovered.transcript[2].id.as_str())
+        recovered.transcript[4].parent_id.as_deref(),
+        Some(recovered.transcript[3].id.as_str())
     );
 
     let projection = store.load_projection().unwrap();
     let execution = projection
-        .agent_executions
+        .root_inputs
         .get("request-with-tool-call")
         .unwrap();
     assert_eq!(execution.model_steps.len(), 1);
@@ -265,6 +372,10 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
                         2,
                     )
                 },
+                input_message_id: "input-detached".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 2,
             },
         )
         .await
@@ -273,7 +384,7 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
         agent_instance_id: child.agent_instance_id.clone(),
         root_input_id: "request-detached".into(),
         report_id: "report-detached".into(),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: Default::default(),
         },
         summary: "detached result".into(),
@@ -344,6 +455,10 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
             "idempotent input",
             1,
         ),
+        input_message_id: "input-idempotent".into(),
+        input_parent_message_id: None,
+        input_tree_parent_entry_id: None,
+        input_committed_at: 1,
     };
     for _ in 0..2 {
         store
@@ -355,7 +470,7 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
         agent_instance_id: root.agent_instance_id.clone(),
         root_input_id: "request-idempotent".into(),
         report_id: "report-idempotent".into(),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: Default::default(),
         },
         summary: "done".into(),
@@ -375,8 +490,8 @@ async fn duplicate_run_start_and_terminal_are_idempotent() {
             .unwrap();
     }
     let projection = store.load_projection().unwrap();
-    assert_eq!(projection.agent_executions.len(), 1);
-    let execution = projection.agent_executions.get("request-idempotent").unwrap();
+    assert_eq!(projection.root_inputs.len(), 1);
+    let execution = projection.root_inputs.get("request-idempotent").unwrap();
     assert_eq!(execution.report.as_ref(), Some(&report));
     assert_eq!(execution.prompt_assembly_version, 1);
     assert_eq!(execution.prompt_digest, "prompt-idempotent");
@@ -431,6 +546,10 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
                 prompt_digest: "prompt-queued".into(),
                 started_at: 2,
                 input: queued,
+                input_message_id: "input-queued-1".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 2,
             },
         )
         .await
@@ -439,7 +558,7 @@ async fn follow_up_queue_is_durable_and_advances_atomically_into_a_run() {
     assert!(projection.agent_input_queue.is_empty());
     assert_eq!(
         projection
-            .agent_executions
+            .root_inputs
             .get("queued-1")
             .unwrap()
             .root_input_id,

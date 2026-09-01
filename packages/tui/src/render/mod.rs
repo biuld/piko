@@ -142,10 +142,11 @@ fn paint_regions(
 
 fn render_bottom_bar(frame: &mut Frame<'_>, area: Rect, app: &AppState) {
     let agent_label = agent_chrome_label(app);
-    let agent_busy = app.agent_panel.agents().iter().any(|a| {
-        app.agent_foreground(&a.agent_instance_id, &a.activity)
-            .is_busy()
-    });
+    let agent_busy = app
+        .agent_panel
+        .agents()
+        .iter()
+        .any(|a| app.agent_foreground(&a.agent_instance_id).is_busy());
 
     BottomBar::render(
         frame,
@@ -218,7 +219,7 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
                 .agent_panel
                 .agents()
                 .iter()
-                .map(|agent| app.agent_foreground(&agent.agent_instance_id, &agent.activity))
+                .map(|agent| app.agent_foreground(&agent.agent_instance_id))
                 .collect();
             let queue = app.queue_summary();
             let view = AgentPanelView {

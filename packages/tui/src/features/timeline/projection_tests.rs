@@ -106,6 +106,7 @@ fn live_draft_splits_around_upstream_card() {
 
     let draft = piko_client_core::RealtimeDraft {
         message_id: "msg-1".into(),
+        root_input_id: Some("input-1".into()),
         last_delta_seq: 3,
         content_segments: vec![
             RealtimeContentSegment {

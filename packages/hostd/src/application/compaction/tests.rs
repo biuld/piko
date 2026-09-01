@@ -123,7 +123,7 @@ fn unset_guard_derives_from_resolved_window() {
 async fn window_fraction_guard_scales_retrigger_to_resolved_model() {
     let temp = tempfile::tempdir().unwrap();
     let app =
-        HostApp::with_turn_runner(Arc::new(crate::ports::ErrorAgentRunRunner::new("not used")));
+        HostApp::with_agent_runner(Arc::new(crate::ports::ErrorAgentRunRunner::new("not used")));
     *app.settings.lock().await = HostSettings {
         default_model: Some("small-model".into()),
         default_provider: Some("test-provider".into()),

@@ -1,0 +1,152 @@
+use std::sync::Arc;
+
+use piko_orchd_api::{
+    AgentCommitPort, AgentRecoveryState, AgentRuntimeApi, ExecutionCommitPort, RealtimeDeltaSink,
+    SessionAgentConfig, SessionAgentPorts, SessionExecutionPorts,
+};
+use piko_protocol::agents::AgentSpec;
+
+use crate::api::ProtocolError;
+use crate::infra::storage::session_store::SessionStore;
+use crate::ports::ResumeAgent;
+
+use super::OrchAgentRunRunner;
+use super::agent_commit::ProjectingAgentCommitPort;
+use super::commit::{ExecutionCommitRouter, RealtimeDeltaRouter, RepositoryExecutionCommitPort};
+use super::run::resolve_recovered_agent_spec;
+
+impl OrchAgentRunRunner {
+    pub(super) async fn prepare_session_runtime(
+        &self,
+        session_id: &str,
+        cwd: &str,
+        session_dir: &std::path::Path,
+        root_spec: &AgentSpec,
+        resume_agent: Option<&ResumeAgent>,
+    ) -> Result<(), ProtocolError> {
+        let attach_lock = self.session_attach_lock(session_id);
+        let _attach_guard = attach_lock.lock().await;
+        self.register_session_context(session_id.to_string(), cwd.to_string());
+        let store = SessionStore::new(session_dir);
+        let root = store
+            .ensure_root_agent(&root_spec.id)
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+        let durable_commit: Arc<dyn ExecutionCommitPort> =
+            Arc::new(RepositoryExecutionCommitPort {
+                store: store.clone(),
+            });
+        let commit_router = {
+            let mut routers = self.commit_routers.lock().unwrap();
+            Arc::clone(routers.entry(session_id.to_string()).or_insert_with(|| {
+                Arc::new(ExecutionCommitRouter::new(
+                    Arc::clone(&durable_commit),
+                    store.clone(),
+                    session_id.to_string(),
+                    Arc::clone(&self.observation_router),
+                ))
+            }))
+        };
+        let realtime_router = {
+            let mut routers = self.realtime_routers.lock().unwrap();
+            Arc::clone(routers.entry(session_id.to_string()).or_insert_with(|| {
+                Arc::new(RealtimeDeltaRouter::new(
+                    session_id.to_string(),
+                    Arc::clone(&self.observation_router),
+                ))
+            }))
+        };
+
+        if matches!(
+            self.agent_runtime
+                .agent_snapshot(session_id.to_string(), root.agent_instance_id.clone())
+                .await,
+            Err(piko_orchd_api::AgentApiError::SessionNotAttached)
+        ) {
+            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(store.clone());
+            let resolved_specs = crate::adapters::prompts::agent_loader::load_agents(cwd);
+            store
+                .interrupt_incomplete_agent_work()
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+            let recovered_agents: Vec<AgentRecoveryState> = store
+                .agent_instances()
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?
+                .into_iter()
+                .map(|agent| {
+                    let agent_instance_id = agent.identity.agent_instance_id.clone();
+                    let recovered_spec_id = agent.identity.agent_spec_id.clone();
+                    let mut transcript = store
+                        .agent_transcript(session_id, &agent_instance_id)
+                        .unwrap_or_default();
+                    let mut head_message_id = store
+                        .load_agent(session_id, &agent_instance_id)
+                        .ok()
+                        .and_then(|agent| agent.head_message_id);
+                    if agent_instance_id == root.agent_instance_id
+                        && let Some(resume) = resume_agent
+                    {
+                        // Root context is the host-reduced active branch with
+                        // compaction applied, not the physical private tail.
+                        transcript = resume.state.transcript.clone();
+                        head_message_id = resume.state.head_message_id.clone();
+                    }
+                    AgentRecoveryState {
+                        inbox: store.agent_inbox(&agent_instance_id).unwrap_or_default(),
+                        identity: agent.identity,
+                        spec: resolve_recovered_agent_spec(
+                            &agent_instance_id,
+                            &root.agent_instance_id,
+                            agent.spec,
+                            &recovered_spec_id,
+                            &resolved_specs,
+                            root_spec,
+                        ),
+                        lifecycle: agent.lifecycle,
+                        transcript,
+                        head_message_id,
+                        latest_report: agent.latest_report,
+                        execution_reports: store
+                            .agent_execution_reports(&agent_instance_id)
+                            .unwrap_or_default(),
+                        queued_inputs: store
+                            .agent_queued_inputs(&agent_instance_id)
+                            .unwrap_or_default(),
+                        pending_detached_deliveries: store
+                            .pending_detached_deliveries(&agent_instance_id)
+                            .unwrap_or_default(),
+                    }
+                })
+                .collect();
+            let agent_commit: Arc<dyn AgentCommitPort> = Arc::new(ProjectingAgentCommitPort::new(
+                agent_commit,
+                session_id.to_string(),
+                &recovered_agents,
+                Arc::clone(&self.observation_router),
+                Arc::clone(&self.active_agent_inputs),
+            ));
+            let trajectory_recorder = self
+                .trajectory_recorders
+                .get_or_create(session_id, store.clone());
+            self.agent_runtime
+                .attach_agent_session(SessionAgentConfig {
+                    session_id: session_id.to_string(),
+                    root,
+                    recovered_agents,
+                    ports: SessionAgentPorts {
+                        agents: agent_commit,
+                        executions: SessionExecutionPorts::new(
+                            commit_router.clone() as Arc<dyn ExecutionCommitPort>
+                        )
+                        .with_prompt(Arc::new(super::prompt_assembly::HostPromptAssemblyPort {
+                            trajectory: Some(trajectory_recorder.clone()),
+                        }))
+                        .with_realtime(realtime_router.clone() as Arc<dyn RealtimeDeltaSink>)
+                        .with_trajectory(Arc::new(trajectory_recorder)),
+                    },
+                })
+                .await
+                .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+        }
+
+        Ok(())
+    }
+}

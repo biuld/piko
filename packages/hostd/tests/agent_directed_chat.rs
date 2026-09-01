@@ -84,7 +84,7 @@ async fn child_transcript_and_selected_view_persist_independently() {
     let root_agent_instance_id = root.agent_instance_id.clone();
     store
         .commit_message(
-            piko_protocol::execution::MessageCommit {
+            piko_protocol::agent_work::MessageCommit {
                 session_id: session_id.clone(),
                 root_input_id: "input-1".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -185,9 +185,10 @@ async fn child_transcript_and_selected_view_persist_independently() {
             _ => None,
         })
         .collect();
-    assert_eq!(child_commits.len(), 1);
+    assert_eq!(child_commits.len(), 2);
+    assert!(matches!(child_commits[0].message, Message::User { .. }));
     assert!(matches!(
-        child_commits[0].message,
+        child_commits[1].message,
         Message::Assistant { .. }
     ));
     server

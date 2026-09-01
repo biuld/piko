@@ -8,7 +8,7 @@ use piko_llmd::auth::AuthStorage;
 use piko_llmd::gateway::InferenceGateway;
 
 /// Build an OrchAgentRunRunner and return both the runner and the model executor (if available).
-pub(crate) async fn build_orch_turn_runner(
+pub(crate) async fn build_orch_agent_runner(
     settings: &HostSettings,
 ) -> Result<
     (

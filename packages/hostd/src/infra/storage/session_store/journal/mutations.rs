@@ -1,4 +1,4 @@
-use piko_protocol::execution::{CommitAck, CommitError, MessageCommit};
+use piko_protocol::agent_work::{CommitAck, CommitError, MessageCommit};
 use piko_protocol::{
     AgentInputDisposition, AgentInputDispositionChange, Message, SessionTreeEntry,
 };

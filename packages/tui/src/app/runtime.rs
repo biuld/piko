@@ -99,8 +99,8 @@ impl AppState {
                         session_id: previous,
                     }));
                 } else {
-                    let pending_draft = self.session.pending_turn_draft.take();
-                    let pending_content = self.session.pending_turn_content.take();
+                    let pending_draft = self.session.pending_submit_draft.take();
+                    let pending_content = self.session.pending_submit_content.take();
                     self.clear_session_view();
                     if let Some(draft) = pending_draft
                         && self.editor.is_empty()

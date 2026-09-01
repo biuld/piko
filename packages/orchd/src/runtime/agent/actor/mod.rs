@@ -7,12 +7,14 @@ mod run_protocol;
 
 use piko_comms::contracts::{AgentCommands, AgentSnapshot as AgentSnapshotContract};
 use piko_comms::{LatestSender, MailboxReceiver, MailboxSender};
-use piko_orchd_api::{AgentApiError, AgentCommitPort};
+use piko_orchd_api::{
+    AgentApiError, AgentCommitPort, ConversationContext, ExecutionConfig, StartExecutionRequest,
+    SteerExecutionRequest,
+};
 use piko_protocol::{
     AgentActivity, AgentDurableCommand, AgentInboxItem, AgentInboxSnapshot, AgentInputDelivery,
     AgentInputReceipt, AgentInstanceIdentity, AgentInstanceLifecycle, AgentLifecycleReceipt,
-    AgentMailboxEvent, AgentSnapshot, AgentWorkReport, ConversationContext, ExecutionConfig,
-    SendAgentInputRequest, StartExecutionRequest, SteerExecutionRequest,
+    AgentMailboxEvent, AgentSnapshot, AgentWorkReport, SendAgentInputRequest,
 };
 
 use super::mailbox::{AgentCommand, DetachedReportTarget};
@@ -20,7 +22,7 @@ use super::scope::SessionAgentScope;
 use crate::runtime::execution::{AgentExecutionRuntime, ExecutionTerminal};
 use crate::runtime::reliability::{
     ActorCommandScope, DetachedDeliveryResult, DetachedDeliveryScope, ExecutionHandoffLease,
-    RunCancellation, RunStartupScope, StartedRunFailure, TerminalCommitResult, TerminalCommitScope,
+    RunCancellation, RunStartupScope, TerminalCommitResult, TerminalCommitScope,
 };
 use crate::runtime::utils::now_ms;
 

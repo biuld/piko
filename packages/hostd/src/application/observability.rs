@@ -150,7 +150,7 @@ fn rollout_cursor(transcript_seq: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use piko_protocol::execution::MessageCommit;
+    use piko_protocol::agent_work::MessageCommit;
 
     use super::{HostApp, parse_rollout_cursor, rollout_cursor};
     use crate::api::Message;

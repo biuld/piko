@@ -1,7 +1,7 @@
 //! Inter-agent completion Context helpers (F-20).
 
 use crate::{
-    AgentWorkReport, ContentTrust, ExecutionOutcome, Message, MessageContent, PromptSource,
+    AgentWorkOutcome, AgentWorkReport, ContentTrust, Message, MessageContent, PromptSource,
 };
 
 /// Source kind for retained inter-agent completion Context messages (F-20).
@@ -47,13 +47,13 @@ pub fn agent_completion_context_message(report: &AgentWorkReport) -> Message {
 /// Pure formatter for the model-visible completion body (stable key order).
 pub fn agent_completion_content(report: &AgentWorkReport) -> String {
     let outcome = match &report.outcome {
-        ExecutionOutcome::Succeeded { .. } => "succeeded",
-        ExecutionOutcome::Failed { .. } => "failed",
-        ExecutionOutcome::Cancelled { .. } => "cancelled",
+        AgentWorkOutcome::Succeeded { .. } => "succeeded",
+        AgentWorkOutcome::Failed { .. } => "failed",
+        AgentWorkOutcome::Cancelled { .. } => "cancelled",
     };
     let summary = match &report.outcome {
-        ExecutionOutcome::Failed { error } if !error.is_empty() => bound_completion_summary(error),
-        ExecutionOutcome::Cancelled {
+        AgentWorkOutcome::Failed { error } if !error.is_empty() => bound_completion_summary(error),
+        AgentWorkOutcome::Cancelled {
             reason: Some(reason),
         } if !reason.is_empty() => bound_completion_summary(reason),
         _ => bound_completion_summary(&report.summary),
@@ -92,7 +92,7 @@ mod tests {
     use super::*;
     use crate::Usage;
 
-    fn report(summary: &str, outcome: ExecutionOutcome) -> AgentWorkReport {
+    fn report(summary: &str, outcome: AgentWorkOutcome) -> AgentWorkReport {
         AgentWorkReport {
             agent_instance_id: "agent_child".into(),
             root_input_id: "input-42".into(),
@@ -108,7 +108,7 @@ mod tests {
     fn completion_content_lists_facts_in_fixed_order() {
         let body = agent_completion_content(&report(
             "child finished",
-            ExecutionOutcome::Succeeded {
+            AgentWorkOutcome::Succeeded {
                 usage: Usage::default(),
             },
         ));
@@ -130,7 +130,7 @@ mod tests {
     fn failed_outcome_prefers_error_text_over_summary() {
         let body = agent_completion_content(&report(
             "unused",
-            ExecutionOutcome::Failed {
+            AgentWorkOutcome::Failed {
                 error: "tool boom".into(),
             },
         ));
@@ -144,7 +144,7 @@ mod tests {
         let long = "x".repeat(AGENT_COMPLETION_SUMMARY_MAX_CHARS + 50);
         let body = agent_completion_content(&report(
             &long,
-            ExecutionOutcome::Succeeded {
+            AgentWorkOutcome::Succeeded {
                 usage: Usage::default(),
             },
         ));
@@ -160,7 +160,7 @@ mod tests {
     fn is_agent_completion_message_matches_source_identity() {
         let message = agent_completion_context_message(&report(
             "ok",
-            ExecutionOutcome::Succeeded {
+            AgentWorkOutcome::Succeeded {
                 usage: Usage::default(),
             },
         ));

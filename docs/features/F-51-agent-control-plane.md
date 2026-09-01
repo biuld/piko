@@ -1,6 +1,9 @@
 # F-51: Agent work lifecycle and control plane
 
-> Status: implemented (D-68 slices 1–6.4; V-64)
+> Status: implemented (D-68; [V-64](../verification/V-64-agent-control-plane.md)).
+> Host follow-up admission keeps distinct `input_id` / `request_id`.
+> `AgentWorkSnapshot` is the published recoverable foreground contract.
+> Internal orchd Execution DTOs remain off the client command surface.
 > Priority: P0
 > Source evidence: piko product/runtime review; consolidates [F-01](F-01-turn-runtime.md), [F-10](F-10-multi-agent.md), [F-22](F-22-client-agent-projection.md), [F-31](F-31-durable-session-journal.md), and [F-48](F-48-authoritative-agent-lifecycle.md)
 > Design: [D-68](../design/D-68-agent-control-plane.md)
@@ -204,7 +207,9 @@ For the viewed AgentInstance:
 - Alt+Enter follows up, starting immediately when idle or remaining pending
   when busy;
 - Esc interrupts active work;
-- dequeue cancels a selected AgentInput.
+- dequeue cancels the last-admitted pending follow-up of the viewed agent by
+  `input_id` (`queued_inputs.last()` after host admission-order sort). There
+  is no selected-row queue UI.
 
 The TUI may own editor drafts, selection, animation, and command optimism, but
 not lifecycle or queue truth.

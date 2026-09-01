@@ -5,28 +5,18 @@ use piko_protocol::{AgentDurableCommand, AgentInputReceipt};
 
 use crate::runtime::execution::PreparedExecution;
 
-/// A prepared Execution whose durable Agent run has not been committed yet.
+/// A prepared Execution whose retained prelude and durable Agent work have not
+/// been committed yet.
 pub(crate) struct PreparedStartup {
     prepared: PreparedExecution,
 }
 
 pub(crate) type RunStartupScope = PreparedStartup;
 
-/// A prepared Execution whose Agent run is durable but whose input is not yet
-/// committed to the private transcript.
-pub(crate) struct DurableStartup {
-    prepared: PreparedExecution,
-}
-
 /// A durably started Execution whose initial input is committed and which may
 /// now be activated.
 pub(crate) struct InputCommittedStartup {
     prepared: PreparedExecution,
-}
-
-pub(crate) struct StartedRunFailure {
-    pub error: AgentApiError,
-    pub receipt: AgentInputReceipt,
 }
 
 impl PreparedStartup {
@@ -39,23 +29,14 @@ impl PreparedStartup {
         commit: &Arc<dyn AgentCommitPort>,
         session_id: &str,
         command: AgentDurableCommand,
-    ) -> Result<DurableStartup, AgentApiError> {
+    ) -> Result<InputCommittedStartup, AgentApiError> {
+        if let Err(error) = self.prepared.commit_prelude().await {
+            self.prepared.rollback().await;
+            return Err(error);
+        }
         if let Err(error) = commit.commit_agent_command(session_id, command).await {
             self.prepared.rollback().await;
             return Err(AgentApiError::PersistenceFailed(error.to_string()));
-        }
-        Ok(DurableStartup {
-            prepared: self.prepared,
-        })
-    }
-}
-
-impl DurableStartup {
-    pub async fn commit_input(self) -> Result<InputCommittedStartup, StartedRunFailure> {
-        if let Err(error) = self.prepared.commit_input().await {
-            let receipt = agent_receipt(&self.prepared);
-            self.prepared.rollback().await;
-            return Err(StartedRunFailure { error, receipt });
         }
         Ok(InputCommittedStartup {
             prepared: self.prepared,

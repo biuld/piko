@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use piko_protocol::agent_runtime::RealtimeDelta;
-use piko_protocol::execution::ModelStepBoundary;
+use piko_protocol::agent_work::ModelStepBoundary;
 use piko_protocol::messages::{ContentBlock, Message, UpstreamAction};
 use piko_protocol::{MessageId, SessionTreeEntry, StreamItemKind, StreamItemOp};
 
@@ -114,6 +114,9 @@ pub struct CommittedItem {
 #[derive(Debug, Clone)]
 pub struct RealtimeDraft {
     pub message_id: MessageId,
+    /// Causal user input that owns this draft. Live ordering anchors the
+    /// draft after committed transcript items for the same input.
+    pub root_input_id: Option<String>,
     pub last_delta_seq: u64,
     /// Text and thinking segments in first-seen order. A segment is addressed
     /// by `(kind, content_index)`; subsequent chunks mutate it in place.

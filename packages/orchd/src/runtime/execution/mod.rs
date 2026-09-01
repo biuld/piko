@@ -23,10 +23,9 @@ use futures_util::FutureExt;
 use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
-use piko_orchd_api::{AgentApiError, CancelReceipt, SessionExecutionPorts};
-use piko_protocol::execution::{
-    CancelExecutionRequest, ExecutionInputReceipt, ExecutionReceipt, ExecutionStatus,
-    StartExecutionRequest, SteerExecutionRequest,
+use piko_orchd_api::{
+    AgentApiError, CancelExecutionRequest, CancelReceipt, ExecutionInputReceipt, ExecutionReceipt,
+    ExecutionStatus, SessionExecutionPorts, StartExecutionRequest, SteerExecutionRequest,
 };
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;

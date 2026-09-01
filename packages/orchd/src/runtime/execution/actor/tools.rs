@@ -1,5 +1,5 @@
 use super::*;
-use piko_protocol::execution::{MessageCommit, ModelStepCommit};
+use piko_protocol::agent_work::{MessageCommit, ModelStepCommit};
 use piko_protocol::{
     TrajectoryChildRunRecord, TrajectoryIdentity, TrajectoryNotificationKind, TrajectoryRecord,
     TrajectorySystemNotificationRecord, TrajectoryToolCallRecord, TrajectoryToolCallStatus,
@@ -372,10 +372,7 @@ impl ExecutionActor {
             timestamp: Some(steering.submitted_at),
         };
         let next_step_index = self.state.model_step_index.saturating_add(1);
-        let input_id = steering
-            .input_id
-            .as_deref()
-            .unwrap_or(steering.request_id.as_str());
+        let input_id = steering.input_id.as_str();
         let change = piko_protocol::AgentInputDispositionChange {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             input_id: input_id.to_string(),

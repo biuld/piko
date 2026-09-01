@@ -48,7 +48,7 @@ fn submit_without_session_returns_session_create_effect() {
 
     assert!(app.session.initializing);
     assert_eq!(
-        app.session.pending_turn_content,
+        app.session.pending_submit_content,
         Some(piko_protocol::MessageContent::String("hello".into()))
     );
     assert_eq!(effects.len(), 1);

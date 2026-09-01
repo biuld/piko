@@ -133,6 +133,7 @@ impl AgentActor {
             self.finish_run_cancellation();
             return Err(AgentApiError::Cancelled);
         }
+        let input_commit = prepared.input_commit().clone();
         let durable_start = AgentDurableCommand::AgentInputProcessingStarted {
             agent_instance_id: self.identity.agent_instance_id.clone(),
             root_input_id: canonical_input_id.clone(),
@@ -142,6 +143,10 @@ impl AgentActor {
             prompt_digest,
             started_at,
             input: canonical_input,
+            input_message_id: input_commit.message_id,
+            input_parent_message_id: input_commit.parent_message_id,
+            input_tree_parent_entry_id: input_commit.tree_parent_entry_id,
+            input_committed_at: input_commit.committed_at,
         };
         let startup = match RunStartupScope::new(prepared)
             .commit_start(&self.commit, &self.identity.session_id, durable_start)
@@ -161,20 +166,6 @@ impl AgentActor {
             root_input_id: canonical_input_id.clone(),
         };
         self.publish_snapshot();
-        let startup = match startup.commit_input().await {
-            Ok(startup) => startup,
-            Err(failure) => {
-                let mut failure = failure;
-                failure.receipt.input_id = canonical_input_id.clone();
-                return self
-                    .finish_failed_started_run(
-                        canonical_input_id.clone(),
-                        "input commit failed",
-                        failure,
-                    )
-                    .await;
-            }
-        };
         if startup_cancel.is_cancelled() {
             let mut receipt = startup.receipt();
             receipt.input_id = canonical_input_id.clone();
@@ -197,11 +188,11 @@ impl AgentActor {
         if startup_cancel.is_cancelled() {
             let _ = self
                 .execution
-                .request_cancel(piko_protocol::CancelExecutionRequest {
+                .request_cancel(piko_orchd_api::CancelExecutionRequest {
                     request_id: format!("cancel-startup-{canonical_input_id}"),
                     session_id: self.identity.session_id.clone(),
                     root_input_id: canonical_input_id.clone(),
-                    reason: piko_protocol::CancelReason::Superseded,
+                    reason: piko_orchd_api::CancelReason::Superseded,
                 })
                 .await;
         }
@@ -236,27 +227,6 @@ impl AgentActor {
         })
     }
 
-    async fn finish_failed_started_run(
-        &mut self,
-        root_input_id: String,
-        context: &str,
-        failure: StartedRunFailure,
-    ) -> Result<AgentInputReceipt, AgentApiError> {
-        self.run_state = AgentRunState::Running {
-            root_input_id: failure.receipt.input_id.clone(),
-        };
-        let (terminal, _unobserved) = ExecutionHandoffLease::new(ExecutionTerminal {
-            outcome: piko_protocol::ExecutionOutcome::failed(format!(
-                "{context}: {}",
-                failure.error
-            )),
-            transcript: self.transcript.clone(),
-            head_message_id: self.head_message_id.clone(),
-        });
-        Box::pin(self.handle_processing_finished(root_input_id, terminal)).await;
-        Ok(failure.receipt)
-    }
-
     async fn finish_cancelled_started_run(
         &mut self,
         root_input_id: String,
@@ -274,7 +244,7 @@ impl AgentActor {
         // with the marker in place (F-01 / D-01).
         let marker = piko_protocol::agent_work_abort_marker(&root_input_id);
         let marker_id = piko_protocol::agent_work_abort_marker_message_id(&root_input_id);
-        let marker_commit = piko_protocol::execution::MessageCommit {
+        let marker_commit = piko_protocol::agent_work::MessageCommit {
             session_id: self.identity.session_id.clone(),
             root_input_id: root_input_id.clone(),
             agent_instance_id: self.identity.agent_instance_id.clone(),
@@ -293,11 +263,11 @@ impl AgentActor {
             Ok(()) => {
                 transcript.push(marker);
                 head_message_id = marker_id;
-                piko_protocol::ExecutionOutcome::Cancelled {
+                piko_protocol::AgentWorkOutcome::Cancelled {
                     reason: Some("cancelled during startup".into()),
                 }
             }
-            Err(error) => piko_protocol::ExecutionOutcome::failed(format!(
+            Err(error) => piko_protocol::AgentWorkOutcome::failed(format!(
                 "abort marker commit failed: {error}"
             )),
         };

@@ -29,7 +29,7 @@ impl<'a> AgentWorkControl<'a> {
         input_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         self.app.state.lock().await.session(&session_id)?;
-        let runner = self.app.turn_runner.lock().await.clone();
+        let runner = self.app.agent_runner.lock().await.clone();
         let receipt = runner
             .cancel_agent_input(&session_id, &agent_instance_id, &input_id)
             .await?;
@@ -59,21 +59,35 @@ impl<'a> AgentWorkControl<'a> {
         self.app.state.lock().await.session(&session_id)?;
         let accepted = self
             .app
-            .turn_runner
+            .agent_runner
             .lock()
             .await
             .clone()
             .interrupt_agent(&session_id, &agent_instance_id)
             .await;
-        Ok(vec![ServerMessage::CommandResponse {
+        let mut messages = vec![ServerMessage::CommandResponse {
             command_id,
             result: Ok(crate::api::CommandResult::AgentInterrupted {
-                session_id,
-                agent_instance_id,
+                session_id: session_id.clone(),
+                agent_instance_id: agent_instance_id.clone(),
                 accepted,
                 timestamp: now_ms(),
             }),
-        }])
+        }];
+        if let Ok((snapshot, agents)) = self.app.session_view(&session_id).await
+            && snapshot
+                .agent_work
+                .iter()
+                .any(|work| interrupt_push_applies(work, &agent_instance_id))
+        {
+            messages.push(super::sessions::helpers::session_reconciled_message(
+                session_id,
+                piko_protocol::ReconcileReason::ExplicitRefresh,
+                snapshot,
+                agents,
+            ));
+        }
+        Ok(messages)
     }
 
     async fn submit_with_response(
@@ -91,7 +105,7 @@ impl<'a> AgentWorkControl<'a> {
                 let agent_instance_id = input.agent_instance_id.clone();
                 let receipt = self
                     .app
-                    .turn_runner
+                    .agent_runner
                     .lock()
                     .await
                     .clone()
@@ -119,16 +133,7 @@ impl<'a> AgentWorkControl<'a> {
             piko_protocol::AgentInputDelivery::Auto
             | piko_protocol::AgentInputDelivery::StartWhenIdle
             | piko_protocol::AgentInputDelivery::FollowUp => {
-                self.app
-                    .submit_input_with_id(
-                        command_id,
-                        input.session_id,
-                        input.agent_instance_id,
-                        input.input_id,
-                        input.content,
-                        tx,
-                    )
-                    .await
+                self.app.submit_user_input(command_id, input, tx).await
             }
         }
     }
@@ -148,7 +153,7 @@ impl<'a> AgentWorkControl<'a> {
     }
 
     async fn agent_is_steerable(&self, session_id: &str, agent_instance_id: &str) -> bool {
-        let runner = self.app.turn_runner.lock().await.clone();
+        let runner = self.app.agent_runner.lock().await.clone();
         if let Some(agents) = runner.list_agent_instances(session_id).await
             && agents.iter().any(|agent| {
                 agent.agent_instance_id == agent_instance_id
@@ -202,11 +207,11 @@ impl<'a> AgentWorkControl<'a> {
                 "client AgentInput must have user origin and no caller".into(),
             ));
         }
-        super::turns::content::validate_user_content(&input.content)?;
+        super::agent_work::content::validate_user_content(&input.content)?;
         let cwd = self.app.state.lock().await.session_cwd(&input.session_id)?;
         let session_dir = self
             .app
-            .ensure_turn_session_dir(&input.session_id, &cwd)
+            .ensure_agent_session_dir(&input.session_id, &cwd)
             .await?;
         let projection = self
             .app
@@ -238,19 +243,26 @@ impl<'a> AgentWorkControl<'a> {
         session_id: &str,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
-        let (snapshot, agents) = self.app.session_view(session_id).await?;
-        crate::util::send_event(
-            tx,
-            super::sessions::helpers::session_reconciled_message(
-                session_id.to_string(),
-                piko_protocol::ReconcileReason::ExplicitRefresh,
-                snapshot,
-                agents,
-            ),
-        )
-        .await;
-        Ok(())
+        self.app.publish_work_snapshot(session_id, tx).await
     }
+}
+
+fn interrupt_push_applies(
+    work: &piko_protocol::AgentWorkSnapshot,
+    agent_instance_id: &str,
+) -> bool {
+    work.agent_instance_id == agent_instance_id
+        && (matches!(
+            work.foreground,
+            piko_protocol::AgentForeground::Cancelling
+                | piko_protocol::AgentForeground::RequiresAction
+        ) || work.active_work.as_ref().is_some_and(|active| {
+            matches!(
+                active.state,
+                piko_protocol::AgentWorkViewState::Cancelling
+                    | piko_protocol::AgentWorkViewState::RequiresAction
+            )
+        }))
 }
 
 fn agent_activity_is_live(activity: &piko_protocol::AgentActivity) -> bool {

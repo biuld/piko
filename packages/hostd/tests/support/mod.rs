@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 pub mod mock_session;
+pub mod work_snapshot;
 
 pub use mock_session::MockSessionPublisher;
 
@@ -227,7 +228,7 @@ pub fn success_report(agent_instance_id: impl Into<String>) -> piko_protocol::Ag
         agent_instance_id: agent_instance_id.into(),
         root_input_id: "input-test".into(),
         report_id: format!("report_{}", uuid::Uuid::new_v4()),
-        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
             usage: Default::default(),
         },
         summary: "done".into(),

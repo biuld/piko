@@ -136,6 +136,81 @@ fn stream_item_applies_text_chunk() {
 }
 
 #[test]
+fn realtime_draft_that_arrives_first_stays_after_its_user_prompt() {
+    let mut tl = AgentTimeline::new();
+    let mut patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some("s1".into()),
+        Some("root".into()),
+        "assistant-1",
+        Some(0),
+        &RealtimeDelta::Text {
+            content_index: 0,
+            delta: "answer".into(),
+        },
+    )
+    .pop()
+    .unwrap();
+    patch.fields.as_mut().unwrap()["rootInputId"] = serde_json::json!("input-1");
+    assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+
+    assert!(tl.apply_committed(
+        "user-1".into(),
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("question".into()),
+            timestamp: None,
+        },
+        "input-1".into(),
+    ));
+
+    assert!(matches!(
+        &tl.items()[0],
+        TimelineItem::Committed(item) if item.message_id == "user-1"
+    ));
+    assert!(matches!(
+        &tl.items()[1],
+        TimelineItem::RealtimeDraft(item) if item.message_id == "assistant-1"
+    ));
+}
+
+#[test]
+fn rooted_realtime_draft_orders_after_an_existing_user_prompt() {
+    let mut tl = AgentTimeline::new();
+    assert!(tl.apply_committed(
+        "user-1".into(),
+        1,
+        Message::User {
+            content: piko_protocol::MessageContent::String("question".into()),
+            timestamp: None,
+        },
+        "input-1".into(),
+    ));
+    let mut patch = piko_protocol::StreamItemPatch::from_realtime_delta(
+        Some("s1".into()),
+        Some("root".into()),
+        "assistant-1",
+        Some(0),
+        &RealtimeDelta::Text {
+            content_index: 0,
+            delta: "answer".into(),
+        },
+    )
+    .pop()
+    .unwrap();
+    patch.fields.as_mut().unwrap()["rootInputId"] = serde_json::json!("input-1");
+    assert_eq!(tl.apply_stream_item(&patch), ApplyOutcome::Applied);
+
+    assert!(matches!(
+        &tl.items()[0],
+        TimelineItem::Committed(item) if item.message_id == "user-1"
+    ));
+    assert!(matches!(
+        &tl.items()[1],
+        TimelineItem::RealtimeDraft(item) if item.message_id == "assistant-1"
+    ));
+}
+
+#[test]
 fn realtime_segments_coalesce_chunks_and_keep_first_seen_kind_order() {
     let mut tl = AgentTimeline::new();
     for (seq, delta) in [

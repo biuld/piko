@@ -24,15 +24,6 @@ impl AppState {
                     prompt,
                     selected_idx: 0,
                 });
-                if let Some(agent) = self
-                    .agent_panel
-                    .list
-                    .items
-                    .iter_mut()
-                    .find(|a| a.agent_instance_id == agent_instance_id)
-                {
-                    agent.activity = piko_protocol::AgentActivity::WaitingForApproval;
-                }
                 self.status = format!("approval requested for {tool_name}");
                 self.notifications.push_with(
                     crate::features::notifications::NoticeScope::Session(session_id.clone()),
@@ -57,42 +48,10 @@ impl AppState {
                 if !self.accepts_session(&session_id) {
                     return effects;
                 }
-                let agent_instance_id = self
-                    .approvals
-                    .pending
-                    .iter()
-                    .find(|a| a.id == approval_id)
-                    .map(|a| a.agent_instance_id.clone());
                 self.approvals.resolve(&approval_id);
                 self.notifications.resolve(
                     &crate::features::notifications::NoticeSubject::Approval(approval_id.clone()),
                 );
-                if let Some(agent_id) = agent_instance_id {
-                    let still_blocked = self
-                        .approvals
-                        .pending
-                        .iter()
-                        .any(|a| a.agent_instance_id == agent_id);
-                    if !still_blocked
-                        && let Some(agent) = self
-                            .agent_panel
-                            .list
-                            .items
-                            .iter_mut()
-                            .find(|a| a.agent_instance_id == agent_id)
-                    {
-                        agent.activity = if self
-                            .session
-                            .agent_work
-                            .get(&agent_id)
-                            .is_some_and(|work| work.active_work.is_some())
-                        {
-                            piko_protocol::AgentActivity::Running
-                        } else {
-                            piko_protocol::AgentActivity::Idle
-                        };
-                    }
-                }
                 self.status = format!("approval {approval_id} resolved: {decision:?}");
                 if self.approvals.is_empty()
                     && self.focus_manager.active_mode() == AppMode::Surface(SurfaceId::Approval)

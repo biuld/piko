@@ -109,6 +109,21 @@ monotonic clock only while the draft is open; it never invents a completed
 duration. A ModelStep event from another agent or Turn cannot close this
 draft because all updates are keyed by agent and assistant message identity.
 
+The commit-to-observation seam is a post-ack adapter, not an implicit message
+side effect. Domain code keeps explicit aggregate commits (a model step must
+remain atomic); the adapter publishes one reliable fact describing the
+successful durable commit, and the host projector expands that fact into
+client events. New aggregate commit shapes must extend this single adapter or
+return an ordered committed-fact batch from the journal boundary. They must
+not add independent call-site notifications that can drift from persistence.
+
+An input's observation cursor is captured immediately before its durable
+`AgentInputProcessingStarted` projection publishes any reliable event. A
+subscriber that attaches after `wait_agent_input_started` therefore replays
+the complete processing window. For a queued follow-up, processing start
+advances the saved cursor past the previous root input before publishing the
+new input's running/message events.
+
 The `ToolExecutionEvent::Ended` DTO also carries `parent_message_id`, so
 legacy stream-item conversion cannot detach a tool result from its model step.
 

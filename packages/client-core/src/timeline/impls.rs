@@ -164,11 +164,16 @@ impl AgentTimeline {
         message_id: MessageId,
         delta_seq: u64,
         delta: &RealtimeDelta,
+        root_input_id: Option<String>,
     ) -> ApplyOutcome {
         if self.committed_records.contains_key(&message_id) {
             return ApplyOutcome::Ignored;
         }
-        let outcome = self.prepare_draft(&message_id, delta_seq);
+        let (outcome, order_changed) =
+            self.prepare_draft(&message_id, delta_seq, root_input_id.clone());
+        if order_changed {
+            self.maintenance();
+        }
         if outcome != ApplyOutcome::Applied {
             return outcome;
         }
@@ -234,7 +239,7 @@ impl AgentTimeline {
                 content_index,
                 Some(&chunk),
                 Some(message_id),
-                None,
+                root_input_id,
             );
         }
         ApplyOutcome::Applied
@@ -269,7 +274,10 @@ impl AgentTimeline {
             let Some(seq) = patch.delta_seq else {
                 return ApplyOutcome::Inconsistent;
             };
-            let outcome = self.prepare_draft(&parent, seq);
+            let (outcome, order_changed) = self.prepare_draft(&parent, seq, root_input_id.clone());
+            if order_changed {
+                self.maintenance();
+            }
             if outcome != ApplyOutcome::Applied {
                 return outcome;
             }
@@ -345,7 +353,7 @@ impl AgentTimeline {
         }
 
         if let Some((message_id, delta_seq, delta)) = patch.as_realtime_apply() {
-            return self.apply_realtime_checked(message_id, delta_seq, &delta);
+            return self.apply_realtime_checked(message_id, delta_seq, &delta, root_input_id);
         }
 
         if patch.item_kind == StreamItemKind::ToolCall && patch.op == StreamItemOp::Upsert {
@@ -526,14 +534,20 @@ impl AgentTimeline {
         self.next_live_order = 0;
     }
 
-    fn prepare_draft(&mut self, message_id: &str, delta_seq: u64) -> ApplyOutcome {
+    fn prepare_draft(
+        &mut self,
+        message_id: &str,
+        delta_seq: u64,
+        root_input_id: Option<String>,
+    ) -> (ApplyOutcome, bool) {
         if self.committed_records.contains_key(message_id) {
-            return ApplyOutcome::Ignored;
+            return (ApplyOutcome::Ignored, false);
         }
         if !self.draft_ids.contains_key(message_id) {
             let live_order = self.allocate_live_order();
             self.items.push(TimelineItem::RealtimeDraft(RealtimeDraft {
                 message_id: message_id.to_string(),
+                root_input_id,
                 last_delta_seq: delta_seq,
                 content_segments: Vec::new(),
                 live_order,
@@ -545,20 +559,25 @@ impl AgentTimeline {
             self.draft_ids
                 .insert(message_id.to_string(), self.items.len() - 1);
             self.maintenance_indexes_only();
-            return ApplyOutcome::Applied;
+            return (ApplyOutcome::Applied, true);
         }
         let idx = self.draft_ids[message_id];
         let TimelineItem::RealtimeDraft(draft) = &mut self.items[idx] else {
-            return ApplyOutcome::Inconsistent;
+            return (ApplyOutcome::Inconsistent, false);
         };
+        let mut order_changed = false;
+        if draft.root_input_id.is_none() {
+            order_changed = root_input_id.is_some();
+            draft.root_input_id = root_input_id;
+        }
         if delta_seq <= draft.last_delta_seq {
-            return ApplyOutcome::Ignored;
+            return (ApplyOutcome::Ignored, order_changed);
         }
         if delta_seq != draft.last_delta_seq + 1 {
-            return ApplyOutcome::Inconsistent;
+            return (ApplyOutcome::Inconsistent, order_changed);
         }
         draft.last_delta_seq = delta_seq;
-        ApplyOutcome::Applied
+        (ApplyOutcome::Applied, order_changed)
     }
 
     /// Advance a live draft's delta sequence without adding content. Used by
@@ -589,17 +608,39 @@ impl AgentTimeline {
     }
 
     pub(super) fn reorder_authored_items(&mut self) {
+        let root_anchors: HashMap<&str, u64> = self
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                TimelineItem::Committed(item) => {
+                    Some((item.root_input_id.as_str(), item.transcript_seq))
+                }
+                TimelineItem::Tool(item) => {
+                    match (item.root_input_id.as_deref(), item.transcript_seq) {
+                        (Some(root_input_id), Some(seq)) => Some((root_input_id, seq)),
+                        _ => None,
+                    }
+                }
+                TimelineItem::RealtimeDraft(_) | TimelineItem::SessionEntry(_) => None,
+            })
+            .fold(HashMap::new(), |mut anchors, (root_input_id, seq)| {
+                anchors
+                    .entry(root_input_id)
+                    .and_modify(|anchor| *anchor = (*anchor).max(seq))
+                    .or_insert(seq);
+                anchors
+            });
         let positions: Vec<usize> = self
             .items
             .iter()
             .enumerate()
-            .filter_map(|(idx, item)| authored_seq(item).map(|_| idx))
+            .filter_map(|(idx, item)| is_agent_authored(item).then_some(idx))
             .collect();
         let mut authored: Vec<TimelineItem> = positions
             .iter()
             .map(|idx| self.items[*idx].clone())
             .collect();
-        authored.sort_by_key(|item| authored_seq(item).unwrap_or(u64::MAX));
+        authored.sort_by_key(|item| authored_order_key(item, &root_anchors));
         for (idx, item) in positions.into_iter().zip(authored) {
             self.items[idx] = item;
         }
@@ -665,11 +706,35 @@ impl AgentTimeline {
     }
 }
 
-fn authored_seq(item: &TimelineItem) -> Option<u64> {
+fn is_agent_authored(item: &TimelineItem) -> bool {
+    !matches!(item, TimelineItem::SessionEntry(_))
+}
+
+fn authored_order_key(item: &TimelineItem, root_anchors: &HashMap<&str, u64>) -> (u64, u8, u64) {
     match item {
-        TimelineItem::Committed(item) => Some(item.transcript_seq),
-        TimelineItem::Tool(item) => item.transcript_seq,
-        _ => None,
+        TimelineItem::Committed(item) => (item.transcript_seq, 0, 0),
+        TimelineItem::Tool(item) => item.transcript_seq.map_or_else(
+            || {
+                (
+                    item.root_input_id
+                        .as_deref()
+                        .and_then(|root| root_anchors.get(root).copied())
+                        .unwrap_or(u64::MAX),
+                    1,
+                    item.live_order,
+                )
+            },
+            |seq| (seq, 0, 0),
+        ),
+        TimelineItem::RealtimeDraft(item) => (
+            item.root_input_id
+                .as_deref()
+                .and_then(|root| root_anchors.get(root).copied())
+                .unwrap_or(u64::MAX),
+            1,
+            item.live_order,
+        ),
+        TimelineItem::SessionEntry(item) => (item.branch_order, 0, 0),
     }
 }
 

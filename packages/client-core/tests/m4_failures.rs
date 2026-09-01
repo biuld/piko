@@ -123,6 +123,7 @@ fn m4_reconcile_restores_pending_prompts() {
     event.snapshot.pending_approvals.push(ApprovalSnapshot {
         approval_id: "ap-restore".into(),
         agent_instance_id: "root".into(),
+        root_input_id: "input-root".into(),
         tool_name: "exec".into(),
         request: serde_json::json!({"cmd": "ls"}),
         prompt: None,
@@ -134,6 +135,7 @@ fn m4_reconcile_restores_pending_prompts() {
         .push(UserInteractionSnapshot {
             interaction_id: "ix-restore".into(),
             agent_instance_id: "root".into(),
+            root_input_id: "input-root".into(),
             agent_id: "main".into(),
             tool_call_id: "tc-1".into(),
             status: UserInteractionStatus::Pending,

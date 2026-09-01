@@ -5,7 +5,7 @@
 > (`infra/mcp/*`, `tests/fixtures/mcp_server.sh`,
 > `tests/fixtures/mcp_server_no_resources.sh`), settings model
 > (`domain/config/settings.rs`), approval gateway
-> (`adapters/turns/orch_runner/approval_gateway.rs`), orchd registry
+> (`adapters/agent_runner/orch_runner/approval_gateway.rs`), orchd registry
 > (`adapters/tools/registry.rs`, `registry_tests.rs`), client-core + TUI
 > prompt propagation; full workspace suite
 > Environment: macOS (arm64), `cargo test --workspace`,

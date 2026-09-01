@@ -1,5 +1,7 @@
 //! Vertical-slice tests for the long-lived AgentInstance control plane.
 
+#[path = "common/blocking_tool.rs"]
+mod blocking_tool;
 #[path = "common/faux_provider.rs"]
 mod faux_provider;
 
@@ -232,7 +234,7 @@ impl AgentCommitPort for BlockingRunStartCommitPort {
 impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
     async fn commit_message(
         &self,
-        commit: piko_protocol::execution::MessageCommit,
+        commit: piko_protocol::agent_work::MessageCommit,
     ) -> Result<piko_protocol::CommitAck, CommitError> {
         let attempt = self.attempt.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt == self.fail_at {
@@ -247,9 +249,17 @@ impl piko_orchd_api::ExecutionCommitPort for FailingMessageCommitPort {
         })
     }
 
+    async fn commit_steer(
+        &self,
+        message: piko_protocol::agent_work::MessageCommit,
+        _change: piko_protocol::AgentInputDispositionChange,
+    ) -> Result<piko_protocol::CommitAck, CommitError> {
+        self.commit_message(message).await
+    }
+
     async fn commit_model_step(
         &self,
-        commit: piko_protocol::execution::ModelStepCommit,
+        commit: piko_protocol::agent_work::ModelStepCommit,
     ) -> Result<piko_protocol::CommitAck, CommitError> {
         let attempt = self.attempt.fetch_add(1, Ordering::SeqCst) + 1;
         if attempt == self.fail_at {
@@ -360,6 +370,15 @@ impl AgentCommitPort for CollectingAgentCommitPort {
                 report.agent_instance_id.clone()
             }
             AgentDurableCommand::AgentInputProcessingStarted {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::PendingActionRequested {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::PendingActionResolved {
+                agent_instance_id, ..
+            }
+            | AgentDurableCommand::InterruptRequested {
                 agent_instance_id, ..
             } => agent_instance_id.clone(),
             AgentDurableCommand::CommitReport {
@@ -490,6 +509,7 @@ async fn attached_bootstrapped_runtime_with_limits(
 
 include!("agent_runtime_cases/atomicity.rs");
 include!("agent_runtime_cases/behavior.rs");
+include!("agent_runtime_cases/races.rs");
 include!("agent_runtime_cases/context/mod.rs");
 include!("agent_runtime_cases/multi_agent.rs");
 include!("agent_runtime_cases/recovery.rs");

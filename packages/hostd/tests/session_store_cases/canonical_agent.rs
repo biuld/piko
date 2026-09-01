@@ -81,6 +81,10 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
                 prompt_digest: "digest".into(),
                 started_at: 21,
                 input,
+                input_message_id: "message-follow-up".into(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 21,
             },
         )
         .await
@@ -91,6 +95,10 @@ async fn canonical_agent_inputs_replay_and_project_work_state() {
         .unwrap()
         .unwrap();
     assert_eq!(active.foreground, piko_protocol::AgentForeground::Running);
+    assert_eq!(
+        active.active_work.as_ref().unwrap().state,
+        piko_protocol::AgentWorkViewState::Starting
+    );
     assert_eq!(
         active.active_work.as_ref().unwrap().root_input_id,
         "input-follow-up"
@@ -148,6 +156,10 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
                 prompt_digest: "digest-root".into(),
                 started_at: 10,
                 input: input.clone(),
+                input_message_id: request.message_id.clone(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 10,
             },
         )
         .await
@@ -161,6 +173,22 @@ async fn run_start_commit_admits_and_binds_root_input_atomically() {
     assert_eq!(work.root_input_id, input.input_id);
     assert!(snapshot.queued_inputs.is_empty());
     assert!(snapshot.pending_steers.is_empty());
+    let aggregate = piko_session_store::SessionStore::open(
+        temp.path(),
+        piko_session_store::OpenOptions::default(),
+    )
+    .unwrap()
+    .aggregate;
+    let stored_input = aggregate.agent_inputs.get(&input.input_id).unwrap();
+    let stored_message = aggregate.messages.get(&request.message_id).unwrap();
+    assert_eq!(
+        stored_input.applied_message_id.as_deref(),
+        Some(request.message_id.as_str())
+    );
+    assert_eq!(
+        stored_input.admission_revision, stored_message.revision,
+        "admission, processing start, and initiating user message share one commit"
+    );
 }
 
 #[tokio::test]
@@ -193,13 +221,17 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 prompt_digest: "digest".into(),
                 started_at: 10,
                 input: piko_protocol::AgentInput::from_request(&root_request, 10),
+                input_message_id: root_request.message_id.clone(),
+                input_parent_message_id: None,
+                input_tree_parent_entry_id: None,
+                input_committed_at: 10,
             },
         )
         .await
         .unwrap();
     store
         .commit_message(
-            piko_protocol::execution::MessageCommit {
+            piko_protocol::agent_work::MessageCommit {
                 session_id: "session-1".into(),
                 root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -274,7 +306,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
 
     store
         .commit_steer(
-            piko_protocol::execution::MessageCommit {
+            piko_protocol::agent_work::MessageCommit {
                 session_id: "session-1".into(),
                 root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -314,7 +346,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
 
     store
         .commit_model_step(
-            piko_protocol::execution::ModelStepCommit {
+            piko_protocol::agent_work::ModelStepCommit {
                 session_id: "session-1".into(),
             root_input_id: "request-root-steer".into(),
                 agent_instance_id: root.agent_instance_id.clone(),
@@ -323,7 +355,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
                 started_at: 21,
                 finished_at: 22,
                 outcome: piko_protocol::ModelStepOutcome::Completed,
-                assistant: piko_protocol::execution::MessageCommit {
+                assistant: piko_protocol::agent_work::MessageCommit {
                     session_id: "session-1".into(),
                 root_input_id: "request-root-steer".into(),
                     agent_instance_id: root.agent_instance_id.clone(),
@@ -359,7 +391,7 @@ async fn steer_message_and_application_are_committed_as_one_step_relation() {
             .is_none()
     );
     assert_eq!(
-        projection.agent_executions["request-root-steer"].model_steps[0].model_step_id,
+        projection.root_inputs["request-root-steer"].model_steps[0].model_step_id,
         "request-root-steer:step_1"
     );
 }

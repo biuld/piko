@@ -1,6 +1,6 @@
 # ADR-027: Session, Agent, AgentInput, ModelStep
 
-> Status: proposed
+> Status: accepted
 > Date: 2026-08-30
 > Supersedes in part: [ADR-025](ADR-025-authoritative-agent-lifecycle.md) as a core-domain hierarchy
 

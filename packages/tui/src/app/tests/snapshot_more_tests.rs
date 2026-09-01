@@ -269,7 +269,6 @@ fn queue_update_populates_status_data() {
 
     assert_eq!(app.queue_status.steer_count, 1);
     assert_eq!(app.queue_status.follow_up_count, 2);
-    assert_eq!(app.queue_status.next_turn_count, 2);
 }
 
 #[test]

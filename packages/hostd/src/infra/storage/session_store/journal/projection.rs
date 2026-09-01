@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use piko_protocol::{ExecutionStatus, SessionTreeEntry};
+use piko_protocol::{AgentWorkProcessingStatus, SessionTreeEntry};
 use piko_session_store::SessionAggregate;
 
 use crate::domain::sessions::SessionModelRef;
 use crate::ports::storage_types::{
-    AgentProjection, ExecutionProjection, SessionProjection, SessionStorageError,
+    AgentProjection, RootInputProjection, SessionProjection, SessionStorageError,
 };
 
 use super::SessionStore;
@@ -85,7 +85,7 @@ impl SessionStore {
                 )
             })
             .collect();
-        let agent_executions = aggregate
+        let root_inputs = aggregate
             .agent_inputs
             .values()
             .filter_map(|input| {
@@ -120,7 +120,7 @@ impl SessionStore {
                     .collect();
                 Some((
                     input.input.input_id.clone(),
-                    ExecutionProjection {
+                    RootInputProjection {
                         agent_instance_id,
                         root_input_id: input.input.input_id.clone(),
                         request_id: input.input.request_id.clone(),
@@ -133,7 +133,9 @@ impl SessionStore {
                         status: processing
                             .report
                             .as_ref()
-                            .map_or(ExecutionStatus::Running, |report| report.outcome.status()),
+                            .map_or(AgentWorkProcessingStatus::Running, |report| {
+                                report.outcome.status()
+                            }),
                         started_at: processing.started_at,
                         finished_at: processing.finished_at,
                         report: processing.report.clone(),
@@ -171,7 +173,7 @@ impl SessionStore {
             journal_revision: aggregate.revision,
             agents,
             agent_inbox: aggregate.inbox.values().cloned().collect(),
-            agent_executions,
+            root_inputs,
             agent_input_queue: aggregate.pending_follow_ups(None),
             agent_work: aggregate.agent_work_snapshots(),
             last_model: aggregate

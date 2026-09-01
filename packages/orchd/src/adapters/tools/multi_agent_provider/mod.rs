@@ -108,7 +108,7 @@ impl MultiAgentToolProvider {
                         receipt.map_err(ToolFail::from_agent)?;
                     },
                     _ = cancellation.cancelled() => {
-                        let _ = self.runtime.cancel_agent_run(
+                        let _ = self.runtime.interrupt_agent(
                             context.session_id.clone(),
                             child.identity.agent_instance_id.clone(),
                         ).await;
@@ -130,7 +130,7 @@ impl MultiAgentToolProvider {
                 tokio::select! {
                     report = completion => report.map_err(ToolFail::from_agent)?,
                     _ = cancellation.cancelled() => {
-                        let _ = self.runtime.cancel_agent_run(
+                        let _ = self.runtime.interrupt_agent(
                             context.session_id.clone(),
                             child.identity.agent_instance_id.clone(),
                         ).await;
@@ -227,7 +227,7 @@ impl MultiAgentToolProvider {
         let previous_activity = activity_str(&snapshot.activity);
         match self
             .runtime
-            .cancel_agent_run(context.session_id.clone(), target.clone())
+            .interrupt_agent(context.session_id.clone(), target.clone())
             .await
         {
             Ok(receipt) => Ok(serde_json::json!({

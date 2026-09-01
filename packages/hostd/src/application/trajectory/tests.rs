@@ -131,7 +131,7 @@ async fn query_lists_and_fetches_runs_from_journal_events() {
                         agent_instance_id: agent_instance_id.into(),
                         root_input_id: "input-1".into(),
                         report_id: "report-1".into(),
-                        outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                        outcome: piko_protocol::AgentWorkOutcome::Succeeded {
                             usage: piko_protocol::Usage::empty(),
                         },
                         summary: "done".into(),

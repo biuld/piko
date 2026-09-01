@@ -3,7 +3,7 @@
 > Date: 2026-08-03
 > Fixture: hostd settings merge + permission-domain + approval-gateway
 > tests (`domain/config/settings.rs`,
-> `domain/permissions/mod.rs`, `adapters/turns/orch_runner/tests.rs`),
+> `domain/permissions/mod.rs`, `adapters/agent_runner/orch_runner/tests.rs`),
 > orchd policy-resolution + registry decision tests
 > (`runtime/utils.rs`, `adapters/tools/registry_tests.rs`), full workspace
 > suite

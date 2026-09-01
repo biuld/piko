@@ -2,9 +2,9 @@ use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
 use piko_comms::{MailboxSender, ReplyReceiver, ReplySender};
-use piko_orchd_api::{AgentApiError, CancelReceipt};
-use piko_protocol::execution::ExecutionInputReceipt;
-use piko_protocol::execution::{CancelReason, SteerExecutionRequest};
+use piko_orchd_api::{
+    AgentApiError, CancelReason, CancelReceipt, ExecutionInputReceipt, SteerExecutionRequest,
+};
 use tokio_util::sync::CancellationToken;
 
 use super::{ExecutionIdentity, ExecutionTerminal};
@@ -34,7 +34,7 @@ pub struct ExecutionHandle {
     pub terminal_rx: ArcTerminalReceiver,
 }
 
-/// Cloneable waiter for the terminal ExecutionOutcome.
+/// Cloneable waiter for the terminal AgentWorkOutcome.
 #[derive(Clone)]
 pub struct ArcTerminalReceiver {
     inner: std::sync::Arc<

@@ -4,7 +4,7 @@ mod journal;
 mod serial;
 
 pub use crate::ports::storage_types::{
-    AgentProjection, CommittedMessage, ExecutionProjection, RecoveredAgent, SessionProjection,
+    AgentProjection, CommittedMessage, RecoveredAgent, RootInputProjection, SessionProjection,
 };
 pub use journal::SessionStore;
 pub(crate) use journal::mutations::tree_entry_event;

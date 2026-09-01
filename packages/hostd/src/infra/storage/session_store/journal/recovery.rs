@@ -129,7 +129,7 @@ impl SessionStore {
                         "report",
                         &["interrupted", &input.input.input_id],
                     ),
-                    outcome: piko_protocol::ExecutionOutcome::Cancelled {
+                    outcome: piko_protocol::AgentWorkOutcome::Cancelled {
                         reason: Some("interrupted during session recovery".into()),
                     },
                     summary: "Agent work interrupted during session recovery".into(),

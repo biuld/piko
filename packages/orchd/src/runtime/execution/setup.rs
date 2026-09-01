@@ -123,7 +123,7 @@ impl AgentExecutionRuntime {
     pub(crate) async fn commit_execution_message(
         &self,
         session_id: &str,
-        commit: piko_protocol::execution::MessageCommit,
+        commit: piko_protocol::agent_work::MessageCommit,
     ) -> Result<(), AgentApiError> {
         let scope = self.scope(session_id).await?;
         scope

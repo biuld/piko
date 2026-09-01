@@ -1,12 +1,12 @@
-#[path = "../support/mock_turn_runner.rs"]
-mod mock_turn_runner;
+#[path = "../support/mock_agent_runner.rs"]
+mod mock_agent_runner;
 #[path = "../support/mod.rs"]
 mod support;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use mock_turn_runner::MockAgentRunRunner;
+use mock_agent_runner::MockAgentRunRunner;
 use piko_hostd::api::{Command, Message, ServerMessage as Event, SessionTreeEntry};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::ports::AgentRunRunner;
@@ -121,7 +121,7 @@ impl AgentRunRunner for AgentPersistRunner {
             }
 
             let _ = store.commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-main".into(),
@@ -149,7 +149,7 @@ impl AgentRunRunner for AgentPersistRunner {
             );
 
             let _ = store.commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
@@ -191,7 +191,7 @@ impl AgentRunRunner for AgentPersistRunner {
                 timestamp: Some(2),
             };
             let _ = store.commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: "task-child".into(),
@@ -274,4 +274,5 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
     }
 }
 
+mod hydrate_tests;
 mod persistence_tests;

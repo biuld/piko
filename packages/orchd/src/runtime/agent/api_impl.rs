@@ -260,11 +260,11 @@ impl AgentRuntimeApi for AgentRuntime {
             .map_err(|_| AgentApiError::RuntimeUnavailable)?
     }
 
-    async fn cancel_agent_run(
+    async fn interrupt_agent(
         &self,
         session_id: String,
         agent_instance_id: String,
-    ) -> Result<AgentCancelReceipt, AgentApiError> {
+    ) -> Result<AgentInterruptReceipt, AgentApiError> {
         let scope = self.scope(&session_id).await?;
         let handle = scope
             .agent(&agent_instance_id)
@@ -283,15 +283,17 @@ impl AgentRuntimeApi for AgentRuntime {
         let result = received
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?;
-        match result {
-            Err(AgentApiError::InvalidState) if cancellation_requested => Ok(AgentCancelReceipt {
-                request_id: format!("cancel-agent-{agent_instance_id}"),
-                session_id,
-                agent_instance_id,
-                accepted: true,
-            }),
-            result => result,
-        }
+        let accepted = match result {
+            Err(AgentApiError::InvalidState) if cancellation_requested => true,
+            Err(AgentApiError::InvalidState) => false,
+            Ok(receipt) => receipt.accepted,
+            Err(error) => return Err(error),
+        };
+        Ok(AgentInterruptReceipt {
+            session_id,
+            agent_instance_id,
+            accepted,
+        })
     }
 
     async fn cancel_agent_input(

@@ -1,5 +1,5 @@
-#[path = "../support/mock_turn_runner.rs"]
-mod mock_turn_runner;
+#[path = "../support/mock_agent_runner.rs"]
+mod mock_agent_runner;
 #[path = "../support/mod.rs"]
 mod support;
 
@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use mock_turn_runner::MockAgentRunRunner;
+use mock_agent_runner::MockAgentRunRunner;
 use piko_hostd::api::{ApprovalDecision, Command, Message, ServerMessage as Event};
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
 use piko_hostd::ports::AgentRunRunner;
@@ -155,7 +155,7 @@ impl AgentRunRunner for AssistantRunner {
 
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -185,7 +185,7 @@ impl AgentRunRunner for AssistantRunner {
         };
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -340,7 +340,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
         };
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -384,7 +384,7 @@ impl AgentRunRunner for ReuseRootAgentRunRunner {
         };
         store
             .commit_message(
-                piko_protocol::execution::MessageCommit {
+                piko_protocol::agent_work::MessageCommit {
                     session_id: session_id.clone(),
                     root_input_id: "input-1".into(),
                     agent_instance_id: agent_instance_id.clone(),
@@ -573,4 +573,4 @@ impl AgentRunRunner for WaitingApprovalRunner {
 }
 
 mod session_tests;
-mod turn_tests;
+mod work_tests;

@@ -1,13 +1,13 @@
 mod support;
 pub use support::MockSessionPublisher;
 
-#[path = "support/mock_turn_runner.rs"]
-mod mock_turn_runner;
+#[path = "support/mock_agent_runner.rs"]
+mod mock_agent_runner;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use mock_turn_runner::MockAgentRunRunner;
+use mock_agent_runner::MockAgentRunRunner;
 use piko_hostd::api::{Command, ServerMessage as Event, SessionTreeEntry};
 use piko_hostd::domain::sessions::SessionModelRef;
 use piko_hostd::infra::storage::JsonlSessionRepository;

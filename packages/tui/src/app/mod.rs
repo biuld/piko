@@ -25,6 +25,7 @@ use crate::{
     ui::components::{choice_workflow::ChoiceWorkflow, text_box::TextBox},
 };
 
+mod agent_control;
 mod bootstrap;
 pub mod command;
 pub mod confirm;
@@ -38,7 +39,6 @@ mod session_ops;
 mod session_view;
 mod slash;
 mod submit;
-mod turn;
 
 #[cfg(test)]
 mod tests;
@@ -98,7 +98,6 @@ pub enum ToolStatus {
 pub struct QueueStatus {
     pub steer_count: u32,
     pub follow_up_count: u32,
-    pub next_turn_count: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -202,8 +201,8 @@ pub struct SessionUiState {
     pub previous_live_id: Option<String>,
     pub initializing: bool,
     pub shell_ready: bool,
-    pub pending_turn_content: Option<piko_protocol::MessageContent>,
-    pending_turn_draft: Option<crate::features::editor::state::EditorDraft>,
+    pub pending_submit_content: Option<piko_protocol::MessageContent>,
+    pending_submit_draft: Option<crate::features::editor::state::EditorDraft>,
     pub requested_id: Option<String>,
     pub continue_requested: bool,
     /// Host-authoritative AgentInput work projection.

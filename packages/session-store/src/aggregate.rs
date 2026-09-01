@@ -41,6 +41,12 @@ pub struct SessionAggregate {
     pub active_root_by_agent: BTreeMap<String, String>,
     #[serde(default)]
     pub pending_inputs_by_agent: BTreeMap<String, Vec<String>>,
+    /// Unresolved user actions keyed by action id.
+    #[serde(default)]
+    pub pending_actions: BTreeMap<String, crate::AgentPendingActionRequestedV1>,
+    /// Roots with a committed interrupt intent and no terminal fact yet.
+    #[serde(default)]
+    pub interrupt_requested_roots: BTreeSet<String>,
     #[serde(default)]
     pub input_by_request: BTreeMap<String, String>,
     #[serde(default)]
@@ -187,7 +193,71 @@ impl SessionAggregate {
                 self.apply_agent_input_processing_started(data)?
             }
             EventData::AgentInputProcessingFinishedV1(data) => {
-                self.apply_agent_input_processing_finished(data)?
+                let root_input_id = data.root_input_id.clone();
+                self.apply_agent_input_processing_finished(data)?;
+                self.pending_actions
+                    .retain(|_, action| action.root_input_id != root_input_id);
+                self.interrupt_requested_roots.remove(&root_input_id);
+            }
+            EventData::AgentPendingActionRequestedV1(data) => {
+                let root_input = self.agent_inputs.get(&data.root_input_id).ok_or_else(|| {
+                    StoreError::InvalidEvent(format!(
+                        "pending action references inactive root {}",
+                        data.root_input_id
+                    ))
+                })?;
+                if root_input.input.agent_instance_id != data.agent_instance_id
+                    || root_input
+                        .processing
+                        .as_ref()
+                        .is_none_or(|processing| processing.finished_at.is_some())
+                {
+                    return Err(StoreError::InvalidEvent(
+                        "pending action references inactive work or another agent".into(),
+                    ));
+                }
+                if let Some(existing) = self.pending_actions.get(&data.action.action_id)
+                    && existing != &data
+                {
+                    return Err(StoreError::InvalidEvent(format!(
+                        "conflicting pending action {}",
+                        data.action.action_id
+                    )));
+                }
+                self.pending_actions
+                    .insert(data.action.action_id.clone(), data);
+            }
+            EventData::AgentPendingActionResolvedV1(data) => {
+                let action = self.pending_actions.get(&data.action_id).ok_or_else(|| {
+                    StoreError::InvalidEvent(format!("unknown pending action {}", data.action_id))
+                })?;
+                if action.agent_instance_id != data.agent_instance_id
+                    || action.root_input_id != data.root_input_id
+                {
+                    return Err(StoreError::InvalidEvent(
+                        "pending action resolution identity mismatch".into(),
+                    ));
+                }
+                self.pending_actions.remove(&data.action_id);
+            }
+            EventData::AgentInterruptRequestedV1(data) => {
+                let root_input = self.agent_inputs.get(&data.root_input_id).ok_or_else(|| {
+                    StoreError::InvalidEvent(format!(
+                        "interrupt references inactive root {}",
+                        data.root_input_id
+                    ))
+                })?;
+                if root_input.input.agent_instance_id != data.agent_instance_id
+                    || root_input
+                        .processing
+                        .as_ref()
+                        .is_none_or(|processing| processing.finished_at.is_some())
+                {
+                    return Err(StoreError::InvalidEvent(
+                        "interrupt references inactive work or another agent".into(),
+                    ));
+                }
+                self.interrupt_requested_roots.insert(data.root_input_id);
             }
             EventData::ModelStepCommitted(data) => self.apply_model_step(revision, raw, data)?,
             EventData::InboxReportCommitted { item } => self.apply_inbox_committed(item)?,

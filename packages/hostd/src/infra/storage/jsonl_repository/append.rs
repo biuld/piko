@@ -54,7 +54,7 @@ impl JsonlSessionRepository {
                     .unwrap_or_else(|| message.agent_id.clone());
                 store
                     .commit_message(
-                        piko_protocol::execution::MessageCommit {
+                        piko_protocol::agent_work::MessageCommit {
                             session_id: projection.session_id,
                             root_input_id: message.root_input_id.clone(),
                             agent_instance_id,
@@ -85,7 +85,7 @@ impl JsonlSessionRepository {
                 );
                 store
                     .commit_message(
-                        piko_protocol::execution::MessageCommit {
+                        piko_protocol::agent_work::MessageCommit {
                             session_id: projection.session_id,
                             root_input_id: root_input_id.clone(),
                             agent_instance_id: agent_instance_id.clone(),

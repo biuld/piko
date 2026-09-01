@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use piko_orchd_api::{AgentApiError, ExecutionCommitPort};
-use piko_protocol::{AgentInputDispositionChange, Message, execution::MessageCommit};
+use piko_protocol::{AgentInputDispositionChange, Message, agent_work::MessageCommit};
 
 use crate::runtime::execution::{ExecutionIdentity, state::ExecutionState};
 

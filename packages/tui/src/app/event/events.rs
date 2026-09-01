@@ -151,8 +151,8 @@ impl AppState {
                     name,
                 }));
             }
-            if let Some(content) = self.session.pending_turn_content.take() {
-                let draft = self.session.pending_turn_draft.take();
+            if let Some(content) = self.session.pending_submit_content.take() {
+                let draft = self.session.pending_submit_draft.take();
                 if let Some(target_agent_instance_id) =
                     self.agent_panel.active_agent_instance_id.clone()
                 {
@@ -180,8 +180,8 @@ impl AppState {
                     effects.push(Effect::send(command));
                     self.status = "submitted first message".to_string();
                 } else {
-                    self.session.pending_turn_content = Some(content);
-                    self.session.pending_turn_draft = draft;
+                    self.session.pending_submit_content = Some(content);
+                    self.session.pending_submit_draft = draft;
                     self.status = "waiting for root agent".to_string();
                 }
             }

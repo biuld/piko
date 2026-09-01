@@ -295,6 +295,12 @@ session facts and summaries behind the conversation. Replacing a realtime
 draft with its committed message preserves the draft's visible position unless
 the authoritative ordering key places it elsewhere.
 
+Realtime patches carry `rootInputId`. The normalized draft retains that causal
+identity and sorts immediately after the latest committed transcript item for
+the same input, so a draft that arrives before its accepted user prompt cannot
+render above that prompt. Items without a causal root retain live arrival order
+after authoritative transcript items.
+
 `ReplaceContent` addresses the segment at `content_index` and replaces its
 current bytes. `ClearContent` clears that segment; an omitted index clears all
 text/thinking segments for the item. Tool-call operations address streamed
@@ -307,9 +313,10 @@ The normalized draft stores typed segments in first-seen order and mutates the
 matching `(kind, content_index)` segment in place. This preserves inter-kind
 ordering and whitespace while avoiding one render block per token.
 
-Tool patches carry `turnId`. The normalized tool item retains this identity and
-supports `running`, `completed`, `failed`, and `cancelled`. A failed or
-cancelled terminal finalizes every unresolved tool attributed to that turn.
+Tool patches carry `rootInputId`. The normalized tool item retains this
+identity and supports `running`, `completed`, `failed`, and `cancelled`. A
+failed or cancelled terminal finalizes every unresolved tool attributed to
+that turn.
 
 Host emits `SessionEntryCommitted` for newly durable, non-message entries that
 have a live Timeline projection. It does not duplicate `Message` entries,

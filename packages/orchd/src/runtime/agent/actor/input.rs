@@ -159,7 +159,7 @@ impl AgentActor {
                 let session_id = self.identity.session_id.clone();
                 let live_delivery = SteerExecutionRequest {
                     request_id: request.request_id.clone(),
-                    input_id: Some(input_id.clone()),
+                    input_id: input_id.clone(),
                     session_id: session_id.clone(),
                     root_input_id: root_input_id.clone(),
                     message_id: request.message_id.clone(),

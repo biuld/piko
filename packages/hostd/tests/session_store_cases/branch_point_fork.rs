@@ -192,7 +192,7 @@ async fn full_clone_clears_world_state_baseline_and_transient_queues() {
                     agent_instance_id: "child".into(),
                     root_input_id: "input-child".into(),
                     report_id: "r1".into(),
-                    outcome: piko_protocol::ExecutionOutcome::Succeeded {
+                    outcome: piko_protocol::AgentWorkOutcome::Succeeded {
                         usage: Default::default(),
                     },
                     summary: "done".into(),
@@ -209,7 +209,7 @@ async fn full_clone_clears_world_state_baseline_and_transient_queues() {
     let forked_projection = forked_store.load_projection().unwrap();
     assert!(forked_projection.world_state_baseline.is_none());
     assert!(forked_projection.agent_inbox.is_empty());
-    assert!(forked_projection.agent_executions.is_empty());
+    assert!(forked_projection.root_inputs.is_empty());
     assert!(forked_projection.agent_input_queue.is_empty());
     assert_eq!(forked.state.cumulative_usage.total_tokens, 0);
     assert!(forked

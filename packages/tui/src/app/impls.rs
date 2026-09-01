@@ -248,27 +248,13 @@ impl AppState {
 
     /// Per-agent foreground work projection (F-22 / F-51).
     ///
-    /// Prefer the host-authored `AgentWorkSnapshot`. Local pending
-    /// approvals/interactions still upgrade the view to RequiresAction
-    /// before the next snapshot arrives.
-    pub fn agent_foreground(
-        &self,
-        agent_instance_id: &str,
-        activity: &piko_protocol::AgentActivity,
-    ) -> piko_protocol::AgentForeground {
-        let blocked = self
-            .approvals
-            .pending
-            .iter()
-            .any(|a| a.agent_instance_id == agent_instance_id)
-            || self.interactions.pending_for_agent(agent_instance_id);
-        if blocked {
-            return piko_protocol::AgentForeground::RequiresAction;
-        }
-        if let Some(work) = self.session.agent_work.get(agent_instance_id) {
-            return work.foreground;
-        }
-        piko_protocol::AgentForeground::from_activity(activity)
+    /// The host-authored `AgentWorkSnapshot` is the sole foreground authority.
+    pub fn agent_foreground(&self, agent_instance_id: &str) -> piko_protocol::AgentForeground {
+        self.session
+            .agent_work
+            .get(agent_instance_id)
+            .map(|work| work.foreground)
+            .unwrap_or(piko_protocol::AgentForeground::Idle)
     }
 
     pub fn push_focus(&mut self, mode: AppMode) {

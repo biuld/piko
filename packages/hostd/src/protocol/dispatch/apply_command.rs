@@ -99,7 +99,7 @@ impl HostServer {
                 }])
             }
             Command::ProcessList { .. } => {
-                let runner = self.0.turn_runner.lock().await.clone();
+                let runner = self.0.agent_runner.lock().await.clone();
                 let processes = runner.list_processes().await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -110,7 +110,7 @@ impl HostServer {
                 }])
             }
             Command::ProcessStop { process_id, .. } => {
-                let runner = self.0.turn_runner.lock().await.clone();
+                let runner = self.0.agent_runner.lock().await.clone();
                 let exit = runner.terminate_process(&process_id).await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -124,7 +124,7 @@ impl HostServer {
                 }])
             }
             Command::McpStatus { .. } => {
-                let runner = self.0.turn_runner.lock().await.clone();
+                let runner = self.0.agent_runner.lock().await.clone();
                 let servers = runner.mcp_statuses().await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -213,7 +213,7 @@ impl HostServer {
                 ..
             } => {
                 let handled = self
-                    .turn_runner
+                    .agent_runner
                     .lock()
                     .await
                     .clone()
@@ -245,7 +245,7 @@ impl HostServer {
                 response,
                 ..
             } => {
-                self.turn_runner
+                self.agent_runner
                     .lock()
                     .await
                     .clone()
@@ -299,7 +299,7 @@ impl HostServer {
                 session_id,
                 command_id,
             } => {
-                let runner = self.turn_runner.lock().await.clone();
+                let runner = self.agent_runner.lock().await.clone();
                 let agents = if let Some(agents) = runner.list_agent_instances(&session_id).await {
                     agents
                 } else {

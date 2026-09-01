@@ -23,15 +23,15 @@ impl HostApp {
             let store = session_store_factory.open(path);
             let projection = store.load_projection().await.map_err(storage_error)?;
             let mut incomplete = Vec::new();
-            for execution in projection.agent_executions.values() {
+            for root_input in projection.root_inputs.values() {
                 if !matches!(
-                    execution.status,
-                    piko_protocol::ExecutionStatus::Accepted
-                        | piko_protocol::ExecutionStatus::Running
+                    root_input.status,
+                    piko_protocol::AgentWorkProcessingStatus::Accepted
+                        | piko_protocol::AgentWorkProcessingStatus::Running
                 ) {
                     continue;
                 }
-                let root_input_id = execution.root_input_id.clone();
+                let root_input_id = root_input.root_input_id.clone();
                 if root_input_id.is_empty() {
                     continue;
                 }
@@ -59,7 +59,7 @@ impl HostApp {
         };
         if let Some(path) = session_path {
             let store = session_store_factory.open(path);
-            crate::application::turns::projection::reconcile_committed_messages(
+            crate::application::agent_work::projection::reconcile_committed_messages(
                 state,
                 store.as_ref(),
                 &session_id,
@@ -121,10 +121,10 @@ impl HostApp {
             };
             drop(state);
             // In-memory host configurations still use an ephemeral journal
-            // for Turn execution. Create it with the session itself so the
-            // first chat does not pay genesis durability latency before its
+            // for Agent work. Create it with the session itself so the first
+            // input does not pay genesis durability latency before its
             // acceptance response.
-            self.ensure_turn_session_dir(&session_id, &cwd).await?;
+            self.ensure_agent_session_dir(&session_id, &cwd).await?;
             let (snapshot, agents) = self.session_view(&session_id).await?;
             Ok(vec![
                 server_response_ok(command_id, created),
@@ -145,7 +145,7 @@ impl HostApp {
         session_path: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         let live_turn_run = self
-            .turn_runner
+            .agent_runner
             .lock()
             .await
             .clone()
@@ -349,6 +349,10 @@ mod tests {
                         caller_agent_instance_id: None,
                         detached_recipient_agent_instance_id: None,
                     },
+                    input_message_id: "message-request-recovered".into(),
+                    input_parent_message_id: None,
+                    input_tree_parent_entry_id: None,
+                    input_committed_at: 2,
                 },
             )
             .await
@@ -377,7 +381,7 @@ mod tests {
             .expect("recovery report");
         assert!(matches!(
             report.outcome,
-            piko_protocol::ExecutionOutcome::Cancelled { .. }
+            piko_protocol::AgentWorkOutcome::Cancelled { .. }
         ));
 
         let replay = HostApp::session_open_response(

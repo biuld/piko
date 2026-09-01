@@ -112,9 +112,9 @@ to consumers that need it.
 | `packages/orchd/src/adapters/tools/registry.rs` | decision-gate + error mapping |
 | `packages/hostd/src/domain/config/settings.rs` | `ApprovalSettings`, merge, defaults |
 | `packages/hostd/resources/settings.toml` | `[approvals]` section |
-| `packages/hostd/src/adapters/turns/orch_runner/mod.rs` | `approval_timeout` field + constructor param |
-| `packages/hostd/src/adapters/turns/orch_runner/approval_gateway.rs` | deadline race, expired resolution |
-| `packages/hostd/src/adapters/turns/orch_runner/turn_runner.rs` | status mapping stays user-decision-only |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/mod.rs` | `approval_timeout` field + constructor param |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/approval_gateway.rs` | deadline race, expired resolution |
+| `packages/hostd/src/adapters/agent_runner/orch_runner/turn_runner.rs` | status mapping stays user-decision-only |
 | `packages/hostd/src/application/observation.rs` | `Expired` → decline projection |
 | `packages/hostd/src/protocol/orch_factory.rs` | thread approval settings |
 

@@ -75,7 +75,7 @@ pub struct SessionEventEnvelope {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SessionEvent {
     ModelStepCommitted {
-        boundary: crate::execution::ModelStepBoundary,
+        boundary: crate::agent_work::ModelStepBoundary,
     },
     MessageCommitted {
         transcript_seq: u64,
