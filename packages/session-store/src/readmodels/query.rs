@@ -19,9 +19,10 @@ pub fn query_catalog(path: &Path) -> Result<CatalogView> {
         return Ok(view);
     }
     let opened = SessionStore::open(path, OpenOptions::default())?;
+    let (aggregate, _) = opened.store.republish_readmodels()?;
     Ok(CatalogView {
         identity: SessionStore::inspect(path)?,
-        facts: facts_from_aggregate(&opened.aggregate),
+        facts: facts_from_aggregate(&aggregate),
     })
 }
 
@@ -29,7 +30,9 @@ pub fn query_current(path: &Path) -> Result<SessionAggregate> {
     if let Some(aggregate) = load_current_if_published(path)? {
         return Ok(aggregate);
     }
-    Ok(SessionStore::open(path, OpenOptions::default())?.aggregate)
+    let opened = SessionStore::open(path, OpenOptions::default())?;
+    let (aggregate, _) = opened.store.republish_readmodels()?;
+    Ok(aggregate)
 }
 
 pub fn query_trajectory(path: &Path) -> Result<crate::TrajectoryProjection> {
@@ -37,9 +40,9 @@ pub fn query_trajectory(path: &Path) -> Result<crate::TrajectoryProjection> {
         projection.refresh_counts();
         return Ok(projection);
     }
-    Ok(SessionStore::open(path, OpenOptions::default())?
-        .store
-        .trajectory())
+    let opened = SessionStore::open(path, OpenOptions::default())?;
+    let (_, trajectory) = opened.store.republish_readmodels()?;
+    Ok(trajectory)
 }
 
 fn load_identity(path: &Path) -> Result<SessionIdentityFile> {

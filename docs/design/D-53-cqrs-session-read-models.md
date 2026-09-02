@@ -46,7 +46,9 @@ leaves tip ahead of `head`; the next query rebuilds. It does not parse
 the rest of the open segment or any closed segment.
 
 A failed read-model write does not retract the journal commit. The next
-query or open rebuilds.
+query or open rebuilds. If that query reuses the same-process attached writer,
+it republishes the writer's in-memory aggregate and trajectory instead of
+mistaking writer reuse for a completed rebuild.
 
 Idempotent append (same `commit_id`, matching payload) republishes read
 models when they lag, then returns the existing commit.
@@ -185,6 +187,11 @@ No `island-rs` change required.
   fails if reopen falls back to full replay; corrupted projections are rebuilt
   and all three files are checksum-aligned to `head.json`; forked sessions
   publish their own journal generation.
+- Live tree E2E: the first durable message is emitted as a complete
+  `SessionEntryCommitted` before terminal reconciliation, so a newly created
+  session does not depend on restart or a full snapshot to populate the tree.
+- Same-process recovery: corrupt read models are republished by the next query
+  while the original writer remains attached.
 
 ## Alternatives considered
 

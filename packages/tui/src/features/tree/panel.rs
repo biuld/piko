@@ -43,6 +43,23 @@ impl TreePanel {
         self.select_nearest_visible(current_leaf_id);
     }
 
+    /// Insert or replace one host-committed entry without waiting for a full
+    /// session reconciliation. The snapshot cursor remains authoritative and
+    /// is corrected by the terminal reconciliation.
+    pub fn upsert_committed(&mut self, entry: SessionTreeEntry) {
+        let entry_id = entry.id().to_string();
+        let current_leaf_id = self.document.current_leaf_id.clone();
+        if let Some(index) = self.document.by_id.get(&entry_id).copied() {
+            self.document.nodes[index] = entry;
+        } else {
+            self.document.nodes.push(entry);
+        }
+        self.document = TreeDocument::build(&self.document.nodes, current_leaf_id.as_deref());
+        self.rebuild_visible_for_filter();
+        let selection = self.selection.clone().unwrap_or(entry_id);
+        self.select_nearest_visible(Some(&selection));
+    }
+
     pub fn select_entry(&mut self, entry_id: &str) {
         if let Some(idx) = self
             .visible

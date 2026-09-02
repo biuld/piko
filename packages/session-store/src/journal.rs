@@ -357,6 +357,45 @@ impl SessionStore {
         Ok(commit)
     }
 
+    /// Publish the attached writer's current in-memory projections.
+    ///
+    /// Query fallback uses this when `open` reuses the same-process writer:
+    /// reuse must repair stale files just like a cold open/rebuild does.
+    pub(crate) fn republish_readmodels(
+        &self,
+    ) -> Result<(SessionAggregate, crate::TrajectoryProjection)> {
+        let aggregate = self
+            .inner
+            .aggregate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let trajectory = self
+            .inner
+            .trajectory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let checksum = self
+            .inner
+            .last_checksum
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let aggregate_snapshot = aggregate.clone();
+        let trajectory_snapshot = trajectory.clone();
+        let Some(checksum) = checksum else {
+            return Ok((aggregate_snapshot, trajectory_snapshot));
+        };
+        crate::readmodels::publish(
+            &self.inner.path,
+            &self.inner.session_id,
+            &self.inner.journal_generation,
+            &aggregate,
+            &trajectory,
+            &checksum,
+        )?;
+        Ok((aggregate_snapshot, trajectory_snapshot))
+    }
+
     fn open_segment_path(&self, revision: u64) -> PathBuf {
         open_path(&self.inner.path, revision)
     }

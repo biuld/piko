@@ -253,7 +253,7 @@ impl HostApp {
         message_id: &str,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
-        let (committed, agent_work_diff) = {
+        let (committed, tree_entry, agent_work_diff) = {
             let mut state = self.state.lock().await;
             let store = self.session_store_factory.open(session_dir);
             let committed = record_committed_message(
@@ -264,6 +264,15 @@ impl HostApp {
                 message_id,
             )
             .await?;
+            let tree_entry = committed.as_ref().and_then(|committed| {
+                state.session(session_id).ok().and_then(|session| {
+                    session
+                        .entries
+                        .iter()
+                        .find(|entry| entry.id() == committed.message_id)
+                        .cloned()
+                })
+            });
             let agent_work_diff = committed.as_ref().and_then(|committed| {
                 crate::domain::sessions::file_change_from_message(&committed.message)?;
                 Some(
@@ -277,7 +286,7 @@ impl HostApp {
                         }),
                 )
             });
-            (committed, agent_work_diff)
+            (committed, tree_entry, agent_work_diff)
         };
         let committed = committed.ok_or_else(|| {
             ProtocolError::ObservationFailed(format!(
@@ -294,6 +303,19 @@ impl HostApp {
                 .and_then(|s| s.take_pending_todo_projection())
         };
         send_event(tx, ServerMessage::TranscriptCommitted(committed)).await;
+        let tree_entry = tree_entry.ok_or_else(|| {
+            ProtocolError::ObservationFailed(format!(
+                "committed tree entry {message_id} missing for agent {agent_instance_id}"
+            ))
+        })?;
+        send_event(
+            tx,
+            ServerMessage::SessionEntryCommitted(piko_protocol::SessionEntryCommittedEvent {
+                session_id: session_id.to_string(),
+                entry: tree_entry,
+            }),
+        )
+        .await;
         if let Some(list) = todo_list {
             send_event(
                 tx,

@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn committed_session_entry_populates_tree_before_reconciliation() {
+    let mut app = live_app();
+    assert!(app.tree.visible.rows.is_empty());
+
+    let entry = user_tree_entry("live-user", None, "hello live tree");
+    let effects = app.apply_event(Event::SessionEntryCommitted(
+        piko_protocol::SessionEntryCommittedEvent {
+            session_id: "session-1".into(),
+            entry,
+        },
+    ));
+
+    assert!(effects.is_empty());
+    assert_eq!(app.tree.document.nodes.len(), 1);
+    assert_eq!(app.tree.visible.rows.len(), 1);
+    assert_eq!(app.tree.visible.rows[0].entry_id, "live-user");
+}
+
+#[test]
 fn tree_summary_prompt_does_not_trigger_when_selected_user_targets_current_leaf() {
     let mut app = app();
     let entries = vec![

@@ -835,6 +835,42 @@ fn query_catalog_and_current_use_published_models() {
 }
 
 #[test]
+fn query_republishes_stale_models_while_writer_is_attached() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("session");
+    let opened = SessionStore::create(&path, new_session("s1")).unwrap();
+    opened
+        .store
+        .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
+        .unwrap();
+
+    for name in ["catalog.json", "current.json", "trajectory.json"] {
+        std::fs::write(path.join("readmodels").join(name), b"broken").unwrap();
+    }
+
+    let current = piko_session_store::query_current(&path).unwrap();
+    assert_eq!(current.revision, 2);
+    for name in ["catalog.json", "current.json", "trajectory.json"] {
+        let bytes = std::fs::read(path.join("readmodels").join(name)).unwrap();
+        serde_json::from_slice::<serde_json::Value>(&bytes)
+            .unwrap_or_else(|error| panic!("{name} was not republished: {error}"));
+    }
+    assert_eq!(
+        piko_session_store::query_catalog(&path)
+            .unwrap()
+            .facts
+            .revision,
+        2
+    );
+    assert_eq!(
+        piko_session_store::query_trajectory(&path)
+            .unwrap()
+            .revision,
+        2
+    );
+}
+
+#[test]
 fn corrupt_current_read_model_is_rebuilt_from_the_journal() {
     let temp = tempdir().unwrap();
     let path = temp.path().join("session");

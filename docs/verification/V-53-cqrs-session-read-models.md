@@ -3,6 +3,7 @@
 > Feature: [F-37](../features/F-37-materialized-read-models.md)
 > Design: [D-53](../design/D-53-cqrs-session-read-models.md)
 > Date: 2026-08-18
+> Updated: 2026-09-03
 
 ## Scope under test
 
@@ -17,17 +18,22 @@
 | Trajectory list/fetch after restart | `query_lists_and_fetches_runs_from_journal_events`; `turn_writes_durable_trajectory_records` |
 | Open/resume without snapshot files | `persistent_turn_recovers_each_agent_private_transcript` asserts `readmodels/` and no `snapshots/` |
 | Query LRUs removed | `LruMap`, `facts_cache`, `open_stores` LRU, trajectory decode LRU deleted |
+| First-session live tree before terminal reconciliation | `first_session_publishes_live_tree_entries_before_terminal_reconciliation`; TUI reducer `committed_session_entry_populates_tree_before_reconciliation` |
+| Same-process query repairs projections while the writer remains attached | `query_republishes_stale_models_while_writer_is_attached` |
 
 ## Results
 
 | Test | Result |
 |---|---|
-| `piko-session-store` `--test journal` | 20 passed |
+| `piko-session-store` `--test journal` | 26 passed |
 | `piko-hostd` `--lib` | 173 passed |
 | `piko-hostd` `--test session_store` | 18 passed |
 | `piko-hostd` `--test session_storage` | 6 passed |
 | `piko-hostd` `--test trajectory_turn` | 1 passed |
 | `cargo clippy -p piko-session-store -p piko-hostd --all-targets -- -D warnings` | clean |
+
+The 2026-09-03 regression run additionally passed the focused live-tree TUI
+test and the four-test `piko-e2e --test session_read_models` suite.
 
 ## Notes
 

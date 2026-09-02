@@ -88,6 +88,7 @@ impl AppState {
         }
         let order = self.timeline().components.len() as u64;
         let entry = committed.entry;
+        self.tree.upsert_committed(entry.clone());
         let outcome = self.timelines.apply_session_entry(entry, order);
         if outcome == piko_client_core::ApplyOutcome::Inconsistent {
             vec![Effect::send(Command::StateSnapshot {

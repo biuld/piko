@@ -28,6 +28,44 @@ fn complete_chat(host: &mut HostdHarness, session_id: &str, command_id: &str, te
     host.wait_completed(session_id);
 }
 
+#[test]
+fn first_session_publishes_live_tree_entries_before_terminal_reconciliation() {
+    let _serial = serial_guard();
+    let mut host = HostdHarness::launch("immediate");
+    let session_id = host.create_session("create-live-tree");
+    host.send(Command::submit_follow_up(
+        "submit-live-tree",
+        &session_id,
+        root_agent_id(&session_id),
+        MessageContent::String("first live message".into()),
+    ));
+    assert!(matches!(
+        host.command_result("submit-live-tree"),
+        CommandResult::AgentInputSubmitted { .. }
+    ));
+
+    let committed = host.wait_for("live session tree entry", |message| {
+        matches!(
+            message,
+            ServerMessage::SessionEntryCommitted(event)
+                if event.session_id == session_id
+                    && matches!(
+                        &event.entry,
+                        SessionTreeEntry::Message(entry)
+                            if matches!(
+                                &entry.message,
+                                Message::User {
+                                    content: MessageContent::String(text),
+                                    ..
+                                } if text == "first live message"
+                            )
+                    )
+        )
+    });
+    assert!(matches!(committed, ServerMessage::SessionEntryCommitted(_)));
+    host.wait_completed(&session_id);
+}
+
 fn message_entry<'a>(snapshot: &'a SessionSnapshot, entry_id: &str) -> &'a SessionTreeEntry {
     snapshot
         .entries
