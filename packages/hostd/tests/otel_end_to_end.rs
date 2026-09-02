@@ -92,11 +92,21 @@ async fn turn_records_metrics_and_logs_without_span_export() {
 
     // ---- run one turn through the real hostd path ----
     let temp = tempfile::tempdir().unwrap();
+    // Seed a workspace `main` agent so the root spec never depends on the
+    // developer's real $PIKO_HOME install.
+    let workspace = temp.path().join("workspace");
+    let agents_dir = workspace.join(".piko").join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agents/main.toml"),
+        agents_dir.join("main.toml"),
+    )
+    .unwrap();
     let initial = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
     let created = initial
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
-            cwd: "/project".into(),
+            cwd: workspace.to_string_lossy().into_owned(),
         })
         .await;
     let session_id = created

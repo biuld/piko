@@ -17,7 +17,8 @@ cargo test -p piko-hostd --test session_store -- interrupt_during_pending_action
 cargo test -p piko-orchd --test agent_runtime -- steer_then_root follow_up_while cancel_before cancel_after interrupt_idle
 cargo test -p piko-session-store --test work_crash --test work_proptest
 cargo test -p piko-tui -- foreground_tests queue_tests
-cargo clippy -p piko-hostd -p piko-orchd -p piko-session-store -p piko-tui --all-targets -- -D warnings
+cargo test -p piko-e2e --test control -- --test-threads=1
+cargo clippy -p piko-hostd -p piko-orchd -p piko-session-store -p piko-tui -p piko-e2e --all-targets -- -D warnings
 ```
 
 Desktop remains out of scope. Two-HostServer tests model restart / a second
@@ -43,6 +44,10 @@ later `StateSnapshot` / `SessionOpen`.
   — two HostServers SessionOpen the same journal; unfinished root is
   recovered; pending steers do not bind to a successor; queued follow-up
   remains cancellable by `input_id`; post-restart steer is rejected.
+- Cross-process JSONL: `queue_cancellation_and_surviving_identity_rehydrate_after_restart`
+  proves the same queue identity, rejected-steer, and post-restart cancellation
+  contract through a restarted hostd process. The control E2E also observes
+  the authoritative Cancelling push before terminal reconciliation.
 
 ## Invariants
 
@@ -103,3 +108,5 @@ Hydrate / restart:
 - `two_clients_restart_cancel_queued_follow_up_and_reject_steer`
 - `two_clients_reconcile_the_same_authoritative_work_projection` (queued hydrate)
 - `first_reconciled_snapshot_contains_atomic_interruption_recovery`
+- `queue_cancellation_and_surviving_identity_rehydrate_after_restart`
+- `turn_cancel_crosses_jsonl_hostd_and_orchd_and_clears_active_state`

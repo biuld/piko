@@ -54,13 +54,13 @@ pub async fn record_committed_message(
     else {
         return Ok(None);
     };
-    let tree_parent_id = match store {
+    let durable_tree_parent = match store {
         Some(store) => store
             .find_committed_message(session_id, agent_instance_id, message_id)
             .await
             .ok()
             .flatten()
-            .and_then(|message| message.tree_parent_id),
+            .map(|message| message.tree_parent_id),
         None => None,
     };
     append_committed_message(
@@ -72,7 +72,7 @@ pub async fn record_committed_message(
         &projected.message,
         &projected.message_id,
         projected.transcript_seq,
-        tree_parent_id.as_deref(),
+        durable_tree_parent,
     )
 }
 
@@ -216,7 +216,7 @@ fn append_committed_message(
     message: &Message,
     message_id: &str,
     transcript_seq: u64,
-    parent_id: Option<&str>,
+    durable_tree_parent: Option<Option<String>>,
 ) -> Result<Option<TranscriptCommittedEvent>, ProtocolError> {
     let is_new = state
         .session(session_id)?
@@ -242,20 +242,23 @@ fn append_committed_message(
             session.set_todo_list(list);
         }
     }
-    let parent_id = parent_id
-        .map(str::to_string)
-        .or_else(|| {
-            state
-                .session(session_id)
-                .ok()?
-                .task_heads
-                .get(agent_instance_id)
-                .cloned()
-        })
-        .or_else(|| {
-            // Cross-execution Turns may not have a projected task head yet.
-            state.session(session_id).ok()?.current_leaf_id.clone()
-        });
+    // The durable journal is the tree authority: when the committed message was
+    // found in storage, take its tree parent verbatim (including an explicit
+    // root `None`). Late-observed root facts (e.g. world-state messages) must
+    // not be grafted under the current head, which would cycle the entry tree.
+    // The head-based fallback only covers paths without durable storage.
+    let parent_id = durable_tree_parent.unwrap_or_else(|| {
+        state
+            .session(session_id)
+            .ok()
+            .and_then(|session| session.task_heads.get(agent_instance_id).cloned())
+            .or_else(|| {
+                state
+                    .session(session_id)
+                    .ok()
+                    .and_then(|session| session.current_leaf_id.clone())
+            })
+    });
 
     let timestamp = message_timestamp(message).to_string();
     let entry = SessionTreeEntry::Message(MessageEntry {

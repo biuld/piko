@@ -1,11 +1,11 @@
-//! Outbound port for the durable AgentInstance session store.
+//! Outbound port for durable AgentInstance session queries and control facts.
 //!
-//! `application` reads/queries session storage only through
+//! `application` accesses session storage only through
 //! [`SessionStorePort`] (and opens/creates stores only through
 //! [`SessionStoreFactory`]); the concrete filesystem-backed implementation
-//! (`SessionStore`) lives in `adapters::storage`. Durable mutation still
-//! flows through `piko_orchd_api::AgentCommitPort`, implemented by the same
-//! adapter.
+//! (`SessionStore`) lives in `adapters::storage`. Runtime-originated durable
+//! mutation still flows through `piko_orchd_api::AgentCommitPort`; host control
+//! uses the narrow atomic mutations declared below.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -43,6 +43,23 @@ pub trait SessionStorePort: Send + Sync {
     ) -> Result<Option<piko_protocol::AgentWorkReport>, SessionStorageError>;
 
     async fn interrupt_incomplete_agent_work(&self) -> Result<usize, SessionStorageError>;
+
+    /// Atomically cancel one still-pending follow-up by durable identity.
+    async fn cancel_pending_agent_input(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, piko_protocol::CommitError>;
+
+    /// Atomically persist interrupt intent for the current unfinished root.
+    /// Returns that root identity, or `None` when the agent is durably idle.
+    async fn request_agent_interrupt(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        requested_at: i64,
+    ) -> Result<Option<String>, piko_protocol::CommitError>;
 
     async fn trajectory(
         &self,

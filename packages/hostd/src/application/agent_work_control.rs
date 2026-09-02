@@ -28,11 +28,21 @@ impl<'a> AgentWorkControl<'a> {
         agent_instance_id: String,
         input_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        self.app.state.lock().await.session(&session_id)?;
+        let cwd = self.app.state.lock().await.session_cwd(&session_id)?;
+        let session_dir = self.app.ensure_agent_session_dir(&session_id, &cwd).await?;
+        let store = self.app.session_store_factory.open(&session_dir);
+        let receipt = store
+            .cancel_pending_agent_input(&session_id, &agent_instance_id, &input_id)
+            .await
+            .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
         let runner = self.app.agent_runner.lock().await.clone();
-        let receipt = runner
-            .cancel_agent_input(&session_id, &agent_instance_id, &input_id)
-            .await?;
+        if receipt.accepted {
+            // The journal is authority. Synchronize an attached actor when one
+            // exists; an unattached runtime will hydrate the cancelled state.
+            let _ = runner
+                .cancel_agent_input(&session_id, &agent_instance_id, &input_id)
+                .await;
+        }
         let mut messages = vec![ServerMessage::CommandResponse {
             command_id,
             result: Ok(crate::api::CommandResult::AgentInputCancelled {
@@ -56,15 +66,35 @@ impl<'a> AgentWorkControl<'a> {
         session_id: String,
         agent_instance_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        self.app.state.lock().await.session(&session_id)?;
-        let accepted = self
+        let cwd = self.app.state.lock().await.session_cwd(&session_id)?;
+        let session_dir = self.app.ensure_agent_session_dir(&session_id, &cwd).await?;
+        let root_input_id = self
             .app
-            .agent_runner
-            .lock()
-            .await
-            .clone()
-            .interrupt_agent(&session_id, &agent_instance_id)
+            .session_store_factory
+            .open(&session_dir)
+            .request_agent_interrupt(&session_id, &agent_instance_id, now_ms())
             .await;
+        let root_input_id =
+            root_input_id.map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
+        let checkpoint = if root_input_id.is_some() {
+            self.app.session_view(&session_id).await.ok()
+        } else {
+            None
+        };
+        let runner = self.app.agent_runner.lock().await.clone();
+        let accepted = if root_input_id.is_some() {
+            runner
+                .interrupt_agent(&session_id, &agent_instance_id)
+                .await
+        } else if self.app.storage.is_none() {
+            // In-memory test/product embeddings may supply a runner without a
+            // durable commit port. Persistent hosts never use this fallback.
+            runner
+                .interrupt_agent(&session_id, &agent_instance_id)
+                .await
+        } else {
+            false
+        };
         let mut messages = vec![ServerMessage::CommandResponse {
             command_id,
             result: Ok(crate::api::CommandResult::AgentInterrupted {
@@ -74,7 +104,7 @@ impl<'a> AgentWorkControl<'a> {
                 timestamp: now_ms(),
             }),
         }];
-        if let Ok((snapshot, agents)) = self.app.session_view(&session_id).await
+        if let Some((snapshot, agents)) = checkpoint
             && snapshot
                 .agent_work
                 .iter()

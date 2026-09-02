@@ -71,11 +71,22 @@ async fn create_open_session(
     repo_path: &std::path::Path,
     runner: Arc<OrchAgentRunRunner>,
 ) -> (HostServer, String, String) {
+    // Seed a workspace `main` agent so the root spec never depends on the
+    // developer's real $PIKO_HOME install.
+    let workspace = repo_path.join("workspace");
+    let agents_dir = workspace.join(".piko").join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agents/main.toml"),
+        agents_dir.join("main.toml"),
+    )
+    .unwrap();
+    let cwd = workspace.to_string_lossy().into_owned();
     let initial = HostServer::with_storage(JsonlSessionRepository::new(repo_path));
     let created = initial
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
-            cwd: "/project".into(),
+            cwd,
         })
         .await;
     let session_id = created

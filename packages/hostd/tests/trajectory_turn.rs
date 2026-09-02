@@ -92,11 +92,21 @@ async fn wait_for_trajectory(
 #[tokio::test]
 async fn turn_writes_durable_trajectory_records() {
     let temp = tempfile::tempdir().unwrap();
+    // Seed a workspace `main` agent so the root spec never depends on the
+    // developer's real $PIKO_HOME install.
+    let workspace = temp.path().join("workspace");
+    let agents_dir = workspace.join(".piko").join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agents/main.toml"),
+        agents_dir.join("main.toml"),
+    )
+    .unwrap();
     let initial = HostServer::with_storage(JsonlSessionRepository::new(temp.path()));
     let created = initial
         .handle_command(Command::SessionCreate {
             command_id: "create".into(),
-            cwd: "/project".into(),
+            cwd: workspace.to_string_lossy().into_owned(),
         })
         .await;
     let session_id = created
@@ -187,7 +197,10 @@ async fn turn_writes_durable_trajectory_records() {
         .next()
         .expect("root run projection");
     assert!(!execution.root_input_id.is_empty());
-    assert_eq!(execution.root_input_id, execution.request_id);
+    // D-68 rekey: the durable grain is the host-minted root_input_id; the
+    // request id stays the client command id that admitted the input.
+    assert_eq!(execution.root_input_id, "input_trajectory-turn");
+    assert_eq!(execution.request_id, "trajectory-turn");
     assert_eq!(execution.model_steps.len(), 2);
     assert_eq!(
         execution.model_steps[0].outcome,

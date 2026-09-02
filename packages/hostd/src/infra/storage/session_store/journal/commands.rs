@@ -7,6 +7,8 @@ use piko_session_store::EventData;
 
 use super::SessionStore;
 
+#[path = "commands_control.rs"]
+mod control;
 #[path = "commands_inputs.rs"]
 mod inputs;
 #[path = "commands_queue.rs"]
@@ -26,7 +28,7 @@ impl AgentCommitPort for SessionStore {
 }
 
 impl SessionStore {
-    fn commit_agent_command_unlocked(
+    pub(super) fn commit_agent_command_unlocked(
         &self,
         session_id: &str,
         command: AgentDurableCommand,

@@ -59,6 +59,9 @@ async fn guardian_runner(
     )
     .await;
     runner.set_guardian_review_callback(review);
+    // The user-approval fallback persists a PendingActionRequested fact before
+    // registering the pending approval; give the session a durable route.
+    ensure_test_active_work(&runner, "s1").await;
     runner
 }
 

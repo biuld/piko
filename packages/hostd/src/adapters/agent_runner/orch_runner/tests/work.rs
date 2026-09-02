@@ -130,7 +130,11 @@ async fn processing_start_advances_a_queued_inputs_observation_window() {
         1,
         "queued input must exclude reliable events from the previous root"
     );
-    assert_eq!(hub.cursor().seq, 2, "running projection follows the cursor");
+    assert_eq!(
+        hub.cursor().seq,
+        3,
+        "running projection publishes the AgentChanged event and the reliable user-input MessageCommitted"
+    );
 }
 
 #[tokio::test]

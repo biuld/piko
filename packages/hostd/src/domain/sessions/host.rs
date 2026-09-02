@@ -103,8 +103,13 @@ impl HostState {
         state
             .task_heads
             .insert(agent_instance_id.to_string(), entry.id().to_string());
+        // Late-observed durable facts (e.g. a world-state message committed at
+        // assembly but projected after the turn's assistant message) must never
+        // drag the live cursor back onto an older message. The durable journal
+        // already advanced past them; only move the cursor forward.
         if state.active_agent_instance_id.as_deref() == Some(agent_instance_id)
             && entry.advances_selected_branch()
+            && !entry_is_ancestor_of_cursor(state, entry.id())
         {
             state.current_leaf_id = Some(entry.id().to_string());
         }
@@ -167,4 +172,28 @@ impl HostState {
         state.world_state_baseline = Some(facts.clone());
         Ok(previous)
     }
+}
+
+/// Whether `entry_id` already lies on the parent ancestry of the current
+/// cursor. Cycles and missing parents terminate the walk safely.
+fn entry_is_ancestor_of_cursor(state: &SessionState, entry_id: &str) -> bool {
+    let Some(start) = state.current_leaf_id.clone() else {
+        return false;
+    };
+    let mut current = Some(start);
+    let mut visited = std::collections::HashSet::new();
+    while let Some(id) = current {
+        if id == entry_id {
+            return true;
+        }
+        if !visited.insert(id.clone()) {
+            return false;
+        }
+        current = state
+            .entries
+            .iter()
+            .find(|entry| entry.id() == id)
+            .and_then(|entry| entry.parent_id().map(str::to_string));
+    }
+    false
 }

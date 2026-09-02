@@ -205,8 +205,22 @@ pub(super) fn map_group_pieces(items: &[TimelineItem], range: (usize, usize)) ->
             }],
             _ => split_turn(slice, &committed.message_id),
         },
-        Some(TimelineItem::RealtimeDraft(draft)) => split_turn(slice, &draft.message_id),
+        // A run may open with a committed running tool and continue into live
+        // drafts (durable facts sort before same-root drafts); both are
+        // assistant-side turn content and must map through split_turn.
+        Some(TimelineItem::Tool(_)) | Some(TimelineItem::RealtimeDraft(_)) => {
+            split_turn(slice, fallback_id_for(slice))
+        }
         _ => first_single(slice).into_iter().collect(),
+    }
+}
+
+fn fallback_id_for(slice: &[TimelineItem]) -> &str {
+    match slice.first() {
+        Some(TimelineItem::Tool(tool)) => tool.tool_call_id.as_str(),
+        Some(TimelineItem::RealtimeDraft(draft)) => draft.message_id.as_str(),
+        Some(TimelineItem::Committed(committed)) => committed.message_id.as_str(),
+        _ => "turn",
     }
 }
 

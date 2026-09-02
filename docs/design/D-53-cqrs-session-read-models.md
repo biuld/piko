@@ -179,6 +179,12 @@ No `island-rs` change required.
   fields equal a full replay of the same revision.
 - hostd: `summaries` does not retain journal handles; trajectory query
   has no decode LRU; `LruMap` is gone.
+- Cross-process E2E (`piko-e2e::session_read_models`):
+  `branch_tree_and_cursor_survive_restart_across_the_read_model_fast_path`
+  poisons an early journal record while preserving the aligned tail, so it
+  fails if reopen falls back to full replay; corrupted projections are rebuilt
+  and all three files are checksum-aligned to `head.json`; forked sessions
+  publish their own journal generation.
 
 ## Alternatives considered
 

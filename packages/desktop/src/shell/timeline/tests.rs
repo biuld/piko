@@ -321,7 +321,7 @@ fn thinking_only_draft_tail_spins_until_more_content() {
 }
 
 #[test]
-fn running_tool_after_draft_ends_suppresses_tail_spinner() {
+fn running_tool_sorts_before_live_drafts_and_suppresses_tail_spinner() {
     let chunk = |seq: u64, kind: piko_protocol::StreamItemKind, index: u32, text: &str| {
         piko_protocol::StreamItemPatch {
             session_id: Some("s".into()),
@@ -348,8 +348,9 @@ fn running_tool_after_draft_ends_suppresses_tail_spinner() {
         1,
         "partial",
     ));
-    // A running tool after the draft ends the run: the thinking tail is no
-    // longer the spinner carrier; the tool chip is.
+    // A tool call committed mid-run is a durable fact: it sorts before the
+    // same run's still-streaming drafts, and the thinking tail no longer
+    // carries the spinner (the tool chip is running, the text owns the caret).
     timeline.apply_committed(
         "call-9".into(),
         1,
@@ -365,18 +366,21 @@ fn running_tool_after_draft_ends_suppresses_tail_spinner() {
     );
     let core = state_with(timeline);
     let frame = frame_timeline(&core, 0.).1;
-    // Piece 0 keeps the draft segments; the tool owns its own piece.
     let TimelineRow::Assistant { segments, .. } = rows_around(&core, &frame, 0).unwrap().1 else {
         panic!("expected assistant flow");
     };
+    assert!(
+        matches!(&segments[0], TurnSegment::Tool { id, .. } if id == "call-9"),
+        "the committed tool renders before the live drafts: {segments:?}"
+    );
     assert!(matches!(
-        &segments[0],
+        &segments[1],
         TurnSegment::Thinking { active: false, .. }
     ));
-    let TimelineRow::Assistant { segments, .. } = rows_around(&core, &frame, 1).unwrap().1 else {
-        panic!("expected tool piece");
-    };
-    assert!(matches!(&segments[0], TurnSegment::Tool { id, .. } if id == "call-9"));
+    assert!(matches!(
+        &segments[2],
+        TurnSegment::Text { caret: true, .. }
+    ));
 }
 
 #[test]

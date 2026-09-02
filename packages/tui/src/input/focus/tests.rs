@@ -86,6 +86,25 @@ fn follow_up_steer_and_dequeue_keys_reach_the_editor() {
 fn escape_interrupts_viewed_runtime_agent_without_a_host_turn() {
     let mut app = app();
     app.agent_panel.active_agent_instance_id = Some("agent-child".into());
+    // The interrupt decision follows the host-authoritative agent-work
+    // projection, not the agent panel's activity badge.
+    app.session.agent_work.insert(
+        "agent-child".into(),
+        piko_protocol::AgentWorkSnapshot {
+            agent_instance_id: "agent-child".into(),
+            lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+            foreground: piko_protocol::AgentForeground::Running,
+            active_work: Some(piko_protocol::ActiveWorkSnapshot {
+                root_input_id: "input-child".into(),
+                state: piko_protocol::AgentWorkViewState::Running,
+                active_model_step_id: None,
+                started_at: 1,
+            }),
+            pending_steers: Vec::new(),
+            queued_inputs: Vec::new(),
+            pending_action: None,
+        },
+    );
     app.agent_panel
         .upsert_agent(crate::features::agent_status::AgentEntry {
             agent_id: "worker".into(),

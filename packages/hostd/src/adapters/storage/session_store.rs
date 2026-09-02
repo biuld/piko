@@ -85,6 +85,28 @@ impl SessionStorePort for BlockingSessionStore {
             .await
     }
 
+    async fn cancel_pending_agent_input(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        input_id: &str,
+    ) -> Result<piko_protocol::AgentInputCancelReceipt, piko_protocol::CommitError> {
+        self.inner
+            .cancel_pending_agent_input(session_id, agent_instance_id, input_id)
+            .await
+    }
+
+    async fn request_agent_interrupt(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+        requested_at: i64,
+    ) -> Result<Option<String>, piko_protocol::CommitError> {
+        self.inner
+            .request_agent_interrupt(session_id, agent_instance_id, requested_at)
+            .await
+    }
+
     async fn trajectory(
         &self,
     ) -> Result<piko_session_store::TrajectoryProjection, SessionStorageError> {

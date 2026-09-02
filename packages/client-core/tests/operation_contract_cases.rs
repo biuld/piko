@@ -217,8 +217,53 @@ fn c9_approval_requested_then_responded() {
     let session = state.live_session.as_ref().unwrap();
     assert_eq!(session.pending_approvals.len(), 1);
     assert_eq!(session.pending_approvals[0].approval_id, "approval-1");
+
+    // Foreground is host-authoritative: the host pushes a reconcile carrying
+    // the RequiresAction agent-work snapshot after the pending action.
+    let mut snapshot = session_snapshot("sess-1");
+    snapshot.pending_approvals = vec![piko_protocol::ApprovalSnapshot {
+        approval_id: "approval-1".into(),
+        agent_instance_id: "root".into(),
+        root_input_id: "turn-1".into(),
+        tool_name: "write_file".into(),
+        request: serde_json::json!({"path": "/tmp/x"}),
+        prompt: None,
+        status: piko_protocol::ApprovalStatus::Pending,
+    }];
+    snapshot.agent_work = vec![piko_protocol::AgentWorkSnapshot {
+        agent_instance_id: "root".into(),
+        lifecycle: piko_protocol::AgentInstanceLifecycle::Open,
+        foreground: piko_protocol::AgentForeground::RequiresAction,
+        active_work: Some(piko_protocol::ActiveWorkSnapshot {
+            root_input_id: "turn-1".into(),
+            state: piko_protocol::AgentWorkViewState::Running,
+            active_model_step_id: None,
+            started_at: 1,
+        }),
+        pending_steers: Vec::new(),
+        queued_inputs: Vec::new(),
+        pending_action: Some(piko_protocol::PendingActionSummary {
+            action_id: "approval-1".into(),
+            kind: "approval".into(),
+            summary: Some("write_file".into()),
+        }),
+    }];
+    let (state, _) = host(
+        state,
+        ServerMessage::SessionReconciled(piko_protocol::SessionReconciledEvent {
+            session_id: "sess-1".into(),
+            reason: piko_protocol::ReconcileReason::ExplicitRefresh,
+            cursor: piko_protocol::agent_runtime::SessionCursor {
+                epoch: "e1".into(),
+                seq: 2,
+            },
+            snapshot,
+            agents: vec![agent_info("sess-1", "root", None)],
+        }),
+        &mut ids,
+    );
     assert_eq!(
-        piko_client_core::agent_foreground("root", session),
+        piko_client_core::agent_foreground("root", state.live_session.as_ref().unwrap()),
         piko_protocol::AgentForeground::RequiresAction
     );
 
