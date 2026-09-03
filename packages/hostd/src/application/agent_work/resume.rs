@@ -24,7 +24,11 @@ impl HostApp {
                     &session.entries,
                     session.current_leaf_id.as_deref(),
                 );
-                if !session_transcript.is_empty() {
+                if session.current_leaf_id.is_none() || !session_transcript.is_empty() {
+                    let active_branch = crate::domain::compaction::active_branch_entries(
+                        &session.entries,
+                        session.current_leaf_id.as_deref(),
+                    );
                     let transcript_seq = session
                         .entries
                         .iter()
@@ -38,11 +42,15 @@ impl HostApp {
                         })
                         .max()
                         .unwrap_or(0);
-                    let head_message_id = session
-                        .task_heads
-                        .get(root_agent_instance_id)
-                        .cloned()
-                        .or_else(|| session.current_leaf_id.clone());
+                    let head_message_id =
+                        active_branch.iter().rev().find_map(|entry| match entry {
+                            piko_protocol::SessionTreeEntry::Message(message)
+                                if message.agent_instance_id == root_agent_instance_id =>
+                            {
+                                Some(message.id.clone())
+                            }
+                            _ => None,
+                        });
                     Some(ResumeAgent {
                         agent_instance_id: root_agent_instance_id.to_string(),
                         state: piko_protocol::agent_runtime::AgentResumeState {

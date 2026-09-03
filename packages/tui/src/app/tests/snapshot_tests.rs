@@ -46,7 +46,7 @@ fn snapshot_projects_only_typed_timeline_entries() {
         }),
         SessionTreeEntry::Compaction(CompactionEntry {
             id: "compact-entry".into(),
-            parent_id: None,
+            parent_id: Some("model-entry".into()),
             timestamp: "2".into(),
             summary: "compact summary".into(),
             first_kept_entry_id: "model-entry".into(),
@@ -56,7 +56,7 @@ fn snapshot_projects_only_typed_timeline_entries() {
         }),
         SessionTreeEntry::BranchSummary(BranchSummaryEntry {
             id: "branch-entry".into(),
-            parent_id: None,
+            parent_id: Some("compact-entry".into()),
             timestamp: "3".into(),
             from_id: "old-leaf".into(),
             summary: "branch summary".into(),
@@ -65,7 +65,7 @@ fn snapshot_projects_only_typed_timeline_entries() {
         }),
         SessionTreeEntry::CustomMessage(CustomMessageEntry {
             id: "visible-custom".into(),
-            parent_id: None,
+            parent_id: Some("branch-entry".into()),
             timestamp: "4".into(),
             custom_type: "skill".into(),
             content: CustomMessageContent::String("used skill".into()),
@@ -118,7 +118,7 @@ fn snapshot_projects_only_typed_timeline_entries() {
                 seq: 1,
                 entries,
                 model_steps: Vec::new(),
-                current_leaf_id: None,
+                current_leaf_id: Some("visible-custom".into()),
                 selected_agent_instance_id: None,
                 agent_work: Vec::new(),
                 pending_approvals: Vec::new(),

@@ -4,13 +4,14 @@ use piko_protocol::session::SessionTreeEntry;
 
 /// Return entries on the path from `current_leaf_id` to the root (chronological).
 ///
-/// If `current_leaf_id` is absent, return all entries as-is.
+/// If `current_leaf_id` is absent, the cursor is before the first message and
+/// the active branch is empty.
 pub fn active_branch_entries(
     entries: &[SessionTreeEntry],
     current_leaf_id: Option<&str>,
 ) -> Vec<SessionTreeEntry> {
     let Some(leaf_id) = current_leaf_id else {
-        return entries.to_vec();
+        return Vec::new();
     };
 
     let mut by_id = std::collections::HashMap::new();
@@ -44,4 +45,20 @@ pub fn active_path_ids(entries: &[SessionTreeEntry], current_leaf_id: Option<&st
         .into_iter()
         .map(|e| e.id().to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_cursor_means_empty_active_branch() {
+        let entry = SessionTreeEntry::SessionInfo(piko_protocol::SessionInfoEntry {
+            id: "info".into(),
+            parent_id: None,
+            timestamp: "1".into(),
+            name: Some("kept in the full tree".into()),
+        });
+        assert!(active_branch_entries(&[entry], None).is_empty());
+    }
 }

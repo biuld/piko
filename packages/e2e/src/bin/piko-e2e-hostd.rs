@@ -168,6 +168,20 @@ impl InferenceGateway for ScriptedGateway {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        let context_messages = request
+            .conversation
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ConversationItemKind::Context {
+                    content, source, ..
+                } => Some(json!({
+                    "content": content_text(content),
+                    "source": source,
+                })),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         append_record(
             &self.log_path,
             "gateway",
@@ -178,6 +192,7 @@ impl InferenceGateway for ScriptedGateway {
                     "id": request.model.model,
                 },
                 "user_messages": user_messages,
+                "context_messages": context_messages,
             }),
         );
 

@@ -29,33 +29,19 @@ fn command_content(record: &Value) -> Option<&str> {
 }
 
 fn completed_work_count(records: &[Value]) -> usize {
-    let mut active_input: Option<String> = None;
-    let mut completed = std::collections::HashSet::new();
-    for record in records {
-        let Some(piko_protocol::ServerMessage::SessionReconciled(event)) = server_message(record)
-        else {
-            continue;
-        };
-        let root_agent_instance_id = event
-            .agents
-            .iter()
-            .find(|agent| agent.parent_agent_instance_id.is_none())
-            .map(|agent| agent.agent_instance_id.as_str());
-        let next = event
-            .snapshot
-            .agent_work
-            .iter()
-            .find(|work| Some(work.agent_instance_id.as_str()) == root_agent_instance_id)
-            .and_then(|work| work.active_work.as_ref())
-            .map(|work| work.root_input_id.clone());
-        if active_input != next
-            && let Some(previous) = active_input.take()
-        {
-            completed.insert(previous);
-        }
-        active_input = next;
-    }
-    completed.len()
+    records
+        .iter()
+        .filter_map(server_message)
+        .filter_map(|message| match message {
+            piko_protocol::ServerMessage::ModelStepCommitted(boundary)
+                if boundary.outcome == piko_protocol::ModelStepOutcome::Completed =>
+            {
+                Some(boundary.root_input_id)
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .len()
 }
 
 const ROWS: u16 = 24;

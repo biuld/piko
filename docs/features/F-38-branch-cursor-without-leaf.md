@@ -100,9 +100,9 @@ current cursor = latest published branch-selection fact
 ```
 
 Absence of a cursor means there is no selected node. Readers must not
-fall back to "last appended row" or "last Leaf target" to invent one,
-except a purely local compaction helper that has been given no cursor
-and must pick a tip from the graph it was handed.
+fall back to "last appended row" or "last Leaf target" to invent one.
+Any specialized operation that intentionally chooses a best-effort tip must
+resolve and pass that tip explicitly.
 
 ### Navigate
 
@@ -116,6 +116,10 @@ While the session is idle:
    (or empty for the root reset).
 4. Publish current state. Clients rebuild Timeline and Session Tree
    from that state.
+
+If orchd already has the Session attached, hostd invalidates that runtime
+attachment after the idle check. The next input reattaches from the durable
+cursor, so an abandoned in-memory transcript cannot leak into the new branch.
 
 Selecting the already-selected node is a no-op.
 
@@ -150,6 +154,9 @@ recovered cursor equals the last committed branch-selection fact.
 - [x] Appending a label or session-info fact does not move the cursor.
 - [x] Ordinary tree/timeline/open paths do not scan the journal to
       compute the active branch.
+- [x] An already-attached root runtime is rehydrated after navigate and does
+      not send abandoned messages to the next model request.
+- [x] A generated branch summary is included in the next model context.
 
 ## Product decisions
 

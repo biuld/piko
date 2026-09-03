@@ -6,11 +6,7 @@ use crate::{Result, SessionAggregate, StoreError};
 
 impl SessionAggregate {
     pub fn active_root_transcript(&self) -> Result<Vec<Message>> {
-        let mut current = self.root_base_message_id.clone().or_else(|| {
-            self.root
-                .as_ref()
-                .and_then(|root| self.agent_heads.get(&root.agent_instance_id).cloned())
-        });
+        let mut current = self.root_base_message_id.clone();
         let mut path = Vec::new();
         let mut visited = BTreeSet::new();
         while let Some(id) = current {

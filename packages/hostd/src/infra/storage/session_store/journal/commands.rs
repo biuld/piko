@@ -343,10 +343,7 @@ fn admitted_base(
         .as_ref()
         .is_some_and(|root| root.agent_instance_id == agent_instance_id)
     {
-        aggregate
-            .root_base_message_id
-            .clone()
-            .or_else(|| aggregate.agent_heads.get(agent_instance_id).cloned())
+        aggregate.root_base_message_id.clone()
     } else {
         aggregate.agent_heads.get(agent_instance_id).cloned()
     }

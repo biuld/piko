@@ -21,15 +21,23 @@ struct PtyHarness {
     output_rx: ThreadBridgeReceiver<TuiHostBridge, Vec<u8>>,
     output: Vec<u8>,
     log_path: PathBuf,
+    piko_home: PathBuf,
 }
 
 impl PtyHarness {
     fn launch() -> Self {
+        let suffix = unique_suffix();
         let log_path = std::env::temp_dir().join(format!(
             "piko-tui-pty-{}-{}.jsonl",
             std::process::id(),
-            unique_suffix()
+            suffix
         ));
+        let piko_home =
+            std::env::temp_dir().join(format!("piko-tui-pty-home-{}-{suffix}", std::process::id()));
+        let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("canonicalize piko source root");
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -45,6 +53,8 @@ impl PtyHarness {
         command.arg(binary_path("piko-tui-pty-hostd"));
         command.env("PIKO_TUI_EXIT_AFTER_MS", EXIT_AFTER_MS);
         command.env("PIKO_TUI_PTY_LOG", &log_path);
+        command.env("PIKO_HOME", &piko_home);
+        command.env("PIKO_DEV_SOURCE_ROOT", source_root);
         command.env("TERM", "xterm-256color");
         command.env_remove("COLORTERM");
         command.cwd(env!("CARGO_MANIFEST_DIR"));
@@ -62,6 +72,7 @@ impl PtyHarness {
             output_rx,
             output: Vec::new(),
             log_path,
+            piko_home,
         }
     }
 
@@ -75,8 +86,19 @@ impl PtyHarness {
     }
 
     fn send(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).expect("write pty input");
-        self.writer.flush().expect("flush pty input");
+        if let Err(error) = self
+            .writer
+            .write_all(bytes)
+            .and_then(|()| self.writer.flush())
+        {
+            self.drain_output();
+            let status = self.child.try_wait().ok().flatten();
+            panic!(
+                "write pty input: {error}; child status: {status:?}; output:\n{}; commands: {:?}",
+                String::from_utf8_lossy(&self.output),
+                read_commands(&self.log_path)
+            );
+        }
     }
 
     fn send_after(&mut self, bytes: &[u8], delay: Duration) {
@@ -197,6 +219,7 @@ impl Drop for PtyHarness {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = fs::remove_file(&self.log_path);
+        let _ = fs::remove_dir_all(&self.piko_home);
     }
 }
 

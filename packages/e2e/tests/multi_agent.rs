@@ -93,4 +93,47 @@ fn spawn_agent_round_trips_from_jsonl_hostd_through_orchd_and_back() {
         agent.agent_instance_id == child_id
             && agent.parent_agent_instance_id.as_deref() == Some(root_agent.as_str())
     }));
+
+    let snapshot = host.snapshot(&session_id, "snapshot-before-branch-fork");
+    let root_user_id = snapshot
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            piko_protocol::SessionTreeEntry::Message(message)
+                if message.agent_instance_id == root_agent
+                    && matches!(&message.message, Message::User { .. }) =>
+            {
+                Some(message.id.clone())
+            }
+            _ => None,
+        })
+        .expect("root user entry");
+    host.send(Command::SessionFork {
+        command_id: "fork-before-child".into(),
+        session_id: session_id.clone(),
+        entry_id: Some(root_user_id),
+    });
+    let forked_id = match host.command_result("fork-before-child") {
+        CommandResult::SessionOpened { session_id, .. } => session_id,
+        other => panic!("expected forked session open, got {other:?}"),
+    };
+    host.wait_for("forked session reconciliation", |message| {
+        matches!(
+            message,
+            ServerMessage::SessionReconciled(event) if event.session_id == forked_id
+        )
+    });
+    host.send(Command::AgentList {
+        command_id: "forked-agents".into(),
+        session_id: forked_id,
+    });
+    let CommandResult::AgentListed { agents, .. } = host.command_result("forked-agents") else {
+        panic!("expected forked agent list");
+    };
+    assert_eq!(
+        agents.len(),
+        1,
+        "unreferenced child agents must not cross a branch fork"
+    );
+    assert_eq!(agents[0].agent_instance_id, root_agent);
 }

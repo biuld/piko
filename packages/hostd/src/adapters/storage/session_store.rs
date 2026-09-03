@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::blocking::StorageBlockingPool;
+use crate::api::SessionTreeEntry;
 use crate::infra::storage::SessionStore;
 use crate::ports::session_store::{SessionStoreFactory, SessionStorePort};
 use crate::ports::storage_types::{
@@ -105,6 +106,19 @@ impl SessionStorePort for BlockingSessionStore {
         self.inner
             .request_agent_interrupt(session_id, agent_instance_id, requested_at)
             .await
+    }
+
+    async fn select_branch(&self, target_id: Option<&str>) -> Result<(), SessionStorageError> {
+        let store = self.inner.clone();
+        let target_id = target_id.map(str::to_string);
+        self.pool
+            .run(move || store.select_branch(target_id.as_deref()))
+            .await
+    }
+
+    async fn append_tree_entry(&self, entry: SessionTreeEntry) -> Result<(), SessionStorageError> {
+        let store = self.inner.clone();
+        self.pool.run(move || store.append_tree_entry(&entry)).await
     }
 
     async fn trajectory(

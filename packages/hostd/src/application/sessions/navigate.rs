@@ -154,6 +154,17 @@ impl HostApp {
             paths.get(&session_id).cloned()
         };
 
+        // orchd keeps an in-memory transcript per attached AgentInstance.
+        // Navigation changes hostd's authoritative branch, so force the next
+        // input to reattach from the newly projected cursor rather than reuse
+        // the abandoned runtime transcript.
+        self.agent_runner
+            .lock()
+            .await
+            .clone()
+            .invalidate_session_runtime(&session_id)
+            .await?;
+
         let mut persisted_via_storage = false;
         if let Some(storage) = &self.storage
             && let Some(path) = path.as_ref()
@@ -180,8 +191,21 @@ impl HostApp {
 
         if !persisted_via_storage {
             if let Some(b) = &branch_summary {
+                if let Some(path) = path.as_ref() {
+                    self.session_store_factory
+                        .open(path)
+                        .append_tree_entry(b.clone())
+                        .await
+                        .map_err(storage_error)?;
+                }
                 state.append_entry(&session_id, b.clone())?;
                 target_id = Some(b.id().to_string());
+            } else if let Some(path) = path.as_ref() {
+                self.session_store_factory
+                    .open(path)
+                    .select_branch(target_id.as_deref())
+                    .await
+                    .map_err(storage_error)?;
             }
             state.select_branch(&session_id, target_id.clone())?;
         }

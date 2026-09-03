@@ -6,14 +6,15 @@ pub fn active_branch_entries(
     entries: &[SessionTreeEntry],
     leaf_id: Option<&str>,
 ) -> Vec<SessionTreeEntry> {
+    let Some(leaf_id) = leaf_id else {
+        return Vec::new();
+    };
     let mut by_id = std::collections::HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
         by_id.insert(entry.id(), index);
     }
 
-    let mut current = leaf_id
-        .map(str::to_string)
-        .or_else(|| entries.last().map(|entry| entry.id().to_string()));
+    let mut current = Some(leaf_id.to_string());
     let mut indexes = Vec::new();
     let mut visited = std::collections::HashSet::new();
     while let Some(id) = current {

@@ -80,6 +80,17 @@ impl AgentRunRunner for OrchAgentRunRunner {
             .await
     }
 
+    async fn invalidate_session_runtime(&self, session_id: &str) -> Result<(), ProtocolError> {
+        match self
+            .agent_runtime
+            .detach_agent_session(session_id.to_string())
+            .await
+        {
+            Ok(()) | Err(piko_orchd_api::AgentApiError::SessionNotAttached) => Ok(()),
+            Err(error) => Err(ProtocolError::InvalidCommand(error.to_string())),
+        }
+    }
+
     async fn wait_agent_input_started(
         &self,
         session_id: &str,

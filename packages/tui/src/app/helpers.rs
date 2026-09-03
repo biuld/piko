@@ -10,32 +10,7 @@ pub fn get_active_branch_entries(
     entries: &[SessionTreeEntry],
     current_leaf_id: Option<&str>,
 ) -> Vec<SessionTreeEntry> {
-    let Some(leaf_id) = current_leaf_id else {
-        return entries.to_vec();
-    };
-    let mut by_id = std::collections::HashMap::new();
-    for entry in entries {
-        by_id.insert(entry.id(), entry);
-    }
-
-    let mut path = Vec::new();
-    let mut curr_id = Some(leaf_id.to_string());
-    let mut visited = std::collections::HashSet::new();
-
-    while let Some(id) = curr_id {
-        if !visited.insert(id.clone()) {
-            break; // cycle detected (e.g. id == parentId)
-        }
-        if let Some(entry) = by_id.get(id.as_str()) {
-            path.push((*entry).clone());
-            curr_id = entry.parent_id().map(|s| s.to_string());
-        } else {
-            break;
-        }
-    }
-
-    path.reverse();
-    path
+    piko_client_core::active_branch_entries(entries, current_leaf_id)
 }
 
 pub(crate) fn flatten_models(providers: Vec<ProviderInfo>) -> Vec<ModelOption> {

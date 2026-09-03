@@ -64,8 +64,17 @@ parent walk from `current_leaf_id` / `selected_tree_entry_id`.
 
 Open/resume trusts that cursor.
 
-`active_branch_entries` without an explicit cursor uses the last
-projected graph entry.
+`active_branch_entries` without an explicit cursor returns an empty branch. A
+specialized caller that intentionally needs a best-effort tip must choose that
+tip explicitly before calling the lineage walk. Clients and hostd apply the
+same rule. After navigation, hostd invalidates any attached orchd session so the
+next input reattaches the root AgentInstance from the new durable cursor rather
+than retaining the abandoned in-memory transcript.
+
+When the cursor points to non-message content, `root_base_message_id` is the
+nearest root-AgentInstance message on that entry's ancestry. Branch summaries
+and custom messages are projected into model-visible `Context` messages with
+stable source provenance.
 
 ### Protocol
 
@@ -78,7 +87,7 @@ projected graph entry.
 | `piko-protocol` | Remove Leaf from `SessionTreeEntry` |
 | `piko-hostd` | Navigate = `BranchSelected`; project only current entry kinds |
 | `piko-tui` | No Leaf match arms or fixtures |
-| `piko-session-store` | Unchanged reducer (`BranchSelected` already exists) |
+| `piko-session-store` | `BranchSelected` reducer unchanged; root transcript query treats an absent cursor as empty |
 
 ## Reusable infrastructure
 
@@ -96,6 +105,9 @@ read-model publication rebuilds on the next query (F-37).
 - hostd: navigate to root user publishes empty cursor (memory + storage).
 - hostd: storage `navigate` after two messages sets `current_leaf_id`
   without adding a tree entry.
+- E2E: continuing after backtrack excludes abandoned user messages from the
+  next gateway request, including when orchd was already attached.
+- E2E: a generated branch summary reaches the next gateway request as Context.
 - hostd: label/session-info append does not move `selected_tree_entry_id`.
 - tui: hidden non-content current node still selects nearest visible
   ancestor.

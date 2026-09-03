@@ -67,6 +67,14 @@ fn branch_point_fork_keeps_ancestor_path_only() {
         .collect();
     assert_eq!(forked_ids, vec!["m1", "m2"]);
     assert!(forked.state.world_state_baseline.is_none());
+    let forked_aggregate = piko_session_store::query_current(&forked.path).unwrap();
+    assert_eq!(
+        forked_aggregate
+            .fork_origin
+            .as_ref()
+            .and_then(|origin| origin.source_tree_entry_id.as_deref()),
+        Some("m2")
+    );
 
     let after_source = repo.load_by_path(&session_dir).expect("reload source");
     let source_message_ids: Vec<&str> = after_source

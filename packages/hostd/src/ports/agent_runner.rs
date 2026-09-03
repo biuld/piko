@@ -110,6 +110,12 @@ pub trait AgentRunRunner: Send + Sync {
         Ok(())
     }
 
+    /// Drop a cached runtime session after host-authoritative branch state
+    /// changes. The next input reattaches from the durable active branch.
+    async fn invalidate_session_runtime(&self, _session_id: &str) -> Result<(), ProtocolError> {
+        Ok(())
+    }
+
     async fn cancel_agent_input(
         &self,
         _session_id: &str,

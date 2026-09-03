@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use piko_session_store::{
-    EventData, NewSession, OpenOptions, ProposedCommit, RawEvent, SessionAggregate,
-    SessionStore as Journal,
+    CompactionRecordedV1, EventData, NewSession, OpenOptions, ProposedCommit, RawEvent,
+    SessionAggregate, SessionStore as Journal,
 };
 
+use crate::api::SessionTreeEntry;
 use crate::ports::storage_types::SessionStorageError;
 
 mod commands;
@@ -80,6 +81,70 @@ impl SessionStore {
 
     pub(crate) fn aggregate(&self) -> Result<SessionAggregate, SessionStorageError> {
         Ok(self.journal()?.aggregate())
+    }
+
+    pub fn select_branch(&self, target_id: Option<&str>) -> Result<(), SessionStorageError> {
+        self.with_io(|| {
+            let aggregate = self.aggregate()?;
+            if aggregate.selected_tree_entry_id.as_deref() == target_id {
+                return Ok(());
+            }
+            if let Some(id) = target_id
+                && !aggregate.messages.contains_key(id)
+                && !aggregate.tree_entries.contains_key(id)
+            {
+                return Err(self.invalid(format!("unknown tree entry: {id}")));
+            }
+            let root_base_message_id = root_message_ancestor(&aggregate, target_id);
+            let seed = format!("{}:{}", aggregate.revision, target_id.unwrap_or("root"));
+            self.commit_events(
+                &piko_orchd_api::stable_internal_id(
+                    "branch-selected",
+                    &[aggregate.session_id.as_deref().unwrap_or_default(), &seed],
+                ),
+                chrono::Utc::now().timestamp_millis(),
+                vec![EventData::BranchSelected {
+                    selected_tree_entry_id: target_id.map(str::to_string),
+                    root_base_message_id,
+                }],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Append a non-message session-tree entry and advance the selected branch
+    /// atomically when that entry participates in the visible conversation.
+    pub fn append_tree_entry(&self, entry: &SessionTreeEntry) -> Result<(), SessionStorageError> {
+        self.with_io(|| {
+            let aggregate = self.aggregate()?;
+            let committed_at = entry.timestamp().parse().unwrap_or_default();
+            let mut events = vec![mutations::tree_entry_event(entry)?];
+            if let SessionTreeEntry::Compaction(compaction) = entry {
+                events.push(EventData::CompactionRecorded(CompactionRecordedV1 {
+                    compaction_id: compaction.id.clone(),
+                    tree_parent_entry_id: compaction.parent_id.clone(),
+                    summary: compaction.summary.clone(),
+                    first_retained_entry_id: compaction.first_kept_entry_id.clone(),
+                    tokens_before: compaction.tokens_before,
+                    committed_at,
+                }));
+                events.push(EventData::WorldStateAdvanced { facts: None });
+            }
+            if entry.advances_selected_branch() {
+                events.push(EventData::BranchSelected {
+                    selected_tree_entry_id: Some(entry.id().to_string()),
+                    root_base_message_id: root_message_ancestor(&aggregate, entry.parent_id()),
+                });
+            }
+            let session_id = aggregate
+                .session_id
+                .as_deref()
+                .ok_or_else(|| self.invalid("missing session"))?;
+            let commit_id =
+                piko_orchd_api::stable_internal_id("tree-entry", &[session_id, entry.id()]);
+            self.commit_events(&commit_id, committed_at, events)?;
+            Ok(())
+        })
     }
 
     pub(crate) fn commit_events(
@@ -187,4 +252,35 @@ impl SessionStore {
     pub(super) fn session_dir(&self) -> &Path {
         &self.session_dir
     }
+}
+
+/// Resolve the nearest root-AgentInstance message on a session-tree ancestry.
+///
+/// The session cursor may point at non-message content such as compaction or a
+/// branch summary. Root transcript continuation must follow the tree ancestry
+/// instead of falling back to the physically latest root message.
+pub(crate) fn root_message_ancestor(
+    aggregate: &SessionAggregate,
+    target_id: Option<&str>,
+) -> Option<String> {
+    let root_id = &aggregate.root.as_ref()?.agent_instance_id;
+    let mut current = target_id.map(str::to_string);
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(id) = current {
+        if !visited.insert(id.clone()) {
+            return None;
+        }
+        if let Some(message) = aggregate.messages.get(&id) {
+            if &message.data.agent_instance_id == root_id {
+                return Some(id);
+            }
+            current = message.data.tree_parent_entry_id.clone();
+            continue;
+        }
+        current = aggregate
+            .tree_entries
+            .get(&id)
+            .and_then(|entry| entry.data.parent_entry_id.clone());
+    }
+    None
 }

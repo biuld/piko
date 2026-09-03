@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use super::storage_types::{
     AgentProjection, CommittedMessage, RecoveredAgent, SessionProjection, SessionStorageError,
 };
+use crate::api::SessionTreeEntry;
 
 /// Narrow async read/query surface used by the application. The filesystem
 /// adapter keeps the underlying store synchronous and offloads whole calls.
@@ -60,6 +61,12 @@ pub trait SessionStorePort: Send + Sync {
         agent_instance_id: &str,
         requested_at: i64,
     ) -> Result<Option<String>, piko_protocol::CommitError>;
+
+    /// Persist the host-authoritative session-tree cursor.
+    async fn select_branch(&self, target_id: Option<&str>) -> Result<(), SessionStorageError>;
+
+    /// Persist a non-message session-tree entry and its cursor transition.
+    async fn append_tree_entry(&self, entry: SessionTreeEntry) -> Result<(), SessionStorageError>;
 
     async fn trajectory(
         &self,

@@ -93,6 +93,35 @@ fn commit(id: &str, at: i64, event: RawEvent) -> ProposedCommit {
     ProposedCommit::one(id, at, event)
 }
 
+fn message_and_select_commit(
+    commit_id: &str,
+    at: i64,
+    message_id: &str,
+    agent_parent: Option<&str>,
+    tree_parent: Option<&str>,
+) -> ProposedCommit {
+    ProposedCommit {
+        commit_id: commit_id.into(),
+        committed_at: at,
+        causation_id: None,
+        correlation_id: None,
+        events: vec![
+            event(
+                &format!("{commit_id}-message"),
+                message(message_id, agent_parent, tree_parent),
+            ),
+            event(
+                &format!("{commit_id}-branch"),
+                EventData::BranchSelected {
+                    selected_tree_entry_id: Some(message_id.into()),
+                    root_base_message_id: Some(message_id.into()),
+                },
+            ),
+        ],
+        extensions: BTreeMap::new(),
+    }
+}
+
 fn message(id: &str, agent_parent: Option<&str>, tree_parent: Option<&str>) -> EventData {
     EventData::MessageCommitted(MessageCommittedV1 {
         message_id: id.into(),
@@ -402,7 +431,7 @@ fn applied_agent_input_is_the_single_durable_user_payload_authority() {
 fn append_reopen_and_idempotent_retry_converge() {
     let temp = tempdir().unwrap();
     let opened = SessionStore::create(&temp.path().join("session"), new_session("s1")).unwrap();
-    let proposed = commit("c2", 2, event("e2", message("m1", None, None)));
+    let proposed = message_and_select_commit("c2", 2, "m1", None, None);
     let first = opened.store.append(1, proposed.clone()).unwrap();
     let retry = opened.store.append(1, proposed).unwrap();
     assert_eq!(first, retry);
@@ -877,18 +906,14 @@ fn corrupt_current_read_model_is_rebuilt_from_the_journal() {
     let opened = SessionStore::create(&path, new_session("s1")).unwrap();
     opened
         .store
-        .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
+        .append(1, message_and_select_commit("c2", 2, "m1", None, None))
         .unwrap();
     fill_to_segment_boundary(&opened.store);
     opened
         .store
         .append(
             1_000,
-            commit(
-                "tail-c1001",
-                1_001,
-                event("tail-e1001", message("m2", Some("m1"), Some("m1"))),
-            ),
+            message_and_select_commit("tail-c1001", 1_001, "m2", Some("m1"), Some("m1")),
         )
         .unwrap();
     drop(opened);

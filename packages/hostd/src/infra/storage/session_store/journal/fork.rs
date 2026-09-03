@@ -119,17 +119,24 @@ impl SessionStore {
         .map_err(|error| self.storage_error(error))?;
         let forked = SessionStore::new(target);
         drop(opened);
+        let kept_agents = kept_agent_ids(&source, retained);
         forked.commit_events(
             &piko_orchd_api::stable_internal_id("session-fork", &[&session_id]),
             created_at,
             vec![EventData::SessionForked(SessionForkedV1 {
                 source_session_id,
                 source_revision: source.revision,
-                source_tree_entry_id: retained.and_then(|ids| ids.last().cloned()),
+                source_tree_entry_id: cursor_entry_id.map(str::to_string),
             })],
         )?;
 
-        for agent in source.agents.values() {
+        let mut agents = source
+            .agents
+            .values()
+            .filter(|agent| kept_agents.contains(&agent.identity.agent_instance_id))
+            .collect::<Vec<_>>();
+        agents.sort_by_key(|agent| agent_depth(&source, &agent.identity.agent_instance_id));
+        for agent in agents {
             let Some(spec) = agent.spec.clone() else {
                 continue;
             };
@@ -184,21 +191,34 @@ impl SessionStore {
                 name: source.name.clone(),
             });
         }
-        if let Some(model) = source.model_continuity {
+        if let Some(model) = &source.model_continuity {
             final_events.push(EventData::ModelContinuityChanged {
-                provider: Some(model.provider),
-                model_id: Some(model.model_id),
+                provider: Some(model.provider.clone()),
+                model_id: Some(model.model_id.clone()),
             });
         }
         // Forks intentionally clear the world-state diff baseline so their
         // first run injects a complete snapshot in the new session context.
-        for (agent_instance_id, todo_list) in source.todo_lists {
+        for (agent_instance_id, todo_list) in &source.todo_lists {
+            if !kept_agents.contains(agent_instance_id) {
+                continue;
+            }
             final_events.push(EventData::TodoListReplaced {
-                agent_instance_id,
-                todo_list: Some(todo_list),
+                agent_instance_id: agent_instance_id.clone(),
+                todo_list: Some(todo_list.clone()),
             });
         }
-        if let Some(selected) = source.selected_agent_instance_id {
+        let selected_agent = source
+            .selected_agent_instance_id
+            .clone()
+            .filter(|selected| kept_agents.contains(selected))
+            .or_else(|| {
+                source
+                    .root
+                    .as_ref()
+                    .map(|root| root.agent_instance_id.clone())
+            });
+        if let Some(selected) = selected_agent {
             final_events.push(EventData::AgentSelected {
                 agent_instance_id: selected,
                 selected_at: created_at,
@@ -207,17 +227,10 @@ impl SessionStore {
         let selected = cursor_entry_id.map(str::to_string).or_else(|| {
             source
                 .selected_tree_entry_id
+                .clone()
                 .filter(|id| retained.is_none_or(|ids| ids.contains(id)))
         });
-        let root_base = selected
-            .as_ref()
-            .filter(|id| source.messages.contains_key(*id))
-            .cloned()
-            .or_else(|| {
-                source
-                    .root_base_message_id
-                    .filter(|id| retained.is_none_or(|ids| ids.contains(id)))
-            });
+        let root_base = super::root_message_ancestor(&source, selected.as_deref());
         if selected.is_some() || root_base.is_some() {
             final_events.push(EventData::BranchSelected {
                 selected_tree_entry_id: selected,
@@ -233,4 +246,59 @@ impl SessionStore {
         }
         Ok(())
     }
+}
+
+fn kept_agent_ids(
+    source: &piko_session_store::SessionAggregate,
+    retained: Option<&BTreeSet<String>>,
+) -> BTreeSet<String> {
+    let mut kept = if let Some(retained) = retained {
+        source
+            .messages
+            .values()
+            .filter(|message| retained.contains(&message.data.message_id))
+            .map(|message| message.data.agent_instance_id.clone())
+            .collect::<BTreeSet<_>>()
+    } else {
+        source.agents.keys().cloned().collect()
+    };
+    if let Some(root) = &source.root {
+        kept.insert(root.agent_instance_id.clone());
+    }
+
+    // Preserve a valid AgentInstance tree when a retained descendant's own
+    // transcript is on the branch but an intermediate supervisor has no row.
+    let mut pending = kept.iter().cloned().collect::<Vec<_>>();
+    while let Some(agent_id) = pending.pop() {
+        let Some(parent) = source
+            .agents
+            .get(&agent_id)
+            .and_then(|agent| agent.identity.parent_agent_instance_id.clone())
+        else {
+            continue;
+        };
+        if kept.insert(parent.clone()) {
+            pending.push(parent);
+        }
+    }
+    kept
+}
+
+fn agent_depth(source: &piko_session_store::SessionAggregate, agent_id: &str) -> usize {
+    let mut depth = 0usize;
+    let mut current = Some(agent_id);
+    let mut visited = BTreeSet::new();
+    while let Some(id) = current {
+        if !visited.insert(id.to_string()) {
+            break;
+        }
+        current = source
+            .agents
+            .get(id)
+            .and_then(|agent| agent.identity.parent_agent_instance_id.as_deref());
+        if current.is_some() {
+            depth = depth.saturating_add(1);
+        }
+    }
+    depth
 }
