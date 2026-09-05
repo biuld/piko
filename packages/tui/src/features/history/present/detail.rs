@@ -1,14 +1,14 @@
 use piko_protocol::{
-    AgentWorkOutcome, ContentBlock, HistoryAvailability, HistoryItemContent, HistoryItemDetail,
-    HistoryProvenance, Message, MessageContent, SessionTreeEntry, TrajectoryRecord, Usage,
+    AgentWorkOutcome, HistoryAvailability, HistoryItemContent, HistoryItemDetail,
+    HistoryProvenance, TrajectoryRecord, Usage,
 };
 
+use super::content::{fields, message_content, message_lines, section, tree_lines};
 use super::labels::{
     block_kind_word, origin_word, outcome_color, outcome_word, step_outcome_word, terminal_word,
     tool_status_word,
 };
 use super::paint::{kv, plain, wrapped};
-use crate::features::short_id;
 use crate::theme::Theme;
 use ratatui::text::Line;
 
@@ -26,16 +26,43 @@ pub(crate) fn detail_lines(
         }
         HistoryAvailability::Available => {}
     }
+    lines.push(plain(
+        format!("Snapshot revision {}", detail.item_ref.revision),
+        theme.muted,
+        width,
+    ));
     lines.push(plain("", theme.text, width));
     match detail.content.as_ref() {
         Some(HistoryItemContent::Input { input }) => {
             lines.push(plain(origin_word(input.origin), theme.accent_user, width));
-            lines.extend(wrapped(&content_preview(&input.content), theme.text, width));
+            lines.extend(message_content(&input.content, theme, width));
         }
-        Some(HistoryItemContent::Message { message, .. }) => {
+        Some(HistoryItemContent::Message {
+            message_id,
+            message,
+        }) => {
             lines.extend(message_lines(message, theme, width));
+            lines.extend(section("Message ID", message_id, theme, width));
         }
         Some(HistoryItemContent::ModelStep { boundary }) => {
+            lines.extend(section(
+                "Model step ID",
+                &boundary.model_step_id,
+                theme,
+                width,
+            ));
+            lines.extend(section(
+                "Assistant message",
+                &boundary.assistant_message_id,
+                theme,
+                width,
+            ));
+            lines.extend(section(
+                "Ordered tool declarations",
+                &boundary.tool_call_message_ids.join("\n"),
+                theme,
+                width,
+            ));
             lines.push(kv(
                 "outcome",
                 step_outcome_word(boundary.outcome),
@@ -70,8 +97,7 @@ pub(crate) fn detail_lines(
             lines.extend(usage_lines(&report.usage, theme, width));
         }
         Some(HistoryItemContent::TreeEntry { entry }) => {
-            lines.push(plain(tree_entry_label(entry), theme.text_secondary, width));
-            lines.extend(wrapped(&tree_entry_preview(entry), theme.text, width));
+            lines.extend(tree_lines(entry, theme, width));
         }
         Some(HistoryItemContent::PromptAssembly { assembly }) => {
             lines.push(kv(
@@ -86,24 +112,29 @@ pub(crate) fn detail_lines(
                 theme,
                 width,
             ));
-            lines.push(kv(
-                "digest",
-                short_id(&assembly.prompt_digest),
+            lines.extend(section("Digest", &assembly.prompt_digest, theme, width));
+            for block in &assembly.prompt.blocks {
+                let label = format!("{} · {}", block_kind_word(block.kind), block.source.locator);
+                lines.extend(section(&label, &block.content, theme, width));
+                let mut metadata = serde_json::to_value(block).unwrap_or_default();
+                if let Some(object) = metadata.as_object_mut() {
+                    object.remove("content");
+                }
+                lines.extend(fields(&metadata, theme, width));
+            }
+            lines.push(plain("Recorded tool catalog", theme.accent, width));
+            lines.extend(fields(
+                &serde_json::to_value(&assembly.tool_catalog).unwrap_or_default(),
                 theme,
                 width,
             ));
-            for block in assembly.prompt.blocks.iter().take(8) {
-                let label = format!("{} · {}", block_kind_word(block.kind), block.source.locator);
-                lines.push(plain(label, theme.muted, width));
-            }
         }
         Some(HistoryItemContent::DiagnosticRecord { record }) => {
             lines.extend(diagnostic_lines(record, theme, width));
         }
         Some(HistoryItemContent::Structured { value }) => {
-            lines.push(plain("unrecognized item", theme.muted, width));
-            let json = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-            lines.extend(wrapped(&json, theme.dim, width));
+            lines.push(plain("Recorded fields", theme.muted, width));
+            lines.extend(fields(value, theme, width));
         }
         None => lines.push(plain(
             "No structured body for this item.",
@@ -138,54 +169,11 @@ fn content_kind(content: &HistoryItemContent) -> &'static str {
 }
 
 fn usage_lines(usage: &Usage, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    vec![kv(
-        "tokens",
-        format!(
-            "{} in · {} out · {} cache",
-            usage.input, usage.output, usage.cache_read
-        ),
+    fields(
+        &serde_json::to_value(usage).unwrap_or_default(),
         theme,
         width,
-    )]
-}
-
-fn message_lines(message: &Message, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-    let (role, body, color) = match message {
-        Message::User { content, .. } => ("user", content_preview(content), theme.accent_user),
-        Message::Assistant { content, .. } => {
-            ("assistant", blocks_preview(content), theme.accent_assistant)
-        }
-        Message::ToolCall {
-            name, arguments, ..
-        } => ("tool", format!("{name} {arguments}"), theme.accent_tool),
-        Message::ToolResult {
-            tool_name,
-            content,
-            is_error,
-            ..
-        } => {
-            let color = if is_error.unwrap_or(false) {
-                theme.error
-            } else {
-                theme.accent_tool
-            };
-            (
-                "result",
-                format!(
-                    "{} {}",
-                    tool_name.as_deref().unwrap_or("tool"),
-                    blocks_preview(content)
-                ),
-                color,
-            )
-        }
-        Message::Context { content, .. } => {
-            ("context", content_preview(content), theme.accent_system)
-        }
-    };
-    let mut lines = vec![plain(role, color, width)];
-    lines.extend(wrapped(&body, theme.text, width));
-    lines
+    )
 }
 
 fn diagnostic_lines(record: &TrajectoryRecord, theme: &Theme, width: u16) -> Vec<Line<'static>> {
@@ -210,6 +198,29 @@ fn diagnostic_lines(record: &TrajectoryRecord, theme: &Theme, width: u16) -> Vec
             if let Some(duration) = record.duration_ms {
                 lines.push(kv("duration", format!("{duration} ms"), theme, width));
             }
+            if let Some(fallback) = &record.fallback {
+                lines.extend(section(
+                    "Fallback",
+                    &format!(
+                        "{} / {} → {} / {}\n{}",
+                        fallback.from_provider,
+                        fallback.from_model,
+                        fallback.to_provider,
+                        fallback.to_model,
+                        fallback.reason
+                    ),
+                    theme,
+                    width,
+                ));
+            }
+            for retry in &record.retries {
+                lines.extend(section(
+                    &format!("Retry {} · {} ms", retry.attempt, retry.delay_ms),
+                    &retry.error,
+                    theme,
+                    width,
+                ));
+            }
             if !record.retries.is_empty() {
                 lines.push(kv(
                     "retries",
@@ -218,88 +229,45 @@ fn diagnostic_lines(record: &TrajectoryRecord, theme: &Theme, width: u16) -> Vec
                     width,
                 ));
             }
+            for (label, value) in [
+                ("Request", Some(&record.request)),
+                ("Options", Some(&record.options)),
+                ("Response", record.response.as_ref()),
+            ] {
+                if let Some(value) = value {
+                    lines.push(plain(label, theme.accent, width));
+                    lines.extend(fields(value, theme, width));
+                }
+            }
             lines
         }
-        TrajectoryRecord::ToolCall(record) => vec![kv(
-            "tool",
-            format!("{} · {}", record.tool_name, tool_status_word(record.status)),
-            theme,
-            width,
-        )],
-        TrajectoryRecord::ChildRun(record) => vec![kv(
-            "child",
-            short_id(&record.child_agent_instance_id),
-            theme,
-            width,
-        )],
+        TrajectoryRecord::ToolCall(record) => {
+            let mut lines = section(
+                "Tool observation",
+                &format!("{} · {}", record.tool_name, tool_status_word(record.status)),
+                theme,
+                width,
+            );
+            if let Some(error) = &record.error {
+                lines.extend(section("Error", error, theme, width));
+            }
+            for (label, value) in [("Arguments", &record.arguments), ("Result", &record.result)] {
+                if let Some(value) = value {
+                    lines.push(plain(label, theme.accent, width));
+                    lines.extend(fields(value, theme, width));
+                }
+            }
+            lines.extend(section("Call ID", &record.call_id, theme, width));
+            lines
+        }
+        TrajectoryRecord::ChildRun(record) => {
+            section("Child agent", &record.child_agent_instance_id, theme, width)
+        }
         TrajectoryRecord::SystemNotification(record) => {
             vec![plain(record.summary.clone(), theme.text, width)]
         }
         TrajectoryRecord::Terminal(record) => {
             vec![kv("terminal", terminal_word(record.kind), theme, width)]
         }
-    }
-}
-
-fn tree_entry_label(entry: &SessionTreeEntry) -> &'static str {
-    match entry {
-        SessionTreeEntry::Message(_) => "message",
-        SessionTreeEntry::ToolCall(_) => "tool call",
-        SessionTreeEntry::ThinkingLevelChange(_) => "thinking level",
-        SessionTreeEntry::ModelChange(_) => "model change",
-        SessionTreeEntry::ActiveToolsChange(_) => "tools change",
-        SessionTreeEntry::Compaction(_) => "compaction",
-        SessionTreeEntry::BranchSummary(_) => "branch summary",
-        SessionTreeEntry::Custom(_) => "custom",
-        SessionTreeEntry::CustomMessage(_) => "custom message",
-        SessionTreeEntry::Label(_) => "label",
-        SessionTreeEntry::SessionInfo(_) => "session info",
-    }
-}
-
-fn tree_entry_preview(entry: &SessionTreeEntry) -> String {
-    match entry {
-        SessionTreeEntry::Message(entry) => message_preview(&entry.message),
-        SessionTreeEntry::ToolCall(entry) => entry.tool_name.clone(),
-        SessionTreeEntry::Compaction(_) => "compacted branch".into(),
-        SessionTreeEntry::Label(entry) => entry.label.clone().unwrap_or_else(|| "label".into()),
-        _ => tree_entry_label(entry).into(),
-    }
-}
-
-fn message_preview(message: &Message) -> String {
-    match message {
-        Message::User { content, .. } | Message::Context { content, .. } => {
-            content_preview(content)
-        }
-        Message::Assistant { content, .. } => blocks_preview(content),
-        Message::ToolCall { name, .. } => name.clone(),
-        Message::ToolResult { tool_name, .. } => {
-            tool_name.clone().unwrap_or_else(|| "tool result".into())
-        }
-    }
-}
-
-fn content_preview(content: &MessageContent) -> String {
-    match content {
-        MessageContent::String(text) => text.clone(),
-        MessageContent::Blocks(blocks) => blocks_preview(blocks),
-    }
-}
-
-fn blocks_preview(blocks: &[ContentBlock]) -> String {
-    let text = blocks
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            ContentBlock::Thinking { thinking, .. } => Some(thinking.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.is_empty() {
-        format!("{} blocks", blocks.len())
-    } else {
-        text
     }
 }

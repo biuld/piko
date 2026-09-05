@@ -38,3 +38,5 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-027](ADR-027-agent-work-lifecycle.md) | Session/Agent/ModelStep invariants; AgentInput as stimulus and root-work identity; delete Turn/Run/Execution leftovers | proposed |
 | [ADR-028](ADR-028-journal-derived-session-history.md) | Derive historical inspection from required journal facts and use trajectory only as diagnostic enrichment | proposed |
 | [ADR-029](ADR-029-retire-trajectory-web-viewer.md) | Retire the F-36 loopback HTTP/SSE trajectory viewer; TUI Session History is the inspector | accepted |
+
+- [ADR-030: Shared TUI split-pane composition](ADR-030-shared-tui-split-pane.md)

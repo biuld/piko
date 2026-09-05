@@ -13,71 +13,13 @@ macro_rules! rule {
     };
 }
 
+mod history;
+
 /// Stable built-in rule IDs. A user override replaces one of these IDs rather
 /// than replacing the whole keymap.
 pub fn default_rules() -> Vec<BindingRule> {
-    vec![
-        rule!(
-            "default-history-refresh",
-            "r",
-            HistoryRefresh,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-sessions",
-            "s",
-            HistoryChooseSession,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-filter",
-            "/",
-            HistoryFilter,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-facts",
-            "a",
-            HistoryFactsOnly,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-diagnostics",
-            "d",
-            HistoryDiagnostics,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-lens-next",
-            "tab",
-            SelectionPageNext,
-            History
-        ),
-        rule!(
-            "default-history-lens-prev",
-            "shift+tab",
-            SelectionPagePrevious,
-            History
-        ),
-        rule!(
-            "default-history-back",
-            "backspace",
-            UiCancel,
-            History,
-            ["!text.inputActive"]
-        ),
-        rule!(
-            "default-history-left",
-            "left",
-            UiCancel,
-            History,
-            ["!text.inputActive"]
-        ),
+    let mut rules = history::rules();
+    rules.extend([
         rule!("default-app-quit", "ctrl+d", AppQuit, Application),
         rule!("default-workspace-tree", "f2", SessionTreeOpen, Workspace),
         rule!(
@@ -499,7 +441,8 @@ pub fn default_rules() -> Vec<BindingRule> {
             WorkflowNextChoice,
             ToolInteraction
         ),
-    ]
+    ]);
+    rules
 }
 
 fn build_rule(

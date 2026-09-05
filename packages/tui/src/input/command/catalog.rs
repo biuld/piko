@@ -132,6 +132,7 @@ pub fn catalog() -> Vec<CommandSpec> {
         SelectionNext, "Next", "Move to the next choice", SELECTION_COMMAND, Repeatable, enabled;
         SelectionPagePrevious, "Previous page", "Move one page backward", SELECTION, Repeatable, enabled;
         SelectionPageNext, "Next page", "Move one page forward", SELECTION, Repeatable, enabled;
+        HistoryInspect, "Inspect history summary", "Inspect the selected summary without fetching content", HISTORY, PressOnly, enabled;
         HistoryRefresh, "Refresh history", "Reload the inspected session snapshot", HISTORY, PressOnly, enabled;
         HistoryChooseSession, "Inspect session", "Choose a session without opening it", HISTORY, PressOnly, enabled;
         HistoryFilter, "Filter history", "Filter the history list", HISTORY, PressOnly, enabled;

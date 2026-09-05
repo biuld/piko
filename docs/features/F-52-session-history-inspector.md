@@ -1,6 +1,8 @@
 # F-52: Session history inspector
 
 > Status: in progress
+> UI refinement: implemented 2026-09-05; verification evidence in
+> [F-52 UI refinement](../verification/F-52-history-ui-refinement.md)
 > Priority: P1
 > Source evidence: piko product decision; F-31 durable journal, F-37
 > materialized read models, F-48 authoritative ModelStep boundaries, and F-51
@@ -125,6 +127,73 @@ narrow terminals use drill-down navigation with the same state and commands.
 Closing Session History restores the previous TUI surface and does not change
 the inspected or active session.
 
+### Information presentation and reading hierarchy
+
+The inspector helps developers explain a session's causal structure and inspect
+its evidence. The default Work lens prioritizes which input started work, which
+agent processed it, what happened through its ModelSteps, and the recorded
+outcome. Agents explains delegation; Transcript explains ancestry and branches;
+Journal explains atomic commits. Each lens retains its distinct question and
+ordering rather than presenting the same event list under different tabs.
+
+The surface has three information levels:
+
+1. **Context:** inspected session, snapshot revision, active lens, breadcrumb,
+   and active filters. Users can distinguish the inspected snapshot from active
+   chat and see whether diagnostics are hidden.
+2. **Scan summary:** a meaningful label or input preview, relevant agent/entity,
+   recorded state or transition, and visible provenance/availability. Counts,
+   clocks, usage, and shortened identifiers are secondary. Labels such as step,
+   tool, and message counts must be understandable without guessing units.
+3. **Selected detail:** semantic content followed by the persisted relations and
+   evidence needed to trace it. Full identities, revisions, commit metadata,
+   and diagnostic context remain accessible; summaries may shorten them.
+
+On constrained widths, optional metadata yields before meaningful labels,
+critical state, or provenance. Availability and provenance remain independently
+visible: an unavailable diagnostic must still be identifiable as diagnostic.
+Color supplements textual labels and does not carry authority on its own.
+Missing information must not be presented as zero, success, or inferred causation.
+
+Details preserve content structure: assistant text and thinking are distinct,
+non-text content is acknowledged, tool arguments and results are separate, and
+prompt assembly exposes its recorded blocks. Known content uses semantic
+formatting; unknown content has a labeled structured fallback. A preview or
+rendering limit must show that content was omitted and provide a way to inspect
+available content. Unavailable content includes a reason. Optional diagnostic
+absence never prevents inspection of the associated fact.
+
+### Layout and interaction refinement
+
+Use consistent outer insets, list-row padding, hierarchy indentation, and
+spacing between detail sections. Keep lists compact; reserve extra vertical
+space for meaningful context and detail boundaries. Selection, hover, keyboard
+focus, failure, provenance, and unavailable states must be distinguishable.
+Selection remains visible while focus moves into detail.
+
+Wide mode provides a selector and independently scrollable detail pane. Narrow
+mode provides the same content and navigation as drill-down pages. Selection
+shows only the already loaded summary; opening an item explicitly fetches its
+large detail. The opened item's identity remains visible if list selection
+subsequently changes, so old content cannot be mistaken for a new selection.
+The `i` action and each row's information target open its already loaded
+summary in either layout mode without a request. Returning from detail restores
+list selection and scroll position. Resizing
+preserves the selected/opened identities and does not fetch content implicitly.
+
+Keyboard and pointer users can both open items, scroll detail, return, change
+lenses, and refresh. Focus and guidance identify which pane receives scrolling;
+Tab/Shift+Tab keep their lens-switching meaning. Hover must not reflow rows.
+Pointer regions come from the same prepared layout as painting.
+
+Filtering is explicitly local to loaded summaries. Show the filter scope and
+active fact/diagnostic settings; zero matches is distinct from an empty lens
+and does not claim that unloaded history has no matches. Pagination and detail
+loading have separate feedback. A detail error does not erase the list; page
+fetch errors preserve previously loaded complete rows with retry guidance.
+Refresh and revision-change handling keep the snapshot boundary explicit and
+never merge detail or pages from different revisions.
+
 ### Work lens
 
 One work row represents the causal closure of an AgentInput whose disposition
@@ -225,7 +294,23 @@ relation, usage total, or any other authoritative conclusion.
 - [x] The loopback HTTP/SSE trajectory viewer, static assets, live fan-out,
       and `[trajectory]` bind/port/enabled settings are removed (ADR-029);
       leftover `[trajectory]` keys in user settings are ignored.
-- [ ] Workspace-wide fmt/clippy/tests remain before accepting F-52 as complete.
+- [ ] Work, Agents, Transcript, and Journal expose their distinct reading
+      hierarchy at narrow and wide widths, including long labels and CJK text.
+- [ ] Context identifies the inspected session/revision, lens, breadcrumb, and
+      local filter scope; provenance and availability remain independently
+      visible even for unavailable diagnostics.
+- [ ] Selected detail preserves typed content, full available relations, and
+      explicit omissions; prompt blocks and long bodies are inspectable without
+      silently stopping at a preview limit.
+- [ ] List and detail scroll independently; return and resize preserve reading
+      context; keyboard and pointer behavior share painted geometry and do not
+      fetch large bodies on selection alone.
+- [ ] Pagination, detail loading/errors, filtered-empty states, and revision
+      changes preserve valid context without showing mixed snapshot content.
+- [ ] Visual verification covers all four lenses, selection/hover/focus,
+      missing legacy relations, absent diagnostics, and long content.
+- [x] Workspace-wide fmt/clippy/tests passed on 2026-09-06; remaining UI visual
+      acceptance criteria above still gate F-52 completion.
 
 ## Product decisions
 

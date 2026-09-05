@@ -6,32 +6,42 @@ use super::{HistoryLens, HistoryPanel, HistoryRow};
 
 impl HistoryPanel {
     pub fn visible_rows(&self) -> Vec<HistoryRow> {
-        if self.choosing_session && !self.loading {
+        self.rows_matching(&self.filter)
+    }
+
+    pub(super) fn loaded_row_count(&self) -> usize {
+        self.rows_matching("").len()
+    }
+
+    fn rows_matching(&self, filter: &str) -> Vec<HistoryRow> {
+        if self.choosing_session {
             return self
                 .sessions
                 .iter()
                 .filter(|session| {
-                    matches_text(&self.filter, &session.session_id)
-                        || matches_text(&self.filter, session.name.as_deref().unwrap_or(""))
-                        || matches_text(&self.filter, &session.cwd)
+                    matches_text(filter, &session.session_id)
+                        || matches_text(filter, session.name.as_deref().unwrap_or(""))
+                        || matches_text(filter, &session.cwd)
                 })
                 .cloned()
                 .map(HistoryRow::Session)
                 .collect();
         }
         match self.lens {
-            HistoryLens::Work if self.work.is_some() => self.work_item_rows(),
-            HistoryLens::Work | HistoryLens::Agents if self.agent_id.is_some() => {
-                self.agent_work_rows()
+            HistoryLens::Work | HistoryLens::Agents if self.work.is_some() => {
+                self.work_item_rows(filter)
             }
-            HistoryLens::Work => self.work_summary_rows(),
-            HistoryLens::Agents => self.agent_rows(),
-            HistoryLens::Transcript => self.transcript_rows(),
-            HistoryLens::Journal => self.journal_rows(),
+            HistoryLens::Work | HistoryLens::Agents if self.agent_id.is_some() => {
+                self.agent_work_rows(filter)
+            }
+            HistoryLens::Work => self.work_summary_rows(filter),
+            HistoryLens::Agents => self.agent_rows(filter),
+            HistoryLens::Transcript => self.transcript_rows(filter),
+            HistoryLens::Journal => self.journal_rows(filter),
         }
     }
 
-    fn work_summary_rows(&self) -> Vec<HistoryRow> {
+    fn work_summary_rows(&self, filter: &str) -> Vec<HistoryRow> {
         self.overview
             .as_ref()
             .map(|overview| {
@@ -39,8 +49,8 @@ impl HistoryPanel {
                     .works
                     .iter()
                     .filter(|work| {
-                        matches_text(&self.filter, &work.input_preview)
-                            || matches_text(&self.filter, &work.root_input_id)
+                        matches_text(filter, &work.input_preview)
+                            || matches_text(filter, &work.root_input_id)
                     })
                     .cloned()
                     .map(HistoryRow::Work)
@@ -49,7 +59,7 @@ impl HistoryPanel {
             .unwrap_or_default()
     }
 
-    fn agent_work_rows(&self) -> Vec<HistoryRow> {
+    fn agent_work_rows(&self, filter: &str) -> Vec<HistoryRow> {
         let Some(agent_id) = &self.agent_id else {
             return Vec::new();
         };
@@ -61,8 +71,8 @@ impl HistoryPanel {
                     .iter()
                     .filter(|work| work.agent_instance_id == *agent_id)
                     .filter(|work| {
-                        matches_text(&self.filter, &work.input_preview)
-                            || matches_text(&self.filter, &work.root_input_id)
+                        matches_text(filter, &work.input_preview)
+                            || matches_text(filter, &work.root_input_id)
                     })
                     .cloned()
                     .map(HistoryRow::Work)
@@ -71,15 +81,15 @@ impl HistoryPanel {
             .unwrap_or_default()
     }
 
-    fn agent_rows(&self) -> Vec<HistoryRow> {
+    fn agent_rows(&self, filter: &str) -> Vec<HistoryRow> {
         let Some(overview) = &self.overview else {
             return Vec::new();
         };
         nested_agents(&overview.agents)
             .into_iter()
             .filter(|(_, agent)| {
-                matches_text(&self.filter, &agent.agent_instance_id)
-                    || matches_text(&self.filter, &agent.agent_spec_id)
+                matches_text(filter, &agent.agent_instance_id)
+                    || matches_text(filter, &agent.agent_spec_id)
             })
             .map(|(depth, agent)| HistoryRow::Agent {
                 agent: agent.clone(),
@@ -88,18 +98,24 @@ impl HistoryPanel {
             .collect()
     }
 
-    fn work_item_rows(&self) -> Vec<HistoryRow> {
+    fn work_item_rows(&self, filter: &str) -> Vec<HistoryRow> {
         let Some(page) = &self.work else {
             return Vec::new();
         };
         let mut rows = Vec::new();
         for item in &page.items {
-            self.push_item_rows(&mut rows, item, 0);
+            self.push_item_rows(&mut rows, item, 0, filter);
         }
         rows
     }
 
-    fn push_item_rows(&self, rows: &mut Vec<HistoryRow>, item: &HistoryItemSummary, depth: u32) {
+    fn push_item_rows(
+        &self,
+        rows: &mut Vec<HistoryRow>,
+        item: &HistoryItemSummary,
+        depth: u32,
+        filter: &str,
+    ) {
         let show_self = match self.provenance {
             HistoryProvenanceFilter::All => true,
             HistoryProvenanceFilter::Facts => item.provenance == HistoryProvenance::Fact,
@@ -107,7 +123,7 @@ impl HistoryPanel {
                 item.provenance == HistoryProvenance::Diagnostic
             }
         };
-        if show_self && matches_text(&self.filter, &item.summary) {
+        if show_self && matches_text(filter, &item.summary) {
             rows.push(HistoryRow::Item {
                 item: item.clone(),
                 depth,
@@ -115,18 +131,18 @@ impl HistoryPanel {
         }
         if self.provenance != HistoryProvenanceFilter::Facts {
             for child in &item.children {
-                self.push_item_rows(rows, child, depth + 1);
+                self.push_item_rows(rows, child, depth + 1, filter);
             }
         }
     }
 
-    fn transcript_rows(&self) -> Vec<HistoryRow> {
+    fn transcript_rows(&self, filter: &str) -> Vec<HistoryRow> {
         self.transcript
             .as_ref()
             .map(|page| {
                 page.items
                     .iter()
-                    .filter(|item| matches_text(&self.filter, &item.summary))
+                    .filter(|item| matches_text(filter, &item.summary))
                     .cloned()
                     .map(HistoryRow::Transcript)
                     .collect()
@@ -134,7 +150,7 @@ impl HistoryPanel {
             .unwrap_or_default()
     }
 
-    fn journal_rows(&self) -> Vec<HistoryRow> {
+    fn journal_rows(&self, filter: &str) -> Vec<HistoryRow> {
         let Some(page) = &self.journal else {
             return Vec::new();
         };
@@ -150,7 +166,7 @@ impl HistoryPanel {
                         item.provenance == HistoryProvenance::Diagnostic
                     }
                 })
-                .filter(|item| matches_text(&self.filter, &item.summary))
+                .filter(|item| matches_text(filter, &item.summary))
                 .cloned()
                 .collect::<Vec<_>>();
             if events.is_empty() {

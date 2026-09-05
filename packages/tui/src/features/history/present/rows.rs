@@ -43,7 +43,7 @@ pub(crate) fn row_line(
         }
         HistoryRow::Work(work) => work_row(width, selected, work, theme),
         HistoryRow::Agent { agent, depth } => {
-            let indent = "  ".repeat(*depth as usize);
+            let indent = "  ".repeat((*depth as usize).min(usize::from(width) / 10));
             let origin = match (&agent.origin, &agent.origin_availability) {
                 (Some(_), _) => "spawned",
                 (_, HistoryAvailability::Unavailable { .. }) => "origin unknown",
@@ -67,7 +67,7 @@ pub(crate) fn row_line(
         }
         HistoryRow::Item { item, depth } => item_row(width, selected, theme, item, *depth),
         HistoryRow::Transcript(item) => {
-            let indent = "  ".repeat(item.depth as usize);
+            let indent = "  ".repeat((item.depth as usize).min(usize::from(width) / 10));
             let mark = if item.selected { "* " } else { "  " };
             let mut right = Vec::new();
             if item.off_branch {
@@ -117,23 +117,23 @@ pub(crate) fn row_line(
 }
 
 fn work_row(width: u16, selected: bool, work: &HistoryWorkSummary, theme: &Theme) -> Line<'static> {
-    let status = work.outcome.map(outcome_word).unwrap_or("pending");
+    let status = work.outcome.map(outcome_word).unwrap_or("unknown");
     let status_color = work
         .outcome
         .map(|outcome| outcome_color(outcome, theme))
         .unwrap_or(theme.muted);
     let mut counts = Vec::new();
     if work.step_count > 0 {
-        counts.push(format!("{}s", work.step_count));
+        counts.push(format!("{} steps", work.step_count));
     }
     if work.tool_count > 0 {
-        counts.push(format!("{}t", work.tool_count));
+        counts.push(format!("{} tools", work.tool_count));
     }
     if work.message_count > 0 {
-        counts.push(format!("{}m", work.message_count));
+        counts.push(format!("{} msgs", work.message_count));
     }
     if let Some(usage) = &work.usage {
-        counts.push(compact_usage(usage));
+        counts.push(format!("{} tokens", compact_usage(usage)));
     }
     let right = counts.join(" · ");
     scan_row(
@@ -156,7 +156,7 @@ fn item_row(
     item: &HistoryItemSummary,
     depth: u32,
 ) -> Line<'static> {
-    let indent = "  ".repeat(depth as usize);
+    let indent = "  ".repeat((depth as usize).min(usize::from(width) / 10));
     let summary_color = match item.availability {
         HistoryAvailability::Unavailable { .. } => theme.warning,
         HistoryAvailability::Available if item.provenance == HistoryProvenance::Diagnostic => {
@@ -164,9 +164,14 @@ fn item_row(
         }
         HistoryAvailability::Available => theme.text,
     };
+    let provenance = match item.provenance {
+        HistoryProvenance::Fact => "fact",
+        HistoryProvenance::Diagnostic => "diag",
+    };
+    let unavailable = matches!(item.availability, HistoryAvailability::Unavailable { .. });
     let right = match (item.provenance, &item.availability) {
-        (_, HistoryAvailability::Unavailable { .. }) => "unavailable".to_string(),
-        (HistoryProvenance::Diagnostic, _) => "diag".to_string(),
+        (_, HistoryAvailability::Unavailable { .. }) => String::new(),
+        (HistoryProvenance::Diagnostic, _) => String::new(),
         (HistoryProvenance::Fact, _) => format!("r{}", item.revision),
     };
     scan_row(
@@ -174,9 +179,16 @@ fn item_row(
         selected,
         theme,
         vec![
+            (
+                format!(
+                    "{provenance}{} ",
+                    if unavailable { " unavailable" } else { "" }
+                ),
+                summary_color,
+            ),
             (indent, theme.dim),
             (
-                pad_kind(kind_label(&item.kind.0)),
+                format!("{} · ", kind_label(&item.kind.0)),
                 kind_color(&item.kind.0, item.provenance, theme),
             ),
             (item.summary.clone(), summary_color),

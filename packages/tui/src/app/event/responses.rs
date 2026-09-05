@@ -27,7 +27,12 @@ impl AppState {
             self.history.pending_command_id = None;
             self.history.loading = false;
             if let Err(error) = &result {
-                self.history.error = Some(error.clone());
+                if self.history.detail_loading {
+                    self.history.detail_loading = false;
+                    self.history.detail_error = Some(error.clone());
+                } else {
+                    self.history.error = Some(error.clone());
+                }
                 return effects;
             }
             if let Ok(piko_protocol::CommandResult::SessionListed { sessions, .. }) = result {

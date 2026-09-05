@@ -243,36 +243,16 @@ impl AppState {
                 self.push_surface(SurfaceId::Notifications);
                 self.status = "notifications".to_string();
             }
-            SurfaceAction::OpenHistory(requested) => return self.open_history(requested),
-            SurfaceAction::HistoryRefresh => {
-                return self.open_history(self.history.session_id.clone());
-            }
-            SurfaceAction::HistoryChooseSession => return self.choose_history_session(),
-            SurfaceAction::HistorySelectLens(index) => return self.select_history_lens(index),
-            SurfaceAction::HistoryFilter => {
-                self.history.filter_editing = true;
-            }
-            SurfaceAction::HistoryFactsOnly => {
-                self.history.provenance = match self.history.provenance {
-                    piko_protocol::HistoryProvenanceFilter::Facts => {
-                        piko_protocol::HistoryProvenanceFilter::All
-                    }
-                    _ => piko_protocol::HistoryProvenanceFilter::Facts,
-                };
-                return self.refetch_history_journal();
-            }
-            SurfaceAction::HistoryDiagnostics => {
-                self.history.provenance = match self.history.provenance {
-                    piko_protocol::HistoryProvenanceFilter::Diagnostics => {
-                        piko_protocol::HistoryProvenanceFilter::All
-                    }
-                    _ => piko_protocol::HistoryProvenanceFilter::Diagnostics,
-                };
-                return self.refetch_history_journal();
-            }
-            action @ (SurfaceAction::HistoryLensPrevious | SurfaceAction::HistoryLensNext) => {
-                return self.cycle_history_lens(action);
-            }
+            action @ (SurfaceAction::HistoryInspect
+            | SurfaceAction::OpenHistory(_)
+            | SurfaceAction::HistoryRefresh
+            | SurfaceAction::HistoryChooseSession
+            | SurfaceAction::HistorySelectLens(_)
+            | SurfaceAction::HistoryFilter
+            | SurfaceAction::HistoryFactsOnly
+            | SurfaceAction::HistoryDiagnostics
+            | SurfaceAction::HistoryLensPrevious
+            | SurfaceAction::HistoryLensNext) => return self.dispatch_history(action),
             SurfaceAction::OpenTree => {
                 self.tree.filter_mode = self.tui_config.tree.filter_mode.into();
                 self.push_surface(SurfaceId::Tree);

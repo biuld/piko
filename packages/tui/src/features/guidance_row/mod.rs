@@ -235,6 +235,7 @@ pub(crate) fn pane_hints(app: &AppState, surface: SurfaceId) -> PaneHints {
                     CommandId::SelectionPageNext,
                 )
                 .map(|key| format!("{key} lens")),
+                binding_hint(app, CommandId::HistoryInspect).map(|key| format!("{key} inspect")),
                 binding_hint(app, CommandId::HistoryRefresh).map(|key| format!("{key} refresh")),
                 binding_hint(app, CommandId::HistoryChooseSession)
                     .map(|key| format!("{key} sessions")),

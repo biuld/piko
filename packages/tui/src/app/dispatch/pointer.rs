@@ -16,6 +16,9 @@ impl AppState {
         for action in actions {
             effects.extend(self.dispatch(action));
         }
+        if self.modal_surface() == Some(SurfaceId::History) {
+            effects.extend(self.history_next_page());
+        }
         effects
     }
 

@@ -71,6 +71,8 @@ pub enum HitId {
     TimelineThought(u64),
     /// One source row owned by a selectable surface.
     Row(usize),
+    /// Inspect the already loaded summary of a row.
+    Inspect(usize),
     /// An editable field owned by a surface.
     TextInput,
     /// A scrollable content viewport owned by a surface.

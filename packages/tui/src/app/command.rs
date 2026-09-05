@@ -145,6 +145,7 @@ pub enum SurfaceAction {
     HistoryLensNext,
     HistorySelectLens(usize),
     HistoryRefresh,
+    HistoryInspect,
     HistoryChooseSession,
     HistoryFilter,
     HistoryFactsOnly,

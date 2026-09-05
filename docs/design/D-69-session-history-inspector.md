@@ -2,7 +2,8 @@
 
 > Status: in progress
 > Implements: [F-52](../features/F-52-session-history-inspector.md)
-> Decisions: [ADR-028](../decisions/ADR-028-journal-derived-session-history.md),
+> Decisions: [ADR-030](../decisions/ADR-030-shared-tui-split-pane.md),
+> [ADR-028](../decisions/ADR-028-journal-derived-session-history.md),
 > [ADR-029](../decisions/ADR-029-retire-trajectory-web-viewer.md),
 > [ADR-027](../decisions/ADR-027-agent-work-lifecycle.md),
 > [ADR-015](../decisions/ADR-015-host-owned-session-journal.md)
@@ -39,9 +40,30 @@ the end of the loaded list. `/` starts a local filter, `a` shows facts only,
 explicitly refreshes. Wide terminals keep selector and detail side by side
 without changing selection authority; pointer hits cover lens tabs and rows.
 
-The F-36 loopback HTTP/SSE trajectory viewer is retired (ADR-029). F-52 is not
-yet accepted as a complete feature until workspace-wide fmt, clippy, and tests
-pass.
+The F-36 loopback HTTP/SSE trajectory viewer is retired (ADR-029). Workspace-wide fmt, clippy, and tests passed on 2026-09-06. F-52 remains
+in progress pending complete UI visual acceptance.
+
+### UI refinement status (2026-09-05)
+
+The refinement is implemented in `features/history/` and the shared
+`ui::components::split_pane` component. History uses independent selector/detail
+viewports, explicit summary inspection (`i` and row information targets),
+separate detail loading/errors, and a shared preparation recipe for paint and
+pointer geometry. Lens navigation occupies its own row; revision remains in
+surface chrome at narrow widths.
+
+Typed detail distinguishes thinking, text, image placeholders, tool arguments
+and results, and exposes all loaded prompt blocks rather than the former
+eight-label preview. Full available identities and commit metadata remain
+scrollable. Provenance and unavailability have independent textual labels.
+
+The 2026-09-06 follow-up keeps full lens names at 40 columns where they fit,
+shows matched/loaded row counts within the current provenance scope, and wraps
+detail feedback with its opened-item context. Summary-only rows no longer
+advertise a body request. Detail viewport rendering lives in `history/detail.rs`.
+
+See [verification evidence](../verification/F-52-history-ui-refinement.md).
+The inspection authority and explicit-refresh model remain unchanged.
 
 ## Constraints and non-goals
 
@@ -352,6 +374,7 @@ Bindings:
 Tab / Shift+Tab    next/previous lens
 j/k or arrows      selection
 Enter              enter/expand/fetch detail
+i                  inspect the loaded summary without fetching a body
 Backspace/Left     one breadcrumb level back
 /                  filter
 a                  facts only
@@ -387,6 +410,94 @@ pretty-printed protocol JSON. Diagnostic children stay muted and labeled
 Host DTO order is authoritative. TUI must not sort causal items by timestamp,
 derive terminal state from the last visible row, aggregate usage, or infer
 child/tool relations.
+
+### 8a. Information presentation refinement
+
+Keep all authority, revision, paging, and explicit-refresh constraints above.
+The inspector remains a causal history browser; Timeline message-card spacing
+and live-follow behavior do not define this surface.
+
+Feature-owned presenters separate context, scan rows, and structured detail
+sections in `features/history/present/`. They consume semantic DTOs and retain
+stable identity independently of displayed text. Full identities and relations
+remain available in detail; TUI must not reconstruct them from shortened IDs
+or opaque item tokens. If required evidence is absent from a DTO, extend the
+host query and protocol deliberately rather than reading files or inferring it.
+
+| Lens | Primary scan information | Detail emphasis |
+|---|---|---|
+| Work | Input preview, target agent, origin, recorded outcome | Input transitions, ordered ModelSteps and their persisted message/tool relations, controls, reports, and usage corrections |
+| Agents | Agent identity, parent hierarchy, lifecycle, work count | Exact spawn/caller relations, agent work, and inbox reports; unavailable legacy origin stays explicit |
+| Transcript | Message/entry kind, content preview, ancestry and branch markers | Structured content, selected/off-branch context, and persisted links to root and step |
+| Journal | Revision, producer, commit boundary, ordered event summaries | Full commit identity, time, causation/correlation, and individual fact/diagnostic evidence |
+
+Keep authoritative host order within each lens. Group labels and indentation
+may clarify persisted relations but must not move facts across commits or
+reorder causal facts to manufacture a tree. Diagnostic children remain labeled
+and subordinate; provenance and availability are separate presentation fields.
+Work outcome is the host-reported outcome, never an inference from a tool exit
+or the last displayed message. Usage displays host-computed values without
+client aggregation.
+
+Replace opaque count suffixes with compact understandable labels. Establish
+width priorities in the row model: identity/summary, critical state, and
+provenance survive before optional clocks/counts/usage. Revision remains
+accessible for every fact; Journal retains revision as primary context. Use
+shared column helpers and bounded indentation so deep ancestry and CJK labels
+do not consume the whole summary column.
+
+Detail presenters produce sections rather than flattening every body into a
+string: semantic heading and provenance, primary content, then relations and
+technical evidence. Reuse product-independent text/code/diff primitives where
+appropriate without importing Timeline's projection or state. Distinguish
+text/thinking/non-text blocks and tool input/result. Opening a prompt assembly exposes all its loaded blocks and their metadata
+in the scrollable detail pane.
+Unknown kinds retain a labeled generic fallback. Every display limit reports
+omission; scrolling or explicit bounded detail requests expose remaining
+available content. Do not add eager full-body loading or unbounded responses.
+
+### 8b. Layout and interaction refinement
+
+Compose one prepared History frame from outer `Pane` chrome and the shared
+[Split Pane component](../../packages/tui/docs/design/split-pane.md), specified
+by its [PRD](../../packages/tui/docs/features/split-pane.md). Split Pane owns
+wide/compact composition, content insets, separator, pane feedback, and shared
+paint/hit geometry. It reuses the existing `piko-tui-layout::DividerSplit`;
+History must not retain its three private copies of split calculations. Lens
+IDs, breadcrumbs, selected/opened identities, focus actions, requests, and
+independent content viewports remain in History. Give both
+panes explicit content insets and consistent section spacing; avoid nested
+boxes or per-row blank padding. Exact cell counts and minimum pane widths are
+implementation choices to validate visually, not new configuration settings.
+The shared component derives compact fallback from those width constraints.
+
+Maintain separate list and detail viewport state. Track selected row identity,
+opened detail identity, detail revision, and panel-local focus explicitly.
+Selection changes do not request full content. Enter/open requests detail and
+identifies its owner in the detail heading; detail cannot appear to belong to
+another selected row. Back restores the previous list position. Resize changes
+placement without resetting identities, breadcrumb, or fetching content.
+
+Tab/Shift+Tab continue to switch lenses. The feature input profile exposes `i` for summary inspection and open/back
+actions with their effective bindings in guidance;
+opening detail focuses its scrollable content, and back returns to the list.
+Wheel routing uses the pane under the pointer. Keyboard scrolling targets the
+focused pane. Selection remains distinct from hover and pane focus. Text
+selection, where supported by shared primitives, must not activate navigation.
+
+Separate overview/page/detail request states and keep existing command
+correlation. Show local filter scope, loaded/matched counts, and whether more
+pages exist; do not report a loaded-page count as a whole-session total.
+Pagination progress and errors must not replace completed rows. Detail errors
+stay within detail with retry guidance. On revision change invalidate all
+revision-bound detail/pages before accepting the new snapshot; preserve stable
+navigation identity only if it can be resolved again at that revision.
+
+The implementation separates semantic presenters, the shared Split Pane
+component with independent consumer viewports, and navigation/state feedback. Record
+visual evidence for each lens at narrow/wide sizes with long content, CJK,
+large histories, unknown kinds, unavailable diagnostics, and legacy relations.
+Update F-52's new unchecked criteria only after implementation and verification.
 
 ### 9. Trajectory integration and retired web viewer
 
@@ -458,6 +569,10 @@ its product-independent presentation.
 - hostd tests for unopened-session queries, paging, revision changes, lazy
   detail, missing diagnostics, integrity errors, and no session attach/model
   invocation.
+- UI refinement tests for independent list/detail scroll, opened-item identity,
+  return/resize restoration, prepared pointer geometry, narrow-width priorities,
+  independent provenance/availability, explicit preview omissions, and separate
+  page/detail/filter/error feedback. Visual fixtures cover all four lenses.
 - TUI tests for active-session isolation, four-lens navigation, wide/narrow
   layout equivalence, paging, filters, fact/diagnostic styling, unavailable
   origin, refresh, pointer hit regions, and transport errors.
@@ -504,5 +619,10 @@ its product-independent presentation.
 7. Retire the web viewer, SSE path, and `[trajectory]` settings (ADR-029).
    Restart without journal replay and the multi-agent soak (spawn, approved
    write, compaction, interrupt; usage correction and failed work on aligned
-   reads) are covered. Workspace-wide fmt/clippy/tests remain before accepting
-   F-52.
+   reads) are covered. Workspace-wide fmt/clippy/tests passed on 2026-09-06;
+   complete UI visual acceptance remains before accepting F-52.
+
+8. Refine information presentation and interaction per sections 8a/8b and the
+   F-52 UI acceptance criteria. Core refinement is implemented; partial rendered
+   buffer and regression evidence is recorded separately from the prior
+   query/projection verification. Full interactive visual acceptance remains open.

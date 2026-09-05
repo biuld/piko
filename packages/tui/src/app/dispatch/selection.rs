@@ -267,7 +267,7 @@ impl AppState {
     }
 
     fn confirm_history_selection(&mut self) -> Vec<Effect> {
-        if self.history.loading {
+        if self.history.loading || self.history.detail_loading {
             return Vec::new();
         }
         if self.history.choosing_session {
@@ -305,7 +305,6 @@ impl AppState {
             let Some(root_input_id) = self.history.selected_work_id() else {
                 return Vec::new();
             };
-            self.history.loading = true;
             return self.history_request(Command::SessionHistoryWorkPageGet {
                 command_id: command_id(),
                 session_id,
@@ -316,13 +315,18 @@ impl AppState {
             });
         }
         if let Some(item_ref) = self.history.selected_item_ref() {
-            self.history.loading = true;
             return self.history_request(Command::SessionHistoryItemGet {
                 command_id: command_id(),
                 session_id,
                 item_ref,
             });
         }
+        self.history.opened_row = self
+            .history
+            .visible_rows()
+            .get(self.history.selected)
+            .cloned();
+        self.history.active_pane = crate::ui::components::split_pane::PaneSide::Second;
         Vec::new()
     }
 

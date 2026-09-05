@@ -1,19 +1,22 @@
 //! Read-only Session History browser (F-52 / D-69).
 
+mod detail;
+mod layout;
 mod pointer;
 mod present;
 mod render;
 mod rows;
+#[cfg(test)]
+mod tests;
 
+use crate::ui::components::split_pane::{PaneSide, SplitPanePlan};
 use piko_protocol::{
     HistoryAgentSummary, HistoryItemDetail, HistoryItemSummary, HistoryJournalPage,
     HistoryProvenanceFilter, HistoryTranscriptItem, HistoryTranscriptPage, HistoryWorkPage,
     HistoryWorkSummary, SessionHistoryOverview,
 };
 use piko_tui_layout::ViewportState;
-use std::cell::Cell;
-
-const WIDE_MIN_WIDTH: u16 = 100;
+use std::cell::{Cell, RefCell};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum HistoryLens {
@@ -78,6 +81,15 @@ pub struct HistoryPanel {
     pub sessions: Vec<piko_protocol::SessionSummary>,
     pub(super) viewport: Cell<ViewportState>,
     pub last_width: Cell<u16>,
+    pub active_pane: PaneSide,
+    pub(super) detail_viewport: Cell<ViewportState>,
+    pub(super) painted_regions: RefCell<Vec<(ratatui::layout::Rect, crate::app::HitId)>>,
+    pub(super) wide: Cell<bool>,
+    pub(super) painted_split: Cell<Option<SplitPanePlan>>,
+    pub(super) list_stack: Vec<(usize, ViewportState)>,
+    pub detail_loading: bool,
+    pub detail_error: Option<String>,
+    pub opened_row: Option<HistoryRow>,
 }
 
 pub struct HistoryCtx<'a> {
@@ -95,7 +107,7 @@ impl HistoryPanel {
     }
 
     pub fn is_wide(&self) -> bool {
-        self.last_width.get() >= WIDE_MIN_WIDTH && !self.choosing_session
+        self.wide.get() && !self.choosing_session
     }
 
     pub fn set_overview(&mut self, overview: SessionHistoryOverview) {
@@ -125,10 +137,10 @@ impl HistoryPanel {
             self.loading = false;
             return;
         }
+        self.list_stack.push((self.selected, self.viewport.get()));
+        self.viewport.set(ViewportState::default());
         self.work = Some(page);
-        if !self.is_wide() {
-            self.detail = None;
-        }
+        self.clear_detail();
         self.selected = 0;
         self.loading = false;
         self.error = None;
@@ -165,8 +177,11 @@ impl HistoryPanel {
     }
 
     pub fn set_detail(&mut self, detail: HistoryItemDetail) {
-        self.viewport.get_mut().scroll_to(0);
+        self.detail_viewport.get_mut().scroll_to(0);
         self.detail = Some(detail);
+        self.detail_loading = false;
+        self.detail_error = None;
+        self.active_pane = PaneSide::Second;
         self.loading = false;
         self.error = None;
     }
@@ -187,23 +202,23 @@ impl HistoryPanel {
 
     pub fn selected_item_ref(&self) -> Option<piko_protocol::HistoryItemRef> {
         match self.visible_rows().get(self.selected)? {
-            HistoryRow::Item { item, .. } => Some(item.item_ref.clone()),
-            HistoryRow::Transcript(item) => Some(item.item_ref.clone()),
+            HistoryRow::Item { item, .. } if item.has_detail => Some(item.item_ref.clone()),
+            HistoryRow::Transcript(item) if item.has_detail => Some(item.item_ref.clone()),
             _ => None,
         }
     }
 
     pub fn select_next(&mut self) {
-        if self.shows_detail_only() {
-            self.viewport.get_mut().scroll_by(1);
+        if self.active_pane == PaneSide::Second {
+            self.detail_viewport.get_mut().scroll_by(1);
             return;
         }
         self.selected = (self.selected + 1).min(self.row_count().saturating_sub(1));
     }
 
     pub fn select_prev(&mut self) {
-        if self.shows_detail_only() {
-            self.viewport.get_mut().scroll_by(-1);
+        if self.active_pane == PaneSide::Second {
+            self.detail_viewport.get_mut().scroll_by(-1);
             return;
         }
         self.selected = self.selected.saturating_sub(1);
@@ -212,9 +227,7 @@ impl HistoryPanel {
     pub fn cycle_lens(&mut self, backwards: bool) -> HistoryLens {
         self.pending_command_id = None;
         self.loading = false;
-        if !self.is_wide() {
-            self.detail = None;
-        }
+        self.clear_detail();
         let current = self.lens.index();
         let len = HistoryLens::ALL.len();
         self.lens = HistoryLens::ALL[if backwards {
@@ -223,6 +236,8 @@ impl HistoryPanel {
             (current + 1) % len
         }];
         self.selected = 0;
+        self.list_stack.clear();
+        self.viewport.set(ViewportState::default());
         self.agent_id = None;
         self.work = None;
         self.lens
@@ -232,19 +247,21 @@ impl HistoryPanel {
         self.lens = HistoryLens::from_index(index);
         self.pending_command_id = None;
         self.selected = 0;
+        self.list_stack.clear();
+        self.viewport.set(ViewportState::default());
         self.agent_id = None;
         self.work = None;
-        if !self.is_wide() {
-            self.detail = None;
-        }
+        self.clear_detail();
         self.lens
     }
 
     pub fn drill_into_agent(&mut self, agent_id: String) {
+        self.list_stack.push((self.selected, self.viewport.get()));
+        self.viewport.set(ViewportState::default());
         self.agent_id = Some(agent_id);
         self.selected = 0;
         self.work = None;
-        self.detail = None;
+        self.clear_detail();
     }
 
     /// Returns true when the caller should close the surface.
@@ -256,15 +273,16 @@ impl HistoryPanel {
             self.filter.clear();
             return false;
         }
-        if self.detail.take().is_some() {
+        if self.active_pane == PaneSide::Second || self.detail.is_some() || self.detail_loading {
+            self.clear_detail();
             return false;
         }
         if self.work.take().is_some() {
-            self.selected = 0;
+            self.restore_list();
             return false;
         }
         if self.agent_id.take().is_some() {
-            self.selected = 0;
+            self.restore_list();
             return false;
         }
         true
@@ -275,7 +293,56 @@ impl HistoryPanel {
     }
 
     pub fn shows_detail_only(&self) -> bool {
-        self.detail.is_some() && !self.is_wide()
+        self.active_pane == PaneSide::Second && !self.is_wide()
+    }
+
+    fn restore_list(&mut self) {
+        let (selected, viewport) = self.list_stack.pop().unwrap_or_default();
+        self.selected = selected;
+        self.viewport.set(viewport);
+        self.clamp_selection();
+    }
+
+    pub fn has_more(&self) -> bool {
+        match self.lens {
+            HistoryLens::Work | HistoryLens::Agents => self
+                .work
+                .as_ref()
+                .map(|page| page.next_cursor.is_some())
+                .unwrap_or_else(|| {
+                    self.overview
+                        .as_ref()
+                        .is_some_and(|page| page.next_cursor.is_some())
+                }),
+            HistoryLens::Transcript => self
+                .transcript
+                .as_ref()
+                .is_some_and(|page| page.next_cursor.is_some()),
+            HistoryLens::Journal => self
+                .journal
+                .as_ref()
+                .is_some_and(|page| page.next_cursor.is_some()),
+        }
+    }
+
+    pub fn inspect_summary(&mut self) {
+        if self.detail_loading {
+            self.pending_command_id = None;
+        }
+        self.clear_detail();
+        self.opened_row = self.visible_rows().get(self.selected).cloned();
+        if self.opened_row.is_some() {
+            self.active_pane = PaneSide::Second;
+            self.detail_viewport.set(ViewportState::default());
+        }
+    }
+
+    pub fn clear_detail(&mut self) {
+        self.detail = None;
+        self.opened_row = None;
+        self.detail_loading = false;
+        self.detail_error = None;
+        self.active_pane = PaneSide::First;
     }
 
     fn clamp_selection(&mut self) {
@@ -316,7 +383,7 @@ impl HistoryPanel {
             parts.push(spec.unwrap_or_else(|| crate::features::short_id(agent_id)));
         }
         match self.provenance {
-            HistoryProvenanceFilter::All => {}
+            HistoryProvenanceFilter::All => parts.push("facts + diagnostics".into()),
             HistoryProvenanceFilter::Facts => parts.push("facts".into()),
             HistoryProvenanceFilter::Diagnostics => parts.push("diagnostics".into()),
         }

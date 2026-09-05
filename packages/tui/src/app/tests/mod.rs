@@ -141,6 +141,7 @@ mod completion_tests;
 mod delete_scope_tests;
 mod diff_tests;
 mod foreground_tests;
+mod history_refinement_tests;
 mod history_tests;
 mod modal_tests;
 mod model_step_tests;

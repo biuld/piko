@@ -151,6 +151,7 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         SessionListOpen => SessionAction::RequestList.into(),
         SessionTreeOpen => SurfaceAction::OpenTree.into(),
         HistoryRefresh => SurfaceAction::HistoryRefresh.into(),
+        HistoryInspect => SurfaceAction::HistoryInspect.into(),
         HistoryChooseSession => SurfaceAction::HistoryChooseSession.into(),
         HistoryFilter => SurfaceAction::HistoryFilter.into(),
         HistoryFactsOnly => SurfaceAction::HistoryFactsOnly.into(),

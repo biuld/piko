@@ -6,6 +6,7 @@ pub mod menu;
 pub mod pane;
 pub mod scroll_view;
 pub mod selectable_list;
+pub mod split_pane;
 pub mod text_box;
 
 pub use feedback::{

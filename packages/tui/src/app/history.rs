@@ -17,8 +17,20 @@ impl AppState {
             _ => unreachable!("history query command"),
         }
         self.history.pending_command_id = Some(command.command_id().to_string());
-        self.history.loading = true;
-        self.history.error = None;
+        if matches!(command, Command::SessionHistoryItemGet { .. }) {
+            self.history.detail_loading = true;
+            self.history.detail_error = None;
+            self.history.active_pane = crate::ui::components::split_pane::PaneSide::Second;
+            self.history.opened_row = self
+                .history
+                .visible_rows()
+                .get(self.history.selected)
+                .cloned();
+            self.history.detail = None;
+        } else {
+            self.history.loading = true;
+            self.history.error = None;
+        }
         vec![Effect::send(command)]
     }
 
@@ -95,6 +107,56 @@ impl AppState {
         }
     }
 
+    pub(super) fn dispatch_history(&mut self, action: SurfaceAction) -> Vec<Effect> {
+        match action {
+            SurfaceAction::HistoryInspect => {
+                self.history.inspect_summary();
+                Vec::new()
+            }
+            SurfaceAction::OpenHistory(requested) => self.open_history(requested),
+            action @ (SurfaceAction::HistoryFilter
+            | SurfaceAction::HistoryFactsOnly
+            | SurfaceAction::HistoryDiagnostics) => self.filter_history(action),
+            action @ (SurfaceAction::HistoryLensPrevious | SurfaceAction::HistoryLensNext) => {
+                self.cycle_history_lens(action)
+            }
+            SurfaceAction::HistoryRefresh => self.open_history(self.history.session_id.clone()),
+            SurfaceAction::HistoryChooseSession => self.choose_history_session(),
+            SurfaceAction::HistorySelectLens(index) => self.select_history_lens(index),
+            _ => Vec::new(),
+        }
+    }
+
+    pub(super) fn filter_history(&mut self, action: SurfaceAction) -> Vec<Effect> {
+        if self.history.detail_loading {
+            self.history.pending_command_id = None;
+        }
+        self.history.clear_detail();
+        self.history.selected = 0;
+        match action {
+            SurfaceAction::HistoryFilter => {
+                self.history.filter_editing = true;
+                Vec::new()
+            }
+            SurfaceAction::HistoryFactsOnly | SurfaceAction::HistoryDiagnostics => {
+                let requested = if matches!(action, SurfaceAction::HistoryFactsOnly) {
+                    piko_protocol::HistoryProvenanceFilter::Facts
+                } else {
+                    piko_protocol::HistoryProvenanceFilter::Diagnostics
+                };
+                self.history.provenance = if self.history.provenance == requested {
+                    piko_protocol::HistoryProvenanceFilter::All
+                } else {
+                    requested
+                };
+                self.history.pending_command_id = None;
+                self.history.loading = false;
+                self.refetch_history_journal()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub(super) fn choose_history_session(&mut self) -> Vec<Effect> {
         self.history = Default::default();
         self.history.choosing_session = true;
@@ -109,6 +171,9 @@ impl AppState {
     pub(super) fn history_next_page(&mut self) -> Vec<Effect> {
         use crate::features::history::HistoryLens;
         if self.history.loading
+            || self.history.detail_loading
+            || self.history.error.is_some()
+            || self.history.active_pane == crate::ui::components::split_pane::PaneSide::Second
             || self.history.choosing_session
             || self.history.shows_detail_only()
             || self.history.selected.saturating_add(3) < self.history.row_count()
@@ -122,7 +187,7 @@ impl AppState {
         let expected_revision = overview.revision;
         let command_id = command_id();
         let command = match self.history.lens {
-            HistoryLens::Work if self.history.work.is_some() => {
+            HistoryLens::Work | HistoryLens::Agents if self.history.work.is_some() => {
                 let page = self.history.work.as_ref().unwrap();
                 let Some(cursor) = page.next_cursor.clone() else {
                     return Vec::new();
@@ -136,7 +201,7 @@ impl AppState {
                     limit: Some(100),
                 }
             }
-            HistoryLens::Work => {
+            HistoryLens::Work | HistoryLens::Agents => {
                 let Some(cursor) = overview.next_cursor.clone() else {
                     return Vec::new();
                 };
@@ -182,7 +247,6 @@ impl AppState {
                     limit: Some(100),
                 }
             }
-            _ => return Vec::new(),
         };
         self.history_request(command)
     }

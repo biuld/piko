@@ -25,6 +25,10 @@ pub(super) fn scan_row(
         marker_style = marker_style.add_modifier(Modifier::BOLD);
     }
     let target = usize::from(width);
+    let right = right.filter(|(text, _)| {
+        // Metadata is optional; keep room for a meaningful primary summary.
+        usize::from(width) >= paint_cols(text) + 38
+    });
     let right_text = right.map(|(text, _)| text).unwrap_or("");
     let right_style = right
         .map(|(_, color)| fill.fg(color))
@@ -84,7 +88,11 @@ pub(super) fn plain(text: impl Into<String>, color: Color, width: u16) -> Line<'
     )
 }
 
-pub(super) fn wrapped(text: &str, color: Color, width: u16) -> Vec<Line<'static>> {
+pub(in crate::features::history) fn wrapped(
+    text: &str,
+    color: Color,
+    width: u16,
+) -> Vec<Line<'static>> {
     crate::ui::line_layout::soft_wrap(text, usize::from(width.max(1)))
         .into_iter()
         .map(|line| plain(line, color, width))
