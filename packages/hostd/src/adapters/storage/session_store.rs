@@ -127,6 +127,13 @@ impl SessionStorePort for BlockingSessionStore {
         let store = self.inner.clone();
         self.pool.run(move || store.trajectory()).await
     }
+
+    async fn inspection(
+        &self,
+    ) -> Result<piko_session_store::InspectionBundle, SessionStorageError> {
+        let store = self.inner.clone();
+        self.pool.run(move || store.inspection()).await
+    }
 }
 
 /// Default factory backed by the real filesystem and the shared blocking pool.

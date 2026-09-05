@@ -1,7 +1,7 @@
 # D-51: Trajectory prompt assembly and cache debugging view
 
-> Status: implemented (rollout 1–4; visual QA user-side)
-> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface)
+> Status: superseded by [ADR-029](../decisions/ADR-029-retire-trajectory-web-viewer.md)
+> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface; retired)
 > Decisions: none new
 
 ## Goal

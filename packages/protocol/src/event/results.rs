@@ -45,6 +45,30 @@ pub enum CommandResult {
         sessions: Vec<SessionSummary>,
         timestamp: i64,
     },
+    SessionHistoryOverviewGot {
+        overview: crate::SessionHistoryOverview,
+        timestamp: i64,
+    },
+    HistoryRevisionChanged {
+        session_id: SessionId,
+        current_revision: u64,
+    },
+    SessionHistoryWorkPaged {
+        page: crate::HistoryWorkPage,
+        timestamp: i64,
+    },
+    SessionHistoryJournalPaged {
+        page: crate::HistoryJournalPage,
+        timestamp: i64,
+    },
+    SessionHistoryTranscriptPaged {
+        page: crate::HistoryTranscriptPage,
+        timestamp: i64,
+    },
+    SessionHistoryItemGot {
+        detail: crate::HistoryItemDetail,
+        timestamp: i64,
+    },
     SessionNavigated {
         session_id: SessionId,
         old_leaf_id: Option<String>,

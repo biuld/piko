@@ -63,10 +63,6 @@ pub struct HostSettings {
     // ---- Observability ----
     pub observability: Option<ObservabilitySettings>,
 
-    // ---- Trajectory web viewer (F-36) ----
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trajectory: Option<TrajectorySettings>,
-
     // ---- Paths ----
     pub session_dir: Option<String>,
 
@@ -161,7 +157,6 @@ impl HostSettings {
             "execution": self.execution,
             "agent-runtime": self.agent_runtime,
             "observability": self.observability,
-            "trajectory": self.trajectory,
             "active-tool-names": self.active_tool_names,
             "session-dir": self.session_dir,
             "mcp-servers": self.mcp_servers,
@@ -397,18 +392,6 @@ pub struct ObservabilitySettings {
     pub otel_endpoint: Option<String>,
     /// OTel `service.name` resource attribute. Default: `piko-hostd`.
     pub service_name: Option<String>,
-}
-
-/// F-36: `[trajectory]` section for the read-only loopback web viewer.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub struct TrajectorySettings {
-    /// Serve the read-only trajectory web viewer. Default: false.
-    pub enabled: Option<bool>,
-    /// Loopback bind address. Default: `127.0.0.1`.
-    pub bind: Option<String>,
-    /// Viewer HTTP port. Default: 3847.
-    pub port: Option<u16>,
 }
 
 mod manager;

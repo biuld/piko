@@ -131,6 +131,9 @@ impl AppState {
                     Vec::new()
                 }
             }
+            Region::Surface(SurfaceId::History) => {
+                self.history.pointer_event(component_hit, gesture)
+            }
             Region::Surface(SurfaceId::Diagnostics) => {
                 self.diagnostics.pointer_event(component_hit, gesture)
             }

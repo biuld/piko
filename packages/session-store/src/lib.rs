@@ -33,18 +33,21 @@ pub use projection::{
     StoredRootProcessing, StoredTreeEntry,
 };
 pub use readmodels::{
-    CatalogView, TrajectoryProjection, TrajectoryRunProjection, inspect_catalog, query_catalog,
-    query_current, query_trajectory,
+    CatalogView, HistoryCommit, HistoryEvent, HistoryProjection, HistoryProvenance,
+    HistoryTransition, InspectionBundle, TrajectoryProjection, TrajectoryRunProjection,
+    inspect_catalog, query_catalog, query_current, query_history, query_inspection,
+    query_trajectory,
 };
 pub use schema::{
     AgentInputAdmittedV1, AgentInputAppliedV1, AgentInputDispositionChangedV1,
     AgentInputProcessingFinishedV1, AgentInputProcessingStartedV1, AgentInterruptRequestedV1,
-    AgentPendingActionRequestedV1, AgentPendingActionResolvedV1, CompactionRecordedV1,
-    Compatibility, EventData, MessageCommittedV1, ModelStepCommittedV1, RawEvent, SessionForkedV1,
-    TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1, UsageRecordedV1,
+    AgentOriginRecordedV1, AgentPendingActionRequestedV1, AgentPendingActionResolvedV1,
+    CompactionRecordedV1, Compatibility, EventData, MessageCommittedV1, ModelStepCommittedV1,
+    RawEvent, SessionForkedV1, TreeEntryRecordedV1, UsageAttribution, UsageCorrectedV1,
+    UsageRecordedV1,
 };
 pub const SCHEMA_VERSION: u32 = 4;
 /// Event-decoder capability within schema-v4. It advances independently from
 /// the on-disk storage generation.
-pub const READER_VERSION: u32 = 3;
+pub const READER_VERSION: u32 = 4;
 pub const COMMITS_PER_SEGMENT: u64 = 1_000;

@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("session history publication changed while reading projections; retry the query")]
+    InspectionBusy,
     #[error("session not found: {0}")]
     NotFound(PathBuf),
     #[error("session writer is already locked: {0}")]

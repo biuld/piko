@@ -139,27 +139,6 @@ pub(crate) fn config_command_for_setting(action: SettingsAction) -> Command {
                 }
             })
         }
-        SettingsAction::Trajectory(value) => {
-            serde_json::json!({
-                "trajectory": {
-                    "enabled": value
-                }
-            })
-        }
-        SettingsAction::TrajectoryBind(value) => {
-            serde_json::json!({
-                "trajectory": {
-                    "bind": value
-                }
-            })
-        }
-        SettingsAction::TrajectoryPort(value) => {
-            serde_json::json!({
-                "trajectory": {
-                    "port": value
-                }
-            })
-        }
         SettingsAction::EditorMultiline(value) => {
             serde_json::json!({ "tui": { "editor": { "multiline": value } } })
         }

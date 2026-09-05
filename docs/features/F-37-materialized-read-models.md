@@ -54,9 +54,9 @@ implementation.
 1. The developer restarts piko and opens the session list. Every session
    shows name, first message, counts, and timestamps immediately. History
    is not scanned.
-2. The developer opens the trajectory viewer on a large session that this
-   process has never loaded. Run summaries appear immediately; opening one
-   run does not decode the session history.
+2. The developer opens Session History on a large session that this process
+   has never loaded. Work summaries appear immediately; opening one item
+   does not decode the session journal.
 3. The developer resumes a large session. The transcript, tree, agents, and
    usage already match the last published commit. Resume does not rebuild
    that state from history.
@@ -64,7 +64,7 @@ implementation.
    catch up. The next query detects the lag, rebuilds from the journal, and
    then returns the same result a clean write would have published.
 5. The developer deletes a session. Its read models disappear with it.
-   Listing and the trajectory viewer retain no dangling reference.
+   Listing and Session History retain no dangling reference.
 6. The developer forks or imports a session. The destination appears in the
    list with its own correct catalog and can be opened without serving the
    source session's projections.
@@ -94,6 +94,8 @@ implementation.
   cross-session index. Listing visits per-session catalog entries.
 - New query surfaces added after this feature must publish a read model.
   They must not introduce another replay-on-read path.
+- F-52 applies this rule to Session History through a dedicated ordered history
+  projection joined revision-consistently with current and trajectory models.
 - Retirement of the caches this feature replaces: process-local fact and
   raw-event caches, every bounded LRU that retains replayed journals or
   decoded query projections for cheaper subsequent reads, and F-31

@@ -71,6 +71,11 @@ pub trait SessionStorePort: Send + Sync {
     async fn trajectory(
         &self,
     ) -> Result<piko_session_store::TrajectoryProjection, SessionStorageError>;
+
+    /// Load the canonical, ordered-history, and diagnostic projections at one
+    /// published journal watermark.
+    async fn inspection(&self)
+    -> Result<piko_session_store::InspectionBundle, SessionStorageError>;
 }
 
 /// Opens or creates a [`SessionStorePort`] for a given session directory.

@@ -395,33 +395,6 @@ fn mcp_defaults_are_documented_in_installed_settings() {
 }
 
 #[test]
-fn trajectory_defaults_are_documented_in_installed_settings() {
-    let settings = installed_settings_fixture();
-    assert!(settings.contains("[trajectory]"));
-    assert!(settings.contains("bind = \"127.0.0.1\""));
-    assert!(settings.contains("port = 3847"));
-}
-
-#[test]
-fn host_namespace_value_exposes_trajectory_bind_and_port() {
-    let settings = HostSettings {
-        trajectory: Some(TrajectorySettings {
-            enabled: Some(true),
-            bind: Some("localhost".into()),
-            port: Some(8080),
-        }),
-        ..HostSettings::default()
-    };
-    let value = settings.host_namespace_value();
-    let trajectory = value
-        .get("trajectory")
-        .expect("trajectory in host namespace");
-    assert_eq!(trajectory["enabled"], serde_json::json!(true));
-    assert_eq!(trajectory["bind"], serde_json::json!("localhost"));
-    assert_eq!(trajectory["port"], serde_json::json!(8080));
-}
-
-#[test]
 fn tui_settings_merge_recursively_by_rule_id() {
     let base = HostSettings {
         tui: Some(serde_json::json!({

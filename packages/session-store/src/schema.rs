@@ -104,6 +104,7 @@ impl RawEvent {
                 | "usage_corrected"
                 | "session_metadata_changed"
                 | "agent_created"
+                | "agent_origin_recorded_v1"
                 | "agent_lifecycle_changed"
                 | "agent_input_admitted_v1"
                 | "agent_input_disposition_changed_v1"
@@ -180,6 +181,7 @@ pub enum EventData {
         spec: AgentSpec,
         created_at: i64,
     },
+    AgentOriginRecordedV1(AgentOriginRecordedV1),
     AgentLifecycleChanged {
         agent_instance_id: String,
         lifecycle: AgentInstanceLifecycle,
@@ -232,6 +234,7 @@ impl EventData {
             Self::UsageCorrected(_) => "usage_corrected",
             Self::SessionMetadataChanged { .. } => "session_metadata_changed",
             Self::AgentCreated { .. } => "agent_created",
+            Self::AgentOriginRecordedV1(_) => "agent_origin_recorded_v1",
             Self::AgentLifecycleChanged { .. } => "agent_lifecycle_changed",
             Self::AgentInputAdmittedV1(_) => "agent_input_admitted_v1",
             Self::AgentInputDispositionChangedV1(_) => "agent_input_disposition_changed_v1",
@@ -265,6 +268,18 @@ pub struct MessageCommittedV1 {
     pub root_input_id: Option<String>,
     pub committed_at: i64,
     pub message: Message,
+}
+
+/// Exact durable causation of a child AgentInstance created by a model tool.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOriginRecordedV1 {
+    pub child_agent_instance_id: String,
+    pub parent_agent_instance_id: String,
+    pub parent_root_input_id: String,
+    pub origin_model_step_id: String,
+    pub origin_tool_call_id: String,
+    pub recorded_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

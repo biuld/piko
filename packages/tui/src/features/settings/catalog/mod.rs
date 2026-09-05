@@ -4,7 +4,7 @@ mod context;
 mod presentation;
 mod tools;
 
-use super::mirror::{SettingsSnapshot, observability_summary, on_off, trajectory_summary};
+use super::mirror::{SettingsSnapshot, observability_summary, on_off};
 use crate::ui::components::menu::{MenuRow, MenuRowKind};
 
 /// Action applied when a setting option is confirmed.
@@ -35,9 +35,6 @@ pub enum SettingsAction {
     DisableTools,
     Observability(bool),
     ObservabilityEndpoint(&'static str),
-    Trajectory(bool),
-    TrajectoryBind(&'static str),
-    TrajectoryPort(u16),
     Theme(&'static str),
     EditorMultiline(bool),
     EditorAutoResize(bool),
@@ -160,7 +157,6 @@ pub fn build_catalog(snap: &SettingsSnapshot) -> Vec<MenuRow<SettingsAction>> {
     rows.extend(tools::trust_rows(snap));
     rows.extend(tools::tool_rows(snap));
     rows.push(observability(snap));
-    rows.push(trajectory(snap));
     rows.extend(presentation::rows(snap));
     rows.push(section_choice(
         "Transport",
@@ -207,94 +203,6 @@ fn observability(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
     )
 }
 
-fn trajectory(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
-    let host = &snap.host;
-    section_branch(
-        "Trajectory",
-        trajectory_summary(host),
-        Some("restart hostd"),
-        Some(GROUP_DIAGNOSTICS),
-        vec![
-            section_choice(
-                "Trajectory Server",
-                on_off(host.trajectory_enabled).into(),
-                Some("restart hostd · loopback web viewer"),
-                None,
-                "Trajectory Server",
-                binary_options(
-                    host.trajectory_enabled,
-                    "Serve the trajectory web viewer after hostd restarts",
-                    "Keep the trajectory server off after hostd restarts",
-                    SettingsAction::Trajectory(true),
-                    SettingsAction::Trajectory(false),
-                ),
-            ),
-            trajectory_bind(snap),
-            trajectory_port(snap),
-        ],
-    )
-}
-
-const TRAJECTORY_BIND_PRESETS: &[&str] = &["127.0.0.1", "localhost"];
-
-fn trajectory_bind(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
-    let host = &snap.host;
-    let current = &host.trajectory_bind;
-    let summary = if TRAJECTORY_BIND_PRESETS.contains(&current.as_str()) {
-        current.clone()
-    } else {
-        format!("{current} · custom")
-    };
-    section_choice(
-        "Bind Address",
-        summary,
-        Some("restart hostd"),
-        None,
-        "Trajectory Bind Address",
-        TRAJECTORY_BIND_PRESETS
-            .iter()
-            .map(|value| {
-                option_row(
-                    value,
-                    "Loopback address the viewer binds to",
-                    SettingsAction::TrajectoryBind(value),
-                    current == value,
-                )
-            })
-            .collect(),
-    )
-}
-
-const TRAJECTORY_PORT_PRESETS: &[u16] = &[3847, 8080, 9090];
-
-fn trajectory_port(snap: &SettingsSnapshot) -> MenuRow<SettingsAction> {
-    let host = &snap.host;
-    let current = host.trajectory_port;
-    let summary = if TRAJECTORY_PORT_PRESETS.contains(&current) {
-        current.to_string()
-    } else {
-        format!("{current} · custom")
-    };
-    section_choice(
-        "Port",
-        summary,
-        Some("restart hostd"),
-        None,
-        "Trajectory Port",
-        TRAJECTORY_PORT_PRESETS
-            .iter()
-            .map(|value| {
-                option_row(
-                    &value.to_string(),
-                    "HTTP port the viewer listens on",
-                    SettingsAction::TrajectoryPort(*value),
-                    current == *value,
-                )
-            })
-            .collect(),
-    )
-}
-
 pub fn thinking_level_detail(level: &str) -> &'static str {
     match level {
         "off" => "Disable assistant thinking/reasoning",
@@ -314,9 +222,6 @@ pub fn action_requires_hostd_restart(action: &SettingsAction) -> bool {
         action,
         SettingsAction::Observability(_)
             | SettingsAction::ObservabilityEndpoint(_)
-            | SettingsAction::Trajectory(_)
-            | SettingsAction::TrajectoryBind(_)
-            | SettingsAction::TrajectoryPort(_)
             | SettingsAction::Transport(_)
     )
 }

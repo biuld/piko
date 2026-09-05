@@ -6,6 +6,5 @@ pub use settings::{
     AgentRuntimeSettings, ApprovalSettings, CompactionSettings, ExecutionSettings,
     FeaturesSettings, GuardianSettings, HostSettings, McpServerConfig, McpSettings,
     ObservabilitySettings, PermissionProfileSettings, PermissionsSettings,
-    PromptCachePolicySetting, PromptSettings, SafetySettings, SettingsManager, TrajectorySettings,
-    TranscriptSettings,
+    PromptCachePolicySetting, PromptSettings, SafetySettings, SettingsManager, TranscriptSettings,
 };

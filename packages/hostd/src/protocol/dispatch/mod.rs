@@ -6,3 +6,4 @@ use crate::util::ClientEventSender;
 
 mod apply_command;
 mod apply_command_stream;
+mod history;

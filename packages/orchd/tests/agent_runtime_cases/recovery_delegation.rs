@@ -72,6 +72,7 @@ async fn recovery_preserves_worker_delegation_mode() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("grandchild".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect_err("a recovered worker must remain unable to spawn children");

@@ -1,6 +1,7 @@
 # F-36: Agent run trajectory
 
-> Status: implemented (F-36/D-49, V-49)
+> Status: implemented (F-36/D-49, V-49); web viewer retired by ADR-029;
+> inspection is F-52 Session History, while diagnostic capture remains
 > Priority: P1
 > Source evidence: piko product decision; gap analysis over F-15 slices
 > (D-30 prompt debugging, D-15/D-46 OTel inspection) and the F-31 durable
@@ -8,15 +9,15 @@
 
 ## Summary
 
-piko records the complete trajectory of every agent execution as a durable,
-host-owned, locally queryable step graph: the assembled prompt, every model
-step with its full request and response (including thinking), every tool
-batch with arguments, status, results, errors, and timing, links to child
-agent runs, retries and fallbacks, and the terminal outcome. The trajectory is
-the single source of truth for "what the agent did and why". It replaces the
-process-local latest-only prompt-debug capture (D-30) and the OTel span
-export, while OTel metrics and unified logs remain as projections over the
-same runtime events.
+piko records a content-rich, durable, best-effort diagnostic trajectory for
+agent work: assembled prompt, model/provider step detail, tool transitions,
+child observations, retries, fallbacks, timing, and terminal detail. It
+replaces the process-local latest-only prompt-debug capture (D-30) and the
+OTel span export, while OTel metrics and unified logs remain. Required journal
+facts—not trajectory observations—are authoritative for AgentInput work,
+ModelStep/message/tool relations, accounting, and terminal outcome. F-52 uses
+those facts as the Session History skeleton and attaches trajectory only as
+diagnostic enrichment.
 
 ## Problem
 
@@ -37,11 +38,12 @@ Today no single record answers "what did this run actually do?":
 - Rollout paging (D-31) is a projection of committed messages, not a step
   record.
 
-The developer iterating on piko needs a durable, content-complete step record
+The developer iterating on piko needs durable, content-rich diagnostic detail
 that survives restarts, works offline without an external backend, and can be
-replayed or inspected locally. The trajectory closes that gap by consolidating
-the causal, content, and timing planes into one host-owned record, making
-prompt debugging and OTel span export redundant.
+replayed or inspected locally. The trajectory closes the prompt/provider
+detail gap and makes prompt debugging and OTel span export redundant. Required
+journal facts separately define authoritative lifecycle and causality; F-52
+joins both sources without promoting the diagnostic record.
 
 ## User journeys
 
@@ -54,8 +56,9 @@ prompt debugging and OTel span export redundant.
 3. A multi-agent turn misbehaves. The developer opens the parent trajectory,
    follows a child-run link, and inspects the child's own model and tool
    steps.
-4. While a turn runs, the developer opens the latest trajectory in the web
-   viewer and follows steps as they commit.
+4. After a turn, the developer opens Session History, expands diagnostic
+   detail on a work or ModelStep item, and inspects assembly, retries, and
+   provider timing without a second viewer.
 
 ## In scope
 
@@ -72,11 +75,10 @@ prompt debugging and OTel span export redundant.
 - Content policy: full content is always captured with no truncation and no
   disable switch; record size is naturally bounded by existing runtime limits
   (context window, max output tokens, tool-output caps).
-- Read-only query path: list runs, fetch one run, page large trajectories
-  (HTTP endpoints for the web viewer); observational — no session mutation and
-  no model invocation.
-- A read-only web viewer served by hostd over loopback HTTP: structured
-  step-graph browsing that replaces the prompt-debug surface.
+- Read-only query path: list runs and fetch one run from published
+  trajectory projections; observational — no session mutation and no model
+  invocation. F-52 Session History is the product inspector and attaches
+  matching records as diagnostic detail.
 - Retirement of D-30 once the trajectory query path lands; removal of the
   OTel span exporter and D-46 GenAI content attributes; OTel metrics and
   unified logs retained.
@@ -90,8 +92,9 @@ prompt debugging and OTel span export redundant.
   trajectory records step boundaries and committed messages.
 - Requiring an external backend, cross-session analytics, or evaluation and
   dataset concepts.
-- A product TUI surface for trajectory inspection (the web viewer is the
-  inspection surface; trajectory is a settings-controlled web feature).
+- A TUI that treats trajectory as its history model. F-52 separately defines
+  a journal-derived Session History surface and may display trajectory records
+  only as optional diagnostic enrichment.
 - Cross-process capture: hostd and the agent runtime run in one process today;
   revisit only if the processes split.
 - Changes to compaction, usage accounting, approvals, or turn-runtime
@@ -116,9 +119,9 @@ prompt debugging and OTel span export redundant.
   and completion fragment reference.
 - Terminal record: completed, failed, or cancelled with the reason.
   (Implemented: `trajectory.terminal` record appended by hostd after the
-  `execution_finished` fact; its SSE fan-out is what lets the live viewer
-  observe the running → terminal transition — on a clean completion no other
-  trajectory record would follow the fact.)
+  `execution_finished` fact so history diagnostics can show the running →
+  terminal transition — on a clean completion no other trajectory record
+  would follow the fact.)
 
 ### Two record categories, one durable journal
 
@@ -168,31 +171,22 @@ by readers that do not understand them.
 ### Query behavior
 
 - Listing runs: scoped by session and agent, newest first, bounded page with
-  cursor.
+  cursor, from the published `trajectory.json` projection.
 - Fetching one run: full step graph, paged for large runs.
 - A missing run returns an explicit error; a query never attaches a session,
   starts a run, or invokes the model gateway.
+- Session History (F-52) is the product inspector. It joins matching
+  trajectory observations onto required facts by persisted identity and
+  fetches large diagnostic bodies only when an item is opened.
 
-### Web viewer
+### Inspection (retired web viewer)
 
-- hostd serves read-only HTTP on loopback only; the static page and the
-  trajectory endpoints come from the same process that owns the store.
-- Endpoints: list runs (session/agent scope, paged), fetch one run (full step
-  graph, paged), and the static viewer page. All are read-only.
-- Live following uses SSE (`EventSource`, `text/event-stream`) from hostd to
-  the browser: the page subscribes to a run's event stream and hostd pushes
-  new trajectory records as they are durably written. The web viewer is a
-  real-time viewer, not a polling client. SSE is the browser-native standard;
-  a streamable-HTTP-style NDJSON endpoint for non-browser consumers is a
-  later addition, not a viewer requirement.
-- Large payloads are handled at render time (lazy load, collapse, scroll into
-  view); stored records are never truncated.
-- The page renders the step graph with foldable steps, content, and child-run
-  links; plain static assets, no separate frontend toolchain.
-- The per-run view renders the run's prompt assembly as a time-ordered card
-  in the message stream (same card interaction and selection as messages) and
-  as a matching timeline marker brick; there is no separate prompt tab
-  (D-52).
+- The F-36 loopback HTTP + SSE web viewer, its static assets, and the
+  `[trajectory]` bind/port/enabled settings are removed (ADR-029).
+- Existing `[trajectory]` keys in user settings.toml are ignored.
+- There is no live follow, SSE fan-out, or second inspection HTTP surface.
+  Capture remains best-effort and durable; dropped-record counters stay
+  process-local.
 
 ### Observability integration
 
@@ -221,17 +215,15 @@ by readers that do not understand them.
       record.
 - [ ] Query commands are read-only: listing/fetching does not mutate session
       state or invoke the model gateway; missing runs return explicit errors.
-- [ ] Records are captured in full without truncation; oversized payloads are
-      handled by the web viewer at render time, not by altering stored content.
+- [x] Records are captured in full without truncation; oversized payloads are
+      fetched by Session History only when an item is opened, not by altering
+      stored content.
 - [x] Once the trajectory query path is verified, all D-30 prompt-debug code is
       deleted (capture, protocol command and result, TUI surface and tests);
-      the web viewer shows the latest run's structured step graph instead
-      (verified in V-49; the D-30 design and V-30 verification records are
-      removed).
-- [ ] The web viewer is served over loopback HTTP only, is read-only, and
-      works without an external backend or frontend build toolchain.
-- [ ] The web viewer follows a running turn in real time over SSE (or
-      streamable HTTP) without polling.
+      Session History shows diagnostic step detail instead (verified in V-49;
+      the D-30 design and V-30 verification records are removed).
+- [x] The loopback HTTP/SSE web viewer, static assets, and `[trajectory]`
+      bind/port/enabled settings are removed (ADR-029).
 - [ ] The OTel span exporter and D-46 GenAI content attributes are removed;
       metrics and unified logs remain with run/step correlation.
 - [ ] Workspace fmt, clippy with warnings denied, and full tests pass.
@@ -244,13 +236,13 @@ by readers that do not understand them.
 | Who captures? | Agent runtime emits step events; hostd persists | hostd stays authoritative for durable state; capture points are the existing production step boundaries. |
 | Content by default? | Always captured in full; no truncation, no disable switch | The journal already stores message bodies (including thinking) locally; sizes are naturally bounded by context/output/tool caps. |
 | Retention? | None — trajectory records persist like all journal records | No eviction; the journal is already the unbounded durable record. |
-| Replace prompt-debug? | Yes — delete all D-30 code after the trajectory query path lands | Trajectory subsumes D-30's data; a live latest-run view replaces the surface. |
-| Viewer surface | Loopback web viewer (HTTP + SSE), enabled by `[trajectory] enabled` | Browser inspection; read-only, hostd-backed, no TUI surface. |
+| Replace prompt-debug? | Yes — delete all D-30 code after the trajectory query path lands | Trajectory subsumes D-30's data; Session History inspects the diagnostic record. |
+| Viewer surface | TUI Session History (F-52); the F-36 loopback HTTP/SSE viewer is retired (ADR-029) | Required facts are the skeleton; trajectory is diagnostic enrichment only. |
 | Record categories | Prompt assembly (input side) and agent trajectory (interaction side), joined by run identity | One run record with two views; assembly is the new focus, trajectory extends existing journal events. |
 | Fact vs observation | Acknowledged facts stay authoritative; assembly/trajectory detail is optional-event-class | Preserves F-31 replay and authority while letting the journal record everything. |
 | OTel spans? | Removed as an export; trajectory is the causal graph | Avoids dual instrumentation and truncated span attributes; escape hatch derives spans from records later. |
 | OTel metrics/logs? | Retained | Histograms/counters and unified logs are projections over the same runtime events; logs keep run/step correlation. |
-| Live updates | SSE (`EventSource`) from hostd to the browser; no polling | Browser-native standard with auto-reconnect; hostd pushes records as they are durably written. |
+| Live updates | None; Session History refreshes explicitly | Historical inspection must not add another realtime state path. |
 | Streaming deltas? | Not recorded | Transient by F-31; trajectory fidelity is step boundaries plus committed messages. |
 | Cross-process capture? | Deferred | In-process event flow today; revisit only if processes split. |
 
@@ -269,8 +261,8 @@ record.
 
 ## Open questions
 
-1. None. SSE is decided for the browser viewer; a streamable-HTTP-style NDJSON
-   endpoint for non-browser consumers is deferred as a later addition.
+1. None. The loopback HTTP/SSE viewer is retired (ADR-029). Session History
+   is the inspector; capture remains best-effort.
 
 ## Reference evidence
 

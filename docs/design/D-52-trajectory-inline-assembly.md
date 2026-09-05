@@ -1,7 +1,7 @@
 # D-52: Trajectory viewer inline assembly
 
-> Status: implemented (viewer slice; user-side visual QA pending)
-> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface)
+> Status: superseded by [ADR-029](../decisions/ADR-029-retire-trajectory-web-viewer.md)
+> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface; retired)
 > Decisions: none new
 
 ## Goal

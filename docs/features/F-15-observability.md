@@ -160,9 +160,10 @@ causality makes regressions slow to localize.
   blocks and model-output bodies are not exported in this slice.
 - Content attributes are size-bounded and must not be duplicated into stderr
   or OTel log records.
-- The trajectory viewer (F-36) is the immediate diagnostic surface for prompt
-  assembly; its fidelity does not depend on OTel sampling or exporter
-  availability. The D-30 latest-only snapshot is removed (V-49).
+- Session History (F-52) is the diagnostic surface for prompt assembly
+  captured by F-36; its fidelity does not depend on OTel sampling or exporter
+  availability. The D-30 latest-only snapshot is removed (V-49). The F-36
+  loopback web viewer is retired (ADR-029).
 
 ### Durable rollout paging (D-31)
 
@@ -216,8 +217,8 @@ causality makes regressions slow to localize.
 
 This slice is superseded by F-36/D-49: the latest-only in-memory snapshot was
 retired once the durable trajectory query path landed (verified in V-49).
-Prompt assembly is now served from `trajectory.assembly` journal events by the
-trajectory viewer.
+Prompt assembly is now served from `trajectory.assembly` journal events and
+inspected in Session History (F-52). The F-36 web viewer is retired (ADR-029).
 
 ### OTel prompt inspection (D-46)
 
@@ -256,7 +257,7 @@ trajectory viewer.
 | Who owns the product usage ledger? | **hostd** turn + session roll-ups; transcript assistant messages are durable step facts | Matches hostd authority for user-visible state; OTel is a projection |
 | Natural grain for usage? | Model-step (assistant message); turn = sum of steps; session = sum of all steps | Provider usage arrives per completion; multi-step turns must not discard earlier steps |
 | Client surface for turn totals? | `TurnEvent` terminals carry `usage` | Live clients get totals without replaying the whole tree |
-| What is the first prompt-debug surface? | Superseded by F-36: the trajectory viewer serves durable run records (assembly + model steps) from the session journal | Faithful by construction; hostd stays authoritative for user-visible diagnostics |
+| What is the first prompt-debug surface? | Superseded by F-36 capture + F-52 Session History; the F-36 web viewer is retired (ADR-029) | Faithful by construction; hostd stays authoritative for user-visible diagnostics |
 | Persist debug snapshots? | Superseded: assembly is durable as `trajectory.assembly` journal events (F-36) | The journal is the sole durable authority; the D-30 in-memory snapshot is removed |
 | Model-input debug boundary | llmd request after mapping/middleware/options, before provider adapter | Faithful to dispatched model input without claiming adapter-private HTTP wire parity |
 | Rollout source | Existing per-AgentInstance append-only JSONL | Avoids a second recorder and preserves hostd's durable authority |

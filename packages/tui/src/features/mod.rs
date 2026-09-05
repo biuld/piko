@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod dock_stack;
 pub mod editor;
 pub mod guidance_row;
+pub mod history;
 pub mod mcp;
 pub mod model_selector;
 pub mod notifications;

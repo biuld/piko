@@ -303,6 +303,14 @@ fn render_surface(frame: &mut Frame<'_>, app: &AppState, area: Rect, surface: Su
             };
             render_panel(&app.diagnostics, frame, area, &ctx, interaction)
         }
+        SurfaceId::History => {
+            let hints = crate::features::guidance_row::pane_hints(app, surface);
+            let ctx = crate::features::history::HistoryCtx {
+                theme: &app.theme,
+                hints: hints.footer.as_deref(),
+            };
+            render_panel(&app.history, frame, area, &ctx, interaction)
+        }
         SurfaceId::Settings => {
             let hints = crate::features::guidance_row::pane_hints(app, surface);
             let ctx = crate::features::settings::SettingsCtx {

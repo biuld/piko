@@ -433,6 +433,7 @@ fn build_surface_hitmap_for_frame(
             stamp(regions)
         }
         Region::Surface(SurfaceId::Diagnostics) => stamp(app.diagnostics.hit_regions(rect)),
+        Region::Surface(SurfaceId::History) => stamp(app.history.hit_regions(rect)),
         Region::Surface(SurfaceId::Settings) => stamp(app.settings.hit_regions(rect)),
         Region::Surface(SurfaceId::Models) => stamp(app.models.hit_regions(rect)),
         Region::Surface(SurfaceId::Thinking) => stamp(app.thinking.hit_regions(rect)),

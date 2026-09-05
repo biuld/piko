@@ -174,7 +174,7 @@ impl AgentCommitPort for StrictCreateCommitPort {
         command: AgentDurableCommand,
     ) -> Result<AgentCommitAck, CommitError> {
         let agent_instance_id = match command {
-            AgentDurableCommand::Create { identity, spec } => {
+            AgentDurableCommand::Create { identity, spec, .. } => {
                 let mut specs = self.specs.lock().await;
                 match specs.get(&identity.agent_instance_id) {
                     Some(existing) if existing != &spec => {

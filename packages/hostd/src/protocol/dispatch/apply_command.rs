@@ -42,6 +42,11 @@ impl HostServer {
             Command::SessionList { scope, cwd, .. } => {
                 self.0.apply_session_list(&command_id, scope, cwd).await
             }
+            command @ (Command::SessionHistoryOverviewGet { .. }
+            | Command::SessionHistoryWorkPageGet { .. }
+            | Command::SessionHistoryJournalPageGet { .. }
+            | Command::SessionHistoryTranscriptPageGet { .. }
+            | Command::SessionHistoryItemGet { .. }) => self.apply_history_command(command).await,
             Command::ModelList { .. } => {
                 let registry = self.model_registry.lock().await;
                 let providers = registry.list_providers();

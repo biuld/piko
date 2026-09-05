@@ -256,6 +256,8 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
                     tool_set_ids: Vec::new(),
                     active_tool_names: None,
                 },
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await
@@ -284,6 +286,8 @@ async fn direct_input_runs_the_addressed_recovered_child_agent() {
                     tool_set_ids: Vec::new(),
                     active_tool_names: None,
                 },
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await

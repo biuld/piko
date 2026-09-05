@@ -46,6 +46,7 @@ M5 Multi-agent depth         complete for committed scope
  └─ I followup/interrupt/list/wait · agent roles · fragments
 M6 Observability & ops       complete
  └─ L tracing/usage · rollout · diff-tracking · trajectory (F-36)
+    · journal-derived Session History in progress (F-52; web viewer retired)
 M7 Extension                 deferred
  └─ K realtime/multimodal
 ```
@@ -172,7 +173,7 @@ Status: **complete for committed scope**.
 | Per-turn and cumulative usage accounting | implemented | D-29/V-29 |
 | Durable rollout recorder/paging | implemented | D-31/V-31; existing v3 JSONL is the recorder |
 | Exact turn-diff tracking | implemented | D-32/V-32 |
-| Prompt and model-input debugging | superseded by F-36 trajectory | D-30 removed; the durable trajectory + loopback web viewer is the inspection surface (D-49/V-49) |
+| Prompt and model-input debugging | superseded by F-36 trajectory | D-30 removed; trajectory retains prompt/provider diagnostic capture, while F-52 defines the journal-derived TUI history surface |
 
 There is no JSON/file-log fallback: when OTel export is disabled, hostd logs
 to stderr.
@@ -193,13 +194,13 @@ optional extensions and have no scheduled implementation.
 | E Tool System | F-06 | registry/routing, batch dispatch, approvals hook |
 | F Approvals & Safety | F-07/F-11/F-12 | approvals, guardian, elicitation decision, safety assessment |
 | G Exec & Sandbox | F-08/F-23 | process lifecycle, full-shell unified exec, enforced containment, command authority/elevation |
-| H Persistence & Resume | F-31/F-51 | schema-v4 canonical journal, durable Agent work/queue facts, deterministic replay/accounting, fork/resume, recovery; paging/prewarm deferred |
+| H Persistence & Resume | F-31/F-51/F-52 | schema-v4 canonical journal, durable Agent work/queue facts, deterministic replay/accounting, fork/resume, recovery, and proposed journal-derived history inspection; paging/prewarm deferred |
 | I Multi-Agent | F-10/F-19/F-20/F-21/F-51 | agent tree, v2 tools, role permissions, completion fragments, model tool surface, unified control semantics |
 | J Skills/Plugins/MCP | F-13/F-14 | skills, plugins, MCP, hooks |
 | K Realtime | F-16 | realtime and multimodal preparation (deferred) |
 | L Observability | F-15 | tracing, timing, usage, rollout/diff/debugging slices |
 | M Config & Permissions | F-17/F-18/F-19 | permission profiles, managed features, agent roles |
-| Client projection (product wire) | F-22/F-51 | hostd→client foreground/work/queue state, stream items, usage used/size (ACP modeling ref) |
+| Client projection (product wire) | F-22/F-51/F-52 | hostd→client foreground/work/queue state, stream items, usage used/size, and proposed read-only history DTOs (ACP modeling ref only where applicable) |
 
 ## 5. Sequencing principles
 
@@ -224,12 +225,17 @@ optional extensions and have no scheduled implementation.
    deletion of leftover Turn/Run/Execution types, IDs, maps, and commands
    (`ChatSubmit` / `QueueSteer` / `TurnCancel`, `TurnRecord`, `steer_queue`,
    orchd send/steer shims, TUI local queues). Desktop is out of scope.
-2. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
+2. **Session history inspector (F-52 / D-69, ADR-028, ADR-029)** — in
+   progress; revision-ordered history read model, revision-consistent host
+   query, and read-only TUI Work/Agents/Transcript/Journal lenses. Required
+   facts are the skeleton; trajectory remains optional diagnostic enrichment.
+   The F-36 loopback HTTP/SSE viewer is retired.
+3. **Command execution authority (F-23 / D-35, ADR-005)** — implemented
    redesign of F-08/F-12/F-17 command behavior: full-shell unified exec,
    host-owned authorization, enforced sandbox-first attempts, constrained
    additional permissions/elevation, and typed process results. Maintain the
    cross-platform differential fixtures in V-35 as sandbox backends evolve.
-3. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
+4. **Client agent projection (F-22 / D-34, ADR-003)** — Slices 1–3
    **implemented** (docs status updated): usage `used`/`size` + silent model
    catalog bootstrap; dedicated `ServerMessage::Usage` after terminal turns
    (sole usage chrome path); sole stream transport `ServerMessage::StreamItem`
@@ -237,4 +243,4 @@ optional extensions and have no scheduled implementation.
    shared `AgentForeground::project` for TUI/client-core. Plan/System
    stream kinds deferred. Optional next: Slice 4 ACP adapter (product-gated;
    not a full ACP transport rewrite).
-4. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.
+5. Keep plugins/hooks, M7, and other consumer-triggered residue deferred.

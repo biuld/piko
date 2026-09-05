@@ -873,13 +873,23 @@ fn query_republishes_stale_models_while_writer_is_attached() {
         .append(1, commit("c2", 2, event("e2", message("m1", None, None))))
         .unwrap();
 
-    for name in ["catalog.json", "current.json", "trajectory.json"] {
+    for name in [
+        "catalog.json",
+        "current.json",
+        "trajectory.json",
+        "history.json",
+    ] {
         std::fs::write(path.join("readmodels").join(name), b"broken").unwrap();
     }
 
     let current = piko_session_store::query_current(&path).unwrap();
     assert_eq!(current.revision, 2);
-    for name in ["catalog.json", "current.json", "trajectory.json"] {
+    for name in [
+        "catalog.json",
+        "current.json",
+        "trajectory.json",
+        "history.json",
+    ] {
         let bytes = std::fs::read(path.join("readmodels").join(name)).unwrap();
         serde_json::from_slice::<serde_json::Value>(&bytes)
             .unwrap_or_else(|error| panic!("{name} was not republished: {error}"));
@@ -897,6 +907,15 @@ fn query_republishes_stale_models_while_writer_is_attached() {
             .revision,
         2
     );
+    assert_eq!(
+        piko_session_store::query_history(&path).unwrap().revision,
+        2
+    );
+    let inspection = piko_session_store::query_inspection(&path).unwrap();
+    assert_eq!(inspection.revision, 2);
+    assert_eq!(inspection.current.revision, inspection.revision);
+    assert_eq!(inspection.history.revision, inspection.revision);
+    assert_eq!(inspection.trajectory.revision, inspection.revision);
 }
 
 #[test]

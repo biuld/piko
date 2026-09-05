@@ -164,6 +164,8 @@ async fn ensure_test_active_work(runner: &super::OrchAgentRunRunner, session_id:
                     parent_agent_instance_id: Some(generated_root.agent_instance_id),
                 },
                 spec: spec.clone(),
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await
@@ -287,6 +289,8 @@ fn create_command() -> AgentDurableCommand {
             tool_set_ids: Vec::new(),
             active_tool_names: None,
         },
+        origin_root_input_id: None,
+        origin_tool_call_id: None,
     }
 }
 

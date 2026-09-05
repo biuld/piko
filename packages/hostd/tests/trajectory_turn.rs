@@ -10,7 +10,6 @@ use piko_hostd::adapters::OrchAgentRunRunner;
 use piko_hostd::api::{Command, CommandResult, ServerMessage};
 use piko_hostd::application::TrajectoryQuery;
 use piko_hostd::infra::storage::{JsonlSessionRepository, SessionStore};
-use piko_hostd::ports::TrajectoryRegistryPort;
 use piko_hostd::protocol::HostServer;
 use piko_llmd::gateway::{
     InferenceError, InferenceEvent, InferenceExecution, InferenceGateway, InferenceRequest,
@@ -163,14 +162,6 @@ async fn turn_writes_durable_trajectory_records() {
             after_seq: None,
         })
         .await;
-    // Subscribe before the turn so live records are observed as they are
-    // appended. The recorder broadcast does not replay already-sent events.
-    let session_id_live = session_id.clone();
-    let live_wait = tokio::spawn(async move {
-        piko_hostd::infra::trajectory::TrajectoryRecorderRegistry::global()
-            .await_subscribe(&session_id_live)
-            .await
-    });
     let events = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         server.handle_command(Command::submit_follow_up(
@@ -268,9 +259,8 @@ async fn turn_writes_durable_trajectory_records() {
         .count();
     assert_eq!(tool_events, 2, "started + completed tool records");
 
-    // The terminal record is appended after `execution_finished`, so a live
-    // SSE viewer observes the running → completed transition (F-36 terminal
-    // record).
+    // The terminal record is appended after `execution_finished` so history
+    // diagnostics can show the running → completed transition (F-36).
     wait_for_trajectory(
         &store,
         1,
@@ -285,36 +275,6 @@ async fn turn_writes_durable_trajectory_records() {
         "terminal",
     )
     .await;
-
-    // The live SSE broadcast carries the same events: the terminal record
-    // (which flips a viewer from running → completed) and a run-list-changed
-    // marker (which tells viewers watching other runs to refresh the strip).
-    let mut live = live_wait
-        .await
-        .expect("subscribe task")
-        .expect("recorder exists after attach");
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let mut saw_terminal = false;
-    let mut saw_runs_changed = false;
-    while !(saw_terminal && saw_runs_changed) {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "live broadcast missing events (terminal={saw_terminal}, runs_changed={saw_runs_changed})"
-        );
-        match tokio::time::timeout(std::time::Duration::from_millis(100), live.recv()).await {
-            Ok(Ok(piko_protocol::TrajectoryLiveEvent::Record(record_event))) => {
-                if let piko_protocol::TrajectoryRecord::Terminal(_) = record_event.record {
-                    saw_terminal = true;
-                }
-            }
-            Ok(Ok(piko_protocol::TrajectoryLiveEvent::RunsChanged { .. })) => {
-                saw_runs_changed = true;
-            }
-            Ok(Err(_)) => break,
-            Err(_) => {}
-        }
-    }
-    assert!(saw_terminal && saw_runs_changed);
 
     // A fresh query (separate store instance, ≈ restart) replays the run.
     let query = TrajectoryQuery::new(

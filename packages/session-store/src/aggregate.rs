@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use piko_protocol::{
-    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec, TodoList,
+    AgentInboxItem, AgentInstanceIdentity, AgentInstanceLifecycle, AgentSpec, Message, TodoList,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,8 @@ pub struct SessionAggregate {
     pub tree_entries: BTreeMap<String, StoredTreeEntry>,
     pub agent_heads: BTreeMap<String, String>,
     pub agents: BTreeMap<String, StoredAgent>,
+    #[serde(default)]
+    pub child_origins: BTreeMap<String, crate::AgentOriginRecordedV1>,
     /// Canonical primitive input facts, keyed by durable input identity.
     #[serde(default)]
     pub agent_inputs: BTreeMap<String, StoredAgentInput>,
@@ -173,6 +175,7 @@ impl SessionAggregate {
                 spec,
                 created_at,
             } => self.apply_agent_created(identity, spec, created_at)?,
+            EventData::AgentOriginRecordedV1(origin) => self.apply_agent_origin(origin)?,
             EventData::AgentLifecycleChanged {
                 agent_instance_id,
                 lifecycle,
@@ -412,6 +415,53 @@ impl SessionAggregate {
                 changed_at: created_at,
             },
         );
+        Ok(())
+    }
+
+    fn apply_agent_origin(&mut self, origin: crate::AgentOriginRecordedV1) -> Result<()> {
+        let child = self.agent(&origin.child_agent_instance_id)?;
+        if child.identity.parent_agent_instance_id.as_deref()
+            != Some(origin.parent_agent_instance_id.as_str())
+        {
+            return Err(StoreError::InvalidEvent(
+                "agent origin parent does not match child identity".into(),
+            ));
+        }
+        let root = self
+            .agent_inputs
+            .get(&origin.parent_root_input_id)
+            .ok_or_else(|| StoreError::InvalidEvent("agent origin root input is unknown".into()))?;
+        let step = self
+            .model_steps
+            .get(&origin.origin_model_step_id)
+            .ok_or_else(|| StoreError::InvalidEvent("agent origin model step is unknown".into()))?;
+        if root.input.agent_instance_id != origin.parent_agent_instance_id
+            || step.data.agent_instance_id != origin.parent_agent_instance_id
+            || step.data.root_input_id != origin.parent_root_input_id
+        {
+            return Err(StoreError::InvalidEvent(
+                "agent origin work identity does not match parent".into(),
+            ));
+        }
+        let declared = step.data.tool_call_message_ids.iter().any(|message_id| {
+            self.messages.get(message_id).is_some_and(|message| {
+                matches!(&message.data.message, Message::ToolCall { id, .. } if id == &origin.origin_tool_call_id)
+            })
+        });
+        if !declared {
+            return Err(StoreError::InvalidEvent(
+                "agent origin tool call is not declared by the model step".into(),
+            ));
+        }
+        if let Some(existing) = self.child_origins.get(&origin.child_agent_instance_id) {
+            return if existing == &origin {
+                Ok(())
+            } else {
+                Err(StoreError::InvalidEvent("conflicting agent origin".into()))
+            };
+        }
+        self.child_origins
+            .insert(origin.child_agent_instance_id.clone(), origin);
         Ok(())
     }
 

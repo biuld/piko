@@ -33,6 +33,7 @@ pub enum SurfaceId {
     Mcp,
     Processes,
     Diagnostics,
+    History,
     Approval,
     ToolInteraction,
     SummaryPrompt,
@@ -122,7 +123,7 @@ impl SurfaceId {
                 guidance: Guidance::None,
                 outside_click: Outside::Dismiss,
             },
-            Self::Diagnostics => SurfaceSpec {
+            Self::Diagnostics | Self::History => SurfaceSpec {
                 sizing: Sizing::CoverBody,
                 input: Input::ReadOnlyViewport,
                 guidance: Guidance::None,

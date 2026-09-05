@@ -1,14 +1,20 @@
 # D-49: Agent run trajectory
 
-> Status: draft
+> Status: implemented for capture; web viewer retired by
+> [ADR-029](../decisions/ADR-029-retire-trajectory-web-viewer.md)
 > Implements: [F-36](../features/F-36-agent-run-trajectory.md)
+> Historical note: the decision to exclude a TUI surface is superseded by
+> F-52/D-69. D-49 remains the diagnostic capture design. The loopback HTTP/SSE
+> viewer in section 4 is retired; Session History inspects required facts and
+> attaches trajectory as diagnostics.
 
 ## Goal
 
 Deliver a durable, content-complete per-run record — prompt assembly (input
 side) plus agent trajectory (interaction side) — stored in the session journal
-as observational event types, served to a real-time loopback web viewer over
-SSE, and then retire D-30 prompt debugging and the OTel span export.
+as observational event types, then retire D-30 prompt debugging and the OTel
+span export. Inspection is Session History (F-52), not a trajectory HTTP
+surface.
 
 ## Constraints and non-goals
 
@@ -19,10 +25,9 @@ SSE, and then retire D-30 prompt debugging and the OTel span export.
 - Capture is best-effort and side-effect-free: a trajectory write must never
   block, fail, delay, or alter a turn.
 - No content truncation, no body-capture switch, no retention eviction.
-- The web viewer is loopback-only and read-only; it requires no frontend build
-  toolchain and no external backend.
-- Streaming deltas, cross-process capture, TUI trajectory surfaces, and
-  non-browser streamable-HTTP endpoints are out of scope.
+- Streaming deltas, cross-process capture, and a TUI that treats trajectory
+  as its history model are out of scope. F-52 is a separate journal-derived
+  inspector.
 - No changes to compaction, usage accounting, approvals, or turn-runtime
   semantics.
 
@@ -170,7 +175,12 @@ change), filters `trajectory.*` events plus relevant facts
 - Missing runs return an explicit 404-style error; queries never attach a
   session, start a run, or invoke the model gateway.
 
-### 4. Web viewer (`piko-hostd`)
+### 4. Web viewer (`piko-hostd`) — retired (ADR-029)
+
+The loopback HTTP + SSE viewer, static assets, live broadcast contract, and
+`[trajectory]` bind/port/enabled settings are removed. Capture, `trajectory.json`,
+and Session History diagnostic enrichment remain. The original design below is
+historical.
 
 Add an HTTP server dependency (`axum`) to `piko-hostd`; tokio net is already
 available. New settings section:
@@ -242,7 +252,7 @@ verified:
 | Package | Change |
 |---|---|
 | `piko-protocol` | Trajectory DTOs and event-type constants; remove prompt-debug DTOs, command, result, and tests |
-| `piko-hostd` | Trajectory recorder port impl + writer task, query service, loopback HTTP server + SSE + settings, D-30 removal, OTel span-export removal |
+| `piko-hostd` | Trajectory recorder port impl + writer task, query service, D-30 removal, OTel span-export removal; HTTP/SSE viewer later retired by ADR-029 |
 | `piko-orchd` | Tool-call and child-run capture at existing boundaries via the new port |
 | `piko-orchd-api` | `TrajectoryCapturePort` trait + `SessionExecutionPorts` field |
 | `piko-llmd` | Model-step record capture (redirect existing hook), remove GenAI content attributes |
@@ -259,10 +269,8 @@ No `island-rs` change required.
   query; the turn is never affected.
 - An interrupted run (hostd restart or abort) keeps every record durably
   written before interruption and queries as interrupted (no terminal state).
-- SSE reconnect uses `Last-Event-ID`; the server replays from the run's recent
-  record sequence before resuming live records.
-- HTTP bind failure logs and continues without the viewer; viewer failure
-  never affects turns or the journal.
+- Viewer HTTP/SSE failure modes no longer apply (ADR-029). Capture enqueue or
+  append failure still drops the record and never affects the turn.
 - Older readers ignore `trajectory.*` events by construction (optional event
   class), so schema evolution and downgrade remain safe.
 
@@ -273,9 +281,8 @@ No `island-rs` change required.
 - Integration: capture pipeline produces `trajectory.*` journal events and a
   query returns the run graph (assembly + steps + tool calls + child links +
   terminal); restart preserves and re-queries the same run; simulated capture
-  failure does not fail the turn and reports `dropped_records`; SSE endpoint
-  streams records to a connected client; static page serves without a build
-  step.
+  failure does not fail the turn and reports `dropped_records`. The HTTP/SSE
+  viewer is retired (ADR-029); Session History covers inspection.
 - Retirement checks: no `prompt-debug` identifiers remain in the workspace;
   OTel logs/metrics still export with run/step correlation and no span
   exporter is installed; D-46 GenAI content tests are removed.
@@ -286,10 +293,10 @@ No `island-rs` change required.
 - **Separate trajectory store**: rejected — duplicates journal facts, creates
   a second authority, and the journal's optional-event class already gives the
   same durability without replay impact.
-- **TUI trajectory surface**: rejected — web viewer is cheaper to build and
-  richer to use (fold/search/link), and matches the PRD's viewer decision.
-- **Polling live updates**: rejected — SSE is the browser-native standard with
-  auto-reconnect.
+- **TUI trajectory surface**: rejected as the history model — F-52 later adds
+  a journal-derived inspector and attaches trajectory only as diagnostics.
+- **Polling / SSE live updates**: rejected for product inspection — Session
+  History is explicit-refresh only (F-52). The original SSE viewer is retired.
 - **OTel as the content store**: rejected — span attributes are transport-
   capped and redacted; trajectory is local, unbounded, and replayable.
 - **Retention eviction**: rejected — PRD records everything with no eviction.
@@ -301,6 +308,6 @@ No `island-rs` change required.
 2. Model-step (llmd hook redirect), tool-call (orchd), child-run, and system-
    notification capture; terminal state via fact replay.
 3. Loopback HTTP server, settings, static page, run list/fetch endpoints, and
-   SSE live stream.
+   SSE live stream (later retired by ADR-029).
 4. D-30 removal and OTel span/GenAI-content removal; docs and verification
    (F-15/D-30 status updates, V-49 evidence).

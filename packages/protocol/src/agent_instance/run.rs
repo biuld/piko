@@ -63,6 +63,10 @@ pub struct CreateAgentRequest {
     pub requested_agent_instance_id: Option<AgentInstanceId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_tool_call_id: Option<String>,
+    /// Root work that executed `origin_tool_call_id`. Both fields are present
+    /// for model-tool creation and absent for manual/system creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_root_input_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -4,11 +4,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::api::{Command, ServerMessage};
-use crate::application::TrajectoryQuery;
 use crate::domain::config::SettingsManager;
-use crate::domain::config::TrajectorySettings;
 use crate::infra::storage::JsonlSessionRepository;
-use crate::infra::web::{TrajectoryWebState, spawn as spawn_trajectory_web};
 use crate::ports::{AgentRunRunner, ErrorAgentRunRunner};
 
 use crate::protocol::{HostServer, build_orch_agent_runner};
@@ -35,7 +32,6 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
                     None,
                 )
             });
-    let trajectory_registry = agent_runner.trajectory_registry();
     let server = HostServer::with_storage_runner_settings(
         JsonlSessionRepository::new(session_root),
         agent_runner,
@@ -54,20 +50,6 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         .lock()
         .await
         .replace(target_settings_path);
-    let trajectory_settings = settings
-        .settings()
-        .trajectory
-        .unwrap_or(TrajectorySettings::default());
-    let web_state = TrajectoryWebState::new(
-        TrajectoryQuery::new(
-            server.session_paths.clone(),
-            server.session_store_factory.clone(),
-            server.storage.clone(),
-        ),
-        trajectory_registry,
-        server.storage.clone(),
-    );
-    let _web_handle = spawn_trajectory_web(&trajectory_settings, web_state);
     if let Some(executor) = model_executor {
         server.set_model_executor(executor).await;
     }

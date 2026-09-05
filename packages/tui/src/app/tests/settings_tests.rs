@@ -33,18 +33,6 @@ fn expanded_host_actions_emit_minimal_merge_patches() {
         patch(SettingsAction::PromptCache("ephemeral")),
         json!({ "prompt": { "cache-policy": "ephemeral" } })
     );
-    assert_eq!(
-        patch(SettingsAction::Trajectory(true)),
-        json!({ "trajectory": { "enabled": true } })
-    );
-    assert_eq!(
-        patch(SettingsAction::TrajectoryBind("localhost")),
-        json!({ "trajectory": { "bind": "localhost" } })
-    );
-    assert_eq!(
-        patch(SettingsAction::TrajectoryPort(8080)),
-        json!({ "trajectory": { "port": 8080 } })
-    );
 }
 
 #[test]
@@ -61,18 +49,6 @@ fn expanded_tui_actions_use_the_tui_namespace_schema() {
         patch(SettingsAction::BottomBarPreset("compact")),
         json!({ "tui": { "bottom_bar": { "items": ["agent", "model", "context"] } } })
     );
-}
-
-#[test]
-fn optimistic_host_apply_updates_trajectory_address() {
-    let mut app = app();
-    app.apply_settings_action_optimistically(&SettingsAction::Trajectory(true));
-    app.apply_settings_action_optimistically(&SettingsAction::TrajectoryBind("localhost"));
-    app.apply_settings_action_optimistically(&SettingsAction::TrajectoryPort(8080));
-
-    assert!(app.host_settings.trajectory_enabled);
-    assert_eq!(app.host_settings.trajectory_bind, "localhost");
-    assert_eq!(app.host_settings.trajectory_port, 8080);
 }
 
 #[test]

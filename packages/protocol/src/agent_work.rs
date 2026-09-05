@@ -10,7 +10,7 @@ use crate::{Message, Usage};
 pub type SessionId = String;
 pub type MessageId = String;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentWorkProcessingStatus {
     Accepted,

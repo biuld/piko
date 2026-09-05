@@ -243,8 +243,8 @@ not lifecycle or queue truth.
 - Changing model-provider streaming protocols.
 - Persisting token deltas, animations, hover state, or drafts.
 - A global scheduler, queue priority, or queue reordering.
-- Replacing the trajectory viewer; remaining slices only rekey it off
-  `root_input_id`.
+- Replacing Session History; remaining slices only rekey leftover trajectory
+  capture off `root_input_id`. The F-36 web viewer is retired by ADR-029.
 
 ## Product decisions
 

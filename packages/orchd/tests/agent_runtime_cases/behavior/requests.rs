@@ -12,6 +12,7 @@ async fn cross_session_or_missing_parent_is_rejected_before_commit() {
             agent_spec_id: "coder".into(),
             requested_agent_instance_id: None,
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect_err("missing parent must fail");
@@ -30,6 +31,7 @@ async fn configured_agent_count_limit_applies_to_new_children() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("count-child".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect("first child is within the configured count");
@@ -42,6 +44,7 @@ async fn configured_agent_count_limit_applies_to_new_children() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("count-child-2".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect_err("the configured total includes the root");
@@ -60,6 +63,7 @@ async fn configured_agent_depth_limit_applies_to_new_children() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("depth-child".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect("first child is within the configured depth");
@@ -72,6 +76,7 @@ async fn configured_agent_depth_limit_applies_to_new_children() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("depth-grandchild".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect_err("the configured depth includes the root");
@@ -96,6 +101,7 @@ async fn worker_agent_cannot_create_children_but_can_be_spawned() {
             agent_spec_id: "scout".into(),
             requested_agent_instance_id: Some("scout-child".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect("supervisors may spawn worker agents");
@@ -108,6 +114,7 @@ async fn worker_agent_cannot_create_children_but_can_be_spawned() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("grandchild".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .expect_err("worker agents cannot create children");
@@ -133,6 +140,7 @@ async fn create_and_input_requests_are_idempotent() {
         agent_spec_id: "main".into(),
         requested_agent_instance_id: Some("child-idempotent".into()),
         origin_tool_call_id: None,
+        origin_root_input_id: None,
     };
     let first = runtime.create_agent(create.clone()).await.unwrap();
     let second = runtime.create_agent(create).await.unwrap();
@@ -228,6 +236,7 @@ async fn sibling_messaging_is_rejected_by_runtime_policy() {
                 agent_spec_id: "main".into(),
                 requested_agent_instance_id: Some(child.into()),
                 origin_tool_call_id: None,
+                origin_root_input_id: None,
             })
             .await
             .unwrap();
@@ -262,6 +271,7 @@ async fn existing_agent_keeps_resolved_spec_snapshot_after_registry_update() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: Some("snapshot-child".into()),
             origin_tool_call_id: None,
+            origin_root_input_id: None,
         })
         .await
         .unwrap();

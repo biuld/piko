@@ -36,7 +36,7 @@
 
 ## Notes
 
-- The web viewer was smoke-tested against a live hostd: `/` serves the static
+- Historical: the web viewer was smoke-tested against a live hostd: `/` serves the static
   two-column page (HTTP 200) with session list, run selector, per-role track
   timeline, and chronological messages; a real persisted session (290
   messages, context/user/assistant/toolCall/toolResult roles) renders through
@@ -52,6 +52,9 @@
   index 0, step bricks resolving through the display list, prompt brick
   selecting index 0), and a static reference check (no dangling tab/prompt
   view references). Browser-level interaction remains user-side.
+- ADR-029 later retired that viewer, its static assets, SSE fan-out, and
+  `[trajectory]` settings. Capture and query evidence in this record still
+  apply; inspection is Session History (F-52).
 - Child-run records are emitted by the execution actor when a
   `spawn_agent`/`spawn_agent_detached` call completes; steer notifications are
   emitted on `commit_steering`. Approval/denial/run-error notifications are

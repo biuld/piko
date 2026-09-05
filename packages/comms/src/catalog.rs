@@ -355,24 +355,6 @@ pub mod contracts {
         }
     );
     contract!(
-        TrajectoryLive,
-        BroadcastContract,
-        TRAJECTORY_LIVE,
-        CommunicationSpec {
-            id: "hostd.trajectory.live",
-            kind: CommunicationKind::Observation,
-            owner: "TrajectoryWriterTask",
-            producers: &["TrajectoryWriterTask"],
-            consumer: "TrajectoryWebViewer",
-            scope: CommunicationScope::Session,
-            delivery: DeliveryGuarantee::BestEffort,
-            capacity: CapacityPolicy::Bounded(256),
-            overflow: OverflowPolicy::DropNewest,
-            closure: ClosureMeaning::NoSubscribers,
-            cancellation: CancellationMeaning::DropInterestOnly,
-        }
-    );
-    contract!(
         TrajectoryRecorders,
         LatestContract,
         TRAJECTORY_RECORDERS,
@@ -381,7 +363,7 @@ pub mod contracts {
             kind: CommunicationKind::LatestState,
             owner: "TrajectoryRecorderRegistry",
             producers: &["TrajectoryRecorderRegistry"],
-            consumer: "TrajectoryWebViewer",
+            consumer: "OrchAgentRunRunner",
             scope: CommunicationScope::Session,
             delivery: DeliveryGuarantee::LatestOnly,
             capacity: CapacityPolicy::Latest,
@@ -410,7 +392,6 @@ pub mod contracts {
         TUI_FILE_SEARCH_RESULTS,
         HOST_COMMAND_OUTPUT,
         TRAJECTORY_WRITES,
-        TRAJECTORY_LIVE,
         TRAJECTORY_RECORDERS,
     ];
 }

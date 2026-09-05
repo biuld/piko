@@ -281,6 +281,30 @@ async fn recovery_completes_declared_tool_calls_without_rerunning_the_model_step
     store
         .commit_model_step(model_step.clone(), "main")
         .expect("an exact model-step retry is idempotent");
+    store
+        .commit_agent_command(
+            "session-1",
+            AgentDurableCommand::Create {
+                identity: AgentInstanceIdentity {
+                    session_id: "session-1".into(),
+                    agent_instance_id: "agent-origin-child".into(),
+                    agent_spec_id: "coder".into(),
+                    parent_agent_instance_id: Some(root.agent_instance_id.clone()),
+                },
+                spec: test_agent_spec("coder"),
+                origin_root_input_id: Some("request-with-tool-call".into()),
+                origin_tool_call_id: Some("call-with-tool-call".into()),
+            },
+        )
+        .await
+        .unwrap();
+    let inspection = store.inspection().unwrap();
+    let origin = &inspection.current.child_origins["agent-origin-child"];
+    assert_eq!(origin.origin_model_step_id, "step-with-tool-call");
+    assert_eq!(
+        inspection.history.child_origins["agent-origin-child"],
+        *origin
+    );
     let mut conflicting = model_step;
     let piko_protocol::Message::Assistant { content, .. } =
         &mut conflicting.assistant.message
@@ -347,6 +371,8 @@ async fn detached_delivery_recovery_is_pending_until_idempotent_inbox_commit() {
             AgentDurableCommand::Create {
                 identity: child.clone(),
                 spec: test_agent_spec("main"),
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await

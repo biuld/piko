@@ -145,6 +145,7 @@ pub(crate) struct SessionStoreInner {
     pub(crate) aggregate: Mutex<SessionAggregate>,
     last_checksum: Mutex<Option<String>>,
     pub(crate) trajectory: Mutex<crate::TrajectoryProjection>,
+    pub(crate) history: Mutex<crate::HistoryProjection>,
 }
 
 static OPEN_STORES: OnceLock<Mutex<BTreeMap<PathBuf, Weak<SessionStoreInner>>>> = OnceLock::new();
@@ -232,7 +233,7 @@ impl SessionStore {
             std::fs::TryLockError::WouldBlock => StoreError::WriterLocked(lock_path.clone()),
             std::fs::TryLockError::Error(source) => io_error(&lock_path, source),
         })?;
-        let (aggregate, trajectory, last_checksum, recovery) =
+        let (aggregate, trajectory, history, last_checksum, recovery) =
             crate::readmodels::load_or_rebuild(&path, &identity, options, allow_empty_genesis)?;
         let inner = Arc::new(SessionStoreInner {
             path: path.clone(),
@@ -242,6 +243,7 @@ impl SessionStore {
             aggregate: Mutex::new(aggregate.clone()),
             last_checksum: Mutex::new(last_checksum),
             trajectory: Mutex::new(trajectory),
+            history: Mutex::new(history),
         });
         registry.insert(path, Arc::downgrade(&inner));
         Ok(OpenedSession {
@@ -273,12 +275,19 @@ impl SessionStore {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .clone();
+                let history = self
+                    .inner
+                    .history
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone();
                 let _ = crate::readmodels::publish(
                     &self.inner.path,
                     &self.inner.session_id,
                     &self.inner.journal_generation,
                     &aggregate,
                     &trajectory,
+                    &history,
                     &existing.checksum.value,
                 );
                 return Ok(existing);
@@ -341,13 +350,20 @@ impl SessionStore {
                 .trajectory
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
+            let mut history = self
+                .inner
+                .history
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             crate::readmodels::apply_trajectory_commit(&mut trajectory, &commit);
+            crate::readmodels::apply_history_commit(&mut history, &commit);
             let _ = crate::readmodels::publish(
                 &self.inner.path,
                 &self.inner.session_id,
                 &self.inner.journal_generation,
                 &aggregate,
                 &trajectory,
+                &history,
                 &commit.checksum.value,
             );
         }
@@ -363,7 +379,11 @@ impl SessionStore {
     /// reuse must repair stale files just like a cold open/rebuild does.
     pub(crate) fn republish_readmodels(
         &self,
-    ) -> Result<(SessionAggregate, crate::TrajectoryProjection)> {
+    ) -> Result<(
+        SessionAggregate,
+        crate::TrajectoryProjection,
+        crate::HistoryProjection,
+    )> {
         let aggregate = self
             .inner
             .aggregate
@@ -374,6 +394,11 @@ impl SessionStore {
             .trajectory
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        let history = self
+            .inner
+            .history
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let checksum = self
             .inner
             .last_checksum
@@ -382,8 +407,9 @@ impl SessionStore {
             .clone();
         let aggregate_snapshot = aggregate.clone();
         let trajectory_snapshot = trajectory.clone();
+        let history_snapshot = history.clone();
         let Some(checksum) = checksum else {
-            return Ok((aggregate_snapshot, trajectory_snapshot));
+            return Ok((aggregate_snapshot, trajectory_snapshot, history_snapshot));
         };
         crate::readmodels::publish(
             &self.inner.path,
@@ -391,9 +417,10 @@ impl SessionStore {
             &self.inner.journal_generation,
             &aggregate,
             &trajectory,
+            &history,
             &checksum,
         )?;
-        Ok((aggregate_snapshot, trajectory_snapshot))
+        Ok((aggregate_snapshot, trajectory_snapshot, history_snapshot))
     }
 
     fn open_segment_path(&self, revision: u64) -> PathBuf {

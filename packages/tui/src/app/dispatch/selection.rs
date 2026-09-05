@@ -15,6 +15,7 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_next(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_next(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_down(1),
+            Some(SurfaceId::History) => self.history.select_next(),
             Some(SurfaceId::Todos) => self.todo_lists.scroll_down(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self
@@ -38,6 +39,7 @@ impl AppState {
             Some(SurfaceId::Thinking) => self.thinking.select_prev(),
             Some(SurfaceId::AuthSelector) => self.auth_selector.select_prev(),
             Some(SurfaceId::Diagnostics) => self.diagnostics.scroll_up(1),
+            Some(SurfaceId::History) => self.history.select_prev(),
             Some(SurfaceId::Todos) => self.todo_lists.scroll_up(1),
             Some(SurfaceId::Usage) => {
                 self.usage_scroll = self.usage_scroll.saturating_sub(1);
@@ -120,6 +122,12 @@ impl AppState {
                     self.pop_focus();
                 }
             }
+            AppMode::Surface(SurfaceId::History) => {
+                if self.history.back() {
+                    self.history = Default::default();
+                    self.pop_focus();
+                }
+            }
             AppMode::Chat => {}
             _ => self.pop_focus(),
         }
@@ -167,6 +175,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Thinking) => self.thinking.list.selected = 0,
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
+            AppMode::Surface(SurfaceId::History) => self.history.selected = 0,
             _ => {}
         }
     }
@@ -191,6 +200,7 @@ impl AppState {
             AppMode::Surface(SurfaceId::Thinking) => self.thinking.list.selected = 0,
             AppMode::Surface(SurfaceId::Settings) => self.settings.reset_selection(),
             AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.menu.reset_selection(),
+            AppMode::Surface(SurfaceId::History) => self.history.selected = 0,
             _ => {}
         }
     }
@@ -240,6 +250,7 @@ impl AppState {
             Some(SurfaceId::Settings) => self.apply_selected_setting(),
             Some(SurfaceId::AuthSelector) => self.confirm_auth_selection(),
             Some(SurfaceId::Processes) => self.confirm_process_stop(),
+            Some(SurfaceId::History) => self.confirm_history_selection(),
             Some(SurfaceId::ThoughtInspector) => Vec::new(),
             Some(
                 SurfaceId::Usage
@@ -253,6 +264,66 @@ impl AppState {
             )
             | None => Vec::new(),
         }
+    }
+
+    fn confirm_history_selection(&mut self) -> Vec<Effect> {
+        if self.history.loading {
+            return Vec::new();
+        }
+        if self.history.choosing_session {
+            let Some(crate::features::history::HistoryRow::Session(session)) = self
+                .history
+                .visible_rows()
+                .into_iter()
+                .nth(self.history.selected)
+            else {
+                return Vec::new();
+            };
+            return self.open_history(Some(session.session_id));
+        }
+        let Some(session_id) = self.history.session_id.clone() else {
+            return Vec::new();
+        };
+        let Some(overview) = self.history.overview.as_ref() else {
+            return Vec::new();
+        };
+        if self.history.lens == crate::features::history::HistoryLens::Agents
+            && self.history.agent_id.is_none()
+        {
+            if let Some(agent_id) = self.history.selected_agent_id() {
+                self.history.drill_into_agent(agent_id);
+            }
+            return Vec::new();
+        }
+        if self.history.work.is_none()
+            && matches!(
+                self.history.lens,
+                crate::features::history::HistoryLens::Work
+                    | crate::features::history::HistoryLens::Agents
+            )
+        {
+            let Some(root_input_id) = self.history.selected_work_id() else {
+                return Vec::new();
+            };
+            self.history.loading = true;
+            return self.history_request(Command::SessionHistoryWorkPageGet {
+                command_id: command_id(),
+                session_id,
+                root_input_id,
+                expected_revision: overview.revision,
+                after_cursor: None,
+                limit: Some(200),
+            });
+        }
+        if let Some(item_ref) = self.history.selected_item_ref() {
+            self.history.loading = true;
+            return self.history_request(Command::SessionHistoryItemGet {
+                command_id: command_id(),
+                session_id,
+                item_ref,
+            });
+        }
+        Vec::new()
     }
 
     fn confirm_process_stop(&mut self) -> Vec<Effect> {

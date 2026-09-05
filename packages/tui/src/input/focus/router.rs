@@ -109,6 +109,13 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
             _ => selection_action(app, false),
         },
         SelectionPagePrevious | SelectionPageNext => match surface {
+            Some(SurfaceId::History) => {
+                if matches!(command, SelectionPagePrevious) {
+                    SurfaceAction::HistoryLensPrevious.into()
+                } else {
+                    SurfaceAction::HistoryLensNext.into()
+                }
+            }
             Some(SurfaceId::Notifications) => {
                 if matches!(command, SelectionPagePrevious) {
                     NotificationAction::ScrollUp(10).into()
@@ -143,6 +150,11 @@ fn dispatch(app: &AppState, command: CommandId) -> Option<Action> {
         CompletionAcceptAndSubmit => EditorAction::AcceptAndSubmitSuggestion.into(),
         SessionListOpen => SessionAction::RequestList.into(),
         SessionTreeOpen => SurfaceAction::OpenTree.into(),
+        HistoryRefresh => SurfaceAction::HistoryRefresh.into(),
+        HistoryChooseSession => SurfaceAction::HistoryChooseSession.into(),
+        HistoryFilter => SurfaceAction::HistoryFilter.into(),
+        HistoryFactsOnly => SurfaceAction::HistoryFactsOnly.into(),
+        HistoryDiagnostics => SurfaceAction::HistoryDiagnostics.into(),
         ModelSelectorOpen => ModelAction::RequestList.into(),
         AgentSelectorOpen => SurfaceAction::OpenAgents.into(),
         SettingsOpen => SurfaceAction::OpenSettings.into(),

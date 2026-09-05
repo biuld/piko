@@ -1,8 +1,7 @@
 # D-50: Trajectory viewer architecture
 
-> Status: implemented (rollout 1–4; visual verification in rollout 5 is
-> user-side)
-> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface)
+> Status: superseded by [ADR-029](../decisions/ADR-029-retire-trajectory-web-viewer.md)
+> Implements: [F-36](../features/F-36-agent-run-trajectory.md) (viewer surface; retired)
 
 ## Goal
 

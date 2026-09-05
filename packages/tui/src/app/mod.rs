@@ -9,6 +9,7 @@ use crate::{
         approval::ApprovalPanel,
         auth_selector::AuthSelector,
         editor::Editor,
+        history::HistoryPanel,
         model_selector::{ModelOption, ModelSelector},
         notifications::NotificationCenter,
         session_list::SessionList,
@@ -33,6 +34,7 @@ mod dispatch;
 pub mod effect;
 mod event;
 mod helpers;
+mod history;
 mod pending;
 mod runtime;
 mod session_ops;
@@ -154,6 +156,7 @@ pub struct AppState {
     pub mcp: crate::features::mcp::McpPanel,
     pub processes: crate::features::processes::ProcessPanel,
     pub diagnostics: crate::features::diagnostics::DiagnosticsPanel,
+    pub history: HistoryPanel,
     /// Last known root input id for `/diff` when no work is actively running.
     pub last_root_input_id: Option<String>,
     /// Last push/result work diff for offline re-open via `/diff`.

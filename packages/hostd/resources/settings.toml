@@ -195,14 +195,3 @@ otel-endpoint = "http://127.0.0.1:4318"
 # hijack 127.0.0.1; hostd exporters also disable proxy for OTLP.
 # service.name used in the exported resource
 # service-name = "piko-hostd"
-
-[trajectory]
-# Read-only loopback trajectory web viewer (F-36): serves the step-graph
-# browser over loopback HTTP + SSE. Bind failure is non-fatal (hostd logs
-# and keeps serving the CLI).
-enabled = false
-# Loopback bind address. Only loopback addresses are supported (the viewer
-# is read-only and never exposed off-host).
-bind = "127.0.0.1"
-# Viewer HTTP port.
-port = 3847

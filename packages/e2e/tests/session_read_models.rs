@@ -291,6 +291,7 @@ fn corrupted_read_models_are_rebuilt_from_the_journal_and_republished() {
 
     fs::write(readmodels.join("current.json"), "{corrupted").expect("corrupt current.json");
     fs::write(readmodels.join("trajectory.json"), "{corrupted").expect("corrupt trajectory.json");
+    fs::write(readmodels.join("history.json"), "{corrupted").expect("corrupt history.json");
     fs::remove_file(readmodels.join("head.json")).expect("remove head.json watermark");
 
     host.restart();
@@ -312,7 +313,7 @@ fn corrupted_read_models_are_rebuilt_from_the_journal_and_republished() {
         current["throughChecksum"], head["checksum"],
         "current model is checksum-anchored to the head watermark"
     );
-    for name in ["catalog.json", "trajectory.json"] {
+    for name in ["catalog.json", "trajectory.json", "history.json"] {
         let model = read_json_file(&readmodels.join(name), &format!("republished {name}"));
         assert_eq!(model["sessionId"], session_id, "{name} republished");
         assert_eq!(

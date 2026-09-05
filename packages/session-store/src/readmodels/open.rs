@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::journal::{OpenOptions, RecoveryReport, SessionIdentityFile};
 use crate::replay::{last_open_commit, read_all};
 use crate::segments::normalize_segment_boundary;
-use crate::{Result, SessionAggregate, StoreError, TrajectoryProjection};
+use crate::{HistoryProjection, Result, SessionAggregate, StoreError, TrajectoryProjection};
 
 use super::{load_current_if_current, rebuild_from_commits};
 
@@ -15,6 +15,7 @@ pub(crate) fn load_or_rebuild(
 ) -> Result<(
     SessionAggregate,
     TrajectoryProjection,
+    HistoryProjection,
     Option<String>,
     RecoveryReport,
 )> {
@@ -35,7 +36,7 @@ pub(crate) fn load_or_rebuild(
     } else {
         None
     };
-    if let Some((mut aggregate, trajectory)) = fast {
+    if let Some((mut aggregate, trajectory, history)) = fast {
         // Recompute the published projection so older or repaired read models
         // converge to the same value as journal replay.
         aggregate.rebuild_work_projection();
@@ -43,7 +44,7 @@ pub(crate) fn load_or_rebuild(
             recovery.repaired = true;
         }
         let checksum = tip.map(|commit| commit.checksum.value);
-        return Ok((aggregate, trajectory, checksum, recovery));
+        return Ok((aggregate, trajectory, history, checksum, recovery));
     }
     let (commits, replay_recovery, _) = read_all(path, options.repair_incomplete_tail)?;
     recovery.repaired |= replay_recovery.repaired;
@@ -62,7 +63,8 @@ pub(crate) fn load_or_rebuild(
             "journal identity/generation mismatch".into(),
         ));
     }
-    let (mut aggregate, trajectory, checksum) = rebuild_from_commits(path, identity, &commits)?;
+    let (mut aggregate, trajectory, history, checksum) =
+        rebuild_from_commits(path, identity, &commits)?;
     aggregate.rebuild_work_projection();
     if aggregate.revision > 0
         && (aggregate.session_id.as_deref() != Some(identity.session_id.as_str())
@@ -75,5 +77,5 @@ pub(crate) fn load_or_rebuild(
     if normalize_segment_boundary(path, aggregate.revision)? {
         recovery.repaired = true;
     }
-    Ok((aggregate, trajectory, checksum, recovery))
+    Ok((aggregate, trajectory, history, checksum, recovery))
 }

@@ -38,7 +38,12 @@ impl SessionStore {
             return Err(CommitError::IdentityMismatch);
         }
         let (commit_id, agent_instance_id, committed_at, events) = match command {
-            AgentDurableCommand::Create { identity, spec } => {
+            AgentDurableCommand::Create {
+                identity,
+                spec,
+                origin_root_input_id,
+                origin_tool_call_id,
+            } => {
                 if identity.session_id != session_id {
                     return Err(CommitError::IdentityMismatch);
                 }
@@ -58,15 +63,41 @@ impl SessionStore {
                     }
                 }
                 let now = chrono::Utc::now().timestamp_millis();
+                let mut events = vec![EventData::AgentCreated {
+                    identity: identity.clone(),
+                    spec,
+                    created_at: now,
+                }];
+                match (origin_root_input_id, origin_tool_call_id) {
+                    (Some(root_input_id), Some(tool_call_id)) => {
+                        let model_step_id = origin_step(
+                            &aggregate,
+                            &identity.parent_agent_instance_id,
+                            &root_input_id,
+                            &tool_call_id,
+                        )?;
+                        events.push(EventData::AgentOriginRecordedV1(
+                            piko_session_store::AgentOriginRecordedV1 {
+                                child_agent_instance_id: identity.agent_instance_id.clone(),
+                                parent_agent_instance_id: identity
+                                    .parent_agent_instance_id
+                                    .clone()
+                                    .ok_or(CommitError::IdentityMismatch)?,
+                                parent_root_input_id: root_input_id,
+                                origin_model_step_id: model_step_id,
+                                origin_tool_call_id: tool_call_id,
+                                recorded_at: now,
+                            },
+                        ));
+                    }
+                    (None, None) => {}
+                    _ => return Err(CommitError::IdentityMismatch),
+                }
                 (
                     stable("agent-create", &[session_id, &identity.agent_instance_id]),
                     identity.agent_instance_id.clone(),
                     now,
-                    vec![EventData::AgentCreated {
-                        identity,
-                        spec,
-                        created_at: now,
-                    }],
+                    events,
                 )
             }
             AgentDurableCommand::SetLifecycle {
@@ -328,6 +359,31 @@ impl SessionStore {
 
 fn stable(kind: &str, parts: &[&str]) -> String {
     piko_orchd_api::stable_internal_id(kind, parts)
+}
+
+fn origin_step(
+    aggregate: &piko_session_store::SessionAggregate,
+    parent_agent_instance_id: &Option<String>,
+    root_input_id: &str,
+    tool_call_id: &str,
+) -> Result<String, CommitError> {
+    let parent = parent_agent_instance_id
+        .as_deref()
+        .ok_or(CommitError::IdentityMismatch)?;
+    aggregate
+        .model_steps
+        .values()
+        .find(|step| {
+            step.data.agent_instance_id == parent
+                && step.data.root_input_id == root_input_id
+                && step.data.tool_call_message_ids.iter().any(|message_id| {
+                    aggregate.messages.get(message_id).is_some_and(|message| {
+                        matches!(&message.data.message, piko_protocol::Message::ToolCall { id, .. } if id == tool_call_id)
+                    })
+                })
+        })
+        .map(|step| step.data.model_step_id.clone())
+        .ok_or(CommitError::IdentityMismatch)
 }
 
 fn canonical_disposition(disposition: AgentInputDisposition) -> Option<AgentInputDisposition> {

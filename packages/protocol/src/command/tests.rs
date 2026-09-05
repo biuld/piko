@@ -192,6 +192,46 @@ fn agent_work_diff_get_round_trips() {
 }
 
 #[test]
+fn session_history_commands_round_trip() {
+    let overview = Command::SessionHistoryOverviewGet {
+        command_id: "history-1".into(),
+        session_id: "s1".into(),
+        after_cursor: Some("work:10".into()),
+        limit: Some(25),
+    };
+    let json = serde_json::to_value(&overview).unwrap();
+    assert_eq!(json["type"], "session_history_overview_get");
+    assert_eq!(serde_json::from_value::<Command>(json).unwrap(), overview);
+
+    let journal: Command = serde_json::from_value(serde_json::json!({
+        "type": "session_history_journal_page_get",
+        "command_id": "history-2",
+        "session_id": "s1",
+        "expected_revision": 42
+    }))
+    .unwrap();
+    assert!(matches!(
+        journal,
+        Command::SessionHistoryJournalPageGet {
+            provenance: crate::HistoryProvenanceFilter::All,
+            expected_revision: 42,
+            ..
+        }
+    ));
+
+    let transcript = Command::SessionHistoryTranscriptPageGet {
+        command_id: "history-3".into(),
+        session_id: "s1".into(),
+        expected_revision: 7,
+        after_cursor: None,
+        limit: Some(50),
+    };
+    let json = serde_json::to_value(&transcript).unwrap();
+    assert_eq!(json["type"], "session_history_transcript_page_get");
+    assert_eq!(serde_json::from_value::<Command>(json).unwrap(), transcript);
+}
+
+#[test]
 fn process_list_and_info_round_trip() {
     let command: Command =
         serde_json::from_value(serde_json::json!({ "type": "process_list", "command_id": "c1" }))

@@ -30,6 +30,10 @@ pub enum AgentDurableCommand {
     Create {
         identity: AgentInstanceIdentity,
         spec: crate::AgentSpec,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin_root_input_id: Option<AgentInputId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin_tool_call_id: Option<String>,
     },
     SetLifecycle {
         agent_instance_id: AgentInstanceId,

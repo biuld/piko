@@ -170,10 +170,9 @@ pub struct TrajectorySystemNotificationRecord {
 }
 
 /// Terminal outcome of a run, recorded as the final trajectory record after
-/// the durable processing-finished fact (F-36 "terminal record"). Its SSE
-/// fan-out is what lets a live viewer observe the running → terminal
-/// transition: on a clean completion no other trajectory record would follow
-/// the processing-finished fact.
+/// the durable processing-finished fact (F-36 "terminal record"). On a clean
+/// completion no other trajectory record would follow that fact; Session
+/// History reads this observation as diagnostic detail.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TrajectoryTerminalRecord {
@@ -186,7 +185,7 @@ pub struct TrajectoryTerminalRecord {
     pub finished_at: i64,
 }
 
-/// One trajectory record, tagged for query responses and the web viewer.
+/// One trajectory record, tagged for query responses and history diagnostics.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TrajectoryRecord {
@@ -202,7 +201,7 @@ pub enum TrajectoryRecord {
 
 /// Terminal outcome of a run. The query derives it from the durable
 /// processing-finished fact; `TrajectoryRecord::Terminal` also records it as
-/// the final observational record so live SSE viewers observe the
+/// the final observational record so history diagnostics can show the
 /// running → terminal transition. Absent means the run is still running or
 /// was interrupted.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -230,8 +229,8 @@ pub struct TrajectoryRunSummary {
     pub child_run_count: u32,
     pub message_count: u32,
     pub dropped_records: u32,
-    /// Host-owned run-level usage rollup (F-32 bookkeeping authority): the
-    /// viewer formats it, it never aggregates records itself.
+    /// Host-owned run-level usage rollup (F-32 bookkeeping authority):
+    /// consumers format it and never aggregate records themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TrajectoryRunUsage>,
 }
@@ -297,33 +296,6 @@ pub struct TrajectoryRun {
     pub messages: Vec<TrajectoryMessage>,
 }
 
-/// Live fan-out event consumed by the SSE web viewer. Published after a
-/// trajectory record is durably appended (`Record`), or when the session's
-/// run list changes — a run started (assembly record) or finished (terminal
-/// record) — so a viewer following a different run can refresh the strip.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TrajectoryLiveEvent {
-    /// A record for one run was durably appended.
-    Record(Box<TrajectoryLiveRecordEvent>),
-    /// The session's run list changed; the viewer should re-fetch it.
-    RunsChanged {
-        session_id: String,
-        committed_at: i64,
-    },
-}
-
-/// One durably appended trajectory record, tagged for the SSE web viewer.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct TrajectoryLiveRecordEvent {
-    pub session_id: String,
-    pub root_input_id: String,
-    pub revision: u64,
-    pub committed_at: i64,
-    pub record: TrajectoryRecord,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,36 +326,6 @@ mod tests {
             }
             other => panic!("expected terminal record, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn live_events_round_trip() {
-        let record = TrajectoryLiveEvent::Record(Box::new(TrajectoryLiveRecordEvent {
-            session_id: "s".into(),
-            root_input_id: "input-r".into(),
-            revision: 7,
-            committed_at: 1,
-            record: TrajectoryRecord::Terminal(TrajectoryTerminalRecord {
-                identity: identity(),
-                kind: TrajectoryTerminalKind::Completed,
-                reason: None,
-                finished_at: 2,
-            }),
-        }));
-        let json = serde_json::to_value(&record).unwrap();
-        assert_eq!(json["kind"], "record");
-        assert_eq!(json["rootInputId"], "input-r");
-        let back: TrajectoryLiveEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(record, back);
-
-        let changed = TrajectoryLiveEvent::RunsChanged {
-            session_id: "s".into(),
-            committed_at: 3,
-        };
-        let json = serde_json::to_value(&changed).unwrap();
-        assert_eq!(json["kind"], "runs_changed");
-        let back: TrajectoryLiveEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(changed, back);
     }
 
     #[test]

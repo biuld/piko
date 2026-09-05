@@ -7,7 +7,39 @@ impl AppState {
         result: Result<piko_protocol::CommandResult, String>,
     ) -> Vec<Effect> {
         let mut effects = Vec::new();
+        let pending_history =
+            self.history.pending_command_id.as_deref() == Some(&response_command_id);
+        let is_history = matches!(
+            &result,
+            Ok(
+                piko_protocol::CommandResult::SessionHistoryOverviewGot { .. }
+                    | piko_protocol::CommandResult::SessionHistoryWorkPaged { .. }
+                    | piko_protocol::CommandResult::SessionHistoryJournalPaged { .. }
+                    | piko_protocol::CommandResult::SessionHistoryTranscriptPaged { .. }
+                    | piko_protocol::CommandResult::SessionHistoryItemGot { .. }
+                    | piko_protocol::CommandResult::HistoryRevisionChanged { .. }
+            )
+        );
+        if (is_history || response_command_id.starts_with("history:")) && !pending_history {
+            return effects;
+        }
+        if pending_history {
+            self.history.pending_command_id = None;
+            self.history.loading = false;
+            if let Err(error) = &result {
+                self.history.error = Some(error.clone());
+                return effects;
+            }
+            if let Ok(piko_protocol::CommandResult::SessionListed { sessions, .. }) = result {
+                self.history.sessions = sessions;
+                self.history.selected = 0;
+                return effects;
+            }
+        }
         match result {
+            Ok(piko_protocol::CommandResult::HistoryRevisionChanged { session_id, .. }) => {
+                return self.open_history(Some(session_id));
+            }
             Ok(piko_protocol::CommandResult::Empty) => {}
             Ok(piko_protocol::CommandResult::AgentInputSubmitted { receipt, .. }) => {
                 self.session
@@ -71,6 +103,30 @@ impl AppState {
                     self.status = "no work diff".to_string();
                 }
             },
+            Ok(piko_protocol::CommandResult::SessionHistoryOverviewGot { overview, .. }) => {
+                let count = overview.works.len();
+                self.history.set_overview(overview);
+                self.status = format!("{count} historical work item(s)");
+            }
+            Ok(piko_protocol::CommandResult::SessionHistoryWorkPaged { page, .. }) => {
+                let count = page.items.len();
+                self.history.set_work(page);
+                self.status = format!("{count} history item(s)");
+            }
+            Ok(piko_protocol::CommandResult::SessionHistoryJournalPaged { page, .. }) => {
+                let count = page.commits.len();
+                self.history.set_journal(page);
+                self.status = format!("{count} journal commit(s)");
+            }
+            Ok(piko_protocol::CommandResult::SessionHistoryTranscriptPaged { page, .. }) => {
+                let count = page.items.len();
+                self.history.set_transcript(page);
+                self.status = format!("{count} transcript item(s)");
+            }
+            Ok(piko_protocol::CommandResult::SessionHistoryItemGot { detail, .. }) => {
+                self.history.set_detail(detail);
+                self.status = "history detail".into();
+            }
             Ok(piko_protocol::CommandResult::SessionCreated {
                 session_id, cwd, ..
             }) => {

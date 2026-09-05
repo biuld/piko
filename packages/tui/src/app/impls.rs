@@ -49,6 +49,7 @@ impl AppState {
             mcp: crate::features::mcp::McpPanel::new(),
             processes: crate::features::processes::ProcessPanel::new(),
             diagnostics: crate::features::diagnostics::DiagnosticsPanel::new(),
+            history: crate::features::history::HistoryPanel::default(),
             last_root_input_id: None,
             last_agent_work_diff: None,
             interactions: ToolInteractionPanel::new(),
@@ -302,6 +303,9 @@ impl AppState {
 
     pub fn pop_focus(&mut self) {
         let popped = self.focus_manager.pop();
+        if popped.is_some_and(|mode| mode.is_surface(SurfaceId::History)) {
+            self.history = Default::default();
+        }
         if !popped.is_some_and(|m| m.is_surface(SurfaceId::SummaryPrompt))
             && let Some(mode) = popped
         {
@@ -310,6 +314,7 @@ impl AppState {
     }
 
     pub fn clear_focus(&mut self) {
+        self.history = Default::default();
         self.focus_manager.clear_to_chat();
         self.clear_all_filters();
         self.agent_panel.focus = false;
@@ -324,6 +329,10 @@ impl AppState {
             AppMode::Surface(SurfaceId::Models) => self.models.filter.clear(),
             AppMode::Surface(SurfaceId::Settings) => self.settings.filter.clear(),
             AppMode::Surface(SurfaceId::AuthSelector) => self.auth_selector.filter.clear(),
+            AppMode::Surface(SurfaceId::History) => {
+                self.history.filter.clear();
+                self.history.filter_editing = false;
+            }
             _ => {}
         }
     }
@@ -336,6 +345,8 @@ impl AppState {
         self.thinking.filter.clear();
         self.settings.filter.clear();
         self.auth_selector.filter.clear();
+        self.history.filter.clear();
+        self.history.filter_editing = false;
     }
 
     pub(crate) fn active_filter_mut(&mut self) -> Option<&mut String> {
@@ -352,6 +363,9 @@ impl AppState {
                 }
                 crate::features::auth_selector::AuthSelectorState::ApiKeyInput { .. } => None,
             },
+            AppMode::Surface(SurfaceId::History) if self.history.filter_editing => {
+                Some(&mut self.history.filter)
+            }
             _ => None,
         }
     }
@@ -431,11 +445,7 @@ impl AppState {
             SettingsAction::ObservabilityEndpoint(ep) => {
                 self.host_settings.otel_endpoint = (*ep).to_string();
             }
-            SettingsAction::Trajectory(v) => self.host_settings.trajectory_enabled = *v,
-            SettingsAction::TrajectoryBind(bind) => {
-                self.host_settings.trajectory_bind = (*bind).to_string();
-            }
-            SettingsAction::TrajectoryPort(port) => self.host_settings.trajectory_port = *port,
+
             SettingsAction::EditorMultiline(value) => {
                 self.tui_config.editor.multiline = *value;
             }

@@ -91,7 +91,7 @@ impl ProjectingAgentCommitPort {
         let changed = {
             let mut agents = self.agents.lock().unwrap();
             match command {
-                AgentDurableCommand::Create { identity, spec } => {
+                AgentDurableCommand::Create { identity, spec, .. } => {
                     let info = crate::api::AgentInfo {
                         session_id: self.session_id.clone(),
                         agent_instance_id: identity.agent_instance_id.clone(),

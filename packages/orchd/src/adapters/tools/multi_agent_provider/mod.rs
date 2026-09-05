@@ -69,6 +69,7 @@ impl MultiAgentToolProvider {
                 agent_spec_id: agent_spec_id.clone(),
                 requested_agent_instance_id: Some(child_id),
                 origin_tool_call_id: Some(call.id.clone()),
+                origin_root_input_id: Some(context.root_input_id.clone()),
             })
             .await
             .map_err(|error| map_spawn_agent_error(error, &specs))?;

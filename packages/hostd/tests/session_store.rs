@@ -6,7 +6,6 @@ use piko_protocol::{
     MessageContent,
 };
 use tempfile::tempdir;
-
 fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
     piko_protocol::AgentSpec {
         id: id.into(),
@@ -23,7 +22,6 @@ fn test_agent_spec(id: &str) -> piko_protocol::AgentSpec {
         active_tool_names: None,
     }
 }
-
 fn message_commit(id: &str, parent: Option<&str>) -> MessageCommit {
     MessageCommit {
         session_id: "session-1".into(),
@@ -47,7 +45,6 @@ fn repository_create_returns_the_persisted_root_agent_selected() {
         .create("/project")
         .unwrap();
     let root_agent_instance_id = format!("agent_{}_root", created.state.session_id);
-
     assert_eq!(
         created.state.active_agent_instance_id.as_deref(),
         Some(root_agent_instance_id.as_str())
@@ -68,7 +65,6 @@ fn import_validates_then_atomically_publishes_without_merging_existing_destinati
         .create("/project")
         .unwrap();
     let destination_repo = JsonlSessionRepository::new(destination_root.path());
-
     let imported = destination_repo.import(&source.path).unwrap();
     assert_eq!(imported.state.session_id, source.state.session_id);
     assert_eq!(imported.state.cwd, source.state.cwd);
@@ -98,6 +94,8 @@ async fn agent_tree_lifecycle_and_inbox_survive_repository_reopen() {
             AgentDurableCommand::Create {
                 identity: child.clone(),
                 spec: test_agent_spec("coder"),
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await
@@ -168,6 +166,8 @@ async fn private_transcripts_are_recovered_per_agent() {
                         parent_agent_instance_id: Some("agent_session-1_root".into()),
                     },
                     spec: test_agent_spec("coder"),
+                    origin_root_input_id: None,
+                    origin_tool_call_id: None,
                 },
             )
             .await
@@ -373,6 +373,8 @@ async fn child_transcript_does_not_move_persisted_session_leaf() {
                     parent_agent_instance_id: Some("agent_session-1_root".into()),
                 },
                 spec: test_agent_spec("coder"),
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await
@@ -462,6 +464,8 @@ async fn durable_commands_serialize_across_independent_store_handles() {
             parent_agent_instance_id: Some(root.agent_instance_id.clone()),
         },
         spec: test_agent_spec("coder"),
+        origin_root_input_id: None,
+        origin_tool_call_id: None,
     };
     let right_cmd = AgentDurableCommand::Create {
         identity: AgentInstanceIdentity {
@@ -471,6 +475,8 @@ async fn durable_commands_serialize_across_independent_store_handles() {
             parent_agent_instance_id: Some(root.agent_instance_id),
         },
         spec: test_agent_spec("reviewer"),
+        origin_root_input_id: None,
+        origin_tool_call_id: None,
     };
 
     let (left_ack, right_ack) = tokio::join!(

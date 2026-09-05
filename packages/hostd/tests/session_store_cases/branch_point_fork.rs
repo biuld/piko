@@ -187,6 +187,8 @@ async fn full_clone_clears_world_state_baseline_and_transient_queues() {
                     parent_agent_instance_id: Some(root.clone()),
                 },
                 spec: test_agent_spec("coder"),
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await

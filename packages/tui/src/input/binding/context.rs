@@ -22,6 +22,7 @@ pub enum ScopeKind {
     Settings,
     Auth,
     Diagnostics,
+    History,
     Todos,
     Usage,
     Notifications,
@@ -49,6 +50,7 @@ impl ScopeKind {
         Self::Settings,
         Self::Auth,
         Self::Diagnostics,
+        Self::History,
         Self::Todos,
         Self::Usage,
         Self::Notifications,
@@ -76,6 +78,7 @@ impl ScopeKind {
             Self::Settings => "settings",
             Self::Auth => "auth",
             Self::Diagnostics => "diagnostics",
+            Self::History => "history",
             Self::Todos => "todos",
             Self::Usage => "usage",
             Self::Notifications => "notifications",
@@ -106,6 +109,7 @@ impl ScopeKind {
             SurfaceId::Settings => Self::Settings,
             SurfaceId::AuthSelector => Self::Auth,
             SurfaceId::Diagnostics => Self::Diagnostics,
+            SurfaceId::History => Self::History,
             SurfaceId::Todos => Self::Todos,
             SurfaceId::Usage => Self::Usage,
             SurfaceId::Notifications => Self::Notifications,
@@ -221,7 +225,9 @@ impl BindingContext {
                 )
                 .is_some(),
             terminal_enhanced: profile.key_reachability.enhanced_keyboard,
-            text_input_active: app.active_text_box_is_present(),
+            text_input_active: app.active_text_box_is_present()
+                || (app.mode() == AppMode::Surface(SurfaceId::History)
+                    && app.history.filter_editing),
             timeline_selection_active: app.timeline().has_selection(),
         }
     }
@@ -333,6 +339,10 @@ pub fn active_scope_stack(app: &AppState) -> ScopeStack {
                     | SurfaceId::AuthSelector
             )
             .then_some(TextSink::Surface)
+            .or_else(|| {
+                (surface == SurfaceId::History && app.history.filter_editing)
+                    .then_some(TextSink::Surface)
+            })
             .or_else(|| {
                 app.active_text_box_is_present()
                     .then_some(TextSink::Surface)

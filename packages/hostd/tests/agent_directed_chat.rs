@@ -135,6 +135,8 @@ async fn child_transcript_and_selected_view_persist_independently() {
                     tool_set_ids: Vec::new(),
                     active_tool_names: None,
                 },
+                origin_root_input_id: None,
+                origin_tool_call_id: None,
             },
         )
         .await

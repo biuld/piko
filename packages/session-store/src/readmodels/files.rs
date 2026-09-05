@@ -28,7 +28,7 @@ pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     sync_dir(path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
-pub const READ_MODEL_SCHEMA: u32 = 1;
+pub const READ_MODEL_SCHEMA: u32 = 2;
 
 pub(crate) fn dir(path: &Path) -> PathBuf {
     path.join("readmodels")
@@ -48,6 +48,10 @@ pub(crate) fn current_path(path: &Path) -> PathBuf {
 
 pub(crate) fn trajectory_path(path: &Path) -> PathBuf {
     dir(path).join("trajectory.json")
+}
+
+pub(crate) fn history_path(path: &Path) -> PathBuf {
+    dir(path).join("history.json")
 }
 
 pub(crate) fn ensure_dir(path: &Path) -> Result<()> {

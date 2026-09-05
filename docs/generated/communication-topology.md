@@ -12,7 +12,6 @@ flowchart LR
         nhostd_prompt_interaction_reply["hostd.prompt.interaction_reply<br/>Reply / Request<br/>One"]
         nhostd_client_output["hostd.client.output<br/>ClientOutput / Connection<br/>Bounded(256)"]
         nhostd_trajectory_writes["hostd.trajectory.writes<br/>Mailbox / Session<br/>Bounded(1024)"]
-        nhostd_trajectory_live["hostd.trajectory.live<br/>Observation / Session<br/>Bounded(256)"]
         nhostd_trajectory_recorders["hostd.trajectory.recorders<br/>LatestState / Session<br/>Latest"]
     end
     subgraph orchd["orchd"]
@@ -53,7 +52,6 @@ flowchart LR
     ncomponent_OrchAgentRunRunner["OrchAgentRunRunner"]
     ncomponent_SessionObservationRouter["SessionObservationRouter"]
     ncomponent_TrajectoryRecorderRegistry["TrajectoryRecorderRegistry"]
-    ncomponent_TrajectoryWebViewer["TrajectoryWebViewer"]
     ncomponent_TrajectoryWriterTask["TrajectoryWriterTask"]
     ncomponent_TuiEventLoop["TuiEventLoop"]
     ncomponent_TuiInputReducer["TuiInputReducer"]
@@ -99,8 +97,6 @@ flowchart LR
     ncomponent_HostPromptAssemblyPort --> nhostd_trajectory_writes
     ncomponent_ExecutionActor --> nhostd_trajectory_writes
     nhostd_trajectory_writes --> ncomponent_TrajectoryWriterTask
-    ncomponent_TrajectoryWriterTask --> nhostd_trajectory_live
-    nhostd_trajectory_live --> ncomponent_TrajectoryWebViewer
     ncomponent_TrajectoryRecorderRegistry --> nhostd_trajectory_recorders
-    nhostd_trajectory_recorders --> ncomponent_TrajectoryWebViewer
+    nhostd_trajectory_recorders --> ncomponent_OrchAgentRunRunner
 ```

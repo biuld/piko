@@ -179,6 +179,50 @@ pub enum Command {
         #[serde(skip_serializing_if = "Option::is_none")]
         label: Option<String>,
     },
+    /// Inspect one session without opening or attaching it.
+    SessionHistoryOverviewGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    SessionHistoryWorkPageGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        root_input_id: String,
+        expected_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    SessionHistoryJournalPageGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        expected_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+        #[serde(default)]
+        provenance: crate::HistoryProvenanceFilter,
+    },
+    SessionHistoryTranscriptPageGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        expected_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    SessionHistoryItemGet {
+        command_id: CommandId,
+        session_id: SessionId,
+        item_ref: crate::HistoryItemRef,
+    },
     /// Submit one immutable AgentInput through the canonical work-control path.
     AgentInputSubmit {
         command_id: CommandId,
@@ -318,6 +362,11 @@ impl Command {
             | Self::SessionDelete { command_id, .. }
             | Self::SessionNavigate { command_id, .. }
             | Self::SessionSetLabel { command_id, .. }
+            | Self::SessionHistoryOverviewGet { command_id, .. }
+            | Self::SessionHistoryWorkPageGet { command_id, .. }
+            | Self::SessionHistoryJournalPageGet { command_id, .. }
+            | Self::SessionHistoryTranscriptPageGet { command_id, .. }
+            | Self::SessionHistoryItemGet { command_id, .. }
             | Self::AgentInputSubmit { command_id, .. }
             | Self::AgentInputCancel { command_id, .. }
             | Self::AgentInterrupt { command_id, .. }
@@ -390,6 +439,8 @@ mod tests;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum ProtocolError {
+    #[error("history revision changed: current {current_revision}")]
+    HistoryRevisionChanged { current_revision: u64 },
     #[error("session not found: {0}")]
     SessionNotFound(String),
     #[error("turn not found: {0}")]

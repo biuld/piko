@@ -225,6 +225,25 @@ pub(crate) fn pane_hints(app: &AppState, surface: SurfaceId) -> PaneHints {
             tip: navigation_hint(app, "select", "cancel"),
             footer: None,
         },
+        SurfaceId::History => PaneHints {
+            tip: None,
+            footer: joined_hint([
+                navigation_hint(app, "expand", "back"),
+                binding_pair_hint(
+                    app,
+                    CommandId::SelectionPagePrevious,
+                    CommandId::SelectionPageNext,
+                )
+                .map(|key| format!("{key} lens")),
+                binding_hint(app, CommandId::HistoryRefresh).map(|key| format!("{key} refresh")),
+                binding_hint(app, CommandId::HistoryChooseSession)
+                    .map(|key| format!("{key} sessions")),
+                binding_hint(app, CommandId::HistoryFilter).map(|key| format!("{key} filter")),
+                binding_hint(app, CommandId::HistoryFactsOnly).map(|key| format!("{key} facts")),
+                binding_hint(app, CommandId::HistoryDiagnostics)
+                    .map(|key| format!("{key} diagnostic")),
+            ]),
+        },
         SurfaceId::Usage | SurfaceId::Todos | SurfaceId::Diagnostics => PaneHints {
             tip: None,
             footer: navigation_hint(app, "scroll", "close"),

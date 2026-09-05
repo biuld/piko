@@ -30,7 +30,7 @@ It reuses `SelectableList`, `SelectableItem`, `PaneSpec`, and
   `process.stop` into one selectable process-management journey; stop
   confirmation is panel state, not another surface.
 - `/diff` uses the Diagnostics surface; prompt-assembly diagnostics live in
-  the trajectory web viewer (F-36).
+  Session History (F-52).
 
 There is deliberately no Commands `SurfaceId`, panel state, focus route, or
 keybinding action.

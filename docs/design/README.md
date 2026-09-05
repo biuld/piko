@@ -14,6 +14,11 @@ decisions that affect multiple features or package boundaries belong in
 
 ## Recent designs
 
+- [D-69: Journal-derived session history inspector](D-69-session-history-inspector.md)
+  implements F-52: a durable history projection, revision-consistent host
+  query, and read-only TUI Work/Agents/Transcript/Journal lenses whose skeleton
+  comes from required facts and whose trajectory detail is optional. The F-36
+  loopback HTTP/SSE viewer is retired (ADR-029).
 - [D-68: AgentInput work model and control plane](D-68-agent-control-plane.md)
   implements F-51: Session/Agent/ModelStep invariants, AgentInput as stimulus
   and root-work identity, durable steer/follow-up admission, TUI cutover, and
@@ -73,21 +78,21 @@ decisions that affect multiple features or package boundaries belong in
   removes the Prompt tab and renders each run's prompt assembly as a
   time-ordered card in the message stream with the same selection/expansion
   behavior as ordinary cards; the timeline prompt marker selects that card
-  (implemented; visual QA user-side).
+  (superseded by ADR-029).
 - [D-51: Trajectory prompt assembly and cache debugging view](D-51-trajectory-prompt-and-cache-view.md)
   adds a Prompt tab to the trajectory viewer: the frozen assembly (blocks,
   tool catalog, cache plan) plus per-step provider cache usage, with an
-  optional `usage` field on the model-step record (draft).
+  optional `usage` field on the model-step record (superseded by ADR-029).
 - [D-50: Trajectory viewer architecture](D-50-trajectory-viewer-architecture.md)
   defines the hostd-served trajectory web viewer: modular static assets
   (no build toolchain), a store with per-slice subscriptions, a canvas
   timeline component, native-scroll DOM lists, loop-free SSE, and CSS tokens
-  as the single source of truth (draft).
+  as the single source of truth (superseded by ADR-029).
 - [D-49: Agent run trajectory](D-49-agent-run-trajectory.md)
   implements F-36: a durable per-run record (prompt assembly + agent
-  trajectory) in the journal as observational event types, served to a
-  real-time loopback web viewer over SSE, retiring D-30 and OTel span export
-  (draft).
+  trajectory) in the journal as observational event types, retiring D-30 and
+  OTel span export; the loopback HTTP/SSE viewer is retired by ADR-029
+  (implemented for capture).
 - [D-48: Turn budget headroom and steer responsiveness](D-48-turn-budget-headroom-and-steer-responsiveness.md)
   implements F-35: a bounded output/reasoning reserve in the per-step context
   preflight and a respond-first model step after a steered user message

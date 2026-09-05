@@ -48,6 +48,8 @@ impl AgentRuntimeApi for AgentRuntime {
                 AgentDurableCommand::Create {
                     identity: root.clone(),
                     spec: root_spec,
+                    origin_root_input_id: None,
+                    origin_tool_call_id: None,
                 },
             )
             .await
@@ -159,6 +161,8 @@ impl AgentRuntimeApi for AgentRuntime {
                 AgentDurableCommand::Create {
                     identity: identity.clone(),
                     spec: spec.clone(),
+                    origin_root_input_id: request.origin_root_input_id.clone(),
+                    origin_tool_call_id: request.origin_tool_call_id.clone(),
                 },
             )
             .await

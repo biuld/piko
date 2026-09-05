@@ -92,11 +92,11 @@ impl HostApp {
         }
         let terminal = completion.result;
         // F-36: record the terminal outcome on the durable trajectory. The
-        // terminal record is appended after the processing-finished fact, so
-        // its SSE fan-out makes a live viewer observe the running → terminal
-        // transition (on a clean completion no other trajectory record would
-        // follow the fact). Failures additionally keep the RunError
-        // notification so the human-readable reason is visible in the stream.
+        // terminal record is appended after the processing-finished fact so
+        // history diagnostics can show the running → terminal transition (on
+        // a clean completion no other trajectory record would follow the
+        // fact). Failures additionally keep the RunError notification so the
+        // human-readable reason is visible in the diagnostic stream.
         self.record_trajectory_terminal(session_id, agent_instance_id, input_id, &terminal)
             .await;
         // F-36: record run failures on the durable trajectory.

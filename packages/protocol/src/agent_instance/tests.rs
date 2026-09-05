@@ -76,6 +76,7 @@ fn agent_facing_dtos_never_serialize_execution_identity() {
             agent_spec_id: "main".into(),
             requested_agent_instance_id: None,
             origin_tool_call_id: Some("tool-1".into()),
+            origin_root_input_id: Some("input-1".into()),
         })
         .expect("serialize CreateAgentRequest"),
         serde_json::to_value(SendAgentInputRequest {

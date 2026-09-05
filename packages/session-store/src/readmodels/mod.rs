@@ -3,6 +3,9 @@
 mod catalog;
 mod current;
 mod files;
+mod history;
+#[cfg(test)]
+mod history_tests;
 mod open;
 mod query;
 mod trajectory;
@@ -15,8 +18,15 @@ use crate::{Result, SessionAggregate};
 
 pub use catalog::{CatalogView, inspect_catalog};
 pub use files::READ_MODEL_SCHEMA;
+pub use history::{
+    HistoryCommit, HistoryEvent, HistoryProjection, HistoryProvenance, HistoryTransition,
+    apply_commit as apply_history_commit,
+};
 pub(crate) use open::load_or_rebuild;
-pub use query::{query_catalog, query_current, query_trajectory};
+pub use query::{
+    InspectionBundle, query_catalog, query_current, query_history, query_inspection,
+    query_trajectory,
+};
 pub use trajectory::{
     TrajectoryProjection, TrajectoryRunProjection, apply_commit as apply_trajectory_commit,
 };
@@ -31,12 +41,14 @@ pub(crate) fn publish(
     journal_generation: &str,
     aggregate: &SessionAggregate,
     trajectory: &TrajectoryProjection,
+    history: &HistoryProjection,
     checksum: &str,
 ) -> Result<()> {
     files::ensure_dir(path)?;
     catalog::write(path, session_id, journal_generation, aggregate, checksum)?;
     current::write(path, session_id, journal_generation, aggregate, checksum)?;
     trajectory::write(path, session_id, journal_generation, trajectory, checksum)?;
+    history::write(path, session_id, journal_generation, history, checksum)?;
     write_head(
         path,
         session_id,
@@ -50,12 +62,19 @@ pub(crate) fn rebuild_from_commits(
     path: &Path,
     identity: &SessionIdentityFile,
     commits: &[DurableCommit],
-) -> Result<(SessionAggregate, TrajectoryProjection, Option<String>)> {
+) -> Result<(
+    SessionAggregate,
+    TrajectoryProjection,
+    HistoryProjection,
+    Option<String>,
+)> {
     let mut aggregate = SessionAggregate::default();
     let mut trajectory = TrajectoryProjection::default();
+    let mut history = HistoryProjection::default();
     for commit in commits {
         aggregate.apply_for_replay(commit)?;
         apply_trajectory_commit(&mut trajectory, commit);
+        apply_history_commit(&mut history, commit);
     }
     let checksum = commits.last().map(|commit| commit.checksum.value.clone());
     if let Some(checksum) = checksum.as_deref() {
@@ -65,17 +84,18 @@ pub(crate) fn rebuild_from_commits(
             &identity.journal_generation,
             &aggregate,
             &trajectory,
+            &history,
             checksum,
         )?;
     }
-    Ok((aggregate, trajectory, checksum))
+    Ok((aggregate, trajectory, history, checksum))
 }
 
 pub(crate) fn load_current_if_current(
     path: &Path,
     identity: &SessionIdentityFile,
     tip: Option<&DurableCommit>,
-) -> Result<Option<(SessionAggregate, TrajectoryProjection)>> {
+) -> Result<Option<(SessionAggregate, TrajectoryProjection, HistoryProjection)>> {
     let Some(current) = current::load(path)? else {
         return Ok(None);
     };
@@ -124,9 +144,32 @@ pub(crate) fn load_current_if_current(
     if !trajectory_aligned {
         return Ok(None);
     }
+    let Some(history) = history::load(path)? else {
+        return Ok(None);
+    };
+    let history_aligned = if let Some(tip) = tip {
+        files::envelope_matches(
+            history.schema_version,
+            &history.session_id,
+            &history.journal_generation,
+            history.through_revision,
+            &history.through_checksum,
+            identity,
+            tip,
+        )
+    } else {
+        history.schema_version == files::READ_MODEL_SCHEMA
+            && history.session_id == identity.session_id
+            && history.journal_generation == identity.journal_generation
+            && history.through_revision == current.through_revision
+            && history.through_checksum == current.through_checksum
+    };
+    if !history_aligned {
+        return Ok(None);
+    }
     let mut trajectory = trajectory.projection;
     trajectory.refresh_counts();
-    Ok(Some((current.aggregate, trajectory)))
+    Ok(Some((current.aggregate, trajectory, history.projection)))
 }
 
 fn write_head(

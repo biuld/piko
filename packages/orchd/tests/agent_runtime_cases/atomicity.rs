@@ -9,6 +9,7 @@ async fn root_and_child_are_committed_before_they_are_routable() {
             agent_spec_id: "coder".into(),
             requested_agent_instance_id: Some("coder-1".into()),
             origin_tool_call_id: Some("call-1".into()),
+            origin_root_input_id: Some("input-1".into()),
         })
         .await
         .expect("create child");

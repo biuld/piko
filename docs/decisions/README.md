@@ -36,3 +36,5 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-025](ADR-025-authoritative-agent-lifecycle.md) | Persist ModelStep boundaries atomically with distinct runtime correlation IDs | accepted; core-domain hierarchy superseded by ADR-027 |
 | [ADR-026](ADR-026-agent-delegation-boundary.md) | Separate supervisor/worker delegation capability from agent roles and tool declarations | accepted |
 | [ADR-027](ADR-027-agent-work-lifecycle.md) | Session/Agent/ModelStep invariants; AgentInput as stimulus and root-work identity; delete Turn/Run/Execution leftovers | proposed |
+| [ADR-028](ADR-028-journal-derived-session-history.md) | Derive historical inspection from required journal facts and use trajectory only as diagnostic enrichment | proposed |
+| [ADR-029](ADR-029-retire-trajectory-web-viewer.md) | Retire the F-36 loopback HTTP/SSE trajectory viewer; TUI Session History is the inspector | accepted |

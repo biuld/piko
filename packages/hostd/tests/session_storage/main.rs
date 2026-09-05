@@ -107,6 +107,8 @@ impl AgentRunRunner for AgentPersistRunner {
                                 parent_agent_instance_id,
                             },
                             spec: test_agent_spec(agent_id),
+                            origin_root_input_id: None,
+                            origin_tool_call_id: None,
                         },
                     )
                     .await;

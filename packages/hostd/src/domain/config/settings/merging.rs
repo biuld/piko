@@ -61,7 +61,6 @@ pub(crate) fn merge(base: HostSettings, overrides: HostSettings) -> HostSettings
         execution: merge_execution(base.execution, overrides.execution),
         agent_runtime: merge_agent_runtime(base.agent_runtime, overrides.agent_runtime),
         observability: merge_observability(base.observability, overrides.observability),
-        trajectory: overrides.trajectory.or(base.trajectory),
         session_dir: overrides.session_dir.or(base.session_dir),
         active_tool_names: overrides.active_tool_names.or(base.active_tool_names),
         mcp_servers: if overrides.mcp_servers.is_empty() {

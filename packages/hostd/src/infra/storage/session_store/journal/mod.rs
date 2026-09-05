@@ -215,6 +215,11 @@ impl SessionStore {
             .map_err(|error| self.storage_error(error))
     }
 
+    pub fn inspection(&self) -> Result<piko_session_store::InspectionBundle, SessionStorageError> {
+        piko_session_store::query_inspection(&self.session_dir)
+            .map_err(|error| self.storage_error(error))
+    }
+
     fn storage_error(&self, error: piko_session_store::StoreError) -> SessionStorageError {
         match error {
             piko_session_store::StoreError::NotFound(path) => {

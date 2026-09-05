@@ -12,9 +12,11 @@ mod guardian;
 pub mod host_app;
 mod observability;
 mod observation;
+mod session_history;
 pub mod sessions;
 mod trajectory;
 
 pub(crate) use agent_work_control::AgentWorkControl;
 pub use host_app::HostApp;
+pub use session_history::SessionHistoryQuery;
 pub use trajectory::TrajectoryQuery;

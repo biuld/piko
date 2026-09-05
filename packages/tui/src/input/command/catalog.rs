@@ -33,14 +33,19 @@ const TEXT_DELETE_BACKWARD: &[ScopeKind] = &[
     ScopeKind::Selection,
     ScopeKind::ToolInteraction,
 ];
-const CANCEL: &[ScopeKind] = &[ScopeKind::Selection, ScopeKind::Suggestions];
+const CANCEL: &[ScopeKind] = &[
+    ScopeKind::Selection,
+    ScopeKind::Suggestions,
+    ScopeKind::History,
+];
 const SELECTION_COMMAND: &[ScopeKind] = &[ScopeKind::Selection, ScopeKind::Suggestions];
 const SUGGESTIONS: &[ScopeKind] = &[ScopeKind::Suggestions];
 const TIMELINE: &[ScopeKind] = &[ScopeKind::Timeline];
 const TIMELINE_COPY: &[ScopeKind] = &[ScopeKind::Editor, ScopeKind::Timeline];
-const SELECTION: &[ScopeKind] = &[ScopeKind::Selection];
+const SELECTION: &[ScopeKind] = &[ScopeKind::Selection, ScopeKind::History];
 const TREE: &[ScopeKind] = &[ScopeKind::Tree];
 const SESSIONS: &[ScopeKind] = &[ScopeKind::Sessions];
+const HISTORY: &[ScopeKind] = &[ScopeKind::History];
 const NOTIFICATION: &[ScopeKind] = &[ScopeKind::Notifications];
 const APPROVAL: &[ScopeKind] = &[ScopeKind::Approval];
 const WORKFLOW: &[ScopeKind] = &[ScopeKind::ToolInteraction];
@@ -127,6 +132,11 @@ pub fn catalog() -> Vec<CommandSpec> {
         SelectionNext, "Next", "Move to the next choice", SELECTION_COMMAND, Repeatable, enabled;
         SelectionPagePrevious, "Previous page", "Move one page backward", SELECTION, Repeatable, enabled;
         SelectionPageNext, "Next page", "Move one page forward", SELECTION, Repeatable, enabled;
+        HistoryRefresh, "Refresh history", "Reload the inspected session snapshot", HISTORY, PressOnly, enabled;
+        HistoryChooseSession, "Inspect session", "Choose a session without opening it", HISTORY, PressOnly, enabled;
+        HistoryFilter, "Filter history", "Filter the history list", HISTORY, PressOnly, enabled;
+        HistoryFactsOnly, "History facts only", "Show required journal facts only", HISTORY, PressOnly, enabled;
+        HistoryDiagnostics, "History diagnostics", "Toggle diagnostic visibility", HISTORY, PressOnly, enabled;
         CompletionAccept, "Accept completion", "Accept the selected suggestion", SUGGESTIONS, PressOnly, suggestions;
         CompletionAcceptAndSubmit, "Accept and submit completion", "Accept and submit the selected suggestion", SUGGESTIONS, PressOnly, suggestions;
         SessionListOpen, "Open sessions", "Open the session list", WORKSPACE, PressOnly, enabled;

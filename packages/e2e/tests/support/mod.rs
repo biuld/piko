@@ -424,6 +424,10 @@ impl HostdHarness {
         std::fs::write(&self.release_path, b"release").expect("release scripted gateway");
     }
 
+    pub fn clear_release(&self) {
+        let _ = std::fs::remove_file(&self.release_path);
+    }
+
     pub fn trace(&self) -> Vec<Value> {
         let path = self.root.path().join("trace.jsonl");
         std::fs::read_to_string(path)
