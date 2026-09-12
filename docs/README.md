@@ -41,6 +41,5 @@ During design, classify every missing capability:
 
 - Agent-runtime behavior stays in the piko packages (hostd / orchd / llmd /
   sandbox / protocol).
-- Reusable desktop UI infrastructure goes to the sibling `island-rs` repo.
 - Uncertain capabilities start locally behind a narrow boundary and move only
   after their general contract is understood.

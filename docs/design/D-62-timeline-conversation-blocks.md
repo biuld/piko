@@ -4,8 +4,8 @@
 > Author: piko design loop
 > Date: 2026-08-23
 > Implements: F-45 (conversation block system; PRD lands with this design)
-> Amends: [F-44](docs/features/F-44-conversation-canvas-presentation.md), [D-61](docs/design/D-61-conversation-canvas-presentation.md)
-> Decisions: [ADR-022](docs/decisions/ADR-022-desktop-client-reintroduction.md)
+> Amends: F-44 and [D-61] — removed with the retired desktop client ([ADR-031](../decisions/ADR-031-retire-desktop-client.md)); kept here as a design record
+> Decisions: ADR-022 — removed with the retired desktop client ([ADR-031](../decisions/ADR-031-retire-desktop-client.md))
 > Island: `docs/design/material.md`, `context-menu.md`, `markdown-renderer.md` (`/Users/biu/Projects/island-rs`)
 
 Scratch source of truth for this loop. When it lands in the repo, copy as `docs/design/D-62-timeline-conversation-blocks.md` and add Feature PRD `docs/features/F-45-timeline-conversation-blocks.md`. F-45 **amends F-44 Timeline row presentation** (user hug+max, user overflow collapse, thinking/tool independent collapsible cards, selectable bodies, Quote). It does **not** reopen Composer shape, scroll-edge fade, model/thinking menus, tab clustering, or follow-tail rules. Unlisted F-42 / F-43 / F-44 rules stand.

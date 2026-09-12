@@ -12,7 +12,7 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-001](ADR-001-codex-evidence-prd-first.md) | codex-rs is behavior evidence; PRD-first documentation workflow | accepted |
 | [ADR-002](ADR-002-codex-modeling-reference.md) | codex-rs is a modeling reference, not a parity target; conflicts resolve by discussion + industry best practice | accepted |
 | [ADR-003](ADR-003-protocol-modeling-acp-reference.md) | piko host–client protocol is product-owned; ACP is a modeling reference (not a wire replacement) | accepted |
-| [ADR-004](ADR-004-tui-only-product-client.md) | TUI is piko's only first-party interactive client | superseded by [ADR-022](ADR-022-desktop-client-reintroduction.md) |
+| [ADR-004](ADR-004-tui-only-product-client.md) | TUI is piko's only first-party interactive client | superseded by [ADR-031](ADR-031-retire-desktop-client.md) |
 | [ADR-005](ADR-005-execution-authority-containment.md) | Separate execution authorization, enforced containment, and process runtime | accepted |
 | [ADR-006](ADR-006-shared-tui-single-line-dock.md) | Share the TUI single-line dock primitive | accepted |
 | [ADR-007](ADR-007-typed-provider-authentication.md) | Preserve typed provider authentication | accepted; partially superseded |
@@ -30,7 +30,6 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-019](ADR-019-tui-runtime-authorities.md) | Give TUI runtime state explicit authorities | accepted |
 | [ADR-020](ADR-020-bounded-output-reserve.md) | Context preflight reserves a bounded output allowance | accepted |
 | [ADR-021](ADR-021-respond-first-steer-steps.md) | Steered user messages are answered before further tool work | accepted |
-| [ADR-022](ADR-022-desktop-client-reintroduction.md) | Reintroduce a first-party desktop client on island-rs with shared projections and transport | accepted |
 | [ADR-023](ADR-023-tui-normalized-input-and-bindings.md) | Normalize TUI input at one adapter boundary and keep scoped bindings host-owned | accepted |
 | [ADR-024](ADR-024-tui-layout-primitives.md) | Use typed prepared layout plans and shared top-origin viewport/content geometry | accepted |
 | [ADR-025](ADR-025-authoritative-agent-lifecycle.md) | Persist ModelStep boundaries atomically with distinct runtime correlation IDs | accepted; core-domain hierarchy superseded by ADR-027 |
@@ -38,5 +37,5 @@ Create new records from [`_TEMPLATE.md`](_TEMPLATE.md). ADRs are numbered
 | [ADR-027](ADR-027-agent-work-lifecycle.md) | Session/Agent/ModelStep invariants; AgentInput as stimulus and root-work identity; delete Turn/Run/Execution leftovers | proposed |
 | [ADR-028](ADR-028-journal-derived-session-history.md) | Derive historical inspection from required journal facts and use trajectory only as diagnostic enrichment | proposed |
 | [ADR-029](ADR-029-retire-trajectory-web-viewer.md) | Retire the F-36 loopback HTTP/SSE trajectory viewer; TUI Session History is the inspector | accepted |
-
-- [ADR-030: Shared TUI split-pane composition](ADR-030-shared-tui-split-pane.md)
+| [ADR-030](ADR-030-shared-tui-split-pane.md) | Share the TUI split-pane composition primitives | accepted |
+| [ADR-031](ADR-031-retire-desktop-client.md) | Retire the first-party desktop client; delete `piko-desktop` and the F-42–F-44/D-59–D-61 documents | accepted |

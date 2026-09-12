@@ -2,6 +2,7 @@
 
 > Status: implemented
 > Priority: P0
+> Note: the desktop client was retired by [ADR-031](../decisions/ADR-031-retire-desktop-client.md); the desktop shell documents this amended (F-42–F-44, D-59–D-61) were removed. Kept as a design record.
 > Source evidence: piko product direction after F-44 canvas (user bubble fixed width; thinking/tool not real blocks)
 > Design: [D-62](../design/D-62-timeline-conversation-blocks.md)
 > Amends: F-44 Timeline row presentation only

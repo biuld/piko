@@ -2,7 +2,7 @@
 
 > Status: superseded
 > Date: 2026-08-09
-> Superseded by: [ADR-022](ADR-022-desktop-client-reintroduction.md)
+> Superseded by: [ADR-031](ADR-031-retire-desktop-client.md) (via ADR-022, removed)
 
 ## Context
 

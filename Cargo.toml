@@ -6,7 +6,6 @@ members = [
   "packages/e2e",
   "packages/client-core",
   "packages/session-store",
-  "packages/desktop",
 ]
 resolver = "2"
 

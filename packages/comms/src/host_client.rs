@@ -1,7 +1,7 @@
 //! Shared hostd stdio client: spawn, JSON-lines decode, bounded drain.
 //!
-//! Frontends select their bridge contract (`TuiHostBridge` or
-//! `DesktopHostBridge`) and share one wire client implementation.
+//! Frontends select their bridge contract (`TuiHostBridge`) and share one
+//! wire client implementation.
 
 use std::{
     io::{BufRead, BufReader, Write},

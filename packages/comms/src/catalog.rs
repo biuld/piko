@@ -254,26 +254,6 @@ pub mod contracts {
         }
     );
     contract!(
-        DesktopHostBridge,
-        ThreadBridgeContract,
-        DESKTOP_HOST_BRIDGE,
-        CommunicationSpec {
-            id: "desktop.host.process_bridge",
-            kind: CommunicationKind::ThreadBridge,
-            owner: "HostdClient",
-            producers: &["HostStdoutReaderThread"],
-            consumer: "DesktopEventLoop",
-            scope: CommunicationScope::Process,
-            delivery: DeliveryGuarantee::InMemory,
-            capacity: CapacityPolicy::Unbounded {
-                justification: "blocking host stdout reader crosses into the GPUI main loop",
-            },
-            overflow: OverflowPolicy::NotApplicable,
-            closure: ClosureMeaning::ProcessExited,
-            cancellation: CancellationMeaning::DisconnectOnly,
-        }
-    );
-    contract!(
         TuiFileSearchRequests,
         ThreadBridgeContract,
         TUI_FILE_SEARCH_REQUESTS,
@@ -387,7 +367,6 @@ pub mod contracts {
         APPROVAL_REPLY,
         INTERACTION_REPLY,
         TUI_HOST_BRIDGE,
-        DESKTOP_HOST_BRIDGE,
         TUI_FILE_SEARCH_REQUESTS,
         TUI_FILE_SEARCH_RESULTS,
         HOST_COMMAND_OUTPUT,

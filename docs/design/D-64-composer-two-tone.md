@@ -1,6 +1,7 @@
 # D-64: Two-tone composer with attachments
 
 > Status: design
+> Note: the desktop client was retired by [ADR-031](../decisions/ADR-031-retire-desktop-client.md); the desktop shell documents this amended (F-42–F-44, D-59–D-61) were removed. Kept as a design record.
 > Feature: [F-47](../features/F-47-composer-attachments.md)
 > Amends: D-59 Slice 4 composer; F-43 control placement
 

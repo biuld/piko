@@ -2,6 +2,7 @@
 
 > Status: design
 > Priority: P0
+> Note: the desktop client was retired by [ADR-031](../decisions/ADR-031-retire-desktop-client.md); the desktop shell documents this amended (F-42–F-44, D-59–D-61) were removed. Kept as a design record.
 > Source evidence: user direction 2026-08-23 (two-tone layered card, offset-stack header, bottom attach chips)
 > Design: [D-64](../design/D-64-composer-two-tone.md)
 > Amends: F-43 Desktop agent workspace — composer visual + control placement
