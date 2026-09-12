@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::runtime::execution::ExecutionTerminal;
 use crate::runtime::reliability::{CommitFailure, ExecutionHandoffLease, RetryState};
 use piko_orchd_api::AgentCommitPort;
-use piko_protocol::{AgentDurableCommand, AgentWorkOutcome, AgentWorkReport, CommitError, Message};
+use piko_protocol::{AgentDurableCommand, AgentWorkOutcome, AgentWorkReport, Message};
 
 /// Frozen terminal state. Publication data is private until `commit` returns a
 /// `CommittedTerminal` capability.
@@ -20,7 +20,6 @@ pub(crate) struct PendingTerminal {
 pub(crate) type TerminalCommitScope = PendingTerminal;
 
 pub(crate) struct CommittedTerminal {
-    pub root_input_id: String,
     pub report: AgentWorkReport,
     pub transcript: Vec<Message>,
     pub head_message_id: Option<String>,
@@ -28,8 +27,6 @@ pub(crate) struct CommittedTerminal {
 }
 
 pub(crate) struct TerminalPersistenceFailure {
-    pub root_input_id: String,
-    pub error: CommitError,
     handoff: Option<ExecutionHandoffLease<ExecutionTerminal>>,
 }
 
@@ -94,17 +91,14 @@ impl PendingTerminal {
             .await;
         match result {
             Ok(_) => TerminalCommitResult::Committed(CommittedTerminal {
-                root_input_id: self.root_input_id.clone(),
                 report: self.report.clone(),
                 transcript: self.transcript.clone(),
                 head_message_id: self.head_message_id.clone(),
                 handoff: self.handoff.take(),
             }),
             Err(error) => match RetryState::classify(error) {
-                CommitFailure::Permanent(error) => {
+                CommitFailure::Permanent => {
                     TerminalCommitResult::PermanentFailure(TerminalPersistenceFailure {
-                        root_input_id: self.root_input_id.clone(),
-                        error,
                         handoff: self.handoff.take(),
                     })
                 }

@@ -85,7 +85,7 @@ pub trait ToolRegistry: Send + Sync {
 // ---- ToolRegistryImpl ----
 
 pub struct ToolRegistryImpl {
-    providers: RwLock<HashMap<String, Box<dyn ToolProvider>>>,
+    providers: RwLock<HashMap<String, std::sync::Arc<dyn ToolProvider>>>,
     tool_sets: RwLock<HashMap<String, ToolSet>>,
     approval_gateway: RwLock<Option<Box<dyn ApprovalGateway>>>,
     /// Resolved managed-feature set (F-18). `None` = all features enabled.

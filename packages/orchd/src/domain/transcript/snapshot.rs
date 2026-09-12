@@ -30,6 +30,7 @@ impl TranscriptSnapshot {
         &self.messages
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn tokens(&self) -> &[u64] {
         &self.tokens
     }
@@ -38,11 +39,13 @@ impl TranscriptSnapshot {
         self.total_tokens
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn into_messages(self) -> Vec<Message> {
         Arc::try_unwrap(self.messages).unwrap_or_else(|shared| (*shared).clone())
     }
 
     /// True when two snapshots share the underlying message allocation.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn shares_storage_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.messages, &other.messages)
     }

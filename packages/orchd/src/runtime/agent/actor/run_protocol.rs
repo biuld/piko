@@ -66,7 +66,8 @@ impl AgentActor {
             input.input_id = canonical_input_id.clone();
             input
         });
-        let (cancellation_generation, startup_cancel) = self.run_cancellation.begin();
+        let (cancellation_generation, startup_cancel) =
+            self.run_cancellation.begin(canonical_input_id.clone());
         self.current_run_cancellation_generation = Some(cancellation_generation);
         let run_context = match self
             .execution

@@ -27,13 +27,16 @@ pub struct CompletedStep {
 }
 
 pub struct LocalStepOutput {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub realtime: Vec<RealtimeFrame>,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub persist: Vec<PersistEvent>,
 }
 
 pub struct StepDispatchResult {
     pub step: CompletedStep,
     pub termination: StepTermination,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub local_output: LocalStepOutput,
 }
 

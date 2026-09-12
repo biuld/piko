@@ -55,6 +55,12 @@ sorts the complete surface, and computes its digest. Context budgeting, prompt
 cache identity, tracing, and the inference request all consume that same
 snapshot. llmd validates and wire-encodes it but never appends hidden tools.
 
+Provider handles and tool-set definitions are copied from one coherent
+registry snapshot before discovery, approval, or execution awaits. A slow
+provider therefore cannot retain the registry read lock and block contribution
+updates or a nested discovery request, while a catalog never combines an old
+provider map with a newer tool-set map.
+
 ## Constraints and non-goals
 
 - Transcripts are append-only and must be deterministic per run; result commit

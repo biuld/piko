@@ -5,7 +5,6 @@ impl AgentRuntime {
         Self {
             execution: Arc::new(AgentExecutionRuntime::new(model_executor)),
             sessions: RwLock::new(HashMap::new()),
-            accepting: AtomicBool::new(true),
             context_tools: Arc::new(crate::adapters::tools::ContextToolsProvider::new()),
             agent_limits: AgentTreeLimits::default(),
         }
@@ -35,7 +34,6 @@ impl AgentRuntime {
         Self {
             execution,
             sessions: RwLock::new(HashMap::new()),
-            accepting: AtomicBool::new(true),
             context_tools,
             agent_limits,
         }
@@ -69,9 +67,10 @@ impl AgentRuntime {
             Arc::new(context_tools_provider.clone()),
             agent_limits,
         ));
-        let multi_agent_provider = crate::adapters::tools::MultiAgentToolProvider::new(
-            runtime.clone() as Arc<dyn AgentRuntimeApi>,
-        );
+        let runtime_api: Arc<dyn AgentRuntimeApi> = runtime.clone();
+        let multi_agent_provider =
+            crate::adapters::tools::MultiAgentToolProvider::from_weak(Arc::downgrade(&runtime_api));
+        drop(runtime_api);
         execution
             .install_tool_contribution(crate::adapters::tools::ToolContribution {
                 provider: Box::new(multi_agent_provider),
@@ -310,17 +309,6 @@ impl AgentRuntime {
             .agent(&request.agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        scope
-            .commit()
-            .commit_agent_command(
-                &request.session_id,
-                AgentDurableCommand::SetLifecycle {
-                    agent_instance_id: request.agent_instance_id.clone(),
-                    lifecycle,
-                },
-            )
-            .await
-            .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))?;
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx

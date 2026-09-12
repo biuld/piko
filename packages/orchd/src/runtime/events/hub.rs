@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
-use async_trait::async_trait;
 use piko_comms::BroadcastSender;
 use piko_comms::contracts::{SessionRealtimeObservation, SessionReliableObservation};
 use tokio_stream::Stream;
@@ -14,11 +12,6 @@ use piko_protocol::agent_runtime::{
 };
 
 use crate::api::{SessionStreamError, SnapshotRequiredReason};
-
-#[async_trait]
-pub trait EventSink<T>: Send + Sync {
-    async fn send(&self, event: T) -> Result<(), SendError>;
-}
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("event sink closed")]
@@ -195,8 +188,6 @@ pub fn merged_output_stream(
         }
     })
 }
-
-pub type SharedSessionOutputHub = Arc<SessionOutputHub>;
 
 #[cfg(test)]
 mod tests {

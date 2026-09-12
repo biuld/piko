@@ -7,8 +7,8 @@ mod state;
 mod transport;
 
 use anyhow::Result;
-use gpui::prelude::*;
-use gpui::{Bounds, WindowBounds, px, size};
+use island::runtime::gpui::prelude::*;
+use island::runtime::gpui::{Bounds, WindowBounds, px, size};
 
 fn main() -> Result<()> {
     let args = cli::CliArgs::parse();

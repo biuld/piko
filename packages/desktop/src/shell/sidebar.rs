@@ -1,10 +1,10 @@
 //! Floating sidebar surface: session discovery and agent hierarchy
 //! (D-59 Slice 3).
 
-use gpui::prelude::*;
-use gpui::{App, IntoElement, ScrollHandle, Window, div, point, px};
 use island::components::source_list::{SourceList, SourceRow, SourceSection};
 use island::platform::material::WindowMaterialHost;
+use island::runtime::gpui::prelude::*;
+use island::runtime::gpui::{App, IntoElement, ScrollHandle, Window, div, point, px};
 use island::theme::{SurfaceRole, TextRole, fill, hairline, metrics, text, tokens};
 
 use piko_client_core::ClientState;

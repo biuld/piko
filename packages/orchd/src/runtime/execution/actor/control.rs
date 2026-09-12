@@ -34,11 +34,7 @@ impl ExecutionActor {
                 self.state.steering.push_back(request);
                 command.complete(Ok(receipt));
             }
-            ExecutionCommand::Cancel {
-                request_id,
-                reason: _,
-                reply,
-            } => {
+            ExecutionCommand::Cancel { request_id, reply } => {
                 let command = ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
                 self.cancel.cancel();
                 command.complete(Ok(CancelReceipt {
@@ -47,10 +43,6 @@ impl ExecutionActor {
                     root_input_id: self.identity.root_input_id.clone(),
                     accepted: true,
                 }));
-            }
-            ExecutionCommand::Shutdown { reply } => {
-                self.cancel.cancel();
-                let _ = reply.send(());
             }
         }
         Ok(())

@@ -143,6 +143,22 @@ No `island-rs` change required.
 - Event publication failures (weak scope dead): ignored; waiting callers time
   out rather than hang forever.
 
+### Attached-child cancellation ownership
+
+An attached child belongs to its parent tool call until its terminal report is
+returned. The provider therefore keeps a cancellation guard after creating the
+child. If either the provider's own cancellation select or an outer dispatcher
+select drops that future, the guard conditionally interrupts the child only
+when the spawned `AgentInput` is still its active root. Normal completion and
+explicit cancellation disarm the guard. This preserves child cleanup without
+allowing delayed cleanup to cancel successor work, and without requiring every
+generic dispatcher to know multi-agent tool names.
+
+The built-in provider holds a weak runtime reference. The invocation upgrades
+it for the duration of one call and reports `RuntimeUnavailable` if shutdown
+already released the runtime; the registry must not form a runtime/provider
+reference cycle.
+
 ## Verification
 
 - Integration tests in `packages/orchd/tests/agent_runtime_cases/multi_agent.rs`
@@ -171,3 +187,8 @@ No `island-rs` change required.
 4. Provider tools (`followup_task`, `interrupt_agent`, `list_agents`,
    `wait_agent`).
 5. Integration tests + `docs/verification/V-10` evidence.
+
+Interrupt requests capture the active root while cancelling its startup token.
+Their mailbox commands retain that root identity, so delayed handling cannot
+interrupt a successor. Attached cleanup also enqueues a conditional command
+when admission is pending and no startup token is visible yet.

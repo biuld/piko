@@ -30,7 +30,6 @@ pub struct ToolCallChunkUpdate {
 #[derive(Default, Clone)]
 pub struct ToolCallAggregator {
     next_tool_call_index: u32,
-    current: Option<InFlightToolCall>,
     completed: Vec<ToolCallItem>,
     correlated: Vec<InFlightToolCall>,
 }
@@ -86,40 +85,7 @@ impl ToolCallAggregator {
         })
     }
 
-    pub fn on_chunk(
-        &mut self,
-        id: String,
-        name: String,
-        args_delta: String,
-    ) -> Option<ToolCallChunkUpdate> {
-        if !name.is_empty() {
-            self.finalize_current();
-            let tool_call_index = self.next_tool_call_index;
-            self.next_tool_call_index += 1;
-            self.current = Some(InFlightToolCall {
-                tool_call_index,
-                id: id.clone(),
-                name,
-                arguments_json: args_delta.clone(),
-            });
-            return Some(ToolCallChunkUpdate {
-                content_index: tool_call_index,
-                tool_call_id: id,
-                delta: args_delta,
-            });
-        }
-
-        let current = self.current.as_mut()?;
-        current.arguments_json.push_str(&args_delta);
-        Some(ToolCallChunkUpdate {
-            content_index: current.tool_call_index,
-            tool_call_id: current.id.clone(),
-            delta: args_delta,
-        })
-    }
-
     pub fn flush(&mut self) -> Vec<ToolCallItem> {
-        self.finalize_current();
         for call in std::mem::take(&mut self.correlated) {
             let arguments = serde_json::from_str(&call.arguments_json)
                 .unwrap_or(serde_json::Value::String(call.arguments_json));
@@ -133,25 +99,6 @@ impl ToolCallAggregator {
         }
         self.completed.sort_by_key(|call| call.tool_call_index);
         std::mem::take(&mut self.completed)
-    }
-
-    fn finalize_current(&mut self) {
-        let Some(current) = self.current.take() else {
-            return;
-        };
-
-        let arguments = match serde_json::from_str::<serde_json::Value>(&current.arguments_json) {
-            Ok(arguments) => arguments,
-            Err(_) => serde_json::Value::String(current.arguments_json),
-        };
-
-        self.completed.push(ToolCallItem {
-            content_index: current.tool_call_index,
-            tool_call_index: current.tool_call_index,
-            id: current.id,
-            name: current.name,
-            arguments,
-        });
     }
 }
 

@@ -1,8 +1,9 @@
 //! Thin LLM tool adapter for the multi-agent control surface (F-10 + F-21).
 
+mod attached_child;
 mod resolve;
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use piko_orchd_api::{
@@ -16,6 +17,7 @@ use piko_protocol::{
     MailboxWaitRequest, MessageContent, SendAgentInputRequest,
 };
 
+use attached_child::AttachedChildCancellation;
 use resolve::{
     MessageWhen, ToolFail, activity_str, catalog_value, map_spawn_agent_error, multi_agent_tools,
     report_value, required_string, resolve_spawn_spec_id, resolve_when, stable_runtime_id,
@@ -24,12 +26,35 @@ use resolve::{
 
 #[derive(Clone)]
 pub struct MultiAgentToolProvider {
-    runtime: Arc<dyn AgentRuntimeApi>,
+    runtime: RuntimeHandle,
+}
+
+#[derive(Clone)]
+enum RuntimeHandle {
+    Strong(Arc<dyn AgentRuntimeApi>),
+    Weak(Weak<dyn AgentRuntimeApi>),
 }
 
 impl MultiAgentToolProvider {
     pub fn new(runtime: Arc<dyn AgentRuntimeApi>) -> Self {
-        Self { runtime }
+        Self {
+            runtime: RuntimeHandle::Strong(runtime),
+        }
+    }
+
+    pub fn from_weak(runtime: Weak<dyn AgentRuntimeApi>) -> Self {
+        Self {
+            runtime: RuntimeHandle::Weak(runtime),
+        }
+    }
+
+    fn runtime(&self) -> Result<Arc<dyn AgentRuntimeApi>, ToolFail> {
+        match &self.runtime {
+            RuntimeHandle::Strong(runtime) => Ok(Arc::clone(runtime)),
+            RuntimeHandle::Weak(runtime) => runtime.upgrade().ok_or_else(|| {
+                ToolFail::from_agent(piko_orchd_api::AgentApiError::RuntimeUnavailable)
+            }),
+        }
     }
 
     fn tools() -> Vec<ToolDef> {
@@ -38,7 +63,7 @@ impl MultiAgentToolProvider {
 
     async fn list_agent_specs_value(&self) -> Result<serde_json::Value, ToolFail> {
         let specs = self
-            .runtime
+            .runtime()?
             .list_agent_specs()
             .await
             .map_err(ToolFail::from_agent)?;
@@ -52,16 +77,15 @@ impl MultiAgentToolProvider {
         detached: bool,
     ) -> Result<serde_json::Value, ToolFail> {
         let prompt = required_string(&call.arguments, "prompt").map_err(ToolFail::from_agent)?;
-        let specs = self
-            .runtime
+        let runtime = self.runtime()?;
+        let specs = runtime
             .list_agent_specs()
             .await
             .map_err(ToolFail::from_agent)?;
         let agent_spec_id = resolve_spawn_spec_id(&call.arguments, &specs)?;
         let spawn_id = stable_runtime_id(&context.root_input_id, &call.id);
         let child_id = format!("agent_{spawn_id}");
-        let child = self
-            .runtime
+        let child = runtime
             .create_agent(CreateAgentRequest {
                 request_id: format!("create:{}:{}", context.root_input_id, call.id),
                 session_id: context.session_id.clone(),
@@ -89,7 +113,7 @@ impl MultiAgentToolProvider {
         if detached {
             let canonical =
                 piko_protocol::AgentInput::from_request(&input, crate::runtime::utils::now_ms());
-            self.runtime
+            runtime
                 .submit_agent_input_detached(canonical, context.agent_instance_id.clone())
                 .await
                 .map_err(ToolFail::from_agent)?;
@@ -103,26 +127,29 @@ impl MultiAgentToolProvider {
             let canonical =
                 piko_protocol::AgentInput::from_request(&input, crate::runtime::utils::now_ms());
             let input_id = canonical.input_id.clone();
+            let mut child_cancellation = AttachedChildCancellation::new(
+                Arc::clone(&runtime),
+                context.session_id.clone(),
+                child.identity.agent_instance_id.clone(),
+                input_id.clone(),
+            );
             if let Some(cancellation) = &context.cancellation {
                 tokio::select! {
-                    receipt = self.runtime.submit_agent_input(canonical) => {
+                    receipt = runtime.submit_agent_input(canonical) => {
                         receipt.map_err(ToolFail::from_agent)?;
                     },
                     _ = cancellation.cancelled() => {
-                        let _ = self.runtime.interrupt_agent(
-                            context.session_id.clone(),
-                            child.identity.agent_instance_id.clone(),
-                        ).await;
+                        child_cancellation.cancel().await;
                         return Err(ToolFail::from_agent(piko_orchd_api::AgentApiError::Cancelled));
                     }
                 }
             } else {
-                self.runtime
+                runtime
                     .submit_agent_input(canonical)
                     .await
                     .map_err(ToolFail::from_agent)?;
             }
-            let completion = self.runtime.wait_agent_input_completion(
+            let completion = runtime.wait_agent_input_completion(
                 context.session_id.clone(),
                 child.identity.agent_instance_id.clone(),
                 input_id,
@@ -131,10 +158,7 @@ impl MultiAgentToolProvider {
                 tokio::select! {
                     report = completion => report.map_err(ToolFail::from_agent)?,
                     _ = cancellation.cancelled() => {
-                        let _ = self.runtime.interrupt_agent(
-                            context.session_id.clone(),
-                            child.identity.agent_instance_id.clone(),
-                        ).await;
+                        child_cancellation.cancel().await;
                         return Err(ToolFail::from_agent(piko_orchd_api::AgentApiError::Cancelled));
                     }
                 }
@@ -149,6 +173,7 @@ impl MultiAgentToolProvider {
                 );
                 object.insert("attached".into(), serde_json::Value::Bool(true));
             }
+            child_cancellation.disarm();
             Ok(value)
         }
     }
@@ -158,14 +183,14 @@ impl MultiAgentToolProvider {
         call: &ToolCall,
         context: &ToolExecutionContext,
     ) -> Result<serde_json::Value, ToolFail> {
+        let runtime = self.runtime()?;
         let target =
             required_string(&call.arguments, "agent_instance_id").map_err(ToolFail::from_agent)?;
         let message = required_string(&call.arguments, "message").map_err(ToolFail::from_agent)?;
         let when = resolve_when(&call.arguments)?;
 
         if when == MessageWhen::Steer {
-            let snapshot = self
-                .runtime
+            let snapshot = runtime
                 .agent_snapshot(context.session_id.clone(), target.clone())
                 .await
                 .map_err(ToolFail::from_agent)?
@@ -189,8 +214,7 @@ impl MultiAgentToolProvider {
             MessageWhen::Steer => AgentInputDelivery::SteerActive,
         };
         let request_id = format!("message:{}:{}", context.root_input_id, call.id);
-        let receipt = self
-            .runtime
+        let receipt = runtime
             .submit_agent_input(piko_protocol::AgentInput {
                 input_id: stable_runtime_id(&context.root_input_id, &call.id),
                 request_id,
@@ -217,17 +241,16 @@ impl MultiAgentToolProvider {
         call: &ToolCall,
         context: &ToolExecutionContext,
     ) -> Result<serde_json::Value, ToolFail> {
+        let runtime = self.runtime()?;
         let target =
             required_string(&call.arguments, "agent_instance_id").map_err(ToolFail::from_agent)?;
-        let snapshot = self
-            .runtime
+        let snapshot = runtime
             .agent_snapshot(context.session_id.clone(), target.clone())
             .await
             .map_err(ToolFail::from_agent)?
             .ok_or_else(|| ToolFail::from_agent(piko_orchd_api::AgentApiError::AgentNotFound))?;
         let previous_activity = activity_str(&snapshot.activity);
-        match self
-            .runtime
+        match runtime
             .interrupt_agent(context.session_id.clone(), target.clone())
             .await
         {
@@ -250,6 +273,7 @@ impl MultiAgentToolProvider {
         call: &ToolCall,
         context: &ToolExecutionContext,
     ) -> Result<serde_json::Value, ToolFail> {
+        let runtime = self.runtime()?;
         let timeout_ms = call
             .arguments
             .get("timeout_ms")
@@ -261,7 +285,7 @@ impl MultiAgentToolProvider {
             .get("agent_instance_id")
             .and_then(serde_json::Value::as_str)
             .map(str::to_string);
-        let wait = self.runtime.wait_agent_mailbox(MailboxWaitRequest {
+        let wait = runtime.wait_agent_mailbox(MailboxWaitRequest {
             session_id: context.session_id.clone(),
             caller_agent_instance_id: Some(context.agent_instance_id.clone()),
             timeout_ms,
@@ -299,14 +323,27 @@ impl ToolProvider for MultiAgentToolProvider {
 
     async fn execute(&self, call: ToolCall, context: ToolExecutionContext) -> ToolExecResult {
         let result = if context.agent_kind.can_spawn_subagents() {
+            let runtime = match self.runtime() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    return ToolExecResult {
+                        ok: false,
+                        value: None,
+                        error: Some(ToolExecError {
+                            code: error.code,
+                            message: error.message,
+                            retryable: Some(error.retryable),
+                        }),
+                    };
+                }
+            };
             match call.name.as_str() {
             "list_agent_specs" => self.list_agent_specs_value().await,
             "spawn_agent" => self.spawn(&call, &context, false).await,
             "spawn_agent_detached" => self.spawn(&call, &context, true).await,
             "message_agent" => self.message_agent(&call, &context).await,
             "interrupt_agent" => self.interrupt_agent(&call, &context).await,
-            "list_agents" => self
-                .runtime
+            "list_agents" => runtime
                 .list_agents(context.session_id.clone())
                 .await
                 .map_err(ToolFail::from_agent)
@@ -328,8 +365,7 @@ impl ToolProvider for MultiAgentToolProvider {
                 }),
             "wait_agent" => self.wait_agent(&call, &context).await,
             "collect_agent_reports" => {
-                match self
-                    .runtime
+                match runtime
                     .agent_inbox(
                         context.session_id.clone(),
                         context.agent_instance_id.clone(),
@@ -345,8 +381,7 @@ impl ToolProvider for MultiAgentToolProvider {
                         let mut consumed = Vec::with_capacity(unread.len());
                         let mut failure = None;
                         for item in &unread {
-                            match self
-                                .runtime
+                            match runtime
                                 .consume_agent_inbox_item(piko_protocol::ConsumeAgentInboxRequest {
                                     request_id: format!("consume:{}:{}", call.id, item.report_id),
                                     session_id: context.session_id.clone(),
@@ -391,9 +426,9 @@ impl ToolProvider for MultiAgentToolProvider {
                             caller_agent_instance_id: Some(context.agent_instance_id.clone()),
                         };
                         let receipt = if call.name == "close_agent" {
-                            self.runtime.close_agent(request).await
+                            runtime.close_agent(request).await
                         } else {
-                            self.runtime.reopen_agent(request).await
+                            runtime.reopen_agent(request).await
                         };
                         receipt
                             .and_then(|receipt| {

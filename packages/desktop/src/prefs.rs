@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use gpui::{Bounds, Pixels, WindowBounds, point, px, size};
+use island::runtime::gpui::{Bounds, Pixels, WindowBounds, point, px, size};
 use serde::{Deserialize, Serialize};
 
 const FILE_NAME: &str = "desktop-prefs.json";

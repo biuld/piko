@@ -6,11 +6,11 @@ use super::tabs::{
     view_target_requires_action,
 };
 use super::*;
-use gpui::prelude::*;
-use gpui::{AnyElement, App, WeakEntity, Window};
 use island::components::chrome::{ChromeMenuButton, ChromeTextEmphasis, GhostTextButton};
 use island::components::menu::{ContextMenuItem, ContextMenuSpec};
 use island::components::tabs::TabGroup;
+use island::runtime::gpui::prelude::*;
+use island::runtime::gpui::{AnyElement, App, WeakEntity, Window};
 use island::theme::IslandIcon;
 
 impl Shell {

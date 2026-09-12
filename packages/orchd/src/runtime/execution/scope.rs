@@ -4,37 +4,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use piko_orchd_api::{AgentApiError, SessionExecutionPorts};
 use tokio::sync::Mutex;
 
-use super::ExecutionIdentity;
 use super::ExecutionTerminal;
 use super::mailbox::ExecutionHandle;
-use piko_protocol::agent_work::AgentWorkOutcome;
 
 pub struct SessionExecutionScope {
-    session_id: String,
     ports: SessionExecutionPorts,
     executions: Mutex<HashMap<String, ExecutionHandle>>,
     completed: Mutex<HashMap<String, ExecutionTerminal>>,
     generation: AtomicU64,
 }
 
-pub struct ExecutionExit {
-    pub identity: ExecutionIdentity,
-    pub terminal: AgentWorkOutcome,
-}
-
 impl SessionExecutionScope {
-    pub fn new(session_id: String, ports: SessionExecutionPorts) -> Self {
+    pub fn new(_session_id: String, ports: SessionExecutionPorts) -> Self {
         Self {
-            session_id,
             ports,
             executions: Mutex::new(HashMap::new()),
             completed: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
         }
-    }
-
-    pub fn session_id(&self) -> &str {
-        &self.session_id
     }
 
     pub fn ports(&self) -> &SessionExecutionPorts {
@@ -118,6 +105,7 @@ mod tests {
     use piko_protocol::agent_work::{CommitAck, CommitError};
 
     use super::*;
+    use crate::runtime::execution::ExecutionIdentity;
     use crate::runtime::execution::mailbox::{ArcTerminalReceiver, ExecutionHandle};
 
     struct NoopCommit;

@@ -2,7 +2,7 @@
 
 use super::canvas::BlockExpandPref;
 use super::*;
-use gpui::FollowMode;
+use island::runtime::gpui::FollowMode;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

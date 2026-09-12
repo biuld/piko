@@ -15,5 +15,4 @@ pub(crate) struct ExecutionState {
     pub respond_after_steer: bool,
     pub usage: Usage,
     pub head_message_id: Option<String>,
-    pub error: Option<String>,
 }

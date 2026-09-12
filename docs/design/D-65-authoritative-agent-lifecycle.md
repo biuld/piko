@@ -88,6 +88,12 @@ acknowledgement. `execute_and_commit_tools` no longer commits declarations;
 it starts execution only after the step commit and commits results in the
 existing deterministic call-index order.
 
+Agent lifecycle changes follow the same serialization rule: the AgentActor
+commits `SetLifecycle`, then applies and publishes its in-memory snapshot.
+The API layer only authorizes and enqueues the command. This prevents a later
+API call from committing ahead of an earlier actor update and leaving durable
+and live lifecycle state in different orders.
+
 For a failed model stream that produced an assistant error message, the actor
 commits a failed ModelStep with no tool declarations and then returns the
 stream error. A cancellation before an assistant response has no completed

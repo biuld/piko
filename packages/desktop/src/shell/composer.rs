@@ -1,14 +1,14 @@
 //! Floating two-tone composer with attachment chips (F-47, D-64).
 
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, CursorStyle, Entity, IntoElement, ParentElement, Styled, Window, div, px,
-};
 use island::components::chrome::{
     LINEAR_PROGRESS_HEIGHT_COMPACT, LinearProgress, LinearProgressSize,
 };
 use island::components::form::{InputEvent, TextAreaField, TextAreaState};
 use island::platform::material::WindowMaterialHost;
+use island::runtime::gpui::prelude::*;
+use island::runtime::gpui::{
+    AnyElement, App, CursorStyle, Entity, IntoElement, ParentElement, Styled, Window, div, px,
+};
 use island::theme::{
     IslandTokens, RoleAccent, SurfaceRole, TextRole, elevation_sm, fill, highlight, metrics, text,
     tokens,
@@ -401,7 +401,10 @@ impl ComposerView {
             let id = attachment.id.clone();
             row = row.child(
                 div()
-                    .id(gpui::SharedString::from(format!("chip-{}", attachment.id)))
+                    .id(island::runtime::gpui::SharedString::from(format!(
+                        "chip-{}",
+                        attachment.id
+                    )))
                     .flex()
                     .items_center()
                     .gap(px(4.))
@@ -470,7 +473,7 @@ fn action_button(
     let t = tokens();
     let m = metrics();
     div()
-        .id(gpui::SharedString::from(label))
+        .id(island::runtime::gpui::SharedString::from(label))
         .px(m.space_sm)
         .py(px(3.))
         .rounded(m.radius_sm)

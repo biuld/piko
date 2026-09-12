@@ -6,9 +6,6 @@ impl AgentExecutionRuntime {
         session_id: String,
         ports: SessionExecutionPorts,
     ) -> Result<(), AgentApiError> {
-        if !self.accepting.load(Ordering::SeqCst) {
-            return Err(AgentApiError::RuntimeUnavailable);
-        }
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&session_id) {
             return Err(AgentApiError::SessionAlreadyAttached);
@@ -41,22 +38,17 @@ impl AgentExecutionRuntime {
         routes: HashMap<String, CatalogRoute>,
         trace_span: tracing::Span,
     ) -> Result<PreparedExecution, AgentApiError> {
-        if !self.accepting.load(Ordering::SeqCst) {
-            return Err(AgentApiError::RuntimeUnavailable);
-        }
         let scope = self.scope(&request.session_id).await?;
         let generation = scope.next_generation();
         let cancel = CancellationToken::new();
         let (command_tx, command_rx) = piko_comms::mailbox::<ExecutionCommands, _>();
         let (terminal_tx, terminal_rx) = piko_comms::reply::<ExecutionTerminalContract, _>();
 
-        // F-19: resolve the executing agent's role from the registered spec
-        // (identity metadata; hostd maps it to a permission profile).
-        let agent_role = self
-            .services
-            .agent_spec(&request.config.agent_id)
-            .await
-            .map(|spec| spec.role);
+        // The request carries the AgentSpec snapshot admitted for this
+        // AgentInstance. Never re-resolve it from the mutable template
+        // registry: recovery and config reload must not change an active
+        // instance's effective role.
+        let agent_role = Some(request.agent_spec.role.clone());
         let identity = ExecutionIdentity {
             session_id: request.session_id.clone(),
             root_input_id: request.root_input_id.clone(),
@@ -291,7 +283,6 @@ impl AgentExecutionRuntime {
         let (reply_tx, reply_rx) = piko_comms::reply::<ExecutionCommandReply, _>();
         let _ = handle.command_tx.try_send(ExecutionCommand::Cancel {
             request_id: request.request_id.clone(),
-            reason: request.reason.clone(),
             reply: reply_tx,
         });
         match reply_rx.await {

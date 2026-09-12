@@ -12,12 +12,11 @@ mod tool_batch;
 
 pub use actor::ExecutionActor;
 pub use mailbox::{ExecutionCommand, ExecutionHandle};
-pub use scope::{ExecutionExit, SessionExecutionScope};
+pub use scope::SessionExecutionScope;
 pub use services::ExecutionServices;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::FutureExt;
 use piko_comms::contracts::{
@@ -51,7 +50,6 @@ pub struct AgentExecutionRuntime {
     /// provider and exposed for the hostd `/ps` surface (F-08).
     processes: Arc<ProcessManager>,
     sessions: RwLock<HashMap<String, Arc<SessionExecutionScope>>>,
-    accepting: AtomicBool,
 }
 
 mod impls;

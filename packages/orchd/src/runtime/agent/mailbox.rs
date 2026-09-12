@@ -50,6 +50,7 @@ pub enum AgentCommand {
     },
     CancelRun {
         request_id: String,
+        expected_root_input_id: Option<String>,
         reply: ReplySender<
             AgentCommandReply,
             Result<piko_protocol::AgentCancelReceipt, AgentApiError>,

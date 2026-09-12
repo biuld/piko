@@ -37,7 +37,7 @@ impl PreparedExecution {
         let generation = self.generation;
         let trace_span = self.trace_span.clone();
         tokio::spawn(async move {
-            let _exit = supervise_execution(scope, actor, generation, terminal_tx)
+            supervise_execution(scope, actor, generation, terminal_tx)
                 .instrument(trace_span)
                 .await;
         });

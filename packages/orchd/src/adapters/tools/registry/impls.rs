@@ -16,7 +16,7 @@ impl ToolRegistryImpl {
     /// Register a tool provider.
     pub async fn register_provider(&self, provider: Box<dyn ToolProvider>) {
         let id = provider.id().to_string();
-        self.providers.write().await.insert(id, provider);
+        self.providers.write().await.insert(id, provider.into());
     }
 
     /// Validate and publish a provider and its tool sets as one contribution.
@@ -66,16 +66,11 @@ impl ToolRegistryImpl {
         {
             return Err(format!("tool set already registered: {}", existing.id));
         }
-        providers.insert(provider_id, contribution.provider);
+        providers.insert(provider_id, contribution.provider.into());
         for tool_set in contribution.tool_sets {
             tool_sets.insert(tool_set.id.clone(), tool_set);
         }
         Ok(())
-    }
-
-    /// Unregister a tool provider by ID.
-    pub async fn unregister_provider(&self, provider_id: &str) {
-        self.providers.write().await.remove(provider_id);
     }
 
     /// Register a tool set.
@@ -86,9 +81,10 @@ impl ToolRegistryImpl {
             .insert(tool_set.id.clone(), tool_set);
     }
 
-    /// Unregister a tool set by ID.
-    pub async fn unregister_tool_set(&self, tool_set_id: &str) {
-        self.tool_sets.write().await.remove(tool_set_id);
+    /// Test-only observation of the catalog's registered sets.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub async fn list_tool_sets(&self) -> std::collections::HashMap<String, ToolSet> {
+        self.tool_sets.read().await.clone()
     }
 
     /// Set (or clear) the approval gateway.
@@ -128,11 +124,6 @@ impl ToolRegistryImpl {
         .then(|| feature.clone())
     }
 
-    /// List all registered tool sets.
-    pub async fn list_tool_sets(&self) -> std::collections::HashMap<String, ToolSet> {
-        self.tool_sets.read().await.clone()
-    }
-
     // ---- Catalog building ----
 
     /// Build the full tool catalog from registered providers and tool sets.
@@ -140,8 +131,15 @@ impl ToolRegistryImpl {
         &self,
         context: &ToolDiscoveryContext,
     ) -> Result<Vec<CatalogEntry>, String> {
-        let providers = self.providers.read().await;
-        let tool_sets = self.tool_sets.read().await;
+        // Provider discovery may await arbitrary extension code. Take stable
+        // handles first so registration cannot be blocked by discovery (and
+        // a provider can safely re-enter the registry).
+        let providers_guard = self.providers.read().await;
+        let tool_sets_guard = self.tool_sets.read().await;
+        let providers = providers_guard.clone();
+        let tool_sets = tool_sets_guard.clone();
+        drop(tool_sets_guard);
+        drop(providers_guard);
 
         let mut entries: Vec<CatalogEntry> = vec![];
         let mut seen: HashSet<String> = HashSet::new();
@@ -149,10 +147,10 @@ impl ToolRegistryImpl {
         let mut provider_cache: HashMap<String, Vec<ToolDef>> = HashMap::new();
 
         // Helper: discover tools from a provider (with caching).
-        async fn discover_from<'a>(
+        async fn discover_from(
             provider_id: &str,
             cache: &mut HashMap<String, Vec<ToolDef>>,
-            providers: &tokio::sync::RwLockReadGuard<'a, HashMap<String, Box<dyn ToolProvider>>>,
+            providers: &HashMap<String, std::sync::Arc<dyn ToolProvider>>,
             ctx: &ToolDiscoveryContext,
         ) -> Vec<ToolDef> {
             if let Some(cached) = cache.get(provider_id) {

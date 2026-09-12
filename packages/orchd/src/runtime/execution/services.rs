@@ -9,7 +9,7 @@ use crate::adapters::tools::todo_provider::TodoProvider;
 use crate::domain::model::step::ModelConfig;
 use crate::ports::model_gateway::InferenceGateway;
 use piko_orchd_api::ToolProvider;
-use piko_orchd_api::telemetry::{NoopRuntimeTelemetry, RuntimeTelemetry};
+use piko_orchd_api::telemetry::RuntimeTelemetry;
 use piko_protocol::TodoList;
 use piko_protocol::agents::AgentSpec;
 use piko_protocol::tools::ToolSet;
@@ -26,10 +26,6 @@ pub struct ExecutionServices {
 }
 
 impl ExecutionServices {
-    pub fn new(model_executor: Arc<dyn InferenceGateway>) -> Self {
-        Self::with_telemetry(model_executor, Arc::new(NoopRuntimeTelemetry))
-    }
-
     pub fn with_telemetry(
         model_executor: Arc<dyn InferenceGateway>,
         telemetry: Arc<dyn RuntimeTelemetry>,

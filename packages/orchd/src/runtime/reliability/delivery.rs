@@ -59,7 +59,7 @@ impl DetachedDeliveryScope {
                 CommitFailure::Retryable => DetachedDeliveryResult::Retry {
                     delay_ms: self.retry.next_delay_ms(),
                 },
-                CommitFailure::Permanent(_) => DetachedDeliveryResult::PermanentFailure,
+                CommitFailure::Permanent => DetachedDeliveryResult::PermanentFailure,
             },
         }
     }

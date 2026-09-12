@@ -8,7 +8,7 @@
 // (F-08 slice 2).
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
@@ -18,7 +18,7 @@ use piko_sandbox::exec::process::ProcessManager;
 use piko_sandbox::policy::EffectivePermissions;
 
 use crate::domain::tools::definition::{ToolDef, ToolProviderSource};
-use crate::domain::tools::result::ToolExecResult;
+use crate::domain::tools::result::{ToolExecError, ToolExecResult};
 use crate::ports::tool_provider::{ToolDiscoveryContext, ToolExecutionContext, ToolProvider};
 
 use super::exec_handlers::{execute_exec_command, execute_write_stdin};
@@ -36,6 +36,25 @@ pub struct WorkspaceToolProvider {
     shell: ShellSnapshot,
     env: EnvironmentProfile,
     processes: Arc<ProcessManager>,
+    process_owners: Mutex<HashMap<String, ProcessOwner>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProcessOwner {
+    session_id: String,
+    agent_instance_id: String,
+}
+
+fn tool_error(code: &str, message: &str) -> ToolExecResult {
+    ToolExecResult {
+        ok: false,
+        value: None,
+        error: Some(ToolExecError {
+            code: code.into(),
+            message: message.into(),
+            retryable: Some(false),
+        }),
+    }
 }
 
 impl WorkspaceToolProvider {
@@ -48,6 +67,7 @@ impl WorkspaceToolProvider {
             shell: ShellSnapshot::capture(None),
             env: EnvironmentProfile::discover(None),
             processes,
+            process_owners: Mutex::new(HashMap::new()),
         }
     }
 
@@ -64,6 +84,7 @@ impl WorkspaceToolProvider {
             shell: ShellSnapshot::capture(Some(&shell_path)),
             env: EnvironmentProfile::discover(Some(&shell_path)),
             processes,
+            process_owners: Mutex::new(HashMap::new()),
         }
     }
 
@@ -86,6 +107,45 @@ impl WorkspaceToolProvider {
     fn policy_for(&self, role: Option<&str>) -> Arc<EffectivePermissions> {
         role.and_then(|role| self.role_policies.get(role).cloned())
             .unwrap_or_else(|| Arc::clone(&self.policy))
+    }
+
+    fn owner_for(context: &ToolExecutionContext) -> ProcessOwner {
+        ProcessOwner {
+            session_id: context.session_id.clone(),
+            agent_instance_id: context.agent_instance_id.clone(),
+        }
+    }
+
+    fn record_process_owner(&self, result: &ToolExecResult, context: &ToolExecutionContext) {
+        let Some(process_id) = result
+            .value
+            .as_ref()
+            .and_then(|value| value.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        self.process_owners
+            .lock()
+            .expect("process owner map")
+            .insert(process_id.to_string(), Self::owner_for(context));
+    }
+
+    fn owns_process(&self, process_id: &str, context: &ToolExecutionContext) -> bool {
+        self.process_owners
+            .lock()
+            .expect("process owner map")
+            .get(process_id)
+            .is_some_and(|owner| owner == &Self::owner_for(context))
+    }
+
+    fn forget_completed_process(&self, process_id: &str) {
+        if self.processes.get(process_id).is_none() {
+            self.process_owners
+                .lock()
+                .expect("process owner map")
+                .remove(process_id);
+        }
     }
 }
 
@@ -122,9 +182,30 @@ impl ToolProvider for WorkspaceToolProvider {
         let policy = self.policy_for(context.agent_role.as_deref());
         match call.name.as_str() {
             "exec_command" => {
-                execute_exec_command(&self.processes, &policy, &self.shell, &call, &context).await
+                let result =
+                    execute_exec_command(&self.processes, &policy, &self.shell, &call, &context)
+                        .await;
+                self.record_process_owner(&result, &context);
+                result
             }
-            "write_stdin" => execute_write_stdin(&self.processes, &call).await,
+            "write_stdin" => {
+                let Some(process_id) = call
+                    .arguments
+                    .get("session_id")
+                    .and_then(serde_json::Value::as_str)
+                else {
+                    return tool_error("invalid_arguments", "session_id is required");
+                };
+                if !self.owns_process(process_id, &context) {
+                    return tool_error(
+                        "process_not_owned",
+                        "exec session belongs to another agent or session",
+                    );
+                }
+                let result = execute_write_stdin(&self.processes, &call).await;
+                self.forget_completed_process(process_id);
+                result
+            }
             "environment" => ToolExecResult {
                 ok: true,
                 value: Some(serde_json::json!({
@@ -244,5 +325,37 @@ mod tests {
             .writable_roots_for(&context(None))
             .expect("roots projected");
         assert!(session_roots.contains(&cwd));
+    }
+
+    #[tokio::test]
+    async fn write_stdin_rejects_a_process_owned_by_another_agent() {
+        let provider = WorkspaceToolProvider::new(
+            policy(&["."], &["."], &[], false),
+            Arc::new(ProcessManager::new()),
+        );
+        provider.process_owners.lock().unwrap().insert(
+            "proc-1".into(),
+            super::ProcessOwner {
+                session_id: "session".into(),
+                agent_instance_id: "other-agent".into(),
+            },
+        );
+        let result = provider
+            .execute(
+                crate::domain::tools::call::ToolCall {
+                    id: "call".into(),
+                    name: "write_stdin".into(),
+                    arguments: serde_json::json!({ "session_id": "proc-1" }),
+                    partial_json: None,
+                },
+                context(None),
+            )
+            .await;
+
+        assert!(!result.ok);
+        assert_eq!(
+            result.error.as_ref().map(|error| error.code.as_str()),
+            Some("process_not_owned")
+        );
     }
 }

@@ -6,7 +6,6 @@
 #![allow(clippy::large_enum_variant)]
 #![allow(clippy::type_complexity)]
 #![allow(clippy::too_many_arguments)]
-#![allow(dead_code)]
 
 mod adapters;
 mod domain;

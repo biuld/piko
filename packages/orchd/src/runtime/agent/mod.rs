@@ -6,7 +6,6 @@ pub use scope::{AgentTreeLimits, SessionAgentScope};
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures_util::FutureExt;
@@ -35,7 +34,6 @@ use crate::runtime::reliability::RunCancellation;
 pub struct AgentRuntime {
     execution: Arc<AgentExecutionRuntime>,
     sessions: RwLock<HashMap<String, Arc<SessionAgentScope>>>,
-    accepting: AtomicBool,
     context_tools: Arc<crate::adapters::tools::ContextToolsProvider>,
     agent_limits: AgentTreeLimits,
 }

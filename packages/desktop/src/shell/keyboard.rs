@@ -29,14 +29,14 @@ impl Shell {
             }
             FocusOwner::Composer => {
                 if self.agent_tabs_focus.is_focused(window) {
-                    window.blur();
+                    window.blur(cx);
                 }
                 self.composer_input
                     .update(cx, |input, cx| input.focus(window, cx));
             }
             FocusOwner::Timeline | FocusOwner::Sidebar => {
                 if self.agent_tabs_focus.is_focused(window) {
-                    window.blur();
+                    window.blur(cx);
                 }
             }
         }

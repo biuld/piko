@@ -1,10 +1,10 @@
 use super::canvas::row_gap_before;
 use super::*;
-use gpui::{FollowMode, list};
 use island::components::chrome::{ChromeTextEmphasis, GhostTextButton};
 use island::components::panel::{
     IslandPanel, IslandPlaceholder, PanelPresentation, PanelSurfaceRole,
 };
+use island::runtime::gpui::{FollowMode, list};
 use island::theme::IslandIcon;
 
 impl Render for Shell {
@@ -230,7 +230,7 @@ impl Shell {
                         .min_h(px(0.))
                         .min_w(px(0.))
                         .on_mouse_down(
-                            gpui::MouseButton::Left,
+                            island::runtime::gpui::MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
                                 this.set_focus_owner(FocusOwner::Timeline, window, cx);
                             }),
@@ -364,13 +364,13 @@ impl Shell {
             let Some(shell) = entity.upgrade() else {
                 return;
             };
-            let rx = app.prompt_for_paths(gpui::PathPromptOptions {
+            let rx = app.prompt_for_paths(island::runtime::gpui::PathPromptOptions {
                 files: true,
                 directories: false,
                 multiple: true,
                 prompt: None,
             });
-            app.spawn(async move |cx: &mut gpui::AsyncApp| {
+            app.spawn(async move |cx: &mut island::runtime::gpui::AsyncApp| {
                 let picked = match rx.await {
                     Ok(Ok(Some(paths))) => Some(paths),
                     _ => None,

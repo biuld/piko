@@ -35,6 +35,7 @@ impl TranscriptManager {
         self.push_message(Message::User { content, timestamp });
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn push_assistant(&mut self, message: Message) {
         self.push_message(message);
     }
@@ -50,17 +51,20 @@ impl TranscriptManager {
     }
 
     /// Per-message token estimates, aligned with `to_vec()`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn tokens(&self) -> &[u64] {
         &self.tokens
     }
 
     /// Sum of the tracked per-message estimates.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn total_tokens(&self) -> u64 {
         self.tokens.iter().sum()
     }
 
     /// Copy-on-write snapshot of the committed transcript. Repeat calls
     /// before the next mutation return the same allocation.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn snapshot(&mut self) -> Arc<TranscriptSnapshot> {
         if let Some(cached) = &self.raw_snapshot {
             return cached.clone();
@@ -81,10 +85,12 @@ impl TranscriptManager {
         NormalizedTranscript::new(messages, truncated_outputs)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn checkpoint(&self) -> usize {
         self.messages.len()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn rollback(&mut self, checkpoint: usize) {
         self.messages.truncate(checkpoint);
         self.tokens.truncate(checkpoint);

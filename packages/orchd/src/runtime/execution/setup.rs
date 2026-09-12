@@ -16,7 +16,6 @@ impl AgentExecutionRuntime {
             services: ExecutionServices::with_telemetry(model_executor, telemetry),
             processes: Arc::new(ProcessManager::new()),
             sessions: RwLock::new(HashMap::new()),
-            accepting: AtomicBool::new(true),
         }
     }
 

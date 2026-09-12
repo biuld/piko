@@ -25,11 +25,6 @@ pub fn runtime_assistant_message_id(root_input_id: &str, step_id: &str) -> Strin
     format!("{root_input_id}:{step_id}:assistant")
 }
 
-/// Produce a stable runtime tool call message ID.
-pub fn runtime_tool_call_message_id(parent_message_id: &str, tool_call_index: u32) -> String {
-    format!("{parent_message_id}:tool_call:{tool_call_index}")
-}
-
 /// Generate a stable runtime tool entity ID.
 pub(crate) fn runtime_tool_entity_id(parent_message_id: &str, tool_call_index: u32) -> String {
     format!("{}:tool:{}", parent_message_id, tool_call_index)

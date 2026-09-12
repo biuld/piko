@@ -21,16 +21,16 @@ mod workspace;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, AsyncApp, Context, FocusHandle, FollowMode, IntoElement, KeyDownEvent,
-    ListAlignment, ListState, Render, ScrollHandle, Styled, Subscription, Window, div, px,
-};
 use island::components::form::{InputEvent, TextAreaState};
 use island::components::list::ListKeyboard;
 use island::components::markdown::MarkdownDocument;
 use island::components::selection::{SelectionGroup, SelectionState};
 use island::platform::material::{MaterialPreference, WindowMaterialHost};
+use island::runtime::gpui::prelude::*;
+use island::runtime::gpui::{
+    AnyElement, App, AsyncApp, Context, FocusHandle, FollowMode, IntoElement, KeyDownEvent,
+    ListAlignment, ListState, Render, ScrollHandle, Styled, Subscription, Window, div, px,
+};
 use island::theme::{SurfaceRole, TextRole, fill, highlight, metrics, text, tokens};
 
 use piko_client_core::{
@@ -78,7 +78,7 @@ pub struct Shell {
     sidebar_keyboard: ListKeyboard,
     sidebar_keyboard_focused: Option<sidebar::NavId>,
     /// Recoverable draft editor; its selection and undo state survive paints.
-    composer_input: gpui::Entity<TextAreaState>,
+    composer_input: island::runtime::gpui::Entity<TextAreaState>,
     drafts: HashMap<String, String>,
     views: HashMap<String, agent_view::AgentViewLocal>,
     draft_key: String,
@@ -92,7 +92,7 @@ pub struct Shell {
     warm_reopen_attempted: bool,
     workspace_cwd: String,
     selection_group: SelectionGroup,
-    selections: HashMap<String, gpui::Entity<SelectionState>>,
+    selections: HashMap<String, island::runtime::gpui::Entity<SelectionState>>,
     markdown_cache: HashMap<String, (String, MarkdownDocument)>,
     _subscriptions: Vec<Subscription>,
 }
@@ -208,7 +208,7 @@ impl Shell {
 
     fn start_host_pump(&mut self, cx: &mut Context<Self>) {
         cx.spawn(
-            async move |shell: gpui::WeakEntity<Shell>, cx: &mut AsyncApp| {
+            async move |shell: island::runtime::gpui::WeakEntity<Shell>, cx: &mut AsyncApp| {
                 loop {
                     let alive = shell.update(cx, |shell, cx| shell.service_host(cx)).is_ok();
                     if !alive {

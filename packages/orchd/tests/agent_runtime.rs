@@ -508,6 +508,7 @@ async fn attached_bootstrapped_runtime_with_limits(
 }
 
 include!("agent_runtime_cases/atomicity.rs");
+include!("agent_runtime_cases/architecture.rs");
 include!("agent_runtime_cases/behavior.rs");
 include!("agent_runtime_cases/races.rs");
 include!("agent_runtime_cases/context/mod.rs");

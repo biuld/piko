@@ -2,7 +2,7 @@ use piko_protocol::CommitError;
 
 pub(crate) enum CommitFailure {
     Retryable,
-    Permanent(CommitError),
+    Permanent,
 }
 
 #[derive(Default)]
@@ -14,7 +14,7 @@ impl RetryState {
     pub fn classify(error: CommitError) -> CommitFailure {
         match error {
             CommitError::IdentityMismatch | CommitError::IdempotencyConflict => {
-                CommitFailure::Permanent(error)
+                CommitFailure::Permanent
             }
             _ => CommitFailure::Retryable,
         }
@@ -44,7 +44,7 @@ mod tests {
     fn identity_and_idempotency_failures_are_permanent() {
         assert!(matches!(
             RetryState::classify(CommitError::IdentityMismatch),
-            CommitFailure::Permanent(CommitError::IdentityMismatch)
+            CommitFailure::Permanent
         ));
         assert!(matches!(
             RetryState::classify(CommitError::Unavailable),

@@ -119,8 +119,7 @@ impl ToolRegistry for ToolRegistryImpl {
         }
 
         // ---- Look up provider ----
-        let providers = self.providers.read().await;
-        let provider = match providers.get(&route.provider_id) {
+        let provider = match self.providers.read().await.get(&route.provider_id).cloned() {
             Some(p) => p,
             None => {
                 return ToolExecutionRecord {

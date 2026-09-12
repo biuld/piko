@@ -40,7 +40,6 @@ impl ExecutionActor {
             // PreparedExecution commits the input before activation, so the
             // first live transcript head is always durable.
             head_message_id: Some(request.input_message_id.clone()),
-            error: None,
         };
         Self {
             identity,

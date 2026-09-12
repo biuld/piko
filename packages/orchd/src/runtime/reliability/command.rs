@@ -27,16 +27,6 @@ impl<C: ReplyContract, T> ActorCommandScope<C, T> {
             let _ = sender.send(value);
         }
     }
-
-    /// Transfer the reply obligation into a longer-lived protocol such as an
-    /// Agent run waiter or durable follow-up queue.
-    pub fn transfer(mut self) -> ReplySender<C, T> {
-        self.reply.fallback.take();
-        self.reply
-            .sender
-            .take()
-            .expect("reply obligation may only be transferred once")
-    }
 }
 
 impl<C: ReplyContract, T> Drop for ReplyGuard<C, T> {
@@ -63,14 +53,6 @@ mod tests {
     async fn completed_scope_sends_value_exactly_once() {
         let (sender, receiver) = piko_comms::reply::<AgentCommandReply, _>();
         ActorCommandScope::new(sender, "aborted").complete("complete");
-        assert_eq!(receiver.await.unwrap(), "complete");
-    }
-
-    #[tokio::test]
-    async fn transfer_moves_the_reply_obligation() {
-        let (sender, receiver) = piko_comms::reply::<AgentCommandReply, _>();
-        let transferred = ActorCommandScope::new(sender, "aborted").transfer();
-        transferred.send("complete").unwrap();
         assert_eq!(receiver.await.unwrap(), "complete");
     }
 }

@@ -128,6 +128,16 @@ pub trait AgentRuntimeApi: Send + Sync {
         agent_instance_id: String,
     ) -> Result<AgentInterruptReceipt, AgentApiError>;
 
+    /// Interrupt a root only when it is still the active work for the agent.
+    /// This conditional form prevents delayed cleanup from cancelling a later
+    /// successor root on the same AgentInstance.
+    async fn interrupt_agent_if_active(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        root_input_id: String,
+    ) -> Result<AgentInterruptReceipt, AgentApiError>;
+
     /// Cancel exactly one pending input by its durable control identity.
     async fn cancel_agent_input(
         &self,

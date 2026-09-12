@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use piko_comms::BroadcastSender;
@@ -9,7 +8,6 @@ use piko_protocol::AgentMailboxEvent;
 use tokio::sync::Mutex;
 
 use super::mailbox::{AgentCommand, AgentHandle};
-use crate::runtime::tasks::TaskRegistry;
 use piko_protocol::{CreateAgentReceipt, CreateAgentRequest};
 
 /// Limits applied when creating new children in one session agent tree.
@@ -46,29 +44,23 @@ impl AgentTreeLimits {
 }
 
 pub struct SessionAgentScope {
-    session_id: String,
-    root_agent_instance_id: String,
     commit: std::sync::Arc<dyn AgentCommitPort>,
     agents: Mutex<HashMap<String, AgentHandle>>,
     limits: AgentTreeLimits,
     create_requests: Mutex<HashMap<String, (CreateAgentRequest, CreateAgentReceipt)>>,
     create_lock: Mutex<()>,
     generation: AtomicU64,
-    tasks: Arc<TaskRegistry>,
     mailbox_events: BroadcastSender<AgentMailboxEventContract, AgentMailboxEvent>,
 }
 
 impl SessionAgentScope {
     pub fn new(
-        session_id: String,
-        root_agent_instance_id: String,
+        _session_id: String,
+        _root_agent_instance_id: String,
         commit: std::sync::Arc<dyn AgentCommitPort>,
         limits: AgentTreeLimits,
     ) -> Self {
         Self {
-            tasks: TaskRegistry::new(),
-            session_id,
-            root_agent_instance_id,
             commit,
             agents: Mutex::new(HashMap::new()),
             limits,
@@ -79,21 +71,8 @@ impl SessionAgentScope {
         }
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
-    pub fn root_agent_instance_id(&self) -> &str {
-        &self.root_agent_instance_id
-    }
-
     pub fn commit(&self) -> &std::sync::Arc<dyn AgentCommitPort> {
         &self.commit
-    }
-
-    /// Session-scoped typed background tasks (F-01 / D-01).
-    pub fn tasks(&self) -> &Arc<TaskRegistry> {
-        &self.tasks
     }
 
     /// Best-effort session notification lane for mailbox updates (F-10).
@@ -234,7 +213,6 @@ impl SessionAgentScope {
     }
 
     pub async fn shutdown(&self) {
-        self.tasks.cancel_all().await;
         let handles = self
             .agents
             .lock()

@@ -18,8 +18,9 @@ file/network policy. Unmapped roles inherit the session profile, so no
   and command-policy evaluation live in hostd. orchd only carries the
   executing agent's `role` (identity from the registered `AgentSpec`) and
   materializes role file/network policies into the sandbox provider.
-- The role is identity, not policy: orchd copies `AgentSpec.role` from its
-  registered spec into the execution context and the approval request; it
+- The role is identity, not policy: orchd copies `AgentSpec.role` from the
+  immutable AgentInstance execution snapshot into the execution context and
+  the approval request; it
   never accepts a role from model-controlled arguments, and hostd is the
   only place a role maps to a profile.
 - Role mappings can only select defined profiles; the built-in `default`

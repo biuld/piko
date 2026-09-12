@@ -213,19 +213,39 @@ impl AgentActor {
                 } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    self.lifecycle = lifecycle;
-                    self.publish_snapshot();
-                    command.complete(Ok(AgentLifecycleReceipt {
-                        request_id,
-                        session_id: self.identity.session_id.clone(),
-                        agent_instance_id: self.identity.agent_instance_id.clone(),
-                        lifecycle,
-                    }));
+                    let result = self
+                        .commit
+                        .commit_agent_command(
+                            &self.identity.session_id,
+                            AgentDurableCommand::SetLifecycle {
+                                agent_instance_id: self.identity.agent_instance_id.clone(),
+                                lifecycle,
+                            },
+                        )
+                        .await
+                        .map_err(|error| AgentApiError::PersistenceFailed(error.to_string()))
+                        .map(|_| {
+                            self.lifecycle = lifecycle;
+                            self.publish_snapshot();
+                            AgentLifecycleReceipt {
+                                request_id,
+                                session_id: self.identity.session_id.clone(),
+                                agent_instance_id: self.identity.agent_instance_id.clone(),
+                                lifecycle,
+                            }
+                        });
+                    command.complete(result);
                 }
-                AgentCommand::CancelRun { request_id, reply } => {
+                AgentCommand::CancelRun {
+                    request_id,
+                    expected_root_input_id,
+                    reply,
+                } => {
                     let command =
                         ActorCommandScope::new(reply, Err(AgentApiError::RuntimeUnavailable));
-                    let result = self.cancel_run(request_id).await;
+                    let result = self
+                        .cancel_run(request_id, expected_root_input_id.as_deref())
+                        .await;
                     command.complete(result);
                 }
                 AgentCommand::CancelInput { input_id, reply } => {
@@ -374,12 +394,16 @@ impl AgentActor {
     pub(super) async fn cancel_run(
         &self,
         request_id: String,
+        expected_root_input_id: Option<&str>,
     ) -> Result<piko_protocol::AgentCancelReceipt, AgentApiError> {
         let root_input_id = self
             .run_state
             .root_input_id()
             .ok_or(AgentApiError::InvalidState)?
             .to_string();
+        if expected_root_input_id.is_some_and(|expected| expected != root_input_id) {
+            return Err(AgentApiError::InvalidState);
+        }
         if matches!(self.run_state, AgentRunState::Finalizing(_)) {
             return Ok(piko_protocol::AgentCancelReceipt {
                 request_id,

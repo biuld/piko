@@ -1,7 +1,7 @@
 //! Timeline reading column rhythm and user-bubble expand prefs
 //! (F-44 / F-46). Row kinds live on the timeline mapping.
 
-use gpui::{Pixels, px};
+use island::runtime::gpui::{Pixels, px};
 
 use island::theme::metrics;
 

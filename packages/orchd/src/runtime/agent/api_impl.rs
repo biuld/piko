@@ -9,9 +9,6 @@ impl AgentRuntimeApi for AgentRuntime {
         &self,
         config: SessionAgentConfig,
     ) -> Result<SessionAgentHandle, AgentApiError> {
-        if !self.accepting.load(Ordering::SeqCst) {
-            return Err(AgentApiError::RuntimeUnavailable);
-        }
         if config.root.session_id != config.session_id
             || config.root.parent_agent_instance_id.is_some()
         {
@@ -274,12 +271,19 @@ impl AgentRuntimeApi for AgentRuntime {
             .agent(&agent_instance_id)
             .await
             .ok_or(AgentApiError::AgentNotFound)?;
-        let cancellation_requested = handle.run_cancellation.cancel_active();
+        let Some(root_input_id) = handle.run_cancellation.cancel_active() else {
+            return Ok(AgentInterruptReceipt {
+                session_id,
+                agent_instance_id,
+                accepted: false,
+            });
+        };
         let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
         handle
             .command_tx
             .send(AgentCommand::CancelRun {
                 request_id: format!("cancel-agent-{agent_instance_id}"),
+                expected_root_input_id: Some(root_input_id),
                 reply,
             })
             .await
@@ -288,9 +292,47 @@ impl AgentRuntimeApi for AgentRuntime {
             .await
             .map_err(|_| AgentApiError::RuntimeUnavailable)?;
         let accepted = match result {
-            Err(AgentApiError::InvalidState) if cancellation_requested => true,
-            Err(AgentApiError::InvalidState) => false,
+            Err(AgentApiError::InvalidState) => true,
             Ok(receipt) => receipt.accepted,
+            Err(error) => return Err(error),
+        };
+        Ok(AgentInterruptReceipt {
+            session_id,
+            agent_instance_id,
+            accepted,
+        })
+    }
+
+    async fn interrupt_agent_if_active(
+        &self,
+        session_id: String,
+        agent_instance_id: String,
+        root_input_id: String,
+    ) -> Result<AgentInterruptReceipt, AgentApiError> {
+        let scope = self.scope(&session_id).await?;
+        let handle = scope
+            .agent(&agent_instance_id)
+            .await
+            .ok_or(AgentApiError::AgentNotFound)?;
+        let cancellation_requested = handle
+            .run_cancellation
+            .cancel_active_if_root(&root_input_id);
+        let (reply, received) = piko_comms::reply::<AgentCommandReply, _>();
+        handle
+            .command_tx
+            .send(AgentCommand::CancelRun {
+                request_id: format!("cancel-agent-input-{root_input_id}"),
+                expected_root_input_id: Some(root_input_id),
+                reply,
+            })
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        let result = received
+            .await
+            .map_err(|_| AgentApiError::RuntimeUnavailable)?;
+        let accepted = match result {
+            Ok(receipt) => receipt.accepted,
+            Err(AgentApiError::InvalidState) => cancellation_requested,
             Err(error) => return Err(error),
         };
         Ok(AgentInterruptReceipt {

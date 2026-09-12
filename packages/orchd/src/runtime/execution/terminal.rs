@@ -12,7 +12,7 @@ pub(super) async fn supervise_execution(
     actor: ExecutionActor,
     generation: u64,
     terminal_tx: piko_comms::ReplySender<ExecutionTerminalContract, ExecutionTerminal>,
-) -> ExecutionExit {
+) {
     let identity = actor.identity().clone();
     let result = std::panic::AssertUnwindSafe(actor.run())
         .catch_unwind()
@@ -75,8 +75,4 @@ pub(super) async fn supervise_execution(
     scope
         .remove_if_generation(&identity.root_input_id, generation)
         .await;
-    ExecutionExit {
-        identity,
-        terminal: outcome,
-    }
 }

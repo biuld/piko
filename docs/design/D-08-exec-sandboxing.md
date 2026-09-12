@@ -35,6 +35,13 @@ The slice delivers:
 - No new crate dependencies beyond `tokio`/`tokio-util`/`libc`, all already
   in the workspace lockfile — the design must build offline.
 
+Long-lived process handles are bound by `WorkspaceToolProvider` to the trusted
+session and AgentInstance that created them. `write_stdin` validates that
+binding before it can poll, write, or terminate a handle; a model-supplied
+process ID alone is never sufficient authority. The binding is released only
+after the process manager no longer contains the handle, so a transient I/O
+error cannot orphan an otherwise live process from its owner.
+
 ## Proposed design
 
 ### `piko-sandbox`: new `exec` module

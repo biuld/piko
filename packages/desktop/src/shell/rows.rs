@@ -4,7 +4,6 @@
 use super::canvas::{toggle_expand, user_pref_open};
 use super::*;
 use crate::focus::{ChipDetail, LayerKind};
-use gpui::{Entity, Window, relative};
 use island::components::activity_chip::{ActivityChip, ActivityStatus};
 use island::components::conversation::{
     BlockAlign, BlockSurface, CollapsePolicy, ConversationBlock, PieceJunction,
@@ -12,6 +11,7 @@ use island::components::conversation::{
 };
 use island::components::markdown::{MarkdownRenderOptions, parse_markdown, render_markdown_with};
 use island::components::selection::SelectionState;
+use island::runtime::gpui::{Entity, Window, relative};
 use island::theme::{IslandIcon, metrics};
 use piko_client_core::timeline::ToolStatus;
 
@@ -23,7 +23,7 @@ impl Shell {
     pub(super) fn render_timeline_row(
         &mut self,
         row: &timeline::TimelineRow,
-        gap_before: gpui::Pixels,
+        gap_before: island::runtime::gpui::Pixels,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -174,7 +174,7 @@ impl Shell {
                 let icon_color = if *leads_turn {
                     tokens().fg_rgba()
                 } else {
-                    gpui::Rgba {
+                    island::runtime::gpui::Rgba {
                         r: 0.,
                         g: 0.,
                         b: 0.,
@@ -230,7 +230,7 @@ impl Shell {
         };
 
         div()
-            .id(gpui::SharedString::from(id))
+            .id(island::runtime::gpui::SharedString::from(id))
             .mt(gap_before)
             .child(block)
             .into_any_element()
@@ -292,9 +292,9 @@ fn tool_chip_label(core: &piko_client_core::ClientState, name: &str, call_id: &s
 }
 
 fn chip_detail_opener(
-    entity: gpui::WeakEntity<Shell>,
+    entity: island::runtime::gpui::WeakEntity<Shell>,
     detail: ChipDetail,
-) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
+) -> impl Fn(&island::runtime::gpui::ClickEvent, &mut Window, &mut App) + 'static {
     move |_, _window, app| {
         if let Some(shell) = entity.upgrade() {
             let detail = detail.clone();
@@ -306,7 +306,10 @@ fn chip_detail_opener(
     }
 }
 
-fn flush_chip_run(chips: impl Iterator<Item = AnyElement>, gap: gpui::Pixels) -> AnyElement {
+fn flush_chip_run(
+    chips: impl Iterator<Item = AnyElement>,
+    gap: island::runtime::gpui::Pixels,
+) -> AnyElement {
     div()
         .flex()
         .flex_row()
@@ -334,7 +337,7 @@ impl ChipDetail {
 }
 
 fn quote_menu(
-    entity: gpui::WeakEntity<Shell>,
+    entity: island::runtime::gpui::WeakEntity<Shell>,
 ) -> impl Fn(
     &island::components::selection::SelectableMenuContext,
     &mut Window,

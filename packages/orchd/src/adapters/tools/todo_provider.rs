@@ -65,7 +65,8 @@ impl TodoProvider {
         }
     }
 
-    /// Snapshot one agent's list for host publish / seed checks.
+    /// Test-only projection check for the runtime todo cache.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn list_for(&self, agent_id: &str) -> Option<TodoList> {
         let guard = self.state.read().await;
         let entry = guard.get(agent_id)?;

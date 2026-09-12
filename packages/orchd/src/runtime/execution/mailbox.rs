@@ -2,9 +2,7 @@ use piko_comms::contracts::{
     ExecutionCommandReply, ExecutionCommands, ExecutionTerminal as ExecutionTerminalContract,
 };
 use piko_comms::{MailboxSender, ReplyReceiver, ReplySender};
-use piko_orchd_api::{
-    AgentApiError, CancelReason, CancelReceipt, ExecutionInputReceipt, SteerExecutionRequest,
-};
+use piko_orchd_api::{AgentApiError, CancelReceipt, ExecutionInputReceipt, SteerExecutionRequest};
 use tokio_util::sync::CancellationToken;
 
 use super::{ExecutionIdentity, ExecutionTerminal};
@@ -16,11 +14,7 @@ pub enum ExecutionCommand {
     },
     Cancel {
         request_id: String,
-        reason: CancelReason,
         reply: ReplySender<ExecutionCommandReply, Result<CancelReceipt, AgentApiError>>,
-    },
-    Shutdown {
-        reply: ReplySender<ExecutionCommandReply, ()>,
     },
 }
 
