@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,7 +39,7 @@ pub async fn run_stdio_server() -> Result<(), Box<dyn std::error::Error>> {
         settings.settings(),
     );
     if let Some(model) = active_model {
-        server.active_model.lock().await.replace(model);
+        server.set_active_model(Some(model)).await;
     }
     let target_settings_path = if settings.project_path().exists() {
         settings.project_path().to_path_buf()
@@ -72,6 +73,7 @@ where
     let mut reader = reader;
     let mut line = String::new();
     let mut command_tasks = tokio::task::JoinSet::new();
+    let mut command_ids = HashMap::new();
     let mut input_closed = false;
     loop {
         if input_closed && command_tasks.is_empty() && event_rx.is_empty() {
@@ -109,9 +111,11 @@ where
                                 }
                                 let command_server = server.clone();
                                 let command_tx = event_tx.clone();
-                                command_tasks.spawn(async move {
+                                let command_id = command.command_id().to_string();
+                                let task = command_tasks.spawn(async move {
                                     command_server.handle_command_into(command, command_tx).await;
                                 });
+                                command_ids.insert(task.id(), command_id);
                             }
                             Err(err) => {
                                 write_ack(
@@ -139,7 +143,35 @@ where
                     }
                 }
             }
-            _ = command_tasks.join_next(), if !command_tasks.is_empty() => {}
+            result = command_tasks.join_next_with_id(), if !command_tasks.is_empty() => {
+                // P2-8: a panicking/cancelled command task must never be
+                // dropped silently — the client would wait forever for a
+                // terminal response. `handle_command_into` always emits a
+                // CommandResponse on the Ok path, so only the JoinError
+                // branch needs a correlated fallback.
+                match result {
+                    Some(Ok((task_id, ()))) => {
+                        command_ids.remove(&task_id);
+                    }
+                    Some(Err(join_error)) => {
+                        let command_id = command_ids
+                            .remove(&join_error.id())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        tracing::error!(error = %join_error, "host command task panicked");
+                        write_ack(
+                            &mut writer,
+                            ServerMessage::CommandResponse {
+                                command_id,
+                                result: Err(format!(
+                                    "host command task failed: {join_error}"
+                                )),
+                            },
+                        )
+                        .await?;
+                    }
+                    None => {}
+                }
+            }
         }
     }
     Ok(())

@@ -11,7 +11,7 @@ use piko_protocol::{Message, SessionTreeEntry, TranscriptCommittedEvent};
 use crate::api::{MessageEntry, ProtocolError, ServerMessage};
 use crate::domain::sessions::HostState;
 use crate::ports::session_store::SessionStorePort;
-use crate::ports::storage_types::SessionStorageError;
+use crate::ports::storage_types::{CommittedMessage, SessionStorageError};
 
 /// Observation path: project a committed message for TUI emission.
 ///
@@ -19,6 +19,7 @@ use crate::ports::storage_types::SessionStorageError;
 /// publishing `MessageCommitted`, so prefer in-memory HostState (already
 /// projected by [`record_committed_message`]) and fall back to durable
 /// storage for the first observation or during session recovery.
+#[cfg(test)]
 pub async fn project_committed_message(
     state: &HostState,
     store: Option<&dyn SessionStorePort>,
@@ -42,6 +43,7 @@ pub async fn project_committed_message(
 
 /// Project a durably committed message and record it into HostState so a
 /// subsequent `StateSnapshot` reflects it without a disk reload.
+#[cfg(test)]
 pub async fn record_committed_message(
     state: &mut HostState,
     store: Option<&dyn SessionStorePort>,
@@ -76,18 +78,36 @@ pub async fn record_committed_message(
     )
 }
 
+pub fn record_loaded_committed_message(
+    state: &mut HostState,
+    session_id: &str,
+    message: CommittedMessage,
+) -> Result<Option<TranscriptCommittedEvent>, ProtocolError> {
+    append_committed_message(
+        state,
+        session_id,
+        &message.agent_instance_id,
+        &message.agent_spec_id,
+        message.root_input_id.as_deref().unwrap_or_default(),
+        &message.message,
+        &message.id,
+        message.transcript_seq,
+        Some(message.tree_parent_id),
+    )
+}
+
 /// Rebuild the in-memory committed projection from the durable aggregate.
 /// This is used when reliable observation cannot replay the full cursor range.
-pub async fn reconcile_committed_messages(
-    state: &mut HostState,
+pub async fn load_reconciliation(
     store: &dyn SessionStorePort,
     session_id: &str,
-) -> Result<(), ProtocolError> {
+) -> Result<Vec<CommittedMessage>, ProtocolError> {
     let agents = match store.agent_instances().await {
         Ok(agents) => agents,
-        Err(SessionStorageError::NotFound(_)) => return Ok(()),
+        Err(SessionStorageError::NotFound(_)) => return Ok(Vec::new()),
         Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
     };
+    let mut messages = Vec::new();
     for agent in agents {
         let agent_instance_id = agent.identity.agent_instance_id;
         let recovered = match store.load_agent(session_id, &agent_instance_id).await {
@@ -100,31 +120,41 @@ pub async fn reconcile_committed_messages(
             }
             Err(error) => return Err(ProtocolError::ObservationFailed(error.to_string())),
         };
-        for message in recovered.transcript {
-            // The session state was already seeded from the durable journal
-            // (e.g. session open), so these messages carry the correct tree
-            // parents. Re-projecting them here can graft a root message
-            // (world-state) under the current leaf and create a cycle in the
-            // entry tree — only project messages that are not present yet.
-            let already_projected = state
-                .session(session_id)
-                .is_ok_and(|session| session.entries.iter().any(|entry| entry.id() == message.id));
-            if already_projected {
-                continue;
-            }
-            let _ = record_committed_message(
-                state,
-                Some(store),
-                session_id,
-                &agent_instance_id,
-                &message.id,
-            )
-            .await?;
+        messages.extend(recovered.transcript);
+    }
+    Ok(messages)
+}
+
+/// Apply a previously loaded reconciliation without performing I/O. Callers
+/// can therefore hold the host-state mutex only for this short mutation.
+pub fn reconcile_committed_messages(
+    state: &mut HostState,
+    session_id: &str,
+    messages: Vec<CommittedMessage>,
+) -> Result<(), ProtocolError> {
+    for message in messages {
+        let already_projected = state
+            .session(session_id)
+            .is_ok_and(|session| session.entries.iter().any(|entry| entry.id() == message.id));
+        if already_projected {
+            continue;
         }
+        let _ = append_committed_message(
+            state,
+            session_id,
+            &message.agent_instance_id,
+            &message.agent_spec_id,
+            message.root_input_id.as_deref().unwrap_or_default(),
+            &message.message,
+            &message.id,
+            message.transcript_seq,
+            Some(message.tree_parent_id),
+        )?;
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn project_committed_message_from_state(
     state: &HostState,
     session_id: &str,
@@ -153,6 +183,7 @@ fn project_committed_message_from_state(
     })
 }
 
+#[cfg(test)]
 async fn project_committed_message_from_store(
     store: &dyn SessionStorePort,
     session_id: &str,

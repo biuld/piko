@@ -23,16 +23,11 @@ impl HostServer {
                 mode,
                 ..
             } => {
-                // Manual compaction — bypass threshold, always compact.
-                send_event(
-                    tx,
-                    ServerMessage::CommandResponse {
-                        command_id: command_id.clone(),
-                        result: Ok(crate::api::CommandResult::Empty),
-                    },
-                )
-                .await;
-                if let Err(error) = self
+                // Manual compaction — bypass threshold, always compact. The
+                // command response is correlated and terminal: it reports the
+                // outcome of the compaction itself instead of a pre-ack that
+                // would mask storage/projection failures (P1-4).
+                match self
                     .0
                     .compact_session_if_needed(
                         &session_id,
@@ -44,13 +39,24 @@ impl HostServer {
                     )
                     .await
                 {
-                    tracing::warn!(
-                        session_id,
-                        error = %error,
-                        "session.compact failed"
-                    );
+                    Ok(()) => {
+                        send_event(
+                            tx,
+                            ServerMessage::CommandResponse {
+                                command_id,
+                                result: Ok(crate::api::CommandResult::Empty),
+                            },
+                        )
+                        .await;
+                        Ok(())
+                    }
+                    Err(error) => {
+                        tracing::warn!(session_id, error = %error, "session.compact failed");
+                        Err(ProtocolError::InvalidCommand(format!(
+                            "session.compact failed: {error}"
+                        )))
+                    }
                 }
-                Ok(())
             }
             command => {
                 let events = self.apply_command(command).await?;

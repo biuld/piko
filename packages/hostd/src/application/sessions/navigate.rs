@@ -78,8 +78,8 @@ impl HostApp {
             if !abandoned.is_empty() {
                 drop(state);
 
-                let executor_guard = self.model_executor.lock().await;
-                if let Some(ref executor) = *executor_guard {
+                let executor = self.runner_bundle.lock().await.model_executor.clone();
+                if let Some(ref executor) = executor {
                     let (model_id, provider) = {
                         let settings = self.settings.lock().await;
                         (
@@ -158,10 +158,8 @@ impl HostApp {
         // Navigation changes hostd's authoritative branch, so force the next
         // input to reattach from the newly projected cursor rather than reuse
         // the abandoned runtime transcript.
-        self.agent_runner
-            .lock()
+        self.current_runner()
             .await
-            .clone()
             .invalidate_session_runtime(&session_id)
             .await?;
 

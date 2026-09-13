@@ -1,7 +1,7 @@
 use crate::api::{ProtocolError, SessionSnapshot, SessionSummary, SessionTreeEntry};
 use uuid::Uuid;
 
-use super::types::{HostState, SessionModelRef, SessionState, now_ms};
+use super::types::{HostState, SessionState, now_ms};
 
 impl HostState {
     pub fn new() -> Self {
@@ -136,41 +136,6 @@ impl HostState {
         self.sessions
             .get_mut(session_id)
             .ok_or_else(|| ProtocolError::SessionNotFound(session_id.to_string()))
-    }
-
-    /// Return the previously recorded model for the session (if any) and
-    /// record the model that will execute the current turn. A `None` model
-    /// does not overwrite recorded history, so unconfigured hosts stay
-    /// switch-free.
-    pub fn record_turn_model(
-        &mut self,
-        session_id: &str,
-        model: Option<&SessionModelRef>,
-    ) -> Result<Option<SessionModelRef>, ProtocolError> {
-        let state = self.session_mut(session_id)?;
-        let previous = state.last_model.clone();
-        if let Some(model) = model
-            && !model.provider.is_empty()
-            && !model.model_id.is_empty()
-        {
-            state.last_model = Some(model.clone());
-        }
-        Ok(previous)
-    }
-
-    /// Return the previously recorded world-state facts for the session (if
-    /// any) and record the facts of the turn about to run. The previous
-    /// value is the diff baseline; a `None` baseline triggers full
-    /// re-injection (F-04 slice 2).
-    pub fn record_world_state(
-        &mut self,
-        session_id: &str,
-        facts: &crate::domain::prompts::WorldStateFacts,
-    ) -> Result<Option<crate::domain::prompts::WorldStateFacts>, ProtocolError> {
-        let state = self.session_mut(session_id)?;
-        let previous = state.world_state_baseline.clone();
-        state.world_state_baseline = Some(facts.clone());
-        Ok(previous)
     }
 }
 

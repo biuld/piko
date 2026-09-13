@@ -65,9 +65,12 @@ impl HostApp {
         mut snapshot: SessionSnapshot,
         mut agents: Vec<AgentInfo>,
     ) -> (SessionSnapshot, Vec<AgentInfo>) {
-        let runner = self.agent_runner.lock().await.clone();
-        if let Some(live_agents) = runner.list_agent_instances(session_id).await {
-            agents = live_agents;
+        let runners = self.session_runner_candidates(session_id).await;
+        for runner in &runners {
+            if let Some(live_agents) = runner.list_agent_instances(session_id).await {
+                agents = live_agents;
+                break;
+            }
         }
         let session_dir = self.session_paths.lock().await.get(session_id).cloned();
         let projection = match session_dir {
@@ -96,7 +99,14 @@ impl HostApp {
             });
         }
         merge_agent_usage_runtime(&mut snapshot, &agents, projection.as_ref());
-        let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
+        let mut approvals = Vec::new();
+        let mut interactions = Vec::new();
+        for runner in runners {
+            let (mut runner_approvals, mut runner_interactions) =
+                runner.pending_prompts_for_session(session_id).await;
+            approvals.append(&mut runner_approvals);
+            interactions.append(&mut runner_interactions);
+        }
         snapshot.pending_approvals = approvals;
         snapshot.pending_interactions = interactions;
         (snapshot, agents)
@@ -110,14 +120,15 @@ impl HostApp {
         session_id: &str,
     ) -> Result<bool, ProtocolError> {
         self.state.lock().await.session(session_id)?;
-        let runner = self.agent_runner.lock().await.clone();
-        if runner.has_active_session_run(session_id).await {
-            return Ok(true);
-        }
-        if let Some(agents) = runner.list_agent_instances(session_id).await
-            && agents.iter().any(agent_info_is_live)
-        {
-            return Ok(true);
+        for runner in self.session_runner_candidates(session_id).await {
+            if runner.has_active_session_run(session_id).await {
+                return Ok(true);
+            }
+            if let Some(agents) = runner.list_agent_instances(session_id).await
+                && agents.iter().any(agent_info_is_live)
+            {
+                return Ok(true);
+            }
         }
         if let Some(session_dir) = self.session_paths.lock().await.get(session_id).cloned()
             && let Ok(projection) = self
@@ -168,7 +179,7 @@ impl HostApp {
                 .map(|s| s.todo_lists_for_snapshot())
                 .unwrap_or_default()
         };
-        let runner = self.agent_runner.lock().await.clone();
+        let runner = self.current_runner().await;
         runner.seed_todo_lists(lists).await;
     }
 

@@ -43,14 +43,15 @@ impl HostApp {
         input_id: &str,
         agent_instance_id: &str,
         session_dir: &std::path::Path,
-        receipt: &piko_protocol::AgentInputReceipt,
+        started_observation: tokio::task::JoinHandle<
+            Result<piko_orchd_api::SessionSubscription, ProtocolError>,
+        >,
         tx: &ClientEventSender,
     ) -> Result<bool, ProtocolError> {
         let started_at = Instant::now();
-        let observation = match runner
-            .wait_agent_input_started(session_id, agent_instance_id, input_id, receipt.disposition)
-            .await
-        {
+        let observation = match started_observation.await.map_err(|error| {
+            ProtocolError::ObservationFailed(format!("start observation task failed: {error}"))
+        })? {
             Ok(observation) => observation,
             Err(error) if error.to_string().to_ascii_lowercase().contains("cancel") => {
                 runner
@@ -97,11 +98,12 @@ impl HostApp {
         // a clean completion no other trajectory record would follow the
         // fact). Failures additionally keep the RunError notification so the
         // human-readable reason is visible in the diagnostic stream.
-        self.record_trajectory_terminal(session_id, agent_instance_id, input_id, &terminal)
+        self.record_trajectory_terminal(runner, session_id, agent_instance_id, input_id, &terminal)
             .await;
         // F-36: record run failures on the durable trajectory.
         if let Err(failure) = &terminal {
             self.record_trajectory_run_error(
+                runner,
                 session_id,
                 agent_instance_id,
                 input_id,
@@ -115,6 +117,7 @@ impl HostApp {
             )
         {
             self.record_trajectory_run_error(
+                runner,
                 session_id,
                 agent_instance_id,
                 input_id,
@@ -165,13 +168,15 @@ impl HostApp {
     ) -> Result<(), ProtocolError> {
         if let Some(session_dir) = self.session_paths.lock().await.get(session_id).cloned() {
             let store = self.session_store_factory.open(&session_dir);
-            let mut state = self.state.lock().await;
-            crate::application::agent_work::projection::reconcile_committed_messages(
-                &mut state,
+            let messages = crate::application::agent_work::projection::load_reconciliation(
                 store.as_ref(),
                 session_id,
             )
             .await?;
+            let mut state = self.state.lock().await;
+            crate::application::agent_work::projection::reconcile_committed_messages(
+                &mut state, session_id, messages,
+            )?;
         }
         let (snapshot, agents) = self.session_view(session_id).await?;
         send_event(
@@ -203,14 +208,16 @@ impl HostApp {
     }
 
     /// Record the work's terminal outcome as the final trajectory record.
+    /// Routes to the runner generation that admitted the turn so a hot-swap
+    /// cannot send the terminal fact to a replacement registry (P1-1).
     async fn record_trajectory_terminal(
         &self,
+        runner: &Arc<dyn AgentRunRunner>,
         session_id: &str,
         agent_instance_id: &str,
         input_id: &str,
         terminal: &Result<piko_protocol::AgentWorkReport, AgentRunFailure>,
     ) {
-        let runner = self.agent_runner.lock().await.clone();
         let Some(recorder) = runner.trajectory_registry().get(session_id) else {
             return;
         };
@@ -243,12 +250,12 @@ impl HostApp {
 
     async fn record_trajectory_run_error(
         &self,
+        runner: &Arc<dyn AgentRunRunner>,
         session_id: &str,
         agent_instance_id: &str,
         input_id: &str,
         message: String,
     ) {
-        let runner = self.agent_runner.lock().await.clone();
         let Some(recorder) = runner.trajectory_registry().get(session_id) else {
             return;
         };

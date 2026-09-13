@@ -35,9 +35,10 @@ impl HostApp {
         }
 
         let executor = self
-            .model_executor
+            .runner_bundle
             .lock()
             .await
+            .model_executor
             .clone()
             .ok_or_else(|| "model executor unavailable for guardian review".to_string())?;
 

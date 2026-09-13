@@ -78,10 +78,21 @@ impl HostServer {
     /// Startup and model config changes share this path. Auth login/logout must
     /// also call it so an `ErrorAgentRunRunner` installed when credentials were
     /// missing is replaced after keys land in `auth.json`.
+    ///
+    /// The whole runtime bundle {runner, executor, active_model} is swapped
+    /// atomically; a failed build clears the previous executor so compaction
+    /// cannot keep calling a stale gateway (P2-5).
     pub(crate) async fn rebuild_agent_runner(&self) {
+        let settings = self.settings.lock().await.clone();
+        self.rebuild_agent_runner_with(settings).await;
+    }
+
+    /// [`Self::rebuild_agent_runner`] with caller-supplied settings — used by
+    /// `apply_config_update`, which holds the settings lock while observers
+    /// run and must rebuild against the candidate settings.
+    pub(crate) async fn rebuild_agent_runner_with(&self, settings: HostSettings) {
         use crate::ports::ErrorAgentRunRunner;
 
-        let settings = self.settings.lock().await.clone();
         let (runner, executor, active_model) = super::build_orch_agent_runner(&settings)
             .await
             .unwrap_or_else(|e| {
@@ -91,13 +102,12 @@ impl HostServer {
                     None,
                 )
             });
-        *self.agent_runner.lock().await = runner;
-        if let Some(exec) = executor {
-            self.set_model_executor(exec).await;
-        }
-        self.wire_context_window_callback().await;
-        self.wire_guardian_callback().await;
-        *self.active_model.lock().await = active_model;
+        // Finish configuring the replacement before publishing it. A command
+        // can capture the bundle immediately after the swap.
+        self.wire_context_window_callback_for(&runner);
+        self.wire_guardian_callback_for(&runner);
+        self.swap_agent_runtime_bundle(runner, executor, active_model)
+            .await;
     }
 
     pub async fn handle_command(&self, command: Command) -> Vec<ServerMessage> {

@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use crate::api::{ProtocolError, ServerMessage};
 use crate::application::agent_work::projection::reconcile_committed_messages;
-use crate::application::agent_work::projection::{
-    record_committed_message, stream_items_from_delta,
-};
+use crate::application::agent_work::projection::stream_items_from_delta;
 use crate::application::host_app::HostApp;
 use crate::ports::{AgentRunRunner, OperationRunCompletion};
 use crate::util::{ClientEventSender, send_event};
@@ -253,17 +251,21 @@ impl HostApp {
         message_id: &str,
         tx: &ClientEventSender,
     ) -> Result<(), ProtocolError> {
+        let store = self.session_store_factory.open(session_dir);
+        let durable_message = store
+            .find_committed_message(session_id, agent_instance_id, message_id)
+            .await
+            .map_err(crate::util::storage_error)?;
         let (committed, tree_entry, agent_work_diff) = {
             let mut state = self.state.lock().await;
-            let store = self.session_store_factory.open(session_dir);
-            let committed = record_committed_message(
-                &mut state,
-                Some(store.as_ref()),
-                session_id,
-                agent_instance_id,
-                message_id,
-            )
-            .await?;
+            let committed = match durable_message {
+                Some(message) => {
+                    crate::application::agent_work::projection::record_loaded_committed_message(
+                        &mut state, session_id, message,
+                    )?
+                }
+                None => None,
+            };
             let tree_entry = committed.as_ref().and_then(|committed| {
                 state.session(session_id).ok().and_then(|session| {
                     session
@@ -346,9 +348,14 @@ impl HostApp {
             .recover_observation(session_id, agent_instance_id, input_id)
             .await?;
         let (snapshot, agents) = {
-            let mut state = self.state.lock().await;
             let store = self.session_store_factory.open(session_dir);
-            reconcile_committed_messages(&mut state, store.as_ref(), session_id).await?;
+            let messages = crate::application::agent_work::projection::load_reconciliation(
+                store.as_ref(),
+                session_id,
+            )
+            .await?;
+            let mut state = self.state.lock().await;
+            reconcile_committed_messages(&mut state, session_id, messages)?;
             (
                 state.snapshot(session_id)?,
                 state.get_agent_list(session_id),

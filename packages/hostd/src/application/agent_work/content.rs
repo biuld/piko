@@ -1,7 +1,9 @@
 use piko_protocol::{ContentBlock, MessageContent};
 
 use crate::api::ProtocolError;
+use crate::domain::prompts::{MentionToken, skills::Skill};
 use crate::domain::prompts::{PromptTemplate, expand_prompt_template};
+use crate::ports::prompt_materials::PromptMaterialLoader;
 
 const MAX_ENCODED_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 
@@ -85,6 +87,51 @@ pub(super) fn expand_templates(
     }
 }
 
+pub(super) fn resolve_mention_messages(
+    tokens: &[MentionToken],
+    cwd: &str,
+    skills: &[Skill],
+    loader: &dyn PromptMaterialLoader,
+) -> Vec<piko_protocol::Message> {
+    tokens
+        .iter()
+        .map(|token| match token {
+            MentionToken::File { path } => match loader.load_mention_file(path, cwd) {
+                Some(file) => piko_protocol::file_mention_context_message(
+                    &file.display_path,
+                    piko_protocol::FileMentionBody::Ok(file.body),
+                ),
+                None => piko_protocol::file_mention_context_message(
+                    path,
+                    piko_protocol::FileMentionBody::Err("path not found".into()),
+                ),
+            },
+            MentionToken::Skill { name } => {
+                let Some(skill) = skills.iter().find(|skill| skill.name == *name) else {
+                    return piko_protocol::skill_mention_context_message(
+                        name,
+                        piko_protocol::SkillMentionBody::Err("unknown skill"),
+                    );
+                };
+                let location = skill.file_path.to_string_lossy().replace('\\', "/");
+                match loader.load_skill_body(&skill.file_path) {
+                    Some(body) => piko_protocol::skill_mention_context_message(
+                        name,
+                        piko_protocol::SkillMentionBody::Ok {
+                            location: &location,
+                            body: &body,
+                        },
+                    ),
+                    None => piko_protocol::skill_mention_context_message(
+                        name,
+                        piko_protocol::SkillMentionBody::Err("unreadable skill file"),
+                    ),
+                }
+            }
+        })
+        .collect()
+}
+
 fn invalid(message: impl Into<String>) -> ProtocolError {
     ProtocolError::InvalidCommand(message.into())
 }
@@ -92,6 +139,37 @@ fn invalid(message: impl Into<String>) -> ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakePromptMaterials;
+
+    impl PromptMaterialLoader for FakePromptMaterials {
+        fn load_prompt_templates(&self, _cwd: &str) -> Vec<PromptTemplate> {
+            Vec::new()
+        }
+
+        fn load_context_files(&self, _cwd: &str) -> Vec<crate::domain::prompts::ContextFile> {
+            Vec::new()
+        }
+
+        fn load_skills(&self, _cwd: &str) -> crate::domain::prompts::skills::LoadSkillsResult {
+            Default::default()
+        }
+
+        fn load_mention_file(
+            &self,
+            raw_path: &str,
+            _cwd: &str,
+        ) -> Option<crate::ports::prompt_materials::MentionFile> {
+            (raw_path == "src/main.rs").then(|| crate::ports::prompt_materials::MentionFile {
+                display_path: raw_path.into(),
+                body: "fn main() {}".into(),
+            })
+        }
+
+        fn load_skill_body(&self, _file_path: &std::path::Path) -> Option<String> {
+            None
+        }
+    }
 
     #[test]
     fn validates_and_projects_image_only_content() {
@@ -122,5 +200,27 @@ mod tests {
             duration_ms: None,
         }]);
         assert!(validate_user_content(&content).is_err());
+    }
+
+    #[test]
+    fn resolves_mentions_at_the_application_port_boundary() {
+        let messages = resolve_mention_messages(
+            &[
+                MentionToken::File {
+                    path: "src/main.rs".into(),
+                },
+                MentionToken::Skill {
+                    name: "missing".into(),
+                },
+            ],
+            "/project",
+            &[],
+            &FakePromptMaterials,
+        );
+
+        assert_eq!(messages.len(), 2);
+        let rendered = format!("{messages:?}");
+        assert!(rendered.contains("fn main() {}"));
+        assert!(rendered.contains("unknown skill"));
     }
 }

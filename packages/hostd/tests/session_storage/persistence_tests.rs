@@ -320,6 +320,58 @@ async fn deleting_visible_session_returns_empty_then_authoritative_clear() {
 }
 
 #[tokio::test]
+async fn deleting_persistent_session_does_not_require_opening_it_first() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let creator =
+        HostServer::with_storage_and_runner(repo.clone(), Arc::new(MockAgentRunRunner::default()));
+    let created = creator
+        .handle_command(Command::SessionCreate {
+            command_id: "create-unopened-delete".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = session_id_from(&created);
+    drop(creator);
+
+    let restarted =
+        HostServer::with_storage_and_runner(repo, Arc::new(MockAgentRunRunner::default()));
+    let deleted = restarted
+        .handle_command(Command::SessionDelete {
+            command_id: "delete-unopened".into(),
+            session_id: session_id.clone(),
+        })
+        .await;
+
+    assert!(matches!(
+        deleted.as_slice(),
+        [
+            Event::CommandResponse {
+                result: Ok(piko_hostd::api::CommandResult::Empty),
+                ..
+            },
+            Event::SessionCleared(piko_protocol::SessionClearedEvent {
+                previous_session_id
+            })
+        ] if previous_session_id == &session_id
+    ));
+    let listed = restarted
+        .handle_command(Command::SessionList {
+            command_id: "list-after-unopened-delete".into(),
+            scope: piko_protocol::SessionListScope::All,
+            cwd: None,
+        })
+        .await;
+    assert!(matches!(
+        &listed[0],
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::SessionListed { sessions, .. }),
+            ..
+        } if sessions.iter().all(|session| session.session_id != session_id)
+    ));
+}
+
+#[tokio::test]
 async fn persistent_turn_recovers_each_agent_private_transcript() {
     let temp = tempfile::tempdir().unwrap();
     let repo = JsonlSessionRepository::new(temp.path());

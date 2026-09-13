@@ -243,8 +243,8 @@ impl HostApp {
                         _ => None,
                     });
 
-            let executor_guard = self.model_executor.lock().await;
-            let Some(executor) = executor_guard.as_ref().cloned() else {
+            let executor = self.runner_bundle.lock().await.model_executor.clone();
+            let Some(executor) = executor else {
                 return Ok(());
             };
             let (default_model_id, default_provider) = {

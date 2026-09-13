@@ -88,9 +88,10 @@ async fn reconciliation_rebuilds_missing_committed_projection_from_journal() {
     ));
 
     let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
-    reconcile_committed_messages(&mut state, async_store.as_ref(), "session-1")
+    let messages = load_reconciliation(async_store.as_ref(), "session-1")
         .await
         .unwrap();
+    reconcile_committed_messages(&mut state, "session-1", messages).unwrap();
 
     assert!(state.session("session-1").unwrap().entries.iter().any(
         |entry| matches!(entry, SessionTreeEntry::Message(message) if message.id == "message-rebuild")
@@ -199,9 +200,10 @@ async fn reconciliation_does_not_graft_existing_root_message_under_current_leaf(
     state.insert_session(session);
 
     let async_store = crate::adapters::storage::FsSessionStoreFactory.open(temp.path());
-    reconcile_committed_messages(&mut state, async_store.as_ref(), "session-1")
+    let messages = load_reconciliation(async_store.as_ref(), "session-1")
         .await
         .unwrap();
+    reconcile_committed_messages(&mut state, "session-1", messages).unwrap();
 
     let entries = &state.session("session-1").unwrap().entries;
     let root = entries

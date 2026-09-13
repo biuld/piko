@@ -182,47 +182,36 @@ fn agent_view_store_records_task_views_and_replays_by_task() {
 }
 
 #[test]
-fn record_turn_model_reports_previous_model_and_tracks_continuity() {
+fn session_model_continuity_state_tracks_recorded_model() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp") {
         crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
         _ => panic!("expected session created"),
     };
     let model_a = super::types::SessionModelRef::new("openai", "model-a");
-    let model_b = super::types::SessionModelRef::new("openai", "model-b");
-    let model_b2 = super::types::SessionModelRef::new("anthropic", "model-b");
+    let model_b = super::types::SessionModelRef::new("anthropic", "model-b");
 
-    // First turn: no previous model; current model is recorded.
-    let previous = state
-        .record_turn_model(&session_id, Some(&model_a))
-        .unwrap();
-    assert_eq!(previous, None);
-
-    // Second turn on the same model: no switch.
-    let previous = state
-        .record_turn_model(&session_id, Some(&model_a))
-        .unwrap();
-    assert_eq!(previous.as_ref(), Some(&model_a));
-
-    // Model change is observable by the next caller.
-    let previous = state
-        .record_turn_model(&session_id, Some(&model_b))
-        .unwrap();
-    assert_eq!(previous.as_ref(), Some(&model_a));
-
-    // A provider change is also a model change even with the same model id.
-    let previous = state
-        .record_turn_model(&session_id, Some(&model_b2))
-        .unwrap();
-    assert_eq!(previous.as_ref(), Some(&model_b));
-
-    // An unconfigured model does not erase recorded history.
-    let previous = state.record_turn_model(&session_id, None).unwrap();
-    assert_eq!(previous.as_ref(), Some(&model_b2));
+    // Submit-path semantics: `last_model` is only written after admission
+    // succeeded (P1-2), and a model change is observable by the next turn.
+    assert_eq!(
+        state.session(&session_id).unwrap().last_model,
+        None,
+        "unadmitted turn must not record a model"
+    );
+    state.session_mut(&session_id).unwrap().last_model = Some(model_a.clone());
+    assert_eq!(
+        state.session(&session_id).unwrap().last_model.as_ref(),
+        Some(&model_a)
+    );
+    state.session_mut(&session_id).unwrap().last_model = Some(model_b.clone());
+    assert_eq!(
+        state.session(&session_id).unwrap().last_model.as_ref(),
+        Some(&model_b)
+    );
 }
 
 #[test]
-fn record_world_state_returns_previous_facts_and_tracks_baseline() {
+fn session_world_state_baseline_tracks_recorded_facts() {
     let mut state = HostState::new();
     let session_id = match state.create_session("/tmp") {
         crate::api::CommandResult::SessionCreated { session_id, .. } => session_id,
@@ -238,14 +227,20 @@ fn record_world_state_returns_previous_facts_and_tracks_baseline() {
         }
     };
 
-    // First turn: no baseline → full injection is triggered upstream.
+    // Submit-path semantics: the baseline is only written after admission
+    // succeeded (P1-2); no baseline → full injection is triggered upstream.
+    assert_eq!(
+        state
+            .session(&session_id)
+            .unwrap()
+            .world_state_baseline
+            .as_ref(),
+        None
+    );
     let first = facts("turn_1", crate::domain::prompts::RunKind::Initial);
-    assert_eq!(state.record_world_state(&session_id, &first).unwrap(), None);
-
-    // Second turn: previous facts become the diff baseline.
+    state.session_mut(&session_id).unwrap().world_state_baseline = Some(first.clone());
     let second = facts("turn_2", crate::domain::prompts::RunKind::Continuation);
-    let previous = state.record_world_state(&session_id, &second).unwrap();
-    assert_eq!(previous, Some(first));
+    state.session_mut(&session_id).unwrap().world_state_baseline = Some(second.clone());
     assert_eq!(
         state
             .session(&session_id)

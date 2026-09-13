@@ -80,6 +80,13 @@ impl HostApp {
             .await
             .map_err(storage_error)?;
         let forked_id = persisted.state.session_id.clone();
+        let reconciliation = Self::prepare_session_open(
+            &forked_id,
+            Some(&persisted.path),
+            self.session_store_factory.as_ref(),
+            false,
+        )
+        .await?;
 
         let mut state = self.state.lock().await;
         self.session_paths
@@ -87,16 +94,8 @@ impl HostApp {
             .await
             .insert(forked_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let path = persisted.path.clone();
-        let mut events = Self::session_open_response(
-            &mut state,
-            command_id,
-            forked_id.clone(),
-            Some(&path),
-            self.session_store_factory.as_ref(),
-            false,
-        )
-        .await?;
+        let mut events =
+            Self::session_open_response(&mut state, command_id, forked_id.clone(), reconciliation)?;
         drop(state);
         events = self.enrich_reconcile_messages(&forked_id, events).await;
         Ok(events)
@@ -117,6 +116,13 @@ impl HostApp {
             .await
             .map_err(storage_error)?;
         let imported_id = persisted.state.session_id.clone();
+        let reconciliation = Self::prepare_session_open(
+            &imported_id,
+            Some(&persisted.path),
+            self.session_store_factory.as_ref(),
+            false,
+        )
+        .await?;
 
         let mut state = self.state.lock().await;
         self.session_paths
@@ -124,16 +130,12 @@ impl HostApp {
             .await
             .insert(imported_id.clone(), persisted.path.clone());
         state.insert_session(persisted.state);
-        let path = persisted.path.clone();
         let mut events = Self::session_open_response(
             &mut state,
             command_id,
             imported_id.clone(),
-            Some(&path),
-            self.session_store_factory.as_ref(),
-            false,
-        )
-        .await?;
+            reconciliation,
+        )?;
         drop(state);
         events = self.enrich_reconcile_messages(&imported_id, events).await;
         Ok(events)
@@ -190,9 +192,24 @@ impl HostApp {
         command_id: &str,
         session_id: String,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        // P1-3: deleting a session with live Agent work would strand the
+        // running orchd actor — it would keep committing messages and the
+        // terminal fact to a deleted journal, and the client would observe
+        // stale turn events after `SessionCleared`. Fork/navigate apply the
+        // same guard.
         let path = self.resolve_session_storage_path(&session_id).await.ok();
         let mapped = self.session_paths.lock().await.get(&session_id).cloned();
         let path = path.or(mapped);
+        // A listed durable session need not have been opened in this process.
+        // Hydrate it before consulting the active-work guard, whose in-memory
+        // lookup deliberately rejects unknown session identities.
+        if let Some(path) = path.as_deref() {
+            self.ensure_session_hydrated_for_mutate(&session_id, path)
+                .await?;
+        }
+        if self.session_has_active_work(&session_id).await? {
+            return Err(ProtocolError::ActiveTurnExists(session_id.clone()));
+        }
         if let Some(path) = path {
             if let Some(storage) = &self.storage {
                 storage.delete(&path).await.map_err(storage_error)?;

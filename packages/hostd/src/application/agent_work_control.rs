@@ -35,10 +35,19 @@ impl<'a> AgentWorkControl<'a> {
             .cancel_pending_agent_input(&session_id, &agent_instance_id, &input_id)
             .await
             .map_err(|error| ProtocolError::InvalidCommand(error.to_string()))?;
-        let runner = self.app.agent_runner.lock().await.clone();
+        // The journal is authority. Synchronize the exact admitting runner
+        // when this input is live; pending inputs without a binding fall back
+        // to the session's best available control plane.
+        let address = crate::ports::AgentWorkAddress {
+            session_id: session_id.clone(),
+            input_id: input_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+        };
+        let runner = match self.app.bound_runner_for_work(&address).await {
+            Some(runner) => runner,
+            None => self.app.runner_for_session_control(&session_id).await,
+        };
         if receipt.accepted {
-            // The journal is authority. Synchronize an attached actor when one
-            // exists; an unattached runtime will hydrate the cancelled state.
             let _ = runner
                 .cancel_agent_input(&session_id, &agent_instance_id, &input_id)
                 .await;
@@ -81,7 +90,17 @@ impl<'a> AgentWorkControl<'a> {
         } else {
             None
         };
-        let runner = self.app.agent_runner.lock().await.clone();
+        // Prefer the generation that admitted work for this concrete agent;
+        // the durable interrupt fact remains authoritative if no actor is
+        // attached in this process.
+        let runner = match self
+            .app
+            .bound_runner_for_agent(&session_id, &agent_instance_id)
+            .await
+        {
+            Some(runner) => runner,
+            None => self.app.runner_for_session_control(&session_id).await,
+        };
         let accepted = if root_input_id.is_some() {
             runner
                 .interrupt_agent(&session_id, &agent_instance_id)
@@ -129,16 +148,15 @@ impl<'a> AgentWorkControl<'a> {
         self.validate_user_input(&input).await?;
         match input.delivery {
             piko_protocol::AgentInputDelivery::SteerActive => {
-                self.require_running(&input.session_id, &input.agent_instance_id)
+                let runner = self
+                    .require_running(&input.session_id, &input.agent_instance_id)
                     .await?;
                 let session_id = input.session_id.clone();
                 let agent_instance_id = input.agent_instance_id.clone();
-                let receipt = self
-                    .app
-                    .agent_runner
-                    .lock()
-                    .await
-                    .clone()
+                // Steer routes through the runner whose live agent/prompt
+                // state established steerability. The durable projection is
+                // the fallback acceptance authority after restart.
+                let receipt = runner
                     .submit_agent_input(input, piko_orchd_api::AgentInputRuntime::default())
                     .await
                     .map_err(|_| {
@@ -172,39 +190,49 @@ impl<'a> AgentWorkControl<'a> {
         &self,
         session_id: &str,
         agent_instance_id: &str,
-    ) -> Result<(), ProtocolError> {
+    ) -> Result<std::sync::Arc<dyn crate::ports::AgentRunRunner>, ProtocolError> {
         self.app.state.lock().await.session(session_id)?;
-        if self.agent_is_steerable(session_id, agent_instance_id).await {
-            return Ok(());
+        if let Some(runner) = self.steerable_runner(session_id, agent_instance_id).await {
+            return Ok(runner);
         }
         Err(ProtocolError::InvalidCommand(format!(
             "agent {agent_instance_id} is not running; cannot steer"
         )))
     }
 
-    async fn agent_is_steerable(&self, session_id: &str, agent_instance_id: &str) -> bool {
-        let runner = self.app.agent_runner.lock().await.clone();
-        if let Some(agents) = runner.list_agent_instances(session_id).await
-            && agents.iter().any(|agent| {
-                agent.agent_instance_id == agent_instance_id
-                    && agent_activity_is_live(&agent.activity)
-            })
-        {
-            return true;
-        }
-        let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
-        if approvals
-            .iter()
-            .any(|approval| approval.agent_instance_id == agent_instance_id)
-            || interactions
+    async fn steerable_runner(
+        &self,
+        session_id: &str,
+        agent_instance_id: &str,
+    ) -> Option<std::sync::Arc<dyn crate::ports::AgentRunRunner>> {
+        let candidates = self.app.session_runner_candidates(session_id).await;
+        for runner in &candidates {
+            if let Some(agents) = runner.list_agent_instances(session_id).await
+                && agents.iter().any(|agent| {
+                    agent.agent_instance_id == agent_instance_id
+                        && agent_activity_is_live(&agent.activity)
+                })
+            {
+                return Some(runner.clone());
+            }
+            let (approvals, interactions) = runner.pending_prompts_for_session(session_id).await;
+            if approvals
                 .iter()
-                .any(|interaction| interaction.agent_instance_id == agent_instance_id)
-        {
-            return true;
+                .any(|approval| approval.agent_instance_id == agent_instance_id)
+                || interactions
+                    .iter()
+                    .any(|interaction| interaction.agent_instance_id == agent_instance_id)
+            {
+                return Some(runner.clone());
+            }
         }
-        let Some(session_dir) = self.app.session_paths.lock().await.get(session_id).cloned() else {
-            return false;
-        };
+        let session_dir = self
+            .app
+            .session_paths
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()?;
         let Ok(projection) = self
             .app
             .session_store_factory
@@ -212,12 +240,17 @@ impl<'a> AgentWorkControl<'a> {
             .load_projection()
             .await
         else {
-            return false;
+            return None;
         };
-        projection
+        if projection
             .agent_work
             .get(agent_instance_id)
             .is_some_and(work_is_steerable)
+        {
+            candidates.into_iter().next()
+        } else {
+            None
+        }
     }
 
     async fn validate_user_input(

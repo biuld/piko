@@ -49,15 +49,20 @@ async fn session_open_restores_queued_turn_from_durable_agent_input() {
         .await
         .unwrap();
 
-    let events = HostApp::session_open_response(
-        &mut state,
-        "open-queued",
-        session_id.clone(),
+    let reconciliation = HostApp::prepare_session_open(
+        &session_id,
         Some(temp.path()),
         &crate::adapters::storage::FsSessionStoreFactory,
         false,
     )
     .await
+    .unwrap();
+    let events = HostApp::session_open_response(
+        &mut state,
+        "open-queued",
+        session_id.clone(),
+        reconciliation,
+    )
     .unwrap();
 
     assert!(
@@ -75,18 +80,9 @@ async fn same_process_open_preserves_live_turn_for_reconcile() {
     else {
         unreachable!()
     };
-    let factory = crate::adapters::storage::FsSessionStoreFactory;
-
-    let events = HostApp::session_open_response(
-        &mut state,
-        "open-live",
-        session_id.clone(),
-        None,
-        &factory,
-        true,
-    )
-    .await
-    .unwrap();
+    let events =
+        HostApp::session_open_response(&mut state, "open-live", session_id.clone(), Vec::new())
+            .unwrap();
 
     assert!(events.iter().any(|event| matches!(
         event,

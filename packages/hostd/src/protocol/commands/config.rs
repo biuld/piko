@@ -38,8 +38,10 @@ impl ConfigObserver for ModelRunnerObserver {
         let changed = runner_settings_changed(old, new);
 
         if changed {
-            // settings already updated on the server before observers run
-            server.rebuild_agent_runner().await;
+            // settings are published only after observers succeed; rebuild
+            // against the candidate settings so the new runner matches the
+            // durable commit
+            server.rebuild_agent_runner_with(new.clone()).await;
         }
 
         let model_id = new.default_model.clone().unwrap_or_default();
@@ -176,6 +178,12 @@ impl ConfigObserver for SessionStorageObserver {
 }
 
 /// Observer responsible for persisting updated settings to disk.
+///
+/// Ordering note (P2-7): `apply_config_update` runs observers *before*
+/// publishing the new settings into memory, so a disk failure aborts the
+/// update and the in-memory/runner state never diverges from durable state.
+/// Writes are atomic (temp file + rename) so a crash cannot leave a
+/// truncated settings file behind.
 struct DiskPersistenceObserver;
 
 #[async_trait]
@@ -188,16 +196,39 @@ impl ConfigObserver for DiskPersistenceObserver {
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
         if new != old {
             let settings_path = server.project_settings_path.lock().await.clone();
-            if let Some(ref path) = settings_path {
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                if let Ok(content) = toml::to_string_pretty(new) {
-                    let _ = std::fs::write(path, content);
-                }
-            }
+            let Some(path) = settings_path else {
+                return Ok(Vec::new());
+            };
+            write_settings_atomically(&path, new).map_err(|error| {
+                ProtocolError::InvalidCommand(format!(
+                    "failed to persist settings to {}: {error}",
+                    path.display()
+                ))
+            })?;
         }
         Ok(Vec::new())
+    }
+}
+
+/// Serialize settings to a sibling temp file and rename it over the target,
+/// so the settings file is never observed half-written.
+fn write_settings_atomically(
+    path: &std::path::Path,
+    settings: &HostSettings,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = toml::to_string_pretty(settings)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let temp = path.with_extension("toml.tmp");
+    std::fs::write(&temp, content)?;
+    match std::fs::rename(&temp, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = std::fs::remove_file(&temp);
+            Err(error)
+        }
     }
 }
 
@@ -255,20 +286,22 @@ impl HostServer {
         let new_settings: HostSettings = serde_json::from_value(settings_json)
             .map_err(|e| ProtocolError::InvalidCommand(format!("Invalid config patch: {}", e)))?;
 
-        // 5. Update state in memory
-        *settings_lock = new_settings.clone();
-        drop(settings_lock); // Release lock before running observers that may require lock access or filesystem wait
-
-        // 6. Execute registered configuration observers (Hooks)
+        // 5. Transaction order (P2-7): durable commit first, then publish.
+        //    DiskPersistenceObserver writes atomically and propagates errors,
+        //    so a failed write leaves the in-memory settings, the agent
+        //    runner, and the client view untouched. Observers run while the
+        //    settings lock is still held: the in-memory settings are only
+        //    published after every observer (including the runner rebuild)
+        //    succeeded.
         let observers: Vec<Box<dyn ConfigObserver>> = vec![
+            Box::new(DiskPersistenceObserver),
             Box::new(ModelRunnerObserver),
             Box::new(SessionStorageObserver),
-            Box::new(DiskPersistenceObserver),
             Box::new(TuiSettingsObserver),
         ];
 
         let mut events = Vec::new();
-        for observer in observers {
+        for observer in &observers {
             let mut obs_events = observer
                 .on_change(self, &old_settings, &new_settings)
                 .await?;
@@ -287,6 +320,10 @@ impl HostServer {
             }
             events.append(&mut obs_events);
         }
+
+        // 6. Durable commit succeeded: publish the in-memory settings.
+        *settings_lock = new_settings.clone();
+        drop(settings_lock);
 
         Ok(events)
     }

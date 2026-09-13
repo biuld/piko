@@ -104,7 +104,7 @@ impl HostServer {
                 }])
             }
             Command::ProcessList { .. } => {
-                let runner = self.0.agent_runner.lock().await.clone();
+                let runner = self.0.current_runner().await;
                 let processes = runner.list_processes().await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -115,7 +115,7 @@ impl HostServer {
                 }])
             }
             Command::ProcessStop { process_id, .. } => {
-                let runner = self.0.agent_runner.lock().await.clone();
+                let runner = self.0.current_runner().await;
                 let exit = runner.terminate_process(&process_id).await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -129,7 +129,7 @@ impl HostServer {
                 }])
             }
             Command::McpStatus { .. } => {
-                let runner = self.0.agent_runner.lock().await.clone();
+                let runner = self.0.current_runner().await;
                 let servers = runner.mcp_statuses().await;
                 Ok(vec![ServerMessage::CommandResponse {
                     command_id,
@@ -217,13 +217,16 @@ impl HostServer {
                 decision,
                 ..
             } => {
-                let handled = self
-                    .agent_runner
-                    .lock()
-                    .await
-                    .clone()
-                    .respond_approval(&approval_id, decision.clone())
-                    .await?;
+                let mut handled = false;
+                for runner in self.0.session_runner_candidates(&session_id).await {
+                    if runner
+                        .respond_approval(&approval_id, decision.clone())
+                        .await?
+                    {
+                        handled = true;
+                        break;
+                    }
+                }
                 // Only an actually-resolved approval publishes a resolution
                 // event. Late or duplicate responses after a deadline expiry
                 // (or after the entry was removed) are ignored: no second
@@ -250,12 +253,21 @@ impl HostServer {
                 response,
                 ..
             } => {
-                self.agent_runner
-                    .lock()
-                    .await
-                    .clone()
-                    .respond_user_interaction(&interaction_id, response.clone())
-                    .await?;
+                let mut handled = false;
+                for runner in self.0.session_runner_candidates(&session_id).await {
+                    if runner
+                        .respond_user_interaction(&interaction_id, response.clone())
+                        .await?
+                    {
+                        handled = true;
+                        break;
+                    }
+                }
+                if !handled {
+                    return Err(ProtocolError::InvalidCommand(format!(
+                        "user interaction not found: {interaction_id}"
+                    )));
+                }
                 let status = match response {
                     crate::api::UserInteractionResponse::Submit { .. } => {
                         crate::api::UserInteractionStatus::Submitted
@@ -304,7 +316,7 @@ impl HostServer {
                 session_id,
                 command_id,
             } => {
-                let runner = self.agent_runner.lock().await.clone();
+                let runner = self.current_runner().await;
                 let agents = if let Some(agents) = runner.list_agent_instances(&session_id).await {
                     agents
                 } else {

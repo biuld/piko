@@ -229,7 +229,7 @@ pub fn assemble_agent_run_prompt(
     }
     let assembly_version = piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION.to_string();
     let block_input = serde_json::to_string(&blocks).expect("prompt blocks must serialize");
-    let source_digest = piko_orchd_api::stable_internal_id(
+    let source_digest = stable_prompt_id(
         "prompt",
         &[
             &assembly_version,
@@ -241,7 +241,7 @@ pub fn assemble_agent_run_prompt(
     let prefix_input =
         serde_json::to_string(&prefix_segments).expect("prompt cache segments must serialize");
     let semantic_prefix_digest =
-        piko_orchd_api::stable_internal_id("prompt-prefix", &[&assembly_version, &prefix_input]);
+        stable_prompt_id("prompt-prefix", &[&assembly_version, &prefix_input]);
     piko_protocol::SemanticRunPrompt {
         blocks,
         assembly_version: piko_protocol::AGENT_RUN_PROMPT_ASSEMBLY_VERSION,
@@ -316,7 +316,7 @@ fn block(
 ) -> piko_protocol::PromptBlock {
     let id = id.into();
     let content = content.trim().to_string();
-    let content_digest = piko_orchd_api::stable_internal_id("prompt-block", &[&id, &content]);
+    let content_digest = stable_prompt_id("prompt-block", &[&id, &content]);
     piko_protocol::PromptBlock {
         id,
         kind,
@@ -334,7 +334,7 @@ pub fn resolved_catalog(
 ) -> piko_protocol::ResolvedToolCatalog {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
     let serialized = serde_json::to_string(&tools).expect("resolved tool catalog must serialize");
-    let digest = piko_orchd_api::stable_internal_id("tool-catalog", &[&serialized]);
+    let digest = stable_prompt_id("tool-catalog", &[&serialized]);
     piko_protocol::ResolvedToolCatalog::new(tools, digest)
 }
 
@@ -372,7 +372,7 @@ fn cache_segments(
                 scope,
                 block_digests,
                 catalog_digest: catalog,
-                segment_digest: piko_orchd_api::stable_internal_id("prompt-segment", &[&input]),
+                segment_digest: stable_prompt_id("prompt-segment", &[&input]),
             })
         })
         .collect()
@@ -380,4 +380,20 @@ fn cache_segments(
 
 fn current_date_string() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Domain-local form of the stable prompt digest. Runtime identities remain
+/// owned by orchd-api; keeping the prompt algorithm here avoids making the
+/// DTO-only protocol crate a general utility dependency.
+fn stable_prompt_id(prefix: &str, parts: &[&str]) -> String {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for part in parts {
+        for byte in part.len().to_le_bytes().iter().chain(part.as_bytes()) {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    }
+    format!("{prefix}_{hash:016x}")
 }

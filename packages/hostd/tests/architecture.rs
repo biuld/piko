@@ -25,24 +25,44 @@ fn domain_rs_files() -> Vec<PathBuf> {
     rs_files_under("src/domain")
 }
 
+/// Scan a source file for any occurrence of the given crate-path tokens,
+/// not just `use` statements: fully-qualified expressions
+/// (`piko_orchd_api::stable_internal_id(...)`, `crate::infra::...`) are
+/// equally real layering violations.
+fn find_path_tokens<'a>(
+    source: &str,
+    path: &std::path::Path,
+    tokens: &'a [&'a str],
+) -> Vec<String> {
+    let mut violations = Vec::new();
+    for (line_no, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        for token in tokens {
+            if trimmed.contains(token) {
+                violations.push(format!("{}:{}: {}", path.display(), line_no + 1, trimmed));
+                break;
+            }
+        }
+    }
+    violations
+}
+
 #[test]
 fn domain_must_not_depend_on_orchd_or_infra() {
+    let tokens = [
+        "piko_orchd::",
+        "piko_orchd_api::",
+        "crate::infra::",
+        "crate::adapters::",
+        "crate::ports::",
+    ];
     let mut violations = Vec::new();
     for path in domain_rs_files() {
         let source = fs::read_to_string(&path).expect("read domain rs");
-        for (line_no, line) in source.lines().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("//") {
-                continue;
-            }
-            if trimmed.contains("use piko_orchd")
-                || trimmed.contains("use piko_orchd_api")
-                || trimmed.contains("use crate::infra")
-                || trimmed.contains("use crate::adapters")
-            {
-                violations.push(format!("{}:{}: {}", path.display(), line_no + 1, trimmed));
-            }
-        }
+        violations.extend(find_path_tokens(&source, &path, &tokens));
     }
     assert!(
         violations.is_empty(),
@@ -64,21 +84,31 @@ fn domain_must_not_depend_on_orchd_or_infra() {
 /// scanning stops at the first `#[cfg(test)]` line in each file.
 #[test]
 fn application_must_not_depend_on_infra_or_adapters() {
+    let tokens = ["crate::infra::", "crate::adapters::"];
+    // `application::host_app` is the sanctioned composition root (see its
+    // module docs): it constructs the default filesystem adapters via
+    // fully-qualified paths so `HostServer::new()` keeps working. Files
+    // listed here are also loaded as `#[cfg(test)]` modules from a parent
+    // file (`#[path = "..."]`), so their `#[cfg(test)]` marker is not
+    // inline; they are unit-test fixtures and fully exempt.
+    let exempt_files = ["host_app.rs", "lifecycle_live_tests.rs"];
     let mut violations = Vec::new();
     for path in rs_files_under("src/application") {
-        let source = fs::read_to_string(&path).expect("read application rs");
-        for (line_no, line) in source.lines().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("#[cfg(test)]") {
-                break;
-            }
-            if trimmed.starts_with("//") {
-                continue;
-            }
-            if trimmed.contains("use crate::infra") || trimmed.contains("use crate::adapters") {
-                violations.push(format!("{}:{}: {}", path.display(), line_no + 1, trimmed));
-            }
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if exempt_files.contains(&file_name) {
+            continue;
         }
+        let source = fs::read_to_string(&path).expect("read application rs");
+        // Unit-test fixtures (`#[cfg(test)]` modules) are exempt; scanning
+        // stops at the first `#[cfg(test)]` line in each file.
+        let body = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("split always yields a first part");
+        violations.extend(find_path_tokens(body, &path, &tokens));
     }
     assert!(
         violations.is_empty(),

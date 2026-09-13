@@ -9,63 +9,64 @@ use crate::util::{now_ms, storage_error};
 use super::helpers::{server_response_ok, session_opened_messages, session_reconciled_message};
 
 impl HostApp {
-    pub(super) async fn session_open_response(
-        state: &mut crate::domain::sessions::HostState,
-        command_id: &str,
-        session_id: String,
+    pub(super) async fn prepare_session_open(
+        session_id: &str,
         session_path: Option<&std::path::Path>,
         session_store_factory: &dyn SessionStoreFactory,
         live_turn_run: bool,
-    ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let recovery_events = if live_turn_run {
-            Vec::new()
-        } else if let Some(path) = session_path {
-            let store = session_store_factory.open(path);
+    ) -> Result<Vec<crate::ports::storage_types::CommittedMessage>, ProtocolError> {
+        let Some(path) = session_path else {
+            return Ok(Vec::new());
+        };
+        let store = session_store_factory.open(path);
+        if !live_turn_run {
             let projection = store.load_projection().await.map_err(storage_error)?;
-            let mut incomplete = Vec::new();
-            for root_input in projection.root_inputs.values() {
-                if !matches!(
-                    root_input.status,
-                    piko_protocol::AgentWorkProcessingStatus::Accepted
-                        | piko_protocol::AgentWorkProcessingStatus::Running
-                ) {
-                    continue;
-                }
-                let root_input_id = root_input.root_input_id.clone();
-                if root_input_id.is_empty() {
-                    continue;
-                }
-                incomplete.push(root_input_id);
-            }
-            let mut reports = Vec::with_capacity(incomplete.len());
+            let incomplete = projection
+                .root_inputs
+                .values()
+                .filter(|root_input| {
+                    matches!(
+                        root_input.status,
+                        piko_protocol::AgentWorkProcessingStatus::Accepted
+                            | piko_protocol::AgentWorkProcessingStatus::Running
+                    ) && !root_input.root_input_id.is_empty()
+                })
+                .map(|root_input| root_input.root_input_id.clone())
+                .collect::<Vec<_>>();
+            let mut missing_report = false;
             for root_input_id in incomplete {
-                reports.push((
-                    root_input_id.clone(),
-                    store
-                        .agent_report_for_input(&root_input_id)
-                        .await
-                        .map_err(storage_error)?,
-                ));
+                if store
+                    .agent_report_for_input(&root_input_id)
+                    .await
+                    .map_err(storage_error)?
+                    .is_none()
+                {
+                    missing_report = true;
+                    break;
+                }
             }
-            if reports.iter().any(|(_, report)| report.is_none()) {
+            if missing_report {
                 store
                     .interrupt_incomplete_agent_work()
                     .await
                     .map_err(storage_error)?;
             }
-            Vec::new()
-        } else {
-            Vec::new()
-        };
-        if let Some(path) = session_path {
-            let store = session_store_factory.open(path);
-            crate::application::agent_work::projection::reconcile_committed_messages(
-                state,
-                store.as_ref(),
-                &session_id,
-            )
-            .await?;
         }
+        crate::application::agent_work::projection::load_reconciliation(store.as_ref(), session_id)
+            .await
+    }
+
+    pub(super) fn session_open_response(
+        state: &mut crate::domain::sessions::HostState,
+        command_id: &str,
+        session_id: String,
+        reconciliation: Vec<crate::ports::storage_types::CommittedMessage>,
+    ) -> Result<Vec<ServerMessage>, ProtocolError> {
+        crate::application::agent_work::projection::reconcile_committed_messages(
+            state,
+            &session_id,
+            reconciliation,
+        )?;
         let snapshot = state.snapshot(&session_id)?;
         let agents = state.get_agent_list(&session_id);
         Ok(session_opened_messages(
@@ -73,7 +74,7 @@ impl HostApp {
             session_id,
             snapshot,
             agents,
-            recovery_events,
+            Vec::new(),
         ))
     }
 
@@ -144,28 +145,32 @@ impl HostApp {
         session_id: String,
         session_path: Option<String>,
     ) -> Result<Vec<ServerMessage>, ProtocolError> {
-        let live_turn_run = self
-            .agent_runner
-            .lock()
-            .await
-            .clone()
-            .has_active_session_run(&session_id)
-            .await;
+        let mut live_turn_run = false;
+        for runner in self.session_runner_candidates(&session_id).await {
+            if runner.has_active_session_run(&session_id).await {
+                live_turn_run = true;
+                break;
+            }
+        }
         let known_session_path = self.session_paths.lock().await.get(&session_id).cloned();
-        let mut state = self.state.lock().await;
 
         // A same-process reopen must preserve the live Turn and its in-memory
         // projection instead of reloading/interruption-recovering durable state.
-        if live_turn_run && state.has_session(&session_id) {
-            let messages = Self::session_open_response(
-                &mut state,
-                command_id,
-                session_id.clone(),
+        if live_turn_run && self.state.lock().await.has_session(&session_id) {
+            let reconciliation = Self::prepare_session_open(
+                &session_id,
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
                 true,
             )
             .await?;
+            let mut state = self.state.lock().await;
+            let messages = Self::session_open_response(
+                &mut state,
+                command_id,
+                session_id.clone(),
+                reconciliation,
+            )?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
@@ -186,36 +191,46 @@ impl HostApp {
                     session_id, opened_id
                 )));
             }
-            self.session_paths
-                .lock()
-                .await
-                .insert(opened_id.clone(), persisted.path.clone());
-            state.insert_session(persisted.state);
             let path = persisted.path.clone();
-            let messages = Self::session_open_response(
-                &mut state,
-                command_id,
-                opened_id.clone(),
+            let reconciliation = Self::prepare_session_open(
+                &opened_id,
                 Some(&path),
                 self.session_store_factory.as_ref(),
                 false,
             )
             .await?;
+            self.session_paths
+                .lock()
+                .await
+                .insert(opened_id.clone(), path);
+            let mut state = self.state.lock().await;
+            state.insert_session(persisted.state);
+            let messages = Self::session_open_response(
+                &mut state,
+                command_id,
+                opened_id.clone(),
+                reconciliation,
+            )?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
         }
 
         // 2. Otherwise, check if it's already in memory.
-        if state.has_session(&session_id) {
-            let messages = Self::session_open_response(
-                &mut state,
-                command_id,
-                session_id.clone(),
+        if self.state.lock().await.has_session(&session_id) {
+            let reconciliation = Self::prepare_session_open(
+                &session_id,
                 known_session_path.as_deref(),
                 self.session_store_factory.as_ref(),
                 false,
             )
             .await?;
+            let mut state = self.state.lock().await;
+            let messages = Self::session_open_response(
+                &mut state,
+                command_id,
+                session_id.clone(),
+                reconciliation,
+            )?;
             drop(state);
             return Ok(self.enrich_reconcile_messages(&session_id, messages).await);
         }
@@ -235,21 +250,26 @@ impl HostApp {
                     _ => ProtocolError::InvalidCommand(format!("invalid session: {}", err)),
                 })?;
                 let opened_id = persisted.state.session_id.clone();
-                self.session_paths
-                    .lock()
-                    .await
-                    .insert(opened_id.clone(), persisted.path.clone());
-                state.insert_session(persisted.state);
                 let path = persisted.path.clone();
-                let messages = Self::session_open_response(
-                    &mut state,
-                    command_id,
-                    opened_id.clone(),
+                let reconciliation = Self::prepare_session_open(
+                    &opened_id,
                     Some(&path),
                     self.session_store_factory.as_ref(),
                     false,
                 )
                 .await?;
+                self.session_paths
+                    .lock()
+                    .await
+                    .insert(opened_id.clone(), path);
+                let mut state = self.state.lock().await;
+                state.insert_session(persisted.state);
+                let messages = Self::session_open_response(
+                    &mut state,
+                    command_id,
+                    opened_id.clone(),
+                    reconciliation,
+                )?;
                 drop(state);
                 return Ok(self.enrich_reconcile_messages(&opened_id, messages).await);
             }
@@ -359,15 +379,16 @@ mod tests {
             .unwrap();
 
         let factory = crate::adapters::storage::FsSessionStoreFactory;
+        let reconciliation =
+            HostApp::prepare_session_open(&session_id, Some(temp.path()), &factory, false)
+                .await
+                .unwrap();
         let events = HostApp::session_open_response(
             &mut state,
             "open-1",
             session_id.clone(),
-            Some(temp.path()),
-            &factory,
-            false,
+            reconciliation,
         )
-        .await
         .unwrap();
 
         assert!(
@@ -384,16 +405,13 @@ mod tests {
             piko_protocol::AgentWorkOutcome::Cancelled { .. }
         ));
 
-        let replay = HostApp::session_open_response(
-            &mut state,
-            "open-2",
-            session_id,
-            Some(temp.path()),
-            &factory,
-            false,
-        )
-        .await
-        .unwrap();
+        let reconciliation =
+            HostApp::prepare_session_open(&session_id, Some(temp.path()), &factory, false)
+                .await
+                .unwrap();
+        let replay =
+            HostApp::session_open_response(&mut state, "open-2", session_id, reconciliation)
+                .unwrap();
         assert!(
             replay
                 .iter()

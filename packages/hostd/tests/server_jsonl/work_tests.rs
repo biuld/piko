@@ -131,6 +131,115 @@ async fn approval_response_is_not_blocked_by_active_turn() {
 }
 
 #[tokio::test]
+async fn approval_routes_to_the_runner_generation_that_admitted_the_turn() {
+    let started = Arc::new(Notify::new());
+    let finish = Arc::new(Notify::new());
+    let server = HostServer::with_agent_runner(Arc::new(WaitingApprovalRunner {
+        started: started.clone(),
+        finish: finish.clone(),
+        ..WaitingApprovalRunner::default()
+    }));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create-generation".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = match &created[0] {
+        Event::CommandResponse {
+            result: Ok(piko_hostd::api::CommandResult::SessionCreated { session_id, .. }),
+            ..
+        } => session_id.clone(),
+        other => panic!("expected session_created, got {other:?}"),
+    };
+    let mut turn = server.handle_command_stream(Command::submit_follow_up(
+        "submit-generation",
+        session_id.clone(),
+        format!("agent_{session_id}_root"),
+        piko_protocol::MessageContent::String("hello".into()),
+    ));
+    assert!(matches!(
+        turn.recv().await,
+        Some(Event::CommandResponse { result: Ok(_), .. })
+    ));
+    assert!(matches!(
+        turn.recv().await,
+        Some(Event::SessionReconciled(_))
+    ));
+    tokio::time::timeout(Duration::from_millis(100), started.notified())
+        .await
+        .expect("original runner should be active");
+
+    let config_events = server
+        .handle_command(Command::ConfigUpdate {
+            command_id: "swap-generation".into(),
+            patch: serde_json::json!({
+                "safety": { "auto-approve-workspace-writes": false }
+            }),
+        })
+        .await;
+    assert!(config_events.iter().any(|event| matches!(
+        event,
+        Event::Model(piko_hostd::api::ModelEvent::ConfigChanged { .. })
+    )));
+
+    let approval_events = server
+        .handle_command(Command::ApprovalRespond {
+            command_id: "approval-generation".into(),
+            session_id,
+            approval_id: "approval-1".into(),
+            decision: ApprovalDecision::Accept,
+            note: None,
+        })
+        .await;
+    assert!(approval_events.iter().any(|event| matches!(
+        event,
+        Event::Approval(piko_hostd::api::ApprovalEvent::Resolved { .. })
+    )));
+
+    finish.notify_one();
+    while turn.recv().await.is_some() {}
+}
+
+#[derive(Clone)]
+struct PanicProcessRunner;
+
+#[async_trait]
+impl AgentRunRunner for PanicProcessRunner {
+    async fn list_processes(&self) -> Vec<piko_protocol::command::ProcessInfo> {
+        panic!("process registry failure")
+    }
+}
+
+#[tokio::test]
+async fn jsonl_correlates_a_panicking_command_with_its_original_id() {
+    let input = serde_json::to_string(&Command::ProcessList {
+        command_id: "process-panic".into(),
+    })
+    .unwrap()
+        + "\n";
+    let (mut read_out, write_out) = tokio::io::duplex(4096);
+    run_jsonl_server(
+        BufReader::new(std::io::Cursor::new(input.into_bytes())),
+        write_out,
+        HostServer::with_agent_runner(Arc::new(PanicProcessRunner)),
+    )
+    .await
+    .unwrap();
+
+    let mut output = String::new();
+    read_out.read_to_string(&mut output).await.unwrap();
+    let event = serde_json::from_str::<Event>(output.lines().next().unwrap()).unwrap();
+    assert!(matches!(
+        event,
+        Event::CommandResponse {
+            command_id,
+            result: Err(_),
+        } if command_id == "process-panic"
+    ));
+}
+
+#[tokio::test]
 async fn create_session_returns_session_created() {
     let server = HostServer::new();
     let events = server

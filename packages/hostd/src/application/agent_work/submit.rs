@@ -5,10 +5,10 @@ use piko_orchd_api::AgentInputRuntime;
 use crate::api::{CommandResult, ProtocolError, ServerMessage};
 use crate::application::host_app::HostApp;
 use crate::domain::prompts::{
-    PromptSnapshotOptions, RunKind, WorldStateFacts, parse_mentions, resolve_mention_messages,
-    snapshot_prompt_resources, world_state_context_message, world_state_diff_content,
-    world_state_full_content,
+    PromptSnapshotOptions, RunKind, WorldStateFacts, parse_mentions, snapshot_prompt_resources,
+    world_state_context_message, world_state_diff_content, world_state_full_content,
 };
+use crate::ports::AgentWorkAddress;
 use crate::util::{ClientEventSender, now_ms, send_event, storage_error};
 
 impl HostApp {
@@ -105,7 +105,14 @@ impl HostApp {
             );
         }
         let skills = loaded_skills.skills;
-        let active_model = self.active_model.lock().await.clone();
+        // Bind prompt/model facts and execution to one immutable runtime
+        // generation. A concurrent config/auth rebuild may publish a newer
+        // bundle, but it cannot make this turn describe one model and execute
+        // on another runner.
+        let runtime_bundle = self.current_runtime_bundle().await;
+        let runner = runtime_bundle.runner.clone();
+        let work_generation = runtime_bundle.generation;
+        let active_model = runtime_bundle.active_model.clone();
         let (previous_model, continuation) = {
             let state = self.state.lock().await;
             let session = state.session(&session_id)?;
@@ -186,8 +193,12 @@ impl HostApp {
         // prelude messages; user text stays unchanged for the durable User row.
         let mention_tokens = parse_mentions(&super::content::plain_text(&expanded_content));
         if !mention_tokens.is_empty() {
-            prompt_resources.user_mentions =
-                resolve_mention_messages(&mention_tokens, PathBuf::from(&cwd).as_path(), &skills);
+            prompt_resources.user_mentions = super::content::resolve_mention_messages(
+                &mention_tokens,
+                &cwd,
+                &skills,
+                self.prompt_materials.as_ref(),
+            );
         }
 
         let active_tool_names = self.settings.lock().await.active_tool_names.clone();
@@ -196,84 +207,95 @@ impl HostApp {
             state.session_cwd(&session_id).unwrap_or_default()
         };
         let session_dir = self.ensure_agent_session_dir(&session_id, &cwd).await?;
-        // The world-state baseline is durable regardless of model
-        // configuration: `model` is one optional fact, not a precondition.
-        if is_root {
-            if let Some(storage) = &self.storage {
-                storage
-                    .set_world_state_baseline(&session_dir, Some(&world_state_facts))
-                    .await
-                    .map_err(storage_error)?;
-            }
-            self.state
-                .lock()
-                .await
-                .session_mut(&session_id)?
-                .world_state_baseline = Some(world_state_facts.clone());
-        }
-        if let Some(current) = active_model.as_ref() {
-            let changed = previous_model
-                .as_ref()
-                .is_some_and(|previous| previous != current);
-            let mut durable_entries = Vec::new();
-            if let Some(storage) = &self.storage {
-                if changed {
-                    let parent_id = {
-                        let state = self.state.lock().await;
-                        state
-                            .session(&session_id)
-                            .ok()
-                            .and_then(|session| session.current_leaf_id.clone())
-                    };
-                    durable_entries = storage
-                        .append_config_metadata(
-                            &session_dir,
-                            parent_id.as_deref(),
-                            Some(current.model_id.as_str()),
-                            Some(current.provider.as_str()),
-                            None,
-                            None,
-                        )
-                        .await
-                        .map_err(storage_error)?;
-                } else if previous_model.is_none() {
+
+        // P1-2: model/world-state bookkeeping must not be persisted before
+        // the input is actually admitted — a failed bootstrap or submit would
+        // otherwise leave a session claiming a model executed (bogus
+        // model-switch on the next prompt) or a stale world-state baseline
+        // (diff instead of full re-injection). The write is deferred into
+        // `commit_admission_metadata` and runs only after the runtime has
+        // returned a durable admission receipt.
+        let commit_admission_metadata = async {
+            // The world-state baseline is durable regardless of model
+            // configuration: `model` is one optional fact, not a precondition.
+            if is_root {
+                if let Some(storage) = &self.storage {
                     storage
-                        .set_last_model(&session_dir, Some(current))
+                        .set_world_state_baseline(&session_dir, Some(&world_state_facts))
                         .await
                         .map_err(storage_error)?;
                 }
+                self.state
+                    .lock()
+                    .await
+                    .session_mut(&session_id)?
+                    .world_state_baseline = Some(world_state_facts.clone());
             }
-            {
-                let mut state = self.state.lock().await;
-                state.session_mut(&session_id)?.last_model = Some(current.clone());
-                for entry in &durable_entries {
-                    state.append_entry(&session_id, entry.clone())?;
+            if let Some(current) = active_model.as_ref() {
+                let changed = previous_model
+                    .as_ref()
+                    .is_some_and(|previous| previous != current);
+                let mut durable_entries = Vec::new();
+                if let Some(storage) = &self.storage {
+                    if changed {
+                        let parent_id = {
+                            let state = self.state.lock().await;
+                            state
+                                .session(&session_id)
+                                .ok()
+                                .and_then(|session| session.current_leaf_id.clone())
+                        };
+                        durable_entries = storage
+                            .append_config_metadata(
+                                &session_dir,
+                                parent_id.as_deref(),
+                                Some(current.model_id.as_str()),
+                                Some(current.provider.as_str()),
+                                None,
+                                None,
+                            )
+                            .await
+                            .map_err(storage_error)?;
+                    } else if previous_model.is_none() {
+                        storage
+                            .set_last_model(&session_dir, Some(current))
+                            .await
+                            .map_err(storage_error)?;
+                    }
+                }
+                {
+                    let mut state = self.state.lock().await;
+                    state.session_mut(&session_id)?.last_model = Some(current.clone());
+                    for entry in &durable_entries {
+                        state.append_entry(&session_id, entry.clone())?;
+                    }
+                }
+                for entry in durable_entries {
+                    send_event(
+                        tx,
+                        ServerMessage::SessionEntryCommitted(
+                            piko_protocol::SessionEntryCommittedEvent {
+                                session_id: session_id.clone(),
+                                entry,
+                            },
+                        ),
+                    )
+                    .await;
                 }
             }
-            for entry in durable_entries {
-                send_event(
-                    tx,
-                    ServerMessage::SessionEntryCommitted(
-                        piko_protocol::SessionEntryCommittedEvent {
-                            session_id: session_id.clone(),
-                            entry,
-                        },
-                    ),
-                )
-                .await;
-            }
-        }
+            Ok::<(), ProtocolError>(())
+        };
         let resume_agent = if agent_instance_id == root_agent_instance_id {
             self.resume_root_agent_for_session(&session_id, &session_dir, &root_agent_instance_id)
                 .await
         } else {
             None
         };
-        let runner = self.agent_runner.lock().await.clone();
         tracing::info!(
             session_id = %session_id,
             input_id = %root_input_id,
             agent_instance_id = %agent_instance_id,
+            runner_generation = work_generation,
             "turn observation loop starting"
         );
         // Bootstrap (idempotently) the runtime session before admission. The
@@ -313,6 +335,55 @@ impl HostApp {
                 return Ok(());
             }
         };
+        let work_address = AgentWorkAddress {
+            session_id: session_id.clone(),
+            input_id: root_input_id.clone(),
+            agent_instance_id: agent_instance_id.clone(),
+        };
+        self.bind_work_runner(work_address.clone(), runner.clone(), work_generation)
+            .await;
+        // Start establishing the realtime subscription immediately after
+        // admission. Host metadata persistence below may perform filesystem
+        // I/O; letting it delay subscription would drop best-effort model/tool
+        // deltas emitted by a fast runtime.
+        let observation_runner = runner.clone();
+        let observation_session_id = session_id.clone();
+        let observation_agent_id = agent_instance_id.clone();
+        let observation_input_id = root_input_id.clone();
+        let observation_disposition = receipt.disposition;
+        let started_observation = tokio::spawn(async move {
+            observation_runner
+                .wait_agent_input_started(
+                    &observation_session_id,
+                    &observation_agent_id,
+                    &observation_input_id,
+                    observation_disposition,
+                )
+                .await
+        });
+        // `submit_agent_input` returns only after orchd's durable admission
+        // acknowledgement. Failed proposals therefore cannot advance model or
+        // world-state continuity. If this host-side metadata write fails, keep
+        // the admitted work controllable and surface the storage failure.
+        if let Err(error) = commit_admission_metadata.await {
+            started_observation.abort();
+            let _ = runner
+                .interrupt_agent(&session_id, &agent_instance_id)
+                .await;
+            // The admission already exists in orchd. Retain the generation
+            // binding until a later control/recovery path observes its
+            // terminal state; releasing it here would make a still-running
+            // turn unreachable after a concurrent runtime hot-swap.
+            send_event(
+                tx,
+                ServerMessage::CommandResponse {
+                    command_id,
+                    result: Err(error.to_string()),
+                },
+            )
+            .await;
+            return Ok(());
+        }
         send_event(
             tx,
             ServerMessage::CommandResponse {
@@ -342,13 +413,19 @@ impl HostApp {
                 &root_input_id,
                 &agent_instance_id,
                 &session_dir,
-                &receipt,
+                started_observation,
                 tx,
             )
             .await;
         let turn_succeeded = match turn_result {
-            Ok(succeeded) => succeeded,
+            Ok(succeeded) => {
+                self.release_work_runner(&work_address).await;
+                succeeded
+            }
             Err(error) => {
+                // An observation failure is not proof that orchd stopped.
+                // Keep the admitting runner addressable for interrupt and
+                // recovery instead of orphaning the turn.
                 if error.to_string().to_ascii_lowercase().contains("cancel") {
                     return Ok(());
                 }

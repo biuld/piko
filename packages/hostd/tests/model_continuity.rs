@@ -121,6 +121,32 @@ impl AgentRunRunner for CapturingRunner {
     }
 }
 
+#[derive(Clone)]
+struct RejectingRunner;
+
+#[async_trait]
+impl AgentRunRunner for RejectingRunner {
+    async fn ensure_session_runtime(
+        &self,
+        _session_id: &str,
+        _cwd: &str,
+        _session_dir: &std::path::Path,
+        _resume_agent: Option<&piko_hostd::ports::ResumeAgent>,
+    ) -> Result<(), piko_hostd::api::ProtocolError> {
+        Ok(())
+    }
+
+    async fn submit_agent_input(
+        &self,
+        _input: piko_protocol::AgentInput,
+        _runtime: piko_orchd_api::AgentInputRuntime,
+    ) -> Result<piko_protocol::AgentInputReceipt, piko_hostd::api::ProtocolError> {
+        Err(piko_hostd::api::ProtocolError::InvalidCommand(
+            "admission rejected".into(),
+        ))
+    }
+}
+
 fn created_session_id(events: &[Event]) -> String {
     events
         .iter()
@@ -145,6 +171,46 @@ fn world_state(snapshot: &PromptResourceSnapshot) -> String {
         } => text.clone(),
         _ => String::new(),
     }
+}
+
+#[tokio::test]
+async fn rejected_admission_does_not_advance_model_or_world_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = JsonlSessionRepository::new(temp.path());
+    let server = HostServer::with_storage_and_runner(repo.clone(), Arc::new(RejectingRunner));
+    let created = server
+        .handle_command(Command::SessionCreate {
+            command_id: "create-rejected".into(),
+            cwd: "/tmp/project".into(),
+        })
+        .await;
+    let session_id = created_session_id(&created);
+    server
+        .set_active_model(Some(SessionModelRef::new("openai", "model-a")))
+        .await;
+
+    let events = server
+        .handle_command(Command::submit_follow_up(
+            "reject",
+            session_id.clone(),
+            format!("agent_{session_id}_root"),
+            piko_protocol::MessageContent::String("hello".into()),
+        ))
+        .await;
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, Event::CommandResponse { result: Err(_), .. }))
+    );
+
+    let persisted = repo
+        .list(None)
+        .unwrap()
+        .into_iter()
+        .find(|session| session.state.session_id == session_id)
+        .expect("persisted session");
+    assert_eq!(persisted.state.last_model, None);
+    assert_eq!(persisted.state.world_state_baseline, None);
 }
 
 #[tokio::test]
